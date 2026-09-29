@@ -23,7 +23,7 @@ import pytest
 import ava
 import ava.agent_identity
 from ava import shell
-from shared.platform import IS_WINDOWS
+from shared.native_process.os_platform import IS_WINDOWS
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions are POSIX-only"),
@@ -436,7 +436,7 @@ def test_new_session_bare_python_resolves_into_venv(
     """A persistent session is a login+interactive shell (`bash -l -i`,
     PtySessionBackend, `shared/sessions/pty/launch.py::_fork_shell`), so it
     sources the user's shell profile — which could in principle put something
-    ahead of the venv bin dir `forward_env_dict` (`shared/session_env.py`)
+    ahead of the venv bin dir `forward_env_dict` (`shared/sessions/env_forwarding.py`)
     forwards on PATH. QA for #3590 verified by hand that bare `python` still
     resolves into this checkout's venv inside such a session; this pins that
     down as a regression test.

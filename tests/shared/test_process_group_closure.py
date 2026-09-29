@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from shared import process_group_closure
+from shared.native_process import group_closure
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
 
@@ -29,7 +29,7 @@ def _late_listing(
     """Record signals and listings; the listing names a late member for some rounds."""
     events: list[str] = []
     killpg = os.killpg
-    listing = process_group_closure.group_members
+    listing = group_closure.group_members
 
     def signal_group(pid: int, sig: int) -> None:
         events.append("signal")
@@ -43,7 +43,7 @@ def _late_listing(
         return [leader, _LATE] if late else real
 
     monkeypatch.setattr(os, "killpg", signal_group)
-    monkeypatch.setattr(process_group_closure, "group_members", listed)
+    monkeypatch.setattr(group_closure, "group_members", listed)
     return events
 
 
@@ -60,7 +60,7 @@ def test_listed_member_besides_leader_forces_another_round(
     process = _leader()
     try:
         events = _late_listing(monkeypatch, process.pid, late_rounds=1)
-        process_group_closure.confirm_closure(process, time.monotonic() + 5)
+        group_closure.confirm_closure(process, time.monotonic() + 5)
         assert events == ["signal", "listing", "signal", "listing"]
         assert process.returncode is None
         assert process.wait(timeout=5) == -9
@@ -70,12 +70,12 @@ def test_listed_member_besides_leader_forces_another_round(
 
 def test_unresolved_closure_keeps_the_leader_unreaped(monkeypatch: pytest.MonkeyPatch) -> None:
     held: list[subprocess.Popen[bytes]] = []
-    monkeypatch.setattr(process_group_closure, "_UNRESOLVED", held)
+    monkeypatch.setattr(group_closure, "_UNRESOLVED", held)
     process = _leader()
     try:
         events = _late_listing(monkeypatch, process.pid, late_rounds=None)
-        with pytest.raises(process_group_closure.GroupClosureUnresolvedError, match="besides"):
-            process_group_closure.close_unadmitted(process, time.monotonic() + 0.5)
+        with pytest.raises(group_closure.GroupClosureUnresolvedError, match="besides"):
+            group_closure.close_unadmitted(process, time.monotonic() + 0.5)
         assert events.count("signal") >= 2
         assert process.returncode is None
         assert held == [process]
@@ -93,5 +93,5 @@ def test_reaped_leader_group_is_never_signalled(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(os, "killpg", recorded)
     with pytest.raises(RuntimeError, match="already reaped"):
-        process_group_closure.confirm_closure(process, time.monotonic() + 1)
+        group_closure.confirm_closure(process, time.monotonic() + 1)
     assert signals == []

@@ -41,9 +41,9 @@ from shared.daemon_shutdown import hard_exit as _hard_exit
 from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
 from shared.machine import machine_name, reachable_host
-from shared.session_backend import PtySessionBackend, SessionBackend, get_shell_backend
-from shared.session_record import SessionRecord
+from shared.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
 from shared.sessions.page_session import page_session_name
+from shared.sessions.record import SessionRecord
 
 from .degradation import (
     _DegradedServeDir,

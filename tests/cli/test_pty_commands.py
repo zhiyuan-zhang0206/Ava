@@ -12,7 +12,7 @@ import redis
 
 from cli import main as cli_main
 from shared.config import settings
-from shared.platform import LockTimeoutError
+from shared.native_process.os_platform import LockTimeoutError
 from shared.sessions.pty import allocation_freeze
 
 

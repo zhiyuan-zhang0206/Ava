@@ -15,7 +15,7 @@ from typing import Literal, Self
 
 from pydantic import Field, model_validator
 
-from shared.process_evidence import Digest, EvidenceModel
+from shared.native_process.evidence import Digest, EvidenceModel
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease
 
 _IDENTITY_MEMBER = "shared/release-build.json"

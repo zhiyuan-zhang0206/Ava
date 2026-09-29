@@ -750,7 +750,7 @@ def claim_idle_wait_span() -> Generator[None, None, None]:
     wait begins. The handler's post-end `gen_ai.task.status` write is dropped
     by the SDK (one "Setting attribute on ended span." log line per park —
     information-free, kept in the log files, filtered out of the event stream
-    by `shared/log.py:_event_pipeline_filter`).
+    by `shared/log/__init__.py:_event_pipeline_filter`).
 
     No-op when trace_enabled=False or initialize_tracing hasn't run yet, and —
     defensively — when the current span is not recording or is not a LangChain

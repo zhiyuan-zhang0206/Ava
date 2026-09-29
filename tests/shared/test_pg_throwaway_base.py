@@ -22,7 +22,7 @@ import pytest
 from shared import pg_throwaway_base as base
 from shared import pg_tools
 from shared.config import settings
-from shared.platform import IS_WINDOWS
+from shared.native_process.os_platform import IS_WINDOWS
 
 
 @pytest.fixture

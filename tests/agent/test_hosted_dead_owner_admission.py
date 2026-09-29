@@ -23,8 +23,8 @@ from shared.incarnation_resources import (
 )
 from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
 from shared.native_process.ownership import stable_create_time
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.runtime_admission import RuntimeAdmission
-from shared.runtime_incarnation import RuntimeIncarnation
 
 
 class _CurrentAdmission(RuntimeAdmission):

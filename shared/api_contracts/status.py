@@ -101,7 +101,7 @@ class MachineStatus(BaseModel):
     # read it). There is no cluster pin to compare it against.
     head_sha: str | None = None
     # The commit the process that answered this node's ClusterStatus probe froze
-    # at its own boot (`shared.process_sha`; None when the probe failed or the
+    # at its own boot (`shared.native_process.loaded_commit`; None when the probe failed or the
     # process froze nothing). head_sha is the checkout; running_sha is the code
     # that process holds. They diverge when the checkout advanced but the process
     # was not restarted — only running_sha reveals the stale code.

@@ -33,10 +33,10 @@ from cli.release_transition.native import DARWIN, LINUX
 from cli.release_transition.pitr.evidence import PitrProgress, PitrSeal
 from cli.release_transition.request import PitrRequest, Record, ReleaseRef
 from shared.atomic_io import write_text_atomic
+from shared.native_process.evidence import ExpectedProcess
+from shared.native_process.os_platform import file_lock
 from shared.native_process.ownership import OwnedProcess
-from shared.platform import file_lock
 from shared.private_storage import ensure_private_dir, private_file_problem
-from shared.process_evidence import ExpectedProcess
 from shared.runtime_release import current_pointer
 from shared.verified_file import regular_bytes
 

@@ -24,7 +24,7 @@ import os
 
 import pytest
 
-import shared.platform as plat
+import shared.native_process.os_platform as plat
 
 pytestmark = pytest.mark.skipif(not plat.IS_MACOS, reason="macOS-only postmaster locale check")
 

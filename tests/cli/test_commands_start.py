@@ -19,7 +19,7 @@ from tests.cli.test_start_readiness_gate import _hermetic_start as _hermetic_sta
 def test_cmd_start_needs_no_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     """cmd_start runs without an interactive tty. The session PATH that once
     justified a tty gate is now forwarded authoritatively per session
-    (shared.session_env.forward_env_dict), so start works from cron / systemd / a
+    (shared.sessions.env_forwarding.forward_env_dict), so start works from cron / systemd / a
     headless ssh, not only a terminal."""
     import sys as _sys
 

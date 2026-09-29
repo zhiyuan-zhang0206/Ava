@@ -35,8 +35,8 @@ from typing import Any
 
 import pytest
 
-from shared.coding_session_owner import CodingSessionKey, CodingSessionOwner
 from shared.paths import workspace_dir
+from shared.sessions.coding_session_owner import CodingSessionKey, CodingSessionOwner
 
 _REPO = Path(__file__).parents[2]
 _DYNAMIC_WORKFLOW_REFERENCE = (

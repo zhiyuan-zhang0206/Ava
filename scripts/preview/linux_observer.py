@@ -33,7 +33,7 @@ from scripts.preview.linux_terminals import (
 )
 from scripts.preview.runtime import SERVICES, owned_processes
 from shared.native_process.ownership import OwnedProcess, capture_tree
-from shared.root_control.client import RootClient, native_identity
+from shared.native_process.root_control.client import RootClient, native_identity
 
 Mode = Literal["running", "manager-running", "stopped", "manager-stopped", "destroyed"]
 MODES = ("running", "manager-running", "stopped", "manager-stopped", "destroyed")

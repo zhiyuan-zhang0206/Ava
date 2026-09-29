@@ -245,7 +245,7 @@ while time.monotonic() < deadline:
 ```
 
 and it keeps its deadline while losing its only throttle — so it spins at full speed
-for the whole bound. `shared.session_backend._graceful_kill_session` is that shape with a
+for the whole bound. `shared.sessions.backend._graceful_kill_session` is that shape with a
 15 s bound per session, and on 2026-07-30 one `tests/cli` test reached it: it spun at
 ~500k iterations/s appending to the test's own recorder list, `pytest tests/cli` hit
 **26 GB** on a 16 GB box, swap ran out, and agent boots went from 850 ms to 78-93 s.

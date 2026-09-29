@@ -9,7 +9,7 @@ from pathlib import Path
 
 from shared.log import logger
 from shared.migration_errors import MigrationLayoutError
-from shared.platform import CREATE_NO_WINDOW
+from shared.native_process.os_platform import CREATE_NO_WINDOW
 from shared.runtime_interpreter import WHEEL_RUNTIME
 from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
 

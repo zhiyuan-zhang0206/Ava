@@ -298,7 +298,7 @@ def _stub_host_transitions(
     flip: Callable[..., Awaitable[bool]],
 ) -> list[int]:
     import services.agent_host.host as host_mod
-    from shared.runtime_incarnation import RuntimeIncarnation
+    from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
     stamps: list[int] = []
 
@@ -497,7 +497,7 @@ class TestPoolIsolation:
     ) -> None:
         """A busy turn may use the work pool without consuming control capacity."""
         import services.agent_host.host as host_mod
-        from shared.runtime_incarnation import RuntimeIncarnation
+        from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
         rows = {11: _Row(status="idling")}
         original, graph, turn_pool = wired(rows)
@@ -694,7 +694,7 @@ class TestConcurrentAgentIsolation:
         slot — which tests/conftest.py pins to 1 for the whole session, and which
         the real host never sets at all (it never calls `establish`).
         """
-        from shared.turn_identity import current_turn_agent_id
+        from shared.native_process.turn_identity import current_turn_agent_id
 
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         assert current_turn_agent_id() is None
@@ -974,7 +974,7 @@ class TestTurnLoop:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import services.agent_host.host as host_mod
-        from shared.runtime_incarnation import RuntimeIncarnation
+        from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
         flips: list[tuple[int, str, str]] = []
 
@@ -1028,7 +1028,7 @@ class TestTurnLoop:
     ) -> None:
         """Hosted exit uses the admitted owner's durable apply, not process exit RPC."""
         import services.agent_host.host as host_mod
-        from shared.runtime_incarnation import RuntimeIncarnation
+        from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
         notified: list[int] = []
 
@@ -1059,7 +1059,7 @@ class TestTurnLoop:
     ) -> None:
         """A returned graph releases its cache before the owner-fenced application."""
         import services.agent_host.host as host_mod
-        from shared.runtime_incarnation import RuntimeIncarnation
+        from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
         notified: list[int] = []
 

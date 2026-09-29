@@ -15,7 +15,7 @@ from shared.caller_identity import CallerIdentity
 from shared.db import create_agent
 from shared.machine import machine_name
 from shared.native_process import ownership
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import (
     attested_caller,
     native_identity,

@@ -20,7 +20,7 @@ Task cancellation; accepted force remains visible to existing durable interrupt
 checks. An idle force wake uses the same original-host serialized pump without
 admitting another runtime.
 
-`shared/turn_identity.py` carries a turn-local resource scope alongside identity.
+`shared/native_process/turn_identity.py` carries a turn-local resource scope alongside identity.
 Copied graph contexts share actual disposable exec domains and request evidence.
 Only successful close/root/reap/reader results remove the exact entry. Formatting
 an `ExecTeardownError` into a tool failure does not erase the evidence. Unknown

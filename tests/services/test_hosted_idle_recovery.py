@@ -29,7 +29,7 @@ from shared.context import AvaContext
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.maintenance_cohort import _classify, _RuntimeRow
 from shared.maintenance_state import MaintenanceHold
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.agent.test_hosted_db_recovery import _admit
 from tests.shared.poll_until import poll_until_async
 

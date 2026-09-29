@@ -189,7 +189,7 @@ from shared.cluster.registry import (
 from shared.cluster.registry import (
     save_record_locked as save_record_locked,
 )
-from shared.platform import file_lock as file_lock
+from shared.native_process.os_platform import file_lock as file_lock
 from shared.port_block import (
     BLOCK_MAX as BLOCK_MAX,
 )

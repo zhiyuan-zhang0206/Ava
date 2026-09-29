@@ -271,7 +271,7 @@ async def claim_inbound_batch(
                 accept_lifecycle_intent,
                 settle_superseded_intent,
             )
-            from shared.runtime_incarnation import current_incarnation
+            from shared.native_process.runtime_incarnation import current_incarnation
 
             command = await accept_lifecycle_intent(conn, agent_id)
             token = current_incarnation(agent_id)

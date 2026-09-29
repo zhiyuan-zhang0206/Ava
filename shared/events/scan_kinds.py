@@ -10,7 +10,7 @@ Regenerates the raw material behind shared/events/registry.md:
 
   1. Static `event=` literals in production Python code (agent_events event names).
   2. Static `label=` literals on logger calls (label fallback -> agent_events
-     event names; see shared/log.py event resolution: event -> label -> "log").
+     event names; see shared/log/__init__.py event resolution: event -> label -> "log").
   3. `insert_event_log*` event_type values (event_log event names, category=audit).
   4. SSE role discriminators in shared/live_events.py (real-time channel,
      not persisted).

@@ -30,8 +30,8 @@ from services.agent_host.db_recovery import database_phase
 from services.agent_host.runtime import TurnOutcome
 from shared.config import settings
 from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity, hosted_resources_settled
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity, hosted_resources_settled
 
 __all__ = [
     "close_hosted_turn",

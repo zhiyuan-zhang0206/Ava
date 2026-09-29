@@ -32,14 +32,14 @@ from typing import NamedTuple, TypedDict, cast
 
 from shared import pg_throwaway_base as _throwaway_base
 from shared.log import logger
+from shared.native_process.child_env import daemon_process_env
+from shared.native_process.os_platform import IS_MACOS, IS_WINDOWS
 from shared.pg_foreground import (
     start_foreground_postgres,
     stop_foreground_postgres,
     wait_foreground_postgres,
 )
 from shared.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
-from shared.platform import IS_MACOS, IS_WINDOWS
-from shared.process_env import daemon_process_env
 
 PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
 PG_BIN_WINDOWS = Path("C:\\Program Files\\PostgreSQL\\17\\bin")  # EDB installer default
@@ -49,7 +49,7 @@ _fixture_log_artifact_dir = fixture_log_artifact_dir
 
 
 def is_macos() -> bool:
-    """True on macOS. Thin re-export of shared.platform.IS_MACOS, kept because
+    """True on macOS. Thin re-export of shared.native_process.os_platform.IS_MACOS, kept because
     cli/commands/data_plane/cluster_instance.py imports this name."""
     return IS_MACOS
 

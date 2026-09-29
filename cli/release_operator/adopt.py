@@ -45,8 +45,8 @@ def _host_supports_adoption() -> bool:
 
 def _adopt(receipt: Path) -> tuple[ReleaseRef, VerifiedRelease]:
     from shared.home_lifecycle_locks import resource_lock
+    from shared.native_process.os_platform import file_lock
     from shared.paths import ava_home
-    from shared.platform import file_lock
     from shared.private_storage import ensure_private_dir
 
     if not _host_supports_adoption():

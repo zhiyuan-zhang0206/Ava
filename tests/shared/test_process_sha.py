@@ -19,15 +19,15 @@ from pathlib import Path
 
 import pytest
 
-from shared import process_sha
+from shared.native_process import loaded_commit
 
 
 @pytest.fixture(autouse=True)
 def _fresh_capture():
     """Each test starts from an unfrozen process and leaves one behind."""
-    process_sha._reset_for_tests()
+    loaded_commit._reset_for_tests()
     yield
-    process_sha._reset_for_tests()
+    loaded_commit._reset_for_tests()
 
 
 def test_get_is_none_before_freeze() -> None:
@@ -36,7 +36,7 @@ def test_get_is_none_before_freeze() -> None:
     This is the guard against the original bug: any read path that can reach git
     is a read path that answers for the *current* checkout, not for the code the
     process is executing."""
-    assert process_sha.get() is None
+    assert loaded_commit.get() is None
 
 
 def test_get_never_shells_out(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,7 +47,7 @@ def test_get_never_shells_out(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("get() must not resolve git")
 
     monkeypatch.setattr(subprocess, "run", _explode)
-    assert process_sha.get() is None
+    assert loaded_commit.get() is None
 
 
 def test_freeze_captures_this_trees_head() -> None:
@@ -55,13 +55,13 @@ def test_freeze_captures_this_trees_head() -> None:
     checkout under test, resolved from `__file__` rather than the cwd."""
     expected = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=Path(process_sha.__file__).resolve().parent.parent,
+        cwd=Path(loaded_commit.__file__).resolve().parent.parent,
         capture_output=True,
         text=True,
         check=True,
     ).stdout.strip()
-    assert process_sha.freeze() == expected
-    assert process_sha.get() == expected
+    assert loaded_commit.freeze() == expected
+    assert loaded_commit.get() == expected
 
 
 def test_freeze_keeps_the_first_answer_when_the_checkout_moves(
@@ -80,9 +80,9 @@ def test_freeze_keeps_the_first_answer_when_the_checkout_moves(
         )
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert process_sha.freeze() == "aaaaaaa1111"
-    assert process_sha.freeze() == "aaaaaaa1111"
-    assert process_sha.get() == "aaaaaaa1111"
+    assert loaded_commit.freeze() == "aaaaaaa1111"
+    assert loaded_commit.freeze() == "aaaaaaa1111"
+    assert loaded_commit.get() == "aaaaaaa1111"
 
 
 def test_freeze_is_none_outside_a_git_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,8 +93,8 @@ def test_freeze_is_none_outside_a_git_checkout(monkeypatch: pytest.MonkeyPatch) 
         return subprocess.CompletedProcess(args=[], returncode=128, stdout="", stderr="not a repo")
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert process_sha.freeze() is None
-    assert process_sha.get() is None
+    assert loaded_commit.freeze() is None
+    assert loaded_commit.get() is None
 
 
 def test_freeze_survives_a_missing_git_binary(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,7 +104,7 @@ def test_freeze_survives_a_missing_git_binary(monkeypatch: pytest.MonkeyPatch) -
         raise FileNotFoundError("git")
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert process_sha.freeze() is None
+    assert loaded_commit.freeze() is None
 
 
 def test_freeze_survives_a_hung_git(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,4 +114,4 @@ def test_freeze_survives_a_hung_git(monkeypatch: pytest.MonkeyPatch) -> None:
         raise subprocess.TimeoutExpired(cmd="git", timeout=10)
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert process_sha.freeze() is None
+    assert loaded_commit.freeze() is None

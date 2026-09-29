@@ -38,7 +38,7 @@ from shared.caller_identity import CallerIdentity
 from shared.config import settings
 from shared.db import create_agent
 from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
 from tests.impersonation_support import attested_caller, recorded_tree
 from tests.shared import test_impersonation_history as history_cases

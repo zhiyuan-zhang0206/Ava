@@ -80,7 +80,7 @@ class ClusterStatus(BaseModel):
     # the multi-machine view shows each node's checkout.
     head_sha: str | None = None
     # The commit the process answering this probe actually loaded, frozen at its
-    # own boot (`shared.process_sha`), or None when it never froze one. Distinct
+    # own boot (`shared.native_process.loaded_commit`), or None when it never froze one. Distinct
     # from head_sha: head_sha is the checkout, running_sha is code the live
     # process holds. They differ when the checkout advanced (`git pull`) but the
     # process was not restarted — the roster marks that node's code as stale.
@@ -248,7 +248,7 @@ def capture_shell(
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
 
     full_name = _shell_session_name(agent_id, shell)
-    from shared.session_backend import get_shell_backend
+    from shared.sessions.backend import get_shell_backend
 
     try:
         captured = get_shell_backend().capture_pane(full_name, lines)
@@ -288,7 +288,7 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool, str | None]:
     if shell is None:
         return "absent", False, None
     full_name = _shell_session_name(agent_id, shell)
-    from shared.session_backend import get_shell_backend
+    from shared.sessions.backend import get_shell_backend
 
     backend = get_shell_backend()
     try:
@@ -326,7 +326,7 @@ def kill_agent_shells(agent_id: int) -> list[int]:
     shells = [shell for shell in agent_shell_sessions(agent_id) if not is_page_label(shell.name)]
     if not shells:
         return []
-    from shared.session_backend import get_shell_backend
+    from shared.sessions.backend import get_shell_backend
 
     backend = get_shell_backend()
 
@@ -363,7 +363,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
     filtered out here — this covers the daemons + the agents' persistent
     shells. A backend that is down degrades to empty data.
     """
-    from shared.session_backend import get_backend, get_shell_backend
+    from shared.sessions.backend import get_backend, get_shell_backend
 
     rows: dict[str, SessionInfo] = {}
     now = datetime.now().astimezone(cluster_tz())
@@ -467,7 +467,7 @@ def _paused_reason(state: shared.host_deploy_state.HostDeployState | None) -> Pa
 
 def _supervisor_online() -> bool | None:
     """An observed native root is online; unavailable inspection stays unknown."""
-    from shared.root_control.client import RootClientError, root_process
+    from shared.native_process.root_control.client import RootClientError, root_process
 
     try:
         return root_process() is not None
@@ -483,9 +483,9 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     through and FastAPI surfaces as default 500 (admin endpoint, not
     consumed by SDK).
     """
-    from shared import process_sha as _process_sha
     from shared.cluster_drift import prod_source_head_sha
     from shared.config import settings
+    from shared.native_process import loaded_commit as _process_sha
 
     agent_host_alive = (
         _check_pidfile(str(settings.services.agent_host_pidfile))[0] if is_agent_runner() else None

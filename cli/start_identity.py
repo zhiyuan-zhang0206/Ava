@@ -22,7 +22,7 @@ from cli.start_runtime import StartRuntime
 from shared import cluster
 from shared.atomic_io import fsync_parent, write_text_atomic
 from shared.envfile import upsert_env
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 from shared.private_storage import ensure_private_dir, ensure_private_file
 
 INTENT_NAME = "start-intent.json"

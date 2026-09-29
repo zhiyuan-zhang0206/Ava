@@ -43,7 +43,7 @@ from shared.agents.history.inbound_sideload import (
     sideload_committed_ids,
 )
 from shared.context import AvaContext
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_hosted_db_recovery import _admit
 
 

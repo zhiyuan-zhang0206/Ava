@@ -21,8 +21,8 @@ from cli.commands import service_stop as strict
 from cli.commands._maintenance_stop_report import StopIncompleteError
 from ops import pty_close_notices
 from shared import maintenance
-from shared.platform import IS_WINDOWS
-from shared.session_backend import PtySessionBackend
+from shared.native_process.os_platform import IS_WINDOWS
+from shared.sessions.backend import PtySessionBackend
 from shared.sessions.pty import session_tree
 from tests.agent.test_maintenance import WHEN
 from tests.cli.conftest import PtyReaper

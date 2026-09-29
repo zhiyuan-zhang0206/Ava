@@ -78,7 +78,7 @@ def _foreign_listeners(holders: dict[int, set[int]], owner: OwnedProcess) -> lis
 
 def _owned_collector_process() -> OwnedProcess | DaemonProbe:
     """Root's captured collector process identity, or the probe explaining its absence."""
-    from shared.root_control.client import RootClientError, owned_process
+    from shared.native_process.root_control.client import RootClientError, owned_process
 
     try:
         owner = owned_process("otel-collector")

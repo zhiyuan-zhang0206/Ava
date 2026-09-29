@@ -8,7 +8,7 @@ import json
 import pytest
 
 from shared import home_lifecycle_locks as state
-from shared.platform import LockTimeoutError
+from shared.native_process.os_platform import LockTimeoutError
 
 
 def test_resource_holder_does_not_block_short_owner_publication(

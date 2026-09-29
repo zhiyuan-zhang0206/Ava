@@ -7,7 +7,7 @@ from agent.db import claim_inbound_batch
 from services.delivery_watchdog.daemon import dead_letter_stale_claimed
 from shared.config import settings
 from shared.db import insert_inbound_message
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
 from tests.agent.test_lifecycle_intent import _command
 

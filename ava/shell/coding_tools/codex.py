@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ava
-from shared import coding_session_owner
+from shared.sessions import coding_session_owner
 
 from ._common import cancel as _cancel_generation
 from ._common import impersonator_guide, init_file, new_generation, worker_bootstrap

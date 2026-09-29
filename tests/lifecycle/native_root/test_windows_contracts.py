@@ -12,12 +12,12 @@ import pytest
 
 from services.ava_root.windows import console, process
 from services.ava_root_glue.windows_terminal_owner import TerminalOwner
-from shared import winjob
 from shared.native_process import ownership as proc_tree
+from shared.native_process import winjob
 from shared.native_process.ownership import OwnedProcess
-from shared.root_control import client
-from shared.root_control.ipc import encode, ok_response
-from shared.root_control.windows import transport
+from shared.native_process.root_control import client
+from shared.native_process.root_control.ipc import encode, ok_response
+from shared.native_process.root_control.windows import transport
 
 
 def test_resource_root_field_is_not_interpreted_as_status(tmp_path, monkeypatch):
@@ -44,7 +44,7 @@ def test_status_still_requires_native_pipe_peer_identity(tmp_path, monkeypatch, 
 
 async def test_terminal_monitor_rechecks_completion_after_waiting_for_close_lock():
     from services.ava_root.custody import ServiceCustody
-    from shared.windows_terminal.record import TerminalRecord
+    from shared.sessions.windows.terminal.record import TerminalRecord
 
     class Job:
         closed = False

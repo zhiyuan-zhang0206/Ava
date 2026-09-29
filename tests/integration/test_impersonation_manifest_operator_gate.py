@@ -35,7 +35,7 @@ from shared.db import create_agent
 from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
 from shared.loki_index_labels import EVENT_STREAM_RETENTION
 from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
 from tests.impersonation_support import attested_caller
 from tests.shared import test_impersonation_history as history_cases

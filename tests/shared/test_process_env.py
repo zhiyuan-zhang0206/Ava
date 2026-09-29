@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared.process_env import daemon_process_env, forwarded_proxy_env
+from shared.native_process.child_env import daemon_process_env, forwarded_proxy_env
 
 _PROXY_NAMES = (
     "http_proxy",

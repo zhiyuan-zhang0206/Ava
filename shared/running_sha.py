@@ -9,7 +9,7 @@ and update cannot empty out the diff and skip the restart.
 Scope note: this is a bookmark for *change detection*, not an answer to "what
 is running right now". `ava start` writes it one line before a launcher that
 leaves already-running sessions alone, so it advances on a start that restarted
-nothing. Status surfaces therefore ask `shared.process_sha`, which each process
+nothing. Status surfaces therefore ask `shared.native_process.loaded_commit`, which each process
 freezes at its own boot; this file stays as the update baseline it always was.
 
 The bookmark is host-local (a file on disk, not in the central DB) because

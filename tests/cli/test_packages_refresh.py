@@ -412,7 +412,7 @@ def test_notify_mode_records_available_without_applying(core_repo: Path) -> None
 
 
 def test_flock_skips_a_concurrent_pass(core_repo: Path) -> None:
-    from shared.platform import file_lock
+    from shared.native_process.os_platform import file_lock
 
     with file_lock(_home() / "packages-refresh.lock", timeout_s=1):
         report = run_refresh(repo=core_repo)

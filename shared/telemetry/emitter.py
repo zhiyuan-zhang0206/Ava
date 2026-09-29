@@ -18,7 +18,7 @@ Startup init (`init_telemetry`) is the one place that fails loud — a process
 whose event pipeline cannot come up should not start silently blind.
 
 Import discipline: this module imports `shared.log` and `shared.db` lazily
-(inside functions) — `shared/db.py` imports `shared/log.py` at module scope
+(inside functions) — `shared/db.py` imports `shared/log/__init__.py` at module scope
 for `logger`, so a top-level import of either from here is a circular-import
 failure for any process that reaches `shared.db` first.
 """
@@ -596,9 +596,9 @@ def _ambient_agent_id() -> int | None:
 
     Turn first, then the process binding: a hosted runner emits on behalf of
     every local agent, so its process binding is None and the turn contextvar
-    (`shared/turn_identity.py`) is the only truthful answer. An exec child or
+    (`shared/native_process/turn_identity.py`) is the only truthful answer. An exec child or
     standalone script may instead carry the process-level `init_telemetry` value."""
-    from shared.turn_identity import current_turn_agent_id
+    from shared.native_process.turn_identity import current_turn_agent_id
 
     bound = current_turn_agent_id()
     if bound is not None:

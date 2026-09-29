@@ -2,7 +2,7 @@
 
 import psycopg
 
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 _OBSERVE_RESTART = (
     "UPDATE inbound_messages i SET observed_at=clock_timestamp(),status='done', "

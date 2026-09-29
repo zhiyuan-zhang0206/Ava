@@ -19,7 +19,7 @@ from shared.agents.impersonation import impersonation_sessions as sessions
 from shared.agents.messages.chat_delivery import insert_chat_inbound_once
 from shared.db import create_agent
 from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 
 

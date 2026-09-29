@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from shared import cluster
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 
 
 @dataclass(frozen=True)
@@ -141,6 +141,6 @@ def registry_lock(*, path: Path | None = None, timeout_s: float = 30) -> Generat
     """
     lock_path = (path if path is not None else cluster.registry_path()).with_suffix(".lock")
     # Cross-platform advisory lock (fcntl on POSIX, msvcrt on Windows) — see
-    # shared.platform.file_lock. Serializes the registry read-modify-write.
+    # shared.native_process.os_platform.file_lock. Serializes the registry read-modify-write.
     with file_lock(lock_path, timeout_s=timeout_s):
         yield

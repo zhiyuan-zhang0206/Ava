@@ -486,7 +486,7 @@ def _kind_closure(roots: tuple[str, ...]) -> set[Path]:
                 # `from shared import telemetry` names a MODULE inside the
                 # package — push the package AND the full dotted path, or the
                 # submodule never enters the frontier (the existing gateway
-                # closure scan had this blind spot: shared/log.py's lazy
+                # closure scan had this blind spot: shared/log/__init__.py's lazy
                 # `from shared import telemetry` did not pull telemetry.py in).
                 if node.level == 0:
                     frontier.append(node.module)

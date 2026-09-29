@@ -315,7 +315,7 @@ class PluginActivation(TypedDict):
 
 
 class ServiceStarted(TypedDict):
-    """`service_started` payload — shared/log.py."""
+    """`service_started` payload — shared/log/__init__.py."""
 
     name: str
     pid: int

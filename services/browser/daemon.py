@@ -38,8 +38,8 @@ from pathlib import Path
 from loguru import logger
 
 from shared.config import settings
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.paths import logs_dir
-from shared.platform import IS_WINDOWS
 from shared.platform_probes import browser_incapability, resolve_chrome_binary
 
 from . import macos_readiness

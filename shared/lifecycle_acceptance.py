@@ -20,7 +20,7 @@ from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 # Correlated against the unaliased agents_meta row. Selection is an optimization;
 # the same predicate also fences the final automatic resurrection UPDATE.

@@ -13,8 +13,8 @@ import pytest
 
 from cli.commands.data_plane import maintenance_stop as data
 from cli.release_transition.pitr.evidence import DataOwner, DataStop
+from shared.native_process.evidence import ExpectedProcess
 from shared.native_process.ownership import OwnedProcess
-from shared.process_evidence import ExpectedProcess
 from tests.lifecycle.transition.test_pitr_execution import _constant
 
 

@@ -27,7 +27,7 @@ from pathlib import Path
 
 import shared.paths
 from shared.atomic_io import fsync_parent, write_text_atomic
-from shared.platform import LockTimeoutError, file_lock
+from shared.native_process.os_platform import LockTimeoutError, file_lock
 
 _LOCK_TIMEOUT_S = 5.0
 _RESOURCE_LOCK_TIMEOUT_S = 30.0

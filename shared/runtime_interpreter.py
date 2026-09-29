@@ -16,8 +16,8 @@ from typing import Literal, Self
 
 from pydantic import model_validator
 
-from shared.platform import IS_WINDOWS
-from shared.process_evidence import Digest, EvidenceModel
+from shared.native_process.evidence import Digest, EvidenceModel
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.release_identity import ApplicationIdentity, read_application_identity
 from shared.runtime_abi import current_abi
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release

@@ -8,15 +8,15 @@ on:
       - 'migrations/*incarnation-resources*'
       - '.github/workflows/exec-domain-owner.yml'
       - 'agent/graph/_exec_process.py'
-      - 'shared/winjob.py'
+      - 'shared/native_process/winjob.py'
       - 'tests/agent/test_exec_domain_confirmation.py'
       - 'agent/exec*owner*.py'
       - 'agent/graph/_exec_owned_run.py'
       - 'shared/exec_owner*.py'
       - 'shared/resource_admission.py'
-      - 'shared/winjob_pipes.py'
-      - 'shared/winjob_spawn.py'
-      - 'shared/exec_process_domain.py'
+      - 'shared/native_process/winjob_pipes.py'
+      - 'shared/native_process/winjob_spawn.py'
+      - 'shared/native_process/exec_domain.py'
       - 'tests/agent/test_exec_owner_entry.py'
       - 'tests/agent/test_resource_admission.py'
       - 'shared/runtime_admission.py'
@@ -79,8 +79,8 @@ jobs:
           # The existing cross-platform domain uses IS_WINDOWS, which pyright
           # cannot narrow; type its POSIX API surface explicitly, and check the
           # native Job implementation against Windows separately on every lane.
-          uv run pyright --pythonplatform Linux shared/winjob.py shared/exec_process_domain.py agent/graph/_exec_process.py tests/agent/test_exec_domain_confirmation.py
-          uv run pyright --pythonplatform Windows shared/winjob.py shared/winjob_pipes.py shared/exec_owner_protocol.py
+          uv run pyright --pythonplatform Linux shared/native_process/winjob.py shared/native_process/exec_domain.py agent/graph/_exec_process.py tests/agent/test_exec_domain_confirmation.py
+          uv run pyright --pythonplatform Windows shared/native_process/winjob.py shared/native_process/winjob_pipes.py shared/exec_owner_protocol.py
           uv run pytest --confcutdir=tests/agent tests/agent/test_exec_domain_confirmation.py tests/agent/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
       - name: Original buffered-control regression must fail on Linux
         if: matrix.os == 'ubuntu-24.04'

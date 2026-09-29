@@ -339,7 +339,7 @@ class TestRegistryInvariants:
             assert proj <= registered, f"projection carries unregistered keys: {proj - registered}"
 
     def test_windows_system_keys_are_declared_once(self) -> None:
-        """The old parallel copy in shared/session_env.py is gone — a single
+        """The old parallel copy in shared/sessions/env_forwarding.py is gone — a single
         declaration in the registry; USERNAME/USERDOMAIN are the Task #963
         lock (getpass.getuser() on Windows)."""
         from shared.env_registry import WINDOWS_SYSTEM_ENV_KEYS, child_env

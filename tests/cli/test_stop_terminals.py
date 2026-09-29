@@ -47,7 +47,7 @@ from cli.commands._maintenance_stop_report import StopIncompleteError
 from cli.commands.service_stop import OwnedProcess
 from ops import pty_close_notices
 from shared import maintenance
-from shared.session_backend import PtySessionBackend
+from shared.sessions.backend import PtySessionBackend
 from shared.sessions.pty import session_tree
 from tests.cli.conftest import PtyReaper
 from tests.cli.test_pause_stop import dependencies

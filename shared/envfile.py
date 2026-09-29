@@ -21,7 +21,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 from shared.private_storage import ensure_private_dir, ensure_private_file, write_private_bytes
 
 _log = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ ENV_LOCK_TIMEOUT_S = 30.0
 def env_lock_path(env_path: Path) -> Path:
     """The lock file guarding a unit's `.env` — a SIBLING, never `.env` itself.
 
-    `shared.platform.file_lock`'s POSIX branch opens its path with `"w"`, which
+    `shared.native_process.os_platform.file_lock`'s POSIX branch opens its path with `"w"`, which
     truncates: pointed at the real file, taking the lock would empty a cluster's
     secrets outright.
     """

@@ -23,8 +23,8 @@ from typing import ClassVar
 
 import pytest
 
-from shared import winproc
-from shared.session_record import SessionRecord
+from shared.sessions.record import SessionRecord
+from shared.sessions.windows import winproc
 
 
 def _record(*, steward: bool = True, pid: int = 123) -> SessionRecord:

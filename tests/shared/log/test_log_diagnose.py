@@ -4,13 +4,13 @@ loguru's `diagnose` defaults to True. With it on, `logger.exception(...)` inline
 every local variable of the failing traceback's frames into the sink's rendered
 output — an independent review reproduced this concretely by recovering a
 `psycopg.connect` DSN's password from a `logger.exception`-logged connection
-failure. Every sink in `shared/log.py` and `shared/log_sinks.py` goes through
-`shared.log_sinks.add_sink`, which passes `diagnose=False` (see
+failure. Every sink in `shared/log/__init__.py` and `shared/log/sinks.py` goes through
+`shared.log.sinks.add_sink`, which passes `diagnose=False` (see
 scripts/lint/lint_logger_add_diagnose.py, which guards this repo-wide).
 
 These tests exercise the actual production sink constructor —
-`shared.log_sinks._add_file_sink`, the file sink every `init_*` entry point in
-`shared/log.py` installs identically — rather than reimplementing sink
+`shared.log.sinks._add_file_sink`, the file sink every `init_*` entry point in
+`shared/log/__init__.py` installs identically — rather than reimplementing sink
 construction, so a regression in the real code path is what fails this test.
 """
 
@@ -23,7 +23,7 @@ import psycopg
 import pytest
 from loguru import logger
 
-from shared.log_sinks import _add_file_sink, add_sink
+from shared.log.sinks import _add_file_sink, add_sink
 
 # Not a real credential — a fixture value chosen to be unmistakable in a diff/log.
 _SENTINEL = "SENTINEL-PASSWORD"

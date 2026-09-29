@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from shared import session_log
+from shared.sessions import log_prefix
 
 
 @pytest.mark.parametrize("pid", [None, 42])
 def test_header_format(pid: int | None) -> None:
     name = "session-\N{LATIN SMALL LETTER E WITH ACUTE}"
     before = datetime.now(UTC)
-    header = session_log.session_log_header(name, pid=pid)
+    header = log_prefix.session_log_header(name, pid=pid)
     after = datetime.now(UTC)
     prefix = f"--- ava session {name} start="
     suffix = f" pid={pid} ---\n" if pid is not None else " ---\n"
@@ -36,19 +36,19 @@ def test_header_identity_changes_with_name_pid_and_time(monkeypatch: pytest.Monk
             assert tz is UTC
             return cls.instant
 
-    monkeypatch.setattr(session_log, "datetime", Clock)
-    first = session_log.session_log_header("one", pid=1)
-    other_name = session_log.session_log_header("two", pid=1)
-    other_pid = session_log.session_log_header("one", pid=2)
+    monkeypatch.setattr(log_prefix, "datetime", Clock)
+    first = log_prefix.session_log_header("one", pid=1)
+    other_name = log_prefix.session_log_header("two", pid=1)
+    other_pid = log_prefix.session_log_header("one", pid=2)
     Clock.instant = Clock.instant.replace(microsecond=123457)
-    later = session_log.session_log_header("one", pid=1)
+    later = log_prefix.session_log_header("one", pid=1)
     assert len({first, other_name, other_pid, later}) == 4
     assert b".123456+00:00" in first
 
 
 def test_new_log_has_header_before_output(tmp_path: Path) -> None:
     path = tmp_path / "session.log"
-    fd, created = session_log.open_session_log(path, "one", pid=42)
+    fd, created = log_prefix.open_session_log(path, "one", pid=42)
     try:
         assert created
         header = path.read_bytes()
@@ -64,7 +64,7 @@ def test_new_log_has_header_before_output(tmp_path: Path) -> None:
 def test_existing_log_is_unchanged_and_appends(tmp_path: Path, content: bytes) -> None:
     path = tmp_path / "session.log"
     path.write_bytes(content)
-    fd, created = session_log.open_session_log(path, "one", pid=42)
+    fd, created = log_prefix.open_session_log(path, "one", pid=42)
     try:
         assert not created
         assert path.read_bytes() == content
@@ -77,10 +77,10 @@ def test_existing_log_is_unchanged_and_appends(tmp_path: Path, content: bytes) -
 
 def test_reopening_new_log_does_not_repeat_header(tmp_path: Path) -> None:
     path = tmp_path / "session.log"
-    fd, _ = session_log.open_session_log(path, "one")
+    fd, _ = log_prefix.open_session_log(path, "one")
     os.close(fd)
     original = path.read_bytes()
-    fd, created = session_log.open_session_log(path, "two", pid=42)
+    fd, created = log_prefix.open_session_log(path, "two", pid=42)
     os.close(fd)
     assert not created
     assert path.read_bytes() == original

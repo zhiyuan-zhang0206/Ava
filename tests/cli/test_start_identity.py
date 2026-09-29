@@ -20,7 +20,7 @@ from dotenv import dotenv_values
 from cli import start_identity as identity
 from cli import start_intent
 from shared import cluster
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 from tests.lifecycle._start_identity import prepare_start_identity
 
 
@@ -639,7 +639,7 @@ def test_public_start_holds_home_lock_through_runtime_start(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    from shared.platform import LockTimeoutError, file_lock
+    from shared.native_process.os_platform import LockTimeoutError, file_lock
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))

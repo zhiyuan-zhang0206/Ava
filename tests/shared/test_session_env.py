@@ -1,4 +1,4 @@
-"""Tests for shared.session_env: session env forwarding (daemon/service children).
+"""Tests for shared.sessions.env_forwarding: session env forwarding (daemon/service children).
 
 The env rides a built dict handed to the child process out-of-band — never an
 argv (issue #974: the old handoff published the cluster secret and
@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from shared import session_env
-from shared.platform import IS_WINDOWS
+from shared.native_process.os_platform import IS_WINDOWS
+from shared.sessions import env_forwarding
 
 
 @pytest.mark.parametrize("runtime", ["runtime", "project #1/runtime"])
@@ -25,7 +25,7 @@ def test_managed_service_path_preserves_tools_across_callers(
     from shared import runtime_interpreter
 
     venv = tmp_path / runtime
-    bindir = venv / session_env.get_backend().venv_bin_dir_name()
+    bindir = venv / env_forwarding.get_backend().venv_bin_dir_name()
     tools = tmp_path / "admitted-tools"
     tools.mkdir()
     command = tools / ("ava-proof.exe" if IS_WINDOWS else "ava-proof")
@@ -34,39 +34,39 @@ def test_managed_service_path_preserves_tools_across_callers(
     monkeypatch.setattr(runtime_interpreter, "runtime_venv", lambda: venv)
     admitted = os.pathsep.join((str(tools), str(bindir), str(tools)))
     monkeypatch.setenv("PATH", str(tmp_path / "interactive"))
-    interactive = session_env.managed_service_env(admitted)
+    interactive = env_forwarding.managed_service_env(admitted)
     monkeypatch.setenv("PATH", str(tmp_path / "manager"))
-    manager = session_env.managed_service_env(admitted)
+    manager = env_forwarding.managed_service_env(admitted)
     assert interactive == manager
     assert manager["PATH"].split(os.pathsep)[:2] == [str(bindir), str(tools)]
     assert manager["PATH"].split(os.pathsep).count(str(bindir)) == 1
     assert manager["AVA_SERVICE_PATH"] == str(tools)
     assert shutil.which(command.name, path=manager["PATH"]) == str(command)
-    assert session_env.managed_service_env(str(tmp_path / "changed")) != manager
+    assert env_forwarding.managed_service_env(str(tmp_path / "changed")) != manager
 
 
 @pytest.mark.parametrize("entry", ["relative", ".", "bad\npath", "bad\x00path"])
 def test_managed_service_path_refuses_caller_relative_entries(entry: str) -> None:
     with pytest.raises(ValueError, match="absolute directory"):
-        session_env.normalize_service_path(entry)
+        env_forwarding.normalize_service_path(entry)
 
 
 @pytest.mark.parametrize("name", ["tools #1", "${CALLER_TOOLS}", "trailing "])
 def test_managed_service_path_refuses_lossy_home_declarations(tmp_path: Path, name: str) -> None:
     with pytest.raises(ValueError, match="round-trip literally"):
-        session_env.admit_service_path(str(tmp_path / name))
+        env_forwarding.admit_service_path(str(tmp_path / name))
 
 
 def test_managed_service_path_accepts_plain_spaces(tmp_path: Path) -> None:
     path = str(tmp_path / "tools with spaces")
-    assert session_env.admit_service_path(path) == path
+    assert env_forwarding.admit_service_path(path) == path
 
 
 @pytest.mark.skipif(IS_WINDOWS, reason="POSIX toolchain paths are injected only on POSIX")
 @pytest.mark.parametrize("shell_path", ["/usr/bin:/bin", "/bin"])
 def test_frontend_toolchain_path_is_independent_of_shell_profile(shell_path: str) -> None:
     """The Node locations are injected even when a remote shell exports only system dirs."""
-    assert session_env.frontend_toolchain_path(shell_path).split(":")[:4] == [
+    assert env_forwarding.frontend_toolchain_path(shell_path).split(":")[:4] == [
         "/opt/homebrew/bin",
         "/usr/local/bin",
         "/usr/bin",
@@ -76,7 +76,7 @@ def test_frontend_toolchain_path_is_independent_of_shell_profile(shell_path: str
 
 def test_venv_activation_prefix_omits_an_empty_path_entry() -> None:
     """An empty login-shell PATH does not add the working directory to lookup."""
-    assert "${PATH:+:$PATH}" in session_env.venv_activation_prefix()
+    assert "${PATH:+:$PATH}" in env_forwarding.venv_activation_prefix()
 
 
 def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,7 +96,7 @@ def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -
             "PATH": "/usr/bin",
         },
     )
-    env = session_env.forward_env_dict()
+    env = env_forwarding.forward_env_dict()
     assert env["AVA_HOME"] == "/tmp/ava-home"  # noqa: S108 — literal, never opened
     assert env["AVA_GATEWAY_URL"] == "http://gw:9000"
     assert "/usr/bin" in env["PATH"]  # whole-env copy keeps PATH (venv-prefixed)
@@ -118,7 +118,7 @@ def test_forward_env_dict_without_venv_activation_keeps_path_but_omits_virtual_e
         {"AVA_HOME": "/tmp/ava-home", "PATH": "/usr/bin"},  # noqa: S108 — literal env only
     )
 
-    env = session_env.forward_env_dict(activate_venv=False)
+    env = env_forwarding.forward_env_dict(activate_venv=False)
 
     assert "VIRTUAL_ENV" not in env
     assert "/usr/bin" in env["PATH"].split(os.pathsep)
@@ -148,13 +148,13 @@ def test_forward_env_dict_carries_temp_dir_and_windows_system_keys(
     # POSIX: temp dir carried (a POSIX daemon may also be spawned with this dict
     # via a direct-process backend); Windows keys not — a POSIX session runs
     # under a login shell whose profile rebuilds the full environment.
-    env = session_env.forward_env_dict()
+    env = env_forwarding.forward_env_dict()
     assert env["TMPDIR"] == "/tmp"  # noqa: S108 — literal, never opened
     assert "SYSTEMROOT" not in env
     # Windows: system keys ride — the env block handed to the child is a
     # wholesale replacement, so omitting them kills the child at boot.
-    monkeypatch.setattr(session_env, "IS_WINDOWS", True)
-    env = session_env.forward_env_dict()
+    monkeypatch.setattr(env_forwarding, "IS_WINDOWS", True)
+    env = env_forwarding.forward_env_dict()
     assert env["TMPDIR"] == "/tmp"  # noqa: S108 — literal, never opened
     assert env["SYSTEMROOT"] == r"C:\Windows"
     assert env["PATH"].endswith("/usr/bin")
@@ -186,7 +186,7 @@ def test_forward_env_dict_carries_the_machine_proxy_configuration(
         },
     )
 
-    env = session_env.forward_env_dict()
+    env = env_forwarding.forward_env_dict()
 
     assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
     assert env["no_proxy"] == "localhost,127.0.0.1"

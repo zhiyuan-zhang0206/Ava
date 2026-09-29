@@ -27,9 +27,9 @@ from shared.agents.impersonation import ImpersonationError
 from shared.db import create_agent, insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
+from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from shared.native_process.turn_identity import bind_turn_identity
 from shared.runtime_admission import PublicationAdmissionDeferredError, RuntimeAdmission
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from shared.turn_identity import bind_turn_identity
 
 
 class _CurrentRuntimeAdmission(RuntimeAdmission):

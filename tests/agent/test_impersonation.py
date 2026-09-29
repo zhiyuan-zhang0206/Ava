@@ -25,8 +25,8 @@ from agent.graph.exec_protocol import read_request, write_request
 from agent.state import BaseAgentState
 from shared.context import AvaContext
 from shared.lifecycle import AgentImpersonation
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 from tests.impersonation_support import attested_caller, recorded_tree
 
 

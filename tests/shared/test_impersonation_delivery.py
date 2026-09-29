@@ -14,7 +14,7 @@ from shared.agents.impersonation import impersonation_delivery as delivery
 from shared.caller_identity import CallerIdentity
 from shared.db import create_agent, insert_inbound_message
 from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 
 type ActiveSession = tuple[dict[str, Any], RuntimeIncarnation, int]

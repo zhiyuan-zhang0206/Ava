@@ -15,10 +15,10 @@ import pytest
 
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
-from shared import helper_chain_guard, helperproc
-from shared.helper_chain_guard import parent_chain_intact
 from shared.native_process import pid_starttime_ticks
-from shared.session_record import SessionRecord
+from shared.sessions import helper_chain_guard, helperproc
+from shared.sessions.helper_chain_guard import parent_chain_intact
+from shared.sessions.record import SessionRecord
 
 
 def _current_process_record(*, generation: str | None = None) -> SessionRecord:
@@ -37,7 +37,7 @@ def _current_process_record(*, generation: str | None = None) -> SessionRecord:
 def test_new_session_preserves_login_shell_env_stderr_and_record(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import session_env
+    from shared.sessions import env_forwarding
 
     calls: list[dict[str, object]] = []
 
@@ -62,7 +62,7 @@ def test_new_session_preserves_login_shell_env_stderr_and_record(
         return {"pid": os.getpid(), "reused": False}
 
     monkeypatch.setattr(client, "spawn_process", fake_spawn_process)
-    monkeypatch.setattr(session_env, "venv_activation_prefix", lambda: "activate-venv && ")
+    monkeypatch.setattr(env_forwarding, "venv_activation_prefix", lambda: "activate-venv && ")
     stderr = unit_home / "logs" / "service.stderr.log"
     backend = helperproc.HelperProcSessionBackend()
 
@@ -246,8 +246,8 @@ def test_backend_route_matrix(
     spawn: bool,
     expected: str,
 ) -> None:
-    from shared import session_backend
     from shared.config import settings
+    from shared.sessions import backend as session_backend
 
     monkeypatch.setattr(session_backend, "IS_WINDOWS", is_windows)
     monkeypatch.setattr(session_backend, "IS_MACOS", is_macos)
@@ -265,7 +265,7 @@ def test_backend_route_fails_closed_when_settings_are_unreadable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import shared.config
-    from shared import session_backend
+    from shared.sessions import backend as session_backend
 
     class BrokenSettings:
         @property
@@ -299,7 +299,7 @@ def test_permissions_helper_spawn_defaults_off() -> None:
 def test_pty_host_uses_direct_helper_child_when_enabled(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import session_backend
+    from shared.sessions import backend as session_backend
     from shared.sessions.pty import cli
 
     calls: list[dict[str, object]] = []

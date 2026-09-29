@@ -42,7 +42,7 @@ from shared.deploy_timing import CORPSE_REAP_GRACE_S
 from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 class ReapedCorpse(NamedTuple):

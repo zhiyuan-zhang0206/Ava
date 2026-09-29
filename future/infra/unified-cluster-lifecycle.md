@@ -340,7 +340,7 @@ The remaining custody gaps: controller death on plain POSIX/macOS has no
 platform owner (for example a Linux cgroup) able to prove closure without the
 original controller, so retirement past that point still needs a human. Group
 closure itself (exec domain, PITR custody, release preparation) runs through one
-core, `shared/process_group_closure.py`, which accepts only a kernel group
+core, `shared/native_process/group_closure.py`, which accepts only a kernel group
 listing of the exited leader alone after a group SIGKILL, so a macOS member
 forked during the signal forces another round. Do not add another restart or
 cleanup fallback, or infer closure

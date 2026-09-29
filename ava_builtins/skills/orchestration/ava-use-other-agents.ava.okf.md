@@ -27,7 +27,7 @@ resolved cluster home plus resolved workspace plus `codex`, so several can share
 a workspace; the record carries its owner and full Persistent Shell handle, and
 the workspace basename appears only in display suffixes. A launch first reclaims
 the workspace's dead generations; transitions are serialized by
-[[shared/coding-session-owner.ava.okf.md|the host-local owner journal]].
+[[shared/sessions/coding-session-owner.ava.okf.md|the host-local owner journal]].
 
 Codex runs on the host user's own `~/.codex` with per-session `-c` overrides
 (workspace trust, no startup update check), so its conversation outlives the
@@ -50,5 +50,5 @@ use non-resurrecting system notes.
 - [[ava_builtins/skills/orchestration/orchestration.ava.okf.md|Workflow orchestration skill]] — belongs to functional group
 - [[ava/shell/shell.ava.okf.md|ava.shell]] — `sessions` (new/send/send_keys/capture/kill) session primitive itself
 - [[ava/watcher.ava.okf.md|ava.watcher]] — wait for it to produce results when supervising long tasks
-- [[shared/coding-session-owner.ava.okf.md]] — per-launch generations, the dead-sibling sweep, and exact cleanup
+- [[shared/sessions/coding-session-owner.ava.okf.md]] — per-launch generations, the dead-sibling sweep, and exact cleanup
 - [[ava/shell/coding_tools/coding-tools.ava.okf.md|ava.shell.coding_tools]] — the launch logic behind the Claude and Codex spawn scripts

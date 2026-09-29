@@ -393,7 +393,7 @@ def test_resolve_command_passthrough_on_posix(monkeypatch: pytest.MonkeyPatch) -
 def test_resolve_command_maps_venv_python_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     """`.mcp.json` is committed once and read on every platform, so the reader
     maps the repo's POSIX interpreter convention onto the local venv layout —
-    the same substitution `shared.session_backend` does for session commands."""
+    the same substitution `shared.sessions.backend` does for session commands."""
     monkeypatch.setattr(cfg_mod, "IS_WINDOWS", True)
     assert cfg_mod.resolve_command(".venv/bin/python") == ".venv\\Scripts\\python.exe"
 

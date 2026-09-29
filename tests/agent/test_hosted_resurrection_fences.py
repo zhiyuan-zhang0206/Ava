@@ -22,7 +22,7 @@ from shared.incarnation_resources import (
     decode_resources,
 )
 from shared.machine import machine_name
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.turn_identity import bind_turn_identity
 
 
 async def _resurrected(

@@ -35,7 +35,7 @@ import pytest
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from services.backup_scheduler import daemon, worker
 from shared.config import settings
-from shared.exec_process_domain import ExecProcessDomain
+from shared.native_process.exec_domain import ExecProcessDomain
 from tests.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
     KILL_SLACK_S,

@@ -50,6 +50,7 @@ from loguru import logger
 
 from shared.boot_policy import BOOT_RETRY_INTERVAL_S
 from shared.config import settings
+from shared.native_process.os_platform import IS_MACOS
 from shared.os_cron import (
     LAUNCHD_LABEL_PREFIX,
     ava_binary_path,
@@ -57,7 +58,6 @@ from shared.os_cron import (
     os_jobs_enabled,
     skip_os_job,
 )
-from shared.platform import IS_MACOS
 
 
 def _home_slug() -> str:

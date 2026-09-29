@@ -18,7 +18,7 @@ def test_collector_protocol_success_requires_root_owned_listeners(
     monkeypatch: pytest.MonkeyPatch, owned: bool
 ) -> None:
     from shared.native_process.ownership import OwnedProcess
-    from shared.root_control import client
+    from shared.native_process.root_control import client
 
     owner = OwnedProcess(101, 12.0, None)
 
@@ -46,7 +46,7 @@ def test_collector_cannot_certify_a_listener_without_root_identity(
 ) -> None:
     from shared.daemon_health import ProbeVerdict
     from shared.native_process.ownership import OwnedProcess
-    from shared.root_control import client
+    from shared.native_process.root_control import client
 
     def _fake_owned_process(_unit: str) -> OwnedProcess | None:
         return None
@@ -73,7 +73,7 @@ def test_collector_discovery_failure_is_unavailable(monkeypatch: pytest.MonkeyPa
 
 def test_collector_root_failure_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     from shared.daemon_health import ProbeVerdict
-    from shared.root_control import client
+    from shared.native_process.root_control import client
 
     def fail(_unit: str) -> None:
         raise client.RootClientError("root status unavailable")

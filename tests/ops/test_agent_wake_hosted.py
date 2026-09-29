@@ -140,7 +140,7 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     from agent.ownership.inbound import RuntimeOwnershipLostError
     from shared.db import insert_inbound_message
     from shared.incarnation_resources import ResourceBirth
-    from shared.turn_identity import bind_turn_identity
+    from shared.native_process.turn_identity import bind_turn_identity
 
     aid = _park(db_conn, status="idling")
     if managed:

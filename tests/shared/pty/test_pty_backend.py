@@ -1,4 +1,4 @@
-"""Tests for ``shared.session_backend.PtySessionBackend`` — the PTY backend
+"""Tests for ``shared.sessions.backend.PtySessionBackend`` — the PTY backend
 that talks to the per-session-host CLI (``shared.sessions.pty.cli``).
 
 Most tests drive the backend through a fake ``subprocess.run`` — the same
@@ -24,9 +24,9 @@ from pathlib import Path
 
 import pytest
 
-import shared.session_backend as sb
-from shared.platform import IS_WINDOWS
-from shared.session_backend import (
+import shared.sessions.backend as sb
+from shared.native_process.os_platform import IS_WINDOWS
+from shared.sessions.backend import (
     PosixProcSessionBackend,
     PtySessionBackend,
     SessionBackend,
@@ -104,7 +104,7 @@ def test_new_session_cli_shape_and_envfile(
     """new → CLI `new <name> <cwd> <envfile>`; the env rides a 0600 handoff
     file, never argv (issue #974 — the CLI only ever sees the file path)."""
     calls, _ = cli_calls
-    monkeypatch.setattr("shared.session_backend.run_dir", lambda: tmp_path)
+    monkeypatch.setattr("shared.sessions.backend.run_dir", lambda: tmp_path)
     backend = _backend()
     ok = backend.new_session(
         "ava-agent-1-shell-2",
@@ -142,7 +142,7 @@ def test_new_session_failure_returns_false_and_cleans_envfile(
     cli_calls,
 ):
     calls, script = cli_calls
-    monkeypatch.setattr("shared.session_backend.run_dir", lambda: tmp_path)
+    monkeypatch.setattr("shared.sessions.backend.run_dir", lambda: tmp_path)
     script[("s", "new")] = _FakeCompletedProcess(
         returncode=1, stderr="pty allocation refused: generation 'freeze-1'"
     )
@@ -293,7 +293,7 @@ def test_kill_session_with_verdict_maps_cli_stdout(cli_calls):
 
 
 def _fake_records(names: list[str]) -> dict[str, object]:
-    from shared.session_record import SessionRecord
+    from shared.sessions.record import SessionRecord
 
     return {
         n: SessionRecord(pid=1, create_time=1.0, cmd="", cwd="", started_at=100.0 + i)

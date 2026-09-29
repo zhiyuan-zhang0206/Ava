@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from shared.platform import IS_WINDOWS
+from shared.native_process.os_platform import IS_WINDOWS
 
 # Values that must never appear in an argv. Shaped like the real thing: the
 # cluster secret, the data-plane URLs that embed it, a provider key.
@@ -122,8 +122,8 @@ def test_session_backend_new_session(
     secret_env: None, captured_argv: list[list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`ava start` / `ava restart` bring every daemon up through here."""
-    from shared.session_backend import PosixProcSessionBackend
-    from shared.session_env import forward_env_dict
+    from shared.sessions.backend import PosixProcSessionBackend
+    from shared.sessions.env_forwarding import forward_env_dict
 
     PosixProcSessionBackend().new_session(
         "ava-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=forward_env_dict()
@@ -147,9 +147,9 @@ def test_launch_record_cannot_reach_a_live_process(
     `has_session` is the same resolve `kill_session` does, so False here means
     there is nothing for it to reach.
     """
-    from shared import posixproc
-    from shared.session_backend import PosixProcSessionBackend
-    from shared.session_env import forward_env_dict
+    from shared.sessions import posixproc
+    from shared.sessions.backend import PosixProcSessionBackend
+    from shared.sessions.env_forwarding import forward_env_dict
 
     PosixProcSessionBackend().new_session(
         "ava-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=forward_env_dict()

@@ -58,7 +58,7 @@ downloads visible while the original source preview remains available. It is a
 diagnostic view, never permission to reap or restart; interrupted commands without
 an exit result never acquire a guessed return code. Receipts retain completed
 command timing for comparing cold acquisition with verified input reuse.
-`shared.posix_command.run_owned_command` gives acquisition, application builds
+`shared.native_process.posix_command.run_owned_command` gives acquisition, application builds
 and offline image preparation one POSIX process group within its caller's
 session from launch. A finite outer preparation owner can close that whole
 session when a coordinator dies. The existing execution-domain

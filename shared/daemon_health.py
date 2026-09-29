@@ -76,12 +76,12 @@ from enum import Enum
 from pathlib import Path
 from typing import cast
 
-from shared import process_sha
 from shared.config import get_field
 from shared.daemon_http import RouteHandler as RouteHandler
 from shared.daemon_http import start_daemon_http
 from shared.env_registry import health_port_env_aliases
 from shared.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
+from shared.native_process import loaded_commit
 from shared.paths import ava_home
 from shared.port_block import LEGACY_AVA_PORTS
 
@@ -250,7 +250,7 @@ def _healthz_payload(
         "pid": pid,
         "home": home,
         "started_at": started_at,
-        "sha": process_sha.get(),
+        "sha": loaded_commit.get(),
     }
     runtime = normal_runtime_identity(home)
     if runtime is not None:

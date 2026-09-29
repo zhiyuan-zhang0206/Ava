@@ -1,10 +1,10 @@
 """Cross-platform OS abstraction — unifies macOS, Windows, and Linux platform
-differences behind a common interface, following the ``shared/session_backend.py``
+differences behind a common interface, following the ``shared/sessions/backend.py``
 provider pattern.
 
 Module-level ``get_backend()`` returns the platform-appropriate singleton.
 Callers use the same ``PlatformBackend`` protocol regardless of platform;
-the backend is selected by the canonical flags in ``shared.platform``
+the backend is selected by the canonical flags in ``shared.native_process.os_platform``
 (``IS_MACOS`` / ``IS_LINUX`` / ``IS_WINDOWS``).
 
 Design:
@@ -21,7 +21,7 @@ import abc
 import sys
 from pathlib import Path
 
-from shared.platform import IS_MACOS, IS_WINDOWS
+from shared.native_process.os_platform import IS_MACOS, IS_WINDOWS
 
 # ---------------------------------------------------------------------------
 # Abstract interface
@@ -316,7 +316,7 @@ class MacPlatformBackend(PlatformBackend):
     def force_kill(self, pid: int) -> None:
         import os
 
-        from shared.platform import SIGKILL
+        from shared.native_process.os_platform import SIGKILL
 
         try:
             os.kill(pid, SIGKILL)
@@ -425,7 +425,7 @@ class LinuxPlatformBackend(PlatformBackend):
     def force_kill(self, pid: int) -> None:
         import os
 
-        from shared.platform import SIGKILL
+        from shared.native_process.os_platform import SIGKILL
 
         try:
             os.kill(pid, SIGKILL)

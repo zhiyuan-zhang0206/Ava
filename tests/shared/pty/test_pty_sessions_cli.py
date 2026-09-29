@@ -30,15 +30,15 @@ import psutil
 import pytest
 
 from shared.native_process import pid_starttime_ticks
-from shared.platform import IS_LINUX, IS_WINDOWS, LockTimeoutError, file_lock
-from shared.session_backend import PtySessionBackend
-from shared.session_record import SessionRecord
+from shared.native_process.os_platform import IS_LINUX, IS_WINDOWS, LockTimeoutError, file_lock
+from shared.sessions.backend import PtySessionBackend
 from shared.sessions.pty import allocation_freeze, orphan_reaper
 from shared.sessions.pty import cli as pty_cli
 from shared.sessions.pty import host as pty_host
 from shared.sessions.pty._paths import host_identity, record_path, socket_path
 from shared.sessions.pty.cli import write_env_file
 from shared.sessions.pty.host import PtySession
+from shared.sessions.record import SessionRecord
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
 
@@ -737,9 +737,9 @@ def test_backend_enumerates_without_subprocess_or_socket(
     def _no_subprocess(*_a: object, **_kw: object) -> object:
         raise AssertionError("session backend must not spawn subprocesses on the list path")
 
-    monkeypatch.setattr("shared.session_backend.subprocess.run", _no_subprocess)
+    monkeypatch.setattr("shared.sessions.backend.subprocess.run", _no_subprocess)
 
-    from shared.session_backend import PtySessionBackend
+    from shared.sessions.backend import PtySessionBackend
 
     backend = PtySessionBackend()
     got = backend.list_sessions()
@@ -760,9 +760,9 @@ def test_backend_list_is_empty_on_a_fresh_home(
     def _no_subprocess(*_a: object, **_kw: object) -> object:
         raise AssertionError("session backend must not spawn subprocesses on the list path")
 
-    monkeypatch.setattr("shared.session_backend.subprocess.run", _no_subprocess)
+    monkeypatch.setattr("shared.sessions.backend.subprocess.run", _no_subprocess)
 
-    from shared.session_backend import PtySessionBackend
+    from shared.sessions.backend import PtySessionBackend
 
     backend = PtySessionBackend()
     assert backend.list_sessions() == []

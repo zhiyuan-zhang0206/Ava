@@ -18,8 +18,8 @@ from services.agent_host.recovery_interrupt import RecoveryInterrupt
 from shared.config import settings
 from shared.db import insert_inbound_message
 from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_hosted_db_recovery import _admit, _graph
 
 

@@ -1,4 +1,4 @@
-"""Unit-level tests for shared.posixproc's liveness primitives.
+"""Unit-level tests for shared.sessions.posixproc's liveness primitives.
 
 Split out of test_posixproc.py (which spawns real child processes for the
 double-fork reparent path): these instead stub psutil/os to exercise
@@ -10,7 +10,7 @@ from __future__ import annotations
 import psutil
 import pytest
 
-from shared import posixproc
+from shared.sessions import posixproc
 
 
 def test_process_is_live_false_for_zombie(monkeypatch: pytest.MonkeyPatch) -> None:

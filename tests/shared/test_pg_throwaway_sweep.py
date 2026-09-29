@@ -38,8 +38,8 @@ import pytest
 
 from shared import pg_throwaway_base, pg_tools
 from shared.config import settings
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.paths import repo_root
-from shared.platform import IS_WINDOWS
 
 pytestmark = pytest.mark.skipif(
     IS_WINDOWS, reason="the registry lock is POSIX flock; the sweep is a no-op on Windows"

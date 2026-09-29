@@ -139,7 +139,7 @@ def _confirm_stop(*, require_confirmation: bool) -> bool:
 
 def _stop_terminals_force() -> None:
     """Close this unit's persistent shells on an explicit full force stop."""
-    from shared.session_backend import get_shell_backend
+    from shared.sessions.backend import get_shell_backend
 
     backend = get_shell_backend()
     names = backend.list_sessions()

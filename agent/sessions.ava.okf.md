@@ -28,12 +28,12 @@ variables. Data and profile directories remain on disk.
 
 ## Identity and environment
 
-The agent host binds identity through `shared/turn_identity.py` for each turn.
+The agent host binds identity through `shared/native_process/turn_identity.py` for each turn.
 It does not set process-wide agent identity. Disposable execute children carry
 an explicit per-agent request; watcher/schedule bootstraps establish their own
 identity. A bare persistent shell has no agent identity.
 
-`shared/session_env.py:forward_env_dict()` passes host-scope bootstrap values
+`shared/sessions/env_forwarding.py:forward_env_dict()` passes host-scope bootstrap values
 to daemon/session children. Cluster values are loaded from the child's actual
 home/gateway projection. Credentials travel through environment/config channels,
 never command-line arguments. `AVA_AGENT_ID` is not globally inherited by

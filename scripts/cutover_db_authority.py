@@ -778,7 +778,7 @@ def main(argv: list[str] | None = None) -> int:
             print("[dry-run] no changes made.")
             return 0
         from shared.home_lifecycle_locks import resource_lock
-        from shared.platform import file_lock
+        from shared.native_process.os_platform import file_lock
 
         # The same home lock order as `ava start`: start intent, then resources.
         with (

@@ -16,7 +16,7 @@ from cli.release_prepare import PreparationReceipt
 from shared.release_identity import read_application_identity
 from shared.runtime_abi import current_abi
 from shared.runtime_release import VerifiedRelease, release_abi, verify_release
-from shared.session_env import frontend_toolchain_path, normalize_service_path
+from shared.sessions.env_forwarding import frontend_toolchain_path, normalize_service_path
 from shared.verified_file import regular_bytes
 
 

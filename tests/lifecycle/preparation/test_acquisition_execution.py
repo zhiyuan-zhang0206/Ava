@@ -13,8 +13,8 @@ import psutil
 import pytest
 
 from cli.release_prepare.acquisition_process import Commands
-from shared import posix_command
-from shared.exec_process_domain import ExecProcessDomain
+from shared.native_process import posix_command
+from shared.native_process.exec_domain import ExecProcessDomain
 from shared.runtime_prepare import _run, tree_inventory
 
 pytestmark = pytest.mark.skipif(

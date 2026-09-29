@@ -47,7 +47,7 @@ from shared.live_announce import publish_agent_updated_sync, publish_impersonati
 from shared.live_events import Cancelled
 from shared.log import logger
 from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def _ttl(value: int) -> int:

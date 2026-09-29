@@ -654,7 +654,7 @@ def test_the_restore_workers_loguru_records_reach_its_stderr_without_settings() 
     """Its stderr is the operation's `stderr.log`, whose tail a failure carries.
     The worker runs with no authority (no HOME, no AVA_HOME), so its sink opens
     without building Settings."""
-    from shared.process_env import restricted_process_env
+    from shared.native_process.child_env import restricted_process_env
 
     environment = restricted_process_env()
     assert "HOME" not in environment and not any(name.startswith("AVA_") for name in environment)

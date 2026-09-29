@@ -14,7 +14,7 @@ from cli.release_transition import execute, journal
 from cli.release_transition.pitr import transition
 from cli.release_transition.pitr.evidence import DataOwner, DataStop
 from cli.release_transition.request import PitrRequest
-from shared.process_evidence import ExpectedProcess
+from shared.native_process.evidence import ExpectedProcess
 from tests.lifecycle.transition.test_launcher_linux import planned as planned
 from tests.lifecycle.transition.test_pitr_operation import _seal
 from tests.lifecycle.transition.test_pitr_operation import pitr_request as pitr_request

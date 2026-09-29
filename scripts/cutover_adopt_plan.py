@@ -220,7 +220,7 @@ def intent_document(
 
 
 def _service_path_refusals(facts: Facts, inputs: Inputs) -> list[str]:
-    from shared.session_env import admit_service_path
+    from shared.sessions.env_forwarding import admit_service_path
 
     declared = facts.env.get("AVA_SERVICE_PATH")
     if inputs.service_path is None:

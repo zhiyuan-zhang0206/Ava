@@ -105,7 +105,7 @@ def test_drain_accepts_the_reaped_turns_failure_with_a_fresh_lease(
 ) -> None:
     """The status fence alone raises; either receipt arrival order must drain."""
     from shared.agents.impersonation import ImpersonationError, native_status
-    from shared.runtime_incarnation import RuntimeIncarnation
+    from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
     agent, owner, generation = _running_agent(db_conn)
     incarnation = RuntimeIncarnation(agent, generation, owner)

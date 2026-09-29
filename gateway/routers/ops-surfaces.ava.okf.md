@@ -109,4 +109,4 @@ render, fail, and retry independently. The old mixed `/inspect` route is absent.
 ## Key Dependencies
 
 - [[routers.ava.okf.md]] — the router index these two belong to
-- [[shared/log.ava.okf.md]] — the emitter that fills the unified `events` stream, and its partitioning
+- [[shared/log/log.ava.okf.md]] — the emitter that fills the unified `events` stream, and its partitioning

@@ -212,7 +212,7 @@ def _create_hold(home: Path, journal: dict[str, Any]) -> None:
     """The cutover hold: the existing pause-owner journal, maintenance phase `stopped`."""
     from shared import pause_owner
     from shared.maintenance_state import MaintenanceHold
-    from shared.platform import file_lock
+    from shared.native_process.os_platform import file_lock
 
     holder, at = journal["hold"]["holder"], journal["hold"]["acquired_at"]
     path = home / PAUSE_OWNER
@@ -646,7 +646,7 @@ def main(
         registry = registry_path(home, args.registry)
         host = host or Host.current()
         if args.execute:
-            from shared.platform import file_lock
+            from shared.native_process.os_platform import file_lock
 
             cutover_id = args.cutover_id or datetime.now(UTC).strftime("adopt-%Y%m%dT%H%M%SZ")
             with file_lock(home / "start-intent.lock", timeout_s=30):

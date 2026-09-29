@@ -710,7 +710,7 @@ def test_helper_killed_mid_transition_is_an_explicit_refusal(
 
 
 def _serving(root: OwnedProcess) -> bool:
-    from shared.root_control.client import RootClientError, root_process
+    from shared.native_process.root_control.client import RootClientError, root_process
 
     try:
         return root_process() == root

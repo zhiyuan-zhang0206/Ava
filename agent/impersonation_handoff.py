@@ -11,7 +11,7 @@ from shared.agents.impersonation.impersonation_history import export_handoff, me
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.message_kwargs import NoteTag
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def start_marker(session: dict[str, Any]) -> HumanMessage:

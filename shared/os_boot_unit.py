@@ -25,8 +25,8 @@ from loguru import logger
 from shared.atomic_io import write_text_atomic
 from shared.boot_policy import BOOT_RETRY_INTERVAL_S
 from shared.cluster import home_slug, registry_path
+from shared.native_process.os_platform import IS_LINUX
 from shared.native_process.ownership import OwnedProcess
-from shared.platform import IS_LINUX
 
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
 

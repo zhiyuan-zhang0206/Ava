@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cli.release_prepare.models import FileInput
-from shared.posix_command import run_owned_command
+from shared.native_process.posix_command import run_owned_command
 from shared.release_identity import ApplicationIdentity
 from shared.runtime_release import ReleaseRejectedError, file_sha256
 

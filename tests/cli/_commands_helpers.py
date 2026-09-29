@@ -139,7 +139,7 @@ def _fake_session_backends(
     real supervisor in unit tests (a real launch would fork a daemon, a real
     kill could touch the dev host's sessions). Returns (service, shell).
     """
-    import shared.session_backend as _sb
+    import shared.sessions.backend as _sb
 
     service = _FakeSessionBackend()
     shell = _FakeSessionBackend()

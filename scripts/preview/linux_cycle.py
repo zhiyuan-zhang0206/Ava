@@ -170,7 +170,7 @@ class LinuxCycle:
                 "-c",
                 "import os\n"
                 "from pathlib import Path\n"
-                "from shared.session_backend import get_shell_backend\n"
+                "from shared.sessions.backend import get_shell_backend\n"
                 f"if not get_shell_backend().new_session({TERMINAL!r}, '', Path.cwd(), env=dict(os.environ)):\n"
                 "    raise RuntimeError('Could not create the native terminal fixture')\n",
             ],

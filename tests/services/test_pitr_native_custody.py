@@ -376,7 +376,7 @@ async def test_launch_failure_quarantines_and_the_next_run_proceeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from services.pitr import worker_process
-    from shared.exec_process_domain import ExecProcessDomain
+    from shared.native_process.exec_domain import ExecProcessDomain
 
     def exhausted(*_args: object, **_kwargs: object) -> None:
         raise OSError(24, "Too many open files")
@@ -427,7 +427,7 @@ async def test_custody_steps_run_off_the_event_loop(
 ) -> None:
     """A slow group close never stalls the scheduler's health loop."""
     from services.pitr import worker_process
-    from shared.exec_process_domain import ExecProcessDomain
+    from shared.native_process.exec_domain import ExecProcessDomain
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{}')\n")
@@ -626,7 +626,7 @@ async def test_commit_holds_the_kind_lock_against_another_controller(
     """A committing operation holds `closure.json` without `committed.json`;
     another controller's admission must never quarantine it as a stopped one."""
     from services.pitr import worker_process
-    from shared.platform import LockTimeoutError
+    from shared.native_process.os_platform import LockTimeoutError
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{}')\n")
@@ -734,7 +734,7 @@ async def test_a_busy_kind_defers_a_scheduled_run_instead_of_failing_it(
 
     from services.pitr import base_scheduler_daemon as scheduler
     from services.pitr import worker_process
-    from shared.platform import LockTimeoutError, file_lock
+    from shared.native_process.os_platform import LockTimeoutError, file_lock
 
     kind = _kind(tmp_path)
     kind.control_root.mkdir(parents=True)

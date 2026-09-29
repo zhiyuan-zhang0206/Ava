@@ -10,9 +10,9 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 
-from shared import process_sha
 from shared.health_schema import DEGRADED, OK, component, render
 from shared.machine import machine_name
+from shared.native_process import loaded_commit
 from shared.paths import ava_home
 from shared.runtime_service_identity import normal_runtime_identity
 
@@ -49,7 +49,7 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
         "home": str(ava_home()),
         "machine": machine_name(),
         "started_at": _STARTED_AT,
-        "sha": process_sha.get(),
+        "sha": loaded_commit.get(),
         "liveness": OK,
     }
     runtime = normal_runtime_identity(str(ava_home()))

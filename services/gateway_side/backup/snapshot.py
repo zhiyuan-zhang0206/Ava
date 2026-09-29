@@ -17,7 +17,7 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import shared.pg_tools
-from shared.platform import LockTimeoutError
+from shared.native_process.os_platform import LockTimeoutError
 from shared.proc import run_bounded
 
 DUMP_TIMEOUT_S = 20 * 60

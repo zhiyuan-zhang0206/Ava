@@ -20,8 +20,8 @@ from shared.incarnation_resources import (
     complete_exec,
     decode_resources,
 )
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.paths import exec_run_dir
-from shared.runtime_incarnation import RuntimeIncarnation
 
 
 def process_ended(identity: ResourceProcess) -> bool:

@@ -99,7 +99,7 @@ def test_old_birth_cannot_grant_after_observed_generation_changes(
     serving_root: RootBirth, state_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     from shared import start_serving
-    from shared.root_control.client import RootClientError
+    from shared.native_process.root_control.client import RootClientError
 
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime)

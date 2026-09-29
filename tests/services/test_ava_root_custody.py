@@ -160,7 +160,7 @@ def test_mutated_custody_is_never_overwritten_or_cleared(tmp_path: Path) -> None
 
 @pytest.mark.parametrize("birth", [float("nan"), float("inf"), -1, True])
 def test_native_status_refuses_invalid_birth(birth: object) -> None:
-    from shared.root_control.client import RootClientError, native_identity
+    from shared.native_process.root_control.client import RootClientError, native_identity
 
     with pytest.raises(RootClientError, match="captured native birth"):
         native_identity({"pid": 101, "create_time": birth, "starttime": None})
@@ -227,7 +227,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     from cli.commands._stop_extras import stop_permissions_helper
     from shared.config import settings
 
-    monkeypatch.setattr("shared.platform.IS_MACOS", True)
+    monkeypatch.setattr("shared.native_process.os_platform.IS_MACOS", True)
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.setattr(settings.services, "permissions_helper_port", 23456)
     stop_permissions_helper()

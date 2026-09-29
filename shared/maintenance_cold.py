@@ -14,10 +14,11 @@ import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-from shared import exec_request_evidence, session_backend
+from shared import exec_request_evidence
 from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.paths import ava_home
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.sessions import backend
 
 _CONSUMER_MODULES = frozenset(
     {
@@ -46,8 +47,8 @@ def require_no_consumers(conn: psycopg.Connection[Any], agent_id: int) -> None:
     provably disposable refuses with its file, attribution and disposition
     commands.
     """
-    backend = session_backend.get_backend()
-    if backend.has_session(f"ava-agent-{agent_id}") or backend.list_sessions(
+    native_backend = backend.get_backend()
+    if native_backend.has_session(f"ava-agent-{agent_id}") or native_backend.list_sessions(
         prefix=f"ava-boot-{agent_id}-"
     ):
         raise RuntimeError(f"legacy native consumer still owns agent {agent_id}")

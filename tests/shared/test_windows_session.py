@@ -13,12 +13,12 @@ from typing import Any
 
 import pytest
 
-from shared import windows_session
+from shared.sessions.windows import logon_session
 
 
 def test_helpers_are_windows_only() -> None:
     with pytest.raises(RuntimeError, match="Windows-only"):
-        windows_session.process_session_id(123)
+        logon_session.process_session_id(123)
 
 
 def _identity(obj: Any) -> Any:
@@ -41,7 +41,7 @@ def _kernel_answer(
         return 1
 
     monkeypatch.setattr(
-        windows_session,
+        logon_session,
         "_kernel32",
         lambda: SimpleNamespace(
             ProcessIdToSessionId=process_to_session,
@@ -49,45 +49,45 @@ def _kernel_answer(
             GetCurrentProcessId=lambda: current_pid,
         ),
     )
-    monkeypatch.setattr(windows_session.ctypes, "byref", _identity)
+    monkeypatch.setattr(logon_session.ctypes, "byref", _identity)
 
 
 def test_process_session_id_reads_the_os_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     _kernel_answer(
         monkeypatch,
         session_by_pid={77: 3},
-        active=windows_session._NO_ACTIVE_SESSION,
+        active=logon_session._NO_ACTIVE_SESSION,
     )
-    assert windows_session.process_session_id(77) == 3
+    assert logon_session.process_session_id(77) == 3
 
 
 def test_process_session_id_unknown_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
     _kernel_answer(
         monkeypatch,
         session_by_pid={},
-        active=windows_session._NO_ACTIVE_SESSION,
+        active=logon_session._NO_ACTIVE_SESSION,
     )
-    assert windows_session.process_session_id(99) is None
+    assert logon_session.process_session_id(99) is None
 
 
 def test_current_session_id_maps_its_own_pid(monkeypatch: pytest.MonkeyPatch) -> None:
     _kernel_answer(
         monkeypatch,
         session_by_pid={4242: 5},
-        active=windows_session._NO_ACTIVE_SESSION,
+        active=logon_session._NO_ACTIVE_SESSION,
     )
-    assert windows_session.current_session_id() == 5
+    assert logon_session.current_session_id() == 5
 
 
 def test_no_active_console_session_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
     _kernel_answer(
         monkeypatch,
         session_by_pid={},
-        active=windows_session._NO_ACTIVE_SESSION,
+        active=logon_session._NO_ACTIVE_SESSION,
     )
-    assert windows_session.active_console_session_id() is None
+    assert logon_session.active_console_session_id() is None
 
 
 def test_active_console_session_id_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
     _kernel_answer(monkeypatch, session_by_pid={}, active=1)
-    assert windows_session.active_console_session_id() == 1
+    assert logon_session.active_console_session_id() == 1

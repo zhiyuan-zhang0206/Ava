@@ -57,7 +57,7 @@ restart it (a reload never revokes a user). A live pooler with closed listeners
 retains custody: normal start cannot repeat its shutdown signal or escalate to
 force. A graceful stop timeout fails without killing the survivor.
 
-PgBouncer and Redis are spawned with `shared.process_env.daemon_process_env`,
+PgBouncer and Redis are spawned with `shared.native_process.child_env.daemon_process_env`,
 and the Postgres postmaster with `shared.pg_tools.pg_start_env` (the same set
 plus the macOS locale fallback): the operator's PATH, home, user, temp dir,
 timezone and locale only. The gateway login, write generation and API token

@@ -44,10 +44,10 @@ from shared.env_registry import (
     MANIFEST_CERTIFICATION_SECRET_ENV,
     manifest_certification_secret_env,
 )
+from shared.native_process.child_env import inherited_process_env
+from shared.native_process.group_closure import group_empty
 from shared.native_process.ownership import OwnedProcess, capture_tree, retain_processes
-from shared.process_env import inherited_process_env
-from shared.process_group_closure import group_empty
-from shared.root_control.ipc import (
+from shared.native_process.root_control.ipc import (
     ErrorCode,
     RequestPayload,
     ResponsePayload,

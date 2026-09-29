@@ -1,4 +1,4 @@
-"""Turn-scoped agent identity (shared/turn_identity.py) and its layering into
+"""Turn-scoped agent identity (shared/native_process/turn_identity.py) and its layering into
 `ava.agent_identity` — Phase 1 of future/infra/agent-runner-as-server.md.
 
 Locks the resolution order `turn contextvar > process slot > AVA_AGENT_ID env`
@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from ava import agent_identity
-from shared.turn_identity import (
+from shared.native_process.turn_identity import (
     bind_turn_identity,
     current_turn_agent_id,
     effective_agent_id,

@@ -16,7 +16,7 @@ from shared.config import settings
 from shared.log import init_gateway_process
 from shared.machine import is_gateway
 from shared.migrations import assert_schema_current
-from shared.platform import raise_fd_limit
+from shared.native_process.os_platform import raise_fd_limit
 from shared.transport_encryption import verify_transport_encryption
 
 _log = logging.getLogger(__name__)

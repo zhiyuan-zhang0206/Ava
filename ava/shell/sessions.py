@@ -17,8 +17,8 @@ from ava.security import scan_content
 from shared.cluster import session_name
 from shared.config import settings
 from shared.paths import repo_root, workspace_dir
-from shared.session_backend import get_shell_backend
-from shared.session_env import cwd_is_inside_checkout, forward_env_dict
+from shared.sessions.backend import get_shell_backend
+from shared.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
 from shared.sessions.page_session import is_page_label
 
 

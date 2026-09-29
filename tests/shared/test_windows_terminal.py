@@ -12,17 +12,18 @@ from pydantic import ValidationError
 
 from services.ava_root.wiring import WiringContext
 from services.ava_root_glue.windows_terminal import TerminalBroker
-from shared import paths, session_backend
+from shared import paths
 from shared.native_process.ownership import OwnedProcess
-from shared.root_control.ipc import ResponsePayload, encode, ok_response
-from shared.windows_terminal import backend, record
+from shared.native_process.root_control.ipc import ResponsePayload, encode, ok_response
+from shared.sessions import backend as session_backend
+from shared.sessions.windows.terminal import backend, record
 
 
 @pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])
 def test_native_transport_rejects_unbounded_deadlines_before_os_calls(
     tmp_path: Path, timeout: float
 ) -> None:
-    from shared.root_control.windows.transport import roundtrip
+    from shared.native_process.root_control.windows.transport import roundtrip
 
     with pytest.raises(ValueError, match="finite and positive"):
         roundtrip(tmp_path / "root", b'{"verb":"status"}\n', timeout)

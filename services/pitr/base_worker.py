@@ -26,9 +26,9 @@ from services.pitr.worker_process import (
 )
 from shared.config import settings
 from shared.log import init_cli_process
+from shared.native_process.child_env import inherited_process_env
+from shared.native_process.os_platform import LockTimeoutError
 from shared.paths import ava_home
-from shared.platform import LockTimeoutError
-from shared.process_env import inherited_process_env
 
 
 def candidate_kind(root: Path | None = None) -> OperationKind:

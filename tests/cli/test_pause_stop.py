@@ -21,7 +21,7 @@ from ops import agent_pause
 from shared import maintenance, pause_owner, start_serving
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.maintenance_state import MaintenanceHold
-from shared.session_backend import PtySessionBackend
+from shared.sessions.backend import PtySessionBackend
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 from tests.cli.conftest import PtyReaper
@@ -309,7 +309,7 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", PtySessionBackend)
+    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", PtySessionBackend)
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
     for name in ("stop_permissions_helper",):

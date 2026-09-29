@@ -24,7 +24,7 @@ import psutil
 import pytest
 
 from shared.hold_driver import HoldDriver, ProcessRef, liveness, mint_driver
-from shared.platform import IS_LINUX
+from shared.native_process.os_platform import IS_LINUX
 
 _REPO = Path(__file__).resolve().parents[2]
 

@@ -24,7 +24,7 @@ from typing import Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict
 
-from shared.platform import primary_disk_path
+from shared.native_process.os_platform import primary_disk_path
 
 # psutil's non-blocking cpu_percent reports the average since the PREVIOUS call
 # in the same process, which is meaningless for a stateless one-shot: the first

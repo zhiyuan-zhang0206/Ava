@@ -514,7 +514,7 @@ def test_job_main_inits_the_child_process_sinks(
 ) -> None:
     """`job.main` boots the child's process sinks before executing.
 
-    `shared/log.py` drops loguru's default handler at import, so without the
+    `shared/log/__init__.py` drops loguru's default handler at import, so without the
     seam every record the child produces — the `llm_usage` rows that are the
     worker's metering ledger included — is silently discarded (task #3868)."""
     order: list[str] = []

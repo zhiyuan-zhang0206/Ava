@@ -254,7 +254,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     roles = machine_role()
     print(f"\n→ roles = {','.join(sorted(roles))}, machine = {resolved['machine_name']}")
-    from shared.platform import raise_fd_limit
+    from shared.native_process.os_platform import raise_fd_limit
 
     raise_fd_limit(65536)  # every service spawned here inherits the raised ceiling
 

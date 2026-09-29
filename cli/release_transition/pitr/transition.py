@@ -25,8 +25,8 @@ from cli.release_transition.pitr.evidence import PitrSeal
 from cli.release_transition.pitr.inputs import read_record, require_inputs
 from cli.release_transition.request import PitrRequest
 from services.pitr.activation_state import ActivationRecord, record_path, write_record
+from shared.native_process.evidence import ExpectedProcess
 from shared.native_process.ownership import OwnedProcess
-from shared.process_evidence import ExpectedProcess
 from shared.verified_file import regular_bytes
 
 # Terminal writer closure bounds, matching the release stop phase's default
@@ -157,7 +157,7 @@ class PitrTransition:
         from cli.commands.data_plane import pitr_activation as activation
         from services.pitr.activation_state import lock_path
         from shared.cluster_lock import acquire_update_lock, release_update_lock
-        from shared.platform import file_lock
+        from shared.native_process.os_platform import file_lock
 
         require_inputs(journal.operation)
         progress = journal.operation.pitr
@@ -431,7 +431,7 @@ class PitrTransition:
         from cli.commands.data_plane import pitr_activation as activation
         from services.pitr.activation_state import lock_path
         from shared.cluster_lock import acquire_update_lock, release_update_lock
-        from shared.platform import file_lock
+        from shared.native_process.os_platform import file_lock
 
         require_inputs(journal.operation)
         holder = f"pitr-proof:{self.request.id}"

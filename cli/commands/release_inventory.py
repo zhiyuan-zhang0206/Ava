@@ -31,8 +31,8 @@ from shared.native_job_observation import (
     read_launchd_definition,
     read_launchd_labels,
 )
+from shared.native_process.evidence import ExpectedProcess
 from shared.private_storage import write_private_bytes
-from shared.process_evidence import ExpectedProcess
 from shared.runtime_abi import current_abi
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.verified_file import regular_bytes as _regular_bytes

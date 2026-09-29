@@ -14,7 +14,7 @@ import pytest
 
 from services.pitr import worker_process
 from services.pitr.operation_custody import OperationKind
-from shared.exec_process_domain import ExecProcessDomain
+from shared.native_process.exec_domain import ExecProcessDomain
 
 
 async def test_native_restore_result_is_atomic_before_receiver_validation(

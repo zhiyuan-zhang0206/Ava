@@ -42,10 +42,10 @@ from cli.commands.extensions.skills_sync import _Source, iter_sources
 from shared import host_version, install_registry, paths, plugin_manifest
 from shared.config import settings
 from shared.deploy.git.gitenv import git_env
+from shared.native_process.os_platform import LockTimeoutError, file_lock
 from shared.os_cron import os_jobs_enabled
 from shared.packages.skills import skill_scan
 from shared.packages.skills.skill_names import match_key
-from shared.platform import LockTimeoutError, file_lock
 from shared.proc import run_bounded
 
 # Backoff: failures double the effective interval, capped after this many

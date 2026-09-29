@@ -104,7 +104,7 @@ from shared.migration_layout import unreadable_migration_files as unreadable_mig
 from shared.migration_layout import untracked_migration_files as untracked_migration_files
 from shared.migration_layout import validate_migration_layout as validate_migration_layout
 from shared.migration_layout import validate_migrations_at_ref as validate_migrations_at_ref
-from shared.platform import CREATE_NO_WINDOW as CREATE_NO_WINDOW
+from shared.native_process.os_platform import CREATE_NO_WINDOW as CREATE_NO_WINDOW
 from shared.runtime_interpreter import WHEEL_RUNTIME as WHEEL_RUNTIME
 from shared.runtime_migration import ReleaseMigrationContext
 from shared.runtime_migration import installed_migration_paths as installed_migration_paths

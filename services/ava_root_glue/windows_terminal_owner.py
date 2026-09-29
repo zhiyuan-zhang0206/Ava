@@ -16,16 +16,22 @@ from pydantic import BaseModel, ConfigDict, Field
 from services.ava_root.custody import ServiceCustody
 from services.ava_root.windows.process import ApplicationProcess, spawn
 from shared.native_process.ownership import OwnedProcess
-from shared.root_control.ipc import (
+from shared.native_process.root_control.ipc import (
     MAX_MESSAGE_BYTES,
     ErrorCode,
     encode,
     error_response,
     ok_response,
 )
-from shared.root_control.windows.native import command_argv
-from shared.root_control.windows.transport import PipeServer
-from shared.windows_terminal.record import NativeBirth, TerminalRecord, endpoint, publish, read
+from shared.native_process.root_control.windows.native import command_argv
+from shared.native_process.root_control.windows.transport import PipeServer
+from shared.sessions.windows.terminal.record import (
+    NativeBirth,
+    TerminalRecord,
+    endpoint,
+    publish,
+    read,
+)
 
 
 class ControlRequest(BaseModel):

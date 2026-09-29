@@ -20,7 +20,7 @@ import pytest
 from services.backup_scheduler import daemon
 from shared import daemon_health
 from shared.config import settings
-from shared.platform import LockTimeoutError
+from shared.native_process.os_platform import LockTimeoutError
 
 
 def _at(hour: int = 3, minute: int = 0) -> datetime:

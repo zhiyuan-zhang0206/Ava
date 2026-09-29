@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.windows_session_steward import should_exit
+from shared.sessions.windows.steward import should_exit
 
 
 @pytest.mark.parametrize(
@@ -53,7 +53,7 @@ def test_deliver_break_runs_the_verified_helper_with_the_exact_identity(
 ) -> None:
     from types import SimpleNamespace
 
-    from shared import windows_session_steward as steward
+    from shared.sessions.windows import steward as steward
 
     calls: list[list[str]] = []
 
@@ -81,7 +81,7 @@ def test_deliver_break_reports_the_helpers_refusal_detail(
 ) -> None:
     from types import SimpleNamespace
 
-    from shared import windows_session_steward as steward
+    from shared.sessions.windows import steward as steward
 
     def run(_argv: list[str], **_: object) -> SimpleNamespace:
         return SimpleNamespace(returncode=1, stderr="private console delivery refused: nope\n")
@@ -110,7 +110,7 @@ def _serve_in_thread(
     alive: dict[str, bool],
     delivered: list[str],
 ) -> tuple[threading.Thread, dict[str, int]]:
-    from shared import windows_session_steward as steward
+    from shared.sessions.windows import steward as steward
 
     monkeypatch.setattr(steward.sys, "platform", "win32")
     monkeypatch.setattr(steward, "_POLL_S", 0.05)
@@ -251,7 +251,7 @@ def test_control_loop_bind_conflict_exits_with_refusal(
     """A port claimed between reservation and bind must not crash the steward:
     it logs and exits, and every later delivery degrades to the designed
     refusal."""
-    from shared import windows_session_steward as steward
+    from shared.sessions.windows import steward as steward
 
     def _alive(*_args: object, **_kwargs: object) -> bool:
         return True

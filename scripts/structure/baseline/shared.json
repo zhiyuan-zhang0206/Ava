@@ -35,9 +35,7 @@
     "shared/runtime_publication_input.py::resolve_runtime_publication_input": 16,
     "shared/runtime_release.py::verify_release": 29,
     "shared/updater_handoff.py::_read_unlocked": 16,
-    "shared/updater_recovery.py::NormalReleaseRecoveryJournal.coherent_phase": 16,
-    "shared/windows_console_signal.py::send_private_console_break": 22,
-    "shared/winproc.py::graceful_signal": 16
+    "shared/updater_recovery.py::NormalReleaseRecoveryJournal.coherent_phase": 16
   },
   "directories": {
     "shared": 226

@@ -24,8 +24,8 @@ from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
 from shared.config import settings
 from shared.db import create_agent
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 
 _SOURCE = "external_agent:codex:run-42"
 _CALLER = {"kind": "external_agent", "subject": "codex", "instance": "run-42"}

@@ -324,7 +324,7 @@ def _read_transcript_blocking(schedule_id: int, lines: int) -> list[str] | None:
     capture has nothing left to show (the backend keeps no such file, so this is the
     PTY-era replacement for the lost scrollback).
     """
-    from shared.session_backend import get_shell_backend
+    from shared.sessions.backend import get_shell_backend
 
     log_path = get_shell_backend().session_log_path(session_name(f"schedule-{schedule_id}"))
     if log_path is None or not log_path.exists():

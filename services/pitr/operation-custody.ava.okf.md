@@ -89,7 +89,7 @@ thread; a stop arriving meanwhile waits for their outcome, then propagates.
 Cancellation first sends SIGTERM for the kind's grace (3 s; 45 s for an
 operator drill, to stop its sandbox and write evidence), then runs the closure
 above. An `ExecDomainBirthError` closes the pinned group at once
-([[shared/process-group-closure.ava.okf.md|closure core]]). Admission
+([[shared/native_process/group-closure.ava.okf.md|closure core]]). Admission
 finishes a quarantine or retirement its controller had proven but not
 completed. A failing progress sink (a closed operator pipe) is dropped.
 

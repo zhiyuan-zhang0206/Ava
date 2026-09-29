@@ -40,9 +40,9 @@ from shared.incarnation_resources import (
     decode_resources,
     register_exec,
 )
+from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from shared.native_process.turn_identity import current_hosted_resources
 from shared.paths import exec_run_dir
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from shared.turn_identity import current_hosted_resources
 
 
 def managed_target(agent_id: int | None) -> RuntimeIncarnation | None:

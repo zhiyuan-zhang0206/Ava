@@ -151,7 +151,7 @@ def _current_agent_id() -> int | None:
     scripts recovered an identity only when AVA_AGENT_ID is set; a hosted
     turn context (turn contextvar bound) wins over the ambient env."""
     from ava.agent_identity import validate_external_identity
-    from shared.turn_identity import effective_agent_id
+    from shared.native_process.turn_identity import effective_agent_id
 
     borrowed = validate_external_identity()
     return borrowed if borrowed is not None else effective_agent_id()

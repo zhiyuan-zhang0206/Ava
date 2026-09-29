@@ -26,7 +26,7 @@ from shared.native_job_observation import (
     observe_crontab,
     observe_launchd,
 )
-from shared.process_evidence import (
+from shared.native_process.evidence import (
     Digest,
     EvidenceModel,
     ExpectedProcess,

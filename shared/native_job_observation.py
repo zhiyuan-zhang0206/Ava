@@ -29,7 +29,7 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
-from shared.process_evidence import Digest
+from shared.native_process.evidence import Digest
 
 
 class NativeReadUnavailableError(RuntimeError):

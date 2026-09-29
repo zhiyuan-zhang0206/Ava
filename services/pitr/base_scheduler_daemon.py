@@ -43,8 +43,8 @@ from shared.daemon_health import health_port, start_health_server, stop_health_s
 from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
 from shared.daemon_shutdown import hard_exit as _hard_exit
 from shared.log import init_gateway_process
+from shared.native_process.os_platform import LockTimeoutError, file_lock
 from shared.paths import ava_home
-from shared.platform import LockTimeoutError, file_lock
 from shared.private_storage import ensure_private_dir
 
 _log = logging.getLogger("services.pitr.base_scheduler_daemon")

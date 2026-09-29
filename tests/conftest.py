@@ -51,7 +51,7 @@ import redis
 @pytest.fixture(autouse=True)
 def isolate_runtime_incarnation(monkeypatch: pytest.MonkeyPatch) -> None:
     """A test's process admission must not become another test's exit identity."""
-    from shared import runtime_incarnation
+    from shared.native_process import runtime_incarnation
 
     monkeypatch.setattr(runtime_incarnation, "_child_incarnation", None)
 
@@ -514,7 +514,7 @@ assert settings.general.machine_host == "localhost"
 assert settings.alerts.grafana_admin_password is None or (
     settings.alerts.grafana_admin_password.get_secret_value() == ""
 )
-from shared.platform import raise_fd_limit
+from shared.native_process.os_platform import raise_fd_limit
 from shared.test_db_guard import assert_test_db_url
 from tests._containers import postgres, redis_server
 from tests._os_jobs import host_ava_os_jobs, is_test_owned_job, remove_os_job
@@ -1804,7 +1804,7 @@ def loguru_records() -> Iterator[list[dict[str, Any]]]:
 def _no_stdlib_telemetry_bridge() -> Iterator[None]:
     """Keep stdlib logging off the loguru->telemetry bridge during tests.
 
-    shared/log.py's `_install_stdlib_intercept()` (called by init_gateway_process
+    shared/log/__init__.py's `_install_stdlib_intercept()` (called by init_gateway_process
     and friends) installs a root-logger handler that forwards stdlib records
     into loguru, whose `_postgres_sink` turns them into telemetry 'log' events.
     Any test that monkeypatches `shared.telemetry.emit` and triggers a log
@@ -1836,7 +1836,7 @@ def serving_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> RootBirth:
     Native IPC and loaded-origin contracts have independent real socket tests.
     """
     from shared import start_serving
-    from shared.process_evidence import ExpectedProcess
+    from shared.native_process.evidence import ExpectedProcess
     from shared.runtime_interpreter import LoadedRuntimeIdentity
 
     runtime = LoadedRuntimeIdentity(

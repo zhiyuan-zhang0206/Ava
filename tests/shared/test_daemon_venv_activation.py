@@ -3,7 +3,7 @@
 Daemons launch as `.venv/bin/python -m X` (an absolute-ish path that does not
 consult PATH), but several shell out to a bare binary that DOES:
 `services.milvus.daemon` execvp's `milvus-lite`, and daemons that run `ava` /
-`python` rely on PATH. `shared.session_env.venv_activation_prefix` prepends the
+`python` rely on PATH. `shared.sessions.env_forwarding.venv_activation_prefix` prepends the
 venv bin onto PATH *inside* the session command, because the two things that
 otherwise carry it do not survive:
 
@@ -27,8 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.paths import repo_root
-from shared.platform import IS_WINDOWS
 
 pytestmark = [
     pytest.mark.skipif(
@@ -73,9 +73,9 @@ def _path0(env: dict[str, str]) -> str:
 def test_launch_path_activates_venv(unit_home: Path) -> None:
     """`session_backend.new_session` (the `ava start` launcher) runs the command
     with the venv bin first on PATH, surviving the login shell."""
-    from shared.platform import raise_fd_limit
-    from shared.session_backend import get_backend
-    from shared.session_env import forward_env_dict
+    from shared.native_process.os_platform import raise_fd_limit
+    from shared.sessions.backend import get_backend
+    from shared.sessions.env_forwarding import forward_env_dict
 
     raise_fd_limit(65536)
     backend = get_backend()

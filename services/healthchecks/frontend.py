@@ -9,7 +9,7 @@ from services.healthchecks.owned_service import listener_pids as _listener_pids
 from shared.config import settings
 from shared.daemon_health import DaemonProbe
 from shared.native_process.ownership import OwnedProcess, capture_tree
-from shared.root_control.client import RootClientError, owned_process
+from shared.native_process.root_control.client import RootClientError, owned_process
 
 
 def _app_port() -> int:

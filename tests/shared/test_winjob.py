@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from shared import winjob
+from shared.native_process import winjob
 
 
 class _FakeKernel32:

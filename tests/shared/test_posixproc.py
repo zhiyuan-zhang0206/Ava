@@ -1,4 +1,4 @@
-"""Tests for shared.posixproc — the native POSIX process supervisor that hosts
+"""Tests for shared.sessions.posixproc — the native POSIX process supervisor that hosts
 detached agent processes. These spawn REAL child processes (the double-fork
 reparent path is the whole point), so they are POSIX-only and use the unit_home
 fixture to keep records/logs under a tmp $AVA_HOME.
@@ -19,10 +19,10 @@ from pathlib import Path
 import psutil
 import pytest
 
-from shared import posixproc
 from shared.native_process import pid_starttime_ticks
-from shared.platform import IS_LINUX, IS_WINDOWS
-from shared.session_record import SessionRecord
+from shared.native_process.os_platform import IS_LINUX, IS_WINDOWS
+from shared.sessions import posixproc
+from shared.sessions.record import SessionRecord
 from tests.shared.poll_until import poll_until
 from tests.shared.process_evidence import detach_evidence, detached_to_known_reaper
 
@@ -589,7 +589,7 @@ def test_new_session_dead_child_records_sentinel(
         def is_running(self) -> bool:
             return False
 
-    monkeypatch.setattr("shared.posixproc.psutil.Process", _NoCreateTime)
+    monkeypatch.setattr("shared.sessions.posixproc.psutil.Process", _NoCreateTime)
     argv = [sys.executable, "-c", "import time; time.sleep(300)"]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     rec = posixproc._read_record(name)
@@ -602,7 +602,7 @@ def test_new_session_dead_child_records_sentinel(
     # monkeypatch.undo() — the latter would also undo `unit_home`'s ava_home
     # patch and the cleanup would touch the real $AVA_HOME.
     pid = rec.pid
-    monkeypatch.setattr("shared.posixproc.psutil.Process", real_process)
+    monkeypatch.setattr("shared.sessions.posixproc.psutil.Process", real_process)
     with contextlib.suppress(psutil.NoSuchProcess):
         psutil.Process(pid).kill()
     posixproc._record_path(name).unlink(missing_ok=True)

@@ -1,4 +1,4 @@
-"""Unit tests for shared.platform — host detection + the disk-path probe.
+"""Unit tests for shared.native_process.os_platform — host detection + the disk-path probe.
 
 The WSL-marker and primary-disk-path logic used to live in the retired
 shared.resource_monitor (as `_is_wsl` / `_disk_usage_path`); it now lives here as the canonical
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-import shared.platform as plat
-from shared.platform import (
+import shared.native_process.os_platform as plat
+from shared.native_process.os_platform import (
     _detect_wsl,
     descends_from_launchd_job,
     ensure_line_buffered_stdio,
@@ -96,7 +96,7 @@ class TestEnsureLineBufferedStdio:
         script = (
             f"import sys, time\n"
             f"sys.path.insert(0, {repo_root!r})\n"
-            f"from shared.platform import ensure_line_buffered_stdio\n"
+            f"from shared.native_process.os_platform import ensure_line_buffered_stdio\n"
             f"ensure_line_buffered_stdio()\n"
             f"print('[ava cluster update] header')\n"
             f"time.sleep(30)\n"

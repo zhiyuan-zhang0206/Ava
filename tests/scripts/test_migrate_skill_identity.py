@@ -130,7 +130,7 @@ def test_apply_registry_contends_with_the_module_registry_lock(
     has its staged body overwritten and its rename left with nothing to rename.
     """
     from shared import install_registry as reg
-    from shared.platform import LockTimeoutError
+    from shared.native_process.os_platform import LockTimeoutError
 
     registry_path = home / "installed.json"
     dups = mig.scan_registry(registry_path)

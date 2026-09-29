@@ -32,6 +32,6 @@ without requiring an independently resident agent process.
 - `agent/hosted_ownership.py` — admission, renewal, settlement and release
 - `agent/hosted_ownership.py:settle_stale_running_rows` — host recovery
 - `services/agent_host/daemon.py` — owner health beat
-- `shared/runtime_incarnation.py` — context-bound execution identity
+- `shared/native_process/runtime_incarnation.py` — context-bound execution identity
 
 Related: [[startup/admission.ava.okf.md]] and [[lifecycle.ava.okf.md]].

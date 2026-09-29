@@ -15,7 +15,7 @@ from cli.release_prepare.acquisition_models import Acquisition, AcquisitionRecei
 from cli.release_prepare.inputs import require_directory
 from cli.release_prepare.models import FileInput, TreeInput, encode
 from shared.atomic_io import fsync_parent
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 from shared.runtime_prepare import inventory_digest, tree_inventory
 from shared.runtime_release import ReleaseRejectedError
 from shared.verified_file import regular_bytes

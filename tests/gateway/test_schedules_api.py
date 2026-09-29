@@ -250,7 +250,7 @@ class TestLogsRunsDraft:
         supplies the output: a finished/crashed runner's output survives the
         session being reaped, where scrollback was lost."""
         from shared.cluster import session_name
-        from shared.session_backend import get_shell_backend
+        from shared.sessions.backend import get_shell_backend
 
         with TestClient(app) as client:
             sid = _create(client, name="l").json()["id"]

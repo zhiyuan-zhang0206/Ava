@@ -15,8 +15,8 @@ import os
 import sys
 
 from shared.machine import MachineRoles
+from shared.native_process.os_platform import IS_MACOS
 from shared.os_autostart import gui_domain_kickstart_command
-from shared.platform import IS_MACOS
 from shared.platform_probes import gui_login_user, gui_session_domain
 
 

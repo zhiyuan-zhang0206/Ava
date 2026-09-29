@@ -21,7 +21,7 @@ from shared.agents.impersonation._impersonation_store import (
 from shared.caller_identity import caller_payload
 from shared.db_transaction import write_transaction
 from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 RELAY_HEARTBEAT_SECONDS = 10.0
 RELAY_HEARTBEAT_STALE_SECONDS = 45.0

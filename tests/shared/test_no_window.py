@@ -3,7 +3,7 @@
 The Windows agent-runner lives in the user's interactive session. A console-less
 parent that spawns a child without a creation flag flashes a brand-new console
 window on the desktop for every subprocess call (shell runs, git calls,
-schtasks invocations). `shared.platform.CREATE_NO_WINDOW` is the single source
+schtasks invocations). `shared.native_process.os_platform.CREATE_NO_WINDOW` is the single source
 of the flag: 0x08000000 on Windows, 0 elsewhere, so a call site that always
 passes `creationflags=CREATE_NO_WINDOW` is a no-op on POSIX.
 
@@ -17,7 +17,7 @@ import subprocess
 
 import pytest
 
-from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
+from shared.native_process.os_platform import CREATE_NO_WINDOW, IS_WINDOWS
 
 _WIN_FLAG = 0x08000000  # subprocess.CREATE_NO_WINDOW on Windows
 

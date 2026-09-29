@@ -27,7 +27,7 @@ from pydantic import (
 
 from shared import native_process
 from shared.native_process import ownership as proc_tree
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 class ResourceEvidenceError(RuntimeError):

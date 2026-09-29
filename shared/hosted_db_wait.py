@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, TypedDict, cast
 from uuid import UUID
 
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 # Covers two 120s DB-only handoff stages + a heartbeat delayed by 10s ownership
 # renewal, 3s publication and 15s sleep, with 12s scheduling allowance (120+120+

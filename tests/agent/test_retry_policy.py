@@ -19,7 +19,7 @@ from agent.graph.llm_errors import (
     LLMStreamStallTimeoutError,
 )
 from shared.config import settings
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.turn_identity import bind_turn_identity
 
 
 def test_retry_policy_excludes_fatal_llm_stream_error() -> None:

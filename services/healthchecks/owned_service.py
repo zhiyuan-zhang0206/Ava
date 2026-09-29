@@ -11,7 +11,7 @@ import psutil
 
 from shared.daemon_health import DaemonProbe
 from shared.native_process.ownership import OwnedProcess, capture_tree
-from shared.root_control.client import RootClientError, owned_process, peer_pid
+from shared.native_process.root_control.client import RootClientError, owned_process, peer_pid
 
 
 def _owned_ping(resolve_owner: Callable[[], OwnedProcess | None], path: Path | str) -> DaemonProbe:

@@ -613,7 +613,7 @@ Three operational consequences worth stating here:
 
 Ava's long-running **daemons** are each kept alive in their own named session — never crammed into one
 session with multiple windows. On POSIX they run as **detached native processes** (double-forked onto init by
-the process supervisor, `shared/posixproc.py`). Agent
+the process supervisor, `shared/sessions/posixproc.py`). Agent
 interactive shells / watchers each run in their own detached pty host
 (`shared/sessions/pty/` — one `pty.fork()` `bash -l -i` + pyte screen capture +
 byte transcript under `$AVA_HOME/logs/` per host, session ops over the
@@ -1102,7 +1102,7 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   the browser session and watchdog healthcheck engage automatically. Set
   `AVA_BROWSER_ENABLED=false` to explicitly opt out. The display verdict is
   computed consistently across processes: `$DISPLAY` / `$WAYLAND_DISPLAY` are
-  passed through both env builders (`shared/session_env.py`) —
+  passed through both env builders (`shared/sessions/env_forwarding.py`) —
   forwarded into every daemon service session, and carried in the detached agent's
   inherited env dict (`agent_spawn_env_dict`) — so the watchdog and the agent see
   the same display the operator's shell does. Without this a headed Linux / WSLg
@@ -2051,7 +2051,7 @@ Agent loguru JSONL (`agent-{N}.log`) is not scraped — it already reaches Loki
 structured via OTLP.
 
 The emitter wiring behind that stream, the unified `events` schema (and its
-legacy `agent_events` mirror), and the monthly partitioning are in `shared/log.ava.okf.md`.
+legacy `agent_events` mirror), and the monthly partitioning are in `shared/log/log.ava.okf.md`.
 
 ## Git hooks: pre-commit / pre-push
 

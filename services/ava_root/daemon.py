@@ -35,7 +35,7 @@ from services.ava_root.wiring import (
     start_participants,
     stop_participants,
 )
-from shared.root_control.ipc import (
+from shared.native_process.root_control.ipc import (
     ErrorCode,
     RequestPayload,
     ResponsePayload,

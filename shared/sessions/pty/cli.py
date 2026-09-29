@@ -73,10 +73,9 @@ import psutil
 
 from shared.log import logger
 from shared.native_process import pid_starttime_ticks
+from shared.native_process.os_platform import LockTimeoutError
 from shared.native_process.ownership import OwnedProcess, stable_create_time
 from shared.paths import run_dir
-from shared.platform import LockTimeoutError
-from shared.session_record import SessionRecord
 from shared.sessions.pty._paths import (
     CAPTURE_MAX_LINES,
     host_identity,
@@ -98,6 +97,7 @@ from shared.sessions.pty.records import (
     session_started_at,
 )
 from shared.sessions.pty.session_tree import TreeKill, kill_host_tree, kill_session_tree
+from shared.sessions.record import SessionRecord
 
 # ---------------------------------------------------------------------------
 # Key translation — the classic send-keys vocabulary (prototype _KEYMAP, with
@@ -192,7 +192,7 @@ def keys_to_bytes(keys: tuple[str, ...]) -> bytes:
 # Envfile mechanism (0600 file, values never on argv — issue #974).
 # ---------------------------------------------------------------------------
 
-# What a POSIX shell can assign to (mirrors shared.session_env): keys outside
+# What a POSIX shell can assign to (mirrors shared.sessions.env_forwarding): keys outside
 # this cannot ride a sourced envfile.
 _SHELL_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -215,7 +215,7 @@ def write_env_file(env: dict[str, str]) -> Path:
     """Write `env` to a fresh 0600 file under $AVA_HOME/run/session-env/ and
     return its path — the ``new`` op's envfile argument.
 
-    Same on-disk format as ``shared.session_env.env_load_prefix`` (KEY=shlex-
+    Same on-disk format as ``shared.sessions.env_forwarding.env_load_prefix`` (KEY=shlex-
     quoted values), so files from either writer load in the host; only
     shell-identifier keys ride (a child env can hold names a shell cannot
     assign). The host consumes the file at startup.
@@ -343,17 +343,18 @@ def _spawn_host(
         generation or "",
     ]
     host_argv.extend([cmd_b64] if cmd_b64 else [])
-    from shared.session_backend import helper_spawn_enabled
+    from shared.sessions.backend import helper_spawn_enabled
 
     if helper_spawn_enabled():
         try:
-            from shared import helperproc, process_env
+            from shared.native_process import child_env
+            from shared.sessions import helperproc
 
             host_pid = helperproc.spawn_via_helper(
                 f"pty-host-{name}",
                 host_argv,
                 Path(cwd),
-                env=process_env.inherited_process_env(),
+                env=child_env.inherited_process_env(),
                 stdout=log,
                 stderr=log,
             )

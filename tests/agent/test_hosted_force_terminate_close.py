@@ -26,7 +26,7 @@ from services.agent_host.settlement import close_hosted_turn
 from shared.agents.impersonation import ImpersonationError
 from shared.context import AvaContext
 from shared.hosted_force import install_hosted_force
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
 
 _FORCE_ERROR = "Native runtime no longer owns this agent"

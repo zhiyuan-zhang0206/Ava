@@ -212,8 +212,8 @@ def _require_root_owned(operation: Operation, home: Path) -> None:
         # (ppid, keeper PID, run dir); the executor then checks the journaled
         # birth, the helper's kernel identity and the pinned seed.
         return
+    from shared.native_process.root_control.client import root_process
     from shared.os_boot_unit import manager_properties, process_cgroup, unit_name
-    from shared.root_control.client import root_process
 
     root = root_process()
     expected_group = f"/system.slice/{unit_name(home)}"

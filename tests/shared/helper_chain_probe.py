@@ -42,7 +42,7 @@ def main() -> None:
         _run_next("unit", marker_path)
     else:
         os.environ["AVA_PERMISSIONS_HELPER_PID"] = Path(marker_path).read_text()
-        from shared.helper_chain_guard import parent_chain_intact
+        from shared.sessions.helper_chain_guard import parent_chain_intact
 
         sys.stdout.write("intact" if parent_chain_intact() else "broken")
 

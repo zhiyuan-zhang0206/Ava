@@ -22,8 +22,8 @@ import pytest
 
 from shared import pg_foreground, pg_throwaway_base, pg_tools
 from shared.config import settings
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.native_process.ownership import OwnedProcess
-from shared.platform import IS_WINDOWS
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="foreground restore ownership is POSIX")
 

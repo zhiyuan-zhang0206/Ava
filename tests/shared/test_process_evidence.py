@@ -12,9 +12,9 @@ import psutil
 import pytest
 
 from shared.native_process import pid_starttime_ticks
+from shared.native_process.evidence import ExpectedProcess, observe_process
+from shared.native_process.os_platform import IS_LINUX
 from shared.native_process.ownership import stable_create_time
-from shared.platform import IS_LINUX
-from shared.process_evidence import ExpectedProcess, observe_process
 
 
 def test_exact_live_exited_and_reused_identity() -> None:
@@ -52,7 +52,7 @@ def test_observe_process_reads_a_vanished_entry_as_exited(
     """The stop-race window in the managed-writer observation: psutil validated
     the pid, then the raw read found no /proc entry because the process was
     reaped in between — that is the exit itself, not a lost observation."""
-    from shared import process_evidence as observation
+    from shared.native_process import evidence as observation
 
     child = subprocess.Popen([sys.executable, "-I", "-c", "import time; time.sleep(30)"])
     pid = child.pid
@@ -85,7 +85,7 @@ def test_observe_process_keeps_unknown_when_a_present_process_cannot_be_read(
 ) -> None:
     """A pid that still exists while its start time cannot be read stays a
     full unknown — never collapsed into the exit it does not prove."""
-    from shared import process_evidence as observation
+    from shared.native_process import evidence as observation
 
     expected = ExpectedProcess(
         pid=os.getpid(), create_time=psutil.Process().create_time(), starttime=1

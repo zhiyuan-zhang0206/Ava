@@ -1,4 +1,4 @@
-"""Tests for ``shared.session_backend`` — the cross-platform session abstraction."""
+"""Tests for ``shared.sessions.backend`` — the cross-platform session abstraction."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from shared.platform import IS_WINDOWS
-from shared.session_backend import (
+from shared.native_process.os_platform import IS_WINDOWS
+from shared.sessions.backend import (
     PosixProcSessionBackend,
     PtySessionBackend,
     SessionBackend,
@@ -54,7 +54,7 @@ def test_get_shell_backend_returns_platform_appropriate_singleton():
     b2 = get_shell_backend()
     assert b1 is b2  # singleton
     if IS_WINDOWS:
-        from shared.windows_terminal.backend import WindowsTerminalBackend
+        from shared.sessions.windows.terminal.backend import WindowsTerminalBackend
 
         assert isinstance(b1, WindowsTerminalBackend)
     else:
@@ -72,13 +72,13 @@ def test_native_proc_dispatches_by_platform():
     """native_proc() returns the native agent-process supervisor module —
     winproc on Windows, posixproc on POSIX — with the surface agent launch /
     reap / status dispatch to."""
-    from shared.session_backend import native_proc
+    from shared.sessions.backend import native_proc
 
     mod = native_proc()
     if IS_WINDOWS:
-        assert mod.__name__ == "shared.winproc"
+        assert mod.__name__ == "shared.sessions.windows.winproc"
     else:
-        assert mod.__name__ == "shared.posixproc"
+        assert mod.__name__ == "shared.sessions.posixproc"
     # the surface the consumers rely on
     for fn in ("has_session", "new_session", "kill_session", "list_sessions", "graceful_signal"):
         assert callable(getattr(mod, fn))

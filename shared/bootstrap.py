@@ -95,7 +95,7 @@ def _transport_failures() -> tuple[type[BaseException], ...]:
 # gateway is down, so `cli.main` sets AVA_CONFIG_FETCH=skip for them before any
 # settings-loading import. Every other process — start, converge, update, the
 # daemons, the agents — derives its fetch decision purely from the role flag and
-# fetches when it is a pure agent-runner. shared.session_env deliberately does NOT
+# fetches when it is a pure agent-runner. shared.sessions.env_forwarding deliberately does NOT
 # forward this var to spawned processes (a daemon/agent must fetch per its own
 # role, never inherit a CLI verb's opt-out).
 CONFIG_FETCH_ENV = "AVA_CONFIG_FETCH"

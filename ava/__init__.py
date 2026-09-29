@@ -182,7 +182,7 @@ def _contain_plugin_load_failure(exc: Exception) -> None:
     """Log + surface a plugin-load failure without killing the process.
 
     Logger AND stderr: a launched child usually has no loguru sink configured
-    (shared/log.py removes the default handler), and its stderr is exactly what
+    (shared/log/__init__.py removes the default handler), and its stderr is exactly what
     lands in the watcher / session log — containment without that line would be
     a silent swallow.
     """

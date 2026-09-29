@@ -23,7 +23,7 @@ demands. A construction anywhere else must at least spell out
 site is not the single definition of the *call*.
 
 Without this check the invariant is "three call sites each remembered", which is
-exactly the state that produced the defect: the sync pools in `shared/log.py`,
+exactly the state that produced the defect: the sync pools in `shared/log/__init__.py`,
 `gateway/app.py` and `services/agent_ops/daemon.py` all wrote
 `kwargs={"prepare_threshold": None}` and stopped there, and PR #940's sweep of the
 bare `psycopg.connect` sites left them untouched because they are a different

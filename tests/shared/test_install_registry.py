@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 
 from shared import install_registry as reg
+from shared.native_process.os_platform import LockTimeoutError
 from shared.paths import install_registry_path
-from shared.platform import LockTimeoutError
 
 
 def _pkg(

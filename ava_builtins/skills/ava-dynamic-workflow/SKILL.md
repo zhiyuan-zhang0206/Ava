@@ -232,7 +232,7 @@ the next wave.  Progress is tracked in `orchestrator_state.json`.
 #   python reference/deep_research_lite.py
 # (bare `python` — the session's PATH already resolves it to this checkout's
 # own venv interpreter on prod home, a dev worktree cluster, or Windows alike;
-# see shared/session_env.py::forward_env_dict)
+# see shared/sessions/env_forwarding.py::forward_env_dict)
 # Each invocation executes one wave, then idles. Repeat until "ALL DONE".
 ```
 

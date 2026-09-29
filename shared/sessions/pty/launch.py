@@ -32,15 +32,15 @@ import psutil
 
 from shared.log import logger
 from shared.native_process import pid_starttime_ticks
+from shared.native_process.os_platform import LockTimeoutError, file_lock
 from shared.native_process.ownership import stable_create_time
-from shared.platform import LockTimeoutError, file_lock
-from shared.session_record import SessionRecord
 from shared.sessions.pty._paths import (
     DEFAULT_COLS,
     DEFAULT_ROWS,
     records_lock_path,
     write_record,
 )
+from shared.sessions.record import SessionRecord
 
 # Sentinel for a child whose create_time could not be read (died at spawn —
 # the pid is at its most reusable moment): can never match a reused pid.

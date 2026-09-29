@@ -31,7 +31,7 @@ from shared.lifecycle_acceptance import (
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 # The exact retained hosted identity; or, all three NULL, a never-admitted row
 # whose fresh-INSERT birth marker is still unconsumed, or a row whose unowned

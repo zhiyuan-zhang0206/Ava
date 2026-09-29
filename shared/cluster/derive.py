@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 from shared import cluster
 from shared.env_registry import REDIS_PASSWORD_ENV, health_port_env_aliases
-from shared.platform import IS_WINDOWS
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.url_secret import redacted_url, url_with_port, url_with_userinfo
 
 # The db / Postgres-role / redis-ACL identifier a newly-born cluster uses. Fixed:
@@ -189,7 +189,7 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
 
     ``exec`` on the serve stage (POSIX): the build is a transient prelude, so
     the shell must hand its pid to ``npm run start`` — otherwise it outlives it
-    and swallows the graceful-stop SIGTERM (``shared.session_env.exec_into``
+    and swallows the graceful-stop SIGTERM (``shared.sessions.env_forwarding.exec_into``
     rejects a compound command whose final stage does not exec, which is what
     made the drifted respawn unlaunchable). On Windows cmd.exe has no ``exec``;
     the ``&&`` chain runs through ``cmd /c`` and winproc kills the process tree,

@@ -44,8 +44,8 @@ from ops.service_spec import ServiceSpec as ServiceSpec  # re-export: generated 
 from shared.config import settings
 from shared.log import logger
 from shared.machine import MachineRoles
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.observability import collector_allowed_for_home, gateway_observability_home
-from shared.platform import IS_WINDOWS
 from shared.platform_probes import (
     browser_incapability,
     browser_mcp_incapability,

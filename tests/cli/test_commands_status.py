@@ -27,7 +27,7 @@ def _local_status_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """Status tests do not initialize a cluster or contact any live gateway."""
     import httpx
 
-    from shared.root_control.client import RootClientError
+    from shared.native_process.root_control.client import RootClientError
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
 
@@ -42,7 +42,7 @@ def _local_status_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
             raise RootClientError("isolated status test")
 
     monkeypatch.setattr(httpx, "get", _unreachable)
-    monkeypatch.setattr("shared.root_control.client.RootClient", _AbsentRoot)
+    monkeypatch.setattr("shared.native_process.root_control.client.RootClient", _AbsentRoot)
 
 
 # ─── gateway cluster-status probe carries the bearer ───────────────────────────
@@ -261,7 +261,7 @@ def test_status_reads_root_units(monkeypatch: pytest.MonkeyPatch, capsys) -> Non
                 },
             }
 
-    monkeypatch.setattr("shared.root_control.client.RootClient", _Client)
+    monkeypatch.setattr("shared.native_process.root_control.client.RootClient", _Client)
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
@@ -289,11 +289,11 @@ def test_status_root_mode_survives_an_unreachable_root(
             del timeout
 
         def status(self) -> dict[str, object]:
-            from shared.root_control.client import RootClientError
+            from shared.native_process.root_control.client import RootClientError
 
             raise RootClientError("unreachable in test")
 
-    monkeypatch.setattr("shared.root_control.client.RootClient", _Down)
+    monkeypatch.setattr("shared.native_process.root_control.client.RootClient", _Down)
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")

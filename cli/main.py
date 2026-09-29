@@ -32,7 +32,11 @@ from pydantic import ValidationError
 # `set_defaults(func=...)` bindings the builders made against their own module globals.
 from cli.parsers import build_parser as _build_parser
 from shared.bootstrap import BootstrapFetchError
-from shared.platform import LockTimeoutError, ensure_line_buffered_stdio, ensure_utf8_stdio
+from shared.native_process.os_platform import (
+    LockTimeoutError,
+    ensure_line_buffered_stdio,
+    ensure_utf8_stdio,
+)
 
 # Force UTF-8 stdio on Windows before any status glyph is printed (a cp1252
 # console raises UnicodeEncodeError on ✓/✗/→). No-op on POSIX. Also seeds
@@ -220,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     # gateway down such a stop now fails at the fetch with the actionable
     # BootstrapFetchError — the same contract `restart` took above. Every other
     # verb — start, converge, update, trace-ship — and every daemon/agent process
-    # fetches per its own role at Settings build. shared.session_env does not
+    # fetches per its own role at Settings build. shared.sessions.env_forwarding does not
     # forward this var, so processes a lite verb spawns never inherit the opt-out.
     from cli.preflight import unit_already_stopped
 
