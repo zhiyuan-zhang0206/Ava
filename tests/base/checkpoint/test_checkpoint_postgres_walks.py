@@ -15,6 +15,8 @@ from langgraph.checkpoint.base.id import uuid6
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.postgres.base import BasePostgresSaver
+from langgraph.checkpoint.serde.base import SerializerProtocol
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 
 from base.agents.history import checkpoint_postgres_walks
@@ -174,8 +176,8 @@ def _config() -> RunnableConfig:
     }
 
 
-def _failing_saver() -> AsyncPostgresSaver:
-    saver = AsyncPostgresSaver(cast(Any, object()))
+def _failing_saver(*, serde: SerializerProtocol | None = None) -> AsyncPostgresSaver:
+    saver = AsyncPostgresSaver(cast(Any, object()), serde=serde)
 
     async def raw_tuple(config: RunnableConfig) -> CheckpointTuple:
         return CheckpointTuple(
@@ -257,3 +259,69 @@ async def test_delta_read_decode_error_emits_partial_span(loguru_records: list[A
     assert spans[0]["history_build_ms"] >= spans[0]["decode_ms"]
     assert spans[0]["message_count"] is None
     assert spans[0]["cache_hit"] is None
+
+
+async def test_decode_instrumentation_reinstalls_after_shared_serde_reverts(
+    loguru_records: list[Any],
+) -> None:
+    """Two savers sharing one `serde` — the normal case for every saver that
+    does not pass its own (`BaseCheckpointSaver.serde` is a class-level
+    default) — must each get decode instrumentation, even if something
+    outside this module put the shared serde's `loads_typed` back to its
+    unwrapped form in between (a `monkeypatch.setattr(saver.serde,
+    "loads_typed", ...)` teardown being the common case, but any direct
+    reassignment has the same effect) without going through this module's
+    uninstall path. The second saver to instrument that reverted serde must
+    notice decode is unwrapped and re-wrap it, rather than trusting a marker
+    that says installation already happened once.
+
+    Uses an explicit, test-scoped `JsonPlusSerializer` rather than the real
+    class-level default so this test's outcome does not depend on whether an
+    earlier test in the same process already wrapped the shared singleton.
+    """
+    shared_serde = JsonPlusSerializer()
+    unwrapped_decode = shared_serde.loads_typed
+    first = AsyncPostgresSaver(cast(Any, object()), serde=shared_serde)
+    wrap_saver_reads_with_delta_reconstruction(first)
+    assert first.serde.loads_typed is not unwrapped_decode
+
+    # Simulate the revert: something restores the shared serde's decode to
+    # the unwrapped function, discarding the wrapper installed above.
+    first.serde.loads_typed = unwrapped_decode  # type: ignore[method-assign]
+
+    saver = _failing_saver(serde=shared_serde)
+    assert saver.serde is first.serde
+
+    async def bad_history(*, config: RunnableConfig, channels: Sequence[str]) -> Any:
+        return saver._build_delta_channels_writes_history(  # type: ignore[attr-defined]
+            channels=["messages"],
+            chain_by_ch={"messages": ["checkpoint-a"]},
+            seed_ver_by_ch={},
+            seed_inline_by_ch={},
+            stage2_rows=[
+                {
+                    "channel": "messages",
+                    "_kind": "w",
+                    "checkpoint_id": "checkpoint-a",
+                    "type": "msgpack",
+                    "blob": b"\xc1",
+                    "task_id": "task",
+                    "idx": 0,
+                }
+            ],
+        )
+
+    saver.aget_delta_channel_history = bad_history  # type: ignore[method-assign]
+    with pytest.raises(ValueError):
+        await saver.aget_tuple(_config())
+    spans = [
+        record["extra"]
+        for record in loguru_records
+        if record["extra"].get("event") == "delta_read_compat"
+    ]
+    assert len(spans) == 1
+    # Pre-fix, the stale `_ava_delta_decode_instrumented` marker on `serde`
+    # stayed True across the revert, so `wrap_saver_reads_with_delta_reconstruction`
+    # skipped re-wrapping and this failure surfaced from "history_build"
+    # instead of "decode" — the decode phase was silently unrecorded.
+    assert spans[0]["failed_phase"] == "decode"

@@ -555,7 +555,18 @@ def _instrument_history_callbacks(saver: AsyncPostgresSaver) -> None:
 
     _instrument_suffix_reads(saver)
     serde = saver.serde
-    if not getattr(serde, "_ava_delta_decode_instrumented", False):
+    if not getattr(serde.loads_typed, "__ava_delta_decode__", False):
+        # `serde` is frequently the class-level `JsonPlusSerializer` instance
+        # LangGraph's `BaseCheckpointSaver` shares across every saver that
+        # does not pass its own `serde` — so a standalone boolean marker on
+        # `serde` would outlive the wrapper itself: something else (a test's
+        # `monkeypatch.setattr(saver.serde, "loads_typed", ...)`, say) can
+        # restore `loads_typed` to the unwrapped function while the marker
+        # stays set, leaving decode silently uninstrumented. Tagging the
+        # wrapper function and checking the *current* `loads_typed` for that
+        # tag instead makes the check track reality: whatever is currently
+        # installed gets wrapped, and re-running this against our own
+        # wrapper is a no-op rather than a second layer.
         orig_decode = serde.loads_typed
 
         def decode(value: Any) -> Any:
@@ -571,8 +582,8 @@ def _instrument_history_callbacks(saver: AsyncPostgresSaver) -> None:
             finally:
                 span.decode_ms += (time.monotonic() - started) * 1000
 
+        decode.__ava_delta_decode__ = True  # type: ignore[attr-defined]
         serde.loads_typed = decode  # type: ignore[method-assign]
-        serde._ava_delta_decode_instrumented = True  # type: ignore[attr-defined]
 
     def ingest_stage1_page(*args: Any, **kwargs: Any) -> Any:
         span = _current_span()
