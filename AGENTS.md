@@ -63,8 +63,8 @@ Windows unit carries `agent-runner` only
 frontend login); it stays on the gateway and rotates only explicitly
 (`scripts/data_plane_ops/rotate_cluster_secret.py`; backups use a birth-pinned passphrase). An EMPTY secret
 (single-box default) leaves the API, `/ops` and frontend unauthenticated and binds every data-plane
-listener to loopback; a set secret adds this host's reachable address for Postgres and its pooler
-(Redis stays loopback, off-box inbound via the relay bridge). The internal data plane always
+listener to loopback; a set secret adds this host's reachable address for Postgres, its pooler and
+Linux Redis (macOS Redis stays loopback-only, off-box inbound via the relay bridge). The internal data plane always
 authenticates: Postgres and PgBouncer admit only SCRAM application logins (the OS-user administrator
 and the collector's password-less monitoring role use `peer` on the owner-only socket), and Redis
 requires its generated passwords. Application processes never hold schema-owner or admin credentials:
