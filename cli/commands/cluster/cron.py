@@ -13,7 +13,6 @@ is always present when the cluster is running.
 from __future__ import annotations
 
 from shared.os_cron import (
-    DEFAULT_CONSECUTIVE_THRESHOLD,
     DEFAULT_INTERVAL_SECONDS,
     register_os_cron,
     unregister_os_cron,
@@ -23,14 +22,13 @@ from shared.os_cron import (
 def cmd_cron_register(
     *,
     interval_s: int = DEFAULT_INTERVAL_SECONDS,
-    threshold: int = DEFAULT_CONSECUTIVE_THRESHOLD,
 ) -> int:
     """Register the OS cron job for the cluster health probe.
 
     CLI entry — delegates to `shared.os_cron.register_os_cron`. Idempotent —
     re-running updates the interval and reloads the job."""
     try:
-        register_os_cron(interval_s=interval_s, threshold=threshold)
+        register_os_cron(interval_s=interval_s)
     except RuntimeError as e:
         print(f"  * {e}")
         return 1

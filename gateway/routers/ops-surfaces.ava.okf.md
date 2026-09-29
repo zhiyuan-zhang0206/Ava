@@ -12,7 +12,7 @@ tags:
 ## Cluster admin endpoints
 
 Gateway-only, for ssh-free ops on a deployed cluster. Both **bypass the
-paused-posture 503 guard** — deliberately: a stuck `ava update` is exactly when
+maintenance-journal 503 guard** — deliberately: a held release operation is exactly when
 that guard is on and exactly when you need to look.
 
 - **`GET /api/cluster/admin/events`** — query the unified `events` stream with `agent_id` /
@@ -27,6 +27,11 @@ that guard is on and exactly when you need to look.
 
 Neither has an SDK wrapper. They are HTTP-only, called directly over the private
 network, because they are operator tools and the SDK surface is for agents.
+
+The cluster router exposes no source-checkout update, rollout, restart or
+update-check endpoint. The status page displays observations and does not
+launch deployments. Captured release requests enter through
+[[cli/release_transition/release_transition.ava.okf.md]].
 
 ## `GET /api/stats/dashboard?hours=`
 

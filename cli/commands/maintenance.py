@@ -14,16 +14,16 @@ import sys
 from datetime import UTC, datetime
 
 from cli.commands._maintenance_probe import host_identity_or_none, ops_quiescent
-from cli.commands._maintenance_stop import (
+from cli.commands._pause_resume import exclusive_resources
+from cli.commands.service_stop import (
     deadline_after,
     remaining,
     require_no_terminals,
-    service_names,
     stop_data_plane,
     stop_services,
 )
-from cli.commands._pause_resume import exclusive_resources
-from ops.agent_pause import _drain, _hold, _prepare
+from cli.cutover_hold import resume_refusal, start_refusal
+from ops.agent_pause import _hold, drain, prepare
 from shared import hold_driver, maintenance, maintenance_cohort, pause_owner, start_serving
 from shared.db import connect
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
@@ -39,7 +39,7 @@ def _gateway_last(*, confirmed: bool) -> None:
 
 
 @exclusive_resources
-def _stop(
+def stop(
     holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
 ) -> None:
     deadline = deadline_after(timeout)
@@ -70,11 +70,14 @@ def _stop(
 
 def _start(holder: str, at: datetime) -> int:
     from cli.commands.start import cmd_start
+    from shared.paths import ava_home
 
     hold = _hold(holder, at)
     if hold.phase not in ("stopped", "starting"):
         raise RuntimeError("maintenance start requires a stopped unit")
     if hold.phase == "stopped":
+        if refusal := start_refusal(ava_home(), holder, at):
+            raise RuntimeError(refusal)
         maintenance.set_phase(holder, at, "starting")
     with maintenance.authorized_start(holder, at):
         result = cmd_start(persist_services=False)
@@ -85,7 +88,7 @@ def _start(holder: str, at: datetime) -> int:
     return result
 
 
-def _resume(holder: str, at: datetime, *, cancel: bool) -> None:
+def resume(holder: str, at: datetime, *, cancel: bool) -> None:
     from ops.cluster_pause import unpause_local_cluster
 
     hold = _hold(holder, at)
@@ -220,17 +223,30 @@ def _driver_ref(ref: hold_driver.ProcessRef | None) -> dict[str, object] | None:
 def _stop_data(
     holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
 ) -> None:
-    from shared.session_backend import get_backend
+    from cli.commands.root_driver import require_root_absent
 
     _gateway_last(confirmed=gateway_last)
     if "gateway" not in machine_role() or _hold(holder, at).phase != "stopped":
         raise RuntimeError("data-plane stop requires this gateway's stopped maintenance hold")
-    if service_names(get_backend(), keep_terminals=keep_terminals):
-        raise RuntimeError("local services are still running; data plane left available")
+    require_root_absent()
     if not keep_terminals:
         require_no_terminals()
     stopped = stop_data_plane(timeout)
     print(f"Stopped local data plane: {stopped}; no backup was created")
+
+
+def _generation(args: argparse.Namespace) -> datetime:
+    """The exact hold generation the verb names; `resume` refuses the cutover hold."""
+    from shared.paths import ava_home
+
+    at = datetime.fromisoformat(args.acquired_at)
+    if at.tzinfo is None or not args.operation.strip():
+        raise ValueError("maintenance requires a nonempty operation and timezone-aware timestamp")
+    if args.maintenance_cmd == "resume" and (
+        refusal := resume_refusal(ava_home(), args.operation, at)
+    ):
+        raise RuntimeError(refusal)
+    return at
 
 
 def run(args: argparse.Namespace) -> int:
@@ -251,23 +267,25 @@ def run(args: argparse.Namespace) -> int:
             )
         )
         return 0
-    at = datetime.fromisoformat(args.acquired_at)
-    if at.tzinfo is None or not args.operation.strip():
-        raise ValueError("maintenance requires a nonempty operation and timezone-aware timestamp")
+    from shared.paths import ava_home
+    from shared.release_operation import require_start_authorized
+
+    require_start_authorized(ava_home())
+    at = _generation(args)
     # Task #3270: this invocation is an operator-side ladder step, so stamp its
     # shepherding identity on the standing hold before doing its work. A no-op
-    # when no matching hold stands yet (prepare's first run mints via _prepare).
+    # when no matching hold stands yet (prepare's first run mints via prepare).
     # Best-effort: a failed stamp must not block the verb itself -- the
     # stranded-hold verdict reports missing evidence loudly instead.
     driver = hold_driver.mint_driver()
     with contextlib.suppress(Exception):
         pause_owner.refresh_driver(args.operation, at, driver=driver)
     if verb == "prepare":
-        _prepare(args.operation, at, driver=driver)
+        prepare(args.operation, at, driver=driver)
     elif verb == "drain":
-        _drain(args.operation, at, args.timeout)
+        drain(args.operation, at, args.timeout)
     elif verb == "stop":
-        _stop(
+        stop(
             args.operation,
             at,
             args.timeout,
@@ -277,7 +295,7 @@ def run(args: argparse.Namespace) -> int:
     elif verb == "start":
         return _start(args.operation, at)
     elif verb == "resume":
-        _resume(args.operation, at, cancel=args.cancel)
+        resume(args.operation, at, cancel=args.cancel)
     elif verb == "repair":
         _repair(args.operation, at, operator=args.operator)
     elif verb == "stop-data-plane":

@@ -4,7 +4,6 @@
     "tests/gateway/stats_dashboard/test_routes.py::test_dashboard_shards_long_loki_windows_and_merges_aggregates": 20,
     "tests/gateway/test_agents_endpoints.py::test_get_models_reasoning_effort_options_match_factory_tables": 35,
     "tests/gateway/test_agents_endpoints.py::test_get_models_returns_grouped_supported_models": 17,
-    "tests/gateway/test_cluster_endpoints.py::TestSpawnUpdate.test_spawn_update_launches_the_updater_session": 15,
     "tests/gateway/test_fleet_graph_resilience.py::test_archive_fetch_failure_serves_stale_graph_and_negative_caches": 16,
     "tests/gateway/test_loki_events.py::TestGlobalQueryBudget.test_observes_every_transition_and_types_local_rejections": 18,
     "tests/gateway/test_mcp_clients.py::test_create_shows_token_once_and_list_redacts_credentials": 18,
@@ -24,24 +23,24 @@
     "tests/gateway": 118
   },
   "files": {
-    "tests/gateway/stats_dashboard/test_routes.py": 1223,
+    "tests/gateway/stats_dashboard/test_routes.py": 1221,
     "tests/gateway/test_agent_inspect.py": 823,
-    "tests/gateway/test_agents_endpoints.py": 1403,
-    "tests/gateway/test_agents_internals.py": 1323,
+    "tests/gateway/test_agents_endpoints.py": 1401,
+    "tests/gateway/test_agents_internals.py": 1276,
     "tests/gateway/test_alerts_api.py": 1014,
     "tests/gateway/test_auth.py": 1161,
-    "tests/gateway/test_cluster_endpoints.py": 2799,
+    "tests/gateway/test_cluster_endpoints.py": 1206,
     "tests/gateway/test_config_api.py": 1004,
     "tests/gateway/test_fleet_graph.py": 1049,
     "tests/gateway/test_idempotency.py": 859,
     "tests/gateway/test_loki_events.py": 2716,
     "tests/gateway/test_memory_search.py": 1424,
     "tests/gateway/test_notices_endpoint.py": 1402,
-    "tests/gateway/test_operations.py": 1554,
+    "tests/gateway/test_operations.py": 1099,
     "tests/gateway/test_sse.py": 842,
-    "tests/gateway/test_status_cluster.py": 1204,
+    "tests/gateway/test_status_cluster.py": 1165,
     "tests/gateway/test_tasks_router.py": 811,
-    "tests/gateway/test_timeline.py": 2797,
-    "tests/gateway/test_ttl_reaper.py": 1668
+    "tests/gateway/test_timeline.py": 2771,
+    "tests/gateway/test_ttl_reaper.py": 1159
   }
 }

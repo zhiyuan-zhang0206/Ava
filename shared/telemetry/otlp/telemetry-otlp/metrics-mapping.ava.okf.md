@@ -40,11 +40,13 @@ you percentile). Emit sites cast duration-style fields to explicit ints
 - `llm_usage.cost_usd` -> **float Counter** (`ava_llm_usage_cost_usd_total`).
   Money is summed, never percentiled; `increase(...)` over any window is the
   exact spend at usage-time rates.
-- `watchdog_tick.last_tick_timestamp_seconds` -> **ObservableGauge**
-  (`ava_watchdog_tick_last_tick_timestamp_seconds`). It holds the wall-clock
-  time of the most recently completed watchdog round, rather than accumulating
-  every round; the stale-tick alert retains its `machine` and `process`
-  attributes to distinguish the two capability watchdogs on one host.
+- `root_health_tick.last_tick_timestamp_seconds` -> **ObservableGauge**
+  (`ava_root_health_tick_last_tick_timestamp_seconds`). It holds the wall-clock
+  time of the most recently completed root health round, independently of its
+  verdicts. `root_health_expected.expected_since_timestamp_seconds` is also a
+  gauge, emitted at observer startup before any completed round. The freshness
+  alert compares the expected and observed sets per `machine`, `home_id`, and `process`,
+  covering a root that starts but never produces its first sample.
 - `compaction_completed.history_chars` and `.summary_chars` -> **Histogram**.
   They are independent source/replacement size samples; the explicit
   `.compactions=1` field remains the Counter for completion frequency, and
@@ -95,3 +97,7 @@ recovered minute-scale gateway freeze instead of folding it into +Inf.
 
 `PeriodicExportingMetricReader`, 15 s interval (`_METRICS_INTERVAL_S`), to
 the sidecar's `/v1/metrics`.
+
+Root observation events carry a fixed-length SHA-256 `home_id` of the resolved
+home path. Freshness grouping retains it so another cluster on the same host
+cannot mask missing rounds; the event body also carries the full home path.

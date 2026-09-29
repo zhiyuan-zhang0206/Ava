@@ -196,7 +196,12 @@ def _request(
     headers: list[tuple[bytes, bytes]] | None = None,
     client: tuple[str, int] | None = ("127.0.0.1", 1),
 ) -> Request:
-    """Build the smallest request shape accepted by the direct middleware calls."""
+    """Build the smallest request shape accepted by the direct middleware calls.
+
+    The scope deliberately carries no `app`: a request without a session
+    cookie must never reach the session store (`request.app.state.db_pool`),
+    so bearer and anonymous requests pay no session lookup.
+    """
     return Request(
         {
             "type": "http",

@@ -2,20 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
 import sys
 import time
 from datetime import UTC, datetime
-from functools import partial
 from pathlib import Path
 
-import psutil
 import pytest
 
 import services.pitr.base_operation_runtime as restore_runtime
 import services.pitr.base_scheduler_daemon as daemon
 from services.pitr import retention_scheduler
+from services.pitr import worker_process as workers
 from services.pitr.activation_state import ActivationRecord, write_record
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.base_scheduler_daemon import BaseCandidateState, _components, is_due
@@ -71,7 +69,7 @@ def _required_wal(candidate: CandidateManifest) -> tuple[RestoreObject, ...]:
 def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_path: Path) -> None:
     uploader = tmp_path / "uploader.json"
     uploader.write_text("publisher-only")
-    inputs = daemon._RestoreWorkerInput(
+    inputs = restore_runtime.RestoreWorkerInput(
         candidate_json=_candidate("viewer-only").to_json(),
         root=tmp_path,
         ack_dir=tmp_path / "ack",
@@ -134,8 +132,8 @@ async def test_restore_worker_popen_forwards_host_proxy_env(
         captured.update(env)
         raise _WorkerSpawnedError
 
-    monkeypatch.setattr(restore_runtime.subprocess, "Popen", _capture_popen)
-    inputs = daemon._RestoreWorkerInput(
+    monkeypatch.setattr(workers.ExecProcessDomain, "launch_posix", _capture_popen)
+    inputs = restore_runtime.RestoreWorkerInput(
         candidate_json=_candidate("proxy-forwarding").to_json(),
         root=tmp_path,
         ack_dir=tmp_path / "ack",
@@ -218,7 +216,7 @@ def test_restore_worker_input_builds_baidu_store_args(
         settings.physical_backup, "pitr_baidu_credentials_file", tmp_path / "creds.json"
     )
     monkeypatch.setattr(settings.physical_backup, "pitr_baidu_token_file", tmp_path / "token.json")
-    monkeypatch.setattr(restore_runtime, "direct_db_url", lambda: "postgresql://x")
+    monkeypatch.setattr(restore_runtime, "live_probe_conninfo", lambda: "dbname=x")
     monkeypatch.setattr(restore_runtime, "live_data_directory", lambda: "/live/data")
 
     def fake_pg_tool(_name: str) -> Path:
@@ -247,7 +245,7 @@ def test_restore_worker_input_builds_cos_store_args(
     )
     monkeypatch.setattr(settings.physical_backup, "pitr_cos_bucket", "ava-pitr-1250000000")
     monkeypatch.setattr(settings.physical_backup, "pitr_cos_region", "ap-guangzhou")
-    monkeypatch.setattr(restore_runtime, "direct_db_url", lambda: "postgresql://x")
+    monkeypatch.setattr(restore_runtime, "live_probe_conninfo", lambda: "dbname=x")
     monkeypatch.setattr(restore_runtime, "live_data_directory", lambda: "/live/data")
 
     def fake_pg_tool(_name: str) -> Path:
@@ -327,27 +325,6 @@ def test_legacy_manifest_daemon_paths_parse_without_crashing(
     assert daemon._pending_restore_candidate(root) is not None
 
 
-def test_restricted_restore_group_reaps_orphan_descendant() -> None:
-    script = (
-        "import subprocess,sys,time; "
-        "subprocess.Popen([sys.executable,'-c',"
-        "'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)']);"
-        "time.sleep(60)"
-    )
-    process = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", script], start_new_session=True, text=True
-    )
-    created_at = psutil.Process(process.pid).create_time()
-    deadline = time.monotonic() + 10
-    while len(daemon._group_members(process.pid)) < 2 and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert len(daemon._group_members(process.pid)) >= 2
-
-    daemon._reap_restore_subprocess_group(process, created_at)
-
-    assert daemon._group_members(process.pid) == []
-
-
 def test_authoritative_verify_precedes_publisher_construction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -380,68 +357,6 @@ def test_authoritative_verify_precedes_publisher_construction(
         )
 
     assert constructed is False
-
-
-def _blocking_worker(
-    started: Path,
-    stopped: Path,
-    stop: daemon.StopSignal,
-    _output: daemon._WorkerQueue,
-) -> None:
-    started.write_text(str(os.getpid()))
-    stop.wait()
-    stopped.write_text("stopped")
-
-
-def _noncooperative_worker(
-    started: Path,
-    armed: Path,
-    late: Path,
-    _stop: daemon.StopSignal,
-    _output: daemon._WorkerQueue,
-) -> None:
-    script = (
-        "import signal,subprocess,sys,time\n"
-        f"late={str(late)!r}\n"
-        "def spawn_late(*_args):\n"
-        " p=subprocess.Popen([sys.executable,'-c',"
-        "'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)'])\n"
-        " open(late,'w').write(str(p.pid))\n"
-        "signal.signal(signal.SIGTERM,spawn_late)\n"
-        f"open({str(armed)!r},'w').write('armed')\n"
-        "time.sleep(60)\n"
-    )
-    child = subprocess.Popen([sys.executable, "-c", script])  # noqa: S603
-    while not armed.exists():
-        time.sleep(0.01)
-    started.write_text(f"{os.getpid()} {child.pid}")
-    time.sleep(60)
-
-
-async def _wait_for_path(path: Path, *, timeout_s: float = 10) -> None:
-    deadline = time.monotonic() + timeout_s
-    while not path.exists() and time.monotonic() < deadline:
-        await asyncio.sleep(0.02)
-    assert path.exists(), f"worker did not publish {path.name} before the deadline"
-
-
-async def _assert_tree_gone(pids: list[int], timeout_s: float = 5.0) -> None:
-    # After SIGKILL, dead processes can remain zombies until their new parent
-    # reaps them, and psutil.pid_exists() still reports those entries. Assert
-    # no live members, not that every process-table entry vanished (same
-    # discipline as tests/agent/test_exec_subprocess.py::_assert_tree_gone).
-    deadline = time.monotonic() + timeout_s
-    remaining = set(pids)
-    while remaining and time.monotonic() < deadline:
-        for pid in list(remaining):
-            try:
-                if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
-                    remaining.discard(pid)
-            except psutil.NoSuchProcess:
-                remaining.discard(pid)
-        if remaining:
-            await asyncio.sleep(0.05)
-    assert not remaining, f"process(es) still alive after forced shutdown: {sorted(remaining)}"
 
 
 def test_due_uses_durable_candidate_after_restart(tmp_path: Path) -> None:
@@ -859,26 +774,6 @@ def test_retention_health_never_exposes_stale_or_failed_eligibility(tmp_path: Pa
     assert disabled["eligible_bytes"] == 0
 
 
-@pytest.mark.asyncio
-async def test_runner_cancellation_reaps_active_worker(
-    tmp_path: Path,
-) -> None:
-    started = tmp_path / "started"
-    stopped = tmp_path / "stopped"
-
-    task = asyncio.create_task(
-        daemon._run_worker(target=partial(_blocking_worker, started, stopped))
-    )
-    await _wait_for_path(started)
-    child_pid = int(started.read_text())
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-    assert stopped.read_text() == "stopped"
-    await _assert_tree_gone([child_pid])
-
-
 # ── QA #931 R3: domain conditions never gate readiness ────────────────────
 
 
@@ -935,29 +830,3 @@ async def test_degraded_domain_condition_keeps_healthz_200() -> None:
         assert status == 503, "wedged daemon (stale liveness) still gates readiness"
     finally:
         await stop_health_server(server)
-
-
-@pytest.mark.asyncio
-async def test_forced_shutdown_reaps_noncooperative_group_and_late_fork(
-    tmp_path: Path,
-) -> None:
-    started = tmp_path / "started"
-    armed = tmp_path / "armed"
-    late = tmp_path / "late"
-    task = asyncio.create_task(
-        daemon._run_worker(
-            target=partial(_noncooperative_worker, started, armed, late),
-            cooperative_timeout_s=0.1,
-            group_grace_s=3,
-            group_deadline_s=15,
-        )
-    )
-    await _wait_for_path(started)
-    worker_pid, child_pid = (int(value) for value in started.read_text().split())
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-    await _wait_for_path(late)
-    late_pid = int(late.read_text())
-    await _assert_tree_gone([worker_pid, child_pid, late_pid])

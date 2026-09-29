@@ -19,7 +19,7 @@ Milvus-lite standalone gRPC server wrapper — launches `milvus-lite server` via
 
 ## Key Dependencies
 - [[memory-indexer.ava.okf.md]] — sole writer and reader
-- [[services/watchdog/watchdog.ava.okf.md]] — kept alive via `healthchecks/milvus.py`
+- [[services/ava_root_glue/ava_root_glue.ava.okf.md]] — kept alive via `healthchecks/milvus.py`
 
 ## Entry Points
 - `services/milvus/daemon.py` — `.venv/bin/python -m services.milvus.daemon`

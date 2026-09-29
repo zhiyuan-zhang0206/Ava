@@ -15,11 +15,14 @@ was shorter than the dangerous one**: Phase B polled each agent-runner back for 
 most a POSIX-era 120 s, and a host that outran that was written off while its
 checkout had moved and its processes had not. The orchestration returns, the
 `finally` releases, and the cluster is open in exactly the state a second deploy must
-not start into. Two things close that: `settle_update_lock` keeps the lease held
-across the window, and `shared.deploy_timing` removes the mismatch that opened it —
-one no-progress definition shared by the poll, the settle TTL and the host-local
-stall reaper, plus a lease renewed while the orchestration runs so its TTL is no
-longer a budget the rollout has to fit inside.
+not start into. Two things close that: a **settle hold** (`shared.cluster_lock`'s
+settle fields; its writer went with the old phase-based orchestration and has been
+removed as dead code — the read side, `settle_hosts_converged` below, remains live
+for a future writer) keeps the lease held across the window, and
+`shared.deploy_timing` removes the mismatch that opened it — one no-progress
+definition shared by the poll, the settle TTL and the host-local stall reaper, plus
+a lease renewed while the orchestration runs so its TTL is no longer a budget the
+rollout has to fit inside.
 
 ## The two signals, and why the polarity differs between them
 
@@ -32,9 +35,8 @@ longer a budget the rollout has to fit inside.
    controllers spawn a host-local `ava-updater` without going near the gateway's
    orchestration. The code controller added on 2026-07-28 means that path gets
    *more* traffic, not less. Read from the table rather than by probing each
-   machine: the old probe's `current_orchestration` field was a session-name
-   judgment that died with the very daemon that answered it. This signal covers
-   the orchestrator's own host too — Phase A pauses it like every agent-runner —
+   machine, whose ops daemon stops with the services it reports on. This signal
+   covers the orchestrator's own host too — Phase A pauses it like every agent-runner —
    which is why the old "this host's own orchestration session" leg was dropped
    in the old-signal sweep (PR5): a lease-less local updater writes `converging`,
    and a rollout holds the lease before its own pause lands.
@@ -99,14 +101,13 @@ question, which is what makes the same weak evidence usable for both.
 
 ## Displaying a hold is not asking this question
 
-`ava cluster status` shows the hold (a banner + the `hold` column beside `pin` /
-`code`) so a refused operator can see it from the roster instead of the cron log.
-That display reads the lease row directly (`read_update_lease`'s settle fields) and
-must keep doing so — calling `deploy_in_flight()` from a status GET would probe every
-machine and, on a converged cluster, *release* the hold as a side effect of someone
-looking at it. It also means the roster shows signal 1 only, which is why the column
-is labelled as the hold's recorded waiting set and never as a convergence verdict:
-the permissive and conservative readings above both belong to callers deciding
+`ava cluster status` shows the hold (a banner above the table) so a refused
+operator can see it from the roster instead of the cron log. That display reads the
+lease row directly (`read_update_lease`) and must keep doing so — calling
+`deploy_in_flight()` from a status GET would probe every machine and, on a
+converged cluster, *release* the hold as a side effect of someone looking at it. It
+also means the roster shows signal 1 only and never a convergence verdict: the
+permissive and conservative readings above both belong to callers deciding
 something, not to a table.
 """
 
@@ -277,15 +278,13 @@ def _remote_orchestration() -> DeployWindow | None:
     """Any machine mid-deploy — signal 2, read from the host_deploy_state
     table instead of probing each machine's ops server (R1, Task #1021).
 
-    The old probe's `current_orchestration` field was a session-name judgment
-    that died with the very daemon that answered it — `ops` stops mid
-    self-update, so the middle of the window read "not deploying" (the blind
-    spot in the module docstring). The posture row is written by the pause
-    fan-out and the updater's lease, both outside the restarted services, so
-    it survives the whole window; a machine with no row has never transitioned
-    and reads as idle. A stale `converging` row (updater crashed) keeps the
-    signal active until the stranded-pause recovery unpauses the host — the
-    conservative direction, since its checkout may have moved.
+    The posture row is written by the pause fan-out and the updater's lease,
+    both outside the restarted services, so it survives the whole window, while
+    an ops daemon stops with the services it would report on; a machine with no
+    row has never transitioned and reads as idle. A stale `converging` row
+    (updater crashed) keeps the signal active until `ava cluster recover`
+    unpauses the host — the conservative direction, since its checkout may have
+    moved.
 
     **Operator exclusion is the one reading this signal withholds** (issue
     #2160): a machine the operator has excluded from the cohort — pause latch,
@@ -353,9 +352,9 @@ def settle_hosts_converged(hosts: list[str]) -> bool:
     Inheriting the permissive reading here would rebuild it inside the fix, where it
     would be much harder to find because the mechanism is believed correct.
 
-    `running_sha` is what makes this more than the roster's pin column: a host whose
-    checkout landed but whose processes were never replaced reads on-pin and is still
-    mid-transition. Bounded caveat: `running_sha` speaks for the process that *answers*
+    `running_sha` is what makes this more than a checkout comparison: a host whose
+    checkout landed but whose processes were never replaced matches the pin and is
+    still mid-transition. Bounded caveat: `running_sha` speaks for the process that *answers*
     the probe — the ops daemon — so "converged" here means that daemon is on the pin,
     not that every process on the host is. A sibling daemon respawned at a different
     commit is the `code` controller's dimension, not this one.

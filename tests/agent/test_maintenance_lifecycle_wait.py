@@ -147,7 +147,7 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
             raise
 
     monkeypatch.setattr(maintenance_cohort, "prepare", resolving_prepare)
-    await asyncio.to_thread(agent_pause._prepare, "move", WHEN)
+    await asyncio.to_thread(agent_pause.prepare, "move", WHEN)
 
     hold = agent_pause._hold("move", WHEN)
     assert hold.phase == "draining"
@@ -177,7 +177,7 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
     events = _events(monkeypatch)
 
     with pytest.raises(RuntimeError, match=r"waited .*still unfinished after the") as raised:
-        agent_pause._prepare("move", WHEN)
+        agent_pause.prepare("move", WHEN)
     assert not isinstance(raised.value, maintenance_cohort.LifecycleCollisionError)
     assert "unfinished lifecycle command" in str(raised.value)
 
@@ -199,7 +199,7 @@ async def test_collision_free_prepare_is_unchanged(
     _as_live_host(monkeypatch, owner)
     events = _events(monkeypatch)
 
-    agent_pause._prepare("move", WHEN)
+    agent_pause.prepare("move", WHEN)
     hold = agent_pause._hold("move", WHEN)
     assert hold.phase == "draining"
     assert set(hold.commands) == {agent}
@@ -226,7 +226,7 @@ async def test_maintenance_command_refuses_without_wait(
     events = _events(monkeypatch)
 
     with pytest.raises(RuntimeError, match="refusing without a wait") as raised:
-        agent_pause._prepare("move", WHEN)
+        agent_pause.prepare("move", WHEN)
     assert not isinstance(raised.value, maintenance_cohort.LifecycleCollisionError)
     assert [event["attributes"]["outcome"] for event in events] == ["refused"]
 
@@ -296,7 +296,7 @@ def test_parked_claimed_work_prepares_without_wait(
     monkeypatch.setattr(agent_pause, "_lifecycle_wait_seconds", lambda: 0.0)
     events = _events(monkeypatch)
 
-    agent_pause._prepare("move", WHEN)
+    agent_pause.prepare("move", WHEN)
 
     hold = agent_pause._hold("move", WHEN)
     assert hold.phase == "draining"
@@ -324,7 +324,7 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     events = _events(monkeypatch)
 
     with pytest.raises(RuntimeError, match=r"waited .*still unfinished after the") as raised:
-        agent_pause._prepare("move", WHEN)
+        agent_pause.prepare("move", WHEN)
     assert not isinstance(raised.value, maintenance_cohort.LifecycleCollisionError)
     assert "unfinished lifecycle command" in str(raised.value)
 
@@ -351,7 +351,7 @@ def test_maintenance_authored_chat_refuses_and_rolls_back_orphan_settlement(
     events = _events(monkeypatch)
 
     with pytest.raises(RuntimeError, match="refusing without a wait"):
-        agent_pause._prepare("move", WHEN)
+        agent_pause.prepare("move", WHEN)
     assert db_conn.execute(
         "SELECT id,status FROM inbound_messages WHERE agent_id=%s ORDER BY id", (agent,)
     ).fetchall() == [(ordinary, "claimed"), (authored, "claimed")]

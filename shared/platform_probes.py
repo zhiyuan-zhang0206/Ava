@@ -88,8 +88,8 @@ def default_chrome_user_data_dir() -> Path | None:
     This is the top-level Chrome data dir (it holds ``Default/``, ``Profile N/``,
     and ``Local State``), NOT a single profile — copying it whole carries every
     signed-in profile plus the cookie jars and saved passwords. It is the source
-    the install/first-start prompt copies from when the operator opts to seed the
-    agent's dedicated profile with their own logged-in Chrome state.
+    used by the browser profile's explicit import of the operator's logged-in
+    Chrome state.
 
     Returns None when the platform has no known location (Windows/other) or the
     dir simply does not exist (Chrome never installed / never launched) — the
@@ -140,7 +140,7 @@ def _bounded_stdout(argv: list[str]) -> str | None:
     None is "no answer" — a missing binary, a timeout, a non-zero exit, or
     empty output — never evidence about the fact being probed. ``shared.proc``
     is imported lazily because this module must stay importable without
-    ``shared.config`` (the install/enroll-time callers depend on that) and
+    ``shared.config`` (the converge-time callers depend on that) and
     ``shared.proc`` reaches it through ``shared.paths``."""
     from shared.proc import run_bounded
 
@@ -201,11 +201,11 @@ def browser_incapability() -> str | None:
 
 
 def browser_deps_incapability() -> str | None:
-    """Settings-free capability check for install/enroll-time use.
+    """Settings-free capability check for converge-time use.
 
     Same three prongs, same order, same reason strings as
-    ``browser_incapability()``, minus the AVA_CHROME_BINARY override — enroll
-    runs on a fresh host before Settings can be built, so it cannot read the
+    ``browser_incapability()``, minus the AVA_CHROME_BINARY override — converge
+    may run on a fresh host before Settings can be built, so it cannot read the
     override. Callers that have Settings use ``browser_incapability()``.
     """
     if not display_available():

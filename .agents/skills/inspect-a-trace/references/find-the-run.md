@@ -126,7 +126,8 @@ GET /api/agents/{agent_id}/traces/{trace_id}/messages
 GET /api/agents/{agent_id}/messages
 ```
 
-Bearer `AVA_CLUSTER_SECRET` when the cluster has one; gateway is on port 8000.
+Bearer `AVA_API_TOKEN` (or, on the gateway, `AVA_CLUSTER_SECRET`) when the
+cluster authenticates; gateway is on port 8000.
 `pruned: true` is the trimmed-checkpoint shape, not an error; 404 means the
 agent is gone. `scripts/read_trace.py --with-content` calls this for you.
 

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Locked Python Installation
-description: Dependency-free installer shared by install.sh and the bounded updater; canonical runtime pins, host-local artifact transport.
+description: Dependency-free package acquisition; canonical runtime pins and host-local artifact transport, with no cluster initialization effects.
 tags:
 - cli
 - infra
@@ -10,24 +10,17 @@ tags:
 # Locked Python Installation
 
 `cli/python_install.py` is a stdlib-only module runnable before project packages
-exist. `scripts/install.sh` selects managed Python and its absolute script path;
-worktree bootstrap uses its already-created venv. The script explicitly locates
+exist. Invoke it with Python 3.12 and an explicit checkout; worktree setup uses
+its already-created venv. It neither creates cluster identity nor starts or
+provisions services. The script explicitly locates
 its checkout, including when `PYTHONSAFEPATH` disables implicit cwd imports.
-
-`cli/commands/_update_uv_sync.py` imports the installer and its stdlib dependency
-closure before checkout. It invokes that retained function with an explicit target
-repo, so staging and historical rollback do not require the target to contain the
-new helper. Each uv step runs through the existing process-tree timeout with one
-shared monotonic deadline. Editable write-window protection, failure recovery and
-post-install import proof surround the complete sequence.
 
 `cli/_python_index.py` reads one host index from uv settings or the pip settings
 uv does not consume. The installer can pass the existing unit `mirror.env`; real
 environment values win. `shared/dotenv_boot.py` preserves the same precedence
 across both uv single-index aliases when a native command loads the unit files
 before calling the installer. Additional indexes remain separate and are rejected
-by the installer. These files are never rewritten by discovery. Explicit
-mirror profile selection remains the install script's existing persistent action.
+by the installer. These files are never rewritten by discovery. Operators configure package-manager transport independently of cluster start.
 Additional/explicit-only indexes fail rather than silently losing their source policy.
 
 The lock-source lint runs before installation. Its stdlib implementation lives in
@@ -46,6 +39,20 @@ new dev installs but retain existing dev packages. Failure aborts the remaining
 steps; neither branch mutates `uv.lock` or commits a derived requirements file.
 This preflight preserves the environment on a stale lock; it is not an atomic
 rollback of later network, build, or installation failures.
+
+Every uv step runs with `--no-config`, which also makes uv ignore
+`.python-version` and accept any interpreter meeting `requires-python`. The steps
+that can create the environment (native sync, mirror `uv venv`) therefore pass
+the checkout's `.python-version` pin, or the caller's explicit `--python`, as
+`--python`. The offline export stays unpinned: it is universal, and a missing
+pinned interpreter must remain fetchable by the creating step. Native sync
+recreates an existing environment whose interpreter misses the pin. The mirror
+transport asks an existing target's interpreter for its own version (never a
+directory name or `pyvenv.cfg`): a match is reused; a mismatch with
+`.python-version` prints the old and new versions, removes the checkout's own
+`.venv` and creates it on the pin. It refuses to remove a symlinked `.venv` or
+one that resolves outside the checkout. An explicit `--python` is the caller's
+choice, so its existing target is reused without that check.
 
 Configuration precedence, limits, and first-rollout cautions:
 [Machine Python indexes](../conventions/dev-setup.md#machine-python-indexes).

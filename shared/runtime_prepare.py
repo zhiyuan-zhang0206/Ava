@@ -15,11 +15,15 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from shared.process_group_closure import close_unadmitted, wait_group_finished
+from shared.runtime_abi import AbiTag, AbiTagError, current_abi, parse_abi_tag
 from shared.runtime_release import (
+    MANIFEST_VERSION,
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
@@ -54,33 +58,51 @@ def _write_json(path: Path, value: object) -> None:
         os.fsync(stream.fileno())
 
 
+_CLOSE_SECONDS = 5.0
+
+
 def _run(argv: list[str], cwd: Path, *, timeout: int = 180) -> str:
-    # No inherited AVA_HOME, credentials, PYTHONPATH, uv configuration or indexes.
-    result = subprocess.run(  # noqa: S603 — verified local artifacts, argv without a shell.
-        argv,
-        cwd=cwd,
-        env={
-            "PATH": "/usr/bin:/bin",
-            "HOME": str(cwd),
-            "UV_NO_CONFIG": "1",
-            "UV_OFFLINE": "1",
-            "AVA_CONFIG_FETCH": "skip",
-            "AVA_TIMEZONE": "UTC",
-            "AVA_HOME": str(cwd / "probe-home"),
-            "AVA_DB_URL": "postgresql://unused@127.0.0.1:1/unused",
-            "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
-        },
-        text=True,
-        capture_output=True,
-        timeout=timeout,
-        check=False,
-    )
-    if result.returncode:
-        # Dependency URLs/credentials must not leak from subprocess diagnostics.
-        raise ReleaseRejectedError(
-            f"preparation command failed: {Path(argv[0]).name} rc={result.returncode}"
+    """Run one preparation tool as the owner of its own process group.
+
+    Standard library only: the checkout-retiring proof and the release-store
+    contract call this from a bare interpreter. Output goes to files, so an
+    inherited pipe cannot become another unbounded wait. The tool and whatever
+    it left in its group are closed (`close_unadmitted`) before this returns.
+    """
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        process = subprocess.Popen(  # noqa: S603 — verified local artifacts, argv without a shell.
+            argv,
+            cwd=cwd,
+            # No inherited AVA_HOME, credentials, PYTHONPATH, uv configuration or indexes.
+            env={
+                "PATH": "/usr/bin:/bin",
+                "HOME": str(cwd),
+                "UV_NO_CONFIG": "1",
+                "UV_OFFLINE": "1",
+                "AVA_CONFIG_FETCH": "skip",
+                "AVA_TIMEZONE": "UTC",
+                "AVA_HOME": str(cwd / "probe-home"),
+                "AVA_DB_URL": "postgresql://unused@127.0.0.1:1/unused",
+                "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
+            },
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=stderr,
+            process_group=0,
         )
-    return result.stdout
+        finished = False
+        try:
+            finished = wait_group_finished(process, time.monotonic() + timeout)
+        finally:
+            code = close_unadmitted(process, time.monotonic() + _CLOSE_SECONDS)
+        name = Path(argv[0]).name
+        if not finished:
+            raise ReleaseRejectedError(f"preparation command timed out: {name}")
+        if code:
+            # Dependency URLs/credentials must not leak from subprocess diagnostics.
+            raise ReleaseRejectedError(f"preparation command failed: {name} rc={code}")
+        stdout.seek(0)
+        return stdout.read().decode("utf-8", errors="replace")
 
 
 def _copy_python(source: Path, target: Path) -> None:
@@ -99,7 +121,7 @@ def _copy_verified_python(source: Path, target: Path, expected: dict[str, str]) 
         raise ReleaseRejectedError("retained Python bytes differ from trusted input inventory")
 
 
-def _python_input_inventory(source: Path) -> dict[str, str]:
+def python_input_inventory(source: Path) -> dict[str, str]:
     """File links are supported; directory links have no finite tree contract here."""
     for path in source.rglob("*"):
         if path.is_symlink():
@@ -297,6 +319,15 @@ else:
         raise ReleaseRejectedError("retained Python changed optional tkinter availability")
 
 
+def _retained_abi(root: Path, interpreter: Path) -> AbiTag:
+    """The image interpreter's own ABI tag on this host, from its installed module."""
+    probe = "import json, shared.runtime_abi as a; print(json.dumps(a.current_abi().to_json()))"
+    try:
+        return parse_abi_tag(json.loads(_run([str(interpreter), "-I", "-B", "-c", probe], root)))
+    except AbiTagError as exc:
+        raise ReleaseRejectedError(f"retained interpreter has no release ABI tag: {exc}") from exc
+
+
 def _retain_startup_wheel(wheels: Path, root: Path) -> None:
     """Keep original locked dependency bytes for the active startup-hook gate."""
     candidates = list(wheels.glob("setuptools-*.whl"))
@@ -422,7 +453,7 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
     wheels = inputs.wheelhouse.resolve(strict=True)
     if inventory_digest(tree_inventory(wheels)) != inputs.wheelhouse_digest:
         raise ReleaseRejectedError("wheelhouse hash mismatch")
-    python_files = _python_input_inventory(source)
+    python_files = python_input_inventory(source)
     if inventory_digest(python_files) != inputs.python_digest:
         raise ReleaseRejectedError("Python input hash mismatch")
     if file_sha256(inputs.requirements) != inputs.requirements_digest:
@@ -543,9 +574,10 @@ assert hashlib.sha256(schema.read_bytes()).hexdigest() == sys.argv[1], 'schema m
         raise ReleaseRejectedError("inputs changed during preparation")
     _write_json(root / "loaded-native-images.json", loaded_native_images(root))
     manifest = {
-        "version": 1,
+        "version": MANIFEST_VERSION,
         "artifact_digest": identity,
-        "platform": platform.platform(),
+        "abi_tag": _retained_abi(root, interpreter).to_json(),
+        "platform": platform.platform(),  # Provenance only; the ABI tag is the contract.
         "schema_digest": inputs.schema_digest,
         "interpreter": "venv/bin/python",
         "cwd": "venv",
@@ -556,7 +588,7 @@ assert hashlib.sha256(schema.read_bytes()).hexdigest() == sys.argv[1], 'schema m
         store,
         identity,
         manifest_digest=file_sha256(root / "manifest.json"),
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=inputs.schema_digest,
     )
     # Read-only sealing is defense against accidental writes, not a same-UID

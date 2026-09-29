@@ -29,14 +29,7 @@ from shared.api_contracts.contracts import Idempotency, PauseSemantics
 # data-plane by default.
 _EXPECTED_CONTROL_PLANE = frozenset(
     {
-        ("POST", "/api/cluster/stop"),
-        ("POST", "/api/cluster/resume"),
-        ("POST", "/api/cluster/recover"),
         ("POST", "/api/cluster/stopping"),
-        ("POST", "/api/cluster/update"),
-        ("POST", "/api/cluster/rollout"),
-        ("POST", "/api/cluster/restart"),
-        ("GET", "/api/cluster/update-check"),
         ("GET", "/api/cluster/status"),
         ("GET", "/api/cluster/roster"),
         ("GET", "/api/cluster/admin/events"),
@@ -48,6 +41,7 @@ _EXPECTED_CONTROL_PLANE = frozenset(
         ("POST", "/api/alerts"),
         ("POST", "/api/work-failed"),
         ("GET", "/api/health"),
+        ("GET", "/api/bootstrap"),
     }
 )
 
@@ -117,8 +111,9 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
     exempt = [
         ("GET", "/api/health"),
         ("GET", "/api/cluster/status"),
-        ("POST", "/api/cluster/update"),
+        ("POST", "/api/cluster/stopping"),
         ("POST", "/api/alerts"),
+        ("GET", "/api/bootstrap"),
     ]
     blocked = [
         ("GET", "/api/alerts"),  # same template as the exempt webhook, different method
@@ -127,6 +122,8 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
         ("GET", "/api/agents/42/messages"),
         ("GET", "/api/agents/42"),
         ("GET", "/api/cluster/status/extra"),  # exact match, not prefix
+        ("POST", "/api/cluster/update"),  # retired route: no pause exemption survives it
+        ("POST", "/api/cluster/recover"),  # retired route: no pause exemption survives it
         ("GET", "/pages/5-report/a/b"),
     ]
     for method, path in exempt:

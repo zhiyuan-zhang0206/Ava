@@ -30,7 +30,7 @@ copied from an old doc or an old spawn; list the current roster first:
   import httpx, os
   r = httpx.get(
       f"{os.environ['AVA_GATEWAY_URL']}/api/models",
-      headers={"Authorization": f"Bearer {os.environ['AVA_CLUSTER_SECRET']}"},
+      headers={"Authorization": f"Bearer {os.environ.get('AVA_API_TOKEN', '')}"},
       timeout=10,
   )
   models = r.json()["models"]  # id -> {provider, context_window, pricing,

@@ -8,7 +8,8 @@ Pins the properties that matter for reboot survival without recursion:
 - registration writes the plist but NEVER `launchctl bootstrap`s it -- bootstrap
   on a RunAtLoad job runs it immediately, and this runs inside `ava start`, so
   bootstrapping would spawn a second concurrent `ava start`.
-Plus the Linux `@reboot` crontab entry and the Windows ONLOGON task.
+Linux systemd delegation is tested at the platform backend; this file also
+covers the Windows ONLOGON task.
 
 The retry block (`test_the_job_retries_*`) is the one that earns its keep: a
 fire-once boot job left an agent-runner down for 6.5 hours after its `ava start`
@@ -18,7 +19,6 @@ raced the VPN interface at boot, and each platform states the same policy
 
 from __future__ import annotations
 
-import re
 import types
 from pathlib import Path
 
@@ -38,15 +38,6 @@ def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Linux; pin it here so the relaunch tests describe the macOS behaviour on
     # any host. The off-macOS refusal test overrides it back to False.
     monkeypatch.setattr(os_autostart, "IS_MACOS", True)
-
-    # CI runners ARE systemd hosts, so the real probe would consult their
-    # systemctl through the crontab fakes; pin "no enabled boot unit" here so
-    # the crontab-path tests describe the cron branch on any host. The
-    # boot-unit-branch tests override this with True/False.
-    def no_boot_unit(_home: Path | None = None) -> bool:
-        return False
-
-    monkeypatch.setattr("shared.os_boot_unit.boot_unit_owns_boot_path", no_boot_unit)
 
 
 def test_plist_runs_ava_start_at_load() -> None:
@@ -100,261 +91,6 @@ def test_register_macos_idempotent_no_rewrite(
     )  # unchanged -> not rewritten
 
 
-def test_register_linux_adds_reboot_entry(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict = {}
-
-    def fake_run(cmd, **kw):
-        if cmd[:2] == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=1, stdout="", stderr="no crontab for u")
-        if cmd == ["crontab", "-"]:
-            captured["input"] = kw.get("input")  # pyright: ignore[reportUnknownMemberType]
-            return types.SimpleNamespace(returncode=0, stderr="")
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(os_cron.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = os_autostart._register_linux()
-    assert rc == 0
-    assert "@reboot" in captured["input"]
-    # A bare `ava boot`, marker-tagged with the home slug; no --cluster flag.
-    assert "boot  # ava-autostart.ava-t-cafe0123" in captured["input"]
-    assert "--cluster" not in captured["input"]
-
-
-def test_register_linux_replaces_only_this_clusters_entry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace this home's slug-marked entry and preserve a co-located cluster."""
-    captured: dict[str, str] = {}
-    current_line = "@reboot /old/ava boot  # ava-autostart.ava-t-cafe0123"
-    other_line = "@reboot /other/ava boot  # ava-autostart.ava-other-deadbeef"
-
-    def fake_run(cmd: list[str], **kw: object) -> types.SimpleNamespace:
-        if cmd[:2] == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=0, stdout=f"{current_line}\n{other_line}\n")
-        if cmd == ["crontab", "-"]:
-            captured["input"] = str(kw["input"])
-            return types.SimpleNamespace(returncode=0, stderr="")
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(os_cron.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)
-    assert os_autostart._register_linux() == 0
-    assert "ava-autostart.ava-t-cafe0123" in captured["input"]
-    assert current_line not in captured["input"]
-    assert other_line in captured["input"]
-    assert captured["input"].count("# ava-autostart.ava-t-cafe0123") == 1
-
-
-def test_register_linux_skips_when_no_crontab(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(os_cron.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    # No crontab binary -> degrade to a warning, not a failure.
-    assert os_autostart._register_linux() == 0
-
-
-def test_register_linux_defers_to_an_enabled_boot_unit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An installed AND enabled boot unit owns the boot path: no crontab entry
-    is written, and a stale one is removed -- registering both would race two
-    converge runs at every boot."""
-    unregistered: list[str] = []
-
-    def owns_boot_path(_home: Path | None = None) -> bool:
-        return True
-
-    def unregister_linux(slug: str) -> int:
-        unregistered.append(slug)
-        return 0
-
-    def run_must_not_happen(*_args: str, **_kw: str) -> None:
-        pytest.fail("crontab must not be consulted")
-
-    monkeypatch.setattr("shared.os_boot_unit.boot_unit_owns_boot_path", owns_boot_path)
-    monkeypatch.setattr(os_autostart, "_unregister_linux", unregister_linux)
-    monkeypatch.setattr(os_autostart.subprocess, "run", run_must_not_happen)
-
-    assert os_autostart._register_linux() == 0
-    assert unregistered == ["ava-t-cafe0123"]
-
-
-def test_register_linux_writes_cron_while_the_unit_is_staged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A staged unit (installed, not yet enabled) does not own the path:
-    `boot_unit_owns_boot_path` is True only when enabled, so the crontab entry
-    keeps converging the home until the reviewed switch."""
-    captured: dict = {}
-
-    def fake_run(cmd, **kw):
-        if cmd[:2] == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=1, stdout="", stderr="no crontab for u")
-        if cmd == ["crontab", "-"]:
-            captured["input"] = kw.get("input")  # pyright: ignore[reportUnknownMemberType]
-            return types.SimpleNamespace(returncode=0, stderr="")
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    def owns_boot_path(_home: Path | None = None) -> bool:
-        return False
-
-    monkeypatch.setattr("shared.os_boot_unit.boot_unit_owns_boot_path", owns_boot_path)
-    monkeypatch.setattr(os_cron.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    assert os_autostart._register_linux() == 0
-    assert "boot  # ava-autostart.ava-t-cafe0123" in captured["input"]
-
-
-def test_register_linux_defers_when_crontab_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The unit-owned branch must survive a host with no crontab binary.
-
-    The stale-entry cleanup runs `crontab -l`; an uncaught FileNotFoundError
-    there would crash `ava start` into the boot unit's uncapped retry -- the
-    failure class this change removes. The cleanup is a no-op instead."""
-
-    def owns_boot_path(_home: Path | None = None) -> bool:
-        return True
-
-    def run_missing(cmd: list[str], **_kw: object) -> None:
-        raise FileNotFoundError(2, "No such file or directory", cmd[0])
-
-    monkeypatch.setattr("shared.os_boot_unit.boot_unit_owns_boot_path", owns_boot_path)
-    monkeypatch.setattr(os_autostart.subprocess, "run", run_missing)  # pyright: ignore[reportUnknownArgumentType]
-
-    assert os_autostart._register_linux() == 0
-
-
-def _cron_result_stub(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    read_rc: int = 0,
-    read_error: str = "",
-    existing: str = "",
-    write_rc: int = 0,
-    write_error: str = "",
-    missing_binary: bool = False,
-) -> list[str]:
-    writes: list[str] = []
-    monkeypatch.setattr(os_cron.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
-
-    def fake_run(cmd: list[str], **kw: object) -> types.SimpleNamespace:
-        if missing_binary:
-            raise FileNotFoundError(2, "No such file or directory", cmd[0])
-        if cmd == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=read_rc, stdout=existing, stderr=read_error)
-        assert cmd == ["crontab", "-"]
-        writes.append(str(kw["input"]))
-        return types.SimpleNamespace(returncode=write_rc, stdout="", stderr=write_error)
-
-    monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)
-    return writes
-
-
-def _capture_cron_logs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> list[tuple[str, str, tuple[object, ...]]]:
-    events: list[tuple[str, str, tuple[object, ...]]] = []
-
-    def record(level: str):
-        def log(message: str, *args: object) -> None:
-            events.append((level, message, args))
-
-        return log
-
-    monkeypatch.setattr(
-        os_autostart,
-        "logger",
-        types.SimpleNamespace(info=record("info"), error=record("error")),
-    )
-    return events
-
-
-def test_register_linux_missing_crontab_output_is_unchanged(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(os_cron.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    assert os_autostart._register_linux() == 0
-    assert capsys.readouterr() == (
-        "  ! autostart: crontab not installed on this host (skipping); cluster will not auto-start on reboot\n",
-        "",
-    )
-
-
-def test_register_linux_read_failure_skips_without_writing(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    writes = _cron_result_stub(monkeypatch, read_rc=2, read_error="permission denied")
-
-    assert os_autostart._register_linux() == 1
-    assert writes == []
-    assert capsys.readouterr() == (
-        "",
-        "  * crontab -l failed (permission denied); skipping autostart registration to avoid clobbering the crontab\n",
-    )
-
-
-@pytest.mark.parametrize(
-    ("write_rc", "expected_logs"),
-    [
-        (
-            0,
-            [
-                (
-                    "info",
-                    "crontab @reboot entry added ({}.{})",
-                    ("# ava-autostart", "ava-t-cafe0123"),
-                )
-            ],
-        ),
-        (1, [("error", "crontab update failed: {}", ("disk full",))]),
-    ],
-)
-def test_register_linux_write_result_keeps_rc_and_log_format(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    write_rc: int,
-    expected_logs: list[tuple[str, str, tuple[object, ...]]],
-) -> None:
-    writes = _cron_result_stub(monkeypatch, write_rc=write_rc, write_error="disk full")
-    events = _capture_cron_logs(monkeypatch)
-
-    assert os_autostart._register_linux() == write_rc
-    assert len(writes) == 1
-    assert capsys.readouterr() == ("", "")
-    assert events == expected_logs
-
-
-@pytest.mark.parametrize(
-    ("read_rc", "existing", "write_rc", "missing_binary", "should_write", "should_log"),
-    [
-        (0, "", 0, True, False, False),
-        (1, "", 0, False, False, False),
-        (0, "0 3 * * * backup\n", 0, False, False, False),
-        (0, "@reboot /x/ava boot # ava-autostart.ava-t-cafe0123\n", 0, False, True, True),
-        (0, "@reboot /x/ava boot # ava-autostart.ava-t-cafe0123\n", 1, False, True, False),
-    ],
-)
-def test_unregister_linux_is_silent_unless_write_succeeds(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    read_rc: int,
-    existing: str,
-    write_rc: int,
-    missing_binary: bool,
-    should_write: bool,
-    should_log: bool,
-) -> None:
-    writes = _cron_result_stub(
-        monkeypatch,
-        read_rc=read_rc,
-        existing=existing,
-        write_rc=write_rc,
-        missing_binary=missing_binary,
-    )
-    events = _capture_cron_logs(monkeypatch)
-
-    assert os_autostart._unregister_linux("ava-t-cafe0123") == 0
-    assert (len(writes) == 1) == should_write
-    assert capsys.readouterr() == ("", "")
-    assert events == ([("info", "crontab @reboot entry removed", ())] if should_log else [])
-
-
 # --- the retry policy, per platform ---------------------------------------
 #
 # One behaviour -- re-run `ava start` every BOOT_RETRY_INTERVAL_S seconds until
@@ -385,38 +121,10 @@ def test_the_job_retries_on_macos_at_the_shared_interval() -> None:
     assert f"<integer>{BOOT_RETRY_INTERVAL_S}</integer>" in xml
 
 
-def test_the_job_retries_on_linux_via_ava_boot(monkeypatch: pytest.MonkeyPatch) -> None:
-    """cron fires a `@reboot` line exactly once, so the loop is ours.
-
-    Pins the whole command SHAPE, not just the verb: `AVA_HOME=<home>` has to
-    come first (cron runs the line through /bin/sh, and an assignment only
-    scopes to the command it precedes), then the checkout's `ava`, then `boot`.
-    Both halves of that line arrived from different branches — the env prefix
-    from `os_cron.cron_env_prefix`, the verb from this change — and nothing else
-    in the suite asserts their order.
-    """
-    captured: dict = {}
-
-    def fake_run(cmd, **kw):
-        if cmd[:2] == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=1, stdout="", stderr="no crontab for u")
-        captured["input"] = kw.get("input")  # pyright: ignore[reportUnknownMemberType]
-        return types.SimpleNamespace(returncode=0, stderr="")
-
-    monkeypatch.setattr(os_cron.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    assert os_autostart._register_linux() == 0
-    assert re.search(
-        r"^@reboot AVA_HOME=\S+ /Users/x/\.local/bin/ava boot\s+# ava-autostart\.",
-        captured["input"],  # pyright: ignore[reportUnknownArgumentType]
-        re.MULTILINE,
-    ), captured["input"]
-
-
 def test_the_job_retries_on_windows_via_ava_boot(monkeypatch: pytest.MonkeyPatch) -> None:
     """`schtasks /RI` is documented as not applicable to ONLOGON, and a cmd.exe
     retry wrapper would flash a console window -- so Windows runs the same
-    `ava boot` loop Linux does."""
+    `ava boot` operation."""
     from shared import os_schtasks
 
     seen: list[tuple[str, tuple[str, ...], int]] = []
@@ -427,7 +135,7 @@ def test_the_job_retries_on_windows_via_ava_boot(monkeypatch: pytest.MonkeyPatch
     )
     assert os_autostart._register_windows() is None
     # Unbounded on purpose: `ava boot` retries with no attempt cap, matching what
-    # launchd and cron do, so a scheduler-imposed runtime limit would be a
+    # launchd and systemd do, so a scheduler-imposed runtime limit would be a
     # Windows-only cap on the one job nothing else recovers.
     assert seen == [("autostart", ("boot",), os_schtasks.NO_TIME_LIMIT_S)]
 

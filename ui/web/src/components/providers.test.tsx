@@ -23,12 +23,6 @@ vi.mock("@/lib/use-alerts", () => ({
   AlertsProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-// The Gate poll has its own focused test. Keep this composition smoke test
-// network-free even though the real provider is intentionally auth-independent.
-vi.mock("@/components/gate-maintenance-provider", () => ({
-  GateMaintenanceProvider: () => null,
-}));
-
 vi.mock("next-themes", () => ({
   ThemeProvider: ({ children, nonce }: { children: ReactNode; nonce?: string }) => (
     <div data-testid="theme-provider" data-nonce={nonce}>{children}</div>

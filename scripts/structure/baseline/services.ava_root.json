@@ -1,6 +1,0 @@
-{
-  "complexity": {
-    "services/ava_root/handoff.py::_parse_unit": 16,
-    "services/ava_root/manifest.py::UnitManifest.from_mapping": 15
-  }
-}

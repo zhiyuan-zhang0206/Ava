@@ -1,8 +1,0 @@
-{
-  "owner_bypasses": {
-    "shared/cluster/provision.py::postgres-dial": 12
-  },
-  "private_imports": {
-    "shared/cluster/derive.py::shared.config.data_plane._is_runner_db_url": 1
-  }
-}

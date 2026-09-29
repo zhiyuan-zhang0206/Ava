@@ -2,7 +2,7 @@
 
 Extends the port-conflict preflight (#1205): `ava start` / `ava converge` now
 also probes the data plane (pg/redis, the URLs the runtime dials) and the
-checkout (HEAD vs cluster pin, dirty marker). Same contract as the port
+checkout (dirty marker). Same contract as the port
 preflight — warning-only, logged to `$AVA_HOME/logs/health_preflight.log`,
 never failing a start.
 """
@@ -46,7 +46,7 @@ def _free_port() -> int:
 
 @pytest.fixture
 def _upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
-    """Probe seams pointing at a healthy plane + an idle update, recording calls."""
+    """Probe seams pointing at a healthy plane, recording calls."""
     calls: dict[str, list[str]] = {"pg": [], "redis": []}
 
     def _pg(url: str) -> str | None:
@@ -59,7 +59,6 @@ def _upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
 
     monkeypatch.setattr(_hp, "probe_postgres", _pg)
     monkeypatch.setattr(_hp, "probe_redis", _redis)
-    monkeypatch.setattr(_hp, "_update_in_flight", lambda: False)
     return calls
 
 
@@ -210,7 +209,7 @@ def test_redact_strips_userinfo():
     )
 
 
-# ─── checkout: HEAD vs pin + dirty, prod installs only ─────────────────────
+# ─── checkout: dirty marker, prod installs only ─────────────────────────────
 
 
 def _git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ConvergeCtx, str, str]:
@@ -253,7 +252,6 @@ def _git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Converge
     first = _commit("one")
     head = _commit("two")
     ctx = ConvergeCtx(repo=repo, ava_home=tmp_path / "home", roles=frozenset({"gateway"}))
-    monkeypatch.setattr(_hp, "_update_in_flight", lambda: False)
     return ctx, head, first
 
 
@@ -267,30 +265,16 @@ def test_checkout_dirty_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert any("dirty (1 changed file" in w for w in warnings)
 
 
-def test_checkout_clean_and_aligned_silent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Clean tree + HEAD == pin → no warnings."""
-    ctx, head, _first = _git_repo(tmp_path, monkeypatch)
-    monkeypatch.setattr(_hp, "_cluster_pin", lambda: head)
+def test_checkout_clean_is_silent_off_a_frozen_legacy_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A clean checkout whose HEAD differs from the historical cluster pin warns
+    nothing: no current writer advances that pin, so comparing against it (and
+    telling the operator to run a bare `ava cluster update`) is a stale verdict."""
+    ctx, _head, first = _git_repo(tmp_path, monkeypatch)
+    monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda **_kw: first)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _hp._checkout_warnings(ctx) == []
-
-
-def test_checkout_pin_relation_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """HEAD ahead of the pin (stray git pull) → a warning naming the relation."""
-    ctx, _head, first = _git_repo(tmp_path, monkeypatch)
-    monkeypatch.setattr(_hp, "_cluster_pin", lambda: first)
-
-    warnings = _hp._checkout_warnings(ctx)
-
-    assert any("ahead of the cluster pin" in w for w in warnings)
-
-
-def test_checkout_pin_unknown_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """No pin (never rolled out) → no pin line, but dirty still reports."""
-    ctx, _head, _first = _git_repo(tmp_path, monkeypatch)
-    monkeypatch.setattr(_hp, "_cluster_pin", lambda: None)
-
-    assert not any("cluster pin" in w for w in _hp._checkout_warnings(ctx))
 
 
 def test_checkout_worktree_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

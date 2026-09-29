@@ -203,7 +203,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_MILVUS_DATA_DIR",
     "AVA_MEMORY_ROOT",
     "AVA_PROJECT_ROOT",
-    "AVA_WATCHDOG_INTERVAL_SECONDS",
     "AVA_OPS_CONCURRENCY",
   ],
   "config-health": [
@@ -225,8 +224,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_TASK_MAINTENANCE_PIDFILE",
     "AVA_EVENTS_MAINTENANCE_PIDFILE",
     "AVA_GATEWAY_PIDFILE",
-    "AVA_GATEWAY_WATCHDOG_PIDFILE",
-    "AVA_AGENT_RUNNER_WATCHDOG_PIDFILE",
     "AVA_MEMORY_INDEXER_PIDFILE",
     "AVA_OPS_PIDFILE",
   ],
@@ -236,9 +233,10 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
 // them. Admission criterion is editorial, not structural: a field belongs
 // here only if a human should NOT reach for the panel to change it. Three
 // buckets today:
-//   - AVA_CLUSTER_SECRET: the cluster-wide pre-shared secret. Rotating it is a
-//     multi-step out-of-band dance (every runner re-enrolled), never a panel
-//     edit; hiding it also keeps it out of the write-only secret editor below.
+//   - AVA_CLUSTER_SECRET: the gateway's human bearer. The backend serves it
+//     read-only (no config write may choose it); it rotates only through
+//     scripts/rotate_cluster_secret.py, which re-issues every remote unit's
+//     bundle, so the panel has nothing to show for it.
 //   - AVA_GATEWAY_MAX_RETRIES / AVA_GATEWAY_RETRY_DELAY_SECONDS: SDK→gateway
 //     transport micro-tuning with no operator-facing consequence. For a genuine
 //     need, ask the Ava Guide agent — it edits .env via the `ava` CLI.

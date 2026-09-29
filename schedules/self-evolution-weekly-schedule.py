@@ -70,9 +70,11 @@ def count_events(since: datetime) -> int:
 
     from shared.paths import ava_home
 
+    from shared.cluster_auth import delivered_token
+
     env_file = Path(ava_home()) / ".env"
-    secret = ""
-    if env_file.exists():
+    secret = delivered_token() or ""
+    if not secret and env_file.exists():
         for line in env_file.read_text().splitlines():
             if line.startswith("AVA_CLUSTER_SECRET="):
                 secret = line.split("=", 1)[1].strip().strip("\"'")

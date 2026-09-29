@@ -5,8 +5,9 @@ need `brew install postgresql@17` (or the apt equivalent) before running. The
 binaries live host-level under `~/.ava/runtime/` — shared by every cluster and
 checkout (they are read-only; only the *data* is per-cluster) — and
 `shared.pg_tools.pg_tool()` prefers them over a brew/apt install, falling back to
-brew/apt when the vendored tree is absent (so existing dev boxes are unaffected
-until they next converge).
+brew/apt when the vendored tree is absent. ``shared.pg_runtime`` validates an
+existing installation at converge; it provisions this distribution only when
+no installation is selected.
 
 Postgres comes from zonky's `embedded-postgres-binaries` (Maven Central): a
 purpose-built relocatable distribution that links its own libs via

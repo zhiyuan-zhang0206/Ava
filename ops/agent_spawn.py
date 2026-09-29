@@ -462,11 +462,16 @@ def create_agent_row(
         # fork stays traceable via the fork event's `source` and the fork
         # prompt inbound's source; it is not what the spawner column means.
         lineage_spawner = f"agent:{fork_from}" if fork_from is not None else spawner
+        # The first life's epoch fence is 0: nothing predates it, so it
+        # supersedes nothing (every reader treats it like NULL). No retired
+        # runtime stamped a birth epoch, so it is also this runtime's proof of
+        # the row's origin: an unadmitted row it later ends by force stays
+        # resurrectable (`shared.lifecycle_acceptance.record_unowned_termination`).
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
             "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, preset_name, "
-            "last_launch_attempt_id) "
-            "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, %s)",
+            "last_launch_attempt_id, last_resurrect_inbound_id) "
+            "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, %s, 0)",
             (
                 new_id,
                 lineage_spawner,

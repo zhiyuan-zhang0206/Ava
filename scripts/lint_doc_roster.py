@@ -20,7 +20,7 @@ Two tables are checked, both by set equality in both directions:
 
 2. the healthcheck roster (`services/healthchecks/check-roster/check-roster.ava.okf.md`)
    against the healthcheck module directory plus the ServiceSpec
-   `healthcheck_module` fields and the watchdog's hand-added imports — the
+   `healthcheck_module` fields and root diagnostic adapter imports — the
    2026-08-21 audit (issue #192) found the table documenting a phantom module
    (`task_maintenance.py`) and missing seven real ones. See
    `check_healthcheck_roster()` for the exact sources of truth.
@@ -46,6 +46,7 @@ structured table only.
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -146,7 +147,7 @@ def check() -> int:
 # healthcheck audit: `check-roster.ava.okf.md` documented a phantom module
 # (`task_maintenance.py`) and missed seven real ones. The three sources of
 # truth are all structured data — the module directory, the ServiceSpec
-# roster, and the watchdog's hand-added imports — so set equality pins all
+# roster, and root diagnostic adapter imports — so set equality pins all
 # three to the doc table.
 
 _HEALTHCHECK_SENTINEL = "<!-- lint:healthcheck-roster-table -->"
@@ -157,26 +158,24 @@ _HEALTHCHECK_SENTINEL = "<!-- lint:healthcheck-roster-table -->"
 _HEALTHCHECK_DIR = _REPO_ROOT / "services" / "healthchecks"
 _HEALTHCHECK_ROSTER = _HEALTHCHECK_DIR / "check-roster" / "check-roster.ava.okf.md"
 
-_WATCHDOG_DAEMON = _REPO_ROOT / "services" / "watchdog" / "daemon.py"
-
-# The watchdog's hand-added checks (no ServiceSpec — host policy, native
-# per-cluster processes, or a compose stack; see services/watchdog/daemon.py). Parsed
-# from the watchdog's own `from services.healthchecks.<x> import main as`
-# imports rather than hardcoded, so a hand-added check added or removed there
-# must be reflected in the roster table on the next lint run.
-_HAND_ADDED_IMPORT = re.compile(
-    r"^from services\.healthchecks\.(\w+) import main as \w+_healthcheck$"
-)
+_DIAGNOSTIC_PROBES = _REPO_ROOT / "services" / "ava_root_glue" / "diagnostic_probes.py"
 
 
-def hand_added_healthchecks() -> set[str]:
-    """The healthcheck modules the watchdog imports directly, outside the
-    ServiceSpec roster (brew-pin, redis-acl, pgbouncer, lgtm)."""
+def diagnostic_healthchecks() -> set[str]:
+    """Protocol modules imported by the explicit root diagnostic adapters.
+
+    Inspect source instead of constructing a host-dependent diagnostic roster;
+    checking documentation must not probe a host or load gateway-only clients.
+    """
     names: set[str] = set()
-    for line in _WATCHDOG_DAEMON.read_text(encoding="utf-8").splitlines():
-        m = _HAND_ADDED_IMPORT.match(line)
-        if m:
-            names.add(m.group(1))
+    tree = ast.parse(_DIAGNOSTIC_PROBES.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        if node.module == "services.healthchecks":
+            names.update(alias.name for alias in node.names)
+        elif node.module.startswith("services.healthchecks."):
+            names.add(node.module.split(".")[2])
     return names
 
 
@@ -226,7 +225,7 @@ def parse_healthcheck_roster(text: str) -> set[str]:
 
 def check_healthcheck_roster() -> int:
     """Assert set equality between the roster table, the module directory, and
-    the ServiceSpec + hand-added registrations; return 0/1 exit code."""
+    the ServiceSpec + diagnostic registrations; return 0/1 exit code."""
     try:
         text = _HEALTHCHECK_ROSTER.read_text(encoding="utf-8")
         parsed = parse_healthcheck_roster(text)
@@ -240,7 +239,7 @@ def check_healthcheck_roster() -> int:
         return 1
 
     directory = directory_healthchecks()
-    registered = spec_healthchecks() | hand_added_healthchecks()
+    registered = spec_healthchecks() | diagnostic_healthchecks()
 
     if parsed != directory:
         print(
@@ -263,19 +262,19 @@ def check_healthcheck_roster() -> int:
     if registered != directory:
         print(
             "healthcheck roster lint failed: module directory does not match the "
-            "ServiceSpec + hand-added registrations.",
+            "ServiceSpec + diagnostic registrations.",
             file=sys.stderr,
         )
         extra = registered - directory
         missing = directory - registered
         if extra:
             print(
-                f"  ServiceSpec/hand-added healthchecks with no module file: {sorted(extra)}",
+                f"  ServiceSpec/diagnostic healthchecks with no module file: {sorted(extra)}",
                 file=sys.stderr,
             )
         if missing:
             print(
-                f"  healthcheck modules not registered (ServiceSpec nor hand-added): "
+                f"  healthcheck modules not registered (ServiceSpec nor diagnostic): "
                 f"{sorted(missing)}",
                 file=sys.stderr,
             )

@@ -7,7 +7,7 @@
     "tests/plugins/test_plugin_metrics_logql.py::test_pr_flow_panels_match_the_otlp_contract": 27
   },
   "files": {
-    "tests/plugins/ava_fleet/test_task_maintenance_daemon.py": 818,
+    "tests/plugins/ava_fleet/test_task_maintenance_daemon.py": 804,
     "tests/plugins/test_ava_memory_write.py": 1181
   }
 }

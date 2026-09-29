@@ -28,8 +28,8 @@ from typing import Any, cast
 import psutil
 import pytest
 
+from shared.native_process.ownership import OwnedProcess, shown_name, stable_create_time
 from shared.platform import IS_WINDOWS
-from shared.proc_tree import OwnedProcess, shown_name, stable_create_time
 from shared.session_record import SessionRecord, pid_starttime_ticks
 from shared.sessions.pty import cli as pty_cli
 from shared.sessions.pty import host as pty_host
@@ -629,7 +629,7 @@ def test_a_session_nothing_proves_is_still_looked_at_and_logged(
 # session still holds a process (a stop run from inside the session it closes).
 _CALLER_IN_SESSION = """
 import os, time, psutil
-from shared.proc_tree import OwnedProcess
+from shared.native_process.ownership import OwnedProcess
 from shared.sessions.pty import session_tree
 shell = OwnedProcess.capture(psutil.Process())
 if os.fork() != 0:

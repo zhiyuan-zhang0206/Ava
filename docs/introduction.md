@@ -208,8 +208,8 @@ it goes red"*, *"what is agent 42 doing?"*, *"tell it to skip the flaky test"*.
 | `cluster_status` | is the cluster up, and is it paused for maintenance |
 
 Which cluster it drives is not a flag: the server dials the gateway of the
-checkout its `ava` belongs to, with that cluster's own secret. The `ava` on PATH
-means prod; a worktree's `.venv/bin/ava` means that worktree's cluster. Nothing
+checkout its `ava` belongs to, with that cluster's own secret. A bare `ava` means
+the cluster `$AVA_HOME` names; a worktree's `.venv/bin/ava` means that worktree's cluster. Nothing
 new is exposed — every tool is the authenticated gateway route the web UI
 already calls.
 
@@ -221,8 +221,8 @@ already calls.
 ## CLI
 
 One entry point — `ava`. Every verb acts on the cluster the checkout anchors:
-the `ava` on PATH means prod (`~/.ava`); a worktree's `.venv/bin/ava` means that
-worktree's cluster. Run `ava --help` for the full surface.
+a bare `ava` means the cluster `$AVA_HOME` names (`~/.ava` for prod); a worktree's
+`.venv/bin/ava` means that worktree's cluster. Run `ava --help` for the full surface.
 
 | Verb | Does |
 |---|---|
@@ -232,7 +232,7 @@ worktree's cluster. Run `ava --help` for the full surface.
 | `ava logs` | list live service sessions or tail one |
 | `ava cluster update` | roll the latest merged code across the cluster — the only update path |
 | `ava cluster ls/status/down/destroy` | cluster registry + multi-machine roster |
-| `ava enroll --gateway <url>` | join a split-deployment agent-runner to a gateway |
+| `.venv/bin/ava start --no-serve-gateway --serve-agent-runner --gateway-url <url> --db-capability <bundle>` | first start of a split-deployment agent-runner joining a gateway (its checkout's CLI — the home's own link does not exist yet; with the bundle's `AVA_DB_CAPABILITY_KEY` exported) |
 | `ava agents` | observe + control agents (ls / cancel / restart / terminate) |
 | `ava schedules` | gateway-supervised schedules (cron jobs agents create and own) |
 | `ava skill install <src>` | install Agent Skills from a git URL or local path |

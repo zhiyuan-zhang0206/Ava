@@ -217,7 +217,7 @@ def test_unreadable_envelope_with_a_live_host_is_retained(
     report = quarantine_stale(
         _AGENT,
         incumbent=None,
-        resources=_resources(ResourceProcess(pid=native.pid, birth=native.create_time())),
+        resources=_resources(ResourceProcess.capture(native)),
         reason="unit test",
     )
 
@@ -473,7 +473,7 @@ def test_live_stored_host_identity_retains_a_superseded_envelope(
     report = quarantine_stale(
         _AGENT,
         incumbent=None,
-        resources=_resources(ResourceProcess(pid=native.pid, birth=native.create_time())),
+        resources=_resources(ResourceProcess.capture(native)),
         reason="unit test",
     )
 
@@ -487,11 +487,17 @@ def test_reused_pid_is_the_ended_boot_not_a_live_host(exec_dir: Path, quarantine
     """A recycled PID means the recorded host ended; the file may be quarantined."""
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
     native = psutil.Process()
+    current = ResourceProcess.capture(native)
+    reused = current.model_copy(
+        update={"starttime": current.starttime + 1}
+        if current.starttime is not None
+        else {"birth": current.birth - 100.0}
+    )
 
     report = quarantine_stale(
         _AGENT,
         incumbent=None,
-        resources=_resources(ResourceProcess(pid=native.pid, birth=native.create_time() - 100.0)),
+        resources=_resources(reused),
         reason="unit test",
     )
 

@@ -69,11 +69,14 @@ def services() -> tuple[ServiceSpec, ...]:
             session="memory-indexer",
             cmd=".venv/bin/python -m services.memory_indexer.daemon",
             capabilities=_GATEWAY,
-            # The pool is a markdown checkout on disk and the index is Milvus — the
-            # daemon never opens the main DB (which is also why it is the one daemon
-            # that skips `assert_schema_current`). So a pg outage or a schema
-            # mismatch is not its concern and the watchdog keeps reviving it.
+            # The pool is a markdown checkout on disk and the default index backends
+            # (numpy / Milvus) never open the main DB (which is also why it is the one
+            # daemon that skips `assert_schema_current`). So a pg outage or a schema
+            # mismatch is not its concern and the watchdog keeps reviving it. The
+            # selectable pgvector backend does dial it, so the launcher still
+            # delivers the gateway login.
             requires_db=False,
+            db_access="gateway",
             curl_url=f"http://localhost:{health_port('memory_indexer')}/healthz",
             # Same identity contract as every core /healthz daemon: a 2xx is only
             # believed once name/home/pid say the answering process is this unit's.

@@ -23,19 +23,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, cast
 
-
-def pid_starttime_ticks(pid: int) -> int | None:
-    """Linux `/proc` start time in clock ticks since boot, or None when unavailable.
-
-    The command name in field 2 may include spaces or parentheses, so split the
-    stat record only after its final closing parenthesis.
-    """
-    try:
-        line = Path(f"/proc/{pid}/stat").read_text()
-        rest = line.rsplit(")", 1)[1].split()
-        return int(rest[22 - 3])
-    except (IndexError, OSError, ValueError):
-        return None
+from shared.native_process import pid_starttime_ticks
 
 
 def record_path(name: str) -> Path:

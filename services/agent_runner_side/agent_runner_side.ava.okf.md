@@ -19,17 +19,16 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 |------|------|------|
 | agent-ops | agent-runner inbound HTTP ops (authenticated) | [[agent_ops.ava.okf.md]] |
 | browser | headed Chrome reuse + shared MCP upstream | [[browser/browser.ava.okf.md]] |
-| permissions-helper | macOS/Windows desktop automation (launchd / logon task, not a session) | [[permissions-helper/permissions-helper.ava.okf.md]] |
+| permissions-helper | macOS permission ancestor and desktop automation | [[permissions-helper/permissions-helper.ava.okf.md]] |
 | computer-mcp | computer-use executor: desktop actions through the signed permissions helper, screen-coordinated (lease + FIFO) + audited (task #1101) | [[computer-mcp.ava.okf.md]] |
 | agent-host | Executes local agents as isolated asyncio turns in one daemon | `services/agent_host/` |
 
 ## Also Under agent-runner Capability
 - **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's PLUS AF_UNIX (its wrapper→daemon transport is a Unix socket), so it is **POSIX-only** where `browser` is not; see [[browser/browser.ava.okf.md]]
 - **computer-mcp** — computer-use executor. Capability = permissions-helper + AF_UNIX; no code gate (governance removed 2026-08-10, peer trust model); see [[computer-mcp.ava.okf.md]]
-- **agent-runner-watchdog** — watchdog instance for agent-runner capability (`--role agent-runner`; see [[watchdog.ava.okf.md]], one on each side)
 
 ## Notes
-permissions-helper is macOS/Windows, and **not in the session service roster** — its platform scheduler owns keepalive and it remains outside `build_services()`, while the macOS helper's real protocol healthcheck is manually attached to the agent-runner watchdog.
+The permissions helper is the macOS root ancestor and remains outside `build_services()`. Root diagnostics observes its protocol without repair authority; Linux has no helper ancestor.
 
 The hosted runner renews database ownership and then beats local liveness before
 publishing its 60-second Redis turn-progress snapshot. That best-effort `SET`
@@ -52,5 +51,5 @@ threads. A true stalled turn that cannot unwind retains its slot and requires
 supervisor recovery; backlog recovery does not weaken that resource boundary.
 
 ## Key Dependencies
-- [[watchdog.ava.okf.md]] — agent-runner-watchdog keeps alive the session services in this group every 60s (agent-host / ops / browser)
+- [[services/ava_root_glue/ava_root_glue.ava.okf.md]] — root probes and supervises the selected service manifest.
 - [[services/services.ava.okf.md|Background Services Overview]] — the upper-level index of grouping and capability distribution

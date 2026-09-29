@@ -374,3 +374,30 @@ def test_cross_migration_replay_chain_needs_no_seed(monkeypatch, tmp_path):
         d, f"{_TS2}_readd-folded-col", "ALTER TABLE widgets ADD COLUMN folded_col INT;"
     )
     assert lint.main() == 0
+
+
+def test_role_switch_in_migration_fails(monkeypatch, tmp_path, capsys):
+    """Schema SQL runs as the admin acting as the owner: no role switching."""
+    lint, d = _lint(monkeypatch, tmp_path)
+    (d / f"{_TS}_escalate.sql").write_text("SET ROLE NONE;\nCREATE TABLE t (id int);")
+    (d / f"{_TS}_escalate.down.sql").write_text("DROP TABLE IF EXISTS t;")
+    assert lint.main() == 1
+    assert f"{_TS}_escalate.sql:1: SET ROLE" in capsys.readouterr().err
+
+
+def test_session_authorization_in_baseline_fails(monkeypatch, tmp_path):
+    lint, _ = _lint(
+        monkeypatch,
+        tmp_path,
+        schema_body=f"{_BASELINE_INSERT}\nDO $$ BEGIN SET SESSION AUTHORIZATION DEFAULT; END $$;",
+    )
+    assert lint.main() == 1
+
+
+def test_role_words_in_comments_and_literals_pass(monkeypatch, tmp_path):
+    lint, d = _lint(monkeypatch, tmp_path)
+    (d / f"{_TS}_note.sql").write_text(
+        "-- never SET ROLE here\nCOMMENT ON TABLE t IS 'RESET ROLE is forbidden';"
+    )
+    (d / f"{_TS}_note.down.sql").write_text("SELECT 1;")
+    assert lint.main() == 0

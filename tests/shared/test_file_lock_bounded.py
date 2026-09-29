@@ -159,10 +159,9 @@ def test_every_env_write_door_takes_the_lock(
     The first version of this change locked `write_fields` alone and claimed the
     CLI-converge / gateway-PUT / ops-daemon race was closed. It was not: converge
     writes `.env` through `upsert_env` on **every `ava start`**, `remove_env` and
-    `rename_env_keys` are two more rewrites, and `enroll`'s `write_bootstrap_env`
-    replaces the file wholesale. A lock on one door orders nothing.
+    `rename_env_keys` are two more rewrites. First start uses the same
+    upsert_env writer. A lock on one door orders nothing.
     """
-    import cli.enroll as enroll_mod
     import shared.envfile as envfile_mod
     import shared.runtime_config as rc
 
@@ -174,15 +173,13 @@ def test_every_env_write_door_takes_the_lock(
     taken: list[Path] = []
     _recorded_lock(monkeypatch, rc, taken)
     _recorded_lock(monkeypatch, envfile_mod, taken)
-    _recorded_lock(monkeypatch, enroll_mod, taken)
 
     rc.write_fields({}, set())
     envfile_mod.upsert_env(env, {"AVA_NEW": "2"})
     envfile_mod.remove_env(env, {"AVA_OLD"})
     rc.rename_env_keys(env, {"AVA_NEW": "AVA_RENAMED"})
-    enroll_mod.write_bootstrap_env(env, gateway="http://g", machine_name="m")
 
-    assert len(taken) == 5, f"a door wrote .env without the lock: {taken}"
+    assert len(taken) == 4, f"a door wrote .env without the lock: {taken}"
     assert set(taken) == {expected}
 
 
@@ -193,7 +190,6 @@ def test_the_write_doors_are_leaves(tmp_path: Path) -> None:
     Asserted on the sources so the invariant survives a future edit."""
     import inspect
 
-    import cli.enroll as enroll_mod
     import shared.envfile as envfile_mod
     import shared.runtime_config as rc
 
@@ -201,7 +197,6 @@ def test_the_write_doors_are_leaves(tmp_path: Path) -> None:
         "upsert_env": envfile_mod.upsert_env,
         "remove_env": envfile_mod.remove_env,
         "rename_env_keys": rc.rename_env_keys,
-        "write_bootstrap_env": enroll_mod.write_bootstrap_env,
         "write_fields": rc.write_fields,
     }
     for name, fn in doors.items():

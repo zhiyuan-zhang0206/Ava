@@ -11,7 +11,8 @@ import psutil
 import pytest
 
 from shared import posixproc
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.native_process import pid_starttime_ticks
+from shared.session_record import SessionRecord
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX expected-record contract")
 

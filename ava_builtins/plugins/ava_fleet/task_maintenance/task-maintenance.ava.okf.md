@@ -26,9 +26,9 @@ A gateway-owned daemon — every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (defaul
 ## Entry Points
 - `ava_builtins/plugins/ava_fleet/services.py:services()` — declares this service's `ServiceSpec` (session `task-maintenance`, gateway capability, carries `gate` reading `AVA_TASK_MAINTENANCE_ENABLED`)
 - `plugins/ava_fleet/task_maintenance/daemon.py` — `.venv/bin/python -m plugins.ava_fleet.task_maintenance.daemon`
-- Healthcheck `plugins/ava_fleet/task_maintenance/healthcheck.py` (HTTP `/healthz` :8108 liveness → `shared.service_respawn.run_keepalive`)
+- Healthcheck `plugins/ava_fleet/task_maintenance/healthcheck.py` (HTTP `/healthz` :8108 protocol, centrally bound to captured root ancestry)
 
 ## Notes
 - Configuration gate `AVA_TASK_MAINTENANCE_ENABLED` (default on): turning it off disables reminders for the whole cluster. The gating logic (`gate`) travels with the plugin's `ServiceSpec`, not hardcoded in `ops/spec.py:_gate_reason`; operational configuration (interval/backoff/escalate_n + pidfile + port 8108) remains in global `shared.config` / `shared.daemon_health`, isomorphic with other gateway daemons.
-- After daemon death, the gateway watchdog keeps it alive every 60s as a fallback: the list is derived from `ServiceSpec.healthcheck_module` in `build_services()` [[services/watchdog/watchdog.ava.okf.md|single-source derivation]] (plugin-registered entries are also covered); this service has been wired (healthcheck_module = `plugins.ava_fleet.task_maintenance.healthcheck`). Hence the "schema drift suicide" above works — after exit it gets resurrected next round.
+- The plugin ServiceSpec selects task-maintenance into the gateway root manifest. Root health probes that exact unit and owns verified recovery; the plugin probe has no independent launch authority.
 - Difference from [[services/gateway_side/heartbeat.ava.okf.md]]: heartbeat wakes idle agents to work, task-maintenance reminds overdue tasks; both only INSERT inbound, both are one per cluster on gateway.

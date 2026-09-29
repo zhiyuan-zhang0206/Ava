@@ -1,17 +1,15 @@
 """`ava boot` — `ava start`, re-run while the machine is still coming up.
 
-The boot job's entry on the platforms whose scheduler cannot retry a failed job
-for us (a Linux host without systemd, Windows `ONLOGON`); macOS lets launchd do
-it instead, and on a Linux host whose service manager is systemd the boot unit's
-`Restart=on-failure` does (`shared/os_boot_unit.py`). Which, and why, is
-`shared/boot_policy.py`.
+The Windows ONLOGON startup retry operation. macOS delegates retry to launchd;
+Linux automatic boot delegates to systemd (`shared/os_boot_unit.py`). The policy
+is stated in `shared/boot_policy.py`.
 
 Retries with no attempt limit, which is what launchd does on the platform that
 has a scheduler-level answer -- the three platforms must agree, or a box whose
 VPN is down for 45 minutes recovers on one and stays down forever on the others.
 
 Not an argparse subcommand: `cli.main` dispatches it by argv before the
-settings-gated `cli.commands` import — the same early slot as `ava enroll` —
+settings-gated `cli.commands` import — the same early slot as first-start initialization —
 because the boot job must be able to retry a start that failed for *any* reason,
 a settings error included.
 
@@ -42,19 +40,10 @@ def _start_command(start_args: list[str]) -> list[str]:
     the venv's `pythonw.exe` outright, precisely so PATH lookup cannot pick a
     different `ava.exe`); re-deriving the binary here would reopen that.
 
-    `--no-readiness-gate` is appended, not forwarded: the loop below retries any
-    non-zero code forever, so it must only ever see codes a retry can fix. A start
-    that could not launch its services still exits 1 and is still retried -- that is
-    the ENETUNREACH class this module exists for. A start that launched them and has
-    one not yet serving exits 0 here on purpose, because the alternative is a box
-    where a headed Chrome that will never launch means `ava start` runs every 60
-    seconds forever. Reviving a launched-but-down service belongs to the watchdog
-    keepalive, which this start has just brought up. The macOS plist
-    (`shared.os_autostart`) passes the same flag for the same reason: launchd cannot
-    read exit codes past zero/non-zero, so the three platforms can only agree if the
-    boot path never produces a readiness code at all.
+    A readiness failure remains a failure. Repeating start reconciles the same
+    root-owned units and leaves healthy generations intact.
     """
-    return [sys.executable, "-m", "cli.main", "start", *start_args, "--no-readiness-gate"]
+    return [sys.executable, "-m", "cli.main", "start", *start_args]
 
 
 def _open_boot_log() -> IO[bytes] | int:

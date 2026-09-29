@@ -52,9 +52,8 @@ any signal:
   shell's pid disproves S: the kernel released that pid, so the session ended.
 - **Freshness.** With no witness left, a proof under 1 s old still stands: the
   session could only be replaced under the same id if it ended and its pid
-  was handed out again inside that second, and the identity check already
-  assumes pid reuse cannot land inside a couple of seconds
-  (`shared/proc_tree.py`). This reaches a helper that a job forks on TERM and
+  was handed out again inside that second, and pid reuse does not land inside
+  a couple of seconds. This reaches a helper that a job forks on TERM and
   orphans: it is then the session's only process, with no captured witness.
   A proven pass that read any process in the session renews the proof, so a
   fork-and-exit chain keeps it current while scans keep reading its hops.
@@ -115,16 +114,17 @@ orphan-host reaper and a failed spawn's abort.
 `kill_all_shell_sessions`, and a force stop reach the host op through the
 session backend.
 
-A normal `ava stop` (`cli/commands/_temporary_stop.py`) captures each shell's
-session with `capture_session` before any signal, HUPs the shells and TERMs
-the rest. Each grace poll `refresh`es every capture with one scan, keeping its
-proof current. A poll is quiet only when no captured process lives and the
-scan read no non-zombie process in the session but the caller, pinned or not;
-it counts only once a second,
-immediate poll is quiet too, since a member can fork while the first scan
-runs. A capture nothing can prove any more is still scanned and its
-session's processes logged. What is left after
-the grace dies by `kill_session_tree(also=<capture>, proven_at=<its proof>)`
+The persistent-terminal closure (`cli/commands/service_stop.py`) — a normal
+`ava stop` (`close_terminals`), a release's stop phase and a PITR activation
+(`close_release_terminals`) — captures each shell's session with
+`capture_session` before any signal, HUPs the shells and TERMs the rest. Each
+grace poll `refresh`es every capture with one scan, keeping its proof current.
+A poll is quiet only when no captured process lives and the scan read no
+non-zombie process in the session but the caller, pinned or not; it counts
+only once a second, immediate poll is quiet too, since a member can fork while
+the first scan runs. A capture nothing can prove any more is still scanned and
+its session's processes logged. What is left after the grace dies by
+`kill_session_tree(also=<capture>, proven_at=<its proof>)`
 (decisions/2026-09-28-stop-escalates-to-sigkill.md,
 decisions/2026-09-28-session-id-proven-by-a-live-member.md). `ava pause`
 closes no terminal.

@@ -13,16 +13,11 @@ _workers: set[asyncio.Future[Any]] = set()
 
 @contextmanager
 def admission(kind: str) -> Generator[None]:
-    """Keep readiness and generation-checked resume reachable during a hold.
-
-    Both remain counted until their actual work finishes. Resume owns its
-    readiness, failure-receipt and exact-generation checks in ops_cluster;
-    accepting the request is not permission to release native admission.
-    """
+    """Keep readiness reachable during a hold; it stays counted until its work finishes."""
     current = maintenance.snapshot()
     if (
         current is not None
-        and kind not in ("status_probe", "cluster_resume")
+        and kind != "status_probe"
         and current.maintenance is not None
         and current.maintenance.phase in ("stopping", "stopped", "starting", "ready")
     ):

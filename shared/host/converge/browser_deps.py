@@ -1,7 +1,6 @@
 """Settings-free browser dependency detection, repair, and operator guidance.
 
-This is the settings-free half of the browser-deps contract, used by
-``cli.enroll`` on a fresh host before Settings can be built and by converge's
+This is the settings-free half of the browser-deps contract, used by converge's
 browser step. It imports only the standard library plus settings-free probes
 from ``shared.platform_probes``; it must never import ``shared.config`` or a
 ``cli`` module.
@@ -76,7 +75,7 @@ def browser_deps_warning(reason: str) -> str:
         )
     elif reason.startswith("no Chrome"):
         repair = (
-            "| Install Google Chrome (after enroll, AVA_CHROME_BINARY         |\n"
+            "| Install Google Chrome (after the first start, AVA_CHROME_BINARY|\n"
             "| can point at an existing binary).                              |\n"
         )
     else:

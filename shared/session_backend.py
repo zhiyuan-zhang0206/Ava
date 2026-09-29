@@ -7,25 +7,17 @@ platform.
 - ``get_backend()`` — the **service/daemon** backend: ``WinprocSessionBackend``
   on Windows; ``HelperProcSessionBackend`` on macOS when helper spawning is
   enabled; otherwise ``PosixProcSessionBackend`` (``shared.posixproc``) on
-  POSIX. Every long-running service session lives here: ``ava start`` launches,
-  healthcheck respawns, pause/unpause, and the orchestration sessions (updater /
-  rollout / cluster-restart — S7 moved them onto this backend).
+  POSIX. Every long-running service session lives here: ``ava start`` launches
+  and pause/unpause.
 - ``get_shell_backend()`` — agent interactive shells / watchers:
   ``PtySessionBackend`` (one detached host per session) on POSIX, the native
-  supervisor on Windows. Never addresses service or orchestration sessions.
+  supervisor on Windows. Never addresses service sessions.
 
-**Every import of a platform supervisor in this module is deliberately
-method-local** — `from shared import winproc` / `from shared import posixproc` /
-`from shared.helperproc import HelperProcSessionBackend`
-inside method bodies, never at module scope: the agent-runner self-update
-(`cli/commands/_update_agent_runner.py`) calls `_do_stop` **in-process** after
-`git checkout` + `uv sync`, so the session-kill code stop runs is whatever
-`sys.modules` holds then. Deferring these imports — and this module staying
-out of the updater's import closure — makes that stop load the just-pulled
-killer off disk instead of the pre-pull one (PR #932's `winproc.kill_session`
-fix reaches the rollout that ships it). Hoist any of them and a kill fix stops
-reaching the rollout, with no symptom other than a Windows agent-runner that
-stops and never comes back. Pinned by `tests/cli/test_update_import_timing.py`.
+**Every import of a platform supervisor in this module is method-local** —
+`from shared import winproc` / `from shared import posixproc` /
+`from shared.helperproc import HelperProcSessionBackend` inside method bodies,
+never at module scope — so selecting one backend does not import every
+platform implementation.
 """
 
 from __future__ import annotations
@@ -76,8 +68,6 @@ class SessionBackend(abc.ABC):
         env: dict[str, str],
         login_shell: bool = True,
         exec_cmd: bool = True,
-        gate_fd: int | None = None,
-        receipt: tuple[Path, str] | None = None,
     ) -> bool:
         """Launch ``cmd`` as a detached, named background session.
 
@@ -95,18 +85,8 @@ class SessionBackend(abc.ABC):
         the command's own rather than a shell sitting in front of it. Daemons
         want this: a surviving wrapper swallows the graceful-stop signal and
         every stop runs to its full timeout. Pass False when the shell is itself
-        part of the session's work — an orchestration session whose ``tee``
-        pipeline and ``[session-exit] rc=`` verdict must outlive the command it
-        runs (``ops.cluster_session``).
-
-        ``gate_fd`` + ``receipt`` are the gated-spawn channel of the updater's
-        normal-release chain (``shared.spawn_receipt`` owns the mechanism): the
-        held per-session spawn-gate descriptor and the ``(receipt_path,
-        nonce)`` the child must turn into its birth receipt before exec. Only
-        the native POSIX supervisor implements them, on Linux. Every other
-        backend refuses when they are provided instead of silently degrading
-        to an unguarded fork — a gated spawn that lost its gate is exactly the
-        ambiguity the mechanism exists to remove (design R1/R8).
+        part of the session's work — a session whose ``tee`` pipeline and
+        ``[session-exit] rc=`` verdict must outlive the command it runs.
 
         Returns True on success. An existing live session of the same name is
         left untouched (idempotent), matching the existing guard at every call
@@ -183,9 +163,9 @@ class SessionBackend(abc.ABC):
         """The file **this backend** redirects a session's output to, or None when it
         keeps no such file.
 
-        Asked by anything that decides whether a long-running session is still
-        working from the freshness of what it has written — currently
-        ``ops.updater_reap._reap_stalled_updater``. A backend that keeps no file
+        Asked by anything that reads a long-running session's output from where
+        the backend wrote it — currently the schedule log reader
+        (``gateway.routers.schedules``). A backend that keeps no file
         (the base default — a pane-shaped backend keeps no file) answers None; the
         native supervisors own their redirect and answer with it. A consumer that
         only knew about the tee'd file would have no liveness evidence at all on a
@@ -288,10 +268,8 @@ class PosixProcSessionBackend(SessionBackend):
     terminal; interactive shells (ava.shell.sessions, watchers) live in
     detached per-session hosts via ``get_shell_backend()``.
 
-    Each method imports ``posixproc`` locally rather than at module scope, for
-    the same self-update reason as ``WinprocSessionBackend`` — see the module
-    docstring; ``tests/cli/test_update_import_timing.py`` fails if one is
-    hoisted.
+    Each method imports ``posixproc`` locally rather than at module scope — see
+    the module docstring.
     """
 
     def has_session(self, name: str) -> bool:
@@ -308,8 +286,6 @@ class PosixProcSessionBackend(SessionBackend):
         env: dict[str, str],
         login_shell: bool = True,
         exec_cmd: bool = True,
-        gate_fd: int | None = None,
-        receipt: tuple[Path, str] | None = None,
     ) -> bool:
         from shared.session_env import exec_into, venv_activation_prefix
 
@@ -329,7 +305,7 @@ class PosixProcSessionBackend(SessionBackend):
             cmd = f"exec bash -lc {shlex.quote(inner)}"
         from shared import posixproc
 
-        return posixproc.new_session(name, cmd, cwd, env=env, gate_fd=gate_fd, receipt=receipt)
+        return posixproc.new_session(name, cmd, cwd, env=env)
 
     def kill_session(
         self,
@@ -411,8 +387,7 @@ class PtySessionBackend(SessionBackend):
 
     The mutating ops keep the CLI-subprocess shape rather than importing the
     pty package's internals: ``new`` must outlive nothing (the host detaches
-    itself), and the subprocess boundary keeps this module import-light for
-    the self-update window (``tests/cli/test_update_import_timing.py``).
+    itself), and the subprocess boundary keeps this module import-light.
     """
 
     def _cli(self, *tokens: str) -> subprocess.CompletedProcess[str]:
@@ -432,11 +407,7 @@ class PtySessionBackend(SessionBackend):
         env: dict[str, str] | None = None,
         login_shell: bool = True,
         exec_cmd: bool = True,  # noqa: ARG002 — an interactive shell is never exec'd away
-        gate_fd: int | None = None,
-        receipt: tuple[Path, str] | None = None,
     ) -> bool:
-        if gate_fd is not None or receipt is not None:
-            raise NotImplementedError(f"{type(self).__name__} has no gated spawn")
         if not login_shell:
             raise NotImplementedError(f"{type(self).__name__} only creates login shells")
         if env is None:
@@ -564,10 +535,8 @@ class WinprocSessionBackend(SessionBackend):
     ``shared.winproc._plan_launch`` — the choice governs whether the command's
     output survives).  PTY methods raise ``NotImplementedError``.
 
-    Each method imports ``winproc`` locally rather than at module scope, and that is
-    load-bearing, not style: it is what lets the self-update's post-checkout stop
-    kill with the freshly pulled ``kill_session``. See the module docstring;
-    ``tests/cli/test_update_import_timing.py`` fails if one of these is hoisted.
+    Each method imports ``winproc`` locally rather than at module scope — see the
+    module docstring.
     """
 
     def has_session(self, name: str) -> bool:
@@ -584,11 +553,7 @@ class WinprocSessionBackend(SessionBackend):
         env: dict[str, str],
         login_shell: bool = True,  # noqa: ARG002 — no login shell exists on Windows
         exec_cmd: bool = True,  # noqa: ARG002 — cmd.exe has no exec
-        gate_fd: int | None = None,
-        receipt: tuple[Path, str] | None = None,
     ) -> bool:
-        if gate_fd is not None or receipt is not None:
-            raise NotImplementedError(f"{type(self).__name__} has no gated spawn")
         from shared import winproc
 
         # `.venv/bin/python` -> the checkout's Windows interpreter is the
@@ -677,10 +642,9 @@ def get_backend() -> SessionBackend:
     """Return the platform-appropriate ``SessionBackend`` singleton.
 
     This is the **service/daemon** backend — every long-running service session
-    (`ava start` launches, healthcheck respawns, pause/unpause) and every
-    orchestration session (updater / rollout / cluster-restart) lives here:
-    the helper-backed supervisor on opted-in macOS hosts, the native supervisor
-    on other POSIX hosts, and the native supervisor on Windows. Agent
+    (`ava start` launches, pause/unpause) lives here: the helper-backed
+    supervisor on opted-in macOS hosts, the native supervisor on other POSIX
+    hosts, and the native supervisor on Windows. Agent
     *processes* do NOT call this function directly: `native_proc()` routes them
     to the same selected process supervisor. Agent shells / watchers use the
     PTY backend (`get_shell_backend()`).
@@ -704,13 +668,18 @@ _shell_backend: SessionBackend | None = None
 def get_shell_backend() -> SessionBackend:
     """Return the backend for AGENT interactive shells and watchers —
     ``PtySessionBackend`` on POSIX (one detached host per session), the
-    native supervisor on Windows; distinct from ``get_backend()``
-    (service/daemon + orchestration sessions). ``ava.shell.sessions`` and
+    root-brokered durable terminal resources on Windows; distinct from ``get_backend()``
+    (service/daemon sessions). ``ava.shell.sessions`` and
     watcher sessions use this PTY backend — never the service backend.
     """
     global _shell_backend  # noqa: PLW0603
     if _shell_backend is None:
-        _shell_backend = WinprocSessionBackend() if IS_WINDOWS else PtySessionBackend()
+        if IS_WINDOWS:
+            from shared.windows_terminal.backend import WindowsTerminalBackend
+
+            _shell_backend = WindowsTerminalBackend()
+        else:
+            _shell_backend = PtySessionBackend()
     return _shell_backend
 
 
@@ -727,10 +696,8 @@ def native_proc() -> NativeProcessSupervisor:
     bounding agent count); daemons use `get_backend()`, while agents'
     persistent shells use `get_shell_backend()`.
 
-    Supervisor imports are method-local for the same reason as
-    `WinprocSessionBackend`'s:
-    `ava stop`'s agent reap (`cli.commands.stop._reap_agent_sessions`) runs through
-    here, and on the self-update path that reap must be the post-checkout code.
+    Supervisor imports are local for the same reason as the module's backends:
+    selecting one platform does not import every platform implementation.
     """
     if IS_WINDOWS:
         from shared import winproc

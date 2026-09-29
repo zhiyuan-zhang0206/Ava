@@ -12,7 +12,7 @@ branch:
 
 - **single box** — `gateway,agent-runner` both local (`~/.ava`).
 - **split** — gateway on one host, an `agent-runner` satellite enrolled to it
-  (`ava enroll`). The user's own multi-machine op (a cloud/server gateway + a
+  (`ava start --serve-agent-runner --no-serve-gateway`). The user's own multi-machine op (a cloud/server gateway + a
   Mac satellite that carries the desktop-bound skills) is this mode.
 
 The user always interacts through the browser UI the gateway serves; "where the
@@ -23,7 +23,7 @@ core lives" only changes the URL (localhost vs a remote/tunnel address).
 | Audience | How they get + run it | Needs Apple Developer ID / a packaged `.app`? |
 |---|---|---|
 | **The operator's own machines** | existing helper + split deployment; grant TCC once per machine | **No** |
-| **Open-source self-hosters (devs)** | `git clone` -> `install.sh` (prereqs + locked dependencies) -> `ava start` -> browser; grant TCC once on macOS | **No** |
+| **Open-source self-hosters (devs)** | `git clone` -> acquire dependencies -> `ava start` -> browser; grant TCC once on macOS | **No** |
 | **Non-technical end users** | a signed, notarized, dependency-bundled one-click `.app` | **Yes** |
 
 The decisive fact: **publishing the source is not shipping an installer.** A
@@ -55,11 +55,10 @@ open-source self-hosting both need neither it nor the paid identity.
 What makes open-source adoption smooth is not signing or bundling, it is *can a
 stranger clone and run*:
 
-- `install.sh` prereq install clean for a newcomer (it grew around one operator's
-  environment).
+- Clear platform dependency acquisition followed by one idempotent first start.
 - A clear first-run path for the LLM API key + config.
 - README must state the hard macOS constraint for desktop skills: a live,
   **unlocked** GUI session (synthetic input / capture are dropped on a locked
   screen).
-- Windows ships the agent-runner half only; a Windows box cannot be a
-  self-contained install ([`../gateway/windows-gateway.md`](../gateway/windows-gateway.md)).
+- Windows hardware uses the Linux lifecycle in WSL2; a native Windows root
+  adapter remains unavailable ([setup](../conventions/windows-setup.md)).

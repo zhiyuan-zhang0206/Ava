@@ -1,5 +1,6 @@
 """A real low-population query cannot turn explicit maintenance into a rollback."""
 
+import json
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -9,7 +10,13 @@ import pytest
 
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster import health_alerts as cluster_health_alerts
-from shared import disabled_services, pause_owner
+from shared import pause_owner, service_selection
+
+
+def _select_excluded(names: set[str]) -> None:
+    service_selection.resolve_selection(
+        {"agent-host", "frontend"}, excluded=tuple(sorted(names)), all_services=not names
+    )
 
 
 @pytest.fixture
@@ -19,12 +26,9 @@ def probe_home(
     """Keep the real DB/count/journal paths; intercept only external side effects."""
     assert db_conn.execute("SELECT count(*) FROM agents_meta").fetchone() == (0,)
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(service_selection, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
     monkeypatch.setattr(cluster_health, "_deploy_suppression", lambda: None)
-    (tmp_path / cluster_health.FAILURE_COUNT_FILE).write_text(
-        f"2\ncode\nprevious low population\n{datetime.now(UTC).isoformat()}"
-    )
-    (tmp_path / cluster_health.PENDING_LKG_PASSES_FILE).write_text("candidate\n1")
     return tmp_path
 
 
@@ -37,7 +41,7 @@ def rollbacks(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         calls.append(command)
         return subprocess.CompletedProcess(command, 1)
 
-    monkeypatch.setattr(cluster_health_alerts.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     return calls
 
 
@@ -61,8 +65,8 @@ def test_expected_low_population_does_not_rollback_or_promote(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     if intent == "disabled":
-        disabled_services.write_skipped({"agent-host"})
-        marker = probe_home / "disabled_services"
+        _select_excluded({"agent-host"})
+        marker = service_selection.selection_path()
     else:
         pause_owner.begin_maintenance("test-maintenance", datetime.now(UTC))
         marker = pause_owner.state_path()
@@ -75,30 +79,35 @@ def test_expected_low_population_does_not_rollback_or_promote(
     )
 
     assert cluster_health._agent_population(1) is False
-    assert cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
+    assert cluster_health.run_health_probe() == 1
 
     assert rollbacks == []
     assert len(alerts) == 1  # Local intent cannot hide a real global population outage.
     assert alerts[0]["status"] == "firing"
     assert marker.read_bytes() == intent_before
-    assert (probe_home / cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "0"
-    assert not (probe_home / cluster_health.PENDING_LKG_PASSES_FILE).exists()
     assert "maintenance" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
     "intent", ["absent", "other-service", "legacy-pause", "resumed", "invalid"]
 )
-def test_unexpected_low_population_still_rolls_back(
+def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
     probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]], intent: str
 ) -> None:
     holder, acquired_at = "test-maintenance", datetime.now(UTC)
     if intent == "other-service":
-        disabled_services.write_skipped({"frontend"})
+        _select_excluded({"frontend"})
     elif intent == "legacy-pause":
-        pause_owner.mark_paused(holder, acquired_at)
+        # The plain record (no maintenance hold) the retired updater's stop op wrote.
+        marker = pause_owner.state_path()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            json.dumps(
+                {"state": "paused", "holder": holder, "acquired_at": acquired_at.isoformat()}
+            )
+        )
     elif intent == "resumed":
-        current = pause_owner.begin_maintenance(holder, acquired_at)
+        current = pause_owner.begin_maintenance(holder, acquired_at).snapshot
         assert current.maintenance is not None
         pause_owner.change_maintenance(
             holder, acquired_at, current.maintenance, current.maintenance, resumed=True
@@ -108,23 +117,20 @@ def test_unexpected_low_population_still_rolls_back(
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("invalid journal")
 
-    assert cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
-    assert len(rollbacks) == 1
-    assert rollbacks[0][1:] == ["cluster", "rollback", "--yes"]
-    assert (probe_home / cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "3"
-
-
-def test_reenabled_host_restores_population_failure_counting(
-    probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]]
-) -> None:
-    disabled_services.write_skipped({"agent-host"})
-    assert cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
+    assert cluster_health.run_health_probe() == 1
     assert rollbacks == []
 
-    disabled_services.write_skipped(set())
-    assert cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
-    assert len(rollbacks) == 1
-    assert (probe_home / cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "1"
+
+def test_reenabled_host_keeps_low_population_unhealthy(
+    probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]]
+) -> None:
+    _select_excluded({"agent-host"})
+    assert cluster_health.run_health_probe() == 1
+    assert rollbacks == []
+
+    _select_excluded(set())
+    assert cluster_health.run_health_probe() == 1
+    assert rollbacks == []
 
 
 def test_disabled_host_does_not_explain_gateway_code_failure(
@@ -133,12 +139,12 @@ def test_disabled_host_does_not_explain_gateway_code_failure(
     alerts: list[dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    disabled_services.write_skipped({"agent-host"})
+    _select_excluded({"agent-host"})
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
 
-    assert cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
-    assert len(rollbacks) == 1
+    assert cluster_health.run_health_probe() == 1
+    assert rollbacks == []
 
 
 def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
@@ -147,13 +153,80 @@ def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
     alerts: list[dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    disabled_services.write_skipped({"agent-host"})
+    _select_excluded({"agent-host"})
 
     def down(**_kwargs: object) -> None:
         raise ConnectionError("private test data plane unavailable")
 
     monkeypatch.setattr("shared.db.connect", down)
     assert cluster_health._agent_population_failure_class(1) == "environment"
-    assert cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
+    assert cluster_health.run_health_probe() == 1
     assert rollbacks == []
-    assert (probe_home / cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "2"
+
+
+def test_release_operation_annotates_the_outage_it_explains_until_it_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    alerts: list[dict[str, object]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An in-flight home operation pauses grading and names itself, even with
+    the data plane (and its deploy lease) down; a failed one alerts."""
+    from ops.deploy_window import DeployWindow
+    from tests.lifecycle.transition.test_start_guard import _operation
+
+    path = _operation(tmp_path.resolve() / "home")
+    home = path.parent.parent.parent
+
+    def lease_unreadable(**_kwargs: object) -> DeployWindow:
+        return DeployWindow(active=False, detail="data plane down")
+
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lease_unreadable)
+    message = "FAIL: gateway liveness — health endpoint unreachable or non-200"
+    started_at = datetime.now(UTC) - timedelta(minutes=20)
+    (home / cluster_health.ALERT_STATE_FILE).write_text(f"{message}\n{started_at.isoformat()}\n")
+
+    assert cluster_health._unhealthy(home, message) == 1
+    assert alerts == []
+    assert f"release operation {path.parent.name} at prepared" in capsys.readouterr().err
+
+    failed = json.loads(path.read_bytes()) | {"error": "injected native failure"}
+    path.write_text(json.dumps(failed) + "\n")
+    assert cluster_health._unhealthy(home, message) == 1
+    assert [alert["status"] for alert in alerts] == ["firing"]
+    assert "alert grading paused" not in capsys.readouterr().err
+
+
+def test_a_held_operation_leaves_no_deploy_lease_to_explain_the_outage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    alerts: list[dict[str, object]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A held operation's executor exits on purpose, and its `fleet:<id>` deploy
+    lease outlives it until the lease TTL: neither explains the outage, and the
+    hold is no lost executor either (its own `held` alert is the incident)."""
+    from ops.deploy_window import DeployWindow
+    from tests.lifecycle.transition.test_start_guard import _operation
+
+    path = _operation(tmp_path.resolve() / "home")
+    home = path.parent.parent.parent
+    held = json.loads(path.read_bytes()) | {"phase": "stopping", "error": "injected failure"}
+    path.write_text(json.dumps(held) + "\n")
+
+    def its_own_lease(**_kwargs: object) -> DeployWindow:
+        return DeployWindow(
+            active=True, detail=f"a cluster deploy is in progress — fleet:{path.parent.name}"
+        )
+
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", its_own_lease)
+    message = "FAIL: gateway liveness — health endpoint unreachable or non-200"
+    started_at = datetime.now(UTC) - timedelta(minutes=20)
+    (home / cluster_health.ALERT_STATE_FILE).write_text(f"{message}\n{started_at.isoformat()}\n")
+
+    assert cluster_health_alerts.executor_lost() is None
+    assert cluster_health._unhealthy(home, message) == 1
+    assert [alert["status"] for alert in alerts] == ["firing"]
+    assert "alert grading paused" not in capsys.readouterr().err

@@ -1,0 +1,85 @@
+gui/501/com.ava.review.lcrev-453d549b.noexec = {
+	active count = 0
+	path = /fixture/job/noexec/com.ava.review.lcrev-453d549b.noexec.plist
+	type = LaunchAgent
+	state = spawn scheduled
+
+	program = /fixture/job/does-not-exist
+	arguments = {
+		/fixture/job/does-not-exist
+	}
+
+	working directory = /fixture/job/noexec
+
+	stdout path = /fixture/job/noexec/stdout.log
+	stderr path = /fixture/job/noexec/stderr.log
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.GML39p1dD5/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		XPC_SERVICE_NAME => com.ava.review.lcrev-453d549b.noexec
+	}
+
+	domain = gui/501 [100023]
+	asid = 100023
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 1
+	last exit code = 78: EX_CONFIG
+
+	event triggers = {
+		com.ava.review.lcrev-453d549b.noexec => {
+			keepalive = 0
+			service = com.ava.review.lcrev-453d549b.noexec
+			stream = com.apple.launchd.helper
+			monitor = com.apple.UserEventAgent-Aqua
+			descriptor = {
+				"Executable" => "/fixture/job/does-not-exist"
+				"SkipImmediatePoll" => false
+			}
+		}
+	}
+
+	event channels = {
+		"com.apple.launchd.helper" = {
+			port = 0x0
+			active = 0
+			managed = 1
+			reset = 0
+			hide = 0
+			watching = 0
+		}
+	}
+
+	resource coalition = {
+		ID = 13428
+		type = resource
+		state = active
+		active count = 1
+		name = com.ava.review.lcrev-453d549b.noexec
+	}
+
+	jetsam coalition = {
+		ID = 13429
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.ava.review.lcrev-453d549b.noexec
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+
+	properties = runatload | penalty box | inferred program
+}

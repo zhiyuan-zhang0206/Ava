@@ -282,11 +282,11 @@ def bootstrap_from_gateway() -> None:
     """Fetch the consolidated pool from the gateway and lay it down as this
     machine's initial memory checkout.
 
-    For a split agent-runner whose memory remote is not configured (headless
-    enroll, no GitHub credentials): the shared pool must still reach its
+    For a split agent-runner whose memory remote is not configured (a headless
+    remote runner, no GitHub credentials): the shared pool must still reach its
     agents, so the gateway — which holds the consolidated checkout on `main` —
     serves it directly as a git bundle (GET /api/memory/pool, authenticated
-    with the cluster secret like every runner-to-gateway call). The bundle
+    with the runner's API token like every runner-to-gateway call). The bundle
     carries real `main` ancestry, so the machine branch cloned from it is a
     true descendant of `main` — configuring a memory remote later converges
     cleanly (no add/add storms on the first steward PR). The junk bundle-path

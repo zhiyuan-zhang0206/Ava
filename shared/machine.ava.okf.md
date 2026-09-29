@@ -88,11 +88,13 @@ agent onto a gateway-only node where only the scheduling/DB layer lives".
 - Any endpoint returning or fanning out per-machine data must declare its
   role scope; the classification rule is in
   `conventions/python-conventions.md`.
-- Enrolling a split runner (`ava enroll`) does not birth a cluster — its cluster
-  identity **is** the gateway URL + cluster secret it presented.
+- Enrolling a split runner (`ava start`) does not birth a cluster — its cluster
+  identity **is** the gateway URL + the capability bundle it installed.
+- `gateway_auth_headers` presents this process's delivered machine API token
+  (`AVA_API_TOKEN`), else the gateway home's human secret; empty when open.
 
 ## Key Dependencies
 
 - [[../services/services.ava.okf.md]] — which services each capability contributes
 - [[paths.ava.okf.md]] — where the `machine_*` files live
-- [[../cli/cli.ava.okf.md]] — `ava start` / `ava enroll`, which write these labels
+- [[../cli/cli.ava.okf.md]] — `ava start`, which persists these labels

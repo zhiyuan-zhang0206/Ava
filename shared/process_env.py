@@ -1,9 +1,9 @@
-"""Small process-environment primitives for one-shot child protocols.
+"""Small process-environment primitives for child processes.
 
 Runtime configuration belongs in ``shared.config``. These helpers are only for
 process mechanics that Settings cannot represent: copying the complete live
-environment across ``exec``, consuming a one-shot marker, and adopting values a
-child durably committed for clients created later in the surviving parent.
+environment into a child, or building the fixed environment of a child that
+must inherit no authority.
 """
 
 from __future__ import annotations
@@ -20,21 +20,31 @@ def inherited_process_env(overrides: Mapping[str, str] | None = None) -> dict[st
     return child
 
 
-def consume_process_marker(name: str, *, armed_value: str) -> bool:
-    """Remove a one-shot marker and report whether it advertises this protocol."""
-    return os.environ.pop(name, None) == armed_value
+# The operator's process mechanics a long-lived native daemon may keep: binary
+# lookup (a bare `redis-server` resolves through the child's PATH), identity,
+# temp dir, timezone and locale (`LC_*` as a prefix). The Windows names matter
+# only to a throwaway Postgres there (`pg_start_env`): a Windows child needs
+# `SystemRoot` to run at all, and `pg_ctl` starts the server through `COMSPEC`.
+_DAEMON_ENV_NAMES = frozenset(
+    {"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TZ", "LANG"}
+    | {"SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "TEMP", "TMP", "USERPROFILE"}
+)
 
 
-def update_process_env(values: Mapping[str, str]) -> None:
-    """Adopt committed handoff values for clients built later in this process."""
-    os.environ.update(values)
+def daemon_process_env() -> dict[str, str]:
+    """The environment of a long-lived data-plane daemon (PgBouncer, Redis, and
+    the Postgres postmaster through `shared.pg_tools.pg_start_env`).
 
-
-def remove_process_env(names: tuple[str, ...]) -> None:
-    """Strip parent-only authority before a restricted child starts work."""
-
-    for name in names:
-        os.environ.pop(name, None)
+    Only the operator's process mechanics cross, never configuration or a
+    credential: the boot pass may have put the gateway login, the write
+    generation and its API token into this process's environment, and a daemon
+    would otherwise keep them until it restarts.
+    """
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name in _DAEMON_ENV_NAMES or name.startswith("LC_")
+    }
 
 
 def restricted_process_env() -> dict[str, str]:

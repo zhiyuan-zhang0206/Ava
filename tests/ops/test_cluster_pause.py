@@ -257,12 +257,10 @@ def test_unpause_changes_no_service_sessions(
     assert local_runtime.spawned == local_runtime.killed == []
 
 
-def test_local_resume_refusal_is_the_verdict_the_unpause_raises(
-    monkeypatch: pytest.MonkeyPatch,
+def test_unpause_refuses_a_held_unit_whose_services_stopped(
+    monkeypatch: pytest.MonkeyPatch, posture: list[str]
 ) -> None:
-    """The pre-check a caller runs before attempting (the rollout finalize tail,
-    issue #2162 / task #2966) must be the same verdict the attempt itself raises —
-    one source, so asking first and refusing cannot disagree."""
+    """A held unit whose services stopped resumes only after `ava start` passes readiness."""
     from shared.maintenance_state import MaintenanceHold
 
     when = datetime(2026, 9, 10, tzinfo=UTC)
@@ -270,11 +268,10 @@ def test_local_resume_refusal_is_the_verdict_the_unpause_raises(
     pause_owner.change_maintenance("wsl:pid1", when, MaintenanceHold(), MaintenanceHold("stopping"))
     monkeypatch.setattr("shared.start_serving.is_serving", lambda: False)
 
-    refusal = cluster_pause.local_resume_refusal()
-    assert refusal == "services have stopped; ava start must pass readiness before resume"
     with pytest.raises(RuntimeError) as raised:
         cluster_pause.unpause_local_cluster()
-    assert str(raised.value) == refusal
+    assert str(raised.value) == "services have stopped; ava start must pass readiness before resume"
+    assert posture == []
 
 
 def test_release_local_db_pools_dials_the_host_and_releases_the_ops_pool(

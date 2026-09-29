@@ -1,43 +1,16 @@
-"""OTel Collector sidecar healthcheck — called every 60s by the watchdog.
+"""Read-only health probes for otel collector; the root supervisor owns recovery."""
 
-Probes the sidecar's local OTLP/HTTP receiver independently of export overrides (default
-http://127.0.0.1:4318 — the port follows AVA_TELEMETRY_OTLP_PORT, task #1945)
-with a valid empty ExportTraceServiceRequest and requires a 2xx. A socket that merely answers 401
-or 415 is not a working ingestion path. It also reads the collector's pinned
-loopback Prometheus endpoint (the per-unit AVA_OTELCOL_METRICS_PORT, default
-8888) for current exporter queue saturation. Remote pressure is logged, not
-"fixed" by restarting a healthy local process; the self-scrape in the
-collector config exports the same queue/drop metrics to central Prometheus for
-alerting.
-
-The sidecar is the local OTLP entry for every agent on this machine — except
-that a gateway without its home's ``lgtm-host`` marker (and without an
-explicit ``AVA_TELEMETRY_OTLP_ENDPOINT`` override) has no local collector
-responsibility and its healthcheck warns/returns; pure runners retain relay
-collector behavior. When responsible and down, trace/event/metric export
-drops (agents retry briefly, then shed) until the watchdog revives it within a
-minute.
-"""
-
-import logging
 import re
 import urllib.request
 from dataclasses import dataclass
-from pathlib import Path
 
 from shared.config import settings
 from shared.daemon_health import DaemonProbe
-from shared.log import init_gateway_process, logger
 from shared.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+from shared.native_process.ownership import OwnedProcess, leader_owns_pids
 from shared.observability import collector_allowed_for_home, gateway_observability_home
-from shared.paths import otel_collector_binary, otel_collector_config
-from shared.service_respawn import respawn_and_verify, run_keepalive
-from shared.supervised_listener import (
-    probe_supervised_listener,
-    reclaim_stale_supervised_listener,
-)
+from shared.port_preflight import ListenerDiscoveryError, strict_listeners_on
 
-_log = logging.getLogger("services.healthchecks.otel_collector")
 _QUEUE_SAMPLE = re.compile(
     r"^otelcol_exporter_queue_(?P<kind>capacity|size)\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9.eE+-]+)$"
 )
@@ -45,7 +18,6 @@ _ENQUEUE_FAILURE_SAMPLE = re.compile(
     r"^otelcol_exporter_enqueue_failed_[^{]+\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9.eE+-]+)$"
 )
 _LABEL = re.compile(r'(?:^|,)\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)="(?P<value>[^"]*)"')
-_COLLECTOR_RESPAWN_TIMEOUT_S = 5.0
 
 
 def _collector_serves_this_home() -> bool:
@@ -97,26 +69,53 @@ def _is_alive() -> bool:
         return False
 
 
-def probe_collector() -> DaemonProbe:
-    """The collector is alive only when its OTLP response and supervisor agree."""
-    listener = probe_supervised_listener(
-        "otel-collector", ports=_collector_ports(), binary=otel_collector_binary()
-    ).probe
-    if not listener.alive:
-        return listener
-    if not _is_alive():
-        return DaemonProbe.down("supervised collector does not accept a valid OTLP trace request")
-    return listener
-
-
-def take_over_stale_collector() -> None:
-    """Evict only same-binary collector listeners without a live session record."""
-    reclaim_stale_supervised_listener(
-        "otel-collector",
-        ports=_collector_ports(),
-        binary=otel_collector_binary(),
-        grace_s=_COLLECTOR_RESPAWN_TIMEOUT_S,
+def _foreign_listeners(holders: dict[int, set[int]], owner: OwnedProcess) -> list[int]:
+    """PIDs holding a probed port that fall outside root's collector process tree."""
+    return sorted(
+        pid for pids in holders.values() for pid in pids if not leader_owns_pids(owner, {pid})
     )
+
+
+def _owned_collector_process() -> OwnedProcess | DaemonProbe:
+    """Root's captured collector process identity, or the probe explaining its absence."""
+    from shared.root_control.client import RootClientError, owned_process
+
+    try:
+        owner = owned_process("otel-collector")
+    except RootClientError as exc:
+        return DaemonProbe.unavailable(str(exc))
+    if owner is None:
+        return DaemonProbe.unavailable("root has no live collector process identity")
+    return owner
+
+
+def probe_collector() -> DaemonProbe:
+    """Certify protocol health only for listeners owned by root's captured process."""
+    ports = _collector_ports()
+    try:
+        holders = {port: set(strict_listeners_on(port)) for port in ports}
+    except ListenerDiscoveryError as exc:
+        return DaemonProbe.unavailable(str(exc))
+    if not holders[ports[0]]:
+        return DaemonProbe.down(f"no collector listener on {ports[0]}")
+    owner_or_probe = _owned_collector_process()
+    if isinstance(owner_or_probe, DaemonProbe):
+        return owner_or_probe
+    owner = owner_or_probe
+    foreign = _foreign_listeners(holders, owner)
+    if foreign:
+        return DaemonProbe.port_taken(
+            f"collector ports {ports} include pid(s) {foreign} outside root's process tree"
+        )
+    if not _is_alive():
+        return DaemonProbe.down("root-owned collector does not accept a valid OTLP trace request")
+    try:
+        current = {port: set(strict_listeners_on(port)) for port in ports}
+    except ListenerDiscoveryError as exc:
+        return DaemonProbe.unavailable(str(exc))
+    if current != holders or _foreign_listeners(current, owner):
+        return DaemonProbe.down("collector listener generation changed during the OTLP probe")
+    return DaemonProbe.up("root-owned collector accepts OTLP trace requests")
 
 
 def _queue_pressure() -> CollectorPressure | None:
@@ -158,46 +157,3 @@ def _queue_pressure() -> CollectorPressure | None:
         )
     )
     return CollectorPressure(saturated=saturated, enqueue_failures=failures)
-
-
-def _restart_daemon() -> DaemonProbe:
-    """Take over a verified stale collector, then respawn and verify its replacement."""
-    project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
-    take_over_stale_collector()
-    return respawn_and_verify(
-        "otel-collector",
-        f"{otel_collector_binary()} --config {otel_collector_config()}",
-        project_root,
-        verify=probe_collector,
-        extra_env={"AVA_PROCESS_PROFILE": "gateway"},
-        graceful_timeout_s=_COLLECTOR_RESPAWN_TIMEOUT_S,
-    )
-
-
-def main() -> None:
-    init_gateway_process("otel-collector")
-    if not _collector_serves_this_home():
-        logger.bind(_no_emitter=True, component="otel-collector-healthcheck").warning(
-            "collector skipped — this gateway home is not the LGTM host; telemetry export is unavailable"
-        )
-        return
-    if not probe_collector().alive:
-        run_keepalive("otel-collector", _log, probe=probe_collector, respawn=_restart_daemon)
-        return
-    pressure = _queue_pressure()
-    if pressure is None:
-        logger.bind(_no_emitter=True, component="otel-collector-healthcheck").warning(
-            "collector ingestion is alive but internal queue metrics are unreadable at {}",
-            _metrics_url(),
-        )
-    elif pressure.saturated:
-        failed = sum(pressure.enqueue_failures.get(name, 0) for name in pressure.saturated)
-        logger.bind(_no_emitter=True, component="otel-collector-healthcheck").warning(
-            "collector exporter queue saturated: exporters={} lifetime enqueue failures={}",
-            ",".join(pressure.saturated),
-            failed,
-        )
-
-
-if __name__ == "__main__":
-    main()

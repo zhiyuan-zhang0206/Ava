@@ -5,8 +5,8 @@ process in the shell's POSIX session (``getsid(pid) == shell pid``) together
 with that process's descendants. Every path that ends a session goes through
 `kill_session_tree`: the host's ``kill`` op, the CLI's record-based kill of a
 wedged host, the lazy sweep of a crashed host's shell, the orphan-host reaper
-(`kill_host_tree`), and the SIGKILL leg of a normal `ava stop`'s terminal
-closure.
+(`kill_host_tree`), and the SIGKILL leg of the persistent-terminal closure (a
+normal `ava stop`, a release, a PITR activation).
 
 Why the POSIX session is the membership test, not process groups or the tty:
 
@@ -63,8 +63,8 @@ from typing import NamedTuple
 import psutil
 
 from shared.log import logger
-from shared.proc_tree import OwnedProcess, shown_name
-from shared.session_record import pid_starttime_ticks
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import OwnedProcess, shown_name
 
 # How long one freeze pass waits for its SIGSTOPs to land before rescanning.
 # A member in uninterruptible sleep stops late; the next pass still sees it.
@@ -79,9 +79,8 @@ _POLL_S = 0.01
 # How long a session-id proof stands once no captured member is left to renew
 # it: the original session could only have been replaced by a new one under the
 # same id if it ended and the kernel handed the pid out again inside this
-# window. Half the couple of seconds the identity check already relies on for
-# the same fact (`shared.proc_tree`: "Pid reuse cannot land inside a couple of
-# seconds").
+# window. Pid reuse does not land inside a couple of seconds; this is half that
+# (decisions/2026-09-28-session-id-proven-by-a-live-member.md).
 _PROOF_FRESH_S = 1.0
 
 # A member in one of these states cannot fork any more.
