@@ -138,6 +138,12 @@ and deterministic) into a snapshot file next to the code: `base/db/api.txt`,
 `base/agents/api.txt`, `base/events/api.txt`. Regenerate with
 `.venv/bin/python scripts/structure/contracts.py --write`; the
 `lint-contract-snapshots` pre-commit hook runs `--check` and fails on drift.
+That hook is `files:`-filtered, and pre-commit's own diff selection never
+passes it a purely deleted path (it selects Added/Copied/Modified/Renamed
+only) — so a change that only deletes the last file behind a public symbol
+never triggers it, on any compared range. `lint-prepush-artifact-freshness`
+(pre-push, `always_run: true`) is the unconditional backstop for exactly that
+case; see [git hooks](runbook.md#git-hooks-pre-commit--pre-push).
 
 **A snapshot diff is a contract change, and the PR must declare it** (see the
 "Contract change" section in

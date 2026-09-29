@@ -76,7 +76,9 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   sorts the paths before collection and stops a run whose collection still splits
   a directory.
 - **Full non-e2e + e2e + coverage threshold runs in CI** — it's the merge gate.
-- **Framework pre-push hooks** run pyright, frontend tsc, eslint and vitest. Install
+- **Framework pre-push hooks** run pyright, frontend tsc, eslint and vitest, plus a
+  branch-diff rerun of the pre-commit stage and an unconditional generated-artifact
+  freshness sweep (neither runs pytest). Install
   both stages from the main clone's stable `.venv`, never a worktree:
   `.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push`.
   See [the hook runbook](../../../conventions/runbook.md#git-hooks-pre-commit--pre-push)

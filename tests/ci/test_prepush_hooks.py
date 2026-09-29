@@ -4,11 +4,13 @@
 
 import fcntl
 import os
+import re
 import selectors
 import shlex
 import shutil
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import Literal
 
@@ -18,6 +20,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts/prepush-guard.sh"
 CHECK = ROOT / "scripts/provision/check_git_hooks.py"
+BRANCH_LINT = ROOT / "scripts/prepush-branch-lint.sh"
+ARTIFACT_FRESHNESS = ROOT / "scripts/prepush-artifact-freshness.sh"
 INSTALL = ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push"
 requires_flock = pytest.mark.skipif(shutil.which("flock") is None, reason="flock is not installed")
 
@@ -99,6 +103,192 @@ def test_stage_contract() -> None:
     assert check["stages"] == ["pre-commit"]
     assert check["always_run"] is True
     assert check["verbose"] is True
+
+
+def test_prepush_parity_hooks_configured() -> None:
+    # Both close a distinct gap left by pre-commit's own diff selection (see
+    # the hooks' comments in .pre-commit-config.yaml): rebase/cherry-pick/merge
+    # commits that never ran pre-commit, and a delete-only diff that a
+    # files:-filtered hook can never see on any range. Neither may leak into
+    # the pre-commit stage -- that would make every `git commit` pay their cost.
+    config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
+    hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
+
+    branch_diff = hooks["lint-prepush-branch-diff"]
+    assert branch_diff["stages"] == ["pre-push"]
+    assert branch_diff["always_run"] is True
+    assert branch_diff["verbose"] is True
+    assert branch_diff["pass_filenames"] is False
+    assert branch_diff["entry"] == "bash scripts/prepush-branch-lint.sh"
+
+    freshness = hooks["lint-prepush-artifact-freshness"]
+    assert freshness["stages"] == ["pre-push"]
+    assert freshness["always_run"] is True
+    assert freshness["verbose"] is True
+    assert freshness["pass_filenames"] is False
+    assert freshness["entry"] == "bash scripts/prepush-artifact-freshness.sh"
+
+
+def test_artifact_freshness_hook_list_matches_config() -> None:
+    # Drift guard: scripts/prepush-artifact-freshness.sh hardcodes the
+    # generated-artifact/snapshot hook family so it can duplicate each one
+    # unconditionally at push. A new files:-filtered snapshot hook added to
+    # .pre-commit-config.yaml without also joining this list would silently
+    # keep the same delete-only blind spot the hook exists to close.
+    script = ARTIFACT_FRESHNESS.read_text()
+    match = re.search(r"hooks=\(\n(.*?)\n\)\n", script, re.S)
+    assert match, "scripts/prepush-artifact-freshness.sh must define a hooks=(...) array"
+    listed = [line.strip() for line in match.group(1).splitlines() if line.strip()]
+    expected = {
+        "lint-contract-snapshots",
+        "types-codegen-fresh",
+        "constants-codegen-fresh",
+        "events-registry-fresh",
+        "config-lite-table-fresh",
+        "lint-ava-okf",
+        "check-doc-references",
+    }
+    assert len(listed) == len(expected), "duplicate id in prepush-artifact-freshness.sh hooks list"
+    assert set(listed) == expected
+
+    config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
+    hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
+    for hook_id in listed:
+        hook = hooks[hook_id]
+        # Each must still be a normal filtered pre-commit-stage hook: the
+        # freshness script is what adds the always_run/push-time behavior,
+        # not the hook's own commit-time definition.
+        assert hook.get("pass_filenames") is False
+        assert "pre-commit" in hook.get("stages", config["default_stages"])
+        assert hook.get("always_run") is not True
+
+
+def test_branch_lint_skips_without_origin_main(checkout: Path) -> None:
+    result = subprocess.run(
+        ["bash", str(BRANCH_LINT)],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "PRE-PUSH SKIPPED [branch-lint]: origin/main is not resolvable locally" in result.stderr
+
+
+def test_branch_lint_guard_missing_flock_skips(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Same PATH-shimming technique as test_missing_flock_skips below, applied
+    # to the new "branch-lint" tool so this passes on any host regardless of
+    # whether flock is actually installed here.
+    shim_dir = checkout / "no-flock"
+    shim_dir.mkdir()
+    bash = shutil.which("bash")
+    assert bash is not None
+    (shim_dir / "bash").symlink_to(bash)
+    monkeypatch.setenv("PATH", str(shim_dir))
+    result = run_guard(checkout, "branch-lint")
+    assert result.returncode == 0
+    assert "PRE-PUSH SKIPPED [branch-lint]: flock is not installed" in result.stderr
+    assert "executed" not in result.stdout
+
+
+@requires_flock
+def test_branch_lint_guard_preflight_missing_precommit(checkout: Path) -> None:
+    # scripts/prepush-branch-lint.sh delegates its lock/load handling to
+    # prepush-guard.sh's "branch-lint" tool; exercise that preflight directly
+    # the same way the existing pyright/tsc/eslint/vitest tests do. Needs a
+    # real flock to get past the earlier check, like the other @requires_flock
+    # preflight tests in this file.
+    result = run_guard(checkout, "branch-lint")
+    assert result.returncode == 0
+    assert "PRE-PUSH SKIPPED [branch-lint]: missing .venv/bin/pre-commit" in result.stderr
+    assert "executed" not in result.stdout
+
+
+def _init_probe_repo(path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.email", "t@example.com"], check=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], check=True)
+
+
+def test_delete_only_diff_skips_filtered_hook_but_always_run_catches_it(tmp_path: Path) -> None:
+    """Regression test for the gap behind PR #3658 (`base/agents/api.txt` stale
+    after a rebase deleted the module it described): pre-commit's own diff
+    selection passes a files:-filtered hook only Added/Copied/Modified/Renamed
+    paths -- never a Deleted one, on any compared range -- so only an
+    always_run duplicate at push can catch a delete-only diff.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_probe_repo(repo)
+    log = tmp_path / "ran.log"
+    (repo / ".pre-commit-config.yaml").write_text(
+        textwrap.dedent(f"""\
+            default_install_hook_types: [pre-commit, pre-push]
+            default_stages: [pre-commit]
+            repos:
+              - repo: local
+                hooks:
+                  - id: filtered-check
+                    name: filtered check (commit stage, files filter)
+                    entry: bash -c "echo RAN >> {log}"
+                    language: system
+                    files: ^foo/.*\\.py$
+                    pass_filenames: false
+                  - id: filtered-check-prepush
+                    name: same check, always_run duplicate at prepush
+                    entry: bash -c "echo RAN >> {log}"
+                    language: system
+                    stages: [pre-push]
+                    always_run: true
+                    pass_filenames: false
+            """)
+    )
+    (repo / "foo").mkdir()
+    (repo / "foo/bar.py").write_text("print(1)\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "--no-verify", "-m", "c1"], check=True)
+    base_sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(["git", "-C", str(repo), "rm", "-q", "foo/bar.py"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "--no-verify", "-m", "c2: delete only"], check=True
+    )
+
+    def run_pre_commit(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "pre_commit", *args],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+
+    # The corrected range still selects nothing for the filtered hook: a
+    # delete-only diff is invisible to it regardless of which range is used.
+    filtered = run_pre_commit(
+        "run",
+        "--hook-stage",
+        "pre-commit",
+        "--from-ref",
+        base_sha,
+        "--to-ref",
+        "HEAD",
+        "filtered-check",
+    )
+    assert filtered.returncode == 0
+    assert "no files to check" in filtered.stdout
+    assert not log.exists()
+
+    # The always_run duplicate ignores the filter entirely and catches it.
+    always_run = run_pre_commit("run", "--hook-stage", "pre-push", "--all-files")
+    assert always_run.returncode == 0
+    assert "no files to check" not in always_run.stdout
+    assert log.read_text().count("RAN") == 1
 
 
 def test_missing_flock_skips(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
