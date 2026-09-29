@@ -313,7 +313,7 @@ async def post_agents_resurrect_billing(
     audited no-op, and a concurrent second run is refused by the run-level
     advisory lock.
     """
-    from ops.billing_recovery import run_billing_recovery
+    from ops.ops_lifecycle.billing_recovery import run_billing_recovery
 
     return await run_billing_recovery(execute=body.execute, pool=request.app.state.db_pool)
 

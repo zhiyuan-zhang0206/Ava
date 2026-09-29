@@ -7,7 +7,7 @@ endpoint-private routing logic, shared by routers/agents.py (spawn),
 routers/agents_lifecycle.py (lifecycle ops) and the op-forwarding routers
 (guide / packages / schedules), so they live in their own module — the ops
 server never sees them (forwarding never recurses inside an op, see
-ops/ops_lifecycle.py), and tests get one stable patch point
+ops/ops_lifecycle/__init__.py), and tests get one stable patch point
 (monkeypatch `_enqueue_lifecycle` / `_forward_spawn_to_remote` here). Same
 intent, just relocated from the old app.py to here.
 """

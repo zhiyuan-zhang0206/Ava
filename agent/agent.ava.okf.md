@@ -28,7 +28,7 @@ Overview of the Agent subsystem.
   the **initial prompt template** used at spawn: there is no mode field in the graph. Adding a new agent type = writing a
   new initial prompt, no framework change.
 - **Lifecycle verbs** (state enumeration / wire format see [[shared/agents-contract.ava.okf.md|cross-process contract]],
-  inbound kind see [[agent/db/db.ava.okf.md|database layer]], implementation in `ops/agent_spawn.py` + `ops/agent_wake.py`) — the distinction is
+  inbound kind see [[agent/db/db.ava.okf.md|database layer]], implementation in `ops/agents/spawn.py` + `ops/agents/wake.py`) — the distinction is
   "whether the new process needs to be told what it went through":
   - **spawn** — create new agent, **no inbound message delivered** (from nothing, no "why was I called" issue).
   - **resurrect** — bring a `terminated` agent back (history preserved), deliver a `kind='resurrect'` marker

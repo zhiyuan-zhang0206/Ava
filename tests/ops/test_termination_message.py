@@ -15,7 +15,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
-from ops import ops_exit
+from ops.ops_lifecycle import termination
 from ops.rpc_schemas import TerminateAgentRequest
 from shared.config import settings
 from shared.db import create_agent
@@ -68,7 +68,7 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failed pair rolls back both rows, then retries terminate before chat."""
-    real_insert = ops_exit._insert_termination_pair
+    real_insert = termination._insert_termination_pair
     failed_pair = False
 
     def _fail_after_pair(
@@ -92,8 +92,8 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
             raise RuntimeError("injected pair failure")
         return result
 
-    monkeypatch.setattr(ops_exit, "_insert_termination_pair", _fail_after_pair)
-    terminate_id = ops_exit._enqueue_termination_inbounds(
+    monkeypatch.setattr(termination, "_insert_termination_pair", _fail_after_pair)
+    terminate_id = termination._enqueue_termination_inbounds(
         running_agent_id,
         db_pool,
         source="user",
@@ -118,7 +118,7 @@ def test_termination_survives_failed_message_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Once fallback terminate succeeds, a second chat failure is non-fatal."""
-    real_insert = ops_exit._insert_termination_pair
+    real_insert = termination._insert_termination_pair
 
     def _fail_pair(
         conn: psycopg.Connection,
@@ -141,9 +141,9 @@ def test_termination_survives_failed_message_retry(
     def _fail_retry(*_args: object, **_kwargs: object) -> int:
         raise RuntimeError("injected retry failure")
 
-    monkeypatch.setattr(ops_exit, "_insert_termination_pair", _fail_pair)
-    monkeypatch.setattr(ops_exit, "_insert_pending_termination_message", _fail_retry)
-    terminate_id = ops_exit._enqueue_termination_inbounds(
+    monkeypatch.setattr(termination, "_insert_termination_pair", _fail_pair)
+    monkeypatch.setattr(termination, "_insert_pending_termination_message", _fail_retry)
+    terminate_id = termination._enqueue_termination_inbounds(
         running_agent_id,
         db_pool,
         source="user",
@@ -163,7 +163,7 @@ def test_force_termination_retries_command_before_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Force termination uses the same rollback and termination-first fallback."""
-    real_insert = ops_exit._insert_termination_pair
+    real_insert = termination._insert_termination_pair
     failed_pair = False
 
     def _fail_after_pair(
@@ -187,8 +187,8 @@ def test_force_termination_retries_command_before_message(
             raise RuntimeError("injected force pair failure")
         return result
 
-    monkeypatch.setattr(ops_exit, "_insert_termination_pair", _fail_after_pair)
-    old_status, _, _, terminate_id = ops_exit._force_terminate_transaction(
+    monkeypatch.setattr(termination, "_insert_termination_pair", _fail_after_pair)
+    old_status, _, _, terminate_id = termination._force_terminate_transaction(
         running_agent_id,
         db_pool,
         source="user",
@@ -273,10 +273,10 @@ class TestKillAllShellSessions:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from ops import ops_lifecycle
-        from ops.rpc_terminate import ShellSessionsKill
+        from ops.rpc_schemas.terminate import ShellSessionsKill
 
         events: list[Event] = []
-        monkeypatch.setattr(ops_exit.telemetry, "emit_prepared", events.append)
+        monkeypatch.setattr(termination.telemetry, "emit_prepared", events.append)
 
         resp = await ops_lifecycle.terminate_agent_op(
             running_agent_id, TerminateAgentRequest(kill_all_shell_sessions=True), db_pool
@@ -326,7 +326,7 @@ class TestKillAllShellSessions:
         kills: list[int],
     ) -> None:
         from ops import ops_lifecycle
-        from ops.rpc_terminate import ShellSessionsKill
+        from ops.rpc_schemas.terminate import ShellSessionsKill
 
         resp = await ops_lifecycle.terminate_agent_op(
             running_agent_id,
@@ -369,7 +369,7 @@ class TestKillAllShellSessions:
         """The already-terminated form: no termination left to apply, the
         sessions are still killed and reported."""
         from ops import ops_lifecycle
-        from ops.rpc_terminate import ShellSessionsKill
+        from ops.rpc_schemas.terminate import ShellSessionsKill
 
         agent_id = create_agent(db_conn)
         db_conn.execute(
@@ -435,7 +435,7 @@ class TestKillAllShellSessions:
         death, so the enqueue waits for it, sees `terminated`, and kills the
         sessions now — never an `at_exit` request no apply will ever read."""
         from ops import ops_lifecycle
-        from ops.rpc_terminate import ShellSessionsKill
+        from ops.rpc_schemas.terminate import ShellSessionsKill
 
         with psycopg.connect(settings.data_plane.db_url) as apply_conn:
             apply_conn.execute(
@@ -526,7 +526,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     import shlex
 
     from ops import ops_lifecycle
-    from ops.rpc_terminate import ShellSessionsKill
+    from ops.rpc_schemas.terminate import ShellSessionsKill
     from shared.cluster import session_name
     from shared.session_backend import PtySessionBackend
     from shared.sessions.page_session import page_session_name

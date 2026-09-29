@@ -21,9 +21,14 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from ops import agent_wake, billing_recovery
-from ops.agent_wake import resurrect_agent
-from ops.billing_recovery import enumerate_candidates, enumerate_halted_alive, run_billing_recovery
+from ops.agents import wake
+from ops.agents.wake import resurrect_agent
+from ops.ops_lifecycle import billing_recovery
+from ops.ops_lifecycle.billing_recovery import (
+    enumerate_candidates,
+    enumerate_halted_alive,
+    run_billing_recovery,
+)
 from ops.rpc_schemas import BillingBalanceReport
 from shared.agents import ResurrectRefused
 from shared.db import create_agent
@@ -99,7 +104,7 @@ def _resurrect_inbounds(conn: psycopg.Connection, agent_id: int) -> int:
 def _capture_resurrect_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Observe the prepared audit fact while retaining the real event shape."""
     events: list[dict[str, Any]] = []
-    prepare = agent_wake.prepare_event_log
+    prepare = wake.prepare_event_log
 
     def _record_event(
         *,
@@ -126,7 +131,7 @@ def _capture_resurrect_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str,
             payload=payload,
         )
 
-    monkeypatch.setattr(agent_wake, "prepare_event_log", _record_event)
+    monkeypatch.setattr(wake, "prepare_event_log", _record_event)
     return events
 
 

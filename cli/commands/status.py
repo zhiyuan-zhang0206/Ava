@@ -28,7 +28,7 @@ from cli.commands._repo import (
 )
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.cluster_instance import print_data_plane_status
-from ops.service_spec import ServiceSpec
+from ops.roster.service_spec import ServiceSpec
 from shared import service_selection
 from shared.machine import MachineRoles
 

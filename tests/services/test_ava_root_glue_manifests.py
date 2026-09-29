@@ -11,7 +11,7 @@ import pytest
 # The capability constants are typed frozenset[MachineRole]; capability values
 # are irrelevant to the roster-driven assertions here (same precedent as
 # tests/cli/test_cluster_health.py).
-from ops.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
+from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 from services.ava_root.manifest import ManifestError, load_manifests
 from services.ava_root_glue import manifests as gen
 from shared.machine import MachineRole

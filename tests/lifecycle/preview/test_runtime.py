@@ -155,7 +155,7 @@ def test_readiness_observer_does_not_wait_for_a_late_service(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from ops import roster
-    from ops.service_spec import ServiceSpec
+    from ops.roster.service_spec import ServiceSpec
     from shared.daemon_health import DaemonProbe
 
     (tmp_path / "config.json").write_text(json.dumps({"frontend_url": "http://unused"}))

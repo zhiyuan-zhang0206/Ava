@@ -13,7 +13,7 @@ from pydantic import (
     model_validator,
 )
 
-from ops.rpc_completion import CompletionNoticeIn
+from ops.rpc_schemas.completion import CompletionNoticeIn
 from shared.agents.messages.envelope import validate_source
 
 

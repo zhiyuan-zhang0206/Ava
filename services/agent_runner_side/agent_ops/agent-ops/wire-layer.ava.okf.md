@@ -1,14 +1,14 @@
 ---
 type: doc
 title: Agent-Ops — Strongly-Typed Wire Layer
-description: The ops RPC contract surface (ops/rpc_schemas.py) — OpEnvelope/OpResponse envelopes, the OpKind literal, and the per-kind payload/result models the daemon validates before dispatch.
+description: The ops RPC contract surface (ops/rpc_schemas/__init__.py) — OpEnvelope/OpResponse envelopes, the OpKind literal, and the per-kind payload/result models the daemon validates before dispatch.
 tags: []
 ---
 
 # Agent-Ops — Strongly-Typed Wire Layer
 
 `OpEnvelope` carries `{kind, payload, idempotency_key?}` and `OpResponse`
-carries `{status, result}`. `ops/rpc_schemas.py` defines the current `OpKind`
+carries `{status, result}`. `ops/rpc_schemas/__init__.py` defines the current `OpKind`
 vocabulary and per-kind models. The outbound RPC client validates that vocabulary
 before machine lookup, key generation or network activity; the receiver validates
 it before maintenance admission, worker dispatch or database dedupe. Unknown

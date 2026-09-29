@@ -90,7 +90,7 @@ def _exec_node_ceiling_s() -> float:
 
     Classification also runs in gateway-profile processes (cold prepare),
     whose profile pops the sandbox domain; the cluster ``.env`` is the
-    configuration authority there (the same resolution as ops/agent_wake.py).
+    configuration authority there (the same resolution as ops/agents/wake.py).
     The live domain is read only where the profile keeps it, and the declared
     default is the last resort.
     """

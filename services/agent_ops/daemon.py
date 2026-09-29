@@ -224,7 +224,7 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
     through the `case _` to a 'failed' result rather than crashing the ops
     server. Each arm validates its payload into the per-kind request model and
     serializes the per-kind result model — the wire contract lives in the models
-    (`ops/rpc_schemas.py`), not in hand-written isinstance guards here.
+    (`ops/rpc_schemas/__init__.py`), not in hand-written isinstance guards here.
 
     Returns (status, result) where status is 'completed' or 'failed' and result
     is a JSON-serializable dict (response body on success, error info on

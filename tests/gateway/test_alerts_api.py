@@ -951,7 +951,7 @@ def test_start_readiness_alert_lifecycle_on_real_db(
     import shared.alerts as _alerts
     from cli.commands import _probe as _probe_mod
     from cli.commands._repo import ServiceSpec
-    from ops.service_spec import _GATEWAY
+    from ops.roster.service_spec import _GATEWAY
 
     def _spec(service: str) -> ServiceSpec:
         return ServiceSpec(

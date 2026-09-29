@@ -76,7 +76,7 @@ stop the new incarnation.
 
 ## Resurrection and user wakes
 
-`ops/agent_wake.py` locks home placement and the pause latch, verifies the
+`ops/agents/wake.py` locks home placement and the pause latch, verifies the
 terminated state and outstanding lifecycle evidence, commits the epoch fence
 with its resurrection marker and optional work, then publishes the wake. A
 refusal rolls the whole transaction back, fence included. The agent host admits
@@ -95,4 +95,4 @@ terminated-owner retry as the backstop.
 
 - `agent/hosted_ownership.py` — native completion and resource settlement
 - `agent/lifecycle_observe.py` — successor admission observation
-- `ops/agent_wake.py` — transactional resurrection
+- `ops/agents/wake.py` — transactional resurrection

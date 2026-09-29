@@ -207,7 +207,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
 def test_first_prompt_insert_failure_rolls_back_agent_row(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from ops import agent_spawn
+    from ops.agents import spawn
     from shared.machine import machine_name
 
     with db_conn.cursor() as cur:
@@ -217,9 +217,9 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
     def _fail_insert(*_args: object) -> int:
         raise RuntimeError("prompt insert refused")
 
-    monkeypatch.setattr(agent_spawn, "insert_spawn_prompt_in_transaction", _fail_insert)
+    monkeypatch.setattr(spawn, "insert_spawn_prompt_in_transaction", _fail_insert)
     with pytest.raises(RuntimeError, match="prompt insert refused"):
-        agent_spawn.create_agent_row(machine=machine_name(), prompt="Work", prompt_source="user")
+        spawn.create_agent_row(machine=machine_name(), prompt="Work", prompt_source="user")
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agents_meta")
         assert cur.fetchone() == before

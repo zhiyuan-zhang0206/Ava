@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from ops.service_spec import ServiceSpec
+from ops.roster.service_spec import ServiceSpec
 from ops.spec import services_for_capabilities_annotated
 from shared.machine import MachineRoles
 from shared.proc import process_alive

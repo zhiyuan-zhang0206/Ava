@@ -7,6 +7,9 @@ answers the one endpoint that stays readable while the cluster is paused.
 
   Observability: GET /api/cluster/status — bypasses 503 mode, always
     returns this host's state directly.
+
+The `schema_mismatch` submodule supplies the snapshot's read-only migration
+diagnosis.
 """
 
 from __future__ import annotations
@@ -24,8 +27,8 @@ import shared.cluster
 import shared.db
 import shared.host_deploy_state
 from ops import cluster_pause
+from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
-from ops.schema_mismatch import status as schema_mismatch_status
 from shared.api_contracts.status import PausedReason, SchemaMismatchStatus
 from shared.config import cluster_tz
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
@@ -179,7 +182,7 @@ _AGENT_PROCESS_RE = re.compile(
 _AGENT_SESSION_RE = re.compile(r"-agent-(\d+)")
 # Parse one agent's persistent-shell session name: `…-agent-<id>-shell-<sid>[-<name>]`.
 # The agent's own process session (`…-agent-<id>`, no `-shell-`) does not match.
-_AGENT_SHELL_RE = re.compile(r"-agent-(\d+)-shell-(\d+)(?:-(.+))?$")
+AGENT_SHELL_RE = re.compile(r"-agent-(\d+)-shell-(\d+)(?:-(.+))?$")
 
 
 def agent_shell_sessions(agent_id: int) -> list[ShellInfo]:
@@ -199,7 +202,7 @@ def agent_shell_sessions(agent_id: int) -> list[ShellInfo]:
     sessions, *_ = _collect_sessions()
     shells: list[ShellInfo] = []
     for s in sessions:
-        m = _AGENT_SHELL_RE.search(s.name)
+        m = AGENT_SHELL_RE.search(s.name)
         if m is None or int(m.group(1)) != agent_id:
             continue
         shells.append(

@@ -28,7 +28,7 @@ live in the root diagnostic roster; they never acquire service ownership.
 ``cli.commands._repo`` re-exports ``ServiceSpec`` / ``build_services`` /
 ``services_for_capabilities`` under their historical names as a cli-facing façade
 (so existing `from cli.commands._repo import ...` call sites keep working), but the
-definitions live in ``service_spec.py``, ``roster.py``, and ``spec.py``.
+definitions live in ``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``.
 """
 
 from __future__ import annotations
@@ -40,7 +40,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ops.service_spec import ServiceSpec as ServiceSpec  # re-export: generated plugin fixtures
+from ops.roster.service_spec import (
+    ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
+)
 from shared.config import settings
 from shared.log import logger
 from shared.machine import MachineRoles

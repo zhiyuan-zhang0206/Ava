@@ -283,7 +283,7 @@ forbidden_modules = ["services"]
 # <-> cli HTTP API contracts that BOTH speak (MachineStatus / Config*) are
 # downshifted to `shared.api_contracts` — below both ops and gateway — so cli
 # decodes a gateway response without importing up; ops keeps only the
-# gateway<->runner RPC-shared closure (ops/rpc_schemas.py). See
+# gateway<->runner RPC-shared closure (ops/rpc_schemas/__init__.py). See
 # ops/ops-module.md.
 [[tool.importlinter.contracts]]
 name = "Ops layer (shared < ops < {gateway, cli})"

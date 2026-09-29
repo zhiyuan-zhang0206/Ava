@@ -169,7 +169,7 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/release_fleet/inventory.py": "Refuse a fleet of one whose home does not serve the gateway before effects; never dispatch by role.",
     "cli/release_fleet/entries.py": "Report which capabilities this unit serves in its release receipt; never dispatch by role.",
     "cli/commands/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit pause/stop? No execution is routed elsewhere.",
-    "ops/agent_pause.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
+    "ops/agent_pause/__init__.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
     "cli/commands/maintenance.py": "Which services/data plane does this explicitly local, DB-offline-capable stop/start own? Fleet transport is operator-coordinated.",
     "shared/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
     "shared/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",

@@ -5,7 +5,7 @@ communicate over HTTP; both ends must see the same definitions of
 status / exception / wire-level reason.
 
 - Impl (spawn / resurrection / fork-checkpoint copy) lives in
-  `ops/agents.py`; gateway routes and local ops call it.
+  `ops/agents/__init__.py`; gateway routes and local ops call it.
 - On the agent process side, the SDK (`ava.agents.*`) uniformly goes
   through HTTP to call gateway routes — no longer imports impl from
   this module, only imports types + exceptions to catch.
@@ -71,7 +71,7 @@ class TerminationSource(StrEnum):
     LAUNCH_CONFIRM = "launch-confirm"
     # A framework-detected inconsistency in the row's OWN state killed it — not a
     # death anyone requested and not a launch that can be retried
-    # (`ops/agents.py:respawn_agent` finding status='restarting' with no 'restart'
+    # (`ops/agents/__init__.py:respawn_agent` finding status='restarting' with no 'restart'
     # inbound). Deliberately NOT resurrectable: the row's history is corrupt, so an
     # automatic retry would convert a loud one-time fault into a recurring
     # background warning. Ops inspects, then resurrects by hand.

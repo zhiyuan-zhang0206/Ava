@@ -1,6 +1,6 @@
 """Durable gates consulted before an automatic resurrection.
 
-Split out of `ops/ops_lifecycle.py` at its line budget. Each function answers
+The `ops.ops_lifecycle` door re-exports these gates. Each function answers
 one question about agents_meta / inbound_messages state — may an automatic
 wake proceed? — and each is its own durable policy: wake suppression (repeated
 resurrect failures), the recovery breaker (consecutive permanent provider

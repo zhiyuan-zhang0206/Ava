@@ -158,8 +158,8 @@ def successor_refusal(
       admission clears only a restart pointer.
     - A terminated row resurrects only while it still records exactly the
       closed incarnation as its hosted runtime and holds no lifecycle pointer
-      (`ops.resurrection_retry.hosted_resurrection_target` and the final CAS in
-      `ops.agent_wake`); the claim that follows consumes the terminate receipt.
+      (`ops.agents.resurrection_retry.hosted_resurrection_target` and the final CAS in
+      `ops.agents.wake`); the claim that follows consumes the terminate receipt.
 
     Anything live or different owning the row refuses before the shape is
     judged, and a receipt that already carries a closure never converts twice.

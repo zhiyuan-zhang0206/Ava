@@ -11,8 +11,7 @@ import psycopg
 import pytest
 
 from cli.commands.cluster.control import _schema_mismatch_banner
-from ops import schema_mismatch
-from ops.cluster_status import ClusterStatus
+from ops.cluster_status import ClusterStatus, schema_mismatch
 from shared import migration_layout
 from shared.api_contracts.status import MachineStatus, SchemaMismatchKind, SchemaMismatchStatus
 from shared.migration_errors import MigrationLayoutError

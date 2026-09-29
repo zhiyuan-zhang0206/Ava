@@ -6,11 +6,20 @@ coordination. Its design rationale is recorded in
 
 | Responsibility | Current implementation |
 |---|---|
-| Service specification | `ops/service_spec.py`, `ops/roster.py`, `ops/spec.py` |
-| Observation and status | `ops/observe.py`, `ops/cluster_status.py` |
-| Native agent drain | `ops/agent_pause.py` and `ops/agent_pause_probe.py` |
+| Service specification | `ops/spec.py` (capability selection and gates); `ops/roster/` (canonical roster, its `service_spec` contract) |
+| Observation and status | `ops/roster/observe.py`; `ops/cluster_status/` (host snapshot, `schema_mismatch` diagnosis) |
+| Native agent drain | `ops/agent_pause/` (drain, `probe` of the running host) |
+| Agent lifecycle | `ops/agents/` (birth and wake); `ops/ops_lifecycle/` (lifecycle RPC ops) |
+| RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster_rpc.py` (gateway client) |
 | Pause, stop and restart | CLI maintenance orchestration over the shared drain |
 | Release transition | `cli/release_transition/`, prepared image and native executor |
+
+Each package keeps the import path of the module its door grew from, so
+`ops.agents`, `ops.ops_lifecycle`, `ops.rpc_schemas`, `ops.cluster_status`,
+`ops.agent_pause` and `ops.roster` read the same to their importers. Two
+modules stay top-level by contract: the runtime-prepare probe imports
+`ops.spec` by name inside a candidate image, and `python -m ops.private_files`
+is an operator entry point beside its `private-files/` manifest.
 
 `build_services()` supplies the application root manifest and local status roster.
 Agent-runner units execute agents inside one agent host. There is no per-agent
@@ -38,9 +47,9 @@ subprocesses. Agent shells use independent PTY hosts. Stop verifies captured
 process identity before signalling.
 
 The import boundary is `shared < ops < {gateway, cli}`. The supported RPC
-vocabulary lives in `ops/rpc_schemas.py`; focused agent contracts live in
-`ops/rpc_terminate.py`, `ops/rpc_content.py`, and
-`ops/rpc_billing_recovery.py`. Gateway-only schemas stay in `gateway/schemas/`.
+vocabulary lives in the `ops/rpc_schemas/` door; focused agent contracts live in
+its `terminate`, `content`, and `billing_recovery` submodules. Gateway-only
+schemas stay in `gateway/schemas/`.
 The client and daemon reject unknown kinds before machine lookup, maintenance
 admission, dedupe, or dispatch. `release_image_exec` is the frozen v1
 image-exec handoff (`ops_cluster.release_image_exec_op`): the unit verifies a
@@ -64,8 +73,8 @@ projection does not change the business API's pause middleware. The responding
 ops process SHA and source checkout SHA remain read-only status metadata;
 these fields do not certify every sibling daemon's running code.
 
-`ops/schema_mismatch.py` compares the applied migration set with the running
-image's required set. Wheel runtimes use installed SQL metadata without Git.
+`ops/cluster_status/schema_mismatch.py` compares the applied migration set
+with the running image's required set. Wheel runtimes use installed SQL metadata without Git.
 The status contract contains the diagnosis kind, machine and detail; it has no
 Git-pin category, watchdog counters, held-service projection, or stranded-hold
 record. Ordinary pause and maintenance status remain independent of this

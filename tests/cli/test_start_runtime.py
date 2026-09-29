@@ -19,7 +19,7 @@ import pytest
 
 from cli import start_runtime
 from cli.commands import root_driver, start_generation
-from ops.service_spec import ServiceSpec
+from ops.roster.service_spec import ServiceSpec
 from services.ava_root_glue import manifests
 from shared import runtime_interpreter
 from shared.runtime_abi import current_abi

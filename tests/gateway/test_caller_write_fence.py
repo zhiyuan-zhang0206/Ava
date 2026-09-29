@@ -36,10 +36,10 @@ def test_manual_new_source_rejected_before_dispatch(
 def test_direct_resurrection_rejects_before_transaction(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import Mock
 
-    from ops.agent_wake import _prepare_resurrect_attempt
+    from ops.agents.wake import _prepare_resurrect_attempt
 
     transaction = Mock(side_effect=AssertionError("must not reach database"))
-    monkeypatch.setattr("ops.agent_wake.write_transaction", transaction)
+    monkeypatch.setattr("ops.agents.wake.write_transaction", transaction)
     with pytest.raises(ValueError, match="target runtime protocol"):
         _prepare_resurrect_attempt(
             42,

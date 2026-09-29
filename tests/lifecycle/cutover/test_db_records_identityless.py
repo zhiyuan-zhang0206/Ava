@@ -20,8 +20,8 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.hosted_ownership import admit_hosted_runtime
-from ops import agent_wake
-from ops.agent_spawn import create_agent_row
+from ops.agents import wake
+from ops.agents.spawn import create_agent_row
 from scripts import cutover_db_records as records
 from scripts.cutover_db_survey import Inputs, RetiredUnit
 from shared.agents import ResurrectRefused
@@ -216,7 +216,7 @@ async def _resurrect_and_admit(
 ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
     """The row after resurrection, then (owned by the successor, protocol,
     resources) after the successor's admission."""
-    agent_wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(aid, resurrected_by="user")
     resurrected = _row(db, aid)
     successor = await admit_hosted_runtime(pool, aid, machine, uuid4(), expected_from="idling")
     assert successor is not None
@@ -237,7 +237,7 @@ async def test_the_minted_identity_resurrects_and_admission_takes_it_as_protocol
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(agent_wake, "publish_inbound_wake", _no_wake)
+    monkeypatch.setattr(wake, "publish_inbound_wake", _no_wake)
     runner = cluster.runner
     agents = [
         _terminated(db_conn, runner),
@@ -245,7 +245,7 @@ async def test_the_minted_identity_resurrects_and_admission_takes_it_as_protocol
         _terminated(db_conn, runner, pointer="pending"),
     ]
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
-        agent_wake.resurrect_agent(agents[0], resurrected_by="user")
+        wake.resurrect_agent(agents[0], resurrected_by="user")
     before = {aid: _row(db_conn, aid) for aid in agents}
     inbound = "SELECT to_jsonb(i) FROM inbound_messages i WHERE agent_id=ANY(%s) ORDER BY id"
     receipts = db_conn.execute(inbound, (agents,)).fetchall()

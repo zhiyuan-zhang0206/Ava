@@ -47,7 +47,7 @@ are internal steps under public names because other packages, such as the
 release transition, reach them.
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; restart reuses
-its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
+its native drain. `ops.agent_pause` and `ops.agent_pause.probe`
 own prepare/drain and runtime capability checks; `service_stop` and
 `data_plane/maintenance_stop` verify resource exits, and
 `data_plane/write_generation` performs a release's write-generation fence and

@@ -43,7 +43,7 @@ from gateway.schemas import (
 from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus, _check_pidfile
-from ops.schema_mismatch import status as schema_mismatch_status
+from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from shared.cluster_drift import prod_source_head_sha
 from shared.cluster_lock import DeployLease
 from shared.config import settings

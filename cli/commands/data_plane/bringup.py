@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 import psycopg
 
-from ops.service_spec import DbAccess
+from ops.roster.service_spec import DbAccess
 from shared.cluster.authority.model import Generation
 from shared.cluster.registry import ClusterRecord
 from shared.config import settings

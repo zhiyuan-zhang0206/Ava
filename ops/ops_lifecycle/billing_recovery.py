@@ -98,7 +98,7 @@ def enumerate_candidates(conn: Connection) -> list[BillingCandidate]:
 
     A read failure propagates: the caller treats it as an aborted run, never
     as an empty candidate set (the same fail-closed shape as
-    ``ops/resurrect_gates``).
+    ``ops.ops_lifecycle.resurrect_gates``).
     """
     from shared.agents import TerminationSource
     from shared.recovery_breaker import (
@@ -296,8 +296,8 @@ async def run_billing_recovery(*, execute: bool, pool: ConnectionPool) -> Billin
 async def resurrect_billing_agent_op(agent_id: int) -> BillingResurrectAgentResponse:
     """The versioned ``resurrect-billing-v1`` action (home runner), also used
     as the in-process fallback when the local ops server is unreachable."""
-    from ops.agent_wake import resurrect_agent
-    from ops.resurrection_retry import ResurrectSettlementDeferredError
+    from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
+    from ops.agents.wake import resurrect_agent
     from shared.agents import MachinePaused, ResurrectAlreadyAlive, ResurrectRefused
 
     try:

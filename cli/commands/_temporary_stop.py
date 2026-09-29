@@ -23,7 +23,7 @@ from cli.commands.service_stop import (
     wait_for_exit,
 )
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
-from ops.agent_pause_probe import ops_quiescent
+from ops.agent_pause.probe import ops_quiescent
 from shared import maintenance, start_serving
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.lifecycle_status import begin, finish, phase, status_path

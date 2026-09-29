@@ -3,7 +3,7 @@
 The memory indexer is the pool's search side: it watches the gateway's
 consolidated checkout and keeps the Milvus index current, which is what makes
 `ava.memory.search` — and therefore passive recall — return anything. It is
-declared here rather than hardcoded into `ops/roster.py` because the pool is this
+declared here rather than hardcoded into `ops/roster/__init__.py` because the pool is this
 plugin's, end to end: disable ava_memory and there is no pool to index, no
 `ava.memory` to search it with, and now no daemon indexing it either.
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 
 from ops.roster import daemon_identity
-from ops.service_spec import ServiceSpec
+from ops.roster.service_spec import ServiceSpec
 from shared.config import settings
 from shared.daemon_health import health_port
 from shared.machine import MachineRole

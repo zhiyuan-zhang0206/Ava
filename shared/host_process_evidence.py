@@ -133,7 +133,7 @@ def _daemon_verdict(raw_home: str | None, home: Path) -> bool | None:
     """True when this daemon serves ``home``; None when its home is unreadable."""
     if raw_home is None:
         # A daemon without a readable home is treated as this home, exactly
-        # like the ops-side local host probe (ops/agent_pause_probe.py).
+        # like the ops-side local host probe (ops/agent_pause/probe.py).
         return True
     try:
         return Path(raw_home).resolve() == home

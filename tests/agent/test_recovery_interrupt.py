@@ -12,7 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent import state as states
-from ops.agent_spawn import create_agent_row
+from ops.agents.spawn import create_agent_row
 from services.agent_host import db_recovery, recovery_interrupt
 from services.agent_host.recovery_interrupt import RecoveryInterrupt
 from shared.config import settings

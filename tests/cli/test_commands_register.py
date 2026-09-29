@@ -10,7 +10,7 @@ import pytest
 
 import cli.commands._probe as _probe_commands
 import ops.roster as _roster
-import ops.service_spec as _service_spec
+import ops.roster.service_spec as _service_spec
 from cli.commands._setup import SetupValues
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base

@@ -1,10 +1,9 @@
 # pyright: reportUnknownArgumentType=warning, reportUnknownLambdaType=warning
-"""`gateway/ops_*.py` — ops-server-callable RPC implementations.
+"""`ops.ops_*` op clusters — ops-server-callable RPC implementations.
 
-Free functions backing both FastAPI handlers in gateway/app.py and the
-in-process dispatch in services/agent_ops/daemon.py. These tests pin the
-contract independently of either entry point: dispatch routing in the
-ops server has its own coverage in tests/services/agent_ops/test_daemon.py,
+Free functions backing both the gateway FastAPI handlers and the in-process dispatch in
+services/agent_ops/daemon.py. These tests pin the contract independently of either entry point:
+dispatch routing in the ops server has its own coverage in tests/services/agent_ops/test_daemon.py,
 endpoint smoke tests live in tests/gateway/test_cluster_endpoints.py.
 """
 
@@ -17,7 +16,8 @@ import psycopg
 import pytest
 from pydantic import ValidationError
 
-from ops import ops_cluster, ops_launch, ops_lifecycle
+from ops import ops_cluster, ops_lifecycle
+from ops.ops_lifecycle import launch
 from ops.rpc_schemas import (
     LaunchAgentRequest,
     RestartAgentRequest,
@@ -141,7 +141,7 @@ async def test_legacy_launch_agent_op_delivers_plain_spawn_prompt(
         seen["source"] = source
         return 11
 
-    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _fake_insert)
+    monkeypatch.setattr(launch, "_insert_prompt_blocking", _fake_insert)
     published: list[object] = []
 
     async def _fake_publish(aid: int, iid: int, kind: str, source: str, prompt: str) -> None:
@@ -171,7 +171,7 @@ async def test_launch_agent_op_skips_prompt_for_fork(
         inserted.append(1)
         return 0
 
-    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _fake_insert)
+    monkeypatch.setattr(launch, "_insert_prompt_blocking", _fake_insert)
     monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", lambda *_a, **_k: None)
 
     body = LaunchAgentRequest(agent_id=10)  # no prompt — a fork
@@ -208,8 +208,8 @@ class TestSpawnPrechecksBlocking:
 
     def test_fork_resolves_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """fork_from -> latest_checkpoint_id resolves to an explicit id, not 'latest'."""
-        monkeypatch.setattr(ops_launch, "latest_checkpoint_id", lambda _cur, _aid: "ckpt:v1")
-        checkpoint = ops_launch.spawn_prechecks_blocking(
+        monkeypatch.setattr(launch, "latest_checkpoint_id", lambda _cur, _aid: "ckpt:v1")
+        checkpoint = launch.spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user", fork_from=3),
             self._FakePool(),  # type: ignore[arg-type]
         )
@@ -219,9 +219,9 @@ class TestSpawnPrechecksBlocking:
         """fork_from with no checkpoint raises ForkSourceEmpty (wire-mapped to 409)."""
         from shared.agents import ForkSourceEmpty
 
-        monkeypatch.setattr(ops_launch, "latest_checkpoint_id", lambda _cur, _aid: None)
+        monkeypatch.setattr(launch, "latest_checkpoint_id", lambda _cur, _aid: None)
         with pytest.raises(ForkSourceEmpty):
-            ops_launch.spawn_prechecks_blocking(
+            launch.spawn_prechecks_blocking(
                 SpawnAgentRequest(spawner="user", fork_from=3),
                 self._FakePool(),  # type: ignore[arg-type]
             )
@@ -234,8 +234,8 @@ class TestSpawnPrechecksBlocking:
             looked_up.append(1)
             return "never"
 
-        monkeypatch.setattr(ops_launch, "latest_checkpoint_id", _fake_lookup)
-        checkpoint = ops_launch.spawn_prechecks_blocking(
+        monkeypatch.setattr(launch, "latest_checkpoint_id", _fake_lookup)
+        checkpoint = launch.spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user"),
             self._FakePool(),  # type: ignore[arg-type]
         )
@@ -295,7 +295,7 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
 ) -> None:
     """The internal guarded path treats a stale chat as an expected no-launch
     race, while leaving the still-terminated status for its caller to return."""
-    from ops.agent_wake import ResurrectTriggerStaleError
+    from ops.agents.wake import ResurrectTriggerStaleError
     from shared.agents import AgentStatus
 
     def _terminated(_agent_id: int) -> AgentStatus:
@@ -960,7 +960,7 @@ async def test_launch_agent_op_hosted_skips_process_and_wakes(
         inserted.append((agent_id, prompt, source))
         return 11
 
-    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _fake_insert)
+    monkeypatch.setattr(launch, "_insert_prompt_blocking", _fake_insert)
 
     async def _fake_publish(*_a: object, **_k: object) -> None:
         return None
@@ -968,7 +968,7 @@ async def test_launch_agent_op_hosted_skips_process_and_wakes(
     monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _fake_publish)
     wakes: list[tuple[int, str]] = []
     monkeypatch.setattr(
-        ops_launch, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
+        launch, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
     )
 
     body = LaunchAgentRequest(agent_id=7, prompt="go do X", prompt_source="user")
@@ -991,7 +991,7 @@ async def test_launch_agent_op_hosted_fork_still_wakes(
         inserted.append(1)
         return 0
 
-    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _fake_insert)
+    monkeypatch.setattr(launch, "_insert_prompt_blocking", _fake_insert)
 
     async def _fake_publish(*_a: object, **_k: object) -> None:
         return None
@@ -999,7 +999,7 @@ async def test_launch_agent_op_hosted_fork_still_wakes(
     monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _fake_publish)
     wakes: list[tuple[int, str]] = []
     monkeypatch.setattr(
-        ops_launch, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
+        launch, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
     )
 
     body = LaunchAgentRequest(agent_id=8)
@@ -1060,7 +1060,7 @@ async def test_launch_agent_op_hosted_failure_preserves_its_row(
     def _boom(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
         raise RuntimeError("prompt insert failed")
 
-    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _boom)
+    monkeypatch.setattr(launch, "_insert_prompt_blocking", _boom)
     reclaimed: list[tuple[int, str]] = []
 
     def _fake_reclaim(agent_id: int, _pool: object, *, source: str) -> list[str]:

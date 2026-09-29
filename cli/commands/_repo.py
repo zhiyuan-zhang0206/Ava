@@ -29,8 +29,8 @@ from typing import NamedTuple
 from cli.commands._setup import SetupValues
 from ops import spec as _spec
 from ops.roster import build_services as build_services
-from ops.service_spec import ServiceSpec as ServiceSpec
-from ops.service_spec import profile_marker as profile_marker
+from ops.roster.service_spec import ServiceSpec as ServiceSpec
+from ops.roster.service_spec import profile_marker as profile_marker
 
 # Re-exported (redundant alias marks intentional re-export) so existing call
 # sites `from cli.commands._repo import session_name` keep working after the

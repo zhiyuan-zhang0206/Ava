@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ops import ops_launch, ops_lifecycle
+from ops import ops_lifecycle
+from ops.ops_lifecycle import launch
 from ops.rpc_schemas import LaunchAgentRequest
 
 
@@ -29,9 +30,9 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
     def _wake(agent_id: int, payload: str) -> None:
         wakes.append((agent_id, payload))
 
-    monkeypatch.setattr(ops_launch, "_validate_launch_row", _validate)
-    monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _insert)
-    monkeypatch.setattr(ops_launch, "publish_inbound_wake", _wake)
+    monkeypatch.setattr(launch, "_validate_launch_row", _validate)
+    monkeypatch.setattr(launch, "_insert_prompt_blocking", _insert)
+    monkeypatch.setattr(launch, "publish_inbound_wake", _wake)
     body = LaunchAgentRequest(agent_id=7, launch_attempt_id=uuid4())
     await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]

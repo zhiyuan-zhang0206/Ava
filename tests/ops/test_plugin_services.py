@@ -21,7 +21,8 @@ from pathlib import Path
 import pytest
 
 import shared.plugins_config as pc
-from ops import roster, service_spec, spec
+from ops import roster, spec
+from ops.roster import service_spec
 
 
 def test_fleet_plugin_registers_task_maintenance() -> None:
@@ -126,7 +127,7 @@ def test_broken_services_py_is_skipped_and_others_still_load(
     good_dir = tmp_path / "goodplugin"
     good_dir.mkdir()
     (good_dir / "services.py").write_text(
-        "from ops.service_spec import ServiceSpec\n"
+        "from ops.roster.service_spec import ServiceSpec\n"
         "def services():\n"
         "    return (ServiceSpec(session='probe-good', cmd='noop',\n"
         "            capabilities=frozenset({'gateway'}), requires_db=False),)\n"
@@ -168,7 +169,7 @@ def test_external_service_healthcheck_loads_without_agent_bootstrap(
     (plugin_dir / "services.py").write_text(
         "from __future__ import annotations\n"
         "from dataclasses import dataclass\n"
-        "from ops.service_spec import ServiceSpec\n"
+        "from ops.roster.service_spec import ServiceSpec\n"
         "@dataclass\n"
         "class Sample:\n"
         "    value: int = 1\n"

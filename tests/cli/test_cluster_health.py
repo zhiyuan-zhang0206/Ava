@@ -545,7 +545,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
     """Every intended service needs positive evidence; disabled services do not."""
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    from ops.service_spec import (
+    from ops.roster.service_spec import (
         _GATEWAY,  # typed frozenset[MachineRole]; value irrelevant (roster stubbed)
         ServiceSpec,
     )
@@ -585,7 +585,7 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
 ) -> None:
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    import ops.service_spec as _service_spec
+    import ops.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
@@ -610,7 +610,7 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
 ) -> None:
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    import ops.service_spec as _service_spec
+    import ops.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
@@ -635,7 +635,7 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
 ) -> None:
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    import ops.service_spec as _service_spec
+    import ops.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
@@ -662,7 +662,7 @@ def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) 
     no amount of waiting fixes."""
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    from ops.service_spec import _GATEWAY, ServiceSpec
+    from ops.roster.service_spec import _GATEWAY, ServiceSpec
 
     spec = ServiceSpec(session="ops", cmd="x", capabilities=_GATEWAY, requires_db=True)
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
@@ -696,7 +696,7 @@ def test_service_probes_respect_durable_service_intent(
 ) -> None:
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    import ops.service_spec as _service_spec
+    import ops.roster.service_spec as _service_spec
     from shared import service_selection
 
     wanted = _service_spec.ServiceSpec("gateway", "unused", frozenset({"gateway"}), True)

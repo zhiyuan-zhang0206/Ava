@@ -51,7 +51,7 @@ from pathlib import Path
 from typing import cast, get_args
 
 from ops.roster import build_services
-from ops.service_spec import ServiceSpec
+from ops.roster.service_spec import ServiceSpec
 from services.ava_root.inputs import InputSeal
 from services.ava_root.manifest import (
     ManifestError,

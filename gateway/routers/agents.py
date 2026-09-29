@@ -32,8 +32,8 @@ from gateway.schemas import (
     LabelPatchRequest,
     ModelsResponse,
 )
-from ops.agent_spawn import create_agent_row
-from ops.ops_launch import spawn_prechecks_blocking
+from ops.agents.spawn import create_agent_row
+from ops.ops_lifecycle.launch import spawn_prechecks_blocking
 from ops.rpc_schemas import (
     ConfigNormalization,
     LaunchAgentRequest,
@@ -431,7 +431,7 @@ async def create_and_launch_agent(
         prompt_source=body.prompt_source,
     )
     if prompt_inbound_id is not None and body.prompt_source is not None and body.prompt is not None:
-        from ops.ops_events import publish_inbound_arrived
+        from ops.ops_lifecycle.events import publish_inbound_arrived
 
         prompt_content = spawn_prompt_with_label(body.prompt, body.label)
         try:

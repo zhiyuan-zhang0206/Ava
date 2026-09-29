@@ -18,8 +18,11 @@ from agent.graph.claim.node import claim_node
 from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.state import BaseAgentState
 from cli.commands.agents import impersonation_relay as relay
-from ops.agent_wake import resurrect_agent
-from ops.ops_exit import _enqueue_termination_inbounds, _force_terminate_transaction
+from ops.agents.wake import resurrect_agent
+from ops.ops_lifecycle.termination import (
+    _enqueue_termination_inbounds,
+    _force_terminate_transaction,
+)
 from shared.agents import impersonation as leases
 from shared.agents.impersonation.impersonation_maintenance import remind_expiring_impersonations
 from shared.caller_identity import CallerIdentity
@@ -410,7 +413,7 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ops import agent_wake
+    from ops.agents import wake
 
     owner, _session = await _termination_session(db_conn, aops_pool)
     started = db_conn.execute("SELECT transaction_timestamp()").fetchone()
@@ -424,7 +427,7 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     def earlier_transaction():
         yield db_conn
 
-    monkeypatch.setattr(agent_wake, "write_transaction", earlier_transaction)
+    monkeypatch.setattr(wake, "write_transaction", earlier_transaction)
     resurrect_agent(owner.agent_id, resurrected_by="user", prompt="Continue")
     ordered = db_conn.execute(
         "SELECT kind,payload->>'note_tag' FROM inbound_messages "

@@ -13,7 +13,7 @@ import pytest
 
 from cli.commands import maintenance as command
 from cli.commands._maintenance_probe import HostIdentity
-from ops.agent_pause_probe import host_identity_or_none as real_host_identity_or_none
+from ops.agent_pause.probe import host_identity_or_none as real_host_identity_or_none
 from shared import hold_driver, maintenance, pause_owner, start_serving
 from shared.maintenance_state import MaintenanceHold
 from shared.start_serving import RootBirth
@@ -125,8 +125,8 @@ def test_resume_proceeds_with_absent_agent_host(
     unpause = MagicMock()
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
     monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refused_probe)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: False)
+    monkeypatch.setattr("ops.agent_pause.probe.host_identity", _refused_probe)
 
     command.resume("local", WHEN, cancel=True)
 
@@ -140,12 +140,12 @@ def test_resume_still_refuses_an_unreadable_host_probe(
     """A running host must answer; unreadable evidence is not absence."""
     phase("draining")
     monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: True)
 
     def _wedged() -> None:
         raise URLError(TimeoutError("timed out"))
 
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", _wedged)
+    monkeypatch.setattr("ops.agent_pause.probe.host_identity", _wedged)
 
     with pytest.raises(URLError):
         command.resume("local", WHEN, cancel=True)
@@ -378,8 +378,8 @@ def test_repair_from_drained_with_absent_agent_host_proceeds(
     """An independently absent host has no continuations; a drained hold repairs."""
     failed_hold(7, phase_value="drained")
     monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refused_probe)
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
+    monkeypatch.setattr("ops.agent_pause.probe.host_identity", _refused_probe)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: False)
     unpause = MagicMock()
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
 
@@ -403,8 +403,8 @@ def test_repair_still_refuses_an_unreadable_agent_host_probe(
         raise URLError(TimeoutError("timed out"))
 
     monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", wedged)
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
+    monkeypatch.setattr("ops.agent_pause.probe.host_identity", wedged)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: True)
 
     with pytest.raises(URLError):
         command._repair("local", WHEN, operator=None)
@@ -418,8 +418,8 @@ def test_stop_proceeds_with_absent_agent_host(
 ) -> None:
     phase("drained")
     monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refused_probe)
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
+    monkeypatch.setattr("ops.agent_pause.probe.host_identity", _refused_probe)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: False)
     stop = MagicMock(return_value=[])
     monkeypatch.setattr(command, "stop_services", stop)
 
@@ -439,8 +439,8 @@ def test_refused_health_listener_cannot_prove_host_quiescence(
         phase("drained")
     before = pause_owner.read()
     monkeypatch.setattr(command, "host_identity_or_none", real_host_identity_or_none)
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refused_probe)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: True)
+    monkeypatch.setattr("ops.agent_pause.probe.host_identity", _refused_probe)
     stop = MagicMock(return_value=[])
     unpause = MagicMock()
     monkeypatch.setattr(command, "stop_services", stop)

@@ -2,9 +2,14 @@
 
 spawn / terminate / resurrect / restart / self-exit finalize, plus the
 InboundArrived / PageClosed event publishes the agent-runner emits. One of the
-four op clusters split out of the former single `ops/operations.py` (the
-others are ops_cluster / ops_config / ops_inventory); each cluster is
-self-contained — no op here calls an op in another cluster.
+op clusters beside `ops.ops_cluster` / `ops.ops_config` / `ops.ops_inventory`;
+each cluster is self-contained — no op here calls an op in another cluster.
+
+This package door holds the lifecycle ops; its submodules hold the pieces the
+ops compose: `launch` (runner-side spawn validation and wake), `termination`
+(durable termination messages and force fences), `events` (best-effort event
+fan-out), `resurrect_gates` (durable automatic-resurrection gates) and
+`billing_recovery` (the explicit billing batch recovery).
 
 Both the gateway FastAPI handlers (`gateway/routers/agents_lifecycle.py`, `uploads.py`)
 and the agent-runner ops server (`services/agent_ops/daemon.py:_dispatch`) call
@@ -13,8 +18,7 @@ in the FastAPI handler wrappers — forwarding never recurses inside an op. The
 one forwarding call site in this module is `resurrect_if_terminated`, which is
 NOT an op (only the gateway routers call it, never the ops server dispatch), so
 its home-machine forward cannot loop either. The durable automatic-resurrection
-gates it consults live in `ops/resurrect_gates.py` (split out at the line
-budget; re-exported here).
+gates it consults are re-exported here from `resurrect_gates`.
 """
 
 from __future__ import annotations
@@ -28,68 +32,65 @@ from typing import Any, Literal
 from psycopg_pool import ConnectionPool
 
 from ops import cluster_rpc as _cluster_rpc
-from ops import ops_exit
-from ops.agent_wake import ResurrectTriggerStaleError
 from ops.agents import (
     get_agent_machine,
     get_agent_status,
     resurrect_agent,
 )
+from ops.agents.resurrection_retry import report_auto_resurrect_failure
+from ops.agents.wake import ResurrectTriggerStaleError
 from ops.cluster_status import kill_agent_shells
+from ops.ops_lifecycle import termination
 
-# Re-exported from ops_events after Task #1999; callers retain module-qualified sites.
-from ops.ops_events import (
+# Re-exported from `events`; callers keep module-qualified sites.
+from ops.ops_lifecycle.events import (
     publish_inbound_arrived as publish_inbound_arrived,
 )
-from ops.ops_events import (
+from ops.ops_lifecycle.events import (
     publish_notice_posted as publish_notice_posted,
 )
-from ops.ops_events import (
+from ops.ops_lifecycle.events import (
     publish_notice_resolved as publish_notice_resolved,
 )
-from ops.ops_events import (
+from ops.ops_lifecycle.events import (
     publish_page_closed as publish_page_closed,
 )
-from ops.ops_exit import (
-    _force_mark_terminated as _force_mark_terminated,
-)
-from ops.ops_exit import (
-    _force_terminate_transaction as _force_terminate_transaction,
-)
-from ops.ops_exit import (
-    _publish_force_terminate_inbound as _publish_force_terminate_inbound,
-)
 
-# Re-exported from ops_launch after Task #1999; routers and tests retain their call sites.
-# Re-exported (explicit-alias form) so the gateway routers and tests keep their
-# call sites unchanged after the Task #1999 split: the launch op cluster now
-# lives in `ops/ops_launch.py`.
-from ops.ops_launch import (
+# Re-exported (explicit-alias form) from `launch` so the gateway routers and
+# tests keep their module-qualified call sites.
+from ops.ops_lifecycle.launch import (
     _insert_prompt_blocking as _insert_prompt_blocking,
 )
-from ops.ops_launch import (
+from ops.ops_lifecycle.launch import (
     launch_agent_op as launch_agent_op,
 )
 
-# Re-exported (explicit-alias form) so the module-qualified callers — tests —
-# keep their call sites unchanged after the line-budget split: the automatic-
-# resurrection gates now live in `ops/resurrect_gates.py`.
-from ops.resurrect_gates import (
+# Re-exported (explicit-alias form) from `resurrect_gates` so the
+# module-qualified callers — tests — keep their call sites.
+from ops.ops_lifecycle.resurrect_gates import (
     clear_wake_suppression as _clear_wake_suppression,
 )
-from ops.resurrect_gates import (
+from ops.ops_lifecycle.resurrect_gates import (
     recovery_halt_reason as _recovery_halt_reason,
 )
-from ops.resurrect_gates import (
+from ops.ops_lifecycle.resurrect_gates import (
     recovery_halted as _recovery_halted,
 )
-from ops.resurrect_gates import (
+from ops.ops_lifecycle.resurrect_gates import (
     system_notice_source_of_trigger as _system_notice_source_of_trigger,
 )
-from ops.resurrect_gates import (
+from ops.ops_lifecycle.resurrect_gates import (
     wake_suppression_active as _wake_suppression_active,
 )
-from ops.resurrection_retry import report_auto_resurrect_failure
+from ops.ops_lifecycle.termination import (
+    _force_mark_terminated as _force_mark_terminated,
+)
+from ops.ops_lifecycle.termination import (
+    _force_terminate_transaction as _force_terminate_transaction,
+)
+from ops.ops_lifecycle.termination import (
+    _publish_force_terminate_inbound as _publish_force_terminate_inbound,
+)
 from ops.rpc_schemas import (
     BillingResurrectAgentResponse,
     CancelRequested,
@@ -101,7 +102,7 @@ from ops.rpc_schemas import (
     TerminateAgentRequest,
     TerminateAgentResponse,
 )
-from ops.rpc_terminate import ShellSessionsKill
+from ops.rpc_schemas.terminate import ShellSessionsKill
 from shared import telemetry
 from shared.agents import (
     AgentNotFound,
@@ -273,7 +274,7 @@ def _terminate_graceful_blocking(
 ) -> int | None:
     """Insert the durable termination message and command; None when a
     kill-requesting enqueue found the agent already terminated."""
-    return ops_exit._enqueue_termination_inbounds(
+    return termination._enqueue_termination_inbounds(
         agent_id,
         db_pool,
         source=body.source,
@@ -752,7 +753,7 @@ async def lifecycle_op(
             trigger_inbound_kind=trigger_inbound_kind,
         )
     if action == "resurrect-billing-v1":
-        from ops.billing_recovery import resurrect_billing_agent_op
+        from ops.ops_lifecycle.billing_recovery import resurrect_billing_agent_op
 
         return await resurrect_billing_agent_op(agent_id)
     if action == "recover-crash-marked-v2":

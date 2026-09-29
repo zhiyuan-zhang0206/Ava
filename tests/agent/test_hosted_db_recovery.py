@@ -23,7 +23,7 @@ from agent.db import claim_inbound_batch
 from agent.hosted_ownership import admit_hosted_runtime
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from ops.agent_spawn import create_agent_row
+from ops.agents.spawn import create_agent_row
 from services.agent_host import db_recovery
 from services.agent_host.host import AgentHost
 from shared import hosted_db_wait, maintenance, maintenance_cohort, pause_owner

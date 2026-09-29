@@ -33,7 +33,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.messages.guard import guarded_delta_reducer
 from agent.startup import reconcile_claimed_inbounds_at_startup
-from ops.agent_spawn import _copy_checkpoint_chain
+from ops.agents.spawn import _copy_checkpoint_chain
 from shared.agents.history.checkpoint import (
     _is_delta_snapshot_blob,
     load_checkpoint_message_count,

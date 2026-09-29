@@ -1,4 +1,9 @@
-"""Canonical service roster and identity-probe declarations."""
+"""Canonical service roster and identity-probe declarations.
+
+This package door holds the roster. Its `service_spec` submodule defines the
+`ServiceSpec` contract every roster entry carries, and `observe` derives
+read-only service status from the roster.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +14,7 @@ from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from ops.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
+from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 from shared.cluster import frontend_service_cmd
 from shared.config import settings
 from shared.daemon_health import DaemonProbe, health_port, probe_daemon, probe_home
