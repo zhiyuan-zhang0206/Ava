@@ -6,7 +6,7 @@ fine to run locally once after adding a new migration.
 Checks:
 1. **Filename format** — every up-migration matches
    `YYYYMMDDTHHMMSS_<kebab-name>.sql` and every down matches the `.down.sql`
-   variant (the regexes are reused from `shared.migrations`, so lint and the
+   variant (the regexes are reused from `shared.deploy.schema.migrations`, so lint and the
    runtime loader can never disagree on the format). The timestamp part must
    parse as a real UTC datetime (catches fat-fingered `20261301T...`).
 2. **Unique names** — no two files share a name (the applied-set primary key
@@ -68,8 +68,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
-from shared.migrations import _BASELINE_NAME, _DOWN_FILENAME_RE, _FILENAME_RE
-from shared.rollback_snapshot import is_rollback_snapshot_table
+from shared.deploy.schema.migrations import _BASELINE_NAME, _DOWN_FILENAME_RE, _FILENAME_RE
+from shared.deploy.schema.rollback_snapshot import is_rollback_snapshot_table
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "migrations"
@@ -372,7 +372,7 @@ def _check_schema_seed() -> list[str]:
         errors.append(
             f"db/schema.sql does not stamp the baseline sentinel {_BASELINE_NAME!r} "
             "into schema_migrations — a fresh DB would then look un-baselined and "
-            "shared.migrations would treat everything as pending"
+            "shared.deploy.schema.migrations would treat everything as pending"
         )
     return errors
 

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from services.pitr import archive_shim
-from shared.pg_tools import pg_start_env
+from shared.cluster.dataplane.pg_tools import pg_start_env
 
 
 @pytest.mark.parametrize(

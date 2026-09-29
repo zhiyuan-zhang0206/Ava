@@ -5,7 +5,7 @@ Every cluster (including `main`) runs its OWN Postgres and Redis under its
 plane and cannot reach into each other's database/channels — this is the only
 data-plane path; there is no shared host instance.
 
-Model (mirrors `shared.pg_tools.throwaway_postgres`, but persistent + authed):
+Model (mirrors `shared.cluster.dataplane.pg_tools.throwaway_postgres`, but persistent + authed):
 
 - Postgres `initdb`s into `$AVA_HOME/pg` (cold) — cached through a host-level
   template dir so a new cluster / a test spins up by directory copy, not a fresh
@@ -57,6 +57,15 @@ from urllib.parse import urlsplit
 from shared.cluster import ensure_cluster_redis_acl, ownership
 from shared.cluster import postgres as owned_postgres
 from shared.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
+from shared.cluster.dataplane.pg_tools import (
+    PG_BIN_LINUX,
+    brew_prefix,
+    is_macos,
+    pg_shm_args,
+    pg_start_env,
+    pg_tool,
+    pg_tz_args,
+)
 from shared.cluster.machine import reachable_host
 from shared.config import settings
 from shared.config.physical_backup import pitr_replication_hba_lines
@@ -67,15 +76,6 @@ from shared.native_process.child_env import daemon_process_env, inherited_proces
 from shared.paths import ava_home
 from shared.pg_admin import pg_admin_url as _shared_pg_admin_url
 from shared.pg_admin import pg_socket_dir
-from shared.pg_tools import (
-    PG_BIN_LINUX,
-    brew_prefix,
-    is_macos,
-    pg_shm_args,
-    pg_start_env,
-    pg_tool,
-    pg_tz_args,
-)
 
 _LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
 

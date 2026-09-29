@@ -51,7 +51,7 @@ def test_flat_dump_keys_are_leaf_names_no_domain_nesting() -> None:
     dump = config.flat_dump(mode="json")
     assert set(dump) == config.field_names()
 
-    domain_attrs = {a for a, _label, _m, _cap in config._DOMAIN_MODELS}
+    domain_attrs = {a for a, _label, _m, _cap in config.DOMAIN_MODELS}
     assert not (domain_attrs & set(dump)), "a domain key leaked into the flat dump"
     # spot-check fields from different domains sit at the top level
     for name in ("db_url", "llm_model", "exec_timeout_seconds", "gateway_port"):
@@ -67,7 +67,7 @@ def test_effective_config_snapshot_is_flat_framework_keys() -> None:
     lm api keys, ...) are deliberately excluded: the snapshot is stored as
     plain JSON on every restart_completed row (2026-08-08 audit, P2-7), so a
     sensitive value must not get a second plaintext copy there."""
-    from shared.plugin_config_registry import (
+    from shared.packages.plugins.config_registration import (
         _framework_field_is_sensitive,
         clear_plugin_configs,
         effective_config_snapshot,

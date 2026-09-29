@@ -579,7 +579,7 @@ def test_prepare_inits_the_host_process_sinks(
         order.append("schema")
 
     monkeypatch.setattr(runner, "init_gateway_process", fake_init)
-    monkeypatch.setattr("shared.migrations.assert_schema_current", fake_schema)
+    monkeypatch.setattr("shared.deploy.schema.migrations.assert_schema_current", fake_schema)
 
     runner.prepare()
     assert order == ["init:schedule-hierarchy-worker", "schema"]

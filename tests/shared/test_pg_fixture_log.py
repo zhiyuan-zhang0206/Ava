@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import pg_throwaway_base, pg_tools
+from shared.cluster.dataplane import pg_throwaway_base, pg_tools
 from shared.config import settings
 from shared.native_process.os_platform import IS_WINDOWS
 

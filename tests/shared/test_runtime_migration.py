@@ -16,17 +16,20 @@ from shared.deploy.release.runtime_release import (
     file_sha256,
     verify_release,
 )
-from shared.deploy.state.cluster_lock import DeployLease
-from shared.migrations import (
+from shared.deploy.schema.migrations import (
     MigrationAuthorityMismatch,
     _assert_migration_authority,
 )
+from shared.deploy.schema.runtime_migration import (
+    ReleaseMigrationContext,
+    installed_migration_paths,
+)
+from shared.deploy.state.cluster_lock import DeployLease
 from shared.runtime_abi import current_abi
-from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
 
 
 def test_installed_readonly_inventory_rejects_unlisted_and_changed_sql(tmp_path: Path) -> None:
-    from shared import runtime_migration
+    from shared.deploy.schema import runtime_migration
 
     path = tmp_path / "29991231T235959_inventory.sql"
     path.write_text("SELECT 1")
@@ -44,7 +47,8 @@ def test_installed_readonly_inventory_rejects_unlisted_and_changed_sql(tmp_path:
 
     distribution.locate_file.side_effect = locate
     with patch(
-        "shared.runtime_migration.importlib.metadata.distribution", return_value=distribution
+        "shared.deploy.schema.runtime_migration.importlib.metadata.distribution",
+        return_value=distribution,
     ):
         assert installed_migration_paths(tmp_path) == {path}
         extra = tmp_path / "29991231T235958_unlisted.sql"
@@ -78,8 +82,8 @@ def test_release_cannot_use_fresh_birth_empty_roster_exception() -> None:
     context = MagicMock(spec=ReleaseMigrationContext)
     context.home = "/unit"
     with (
-        patch("shared.migrations._gateway_units", return_value=[]),
-        patch("shared.migrations.machine_name", return_value="host"),
+        patch("shared.deploy.schema.migrations._gateway_units", return_value=[]),
+        patch("shared.deploy.schema.migrations.machine_name", return_value="host"),
         pytest.raises(MigrationAuthorityMismatch),
     ):
         _assert_migration_authority(MagicMock(), context)
@@ -90,7 +94,7 @@ def test_verified_inventory_applies_without_git_and_rolls_back(
 ) -> None:
     """Real PG transaction; synthetic image exercises authority, not launch closure."""
     from scripts.release_proofs import prove_runtime_migration
-    from shared.migrations import apply_pending_migrations
+    from shared.deploy.schema.migrations import apply_pending_migrations
 
     home = tmp_path.resolve()
     store = home / "releases"
@@ -121,9 +125,9 @@ def test_verified_inventory_applies_without_git_and_rolls_back(
         host_abi=current_abi(),
         schema_digest="b" * 64,
     )
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", directory)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", directory)
     monkeypatch.setattr(prove_runtime_migration, "MIGRATIONS_DIR", directory)
-    monkeypatch.setattr("shared.migrations.machine_name", lambda: "runtime-proof")
+    monkeypatch.setattr("shared.deploy.schema.migrations.machine_name", lambda: "runtime-proof")
     with psycopg.connect(settings.data_plane.db_url) as connection:
         try:
             connection.execute("DELETE FROM machine_units")

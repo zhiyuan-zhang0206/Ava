@@ -657,8 +657,8 @@ def clear_plugin_registrations() -> None:
     from agent.graph.context_notes import clear_plugin_context_notes
     from agent.graph.system_prompt import clear_plugin_system_prompt_sections
     from agent.hooks import clear_hooks
+    from shared.packages.plugins.config_registration import clear_plugin_configs
     from shared.packages.plugins.flags import clear_plugin_flags
-    from shared.plugin_config_registry import clear_plugin_configs
 
     # Keep the framework-owned sections / context notes (registered once at
     # module import); drop only the plugin-contributed tails.

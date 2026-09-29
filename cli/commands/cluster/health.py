@@ -254,7 +254,11 @@ def _schema_health() -> bool:
     must not fire a false schema alert while code and DB are actually in sync
     (2026-08-03: probe alerted "applied version behind required" on a
     connection error during a pgbouncer flake)."""
-    from shared.migrations import CodeBehindSchema, SchemaVersionMismatch, check_schema_version
+    from shared.deploy.schema.migrations import (
+        CodeBehindSchema,
+        SchemaVersionMismatch,
+        check_schema_version,
+    )
 
     try:
         # check_schema_version expects a connection; connect+check inline

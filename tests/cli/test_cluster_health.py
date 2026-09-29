@@ -66,7 +66,7 @@ def test_schema_health_db_flake_is_healthy(monkeypatch: pytest.MonkeyPatch) -> N
 def test_schema_health_real_skew_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
     """A genuine code/DB migration-set disagreement still fails the check."""
     import shared.db
-    from shared.migrations import CodeBehindSchema
+    from shared.deploy.schema.migrations import CodeBehindSchema
 
     class _AheadConnect:
         def __init__(self, *a: object, **kw: object) -> None:

@@ -18,16 +18,16 @@ from shared.config.base import EnvSettings
 
 def _registry_with(model: type[EnvSettings]) -> None:
     """Run `_build_registry` over one synthetic domain and nothing else."""
-    from shared import config_registry
+    from shared.host.env import config_registry
 
     domains = (("synthetic", "Synthetic", model, "agent-runner"),)
-    original = config_registry._DOMAIN_MODELS
-    config_registry._DOMAIN_MODELS = domains
+    original = config_registry.DOMAIN_MODELS
+    config_registry.DOMAIN_MODELS = domains
     config_registry._build_registry.cache_clear()
     try:
         config_registry._build_registry()
     finally:
-        config_registry._DOMAIN_MODELS = original
+        config_registry.DOMAIN_MODELS = original
         config_registry._build_registry.cache_clear()
 
 

@@ -458,7 +458,7 @@ async def _main() -> None:
 
     # Schema-current assertion: if the central DB is ahead of this checkout,
     # abort before serving any op that assumes its columns.
-    from shared.migrations import assert_schema_current
+    from shared.deploy.schema.migrations import assert_schema_current
 
     try:
         assert_schema_current(settings.data_plane.db_url)

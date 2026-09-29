@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Schema Migrations (baseline + deltas)
-description: '`db/schema.sql` is the squashed baseline and the rollback floor; `migrations/YYYYMMDDTHHMMSS_<name>.sql` are post-baseline deltas tracked as an applied SET, not a high-water integer. `shared/migrations.py` applies them and asserts version in both directions at every daemon start.'
+description: '`db/schema.sql` is the squashed baseline and the rollback floor; `migrations/YYYYMMDDTHHMMSS_<name>.sql` are post-baseline deltas tracked as an applied SET, not a high-water integer. `shared/deploy/schema/migrations.py` applies them and asserts version in both directions at every daemon start.'
 tags:
 - shared
 - library
@@ -33,7 +33,7 @@ schema; schema-changing rollout remains planned work.
 
 ## Applied set, not a version number
 
-`shared.migrations.apply_pending_migrations` applies every file whose **name** is
+`shared.deploy.schema.migrations.apply_pending_migrations` applies every file whose **name** is
 not yet in the DB's applied set, in name (≈ chronological) order. Each file runs
 as a single transaction; the **runner INSERTs the file's name into
 `schema_migrations`** on completion (migration files must NOT insert
@@ -91,7 +91,7 @@ This RECORD check is package integrity for read-only comparison, not deployment
 authority: an ordinary unanchored wheel still cannot migrate the database.
 
 `scripts/release_proofs/prove_runtime_migration.py` consumes a verified installed image and calls
-`shared.migrations.apply_pending_migrations` directly with its typed context and
+`shared.deploy.schema.migrations.apply_pending_migrations` directly with its typed context and
 native Postgres connection. It checks wrong home, unit, operation, target,
 manifest and SQL refusal, unchanged history, and a current-schema no-op. The
 loaded interpreter/module identity is checked independently. An inactive image
@@ -101,17 +101,17 @@ proof runs only through CI's isolated runtime-preparation fixture; source-level
 pytest cases are not evidence that this installed-wheel proof executed.
 
 Rationale and the rejected alternatives:
-[2026-07-31-migrations-are-gateway-only](../../decisions/2026-07-31-migrations-are-gateway-only.md).
+[2026-07-31-migrations-are-gateway-only](../../../decisions/2026-07-31-migrations-are-gateway-only.md).
 
 ## Reset generations
 
 Frozen inventories, atomic convergence, restore requirements, and reset rollback
-floors: [[shared/migrations/reset-generations.ava.okf.md]].
+floors: [[shared/deploy/schema/reset-generations.ava.okf.md]].
 
 ## Version assertion is bidirectional
 
 Every long-running process (gateway / agent-host / ops / labeler) calls
-`shared.migrations.assert_schema_current(db_url)` at startup:
+`shared.deploy.schema.migrations.assert_schema_current(db_url)` at startup:
 
 | Condition | Exception | Meaning |
 |---|---|---|

@@ -27,7 +27,7 @@ def _plugin(unit_home: Path) -> None:
     )
     (plugin / "default_config.py").write_text(
         "from pydantic import BaseModel, Field\n"
-        "from shared.plugin_config_registry import register_plugin_config\n"
+        "from shared.packages.plugins.config_registration import register_plugin_config\n"
         "class Config(BaseModel):\n"
         "    exec_probe_marker: str = Field(default='default-marker', json_schema_extra={'per_agent': True})\n"
         "register_plugin_config(Config)\n"

@@ -34,9 +34,9 @@ from services.pitr.operation.custody import NativeProcess, OperationWorker, owne
 from services.pitr.operation.worker_process import StopSignal
 from services.pitr.stores.base_object_store import RestartableStreamingObjectStore
 from services.pitr.stores.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
+from shared.cluster.dataplane.pg_tools import pg_tool
 from shared.db import connect_url
 from shared.pg_admin import OwnerAuthority, local_owner_authority
-from shared.pg_tools import pg_tool
 
 
 class BaseCandidateError(RuntimeError):

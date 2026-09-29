@@ -687,7 +687,7 @@ async def run() -> None:
 
 def main() -> None:
     """Entry point: init logger + run asyncio loop."""
-    from shared.migrations import assert_schema_current
+    from shared.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from shared.pg_tools import throwaway_postgres
+from shared.cluster.dataplane.pg_tools import throwaway_postgres
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 

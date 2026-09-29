@@ -93,7 +93,7 @@ def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
     if not get_backend().supports_data_plane() or settings.data_plane.is_remote:
         return
-    from shared.pg_runtime import ensure_pg_runtime
+    from shared.cluster.dataplane.pg_runtime import ensure_pg_runtime
 
     ensure_pg_runtime()
 

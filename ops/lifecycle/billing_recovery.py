@@ -56,7 +56,7 @@ _log = logging.getLogger(__name__)
 
 # Advisory-lock key for the single-flight guard. Arbitrary but stable
 # cluster-wide (ASCII "AVBR" = Ava Billing Recovery) — same construction as
-# the migration lock's "AVMI" (shared/migrations.py).
+# the migration lock's "AVMI" (shared/deploy/schema/migrations.py).
 _RUN_LOCK_KEY = 0x41564252
 
 # The per-agent summary status; the whitelist listing also rides it ('candidate').

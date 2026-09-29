@@ -75,7 +75,7 @@ Capability = Literal["gateway", "agent-runner", "common"]
 # Order = field render order. The default capability owns every field in the
 # domain unless a field overrides it with json_schema_extra={"capability": ...}
 # (services / daemon / general straddle both capabilities — see those files).
-_DOMAIN_MODELS: tuple[tuple[str, str, str | type[Any], str], ...] = (
+DOMAIN_MODELS: tuple[tuple[str, str, str | type[Any], str], ...] = (
     ("lm", "LLM", "LmSettings", "agent-runner"),
     ("sandbox", "Sandbox", "SandboxSettings", "agent-runner"),
     ("agent", "Agent", "AgentSettings", "agent-runner"),
@@ -97,13 +97,13 @@ _DOMAIN_MODELS: tuple[tuple[str, str, str | type[Any], str], ...] = (
 # The domain attribute names on `settings` — used by the profile fail-fast
 # (Settings.__getattr__) to tell a real domain from a typo. Derived, so a new
 # domain can never drift out of the fail-fast check.
-_DOMAIN_ATTRS = frozenset(attr for attr, _label, _model, _cap in _DOMAIN_MODELS)
+DOMAIN_ATTRS = frozenset(attr for attr, _label, _model, _cap in DOMAIN_MODELS)
 
 # The sub-model classes are imported INSIDE the build (see module docstring):
 # importing them at module level would execute the `shared.config` package while
 # this registry is still initializing, breaking the dotenv_boot pre-Settings
 # boot.
-_MODEL_CLASSES = {
+MODEL_CLASSES = {
     "LmSettings": "shared.config.lm",
     "SandboxSettings": "shared.config.sandbox",
     "AgentSettings": "shared.config.agent",
@@ -132,7 +132,7 @@ class _FieldRef:
     info: _FieldInfoLike
 
 
-def _schema_extra(info: _FieldInfoLike) -> dict[str, Any]:
+def schema_extra(info: _FieldInfoLike) -> dict[str, Any]:
     """The field's `json_schema_extra` as a plain dict (empty if unset / callable).
 
     pydantic types `json_schema_extra` as a `dict[str, JsonValue] | callable | None`
@@ -183,14 +183,14 @@ def _build_registry() -> dict[str, _FieldRef]:
     from shared.config.base import EnvSettings
 
     reg: dict[str, _FieldRef] = {}
-    for attr, label, model_name, default_capability in _DOMAIN_MODELS:
+    for attr, label, model_name, default_capability in DOMAIN_MODELS:
         if isinstance(model_name, str):
             # Deferred import (see module docstring): the sub-model classes live
             # under the `shared.config` package. Importing them only at build time
             # keeps this registry importable before Settings construction.
             model = cast(
                 "type[EnvSettings]",
-                getattr(import_module(_MODEL_CLASSES[model_name]), model_name),
+                getattr(import_module(MODEL_CLASSES[model_name]), model_name),
             )
         else:
             # A test-injected synthetic model class (config_lifecycle tests).
@@ -202,7 +202,7 @@ def _build_registry() -> dict[str, _FieldRef]:
                     f"({reg[name].domain} vs {attr}) — flat keying (wire/.env/bootstrap) "
                     f"requires globally-unique field names"
                 )
-            extra = _schema_extra(info)
+            extra = schema_extra(info)
             scope = extra.get("scope")
             # The field's capability is its explicit override or the domain default;
             # a bad override can never load (same fail-fast posture as scope).
@@ -304,7 +304,7 @@ def ensure_built() -> None:
     _build_registry()
 
 
-def _fields() -> dict[str, _FieldRef]:
+def fields() -> dict[str, _FieldRef]:
     return _build_registry()
 
 
@@ -316,19 +316,19 @@ def _fields() -> dict[str, _FieldRef]:
 # `field_alias` etc.) and blows up on a clean env (`ImportError: cannot import
 # name 'field_alias' from partially initialized module ...` — Task #1099).
 @lru_cache(maxsize=1)
-def _field_infos() -> dict[str, _FieldInfoLike]:
-    return {n: r.info for n, r in _fields().items()}
+def field_infos() -> dict[str, _FieldInfoLike]:
+    return {n: r.info for n, r in fields().items()}
 
 
 def __getattr__(name: str) -> Any:
     if name == "FIELD_INFOS":
-        return _field_infos()
+        return field_infos()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def field_alias(name: str) -> str:
     """The `.env` / env-var alias a field reads from (serialization alias wins)."""
-    info = _fields()[name].info
+    info = fields()[name].info
     return info.serialization_alias or info.alias or name.upper()
 
 
@@ -358,24 +358,24 @@ def field_editor_type(annotation: object) -> tuple[str, list[str] | None]:
 def field_alias_map() -> dict[str, str]:
     """`{field name: env alias}` for every field — the flat map runtime_config /
     lint / session env-forwarding build on."""
-    return {name: field_alias(name) for name in _fields()}
+    return {name: field_alias(name) for name in fields()}
 
 
 def field_domain(name: str) -> str:
     """The `settings` attribute holding this field (e.g. 'lm')."""
-    return _fields()[name].domain
+    return fields()[name].domain
 
 
 def field_names() -> set[str]:
     """Every leaf config field name across all sub-models."""
-    return set(_fields())
+    return set(fields())
 
 
 def per_agent_field_names() -> set[str]:
     """Leaf field names flagged `json_schema_extra={"per_agent": True}` — the
     framework fields a spawn/restart config overlay may override."""
     return {
-        name for name, ref in _fields().items() if _schema_extra(ref.info).get("per_agent") is True
+        name for name, ref in fields().items() if schema_extra(ref.info).get("per_agent") is True
     }
 
 
@@ -386,7 +386,7 @@ def field_lifecycle(name: str) -> Lifecycle:
     per-agent instance, so it has no lifecycle (see the module docstring's
     boundary note).
     """
-    extra = _schema_extra(_fields()[name].info)
+    extra = schema_extra(fields()[name].info)
     if extra.get("per_agent") is not True:
         raise KeyError(f"config field {name!r} is not per_agent — it has no lifecycle class")
     return cast(Lifecycle, extra["lifecycle"])

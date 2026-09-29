@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 from shared.config import settings
-from shared.migrations import (
+from shared.deploy.schema.migrations import (
     _BASELINE_NAME,
     apply_pending_migrations,
 )
@@ -33,7 +33,7 @@ def test_apply_pending_squashes_orphaned_applied_names(
     _ = db_conn  # fixture reseeds the baseline
     orphan = "20260815T000001_synthetic-orphan"
     _init_repo(tmp_path)  # migrations/ = tmp_path, git-tracked anchor applies
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
     try:
@@ -58,7 +58,7 @@ def test_apply_pending_squash_then_apply_pending(
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_squash_t (id int);")
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE syn_squash_t;")
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
     try:
@@ -86,7 +86,7 @@ def test_squash_does_not_touch_baseline_or_pending(
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_keep_t (id int);")
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE syn_keep_t;")
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (_SYN,))
     try:
@@ -109,7 +109,7 @@ def test_squash_authority_checked_even_without_pending(
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
         # Give the DB a gateway identity so _assert_migration_authority has
@@ -122,12 +122,12 @@ def test_squash_authority_checked_even_without_pending(
     try:
         # Point the checkout identity somewhere that is NOT the DB's gateway
         # unit; _assert_migration_authority must fire even though pending == [].
-        import shared.migrations as _m
+        import shared.deploy.schema.migrations as _m
 
         monkeypatch.setattr(
             _m, "checkout_anchored_home", lambda: (Path("/nonexistent/home"), False)
         )
-        from shared.migrations import MigrationAuthorityMismatch
+        from shared.deploy.schema.migrations import MigrationAuthorityMismatch
 
         with psycopg.connect(settings.data_plane.db_url) as fresh:
             try:
@@ -153,7 +153,7 @@ def test_squash_logs_the_converged_names(
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
     try:
@@ -173,12 +173,12 @@ def test_squash_refuses_partial_pre_reset_history(
     """P1 guard: a DB holding only PART of the pre-v0.1.0 history must be
     refused, never silently converged — deleting its tracking rows would
     certify a schema that never ran the missing migrations."""
-    from shared.migrations import _V010_PRE_RESET_SET, MigrationHistoryGap
+    from shared.deploy.schema.migrations import _V010_PRE_RESET_SET, MigrationHistoryGap
 
     assert len(_V010_PRE_RESET_SET) == 59, "frozen set drifted"
     partial = sorted(_V010_PRE_RESET_SET)[:24]  # the 8/1-cluster shape
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
         for name in partial:
             c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
@@ -205,11 +205,11 @@ def test_squash_converges_full_pre_reset_history(
     """A DB that ran the COMPLETE pre-reset history converges cleanly: the
     baseline carries the net effect of all 59, so deleting their tracking rows
     is safe and leaves applied == required."""
-    from shared.migrations import _V010_PRE_RESET_SET
+    from shared.deploy.schema.migrations import _V010_PRE_RESET_SET
 
     all_names = sorted(_V010_PRE_RESET_SET)
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
         for name in all_names:
             c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
@@ -233,7 +233,7 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
     deletes it like any other orphan — the frozen set only gates the 59."""
     _ = db_conn
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (SYN_ORPHAN,))
     try:
@@ -251,8 +251,8 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
 def test_current_reset_refuses_missing_history_without_mutation(
     db_conn: psycopg.Connection, applied_count: int
 ) -> None:
-    from shared.migration_history import _PRE_RESET_SET
-    from shared.migrations import MigrationHistoryGap, applied_migration_names
+    from shared.deploy.schema.migration_history import _PRE_RESET_SET
+    from shared.deploy.schema.migrations import MigrationHistoryGap, applied_migration_names
     from tests.ava.migration_support import _set_table_to
 
     assert len(_PRE_RESET_SET) == 101
@@ -267,8 +267,8 @@ def test_current_reset_refuses_missing_history_without_mutation(
 def test_current_reset_converges_complete_history_and_refuses_cross_floor_rollback(
     db_conn: psycopg.Connection,
 ) -> None:
-    from shared.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
-    from shared.migrations import (
+    from shared.deploy.schema.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
+    from shared.deploy.schema.migrations import (
         RollbackBelowFloor,
         applied_migration_names,
         apply_down,
@@ -303,7 +303,7 @@ def test_current_reset_converges_complete_history_and_refuses_cross_floor_rollba
 def test_integer_history_is_refused_without_conversion(
     db_conn: psycopg.Connection, apply: bool
 ) -> None:
-    from shared.migrations import MigrationLayoutError, check_schema_version
+    from shared.deploy.schema.migrations import MigrationLayoutError, check_schema_version
     from tests.ava.migration_support import _set_table_to
 
     _set_table_to(db_conn, "legacy", range(1, 82))
@@ -318,8 +318,8 @@ def test_integer_history_is_refused_without_conversion(
 def test_reset_anchor_and_history_deletion_roll_back_together(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared import migrations
-    from shared.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
+    from shared.deploy.schema import migrations
+    from shared.deploy.schema.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
     from tests.ava.migration_support import _set_table_to
 
     (tmp_path / f"{_RESET_ANCHOR}.sql").write_text("SELECT 1;")
@@ -349,8 +349,8 @@ def test_reset_anchor_and_history_deletion_roll_back_together(
 def test_failed_reset_anchor_preserves_history_for_retry(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared import migrations
-    from shared.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
+    from shared.deploy.schema import migrations
+    from shared.deploy.schema.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
     from tests.ava.migration_support import _set_table_to
 
     anchor = tmp_path / f"{_RESET_ANCHOR}.sql"

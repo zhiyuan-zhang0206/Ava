@@ -73,7 +73,7 @@ _TRAILING_DIVISOR = re.compile(r"/\s*\d+\s*$")
 # ── errors ────────────────────────────────────────────────────────────────────
 
 
-class NoPluginContext(PluginMetricError):  # noqa: N818 — parallel to plugin_config_registry's NoPluginContext
+class NoPluginContext(PluginMetricError):  # noqa: N818 — parallel to config_registration's NoPluginContext
     """``register_metric`` called outside PluginContext — the framework wraps
     plugin imports, so this is a plugin authoring bug (or a test calling
     register directly)."""

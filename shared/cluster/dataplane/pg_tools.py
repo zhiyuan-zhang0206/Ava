@@ -30,16 +30,16 @@ from functools import cache
 from pathlib import Path
 from typing import NamedTuple, TypedDict, cast
 
-from shared import pg_throwaway_base as _throwaway_base
-from shared.log import logger
-from shared.native_process.child_env import daemon_process_env
-from shared.native_process.os_platform import IS_MACOS, IS_WINDOWS
-from shared.pg_foreground import (
+from shared.cluster.dataplane import pg_throwaway_base as _throwaway_base
+from shared.cluster.dataplane.pg_foreground import (
     start_foreground_postgres,
     stop_foreground_postgres,
     wait_foreground_postgres,
 )
-from shared.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
+from shared.cluster.dataplane.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
+from shared.log import logger
+from shared.native_process.child_env import daemon_process_env
+from shared.native_process.os_platform import IS_MACOS, IS_WINDOWS
 
 PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
 PG_BIN_WINDOWS = Path("C:\\Program Files\\PostgreSQL\\17\\bin")  # EDB installer default
@@ -150,7 +150,7 @@ _THROWAWAY_PREFIX = "ava-pg-"
 
 # Where throwaway instance dirs live — the platform default (/dev/shm on Linux,
 # else the OS temp dir), the AVA_PG_THROWAWAY_BASE override, and the
-# capacity-aware pick — is shared.pg_throwaway_base, extracted to keep this
+# capacity-aware pick — is shared.cluster.dataplane.pg_throwaway_base, extracted to keep this
 # module under its line ceiling.
 
 
@@ -172,7 +172,7 @@ def pg_tool(name: str) -> Path:
     """Path to a Postgres client/server binary.
 
     Resolution: the vendored relocatable Postgres under `~/.ava/runtime/` is
-    preferred when it actually carries `name` (`shared.runtime_binaries`, fetched
+    preferred when it actually carries `name` (`shared.cluster.dataplane.runtime_binaries`, fetched
     by converge), so a clean machine needs no `brew install postgresql@17`. The
     vendored tree is a minimal server distribution — only `initdb` / `pg_ctl` /
     `postgres`; client tools (`pg_isready` / `psql` / `pg_dump`) are absent, so
@@ -182,7 +182,7 @@ def pg_tool(name: str) -> Path:
     - Linux: apt postgresql-17 layout under /usr/lib/postgresql/17/bin.
     - Windows: EDB installer default path.
     - Other: PATH lookup via shutil.which (best-effort fallback)."""
-    from shared.runtime_binaries import vendored_pg_bin_dir
+    from shared.cluster.dataplane.runtime_binaries import vendored_pg_bin_dir
 
     vendored = vendored_pg_bin_dir()
     if vendored is not None and (vendored / name).exists():
@@ -276,7 +276,7 @@ _CLAIM_LOCK_NAME = "owner.lock.claim"
 
 def _throwaway_locks() -> list[Path]:
     """Every owner lock under any throwaway root
-    (`shared.pg_throwaway_base.throwaway_roots`), sorted for a deterministic reap
+    (`shared.cluster.dataplane.pg_throwaway_base.throwaway_roots`), sorted for a deterministic reap
     order. The single enumeration the sweep and the port registry share, so both
     see the same set of instance roots."""
     return sorted(
@@ -647,7 +647,7 @@ def throwaway_postgres(
             its own DDL, e.g. the migration smoke replaying migrations/* onto a
             blank DB).
         base: where the instance dir is created. None — every existing caller —
-            resolves through `shared.pg_throwaway_base.select_throwaway_base` (the
+            resolves through `shared.cluster.dataplane.pg_throwaway_base.select_throwaway_base` (the
             configured override, else the platform default); a caller that knows its
             data footprint (the restore drill) passes a base from
             `select_throwaway_base(required_bytes)`, so the base it reports is the

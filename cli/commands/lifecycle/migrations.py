@@ -12,7 +12,7 @@ from typing import Any
 
 import psycopg
 
-from shared.runtime_migration import ReleaseMigrationContext
+from shared.deploy.schema.runtime_migration import ReleaseMigrationContext
 
 
 def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> list[str]:
@@ -45,7 +45,7 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
     # Both dials bypass PgBouncer — the ONE sanctioned data-plane exemption
     # (user ruling 2026-08: every consumer goes through PgBouncer; see
     # shared/db.py `connect`). apply_pending_migrations holds a SESSION
-    # advisory lock (pg_advisory_lock, shared/migrations.py _MIGRATION_LOCK_KEY)
+    # advisory lock (pg_advisory_lock, shared/deploy/schema/migrations.py _MIGRATION_LOCK_KEY)
     # across its whole apply loop, and transaction pooling hands the backend
     # back to the pool at the end of each transaction — the lock would silently
     # drop between statements, letting a concurrent applier interleave DDL.
@@ -71,7 +71,7 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
 
 
 def _apply(conn: psycopg.Connection[Any], release: ReleaseMigrationContext | None) -> list[str]:
-    from shared.migrations import apply_pending_migrations
+    from shared.deploy.schema.migrations import apply_pending_migrations
 
     if release is None:
         return apply_pending_migrations(conn)

@@ -408,7 +408,7 @@ def test_every_field_resolves_a_valid_capability() -> None:
     domain default; `_build_registry` fail-fasts on a bad value at import, so this
     guards the public metadata surface the frontend groups on."""
     from shared.config import get_config_metadata
-    from shared.config_registry import _ALLOWED_CAPABILITIES
+    from shared.host.env.config_registry import _ALLOWED_CAPABILITIES
 
     assert frozenset({"gateway", "agent-runner", "common"}) == _ALLOWED_CAPABILITIES
     bad = [
@@ -456,13 +456,13 @@ def test_build_registry_rejects_bad_capability(monkeypatch: pytest.MonkeyPatch) 
     domain default), so the whole process fails fast rather than silently
     mis-grouping — the same seal `scope` has. Pin the raise directly (the
     all-fields-valid test above only proves the current tree is clean)."""
-    from shared import config_registry
+    from shared.host.env import config_registry
 
     # The registry builds lazily on first use and memoizes; patch the module
     # (not the config re-export) and clear the cache so the typo is exercised.
     monkeypatch.setattr(
         config_registry,
-        "_DOMAIN_MODELS",
+        "DOMAIN_MODELS",
         (("telegram", "Telegram", "TelegramSettings", "gatway"),),  # typo'd default
     )
     config_registry._build_registry.cache_clear()
@@ -1614,8 +1614,8 @@ def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.Mon
     fail-fast, lost in the main rebuild and restored by #2227)."""
     from pydantic import Field
 
-    from shared import config_registry
     from shared.config.base import EnvSettings
+    from shared.host.env import config_registry
 
     class Bad(EnvSettings):
         synthetic_knob: int = Field(
@@ -1626,7 +1626,7 @@ def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(
         config_registry,
-        "_DOMAIN_MODELS",
+        "DOMAIN_MODELS",
         (("synthetic", "Synthetic", Bad, "agent-runner"),),
     )
     config_registry._build_registry.cache_clear()
@@ -1647,8 +1647,8 @@ def test_build_registry_rejects_restart_required_for_unconsuming_kind(
     the value fixes; this check makes the drift class impossible)."""
     from pydantic import Field
 
-    from shared import config_registry
     from shared.config.base import EnvSettings
+    from shared.host.env import config_registry
 
     class WrongKind(EnvSettings):
         synthetic_knob: int = Field(
@@ -1659,7 +1659,7 @@ def test_build_registry_rejects_restart_required_for_unconsuming_kind(
 
     monkeypatch.setattr(
         config_registry,
-        "_DOMAIN_MODELS",
+        "DOMAIN_MODELS",
         (("telegram", "Telegram", WrongKind, "gateway"),),
     )
     config_registry._build_registry.cache_clear()
@@ -1679,7 +1679,7 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
 
     from shared.config import _FIELDS
     from shared.config.profiles import PROCESS_PROFILES
-    from shared.config_registry import _ALLOWED_RESTART_REQUIRED, _RESTART_REQUIRED_PROFILE
+    from shared.host.env.config_registry import _ALLOWED_RESTART_REQUIRED, _RESTART_REQUIRED_PROFILE
 
     def _extra(ref: object) -> dict[str, Any]:
         info = getattr(ref, "info", ref)

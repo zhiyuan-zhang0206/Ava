@@ -316,7 +316,7 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "shared/events/system.py",
         "scripts/codegen/gen_event_registry.py",
         "shared/events/registry.md",
-        "shared/config_registry.py",
+        "shared/host/env/config_registry.py",
         "shared/config/agent.py",
         "scripts/codegen/gen_config_lite_table.py",
         "shared/host/env/config_lite_table.json",

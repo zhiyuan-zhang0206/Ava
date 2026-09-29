@@ -26,7 +26,7 @@ import psycopg
 import pytest
 
 from shared.config import settings
-from shared.migrations import MigrationAuthorityMismatch, apply_pending_migrations
+from shared.deploy.schema.migrations import MigrationAuthorityMismatch, apply_pending_migrations
 
 # This host is the gateway of the DB under test in the "matching" cases.
 _GATEWAY = ("gateway-host", "/Users/ava/.ava")
@@ -53,7 +53,7 @@ def _clean_units_and_synthetic() -> Iterator[None]:
     xdist is free to change, and did: CI shard 7 failed while the same test
     passed locally.
     """
-    from shared.migrations import required_migration_set
+    from shared.deploy.schema.migrations import required_migration_set
 
     # Snapshot before any test monkeypatches MIGRATIONS_DIR, so teardown
     # restores the checkout's real set rather than some tmp dir's.
@@ -89,8 +89,10 @@ def _claim_checkout(
     monkeypatch: pytest.MonkeyPatch, machine: str, home: str, *, anchored: bool = True
 ) -> None:
     """Make the executing checkout claim `machine:home`."""
-    monkeypatch.setattr("shared.migrations.machine_name", lambda: machine)
-    monkeypatch.setattr("shared.migrations.checkout_anchored_home", lambda: (Path(home), anchored))
+    monkeypatch.setattr("shared.deploy.schema.migrations.machine_name", lambda: machine)
+    monkeypatch.setattr(
+        "shared.deploy.schema.migrations.checkout_anchored_home", lambda: (Path(home), anchored)
+    )
 
 
 def _as_git_worktree(tmp_path: Path) -> None:
@@ -120,7 +122,7 @@ def _pending_migration(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_authority_t (id int);")
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE syn_authority_t;")
     _as_git_worktree(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
 
 
 def _synthetic_table_exists() -> bool:
@@ -229,9 +231,9 @@ def test_untracked_migration_files_names_only_untracked_sql(
     (tmp_path / "20260808T020000_untracked.sql").write_text("-- up")
     (tmp_path / "20260808T030000_untracked.down.sql").write_text("-- down")
     (tmp_path / ".hidden.sql").write_text("-- hidden")
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
 
-    from shared import migrations as m
+    from shared.deploy.schema import migrations as m
 
     assert m.untracked_migration_files() == ["20260808T020000_untracked.sql"]
 
@@ -242,9 +244,9 @@ def test_untracked_migration_files_empty_outside_a_worktree(
     """Not a git worktree → empty, not an error: the loader fails closed there
     (nothing would be applied), so the warning surface has nothing to add."""
     (tmp_path / "20260808T010000_x.sql").write_text("-- up")
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
 
-    from shared import migrations as m
+    from shared.deploy.schema import migrations as m
 
     assert m.untracked_migration_files() == []
 
@@ -259,9 +261,9 @@ def test_unreadable_migration_files_names_a_denied_tracked_file(
     locked.write_text("-- up")
     _as_git_worktree(tmp_path)
     locked.chmod(0)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
 
-    from shared import migrations as m
+    from shared.deploy.schema import migrations as m
 
     problems = m.unreadable_migration_files()
     assert [name for name, _ in problems] == ["20260808T010000_locked"]
@@ -274,8 +276,8 @@ def test_unreadable_migration_files_empty_when_every_tracked_file_reads(
     (tmp_path / "20260808T010000_ok.sql").write_text("-- up")
     (tmp_path / "20260808T010000_ok.down.sql").write_text("-- down")
     _as_git_worktree(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("shared.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
 
-    from shared import migrations as m
+    from shared.deploy.schema import migrations as m
 
     assert m.unreadable_migration_files() == []

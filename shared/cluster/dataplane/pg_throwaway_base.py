@@ -1,8 +1,8 @@
 """Where throwaway Postgres clusters put their data — and how much room they need.
 
-Owned by `shared/pg_tools.py`'s throwaway-cluster lifecycle; extracted here to
+Owned by `shared/cluster/dataplane/pg_tools.py`'s throwaway-cluster lifecycle; extracted here to
 keep that module under its line ceiling (the same reason
-`shared/pg_stall_watchdog.py` exists). Holds the host facts and the one policy:
+`shared/cluster/dataplane/pg_stall_watchdog.py` exists). Holds the host facts and the one policy:
 
 - The **platform default base**: `/dev/shm` on Linux (RAM-backed, so scratch
   clusters get tmpfs speed — the historical choice), else the OS temp dir (macOS

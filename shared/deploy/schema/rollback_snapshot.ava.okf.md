@@ -9,7 +9,7 @@ tags:
 
 # Rollback Snapshot Convention
 
-`shared/rollback_snapshot.py` defines `is_rollback_snapshot_table`: a
+`shared/deploy/schema/rollback_snapshot.py` defines `is_rollback_snapshot_table`: a
 `*_backfill_*` table is a finite migration recovery buffer, not durable
 application state. `scripts/content_lint/lint_migrations.py` applies the predicate to every
 created migration table and requires a later forward `DROP TABLE IF EXISTS`

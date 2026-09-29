@@ -51,8 +51,8 @@ from shared.cluster.authority import (
     read_secret,
     require_ledger,
 )
-from shared.migrations import apply_pending_migrations
-from shared.pg_tools import pg_start_env, pg_tool, throwaway_postgres
+from shared.cluster.dataplane.pg_tools import pg_start_env, pg_tool, throwaway_postgres
+from shared.deploy.schema.migrations import apply_pending_migrations
 
 OWNER = "ava_test_owner"
 _TEMPLATE = "ava_test_tmpl"

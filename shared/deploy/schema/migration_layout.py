@@ -8,10 +8,13 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME
+from shared.deploy.schema.migration_errors import MigrationLayoutError
+from shared.deploy.schema.runtime_migration import (
+    ReleaseMigrationContext,
+    installed_migration_paths,
+)
 from shared.log import logger
-from shared.migration_errors import MigrationLayoutError
 from shared.native_process.os_platform import CREATE_NO_WINDOW
-from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
 
 # The squashed baseline: one sentinel row that stands in for the entire history
 # folded into db/schema.sql. Always a member of `required_migration_set()`; has
@@ -27,7 +30,7 @@ _DOWN_FILENAME_RE = re.compile(rf"^{_STEM_RE}\.down\.sql$")
 
 
 def _migrations_dir() -> Path:
-    from shared.migrations import MIGRATIONS_DIR  # lazy: sees monkeypatches
+    from shared.deploy.schema.migrations import MIGRATIONS_DIR  # lazy: sees monkeypatches
 
     return MIGRATIONS_DIR
 

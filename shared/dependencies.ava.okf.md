@@ -22,7 +22,7 @@ The shared-layer domain map below complements the public
 - [[gateway-cli.ava.okf.md]] — gateway communicates with agent processes via the contracts in shared/agents/contract.py
 - [[shared/events/live/live.ava.okf.md]] — `ava:events` live pub/sub payload union
 - [[shared/cluster/machine.ava.okf.md]] — machine name + capability set, `machines` table, spawn-target invariant
-- [[shared/migrations/migrations.ava.okf.md]] — baseline + delta schema model, applied set, version assertion
+- [[shared/deploy/schema/migrations.ava.okf.md]] — baseline + delta schema model, applied set, version assertion
 - [[paths.ava.okf.md]] — `$AVA_HOME` layout
 - [[install_registry.ava.okf.md]] — `installed.json` + the skill-scanner gate
 - [[shared/packages/plugins/enable_config.ava.okf.md]] — per-machine plugin enable state

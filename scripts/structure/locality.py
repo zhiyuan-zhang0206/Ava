@@ -321,16 +321,16 @@ DECISIONS: dict[str, Decision] = {
                 "restore-sandbox and live-identity dials inside the restricted restore "
                 "worker, which runs without a home or settings"
             ),
-            "shared/pg_tools.py": (
+            "shared/cluster/dataplane/pg_tools.py": (
                 "provisions the throwaway Postgres it just started; imported by the "
                 "restricted restore worker and run config-free by scripts/ci/migration_smoke.py"
             ),
-            "shared/pg_stall_watchdog.py": (
-                "probes the throwaway Postgres shared/pg_tools.py started, under the same "
+            "shared/cluster/dataplane/pg_stall_watchdog.py": (
+                "probes the throwaway Postgres shared/cluster/dataplane/pg_tools.py started, under the same "
                 "home-free constraint"
             ),
-            "shared/pg_foreground.py": (
-                "readiness probe of the foreground throwaway postmaster shared/pg_tools.py "
+            "shared/cluster/dataplane/pg_foreground.py": (
+                "readiness probe of the foreground throwaway postmaster shared/cluster/dataplane/pg_tools.py "
                 "started, under the same home-free constraint"
             ),
         },

@@ -299,7 +299,7 @@ def main() -> None:
     the same `KeyboardInterrupt` unwind — see `shared.daemon.shutdown`. `ava stop`
     default force-kill does not reach this.
     """
-    from shared.migrations import assert_schema_current
+    from shared.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)

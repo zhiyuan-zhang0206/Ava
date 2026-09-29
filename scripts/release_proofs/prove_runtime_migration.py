@@ -30,7 +30,7 @@ from shared.deploy.release.runtime_release import (
     verify_release,
 )
 from shared.deploy.release.verified_file import regular_bytes
-from shared.migrations import (
+from shared.deploy.schema.migrations import (
     MIGRATIONS_DIR,
     MigrationAuthorityMismatch,
     applied_migration_names,
@@ -38,8 +38,11 @@ from shared.migrations import (
     check_schema_version,
     required_migration_set,
 )
+from shared.deploy.schema.runtime_migration import (
+    ReleaseMigrationContext,
+    installed_migration_paths,
+)
 from shared.runtime_abi import current_abi
-from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
 
 
 def require(condition: bool, message: str) -> None:  # noqa: FBT001 — proof predicate.

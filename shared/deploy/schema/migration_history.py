@@ -4,7 +4,7 @@ These inventories are restore boundaries, not executable migration history.
 Keep the 2026-08-14 inventory until older backup/PITR restores are ruled out.
 """
 
-from shared.migration_errors import MigrationHistoryGap
+from shared.deploy.schema.migration_errors import MigrationHistoryGap
 
 _RESET_ANCHOR = "20260923T031516_schema-baseline"
 

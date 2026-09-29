@@ -84,7 +84,7 @@ def _validate_config_keys(config: dict[str, object]) -> None:
                 detail=(
                     f"preset config key {key!r} is a framework Settings field but is not "
                     "per_agent=True; cluster-consistent fields cannot be overridden per agent "
-                    "— see shared/plugin_config_registry.py"
+                    "— see shared/packages/plugins/config_registration.py"
                 ),
             )
 

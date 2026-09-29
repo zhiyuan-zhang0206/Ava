@@ -1050,7 +1050,7 @@ class TestSpawnConfig:
         (which reject unknown keys) must not see it, while the other fields are
         still validated."""
         from ava import agents
-        from shared.plugin_config_registry import InvalidConfigOverlay
+        from shared.packages.plugins.config_registration import InvalidConfigOverlay
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
@@ -1063,7 +1063,7 @@ class TestSpawnConfig:
     def test_spawn_rejects_non_per_agent_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """spawn(config_overlay=...) rejects fields not marked per_agent — raises before spawning."""
         from ava import agents
-        from shared.plugin_config_registry import InvalidConfigOverlay
+        from shared.packages.plugins.config_registration import InvalidConfigOverlay
 
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         with pytest.raises(InvalidConfigOverlay):

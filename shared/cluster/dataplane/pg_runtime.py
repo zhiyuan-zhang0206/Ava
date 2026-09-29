@@ -9,9 +9,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from shared import runtime_binaries
+from shared.cluster.dataplane import runtime_binaries
+from shared.cluster.dataplane.pg_tools import pg_tool
 from shared.host.system.backend import get_backend
-from shared.pg_tools import pg_tool
 
 
 def _installed_server() -> Path | None:

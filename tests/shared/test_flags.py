@@ -3,8 +3,9 @@
 import pytest
 
 from shared.config import get_field, set_field
-from shared.config_registry import _fields
+from shared.host.env.config_registry import fields
 from shared.lm.registry import DEFAULT_TUNING
+from shared.packages.plugins.config_registration import _field_is_sensitive
 from shared.packages.plugins.context import PluginContext
 from shared.packages.plugins.flags import (
     NoPluginContext,
@@ -15,7 +16,6 @@ from shared.packages.plugins.flags import (
     declared_flags,
     read_flag,
 )
-from shared.plugin_config_registry import _field_is_sensitive
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ def test_declare_flags_requires_plugin_context() -> None:
 )
 def test_declare_flags_rejects_invalid_or_sensitive_keys(key: str) -> None:
     if key == "data_plane.db_url":
-        assert _field_is_sensitive(_fields()["db_url"].info.json_schema_extra)
+        assert _field_is_sensitive(fields()["db_url"].info.json_schema_extra)
     with PluginContext("plugin"), pytest.raises(UnknownFlag) as exc_info:
         declare_flags(key)
     assert repr(key) in str(exc_info.value)

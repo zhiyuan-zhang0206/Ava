@@ -45,7 +45,7 @@ grouping is NOT this metadata: the top-level display sections are the frontend's
 own static regrouping (`ui/web/src/app/control/_config_groups.ts`); the second
 level is the owning sub-model's `group` label. `capability` below is conceptual
 ownership + the remote-view field filter, not panel grouping (default capability
-per domain in `_DOMAIN_MODELS`). Each Field's json_schema_extra carries the
+per domain in `DOMAIN_MODELS`). Each Field's json_schema_extra carries the
 remaining metadata the frontend and distribution logic need:
 - restart_required: "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process must restart after a change; "gateway" names the gateway process AND every gateway-profile daemon that consumes the field (im_bridge / memory_indexer / memory_search / milvus / ... — an `ava restart` bounces all of them); "schedule" = the gateway-hosted schedule runner
 - writable: whether the frontend allows editing
@@ -86,7 +86,7 @@ was merely the cluster default the day it was born" must stay distinguishable.
 not per-agent has no per-agent instance to freeze — cluster-scope config is by
 definition read live by whatever process next starts, so declaring `lifecycle` on
 one is a category error and the registry rejects it. Plugin `Config` fields
-(`shared/plugin_config_registry.py`) are outside this registry and are not part of
+(`shared/packages/plugins/config_registration.py`) are outside this registry and are not part of
 the frozen set; they behave as `live` and only an explicit overlay pins them.
 
 Resolution + stamping mechanics: `shared/agents/birth_config.py`.
@@ -140,21 +140,6 @@ from shared.config.turn_view import (
 from shared.config.turn_view import (
     turn_settings as turn_settings,
 )
-from shared.config_registry import (
-    _DOMAIN_ATTRS as _DOMAIN_ATTRS,
-)
-from shared.config_registry import (
-    _DOMAIN_MODELS as _DOMAIN_MODELS,
-)
-from shared.config_registry import (
-    Capability as Capability,
-)
-from shared.config_registry import (
-    Lifecycle as Lifecycle,
-)
-from shared.config_registry import (
-    _schema_extra as _schema_extra,
-)
 from shared.host.env.bootstrap import (
     CONFIG_FETCH_ENV as CONFIG_FETCH_ENV,
 )
@@ -171,6 +156,21 @@ from shared.host.env.config_lite_table import (
     FIELD_ALIASES,
     FIELD_DOMAINS,
     PER_AGENT_FIELDS,
+)
+from shared.host.env.config_registry import (
+    DOMAIN_ATTRS as DOMAIN_ATTRS,
+)
+from shared.host.env.config_registry import (
+    DOMAIN_MODELS as DOMAIN_MODELS,
+)
+from shared.host.env.config_registry import (
+    Capability as Capability,
+)
+from shared.host.env.config_registry import (
+    Lifecycle as Lifecycle,
+)
+from shared.host.env.config_registry import (
+    schema_extra as schema_extra,
 )
 from shared.host.env.dotenv_boot import (
     load_ava_env as load_ava_env,
@@ -450,9 +450,9 @@ def __getattr__(name: str) -> Any:
     if name.startswith("__") or _lite.is_upgrading():
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     if name in ("_FIELDS", "FIELD_INFOS"):
-        from shared.config_registry import _field_infos, _fields
+        from shared.host.env.config_registry import field_infos, fields
 
-        return _fields() if name == "_FIELDS" else _field_infos()
+        return fields() if name == "_FIELDS" else field_infos()
     if name in ("CONFIG_UNCHANGED_SENTINEL", "ConfigFieldMeta"):
         # The write-path policy (`shared/config/editing.py`) imports these at
         # module level; both are settings-free metadata objects, so serve them

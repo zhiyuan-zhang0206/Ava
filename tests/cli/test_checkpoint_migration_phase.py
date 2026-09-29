@@ -66,7 +66,7 @@ class _FakeAdminConnection:
 @pytest.fixture
 def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     import shared.db
-    import shared.migrations
+    import shared.deploy.schema.migrations
     from shared import cluster, pg_admin
     from shared.cluster import ownership
 
@@ -110,7 +110,9 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(shared.db, "direct_db_url", lambda: "postgresql://direct/ava")
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
     monkeypatch.setattr(pg_admin.psycopg, "connect", fake_admin_connect)
-    monkeypatch.setattr(shared.migrations, "apply_pending_migrations", fake_ava_migrations)
+    monkeypatch.setattr(
+        shared.deploy.schema.migrations, "apply_pending_migrations", fake_ava_migrations
+    )
     monkeypatch.setattr(
         cluster, "assert_checkpoint_dependency_pinned", fake_dependency_gate, raising=False
     )
@@ -228,7 +230,7 @@ def test_real_start_phase_converges_ava_then_is_idempotent(
 ) -> None:
     """Real PG proves both migration domains are exact on repeated starts."""
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared.migrations import required_migration_set
+    from shared.deploy.schema.migrations import required_migration_set
 
     _bind_private_database(db_conn, monkeypatch)
     db_conn.execute("DELETE FROM machine_units")
@@ -330,8 +332,8 @@ def test_checkpoint_migration_manifest_requires_tracked_up_and_down(
     write_up: bool,
     write_down: bool,
 ) -> None:
-    from shared import migrations
     from shared.cluster import provision
+    from shared.deploy.schema import migrations
 
     name = "20990101T000000_checkpoint-v10"
     if write_up:

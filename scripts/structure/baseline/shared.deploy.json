@@ -13,6 +13,8 @@
     "shared/deploy/release/runtime_prepare.py::prepare_release": 31,
     "shared/deploy/release/runtime_publication_input.py::resolve_runtime_publication_input": 16,
     "shared/deploy/release/runtime_release.py::verify_release": 29,
+    "shared/deploy/schema/migrations.py::apply_pending_migrations": 15,
+    "shared/deploy/schema/runtime_migration.py::ReleaseMigrationContext.validate": 15,
     "shared/deploy/updater/handoff.py::_read_unlocked": 16,
     "shared/deploy/updater/recovery.py::NormalReleaseRecoveryJournal.coherent_phase": 16,
     "shared/deploy/writers/publication.py::WriterPublication.unique_units": 21

@@ -658,7 +658,7 @@ async def run() -> None:
 
 def main() -> None:
     """Initialize the daemon after verifying the database schema version."""
-    from shared.migrations import assert_schema_current
+    from shared.deploy.schema.migrations import assert_schema_current
 
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="page_server")

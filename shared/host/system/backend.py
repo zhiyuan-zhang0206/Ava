@@ -188,7 +188,7 @@ class PlatformBackend(abc.ABC):
         """Resolve a PostgreSQL binary name to a full path, or ``None`` when
         the host has no known installation.
 
-        The vendored relocatable Postgres (``shared.runtime_binaries``) is
+        The vendored relocatable Postgres (``shared.cluster.dataplane.runtime_binaries``) is
         checked first; only when absent does the platform default apply.
         """
         ...
@@ -326,7 +326,7 @@ class MacPlatformBackend(PlatformBackend):
     # -- PostgreSQL --
 
     def pg_binary_path(self, name: str) -> Path | None:
-        from shared.pg_tools import brew_prefix
+        from shared.cluster.dataplane.pg_tools import brew_prefix
 
         return brew_prefix("postgresql@17") / "bin" / name
 
@@ -435,7 +435,7 @@ class LinuxPlatformBackend(PlatformBackend):
     # -- PostgreSQL --
 
     def pg_binary_path(self, name: str) -> Path | None:
-        from shared.pg_tools import PG_BIN_LINUX
+        from shared.cluster.dataplane.pg_tools import PG_BIN_LINUX
 
         return PG_BIN_LINUX / name
 
@@ -611,7 +611,7 @@ class WindowsPlatformBackend(PlatformBackend):
     # -- PostgreSQL --
 
     def pg_binary_path(self, name: str) -> Path | None:
-        from shared.pg_tools import PG_BIN_WINDOWS
+        from shared.cluster.dataplane.pg_tools import PG_BIN_WINDOWS
 
         candidate = PG_BIN_WINDOWS / f"{name}.exe"
         return candidate if candidate.exists() else None

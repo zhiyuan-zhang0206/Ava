@@ -107,16 +107,16 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str]) -> None:
 def domain_model_classes() -> dict[str, type[Any]]:
     """`{domain attr: sub-model class}` — the registry's deferred class imports,
     resolved once per process without constructing any Settings. Public because
-    overlay validation (`shared.plugin_config_registry`) re-validates each
+    overlay validation (`shared.packages.plugins.config_registration`) re-validates each
     framework field against its owning sub-model class."""
     from importlib import import_module
 
-    from shared.config_registry import _DOMAIN_MODELS, _MODEL_CLASSES
+    from shared.host.env.config_registry import DOMAIN_MODELS, MODEL_CLASSES
 
     out: dict[str, type[Any]] = {}
-    for attr, _label, model_name, _capability in _DOMAIN_MODELS:
+    for attr, _label, model_name, _capability in DOMAIN_MODELS:
         if isinstance(model_name, str):
-            out[attr] = getattr(import_module(_MODEL_CLASSES[model_name]), model_name)
+            out[attr] = getattr(import_module(MODEL_CLASSES[model_name]), model_name)
         else:
             out[attr] = model_name
     return out

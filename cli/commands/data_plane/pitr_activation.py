@@ -66,9 +66,9 @@ from services.pitr.activation.state import (
     write_record_cas,
 )
 from services.pitr.stores.cos.client import credential_evidence as _cos_credential_evidence
+from shared.cluster.dataplane.pg_tools import pg_tool
 from shared.config import settings
 from shared.paths import ava_home
-from shared.pg_tools import pg_tool
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
 

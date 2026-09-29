@@ -488,7 +488,7 @@ class TestTimestampOffset:
     """tz audit PR-1 behavior lock. `_row_to_task` builds `created_at`/
     `updated_at` with a bare `.isoformat()` on the value psycopg3 read back —
     the offset it carries is whatever the PG SESSION timezone was, not a
-    fixed one. Pinning that session timezone to UTC (shared/pg_tools.py:
+    fixed one. Pinning that session timezone to UTC (shared/cluster/dataplane/pg_tools.py:
     pg_tz_args, cli/commands/data_plane/cluster_instance.py) is what makes this `+00:00`
     instead of drifting with the host OS timezone."""
 

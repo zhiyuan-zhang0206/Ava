@@ -20,12 +20,12 @@ from services.pitr.stores.restore_object_store import GenerationPinnedObjectRead
 from services.pitr.wal.crypto import decrypt_archive, encrypt_archive, source_identity
 from shared import db
 from shared.api_contracts import strict_decode
+from shared.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
 from shared.config import settings
+from shared.deploy.schema.rollback_snapshot import is_rollback_snapshot_table
 from shared.host.private_storage import write_private_bytes
 from shared.host.proc import run_bounded
 from shared.pg_admin import local_owner_authority
-from shared.pg_tools import pg_tool, throwaway_postgres
-from shared.rollback_snapshot import is_rollback_snapshot_table
 
 _ARCHIVE_SCHEMA_VERSION = 1
 _ARCHIVE_DIRECTORY = "rollback-snapshot-archives"

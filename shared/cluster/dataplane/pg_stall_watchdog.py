@@ -11,7 +11,7 @@ rows the admin connection answers) into the fixture-log artifact dir, then
 SIGKILL the postmaster so the waiting suite fails immediately with a
 connection error instead of hanging for the rest of the run.
 
-Owned by `shared/pg_tools.py`'s throwaway-cluster lifecycle; extracted here
+Owned by `shared/cluster/dataplane/pg_tools.py`'s throwaway-cluster lifecycle; extracted here
 to keep that module under its line ceiling.
 """
 

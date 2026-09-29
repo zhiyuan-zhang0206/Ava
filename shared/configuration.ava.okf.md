@@ -40,7 +40,7 @@ equivalence windows plus first-error parity with the eager path are pinned by
 tests (`tests/shared/test_config_lite_*.py`); the design record is
 [2026-09-16-config-boot-lite](../decisions/2026-09-16-config-boot-lite.md).
 
-`shared/config_registry.py` is the single projection of field aliases,
+`shared/host/env/config_registry.py` is the single projection of field aliases,
 annotations, editor types, choices, and `json_schema_extra` metadata. Both the
 gateway metadata view and the local config CLI use it, preventing scope,
 sensitivity, and editability policy from diverging. `shared/host/env/bootstrap.py`
@@ -70,7 +70,7 @@ a different version from PATH.
 `pg_throwaway_base` is the host-scoped scratch-cluster selection: where
 `shared/pg_tools.throwaway_postgres` creates disposable Postgres instance dirs
 (test fixtures, smokes, the restore drill). Empty keeps the platform default —
-`/dev/shm` on Linux, the OS temp dir elsewhere — and `shared/pg_throwaway_base.py`
+`/dev/shm` on Linux, the OS temp dir elsewhere — and `shared/cluster/dataplane/pg_throwaway_base.py`
 demotes a caller that declares its required capacity to the disk fallback
 (`/var/tmp` where present) when the tmpfs cannot hold it. It rides the same
 home-authority projection as `AVA_REDIS_BIN_DIR`, so a parent's selection cannot

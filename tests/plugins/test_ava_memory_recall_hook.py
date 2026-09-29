@@ -30,8 +30,8 @@ def _loaded() -> Any:
     """Load ava_memory through the real plugin-registration path, so the hook
     instance under test is the registered one (same fixture shape as
     test_ava_memory_notes.py)."""
+    from shared.packages.plugins.config_registration import bind_from_disk
     from shared.packages.plugins.context import PluginContext
-    from shared.plugin_config_registry import bind_from_disk
 
     clear_plugin_registrations()
     for name in list(sys.modules):

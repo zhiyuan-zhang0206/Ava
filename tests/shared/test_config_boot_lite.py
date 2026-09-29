@@ -38,7 +38,7 @@ _LITE_CONFIG_MODULES = {
     "shared.config.profiles",
     "shared.config.turn_view",
     "shared.host.env.config_lite_table",
-    "shared.config_registry",
+    "shared.host.env.config_registry",
 }
 
 

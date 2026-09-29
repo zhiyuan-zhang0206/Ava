@@ -73,7 +73,7 @@ def prepare() -> None:
     (backoff + breaker + last_error) exposes it instead of every tick failing
     on its own.
     """
-    from shared.migrations import assert_schema_current
+    from shared.deploy.schema.migrations import assert_schema_current
 
     init_gateway_process(name="schedule-hierarchy-worker")
     assert_schema_current(settings.data_plane.db_url)

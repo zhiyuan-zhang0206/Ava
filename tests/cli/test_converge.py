@@ -321,7 +321,7 @@ def test_cmd_converge_unconfigured_returns_zero(
     home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     import cli.commands._repo as _repo_commands
-    from shared import runtime_binaries as rb
+    from shared.cluster.dataplane import runtime_binaries as rb
     from shared.config import settings
 
     repo = tmp_path / "repo"
@@ -757,7 +757,7 @@ class TestWarnUntrackedMigrations:
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setattr(
-            "shared.migrations.untracked_migration_files",
+            "shared.deploy.schema.migrations.untracked_migration_files",
             lambda: ["20260808T010000_add-foo.sql"],
         )
         converge_host._warn_untracked_migrations(_ctx(tmp_path, tmp_path))
@@ -769,7 +769,7 @@ class TestWarnUntrackedMigrations:
     def test_silent_when_nothing_untracked(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr("shared.migrations.untracked_migration_files", list)
+        monkeypatch.setattr("shared.deploy.schema.migrations.untracked_migration_files", list)
         converge_host._warn_untracked_migrations(_ctx(tmp_path, tmp_path))
         assert capsys.readouterr().out == ""
 

@@ -169,7 +169,7 @@ REDIS = _LazyConnection(_connect_redis, "REDIS")
 # - Private module (underscore prefix) → not in `ava.help()`, for plugin authors not the agent
 # - lazy attribute access → no cache here, so restart / test monkeypatch changes
 #   to the registry are immediately visible
-# - lazy import shared.plugin_config_registry → avoids ava module load triggering agent
+# - lazy import shared.packages.plugins.config_registration → avoids ava module load triggering agent
 #   module import (test fixture / container mode can still import ava
 #   without connecting agent)
 
@@ -185,8 +185,8 @@ class _PluginsView:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
+        from shared.packages.plugins.config_registration import registered_plugin_config_names
         from shared.packages.plugins.config_view import turn_plugin_config
-        from shared.plugin_config_registry import registered_plugin_config_names
 
         known = registered_plugin_config_names()
         if name not in known:

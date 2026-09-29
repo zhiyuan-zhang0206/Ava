@@ -24,9 +24,9 @@ import pytest
 
 from services.pitr.operation import custody
 from services.pitr.operation import worker_process as workers
+from shared.cluster.dataplane.pg_tools import pg_tool
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess
-from shared.pg_tools import pg_tool
 from tests.services.test_pitr_native_custody import _control_dir, _exited_worker, _kind
 from tests.services.test_pitr_operation_owner import _release_held, _until, _worker
 
@@ -38,7 +38,7 @@ _POSTGRES_WORKER = """\
 import psycopg
 from services.pitr.operation.worker_process import worker_request
 from shared.native_process.ownership import OwnedProcess
-from shared.pg_foreground import start_foreground_postgres, wait_foreground_postgres
+from shared.cluster.dataplane.pg_foreground import start_foreground_postgres, wait_foreground_postgres
 import psutil
 request, output = worker_request(sys.argv)
 data, port = Path(request['data']), request['port']
@@ -193,7 +193,7 @@ def test_retirement_applies_the_postgres_family_proof(tmp_path: Path) -> None:
 
 _FAKE_POSTMASTER = """\
 from services.pitr.operation.worker_process import worker_request
-from shared.pg_foreground import start_foreground_postgres
+from shared.cluster.dataplane.pg_foreground import start_foreground_postgres
 request, output = worker_request(sys.argv)
 start_foreground_postgres(
     [sys.executable, '-c', 'import time; time.sleep(60)', '-D', request['data']],
@@ -235,7 +235,7 @@ def test_restore_sandboxes_are_receipted_for_their_controller(tmp_path: Path) ->
     """Restore proofs and operator drills start their sandbox through the
     receipted launch, so their controller can close its family."""
     from services.pitr.restore.postgres import _spawn_sandbox_postgres
-    from shared import pg_foreground
+    from shared.cluster.dataplane import pg_foreground
 
     postgres = tmp_path / "postgres"
     postgres.write_text("#!/bin/sh\nexec sleep 30\n")

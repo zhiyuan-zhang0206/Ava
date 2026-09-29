@@ -20,7 +20,7 @@ import psutil
 import psycopg
 import pytest
 
-from shared import pg_foreground, pg_throwaway_base, pg_tools
+from shared.cluster.dataplane import pg_foreground, pg_throwaway_base, pg_tools
 from shared.config import settings
 from shared.native_process.os_platform import IS_WINDOWS
 from shared.native_process.ownership import OwnedProcess

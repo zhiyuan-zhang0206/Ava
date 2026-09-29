@@ -23,17 +23,17 @@ import asyncio
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from shared.packages.plugins.config_view import (
-    bind_agent_plugin_config,
-    current_plugin_config_view,
-    resolve_agent_plugin_pins,
-)
-from shared.plugin_config_registry import (
+from shared.packages.plugins.config_registration import (
     _PLUGIN_CONFIG_CLASSES,
     _PLUGIN_CONFIGS,
     all_plugin_configs,
     clear_plugin_configs,
     get_plugin_config,
+)
+from shared.packages.plugins.config_view import (
+    bind_agent_plugin_config,
+    current_plugin_config_view,
+    resolve_agent_plugin_pins,
 )
 
 

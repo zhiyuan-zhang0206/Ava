@@ -27,8 +27,8 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ValidationError
 
 from shared import paths
+from shared.packages.plugins.config_registration import merge_disk_image_schema
 from shared.packages.skills import names as skill_naming
-from shared.plugin_config_registry import merge_disk_image_schema
 
 
 class PluginEntry(BaseModel):
@@ -381,7 +381,7 @@ def update_all_disk_images() -> PluginUpdateResult:
     Driven by the `ava plugins update` CLI (`cli/commands/extensions/plugins.py`); the
     `ava start` converge step runs the same path. There is no gateway endpoint
     for it. Each plugin goes through
-    `shared.plugin_config_registry.merge_disk_image_schema(name, Cls)`:
+    `shared.packages.plugins.config_registration.merge_disk_image_schema(name, Cls)`:
       - disk image missing -> write default
       - new field -> fill into disk image with cls default
       - removed field -> dropped from the disk image (so the image converges to

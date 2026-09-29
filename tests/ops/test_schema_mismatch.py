@@ -12,10 +12,10 @@ import pytest
 
 from cli.commands.cluster.control import _schema_mismatch_banner
 from ops.cluster_status import ClusterStatus, schema_mismatch
-from shared import migration_layout
 from shared.api_contracts.status import MachineStatus, SchemaMismatchKind, SchemaMismatchStatus
-from shared.migration_errors import MigrationLayoutError
-from shared.migrations import applied_migration_names
+from shared.deploy.schema import migration_layout
+from shared.deploy.schema.migration_errors import MigrationLayoutError
+from shared.deploy.schema.migrations import applied_migration_names
 
 
 def _unexpected(*_args: object, **_kwargs: object) -> NoReturn:

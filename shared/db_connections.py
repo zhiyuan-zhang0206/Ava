@@ -353,7 +353,7 @@ def connect(
     (the URL is derived from the registry record — `direct_db_url`). The admin
     plane MUST use it wherever a transaction pooler would break correctness —
     session-level state that outlives a single transaction: the migration applier
-    holds a **session** advisory lock (`pg_advisory_lock`, in shared.migrations)
+    holds a **session** advisory lock (`pg_advisory_lock`, in shared.deploy.schema.migrations)
     across its whole apply loop, which transaction pooling would silently drop.
     `prepare_threshold=None` disables server-side prepared statements so the same
     connection is safe across the different backends a transaction pooler hands

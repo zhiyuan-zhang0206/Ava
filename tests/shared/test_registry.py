@@ -27,12 +27,12 @@ os.environ["AVA_CONFIG_FETCH"] = (
 
 def _fields() -> dict:
     """The raw flat field registry (name -> _FieldRef with scope/capability)."""
-    from shared.config import _FIELDS, _schema_extra, field_alias
+    from shared.config import _FIELDS, field_alias, schema_extra
 
     return {
         name: {
             "alias": field_alias(name),
-            "scope": _schema_extra(ref.info).get("scope"),
+            "scope": schema_extra(ref.info).get("scope"),
             "capability": ref.capability,
         }
         for name, ref in _FIELDS.items()
@@ -377,7 +377,7 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
     prepares identity before any settings) must not circular-import through the
     config package.
 
-    Before the fix, `shared.config_registry` built `FIELD_INFOS` at module
+    Before the fix, `shared.host.env.config_registry` built `FIELD_INFOS` at module
     level, which ran `_build_registry()` during the module import; its deferred
     `shared.config` package import re-entered the half-initialized registry
     module (the package __init__ re-imports `field_alias` from it) and raised

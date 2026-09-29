@@ -33,7 +33,7 @@ The per-agent field set is read from the live config registry
 auto-extends the ban with no manual list to maintain.
 
 **Plugin config.** Same problem one layer over: `_PLUGIN_CONFIGS`
-(`shared/plugin_config_registry.py`) is a process-global `plugin -> instance`
+(`shared/packages/plugins/config_registration.py`) is a process-global `plugin -> instance`
 map that boot rebuilds from the agent's overlay, so subscripting it in turn
 code returns whichever agent booted the process. Reads go through
 `shared/packages/plugins/config_view.py:turn_plugin_config` (which
@@ -84,7 +84,7 @@ _ALLOWED_FILES = frozenset(
 # process-global map, the view is what turn code reads it through.
 _PLUGIN_MECHANISM_FILES = frozenset(
     {
-        "shared/plugin_config_registry.py",
+        "shared/packages/plugins/config_registration.py",
         "shared/packages/plugins/config_view.py",
     }
 )

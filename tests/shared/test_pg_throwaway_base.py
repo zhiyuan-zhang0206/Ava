@@ -1,4 +1,4 @@
-"""Base selection for throwaway Postgres clusters (`shared/pg_throwaway_base.py`).
+"""Base selection for throwaway Postgres clusters (`shared/cluster/dataplane/pg_throwaway_base.py`).
 
 The platform default is `/dev/shm` on Linux — RAM-sized — while a full-restore
 drill needs disk-sized room: on 2026-09-14 the throwaway postmaster died
@@ -19,8 +19,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from shared import pg_throwaway_base as base
-from shared import pg_tools
+from shared.cluster.dataplane import pg_throwaway_base as base
+from shared.cluster.dataplane import pg_tools
 from shared.config import settings
 from shared.native_process.os_platform import IS_WINDOWS
 

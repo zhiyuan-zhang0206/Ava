@@ -19,7 +19,7 @@ from pathlib import Path
 from shared.deploy.release.identity import ApplicationIdentity
 from shared.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
 from shared.deploy.release.verified_file import regular_bytes
-from shared.migration_layout import required_migration_set_from_names
+from shared.deploy.schema.migration_layout import required_migration_set_from_names
 from shared.native_process.posix_command import run_owned_command
 
 _IDENTITY_MEMBER = "shared/release-build.json"

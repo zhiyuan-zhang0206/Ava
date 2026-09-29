@@ -2,7 +2,7 @@
 
 Prerequisite 2 of Phase 1 in `future/infra/agent-runner-as-server.md`, and the
 plugin-scope half of what `shared/config/turn_view.py` did for framework
-`Settings`. `_PLUGIN_CONFIGS` (`shared/plugin_config_registry.py`) is a
+`Settings`. `_PLUGIN_CONFIGS` (`shared/packages/plugins/config_registration.py`) is a
 process-global `plugin -> frozen instance` map that boot mutates in place from
 the agent's `config_overlay`. One agent per process makes that exact; in the
 hosted runner one process serves many agents, so the last booted overlay would
@@ -61,7 +61,7 @@ class _PluginConfigView:
     def config_for(self, plugin: str) -> BaseModel:
         """This agent's instance for `plugin` — the process-global one when the
         agent overrides nothing in it."""
-        from shared.plugin_config_registry import _PLUGIN_CONFIGS
+        from shared.packages.plugins.config_registration import _PLUGIN_CONFIGS
 
         base = _PLUGIN_CONFIGS[plugin]  # KeyError = not registered / not bound, as before
         updates = self._overrides.get(plugin)
@@ -98,7 +98,7 @@ def resolve_agent_plugin_pins(
     if not config_overlay:
         return {}
     from shared.config import field_names
-    from shared.plugin_config_registry import _PLUGIN_CONFIG_CLASSES
+    from shared.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES
 
     framework = field_names()
     pins: dict[str, dict[str, Any]] = {}
@@ -144,13 +144,13 @@ def current_agent_plugin_pins() -> dict[str, Any]:
 def turn_plugin_config(plugin: str) -> BaseModel:
     """The plugin config instance this turn must read.
 
-    The single read seam: `shared.plugin_config_registry.get_plugin_config` and
+    The single read seam: `shared.packages.plugins.config_registration.get_plugin_config` and
     `ava._settings.plugins.<name>` both come through here, so no agent-facing
     path reaches `_PLUGIN_CONFIGS` directly.
     """
     view = _AGENT_PLUGIN_CONFIG.get()
     if view is None:
-        from shared.plugin_config_registry import _PLUGIN_CONFIGS
+        from shared.packages.plugins.config_registration import _PLUGIN_CONFIGS
 
         return _PLUGIN_CONFIGS[plugin]
     return view.config_for(plugin)
@@ -159,7 +159,7 @@ def turn_plugin_config(plugin: str) -> BaseModel:
 def turn_plugin_configs() -> dict[str, BaseModel]:
     """Every bound plugin's instance, agent-scoped — the map behind
     `ava._settings.plugins` enumeration and `all_plugin_configs()`."""
-    from shared.plugin_config_registry import _PLUGIN_CONFIGS
+    from shared.packages.plugins.config_registration import _PLUGIN_CONFIGS
 
     view = _AGENT_PLUGIN_CONFIG.get()
     if view is None:

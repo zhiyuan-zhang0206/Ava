@@ -29,7 +29,10 @@ def installed_migration_paths(directory: Path) -> set[Path]:
     """
     distribution = importlib.metadata.distribution("ava")
     module = Path(__file__).resolve()
-    if Path(str(distribution.locate_file("shared/runtime_migration.py"))).resolve() != module:
+    if (
+        Path(str(distribution.locate_file("shared/deploy/schema/runtime_migration.py"))).resolve()
+        != module
+    ):
         raise ReleaseRejectedError("migration metadata belongs to a different Ava installation")
     direct = distribution.read_text("direct_url.json")
     if direct and json.loads(direct).get("dir_info", {}).get("editable"):

@@ -46,7 +46,7 @@ def test_runner_audits_only_the_interpreter(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(
         cfw, "serving_binaries", cfw.serving_binaries
     )  # keep the real implementation
-    from shared import pg_tools
+    from shared.cluster.dataplane import pg_tools
 
     monkeypatch.setattr(pg_tools, "pg_tool", lambda name: pytest.fail(f"resolved pg tool {name}"))  # pyright: ignore[reportUnknownArgumentType]
     assert cfw.serving_binaries(frozenset({"agent-runner"})) == (Path(sys.executable),)
@@ -54,7 +54,8 @@ def test_runner_audits_only_the_interpreter(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_gateway_audits_the_data_plane_too(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Postgres and the remote OTLP receiver bind this gateway's off-box address."""
-    from shared import paths, pg_tools
+    from shared import paths
+    from shared.cluster.dataplane import pg_tools
 
     pg = tmp_path / "postgres"
     pg.write_text("#!/bin/sh\n")
@@ -77,7 +78,8 @@ def test_nonexistent_resolved_paths_are_dropped(
     Auditing that phantom path would manufacture a permanent "missing rule" on
     every host without brew, so only paths that exist are audited.
     """
-    from shared import paths, pg_tools
+    from shared import paths
+    from shared.cluster.dataplane import pg_tools
 
     monkeypatch.setattr(pg_tools, "pg_tool", lambda name: tmp_path / "nope" / name)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(

@@ -3,7 +3,7 @@
 Run: `.venv/bin/python scripts/audit/split_reexports.py <module> [<module> ...]`
 from the repo root, e.g. the W3 split surface:
 
-    .venv/bin/python scripts/audit/split_reexports.py shared.events.contract shared.migrations
+    .venv/bin/python scripts/audit/split_reexports.py shared.events.contract shared.deploy.schema.migrations
 
 ## Why
 
@@ -91,7 +91,7 @@ def main(argv: list[str]) -> int:
         "modules",
         nargs="+",
         metavar="MODULE",
-        help="origin (facade) module to audit, e.g. shared.migrations",
+        help="origin (facade) module to audit, e.g. shared.deploy.schema.migrations",
     )
     args = parser.parse_args(argv)
     failed = False

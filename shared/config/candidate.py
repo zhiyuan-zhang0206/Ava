@@ -24,8 +24,8 @@ from pydantic_core import ErrorDetails, PydanticUndefined
 
 from shared.config import FIELD_INFOS, field_alias
 from shared.config.service_read import domain_model_classes
-from shared.config_registry import field_domain
 from shared.host.env import runtime_config
+from shared.host.env.config_registry import field_domain
 from shared.host.env.dotenv_file import capture_env_bytes
 
 __all__ = [

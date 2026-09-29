@@ -11,7 +11,7 @@ out of scope.
 ## The default: config, one declaration, reason in the description
 
 A user- or operator-tunable value is a field under `shared/config/` (declared
-once, per the registry doctrine in `shared/config_registry.py`), with:
+once, per the registry doctrine in `shared/host/env/config_registry.py`), with:
 
 - `description` stating **why the default is that number** and what changing it
   does — the reason lives with the value, not in a doc beside it;

@@ -4,7 +4,7 @@
 flat field registry + current values for GET /api/config; the write path's
 "keep existing value" sentinel lives here too. Split out of
 `shared/config/__init__.py` for the design's line budget (R2 convergence point
-A re-split): the registry is built in `shared/config_registry.py`, Settings and
+A re-split): the registry is built in `shared/host/env/config_registry.py`, Settings and
 its boot consumers stay in `__init__.py`.
 
 Imports of the config package are function-level (this module is imported by
@@ -19,7 +19,7 @@ from typing import Any
 
 from pydantic_core import PydanticUndefined
 
-from shared.config_registry import Capability, field_editor_type
+from shared.host.env.config_registry import Capability, field_editor_type
 
 # Stand-in a sensitive field carries in `raw_overrides` instead of its cleartext
 # value: the panel/CLI round-trips it unchanged on a full-replace PUT, and the
@@ -72,13 +72,13 @@ class ConfigFieldMeta:
 
 def get_config_metadata() -> list[ConfigFieldMeta]:
     """Walk every sub-model's fields and extract the metadata the frontend needs."""
-    from shared.config import _FIELDS, _schema_extra, current_field_values, field_alias
+    from shared.config import _FIELDS, current_field_values, field_alias, schema_extra
 
     values = current_field_values()
     result: list[ConfigFieldMeta] = []
     for name, ref in _FIELDS.items():
         field_info = ref.info
-        extra = _schema_extra(field_info)
+        extra = schema_extra(field_info)
         type_name, choices = field_editor_type(field_info.annotation)
 
         current = values[name]

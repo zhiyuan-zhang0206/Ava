@@ -81,7 +81,7 @@ def __getattr__(name: str) -> object:
             ),
         )
     if name == "InvalidConfigOverlay":
-        from shared.plugin_config_registry import InvalidConfigOverlay
+        from shared.packages.plugins.config_registration import InvalidConfigOverlay
 
         return InvalidConfigOverlay
     # Plugin members land on ava.self via register_namespace_member (ava_fleet
@@ -98,7 +98,7 @@ def __getattr__(name: str) -> object:
 
 
 # `InvalidConfigOverlay` is lazily bound via module __getattr__ —
-# `from shared.plugin_config_registry import X` anywhere in ava.self triggers
+# any eager `from shared.packages.plugins.config_registration import ...` in ava.self triggers
 # agent.__init__ → agent.graph._base_prompt calling `ava.help(...)`
 # which reverse-accesses an ava attribute, while ava.__init__ is still
 # running line 91 `import ava.self` and ava.help isn't registered yet →
@@ -170,7 +170,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     agent_identity.assert_self_action("restart")
     payload_json: str | None = None
     if config_overlay:
-        from shared.plugin_config_registry import validate_config_overlay
+        from shared.packages.plugins.config_registration import validate_config_overlay
 
         validate_config_overlay(config_overlay)
         # Settle a withdrawn llm_model before it is stored (task #4306): the

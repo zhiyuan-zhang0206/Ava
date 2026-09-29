@@ -30,7 +30,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from shared import pg_throwaway_base, pg_tools
+from shared.cluster.dataplane import pg_throwaway_base, pg_tools
 from shared.config import settings
 from shared.native_process.child_env import daemon_process_env
 
