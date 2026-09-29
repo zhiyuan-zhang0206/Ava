@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from playwright.sync_api import Route
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_expand_runs_all
@@ -196,3 +197,41 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
     if kind == "agent_chat" and (output := os.environ.get("AVA_TIMELINE_BENCH_OUT")):
         Path(output).write_text(json.dumps(sample, indent=2, sort_keys=True) + "\n")
     _assert_bounded_sample(sample, kind)
+
+    # A bottom command supersedes the parked row, including expanded-turn windows.
+    before_click = page.evaluate("""() => {
+      const viewport = document.querySelector('[role=log]').closest('[data-slot=scroll-area-viewport]');
+      const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+      window.__timelineBottomWrites = [];
+      Object.defineProperty(viewport, 'scrollTop', {
+        get() { return descriptor.get.call(this); },
+        set(top) {
+          window.__timelineBottomWrites.push({ top, previous: descriptor.get.call(this) });
+          descriptor.set.call(this, top);
+        },
+      });
+      return { top: viewport.scrollTop, distance: viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop };
+    }""")
+    assert before_click["distance"] > 600, before_click
+    page.get_by_role("button", name="Scroll to bottom", exact=True).click()
+    at_bottom = """() => {
+      const viewport = document.querySelector('[role=log]').closest('[data-slot=scroll-area-viewport]');
+      const tail = viewport.querySelector('.timeline-item[data-item-id="1200.0"]');
+      return tail && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1 &&
+        tail.getBoundingClientRect().bottom <= viewport.getBoundingClientRect().bottom + 1;
+    }"""
+    try:
+        page.wait_for_function(at_bottom, timeout=10_000)
+    except PlaywrightTimeoutError as exc:
+        result = page.evaluate("""() => {
+          const viewport = document.querySelector('[role=log]').closest('[data-slot=scroll-area-viewport]');
+          return { top: viewport.scrollTop, distance: viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+            writes: window.__timelineBottomWrites.slice(0, 10) };
+        }""")
+        raise AssertionError(
+            ("bottom button did not reach the tail", before_click, result)
+        ) from exc
+    page.evaluate("""() => {
+      document.querySelector('.timeline-item[data-item-id="1200.0"]').style.paddingBottom = '200px';
+    }""")
+    page.wait_for_function(at_bottom, timeout=10_000)

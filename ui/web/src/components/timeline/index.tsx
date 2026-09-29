@@ -303,6 +303,7 @@ export function TimelineView({
   const [controller] = useState<StickyController>(() =>
     createStickyController(stickyThresholds),
   );
+  const isFollowing = useCallback(() => controller.isSticky(), [controller]);
   const canonicalItemsRef = useRef(canonicalItems);
   const retainedItemsMaxRef = useRef(retainedItemsMax);
   // A measured runaway reached 857 rendered items / 44k attached nodes,
@@ -1164,10 +1165,8 @@ export function TimelineView({
   const { range: virtualRange, rowRange } = useTimelineWindow({
     groups: virtualGroups,
     enabled: virtualEnabled,
-    turnRows,
-    measureRows,
-    viewportRef,
-    contentRef,
+    turnRows, measureRows, viewportRef, contentRef,
+    isFollowing,
     identity: threadKey ?? null,
     pendingAnchor: pendingAnchorRef.current ?? compactPinnedId ??
       (!pendingRestoreRef.current?.followBottom && pendingRestoreRef.current?.anchor
@@ -1188,6 +1187,7 @@ export function TimelineView({
     // downward motion, so the ride survives; on arrival dist < bottomZone
     // confirms the stick. Growth mid-ride pins instantly (the controller
     // is already sticky) — same behavior as before.
+    pendingAnchorRef.current = null;
     controller.requestStick();
     setAtBottom(true);
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
