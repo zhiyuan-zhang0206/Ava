@@ -106,15 +106,11 @@ def scan_code(repo: Path) -> tuple[Counter[str], Counter[str], Counter[str], Cou
             event_kinds.update(m.group(1) for m in EVENT_RE.finditer(line))
             label_kinds.update(m.group(1) for m in LABEL_RE.finditer(line))
             event_type_kinds.update(m.group(1) for m in EVENT_TYPE_RE.finditer(line))
-    # PR-D renamed shared/events.py -> shared/events/live/projection.py; keep both names so
-    # the scanner works on pre-rename checkouts too (batch lands A -> ... -> E).
-    events_path = repo / "shared" / "live_events.py"
-    if not events_path.exists():
-        events_path = repo / "shared" / "events.py"
-    if events_path.exists():
-        with events_path.open(encoding="utf-8", errors="replace") as f:
-            for line in f:
-                sse_roles.update(m.group(1) for m in SSE_ROLE_RE.finditer(line))
+    # The live-event projection declares the SSE roles; a missing file is a moved
+    # module this scanner must follow, not an empty role set.
+    with (repo / "shared" / "events" / "live" / "projection.py").open(encoding="utf-8") as f:
+        for line in f:
+            sse_roles.update(m.group(1) for m in SSE_ROLE_RE.finditer(line))
     return event_kinds, label_kinds, event_type_kinds, sse_roles
 
 

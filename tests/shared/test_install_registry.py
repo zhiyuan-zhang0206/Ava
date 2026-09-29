@@ -165,7 +165,7 @@ def _mutator_script(home: Path, name: str, *, marker: Path, wait_for_marker: boo
         f"sys.path.insert(0, {_REPO_ROOT!r})\n"
         f"os.environ['AVA_HOME'] = {str(home)!r}\n"
         f"{stall if not wait_for_marker else ''}"
-        f"from shared import install_registry as reg\n"
+        f"from shared.packages.extensions import install_registry as reg\n"
         f"reg.load()\n"  # pay the import + first-read cost before the handshake
         f"{wait if wait_for_marker else ''}"
         f"with reg.mutate() as registry:\n"
