@@ -2081,11 +2081,17 @@ installations pass. It prints the repair commands and passes: v1 is warn-only so
 hook rollout does not block commits; CI independently enforces the checks.
 Review any `core.hooksPath` override before removing it and installing.
 
-Commit hooks keep linting and code-generation checks. The full-repository
-strict pyright check, frontend typecheck (including Next.js route typegen),
-ESLint and the full Vitest suite run at **pre-push**. Other local hooks default
-to pre-commit; upstream hooks may also declare pre-push hygiene checks. File filters are
-unchanged. Run either stage explicitly with the worktree's own environment:
+Commit hooks keep linting and code-generation checks. Frontend typecheck
+(including Next.js route typegen), ESLint and the full Vitest suite run at
+**pre-push**, scoped by their own `files:` filter to frontend changes. Strict
+pyright also runs at pre-push, but scoped to the branch's own changed `.py`
+files (`scripts/prepush-pyright-files.sh`, `merge-base(origin/main,
+HEAD)..HEAD`, ACMR + still on disk) — never the whole repository locally
+(user ruling 2026-09-22: local runs check only the files touched; a
+full-repo strict pyright stays CI-only, `backend-static`'s `uv run pyright`).
+Other local hooks default to pre-commit; upstream hooks may also declare
+pre-push hygiene checks. Run either stage explicitly with the worktree's own
+environment:
 
 ```bash
 .venv/bin/pre-commit run --all-files
@@ -2122,15 +2128,22 @@ they create:
   does not skip under load; `types-codegen-fresh` alone still skips when
   `ui/web/node_modules` is missing, same as the frontend pre-push hooks.
 
-`scripts/prepush-guard.sh` holds a separate `flock` for each of `pyright`,
-`tsc`, `eslint`, `vitest`, and `branch-lint` across all worktrees on the host. Locks live in
-`/tmp/ava-prepush-locks`, independent of clone, user, and `TMPDIR`; never delete
-live lock files. `AVA_PREPUSH_LOCK_DIR` may override this for tests or a host
-policy, but every checkout on that host must use the same local directory.
-Missing tools/dependencies, unavailable locks/load probes, excessive load, or
-a lock timeout print **WARNING: PRE-PUSH SKIPPED** with the tool and reason,
-then exit 0. Hook verbosity makes these successful skips visible. Install
-frontend dependencies with `(cd ui/web && npm ci)`; Python dependencies use
+`scripts/prepush-guard.sh` holds a separate lock for each of `pyright`,
+`tsc`, `eslint`, `vitest`, and `branch-lint` across all worktrees on the host.
+The lock is `fcntl.flock(2)` on the fd bash opens via `exec 9<lock_file`, run
+from a fresh `python3 -c` subprocess per attempt — not the `flock(1)` binary,
+which stock macOS does not ship — bound to the *open file description* fd 9
+refers to, so it stays held after that python3 process exits, until the
+guarded command (exec'd in the same shell process, inheriting fd 9) itself
+finishes. A wait-with-timeout is `LOCK_NB` polled in a loop, since `fcntl` has
+no built-in timed blocking wait. Locks live in `/tmp/ava-prepush-locks`,
+independent of clone, user, and `TMPDIR`; never delete live lock files.
+`AVA_PREPUSH_LOCK_DIR` may override this for tests or a host policy, but every
+checkout on that host must use the same local directory. Missing
+tools/dependencies, unavailable load probes, excessive load, or a lock
+timeout print **WARNING: PRE-PUSH SKIPPED** with the tool and reason, then
+exit 0. Hook verbosity makes these successful skips visible. Install frontend
+dependencies with `(cd ui/web && npm ci)`; Python dependencies use
 `env -u VIRTUAL_ENV uv sync` after the worktree venv preflight above.
 
 `AVA_PREPUSH_LOCK_WAIT_SECONDS` defaults to `120`: enough for a normal pyright
@@ -2140,8 +2153,9 @@ load average divided by logical CPUs: allow short bursts but avoid adding work
 to a sustained CPU queue. Load is checked before and after acquiring the lock.
 The tool's actual failure status propagates unchanged; a local skip is never
 evidence that the check ran. CI bypasses the wrapper: `backend-static` runs
-`uv run pyright`; `frontend` runs `npx next typegen`, `npx tsc --noEmit`,
-`npm run lint` and `npx vitest run --coverage`. These independent runners retain
+`uv run pyright` (full repository — CI is where the complete strict pass
+lives); `frontend` runs `npx next typegen`, `npx tsc --noEmit`, `npm run lint`
+and `npx vitest run --coverage`. These independent runners retain
 enforcement; the structural CI job already skips the four duplicate hooks.
 
 ## CI (Continuous Integration)
