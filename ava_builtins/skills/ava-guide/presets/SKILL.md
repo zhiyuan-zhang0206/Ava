@@ -19,7 +19,7 @@ Use this when:
 
 When the "new agent type" is a **role** — a product manager, a growth lead, an
 editor — the preset is the small half of the job. Read
-[reference/role-cards.md](reference/role-cards.md) first: the role itself is
+[references/role-cards.md](references/role-cards.md) first: the role itself is
 authored as a skill, and the preset only names it.
 
 ## Concept Review

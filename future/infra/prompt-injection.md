@@ -164,7 +164,7 @@ Two ingestion points from the surface map above have **zero** `scan_content` cal
 and both are load-bearing:
 
 1. **The content-source skills** (`web-sources` — rss / youtube / generic —
-   plus `web_media`, and the x / zhihu / xiaohongshu / douyin family). These are
+   plus `web-ai` / `audio-transcribe`, and the x / zhihu / xiaohongshu / douyin family). These are
    *by definition* untrusted third-party content, and they are the one category the
    surface map calls out as such. They fetch through their own scripts rather than
    `ava.web.*`, so they bypass the scanned path entirely. This is the widest gap.

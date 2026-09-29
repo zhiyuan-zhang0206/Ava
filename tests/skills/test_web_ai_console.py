@@ -1,32 +1,19 @@
-"""Unit tests for the web-ai console child (ava_builtins/skills/web-ai/console/reference/ask.py).
+"""Unit tests for the web-ai console child (ava_builtins/skills/web-ai/console/scripts/ask.py).
 
 The browser-driving half lives in webchat (covered by test_web_ai_webchat.py);
 this locks the console-only mapping from a webchat `ask_many` row to the result
 row the agent reads — specifically the error-row pass-through and the `ok` rule
-(a timed-out partial is not `ok`). Loading ask.py also execs webchat by path; no
-browser is driven.
+(a timed-out partial is not `ok`). Loading ask.py also execs webchat via its own
+__file__-derived sys.path guard; no browser is driven.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
+from tests.skills import load_skill_script
 
-_ASK_PATH = (
-    Path(__file__).parents[2]
-    / "ava_builtins"
-    / "skills"
-    / "web-ai"
-    / "console"
-    / "reference"
-    / "ask.py"
+ask = load_skill_script(
+    "web-ai", "console", "scripts", "ask.py", name="web_ai_console_ask_under_test"
 )
-_spec = importlib.util.spec_from_file_location("web_ai_console_ask_under_test", _ASK_PATH)
-assert _spec and _spec.loader
-ask = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = ask
-_spec.loader.exec_module(ask)
 
 
 def test_to_row_error_row_passes_through_as_not_ok() -> None:

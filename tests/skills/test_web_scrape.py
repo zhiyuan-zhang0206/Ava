@@ -1,5 +1,5 @@
 """Hermetic unit tests for the web-sources:generic skill
-(ava_builtins.skill_support.web_sources.webscrape).
+(ava_builtins/skills/web-sources/scripts/webscrape.py).
 
 The skill's live behavior (curl against real 403-prone sites + trafilatura main-
 content extraction) was verified by hand during the build; these lock the *pure*
@@ -19,7 +19,9 @@ from typing import Any
 
 import pytest
 
-from ava_builtins.skill_support.web_sources import webscrape as feed
+from tests.skills import load_skill_script
+
+feed = load_skill_script("web-sources", "scripts", "webscrape.py")
 
 _ARTICLE_HTML = """<html><head><title>Headline Here</title>
 <meta property="og:site_name" content="Example News"/>

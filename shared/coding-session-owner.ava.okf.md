@@ -80,5 +80,5 @@ anything is launched.
 
 - [[shared/sessions/pty/pty_sessions.ava.okf.md]] — full-name PTY liveness and
   termination used by exact generation cleanup
-- [[ava_builtins/skills/orchestration/ava-use-other-agents.ava.okf.md]]
+- [[ava_builtins/skills/ava-use-other-agents/ava-use-other-agents.ava.okf.md]]
   — Codex launcher and supervisor that consume this owner contract

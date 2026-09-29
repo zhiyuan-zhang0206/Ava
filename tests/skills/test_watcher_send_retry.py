@@ -13,11 +13,11 @@ retry, the channel routing, and the exhausted-exit contract hermetically: real
 imports, a fake ``ava`` that records sends and can refuse the first N of them.
 
 The handoff-dir tests below (2026-09-28 fix, PR #3550 follow-up P2-1) lock
-`codebase_sweep_lite.py`, `deep_research_lite.py`, `codebase_sweep_orchestrator.py`,
-`deep_research_orchestrator.py`, and `orchestrator_template.py` — all in the
-same `ava-dynamic-workflow/reference/` directory as `gather_files.py` above —
-to `shared.paths.workspace_dir` instead of a hardcoded `Path.home() /
-".ava/workspaces"` that never read `AVA_HOME` at all. On a non-default home
+`codebase_sweep_lite.py`, `deep_research_lite.py` (`ava-dynamic-workflow/scripts/`),
+`codebase_sweep_orchestrator.py`, `deep_research_orchestrator.py`, and
+`orchestrator_template.py` (`ava-dynamic-workflow/references/`, alongside
+`gather_files.py` above) to `shared.paths.workspace_dir` instead of a hardcoded
+`Path.home() / ".ava/workspaces"` that never read `AVA_HOME` at all. On a non-default home
 cluster (a worktree cluster, home `~/.ava-<dir>`) that silently wrote
 scratch/handoff state into the WRONG cluster's workspace tree.
 """
@@ -39,8 +39,9 @@ from shared.coding_session_owner import CodingSessionKey, CodingSessionOwner
 from shared.paths import workspace_dir
 
 _REPO = Path(__file__).parents[2]
-_DYNAMIC_WORKFLOW_REFERENCE = (
-    _REPO / "ava_builtins" / "skills" / "ava-dynamic-workflow" / "reference"
+_DYNAMIC_WORKFLOW_SCRIPTS = _REPO / "ava_builtins" / "skills" / "ava-dynamic-workflow" / "scripts"
+_DYNAMIC_WORKFLOW_REFERENCES = (
+    _REPO / "ava_builtins" / "skills" / "ava-dynamic-workflow" / "references"
 )
 
 
@@ -54,8 +55,8 @@ def _load(name: str, path: Path) -> ModuleType:
 
 
 _WATCH_IDLE_PATHS = {
-    "ava-watcher": _REPO / "ava_builtins/skills/ava-watcher/reference/watch_idle.py",
-    "ava-goal": _REPO / "ava_builtins/skills/ava-goal/reference/watch_idle.py",
+    "ava-watcher": _REPO / "ava_builtins/skills/ava-watcher/scripts/watch_idle.py",
+    "ava-goal": _REPO / "ava_builtins/skills/ava-goal/scripts/watch_idle.py",
     "ava-fleet": _REPO / "ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py",
 }
 watch_idle_modules = [
@@ -64,11 +65,11 @@ watch_idle_modules = [
 ]
 watch_work = _load(
     "watch_work_retry_under_test",
-    _REPO / "ava_builtins/skills/ava-use-other-agents/reference/watch_work.py",
+    _REPO / "ava_builtins/skills/ava-use-other-agents/scripts/watch_work.py",
 )
 gather_files = _load(
     "gather_files_under_test",
-    _REPO / "ava_builtins/skills/ava-dynamic-workflow/reference/gather_files.py",
+    _DYNAMIC_WORKFLOW_REFERENCES / "gather_files.py",
 )
 
 
@@ -446,7 +447,7 @@ def test_lite_script_handoff_dir_uses_workspace_dir(
     namespace: dict[str, Any] = {"__name__": f"{filename}_under_test"}
     exec(
         compile(
-            (_DYNAMIC_WORKFLOW_REFERENCE / filename).read_text(encoding="utf-8"), filename, "exec"
+            (_DYNAMIC_WORKFLOW_SCRIPTS / filename).read_text(encoding="utf-8"), filename, "exec"
         ),
         namespace,
     )
@@ -464,13 +465,13 @@ def test_full_orchestrator_handoff_dir_uses_workspace_dir(
     _fake_ava_module: _FakeAva, filename: str, target: str, task_var: str
 ) -> None:
     namespace: dict[str, Any] = {"__name__": f"{filename}_under_test"}
-    _exec_prefix_through(_DYNAMIC_WORKFLOW_REFERENCE / filename, target, namespace)
+    _exec_prefix_through(_DYNAMIC_WORKFLOW_REFERENCES / filename, target, namespace)
     assert namespace[target] == workspace_dir(_fake_ava_module.self.AGENT_ID) / namespace[task_var]
 
 
 def test_orchestrator_template_handoff_dir_uses_workspace_dir(_fake_ava_module: _FakeAva) -> None:
     namespace: dict[str, Any] = {"__name__": "orchestrator_template_under_test"}
     _exec_prefix_through(
-        _DYNAMIC_WORKFLOW_REFERENCE / "orchestrator_template.py", "handoff", namespace
+        _DYNAMIC_WORKFLOW_REFERENCES / "orchestrator_template.py", "handoff", namespace
     )
     assert namespace["handoff"] == workspace_dir(_fake_ava_module.self.AGENT_ID) / "task_handoff"

@@ -1,7 +1,0 @@
-{
-  "complexity": {
-    "ava_builtins/skill_support/gmail/smtp.py::forward": 15,
-    "ava_builtins/skill_support/gmail/smtp.py::reply": 18,
-    "ava_builtins/skill_support/self_evolution/record.py::build_record": 57
-  }
-}

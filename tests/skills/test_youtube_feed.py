@@ -1,4 +1,4 @@
-"""Hermetic unit tests for the web-sources:youtube skill (ava_builtins/skills/web-sources/youtube/reference/feed.py).
+"""Hermetic unit tests for the web-sources:youtube skill (ava_builtins/skills/web-sources/youtube/scripts/feed.py).
 
 The skill's live behavior (real yt-dlp against real YouTube) was verified by
 hand during the build; these lock the *pure* logic that regresses silently —
@@ -25,7 +25,7 @@ _FEED_PATH = (
     / "skills"
     / "web-sources"
     / "youtube"
-    / "reference"
+    / "scripts"
     / "feed.py"
 )
 _spec = importlib.util.spec_from_file_location("youtube_feed_under_test", _FEED_PATH)

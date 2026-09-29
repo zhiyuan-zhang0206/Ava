@@ -51,10 +51,10 @@ Do not hardcode any specific source names into this skill repository.
 > (`shared/session_env.py::forward_env_dict`). `$AVA_HOME` is set in agent
 > processes.
 ```bash
-# Most adapters' CLI is in reference/feed.py:
-python $AVA_HOME/skills/web-sources/<adapter>/reference/feed.py <enum|sync|fetch> --...
-# youtube's CLI is in reference/ too (all adapters share the layout):
-python $AVA_HOME/skills/web-sources/youtube/reference/feed.py <...> --...
+# Most adapters' CLI is in scripts/feed.py:
+python $AVA_HOME/skills/web-sources/<adapter>/scripts/feed.py <enum|sync|fetch> --...
+# youtube's CLI is in scripts/ too (all adapters share the layout):
+python $AVA_HOME/skills/web-sources/youtube/scripts/feed.py <...> --...
 ```
 
 Each adapter's subcommands, parameters, cursor model, and output schema differ — **before you start, read its SKILL.md**.

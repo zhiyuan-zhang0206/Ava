@@ -95,6 +95,18 @@ the `path_imports` section as `path::target -> site count`, matched exactly like
 Rules 4 and 5. There is no allowlist and no pairing: once the section exists at
 the base revision, any new key is a violation.
 
+**One narrow exception**: a script under `ava_builtins/skills/<skill>/` may run a
+one-line `sys.path.insert(0, ...)` / `.append(...)` guard whose argument is
+derived from `__file__` and whose resolved directory stays inside that same
+`<skill>/` tree (typically the skill's own `scripts/`, or a sibling sub-skill's
+`scripts/`) — the pattern `lint_no_script_sibling_imports.py` already documents.
+`path_imports.measure()` recognizes this shape by AST and does not count it as a
+site, so it is never frozen in the baseline. A guard that reaches outside the
+script's own top-level skill directory (another skill, `ava_builtins/skills/`
+itself, or anything under `ava_builtins/plugins/`) is still a violation, and so
+is any file-loader call, even with an in-skill `__file__`-derived argument — a
+loader is a package-door bypass regardless of where it points.
+
 ### Structure budgets: 800 lines per file, 20 direct entries per directory
 
 Budgets cover the governed packages in `_SCAN_DIRS`, plus tests/ and scripts/.

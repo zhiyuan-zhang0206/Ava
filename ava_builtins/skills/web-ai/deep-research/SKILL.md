@@ -18,7 +18,7 @@ import ava, json, datetime as dt
 
 # 1. Start it (this drives the browser: enable Deep Research, type, submit, approve plan)
 out = json.loads(ava.shell.run(
-    '$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/reference/research.py '
+    '$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/scripts/research.py '
     'start --site gemini --prompt "How have small modular reactors progressed since 2023?"',
     timeout=180,  # start enables the mode, submits, and may wait out the plan step
 ))
@@ -33,7 +33,7 @@ deliver if it's done:
 
 ```python
 res = json.loads(ava.shell.run(
-    f'$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/reference/research.py check --site gemini --url "{url}"',
+    f'$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/scripts/research.py check --site gemini --url "{url}"',
     timeout=60,
 ))
 
@@ -67,15 +67,15 @@ usually finishes faster (~1-3 min) than Gemini/ChatGPT.
 ```bash
 # Start (default site gemini). --assume-mode if you already enabled Deep Research
 # in the browser yourself; --plan-wait N seconds to auto-approve the research plan.
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/reference/research.py start --site gemini --prompt "..."
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/reference/research.py start --site chatgpt --prompt "..." --assume-mode
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/reference/research.py start --site perplexity --prompt "..."
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/scripts/research.py start --site gemini --prompt "..."
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/scripts/research.py start --site chatgpt --prompt "..." --assume-mode
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/scripts/research.py start --site perplexity --prompt "..."
 
 # Check / fetch (saves report.md + meta.json when done):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/reference/research.py check --site gemini --url "<url>"
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/scripts/research.py check --site gemini --url "<url>"
 
 # Answer a clarifying question, then keep polling with check:
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/reference/research.py reply --site chatgpt --url "<url>" \
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/deep-research/scripts/research.py reply --site chatgpt --url "<url>" \
     --prompt "Global scope; prioritize 2024-2026 primary sources."
 ```
 

@@ -9,7 +9,7 @@ The **universal fallback adapter** of the `web-sources` family (shared S1 item s
 Platform accounts have dedicated adapters (`youtube`, plus the top-level `gmail` skill), RSS/Atom feeds have `rss`;
 sources that **have neither platform API nor RSS feed** (official news sites, forum portals, blog index pages) fall here.
 
-**A self-contained CLI script** (`reference/feed.py`): agent starts bash, passes command-line arguments, reads stdout
+**A self-contained CLI script** (`scripts/feed.py`): agent starts bash, passes command-line arguments, reads stdout
 JSON. Fetching and list-page enumeration are **two-level cascades** (`fetch` and `enum`
 automatically step through, no need for you to specify):
 
@@ -29,13 +29,13 @@ Pure index/login pages (no wall characteristics and no main content) directly re
 
 ```bash
 # Fetch single page -> main text markdown + title/author/date/site, store in mirror, project S1:
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/generic/reference/feed.py fetch --url <article-url>
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/generic/scripts/feed.py fetch --url <article-url>
 
 # Enumerate article links from list/index page (--link-pattern is a regex for "which a tags are articles", matching absolute URL):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/generic/reference/feed.py enum --url <list-page-url> --link-pattern 'mod=view&aid=\d+'
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/generic/scripts/feed.py enum --url <list-page-url> --link-pattern 'mod=view&aid=\d+'
 
 # One-stop: enumerate + fetch one by one + project S1 (mirror deduplication, see below):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/generic/reference/feed.py sync --url <list-page-url> --link-pattern '...' --limit 20
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/generic/scripts/feed.py sync --url <list-page-url> --link-pattern '...' --limit 20
 ```
 
 Specifically which sites to scrape and what `--link-pattern` to use are **user preferences** and not written into this skill — the agent reads them from its own

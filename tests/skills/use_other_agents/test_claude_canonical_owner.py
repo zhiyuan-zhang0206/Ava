@@ -17,9 +17,7 @@ import pytest
 from ava.shell.coding_tools import _claude_checks, _common, claude
 from shared import coding_session_owner
 
-_REFERENCE = (
-    Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"
-)
+_SKILL_DIR = Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents"
 
 
 def _load(name: str, path: Path) -> ModuleType:
@@ -31,13 +29,13 @@ def _load(name: str, path: Path) -> ModuleType:
     return module
 
 
-spawn_claude = _load("spawn_claude_under_test", _REFERENCE / "spawn_claude.py")
+spawn_claude = _load("spawn_claude_under_test", _SKILL_DIR / "scripts" / "spawn_claude.py")
 
 
 def _launch_takeover(workspace: Path, brief: str) -> int:
     """A one-hour "Fix login" takeover of ``workspace`` through the library entry."""
     return claude.launch(
-        workspace, None, None, 3600, None, "Fix login", brief, reference_dir=_REFERENCE
+        workspace, None, None, 3600, None, "Fix login", brief, skill_dir=_SKILL_DIR
     )
 
 
@@ -101,7 +99,7 @@ def test_relay_command_wiring_is_default_on_and_opt_out_clean(tmp_path: Path) ->
     """Resident wiring: the plugin command carries the stub export; the opt-out stays silent."""
     record = _owner(tmp_path)
     workspace = Path(record.key.workspace)
-    plugin = _REFERENCE / "ava-relay"
+    plugin = _SKILL_DIR / "scripts" / "ava-relay"
     stub = tmp_path / "generation" / "relay.env"
 
     resident = claude._claude_command(workspace, relay_stub=stub, relay_plugin_dir=plugin)
@@ -118,10 +116,10 @@ def test_relay_command_wiring_is_default_on_and_opt_out_clean(tmp_path: Path) ->
     assert "--plugin-dir" not in manual
 
     fallback = claude._takeover_bootstrap_message(
-        1, "Fix login", "brief", _common.impersonator_guide(_REFERENCE), relay_resident=False
+        1, "Fix login", "brief", _common.impersonator_guide(_SKILL_DIR), relay_resident=False
     )
     resident_message = claude._takeover_bootstrap_message(
-        1, "Fix login", "brief", _common.impersonator_guide(_REFERENCE), relay_resident=True
+        1, "Fix login", "brief", _common.impersonator_guide(_SKILL_DIR), relay_resident=True
     )
     assert "Immediately start the Claude Monitor relay" in fallback
     assert "do not arm a Monitor watch" in resident_message
@@ -210,7 +208,7 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
             "brief",
             3600,
             None,
-            _REFERENCE,
+            _SKILL_DIR,
             "11111111-2222-3333-4444-555555555555",
             relay_resident=False,
         )
@@ -375,7 +373,7 @@ def test_resident_launch_scopes_the_credential_stub_to_its_generation(
 def test_relay_wrapper_marks_the_standby_stub_consumed(tmp_path: Path) -> None:
     stub = tmp_path / ".ava-relay.env"
     stub.write_text("SID=9\nAGENT=41\nAVA_IMPERSONATION_RELAY_TOKEN=token\n", encoding="utf-8")
-    wrapper = _REFERENCE / "ava-relay" / "scripts" / "relay-wrapper.sh"
+    wrapper = _SKILL_DIR / "scripts" / "ava-relay" / "scripts" / "relay-wrapper.sh"
     result = subprocess.run(  # noqa: S603 - wrapper path is fixed in this checkout
         ["bash", str(wrapper)],
         env=os.environ
@@ -599,7 +597,7 @@ def test_claude_brief_requires_takeover_mode(
 
 def test_supervised_launch_needs_its_files(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="supervised launch needs its task and work files"):
-        claude.launch(tmp_path, None, None, 3600, reference_dir=_REFERENCE)
+        claude.launch(tmp_path, None, None, 3600, skill_dir=_SKILL_DIR)
 
 
 def test_a_new_generation_lets_the_sweep_ask_about_terminated_owners(
