@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -110,6 +111,92 @@ def test_fresh_mirror_install_preserves_graph_hashes_markers_and_editable(
     build = json.loads((python_mirror.repo / "build-proof.json").read_text())
     assert Path(build["prefix"]) != python_mirror.repo / ".venv"
     assert (python_mirror.repo / "uv.lock").read_bytes() == python_mirror.lock
+
+
+@pytest.mark.parametrize("mirror_host", [True, False])
+def test_environment_creation_names_the_checkout_python_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mirror_host: bool
+) -> None:
+    from cli import python_install
+    from tests.cli._python_install_fixture import ROOT
+
+    repo, env = _settings(tmp_path, monkeypatch)
+    declared = (ROOT / ".python-version").read_text().strip()
+    (repo / ".python-version").write_text(f"{declared}\n")
+    (repo / "uv.lock").write_text(
+        'version = 1\n[[package]]\nname = "probe"\nversion = "1.0.0"\nsource = { editable = "." }\n'
+    )
+    config = tmp_path / "xdg" / "uv" / "uv.toml"
+    config.parent.mkdir(parents=True)
+    if mirror_host:
+        config.write_text('[[index]]\nurl = "https://mirror.example/simple"\ndefault = true\n')
+    for key in list(os.environ):
+        if key.startswith(("UV_", "PIP_")) or key == "VIRTUAL_ENV":
+            monkeypatch.delenv(key)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("PIP_CONFIG_FILE", os.devnull)
+    calls: list[list[str]] = []
+
+    def record(
+        argv: list[str], repo: Path, env: dict[str, str], *, discard_stdout: bool = False
+    ) -> int:
+        calls.append(argv)
+        return 0
+
+    assert python_install.install(repo, run=record) == 0
+    # --no-config hides .python-version from uv; the creating step must carry it.
+    [created] = [argv for argv in calls if argv[1] in {"sync", "venv"}]
+    assert created[1] == ("venv" if mirror_host else "sync")
+    assert "--no-config" in created
+    assert created[created.index("--python") + 1] == declared
+    # The offline export needs no interpreter; the pin must not block a later fetch.
+    assert calls[0][1] == "export"
+    assert "--python" not in calls[0]
+
+
+def test_mirror_host_config_still_creates_the_declared_python(
+    python_mirror: PythonMirror, tmp_path: Path
+) -> None:
+    import platform
+    import subprocess
+    import sys
+
+    # A host uv.toml naming a mirror selects the `uv venv --no-config` transport.
+    # Unpinned, uv takes the newest interpreter it finds, so this discriminates
+    # on any host that also has a newer minor installed.
+    declared = platform.python_version()
+    (python_mirror.repo / ".python-version").write_text(f"{declared}\n")
+    config = tmp_path / "xdg" / "uv" / "uv.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f'[[index]]\nurl = "{python_mirror.index}"\ndefault = true\n')
+    for key in ("UV_DEFAULT_INDEX", "UV_NO_CONFIG"):
+        python_mirror.env.pop(key)
+    base = Path(sys.base_prefix) if sys.platform == "win32" else Path(sys.base_prefix) / "bin"
+    python_mirror.env.update(
+        XDG_CONFIG_HOME=str(config.parents[1]),
+        XDG_CONFIG_DIRS=str(tmp_path / "xdg-system"),
+        PATH=f"{base}{os.pathsep}{python_mirror.env['PATH']}",
+    )
+
+    result = python_mirror.install("--no-dev", explicit_python=False)
+
+    assert result.returncode == 0, result.stderr
+    assert any("probe_runtime-1.0.0" in p for p in python_mirror.requests)
+    interpreter = (
+        python_mirror.repo
+        / ".venv"
+        / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    )
+    created = subprocess.run(  # noqa: S603 — the disposable virtualenv interpreter
+        [str(interpreter), "-c", "import platform; print(platform.python_version())"],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=True,
+    )
+    assert created.stdout.strip() == declared
 
 
 def test_update_keeps_installed_dev_packages_and_official_mode_accepts_same_lock(

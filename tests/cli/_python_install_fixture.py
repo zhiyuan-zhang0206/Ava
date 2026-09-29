@@ -37,18 +37,10 @@ class PythonMirror:
     wheel: Path
     lock: bytes
 
-    def install(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def install(self, *args: str, explicit_python: bool = True) -> subprocess.CompletedProcess[str]:
+        python = ["--python", sys.executable] if explicit_python else []
         return subprocess.run(  # noqa: S603 — fixed commands against disposable test inputs
-            [
-                sys.executable,
-                "-m",
-                "cli.python_install",
-                "--repo",
-                str(self.repo),
-                "--python",
-                sys.executable,
-                *args,
-            ],
+            [sys.executable, "-m", "cli.python_install", "--repo", str(self.repo), *python, *args],
             cwd=ROOT,
             env=self.env,
             text=True,

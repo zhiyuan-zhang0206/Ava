@@ -40,5 +40,14 @@ steps; neither branch mutates `uv.lock` or commits a derived requirements file.
 This preflight preserves the environment on a stale lock; it is not an atomic
 rollback of later network, build, or installation failures.
 
+Every uv step runs with `--no-config`, which also makes uv ignore
+`.python-version` and accept any interpreter meeting `requires-python`. The steps
+that can create the environment (native sync, mirror `uv venv`) therefore pass
+the checkout's `.python-version` pin, or the caller's explicit `--python`, as
+`--python`. The offline export stays unpinned: it is universal, and a missing
+pinned interpreter must remain fetchable by the creating step. Native sync
+recreates an existing environment whose interpreter misses the pin; the mirror
+transport reuses an existing target environment as it is.
+
 Configuration precedence, limits, and first-rollout cautions:
 [Machine Python indexes](../conventions/dev-setup.md#machine-python-indexes).

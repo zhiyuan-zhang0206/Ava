@@ -32,15 +32,16 @@ Clone the production source into the canonical home source directory:
 mkdir -p ~/.ava
 git clone https://github.com/zhiyuan-zhang0206/Ava.git ~/.ava/source
 cd ~/.ava/source
-uv python install 3.12
+uv python install
 env -u VIRTUAL_ENV uv run --no-project --python 3.12 python cli/python_install.py \
-  --locked --inexact --python 3.12
+  --locked --inexact
 ```
 
 The dependency tool installs the canonical locked Python graph into the
-checkout's `.venv`. It does not create a cluster registry entry, provision
-storage, or start services. Package-manager mirrors are configured separately;
-see [mirrors](references/mirrors-cn.md).
+checkout's `.venv`, created on the exact version `.python-version` pins (the
+same version `uv python install` fetches there). It does not create a cluster
+registry entry, provision storage, or start services. Package-manager mirrors
+are configured separately; see [mirrors](references/mirrors-cn.md).
 
 ## Start a single box
 

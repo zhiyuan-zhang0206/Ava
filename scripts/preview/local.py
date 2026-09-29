@@ -155,7 +155,8 @@ class Preview:
             ],
             cwd=self.run,
         )
-        self.command("python", ["uv", "venv", "--python", "3.12", ".venv"])
+        # No --python: uv reads the checkout's .python-version, the one declared pin.
+        self.command("python", ["uv", "venv", ".venv"])
         self.command(
             "python-dependencies",
             [

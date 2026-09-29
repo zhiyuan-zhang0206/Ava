@@ -11,7 +11,7 @@ set -a
 . scripts/mirrors/cn.env
 set +a
 env -u VIRTUAL_ENV uv run --no-project --python 3.12 python cli/python_install.py \
-  --locked --inexact --python 3.12
+  --locked --inexact
 ```
 
 The profile does not select a home, allocate resources, or launch a cluster.
