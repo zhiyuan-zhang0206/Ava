@@ -263,7 +263,7 @@ def _project_skill_roots(cwd: Path | None) -> list[Path]:
     if cwd is None:
         return []
     try:
-        from ava_builtins.plugins.ava_code._walk import project_skill_roots
+        from ava_builtins.plugins.ava_code import project_skill_roots
     except ImportError:
         logger.debug("agent_skill_view: ava-code plugin unavailable; skipping project skills")
         return []

@@ -2,9 +2,5 @@
   "complexity": {
     "ops/ops_cluster.py::cluster_recover_op": 16,
     "ops/ops_config.py::config_write_op": 24
-  },
-  "private_imports": {
-    "ops/cluster_pause.py::services.agent_ops.daemon._db_pool": 1,
-    "ops/ops_cluster.py::ava_builtins.plugins.ava_code._walk": 1
   }
 }

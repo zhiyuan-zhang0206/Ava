@@ -184,7 +184,7 @@ def test_agent_skill_view_tolerates_ava_code_plugin_import_failure(
     """An unavailable ava-code plugin degrades to the converged load-dir list."""
     repo, _ = _project_with_skill(tmp_path)
     monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(repo, ["*"]))
-    monkeypatch.setitem(sys.modules, "ava_builtins.plugins.ava_code._walk", None)
+    monkeypatch.setitem(sys.modules, "ava_builtins.plugins.ava_code", None)
 
     view = ops_cluster.agent_skill_view_op(42, object())
 

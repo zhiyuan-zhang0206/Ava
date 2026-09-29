@@ -10,6 +10,9 @@ from __future__ import annotations
 import logging
 from typing import cast
 
+import psycopg
+from psycopg_pool import ConnectionPool
+
 import shared.host_deploy_state
 from shared import http_dial
 from shared.daemon_health import health_port
@@ -163,12 +166,15 @@ def _unpause_local_cluster() -> None:
     _log.info("[cluster] unpaused: posture -> idle")
 
 
-def release_local_db_pools() -> dict[str, object]:
+def release_local_db_pools(
+    ops_pool: ConnectionPool[psycopg.Connection] | None,
+) -> dict[str, object]:
     """Release this unit's idle DB-pool connections; never fail the stop.
 
     Two client pools survive the agent drain: the local host daemon's shared /
-    control pools (dialed over its loopback health port) and this ops daemon's
-    own dispatch pool. Left open, they hold PgBouncer server connections
+    control pools (dialed over its loopback health port) and the ops daemon's
+    own dispatch pool, which that daemon passes in as `ops_pool` (None before
+    its pool opens). Left open, they hold PgBouncer server connections
     through the data-plane window the stop is about to close. Both releases are
     best-effort — a failure leaves the stop correct but leaks idle client
     connections into the downtime — so it logs loudly and reports in the
@@ -188,13 +194,10 @@ def release_local_db_pools() -> dict[str, object]:
         released["host_error"] = str(exc)
 
     try:
-        from services.agent_ops import daemon as ops_daemon
-
-        pool = ops_daemon._db_pool
-        if pool is not None:
+        if ops_pool is not None:
             from shared.pool_release import release_idle_sync
 
-            released["ops"] = release_idle_sync(pool)
+            released["ops"] = release_idle_sync(ops_pool)
     except Exception as exc:
         _log.warning("[cluster] ops pool release failed (continuing the stop): %s", exc)
         released["ops_error"] = str(exc)
