@@ -359,6 +359,7 @@ def record_failure(agent_id: int, category: str) -> None:
     # A failure can occur between hold publication and cohort capture. Keep
     # that evidence too; preparation must not bless a now-idle broken runtime.
     # Callers grade database-outage exceptions into `record_undelivered`
-    # instead: those are crash-equivalent and must not block resume. They
-    # also drop agents with no continuation here (`MaintenanceHold.outside_cohort`).
+    # instead: those are crash-equivalent and must not block resume. They also
+    # drop agents with no continuation left in the hold (`MaintenanceHold`'s
+    # `outside_cohort` and `drained_and_certified`).
     record_drained(agent_id, 0, failure=category)

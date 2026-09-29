@@ -159,15 +159,15 @@ FC10_AT = datetime(2026, 9, 29, 5, 35, 53, 41351, tzinfo=UTC)
 FC10_FOREIGN = (3, 8, 9)
 
 
-def fc10_stopping_hold() -> None:
-    """The LX hold as its services stop began: cohort 2, 6, 7, all drained."""
+def fc10_hold(phase: str = "stopping", drained: tuple[int, ...] = (2, 6, 7)) -> None:
+    """The LX hold, cohort 2, 6, 7; as its services stop began, all drained."""
     before = pause_owner.begin_maintenance(FC10_HOLDER, FC10_AT).snapshot
     assert before.maintenance is not None
     hold = MaintenanceHold.decode(
         {
-            "phase": "stopping",
+            "phase": phase,
             "commands": {"2": 34, "6": 35, "7": 36},
-            "drained": [2, 6, 7],
+            "drained": list(drained),
             "failures": {},
             "parked": [],
         }
@@ -181,13 +181,16 @@ def _receipts() -> tuple[dict[int, str], dict[int, str]]:
     return current.maintenance.failures, current.maintenance.undelivered
 
 
-@pytest.mark.parametrize(
+_FAILURES = pytest.mark.parametrize(
     "exc",
     [asyncio.CancelledError(), RuntimeError("x"), PoolTimeout("x")],
     ids=lambda exc: type(exc).__name__,
 )
+
+
+@_FAILURES
 def test_a_failure_outside_the_captured_cohort_is_no_receipt(exc: BaseException) -> None:
-    fc10_stopping_hold()
+    fc10_hold()
     fences: receipts.FailureFences = {}
     for agent in FC10_FOREIGN:
         asyncio.run(receipts.record_failure(agent, exc, fences))
@@ -195,13 +198,27 @@ def test_a_failure_outside_the_captured_cohort_is_no_receipt(exc: BaseException)
     assert _receipts() == ({}, {})
 
 
-def test_a_cancelled_cohort_member_still_latches_a_receipt() -> None:
-    """Behavior for this unit's own agents is unchanged, drained ones included."""
-    fc10_stopping_hold()
+@_FAILURES
+@pytest.mark.parametrize("phase", ["drained", "stopping", "stopped", "starting", "ready"])
+def test_a_drained_members_failure_after_the_certified_drain_is_no_receipt(
+    phase: str, exc: BaseException
+) -> None:
+    """Its continuation settled and its held wake claims nothing: no receipt."""
+    fc10_hold(phase)
     fences: receipts.FailureFences = {}
-    asyncio.run(receipts.record_failure(2, asyncio.CancelledError(), fences))
-    assert fences == {2: (FC10_HOLDER, FC10_AT)}
-    assert _receipts() == ({2: "CancelledError"}, {})
+    asyncio.run(receipts.record_failure(2, exc, fences))
+    assert fences == {}
+    assert _receipts() == ({}, {})
+
+
+def test_before_the_drain_is_certified_every_member_still_latches() -> None:
+    """Draining: a member already drained and one still draining both record."""
+    fc10_hold("draining", drained=(6, 7))
+    fences: receipts.FailureFences = {}
+    for agent in (2, 6):
+        asyncio.run(receipts.record_failure(agent, asyncio.CancelledError(), fences))
+    assert fences == {2: (FC10_HOLDER, FC10_AT), 6: (FC10_HOLDER, FC10_AT)}
+    assert _receipts() == ({2: "CancelledError", 6: "CancelledError"}, {})
 
 
 def test_before_the_cohort_is_captured_every_failure_is_recorded() -> None:
@@ -211,10 +228,14 @@ def test_before_the_cohort_is_captured_every_failure_is_recorded() -> None:
     assert _receipts() == ({3: "CancelledError"}, {})
 
 
-def test_parked_agents_belong_to_the_unit() -> None:
+@pytest.mark.parametrize("phase", ["draining", "stopped"])
+def test_parked_agents_belong_to_the_unit(phase: str) -> None:
+    """A parked member never drains, so its failure records in every phase."""
     before = pause_owner.begin_maintenance(FC10_HOLDER, FC10_AT).snapshot
     assert before.maintenance is not None
-    hold = MaintenanceHold("draining", {2: 34}, parked=(5,))
+    hold = MaintenanceHold.decode(
+        {"phase": phase, "commands": {"2": 34}, "drained": [2], "failures": {}, "parked": [5]}
+    )
     pause_owner.change_maintenance(FC10_HOLDER, FC10_AT, before.maintenance, hold)
     asyncio.run(receipts.record_failure(5, asyncio.CancelledError(), {}))
     asyncio.run(receipts.record_failure(3, asyncio.CancelledError(), {}))

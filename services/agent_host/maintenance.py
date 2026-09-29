@@ -48,19 +48,22 @@ async def record_failure(agent_id: int, exc: BaseException, fences: FailureFence
         fences.pop(agent_id, None)
         return
     category = type(exc).__name__
-    assert current.maintenance is not None  # noqa: S101 — snapshot() returns only holds
-    if current.maintenance.outside_cohort(agent_id):
+    hold = current.maintenance
+    assert hold is not None  # noqa: S101 — snapshot() returns only holds
+    if hold.outside_cohort(agent_id) or hold.drained_and_certified(agent_id):
         # Every runner sees every wake (the dispatcher's subscription is
-        # cluster-wide). One cancelled before its row read could say "not
-        # ours" is no receipt of this unit: the captured cohort, readable
-        # without the database, proves the agent has no continuation here
-        # (FC-10 F20: a stopping host latched other machines' woken agents).
-        # An uncaptured cohort proves nothing, so preparation still records.
+        # cluster-wide), and a stop's shutdown cancels every task. A wake
+        # outside the captured cohort (FC-10 F20: a stopping host latched
+        # other machines' woken agents), or of a member whose drain is
+        # certified, runs no continuation: it is no receipt of this unit.
+        # Both facts are read from the journal, without the database. An
+        # uncaptured cohort and an uncertified drain still record.
         fences.pop(agent_id, None)
         logger.debug(
-            "wake failure for agent {agent_id} outside this unit's maintenance cohort "
-            "not recorded ({category})",
+            "wake failure for agent {agent_id} not recorded: no continuation in "
+            "this hold (phase {phase}, {category})",
             agent_id=agent_id,
+            phase=hold.phase,
             category=category,
         )
         return

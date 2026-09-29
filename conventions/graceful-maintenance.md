@@ -196,9 +196,10 @@ crash-equivalent family; every database channel hang surfaces as one of
 these) do not block: they are recorded
 as undelivered, and after the channel recovers the host re-drives the
 held-control path (explicit re-flush, then restart claim) before the drain can
-certify. Once the cohort is captured, a failed wake of an agent outside it
-(another machine's: every runner receives every wake) records no receipt at
-all. For genuinely blocking failures, fix the root cause first, then run
+certify. A failed wake of an agent with no continuation left in the hold
+records no receipt at all: one outside the captured cohort (another machine's:
+every runner receives every wake), or a drained member once the hold reached
+`drained`. For genuinely blocking failures, fix the root cause first, then run
 the sanctioned repair:
 
 ```

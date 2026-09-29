@@ -8,6 +8,9 @@ MaintenancePhase = Literal[
     "preparing", "draining", "drained", "stopping", "stopped", "starting", "ready"
 ]
 _PHASES = ("preparing", "draining", "drained", "stopping", "stopped", "starting", "ready")
+# From `drained` on the drain is certified: that transition required every
+# member drained or reaped with no unsettled failure (shared.maintenance.set_phase).
+_CERTIFIED_PHASES = frozenset({"drained", "stopping", "stopped", "starting", "ready"})
 
 _REPAIR_RECORD_KEYS = ("at", "by", "user", "uid", "pid", "parent", "machine")
 
@@ -68,6 +71,15 @@ class MaintenanceHold:
         """
         captured = self.phase != "preparing" or bool(self.commands or self.parked)
         return captured and agent_id not in self.commands and agent_id not in self.parked
+
+    def drained_and_certified(self, agent_id: int) -> bool:
+        """Whether `agent_id` drained and the drain is certified.
+
+        Such a member's continuation already settled, and a wake of it under
+        the hold claims nothing (no restart command is pending), so no receipt
+        of it gates the hold. Until `drained` its failures still record.
+        """
+        return self.phase in _CERTIFIED_PHASES and agent_id in self.drained
 
     def receipts_outside_cohort(self) -> dict[int, str]:
         """The unsettled failures of agents with no continuation in this hold."""

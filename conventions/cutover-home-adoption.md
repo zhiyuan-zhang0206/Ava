@@ -88,6 +88,16 @@ business.
    prove a runner's stop free of wakes; the adoption settles the receipts they
    leave for other machines' agents, while one for the runner's own agent is
    the known gap below. Budget the drains in sequence.
+
+   Once a runner is stopped in the window, never run a start of the old code
+   on it: no `ava start`, no `ava cluster update`, no stranded-hold recovery
+   (the `[hold-recover]` entry the old pause controller and hold watchdog
+   spawn). A start that succeeds releases the hold and reopens business on
+   the old code inside the window; one that meets a latched receipt refuses
+   and leaves the hold in `starting` (FC-10: the LX hold), which the adoption
+   never keeps, since it keeps only a `stopped` hold. The released unit needs
+   a second drain, and the W3 row export must follow it; the stuck one can
+   only be excluded (W6 `--exclude-unit`) or the window rolled back (R1).
 3. Gateway (W5): `--execute`, then the data-plane authority cutover
    (`scripts/cutover_db_authority.py`, see
    [convert an existing home](data-plane-secret-split.md#convert-an-existing-home)),
@@ -359,8 +369,9 @@ The held first start and `--resume` then see no unsettled receipt.
 
 A receipt of one of the hold's own agents (in `commands` or `parked`; the
 inventory lists them as `pause_owner.local_receipts`, and the refusal names
-them as "failure receipts of its own agents") has no such exit. Settle it
-with the old code, before the host's code switch:
+them as "failure receipts of its own agents") has no such exit, including one
+of a member already in `drained`. Settle it with the old code, before the
+host's code switch:
 
 - The drain failed (phase `preparing`, `draining` or `drained`; the old
   `ava stop` printed "continuations failed; hold retained"). Fix the named
@@ -382,16 +393,20 @@ with the old code, before the host's code switch:
   ([database records](cutover-db-records.md)) only after that unit's last
   drain completed, since the rows must be final; and record the reopening
   and the new holder in the cutover record.
-- **Known gap:** the hold reached `stopped` with a receipt of its own agent
-  latched after its drain: a turn failing while services stopped, or the
-  FC-10 F20 race hitting one of the unit's own, already drained agents (a
-  wake for it in flight when the stop terminated the agent host). Neither
-  code base has a sanctioned exit: `repair` and `resume --cancel` refuse a
-  started stop, start and resume refuse unsettled receipts, and the adoption
-  settles only foreign ones. Never edit the journal by hand. Until an exit
-  exists, record the hold and its receipts, then exclude that runner from the
-  window (it stays on the old code, stopped, and `--exclude-unit` at W6 keeps
-  it fenced), or treat it as a no-go on the gateway (R1).
+- **Known gap:** the legacy hold reached `stopped` with a receipt of its own
+  agent latched after its drain: the FC-10 F20 race hitting one of the
+  unit's own agents (a wake for a drained or parked member in flight when the
+  stop terminated the agent host), or a turn failing while services stopped.
+  The old code has no sanctioned exit: `repair` and `resume --cancel` refuse
+  a started stop, and start and resume refuse unsettled receipts. The
+  adoption settles only receipts outside the cohort. Never edit the journal
+  by hand. Until an exit exists, record the hold and its receipts, then
+  exclude that runner from the window (it stays on the old code, stopped, and
+  `--exclude-unit` at W6 keeps it fenced), or treat it as a no-go on the
+  gateway (R1). The new code no longer latches a drained member's receipt
+  once its drain is certified ([receipts need a live
+  continuation](../shared/maintenance/cohort-receipts.ava.okf.md)); a parked
+  member's still latches.
 
 ## Operator follow-up
 

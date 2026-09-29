@@ -15,7 +15,7 @@ from tests.agent.test_maintenance_receipt_grading import (
     FC10_AT,
     FC10_FOREIGN,
     FC10_HOLDER,
-    fc10_stopping_hold,
+    fc10_hold,
 )
 from tests.services.test_agent_host import _Build, _Row
 from tests.services.test_agent_host import host_plugin as host_plugin
@@ -83,28 +83,33 @@ class _BlockedRead:
 
 
 @pytest.mark.parametrize(
-    ("agent", "latched"),
+    ("phase", "drained", "agent", "latched"),
     [
-        *((agent, {}) for agent in FC10_FOREIGN),
-        (2, {2: "CancelledError"}),
+        *(("stopping", (2, 6, 7), agent, {}) for agent in FC10_FOREIGN),
+        ("stopping", (2, 6, 7), 2, {}),
+        ("draining", (6, 7), 2, {2: "CancelledError"}),
     ],
+    ids=["foreign-3", "foreign-8", "foreign-9", "drained-member", "draining-member"],
 )
-async def test_a_wake_cancelled_before_its_row_read_latches_only_cohort_members(
+async def test_a_wake_cancelled_before_its_row_read_latches_only_live_continuations(
     wired: _Build,
     monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    drained: tuple[int, ...],
     agent: int,
     latched: dict[int, str],
 ) -> None:
     """FC-10 F20: a stop's SIGTERM cancels every task (`cancel_and_drain`).
 
-    A wake for another machine's agent, caught before `_read_stored_config`
-    could say "not ours", latched a blocking receipt on the stopping unit's
-    hold; the same cancellation of this unit's own agent still latches.
+    Caught before `_read_stored_config` could say "not ours", a wake for
+    another machine's agent latched a blocking receipt on the stopping unit's
+    hold, and so could one for a member already drained. A member still
+    draining keeps its receipt.
     """
     host, _graph, pool = wired({})
     blocked = _BlockedRead()
     monkeypatch.setattr(pool, "connection", blocked.connection)
-    fc10_stopping_hold()
+    fc10_hold(phase, drained)
     turn = asyncio.create_task(host.run_turn(agent))
     await blocked.entered.wait()
     work = [
@@ -120,3 +125,18 @@ async def test_a_wake_cancelled_before_its_row_read_latches_only_cohort_members(
     current = maintenance.require_operation(FC10_HOLDER, FC10_AT)
     assert current.maintenance is not None
     assert current.maintenance.failures == latched
+
+
+@pytest.mark.parametrize("phase", ["stopping", "stopped", "starting", "ready"])
+async def test_a_drained_members_held_wake_claims_nothing(
+    wired: _Build, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    """Why its failure is no receipt: after the certified drain its wake reads
+    the row and returns; it never reaches the held control that claims."""
+    host, _graph, pool = wired({2: _Row(status="idling")})
+    control = AsyncMock()
+    monkeypatch.setattr(host, "_run_held_controls", control)
+    fc10_hold(phase)
+    await host.run_turn(2)
+    control.assert_not_awaited()
+    assert pool.reads == 1
