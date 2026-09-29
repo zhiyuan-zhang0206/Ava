@@ -126,11 +126,11 @@ repos:
         files: ^tests/.*\.py$
         pass_filenames: false
 
-      # Ban building a psycopg pool without TCP keepalives. Sync pools go through
-      # `shared.db.pool()`; the async pools that cannot must unpack
-      # `**PG_KEEPALIVE_KWARGS` themselves. See scripts/lint_pool_keepalives.py header.
+      # Ban building a psycopg pool without TCP keepalives where the structure
+      # gate's `postgres-dial` rule cannot see it: scripts/ and the modules that
+      # decision allows. See scripts/lint_pool_keepalives.py header.
       - id: lint-pool-keepalives
-        name: lint pool keepalives (no pool without PG_KEEPALIVE_KWARGS)
+        name: lint pool keepalives (no pool without PG_KEEPALIVE_KWARGS outside Rule 5)
         entry: .venv/bin/python scripts/lint_pool_keepalives.py
         language: system
         types: [python]
