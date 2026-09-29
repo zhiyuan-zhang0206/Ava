@@ -283,7 +283,7 @@ def test_explicit_now_to_boundary_function_is_allowed(scratch) -> None:
         """
         from datetime import timedelta
 
-        from shared import loki_index_labels as labels
+        from shared.telemetry import loki_index_labels as labels
 
 
         def test_split_before_cutover():

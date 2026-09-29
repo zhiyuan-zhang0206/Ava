@@ -239,7 +239,7 @@ def test_url_host_reads_host_with_loopback_fallback():
 
 
 def test_wsl_default_health_port_base_cannot_collide_with_a_birthed_cluster():
-    """`env_registry.WSL_DEFAULT_HEALTH_PORT_BASE` (issue #1152) must sit outside the
+    """`registry.WSL_DEFAULT_HEALTH_PORT_BASE` (issue #1152) must sit outside the
     birth allocator's own scan range — otherwise a cluster later born on the same
     WSL2 box (`cluster.allocate_ports`, which scans [BLOCK_START, BLOCK_MAX))
     could eventually claim the exact base a WSL2 unit auto-defaulted to,

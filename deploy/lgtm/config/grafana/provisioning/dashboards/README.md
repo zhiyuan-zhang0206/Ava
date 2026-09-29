@@ -148,10 +148,10 @@ plugin pack, promoted to core the same day — the repo's own observability
 is not a plugin, per user ruling), `shared/telemetry/metrics/core/events.py` (the
 event-stream panels: the Events trio and the gateway sample count) and
 `shared/telemetry/metrics/core/host.py` (the `Host & data plane` section), plus the
-smaller registration modules beside them (`core_metrics_cost` and
-`core_metrics_frontend` — the line budget splits of the first two, task
-#3697 — and `core_metrics_dismissed`, `core_metrics_fleet`,
-`core_metrics_pr_flow`). All register through `register_core_metric()` in
+smaller registration modules beside them (`cost` and
+`frontend` — the line budget splits of the first two, task
+#3697 — and `dismissed`, `fleet`,
+`pr_flow`). All register through `register_core_metric()` in
 `shared/telemetry/metrics/core/catalog.py`, which runs the **same
 SQL-template safety validation as plugin metrics** (`validate_spec_sql`) and
 fills `plugin = "core"`.

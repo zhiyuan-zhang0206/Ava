@@ -237,7 +237,7 @@ _SETTINGS_BUILD_WARNING = r"""
 import sys
 sys.path.insert(0, sys.argv[1])
 import httpx
-from shared import bootstrap
+from shared.host.env import bootstrap
 def unreachable(*_args, **_kwargs):
     raise httpx.ConnectError("connection refused")
 bootstrap.fetch_bootstrap_config = unreachable

@@ -373,7 +373,7 @@ def _all_aliases() -> frozenset[str]:
 
 
 def test_env_registry_imports_on_clean_env_without_config_package() -> None:
-    """Task #1099 regression: importing env_registry first (a first `ava start`
+    """Task #1099 regression: importing shared.host.env.registry first (a first `ava start`
     prepares identity before any settings) must not circular-import through the
     config package.
 

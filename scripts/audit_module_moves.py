@@ -24,7 +24,8 @@ artifacts — the hash-pinned compatibility patch
 (`scripts/legacy_lkg/compatibility.patch`, bound by `manifest.json`
 patch_sha256 to the 612326d base) and the proof script
 (`scripts/legacy_lkg/cold_boot.py`, executed inside that reconstructed
-install, so its references must keep the base's paths) — and this script
+install, so its references must keep the base's paths) — the byte-frozen
+`db/schema.sql` (its sha256 is the image schema digest), and this script
 itself. Untracked
 environments, caches, and operator scaffolding are outside that universe. Stage
 new files before auditing. Binary files are skipped. Any failed check exits 1.
@@ -46,8 +47,11 @@ _FROZEN = ("decisions/", "postmortems/", "docs/history/")
 # the cold-boot proof script (runs inside the reconstructed base install, so
 # its module/path references resolve against that base - a move in main does
 # not rewrite them; a base bump re-proves and updates them).
+# db/schema.sql is byte-frozen too: its sha256 is the retained image's schema
+# digest, so its stale path comments wait for the first post-cutover migration.
 _FROZEN_FILES = frozenset(
     {
+        "db/schema.sql",
         "scripts/legacy_lkg/compatibility.patch",
         "scripts/legacy_lkg/cold_boot.py",
     }

@@ -14,7 +14,7 @@
     "tests/services/test_permissions_helper.py::_fake_tools.<locals>.run": 22,
     "tests/services/test_pitr_cos_store.py::test_cos_ack_normalizes_into_candidate_and_protected_manifests": 19,
     "tests/services/test_pitr_oss_roles.py::test_put_base_if_absent_streams_multipart_and_writes_sidecar": 15,
-    "tests/services/test_trace.py::test_turn_span_exports_root_at_start_not_at_end": 17
+    "tests/services/test_tracing.py::test_turn_span_exports_root_at_start_not_at_end": 17
   },
   "directories": {
     "tests/services": 163
@@ -34,7 +34,7 @@
     "tests/services/test_permissions_helper.py": 2033,
     "tests/services/test_pitr_base_scheduler.py": 832,
     "tests/services/test_pitr_uploader.py": 872,
-    "tests/services/test_trace.py": 1724,
+    "tests/services/test_tracing.py": 1724,
     "tests/services/test_turn_dispatcher.py": 1428
   },
   "nesting": {

@@ -225,7 +225,7 @@ _PASSTHROUGH_ROWS = (
 # The health-port services (one Settings field each: `<svc>_health_port`,
 # alias `AVA_<SVC>_HEALTH_PORT`, scope=host). Adding a daemon with a health
 # port = one line here + the field in shared/config/services.py; every
-# consumer (derive_env, daemon_health, start, port_preflight, dotenv_boot's
+# consumer (derive_env, daemon.health, start, port_preflight, dotenv_boot's
 # force set) follows automatically.
 _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     "labeler",

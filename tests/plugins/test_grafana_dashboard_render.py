@@ -401,11 +401,11 @@ def test_render_is_deterministic_and_environment_independent(
     script = (
         "import hashlib, sys;"
         f"sys.path.insert(0, {str(_REPO_ROOT)!r});"
-        "from shared.telemetry.metrics.core import core_metrics;"
+        "from shared.telemetry.metrics.core import catalog;"
         "from shared.telemetry.metrics.grafana_dashboard import render_dashboard, render_to_json;"
         "from shared.telemetry.metrics.grafana_dashboard_supply import collect_plugin_specs;"
         "plugins = collect_plugin_specs();"
-        "core = core_metrics.collect_core_metrics();"
+        "core = catalog.collect_core_metrics();"
         "print(hashlib.sha256(render_to_json(render_dashboard(core, plugins.specs)).encode()).hexdigest())"
     )
     scrubbed = subprocess.run(  # noqa: S603 — our own interpreter + a literal script

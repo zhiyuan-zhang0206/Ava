@@ -183,7 +183,7 @@ def test_log_llm_usage_emits_agent_billing_span(
     from opentelemetry import trace as otel_trace
 
     from shared.lm.pricing import quote
-    from shared.telemetry import tracing as trace_mod
+    from shared.telemetry import tracing as tracing_mod
 
     class _Span:
         def __init__(self, start_time: int | None) -> None:
@@ -210,7 +210,7 @@ def test_log_llm_usage_emits_agent_billing_span(
     expected = quote("deepseek-v4-pro", 1_000, 100, 800, at=priced_at)
     assert expected is not None
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setitem(tracing_mod._state, "initialized", True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("time.time_ns", lambda: 5_000_000_000)
     message = AIMessage(
@@ -252,7 +252,7 @@ def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
     """
     from opentelemetry import trace as otel_trace
 
-    from shared.telemetry import tracing as trace_mod
+    from shared.telemetry import tracing as tracing_mod
 
     class _Span:
         def set_attribute(self, _key: str, _value: Any) -> None:
@@ -272,7 +272,7 @@ def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
 
     tracer = _Tracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setitem(tracing_mod._state, "initialized", True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     message = AIMessage(
         content="",

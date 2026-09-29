@@ -43,7 +43,7 @@ missing value prints an actionable error and exits 1. An agent calling `ava`
 
 A host runs the **union** of its capabilities' services — the per-service
 capability declaration is `ServiceSpec.capabilities` in `ops/spec.py`, and the
-resulting roster is documented in [[../services/services.ava.okf.md]]. A **single box**
+resulting roster is documented in [[services/services.ava.okf.md]]. A **single box**
 (`gateway,agent-runner`) is therefore not a special case in the code, just the
 host with several non-empty capability sets and the loopback reachable address.
 
@@ -95,6 +95,6 @@ agent onto a gateway-only node where only the scheduling/DB layer lives".
 
 ## Key Dependencies
 
-- [[../services/services.ava.okf.md]] — which services each capability contributes
+- [[services/services.ava.okf.md]] — which services each capability contributes
 - [[paths.ava.okf.md]] — where the `machine_*` files live
-- [[../cli/cli.ava.okf.md]] — `ava start`, which persists these labels
+- [[cli/cli.ava.okf.md]] — `ava start`, which persists these labels

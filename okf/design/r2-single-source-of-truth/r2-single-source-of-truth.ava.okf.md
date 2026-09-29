@@ -13,10 +13,10 @@ tags:
 
 > Landing status (audit round-2 config.md §4): **A (EnvRegistry) is live** —
 > `shared/host/env/registry.py` projections (child_env / env_authority_drop_set /
-> env_keep_set) derive from the field registry, and test_env_registry.py +
+> env_keep_set) derive from the field registry, and test_registry.py +
 > test_gateway_consumer_guard.py are derivation-rule verifiers, not snapshot
 > seams. Residual: `_DERIVED_FIELDS` / `_IDENTITY_FIELDS` / `_GUIDE_FIELDS` /
-> `_HEALTH_PORT_SERVICES` in env_registry.py stay hand-written consumption
+> `_HEALTH_PORT_SERVICES` in shared/host/env/registry.py stay hand-written consumption
 > declarations — A3 holds for scope-derived projections, not for those four
 > hand sets (test-anchor TODO). B/C/D below are still planned.
 

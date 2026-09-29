@@ -466,7 +466,7 @@ def validate_spec_sql(spec: MetricSpec) -> None:
     (render-only, per-agent). PromQL has neither event-stream requirements
     nor template substitutions."""
     if spec.query_type == "logql":
-        # Lazy: metrics_logql imports this module (the exception class), so a
+        # Lazy: logql imports this module (the exception class), so a
         # module-level from-import here would cycle.
         from shared.telemetry.metrics.logql import validate_spec_logql
 

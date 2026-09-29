@@ -96,7 +96,7 @@ _log = logging.getLogger("shared.daemon.health")
 # did not move them (F-s4-2). The tables are now derived, never hand-maintained:
 #
 #   PORT_OFFSETS (shared.host.env.port_block)          — service -> block offset (ONE table)
-#   health_port_env_aliases() (env_registry) — service -> env var, the derive surface
+#   health_port_env_aliases() (host.env.registry) — service -> env var, the derive surface
 #   DEFAULT_PORTS (below)                     — the legacy fallback = the LEGACY_AVA_PORTS
 #                                               subset for health daemons
 #   _HEALTH_PORT_OVERRIDES (below)            — service -> settings field

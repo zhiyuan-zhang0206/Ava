@@ -2,7 +2,7 @@
 
 The events-maintenance daemon publishes dismissed counts beside the
 unresolved ones; these two tiles complete the total / resolved / net trio
-with the Loki Warning / Error tiles (core_metrics_panels.py) and the
+with the Loki Warning / Error tiles (panels.py) and the
 unresolved tiles. PromQL static expressions, like their unresolved
 counterparts. The gauge names carry the `_ratio` suffix the OTel
 Prometheus exporter appends to unit-"1" instruments. Registered as a

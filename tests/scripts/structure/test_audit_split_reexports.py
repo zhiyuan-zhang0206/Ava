@@ -5,7 +5,7 @@ from scripts import audit_split_reexports as gate
 
 def test_missing_accepts_submodule_fallback() -> None:
     """`from pkg import sub` resolves for a lean package __init__ (no re-exports)."""
-    assert gate._missing("shared.telemetry.metrics", {"metrics_logql"}) == []
+    assert gate._missing("shared.telemetry.metrics", {"logql"}) == []
     assert gate._missing("shared.telemetry.metrics", {"ci_runs_metrics"}) == []
 
 

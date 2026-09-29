@@ -96,7 +96,7 @@ class _AuditRootVisitor(ast.NodeVisitor):
         for alias in node.names:
             if alias.name == "shared":
                 root = alias.asname or alias.name
-                self._audit_modules.add(f"{root}.audit_events")
+                self._audit_modules.add(f"{root}.telemetry.audit_events")
                 self._telemetry_modules.add(f"{root}.telemetry")
             if alias.name == "shared.telemetry.audit_events":
                 self._audit_modules.add(alias.asname or alias.name)
@@ -123,10 +123,12 @@ class _AuditRootVisitor(ast.NodeVisitor):
     def _register_shared_module_aliases(self, node: ast.ImportFrom) -> None:
         if node.module == "shared":
             for alias in node.names:
-                if alias.name == "audit_events":
-                    self._audit_modules.add(alias.asname or alias.name)
                 if alias.name == "telemetry":
                     self._telemetry_modules.add(alias.asname or alias.name)
+        if node.module == "shared.telemetry":
+            for alias in node.names:
+                if alias.name == "audit_events":
+                    self._audit_modules.add(alias.asname or alias.name)
 
     @staticmethod
     def _register_function_aliases(
@@ -299,6 +301,20 @@ def test_an_unclassified_import_shared_audit_helper_fails(tmp_path: Path) -> Non
         "    shared.telemetry.audit_events.insert_event_log(\n"
         "        event_type='send_message', agent_id=1, source='agent:1'\n"
         "    )\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(AssertionError, match=r"new_producer\.py::emit"):
+        _assert_classified(_audit_roots(root), {})
+
+
+def test_an_unclassified_module_alias_audit_helper_fails(tmp_path: Path) -> None:
+    """The package-member form production uses (`from shared.telemetry import audit_events`)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "new_producer.py").write_text(
+        "from shared.telemetry import audit_events\n"
+        "def emit():\n"
+        "    audit_events.prepare_event_log(event_type='send_message', agent_id=1)\n",
         encoding="utf-8",
     )
     with pytest.raises(AssertionError, match=r"new_producer\.py::emit"):

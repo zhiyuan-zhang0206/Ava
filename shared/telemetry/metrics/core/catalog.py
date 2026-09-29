@@ -27,8 +27,8 @@ ops-dashboard panels), ``shared/telemetry/metrics/core/observability.py`` (the m
 ava_observability pack), ``shared/telemetry/metrics/core/events.py`` (the event-stream
 panels: the Events trio and the gateway sample count) and
 ``shared/telemetry/metrics/core/host.py`` (the "Host & data plane" section), plus the
-smaller modules beside them (``core_metrics_cost`` / ``core_metrics_frontend``
-/ ``core_metrics_dismissed`` / ``core_metrics_fleet`` / ``core_metrics_pr_flow``).
+smaller modules beside them (``cost`` / ``frontend`` / ``dismissed`` / ``fleet``
+/ ``pr_flow``).
 The ``plugin`` field of
 every core metric is ``core`` — the dashboard row header and the display name
 are "core".

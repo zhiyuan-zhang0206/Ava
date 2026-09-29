@@ -104,7 +104,7 @@ BLOCK_MAX = 20000
 # booby trap: it produced 8113 for `agent_host`, which `ops` already held, and
 # the whole suite passed because nothing checked this table for duplicates.
 # These are the ports a unit whose `.env` predates a key ACTUALLY BINDS
-# (`daemon_health.DEFAULT_PORTS` is derived from here), so a duplicate is two
+# (`daemon.health.DEFAULT_PORTS` is derived from here), so a duplicate is two
 # daemons fighting over one socket on every existing unit — and that collision
 # would have taken the ops server's port, which the gateway dials for every
 # runner RPC. Pick a number no other entry holds; `test_legacy_ports_are_unique`

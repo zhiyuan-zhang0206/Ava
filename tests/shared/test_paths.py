@@ -80,3 +80,17 @@ def test_prod_checkout_guard_allows_dev_home_any_checkout(
     dev_home.mkdir()
     monkeypatch.setattr(paths, "ava_home", lambda: Path(str(dev_home)))
     assert paths.prod_service_checkout_error(Path.home() / ".ava" / "worktrees" / "dev-wt") is None
+
+
+def test_file_anchored_roots_resolve_to_the_checkout_root() -> None:
+    """Modules that locate the checkout from their own `__file__` count their
+    package depth: the paths door, the `.env` boot chain, and the Grafana
+    dashboard supplier's builtin plugins directory all land on this checkout."""
+    from shared.host.env import dotenv_boot
+    from shared.telemetry.metrics import grafana_dashboard_supply
+
+    checkout = Path(__file__).resolve().parents[2]
+    assert (checkout / "shared" / "__init__.py").is_file()
+    assert paths.repo_root() == checkout
+    assert dotenv_boot._checkout_root() == checkout
+    assert checkout / "ava_builtins" / "plugins" == grafana_dashboard_supply._REPO_PLUGINS_DIR

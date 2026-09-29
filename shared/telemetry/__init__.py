@@ -1,10 +1,16 @@
-"""Unified event emitter — the single entry point for every event in every process.
+"""Unified telemetry: the event emitter and its OTLP export backend, trace
+recording, metrics, Loki index labels and read budget, observability identity,
+and operational alerts.
 
-The emitter implementation moved to `shared/telemetry/emitter.py` (task #4555
-R3, from the former single-module layout); this package door re-exports its
-API so every existing `shared.telemetry.<name>` caller keeps resolving (the
-conflict-package facade, design rule R3). The OTLP export backend lives in
-`shared/telemetry/otlp/`; the doc nodes move with it.
+The door re-exports the emitter's API (`shared/telemetry/emitter.py`), the single
+entry point for every event in every process. The other members are imported
+directly: `otlp/` (the OTLP export backend and its doc nodes), `tracing` and
+`trace_mirror` (span recording and the sidecar mirror's disk guards), `metrics/`
+(metric registries, aggregates, Grafana dashboard supply), `loki_index_labels`
+and `loki_query_budget` (Loki selectors and the read budget), `observability`,
+`lgtm_local` and `station_endpoint` (observability identity and endpoints),
+`alerts` and `alerts_copy` (alert ingest and its IM copy), and `audit_events`
+(the audit side of the event stream).
 
 This init intentionally pulls nothing beyond the emitter's own chain (events
 contract + observability + paths) and the docstring-only otlp subpackage init.

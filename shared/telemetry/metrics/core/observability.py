@@ -10,10 +10,10 @@ retired Metrics page (shared/telemetry/metrics/report.py).
 
 Migrated plugin -> core (user ruling 2026-08-06: core metrics + plugin
 metrics two-tier architecture): the 21 MetricSpec definitions below register
-with ``core_metrics.register_core_metric`` instead of ``register_metric`` —
+with ``catalog.register_core_metric`` instead of ``register_metric`` —
 the same query safety validation, no PluginContext, ``plugin`` auto-filled to
 "core". Registration happens at import time
-(``core_metrics.collect_core_metrics`` imports this module through the
+(``catalog.collect_core_metrics`` imports this module through the
 ``_CORE_DEFINITION_MODULES`` tuple); templates use the
 {event_name}/{category} placeholders and, on inspector-only metrics, the
 {{agent_id}} placeholder.

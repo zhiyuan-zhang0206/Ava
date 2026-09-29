@@ -29,7 +29,7 @@ It also owns the template-building vocabulary every metric definition
 ``EVENT_SELECTOR`` / ``EVENT_NAME_SELECTOR``, ``event_count`` and
 ``CATEGORY_WITH_LEGACY_LOG``.
 
-Imports stay one-directional (metrics_logql -> plugin_metrics): the
+Imports stay one-directional (logql -> plugin_metrics): the
 exception class lives in the registry module and is referenced through the
 module object at call time, so plugin_metrics may import this module
 without a cycle.

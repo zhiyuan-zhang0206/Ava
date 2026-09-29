@@ -3,7 +3,7 @@
 The two Fleet growth panels read the gateway's absolute agent-registry
 max-id gauge (``gateway/_agent_max_id.py``, 60s sample): a Prometheus
 timeseries of ``ava_agent_registry_max_id_ratio`` and its ``deriv()`` slope
-in agents per day. They live here — beside ``core_metrics_dismissed`` — so
+in agents per day. They live here — beside ``dismissed`` — so
 the core panels module (already at 787 lines) stays untouched, while the
 ava_observability registry count remains locked at 21 metrics by tests.
 """

@@ -1,4 +1,6 @@
-"""Shared metrics report types and rendering helpers."""
+"""Metrics: report types and rendering helpers (re-exported here), Loki
+aggregates, LogQL validation, Grafana dashboard supply, the core metric
+families (`core/`), and plugin metric registration (`plugin_metrics`)."""
 
 from shared.telemetry.metrics import core as core
 from shared.telemetry.metrics.report import (

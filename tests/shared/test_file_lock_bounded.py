@@ -162,7 +162,7 @@ def test_every_env_write_door_takes_the_lock(
     `rename_env_keys` are two more rewrites. First start uses the same
     upsert_env writer. A lock on one door orders nothing.
     """
-    import shared.host.env.dotenv_file as envfile_mod
+    import shared.host.env.dotenv_file as dotenv_file_mod
     import shared.host.env.runtime_config as rc
 
     env = tmp_path / ".env"
@@ -172,11 +172,11 @@ def test_every_env_write_door_takes_the_lock(
 
     taken: list[Path] = []
     _recorded_lock(monkeypatch, rc, taken)
-    _recorded_lock(monkeypatch, envfile_mod, taken)
+    _recorded_lock(monkeypatch, dotenv_file_mod, taken)
 
     rc.write_fields({}, set())
-    envfile_mod.upsert_env(env, {"AVA_NEW": "2"})
-    envfile_mod.remove_env(env, {"AVA_OLD"})
+    dotenv_file_mod.upsert_env(env, {"AVA_NEW": "2"})
+    dotenv_file_mod.remove_env(env, {"AVA_OLD"})
     rc.rename_env_keys(env, {"AVA_NEW": "AVA_RENAMED"})
 
     assert len(taken) == 4, f"a door wrote .env without the lock: {taken}"
@@ -190,12 +190,12 @@ def test_the_write_doors_are_leaves(tmp_path: Path) -> None:
     Asserted on the sources so the invariant survives a future edit."""
     import inspect
 
-    import shared.host.env.dotenv_file as envfile_mod
+    import shared.host.env.dotenv_file as dotenv_file_mod
     import shared.host.env.runtime_config as rc
 
     doors = {
-        "upsert_env": envfile_mod.upsert_env,
-        "remove_env": envfile_mod.remove_env,
+        "upsert_env": dotenv_file_mod.upsert_env,
+        "remove_env": dotenv_file_mod.remove_env,
         "rename_env_keys": rc.rename_env_keys,
         "write_fields": rc.write_fields,
     }

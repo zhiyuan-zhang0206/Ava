@@ -25,8 +25,8 @@ def test_non_loopback_hosts(host: str) -> None:
     assert is_loopback_host(host) is False
 
 
-def test_netutil_imports_without_config() -> None:
-    """netutil must not pull shared.config (which builds Settings at import and
+def test_predicates_import_without_config() -> None:
+    """predicates must not pull shared.config (which builds Settings at import and
     fails on a fresh host) — a first `ava start` imports it before any settings."""
     import ast
 

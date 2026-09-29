@@ -102,9 +102,9 @@ EXPECTED = {
 def _load_pack() -> None:
     """Import the core observability definition modules (fresh core registry
     each call). The pack spans three modules: the task #3697 S1 line-budget
-    split moved the frontend telemetry specs to ``core_metrics_frontend``,
+    split moved the frontend telemetry specs to ``frontend``,
     and the #2174 split moved the exec-envelope pair to
-    ``core_metrics_exec_envelope``."""
+    ``exec_envelope``."""
     import importlib
     import sys
 

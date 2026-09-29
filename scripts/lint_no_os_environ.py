@@ -44,7 +44,7 @@ environment live by design, so setenv is the real seam.
 The alias set is dynamically read from `the config field registry` — adding a
 new field to Settings auto-syncs the ban list; no manual maintenance.
 Historical bugs: PR #327 hit this pattern twice (test_loop_main's
-AVA_MCP_SOCKET, test_daemon_health's AVA_SCHEDULER_HEALTH_PORT, plus the
+AVA_MCP_SOCKET, tests/shared/test_health.py's AVA_SCHEDULER_HEALTH_PORT, plus the
 milvus_client fixture's AVA_MILVUS_URI).
 
 Error format `file:line: <line content>` + non-zero exit.

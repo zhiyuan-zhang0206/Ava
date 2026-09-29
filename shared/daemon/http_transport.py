@@ -124,7 +124,7 @@ async def start_daemon_http(
                                 response = _build_response(status, resp_body, ctype)
                             except Exception as exc:
                                 _log.exception(
-                                    "[daemon_health] route %s %s handler raised", method, path
+                                    "[http_transport] route %s %s handler raised", method, path
                                 )
                                 response = _build_response(
                                     500,

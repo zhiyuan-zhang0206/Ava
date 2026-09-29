@@ -42,11 +42,11 @@ class _RecordingTracer:
 
 
 def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
-    from shared.telemetry import tracing as trace_mod
+    from shared.telemetry import tracing as tracing_mod
 
     tracer = _RecordingTracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setitem(tracing_mod._state, "initialized", True)
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     return tracer
 

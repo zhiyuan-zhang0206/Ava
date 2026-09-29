@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
-from shared.telemetry import tracing as trace_mod
+from shared.telemetry import tracing as tracing_mod
 from shared.telemetry.otlp import telemetry_otlp
 from shared.telemetry.tracing import (
     OtlpJsonHttpSpanExporter,
@@ -56,12 +56,12 @@ def _drain_background_trace_threads() -> None:
     a hung arm is caught by the next test's _assert_no_background_trace_threads
     with a loud failure instead of a silent cross-test contamination.
     """
-    retry_thread = trace_mod._state["retry_thread"]
+    retry_thread = tracing_mod._state["retry_thread"]
     if isinstance(retry_thread, threading.Thread):
         retry_thread.join(timeout=_THREAD_DRAIN_TIMEOUT_S)
-    arm_thread = trace_mod._state["arm_thread"]
+    arm_thread = tracing_mod._state["arm_thread"]
     if isinstance(arm_thread, threading.Thread) and arm_thread.is_alive():
-        init_resolved = trace_mod._state["init_resolved"]
+        init_resolved = tracing_mod._state["init_resolved"]
         if isinstance(init_resolved, threading.Event):
             init_resolved.wait(timeout=_THREAD_DRAIN_TIMEOUT_S)
         arm_thread.join(timeout=_THREAD_DRAIN_TIMEOUT_S)
@@ -79,8 +79,8 @@ def _reset_init_flag():
     _assert_no_background_trace_threads()
     gate = telemetry_otlp.observability_export_allowed
     gate.cache_clear()
-    trace_mod._state.clear()
-    trace_mod._state.update(
+    tracing_mod._state.clear()
+    tracing_mod._state.update(
         initialized=False,
         collector_offline_reported=False,
         retry_thread=None,
@@ -91,10 +91,10 @@ def _reset_init_flag():
     )
     gate.cache_clear()
     yield
-    trace_mod._state["initialized"] = True
+    tracing_mod._state["initialized"] = True
     _drain_background_trace_threads()
-    trace_mod._state.clear()
-    trace_mod._state.update(
+    tracing_mod._state.clear()
+    tracing_mod._state.update(
         initialized=False,
         collector_offline_reported=False,
         retry_thread=None,
@@ -109,7 +109,7 @@ def _wait_init_resolved(timeout: float = 5.0) -> None:
     """Join the background arming pass: the armed-path tests assert on state
     the arm thread writes, so they must wait for it (deterministic, not a
     sleep — the event is set in the thread's finally)."""
-    resolved = trace_mod._state.get("init_resolved")
+    resolved = tracing_mod._state.get("init_resolved")
     assert isinstance(resolved, threading.Event)
     assert resolved.wait(timeout=timeout), "background trace arming did not resolve"
 
@@ -129,7 +129,7 @@ def test_disabled_returns_early(monkeypatch: pytest.MonkeyPatch):
     """When trace_enabled=False, initialize_tracing returns None and does not init the SDK."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", False)
     assert initialize_tracing() is None
-    assert trace_mod._state["initialized"] is False
+    assert tracing_mod._state["initialized"] is False
 
 
 def _under_watermark(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,7 +152,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
         "shared.config.settings.observability.telemetry_otlp_endpoint",
         "http://127.0.0.1:4318",
     )
-    monkeypatch.setattr(trace_mod, "cluster_label", lambda: ".ava-test")
+    monkeypatch.setattr(tracing_mod, "cluster_label", lambda: ".ava-test")
     monkeypatch.setattr("shared.telemetry.observability.production_identity", lambda: False)
     _under_watermark(monkeypatch)
 
@@ -185,7 +185,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     assert Instruments.LANGCHAIN in instruments
     assert Instruments.GOOGLE_GENERATIVEAI in instruments
 
-    assert trace_mod._state["initialized"] is True
+    assert tracing_mod._state["initialized"] is True
 
 
 def test_gateway_trace_recording_skips_without_lgtm_marker(
@@ -209,7 +209,7 @@ def test_gateway_trace_recording_skips_without_lgtm_marker(
     initialize_tracing()
 
     assert calls == []
-    assert trace_mod._state["initialized"] is False
+    assert tracing_mod._state["initialized"] is False
 
 
 def test_gateway_trace_recording_arms_with_lgtm_marker(
@@ -268,8 +268,8 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
     initialize_tracing()  # must not raise: the failure is the arm thread's
     _wait_init_resolved()
 
-    assert trace_mod._state["initialized"] is False
-    assert trace_mod._state["arm_failed"] is True
+    assert tracing_mod._state["initialized"] is False
+    assert tracing_mod._state["arm_failed"] is True
     assert warnings
     attrs = warnings[0][1]
     assert attrs.get("action") == "recording_init_failed"  # pyright: ignore[reportUnknownMemberType]
@@ -293,11 +293,11 @@ def test_arm_failure_blocks_rearming(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
     initialize_tracing()
     _wait_init_resolved()
-    assert trace_mod._state["arm_failed"] is True
+    assert tracing_mod._state["arm_failed"] is True
 
     initialize_tracing()  # must be a no-op, not a second arming attempt
     assert calls == [1]
-    assert trace_mod._state["initialized"] is False
+    assert tracing_mod._state["initialized"] is False
 
 
 def test_idempotent_second_call_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -339,7 +339,7 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
     def capture_warning(message: str, *_args: object, **_kwargs: object) -> None:
         warnings.append(message)
 
-    monkeypatch.setattr(trace_mod.logger, "warning", capture_warning)
+    monkeypatch.setattr(tracing_mod.logger, "warning", capture_warning)
     initialized = threading.Event()
 
     def init_traceloop(**_kwargs: object) -> None:
@@ -348,19 +348,19 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", init_traceloop)
 
     initialize_tracing()
-    retry_thread = trace_mod._state["retry_thread"]
+    retry_thread = tracing_mod._state["retry_thread"]
     assert isinstance(retry_thread, threading.Thread)
 
     initialize_tracing()
-    assert trace_mod._state["retry_thread"] is retry_thread
+    assert tracing_mod._state["retry_thread"] is retry_thread
     assert initialized.wait(timeout=1.0)
     retry_thread.join(timeout=0.5)
     _wait_init_resolved()
 
     assert attempts == [False, False, True]
     assert warnings == ["trace recording disabled — local OTel collector not answering"]
-    assert trace_mod._state["initialized"] is True
-    assert trace_mod._state["collector_offline_reported"] is False
+    assert tracing_mod._state["initialized"] is True
+    assert tracing_mod._state["collector_offline_reported"] is False
     assert not retry_thread.is_alive()
 
 
@@ -383,11 +383,11 @@ def test_arming_runs_off_the_caller_thread(monkeypatch: pytest.MonkeyPatch, tmp_
 
     initialize_tracing()  # returns immediately — the mock is still blocked
     assert entered.wait(timeout=5.0), "arm thread must have started"
-    assert trace_mod._state["initialized"] is False  # boot already returned; init pending
+    assert tracing_mod._state["initialized"] is False  # boot already returned; init pending
 
     release.set()
     _wait_init_resolved()
-    assert trace_mod._state["initialized"] is True
+    assert tracing_mod._state["initialized"] is True
 
 
 def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -409,7 +409,7 @@ def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
 
     initialize_tracing()
-    arm_thread = trace_mod._state["arm_thread"]
+    arm_thread = tracing_mod._state["arm_thread"]
     assert isinstance(arm_thread, threading.Thread)
     assert arm_thread.is_alive()
     # Intentionally no _wait_init_resolved(): the fixture teardown must drain.
@@ -434,13 +434,13 @@ def test_arm_tracing_skips_init_when_already_resolved(
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    trace_mod._state["initialized"] = True
-    trace_mod._state["arm_failed"] = False
+    tracing_mod._state["initialized"] = True
+    tracing_mod._state["arm_failed"] = False
     _arm_tracing("http://127.0.0.1:4318")
     assert calls == []
 
-    trace_mod._state["initialized"] = False
-    trace_mod._state["arm_failed"] = True
+    tracing_mod._state["initialized"] = False
+    tracing_mod._state["arm_failed"] = True
     _arm_tracing("http://127.0.0.1:4318")
     assert calls == []
 
@@ -476,8 +476,8 @@ def test_concurrent_arm_threads_init_once(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     # State reset while the first arm is in flight — exactly what the fixture
     # teardown does when a slow CI import outlives the drain.
-    trace_mod._state.clear()
-    trace_mod._state.update(
+    tracing_mod._state.clear()
+    tracing_mod._state.update(
         initialized=False,
         collector_offline_reported=False,
         retry_thread=None,
@@ -501,10 +501,10 @@ def test_turn_span_waits_for_pending_arm(monkeypatch: pytest.MonkeyPatch) -> Non
     pending and opens the root span only after the arm resolves — a span
     opened against the unset proxy tracer would be silently lost."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    trace_mod._state["initialized"] = False
+    tracing_mod._state["initialized"] = False
     release = threading.Event()
     arm = threading.Thread(target=release.wait, daemon=True, name="fake-arm")
-    trace_mod._state["arm_thread"] = arm
+    tracing_mod._state["arm_thread"] = arm
     arm.start()
 
     entered: list[str] = []
@@ -520,8 +520,8 @@ def test_turn_span_waits_for_pending_arm(monkeypatch: pytest.MonkeyPatch) -> Non
     assert before_wait.wait(timeout=5)
     assert entered == []  # blocked in ensure_init_resolved, span NOT opened yet
 
-    trace_mod._state["initialized"] = True
-    trace_mod._state["init_resolved"].set()
+    tracing_mod._state["initialized"] = True
+    tracing_mod._state["init_resolved"].set()
     t.join(timeout=5)
     assert entered == ["open"]  # opened only after the arm resolved
     assert not t.is_alive()
@@ -536,9 +536,9 @@ def test_ensure_init_resolved_bounded_wait(monkeypatch: pytest.MonkeyPatch) -> N
 
     release = threading.Event()
     arm = threading.Thread(target=release.wait, daemon=True, name="fake-arm")
-    trace_mod._state["arm_thread"] = arm
+    tracing_mod._state["arm_thread"] = arm
     arm.start()
-    monkeypatch.setattr(trace_mod, "_INIT_RESOLVED_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(tracing_mod, "_INIT_RESOLVED_TIMEOUT_S", 0.05)
     warnings: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _capture_warning(*a: object, **kw: object) -> None:
@@ -551,7 +551,7 @@ def test_ensure_init_resolved_bounded_wait(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert len(warnings) == 1
     assert warnings[0][1]["action"] == "init_resolved_timeout"
-    assert trace_mod._state["timeout_reported"] is True
+    assert tracing_mod._state["timeout_reported"] is True
     release.set()
     arm.join(timeout=5)
 
@@ -580,8 +580,8 @@ def test_arm_thread_base_exception_marks_attempt_spent(
     initialize_tracing()
     _wait_init_resolved()
 
-    assert trace_mod._state["arm_failed"] is True
-    assert trace_mod._state["initialized"] is False
+    assert tracing_mod._state["arm_failed"] is True
+    assert tracing_mod._state["initialized"] is False
 
     initialize_tracing()  # must be a no-op: the attempt was spent
     assert calls == [1]
@@ -599,7 +599,7 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setattr("shared.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
-    monkeypatch.setattr(trace_mod, "_INIT_RESOLVED_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(tracing_mod, "_INIT_RESOLVED_TIMEOUT_S", 0.05)
 
     entered = threading.Event()
     release = threading.Event()
@@ -626,13 +626,13 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
     ensure_init_resolved()
     assert len(warnings) == 1
     assert warnings[0][1]["action"] == "init_resolved_timeout"
-    assert trace_mod._state["timeout_reported"] is True
-    assert trace_mod._state["initialized"] is False
+    assert tracing_mod._state["timeout_reported"] is True
+    assert tracing_mod._state["initialized"] is False
 
     # ...the arm completes late: recording comes up mid-life...
     release.set()
     _wait_init_resolved()
-    assert trace_mod._state["initialized"] is True
+    assert tracing_mod._state["initialized"] is True
 
     # ...and later calls skip the wait entirely, so the span opens for real.
     ensure_init_resolved()
@@ -664,8 +664,8 @@ def test_ensure_init_resolved_instant_without_arming(
     initialize_tracing()  # declined: collector unreachable, no arm thread
     ensure_init_resolved()  # must return at once, not hang on an unset event
 
-    assert trace_mod._state["arm_thread"] is None
-    assert trace_mod._state["initialized"] is False
+    assert tracing_mod._state["arm_thread"] is None
+    assert tracing_mod._state["initialized"] is False
 
 
 # --- OtlpJsonHttpSpanExporter ---------------------------------------------------
@@ -734,9 +734,9 @@ def test_otlp_exporter_timeout_is_bounded_and_returns_failure(
     monkeypatch.setattr("httpx.post", _timeout)
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
 
-    assert exporter.export([]) is trace_mod.SpanExportResult.FAILURE
-    assert timeouts == [trace_mod._TRACE_EXPORT_TIMEOUT_S]
-    assert 0 < trace_mod._TRACE_EXPORT_TIMEOUT_S <= 5.0
+    assert exporter.export([]) is tracing_mod.SpanExportResult.FAILURE
+    assert timeouts == [tracing_mod._TRACE_EXPORT_TIMEOUT_S]
+    assert 0 < tracing_mod._TRACE_EXPORT_TIMEOUT_S <= 5.0
 
 
 def test_otlp_exporter_circuit_drops_during_cooldown_then_recovers(
@@ -754,29 +754,29 @@ def test_otlp_exporter_circuit_drops_during_cooldown_then_recovers(
         nonlocal posts
         del content, headers, timeout
         posts += 1
-        if posts <= trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD:
+        if posts <= tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD:
             raise httpx.ConnectError("collector unavailable")
         return _Resp()
 
-    monkeypatch.setattr(trace_mod.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(tracing_mod.time, "monotonic", lambda: clock["now"])
     monkeypatch.setattr("httpx.post", _post)
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
 
-    for _ in range(trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD):
-        assert exporter.export([]) is trace_mod.SpanExportResult.FAILURE
-    assert posts == trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD
+    for _ in range(tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD):
+        assert exporter.export([]) is tracing_mod.SpanExportResult.FAILURE
+    assert posts == tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD
 
-    assert exporter.export([]) is trace_mod.SpanExportResult.FAILURE
-    assert posts == trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD
+    assert exporter.export([]) is tracing_mod.SpanExportResult.FAILURE
+    assert posts == tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD
     assert exporter._dropped_batches == 1
 
-    clock["now"] += trace_mod._TRACE_EXPORT_COOLDOWN_S
-    assert exporter.export([]) is trace_mod.SpanExportResult.SUCCESS
-    assert posts == trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD + 1
+    clock["now"] += tracing_mod._TRACE_EXPORT_COOLDOWN_S
+    assert exporter.export([]) is tracing_mod.SpanExportResult.SUCCESS
+    assert posts == tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD + 1
     assert exporter._consecutive_failures == 0
 
-    assert exporter.export([]) is trace_mod.SpanExportResult.SUCCESS
-    assert posts == trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD + 2
+    assert exporter.export([]) is tracing_mod.SpanExportResult.SUCCESS
+    assert posts == tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD + 2
 
 
 # --- turn_span placeholder-root export timing (#1964) ------------------------------
@@ -801,7 +801,7 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    trace_mod._state["initialized"] = True
+    tracing_mod._state["initialized"] = True
 
     posts: list[tuple[str, bytes, dict]] = []
 
@@ -1120,7 +1120,7 @@ def test_turn_span_noop_when_initialize_skipped(monkeypatch: pytest.MonkeyPatch)
     turn_span stays no-op — otherwise it opens a span against an
     uninitialized provider."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    assert trace_mod._state["initialized"] is False
+    assert tracing_mod._state["initialized"] is False
 
     def _explode(*_a, **_kw):
         raise AssertionError("must not open a span when uninitialized")
@@ -1135,7 +1135,7 @@ def test_turn_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch):
     """When enabled and initialized, turn_span opens an OTel root span with
     the given name and stamps the session and turn attributes."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    trace_mod._state["initialized"] = True
+    tracing_mod._state["initialized"] = True
 
     span = _FakeSpan()
     tracer = _FakeTracer(span)
@@ -1193,7 +1193,7 @@ def test_claim_idle_wait_span_noop_when_initialize_skipped(
     """trace_enabled=True but initialize_tracing never ran: no-op, same as
     turn_span — a span opened against the unset proxy tracer is silently lost."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    assert trace_mod._state["initialized"] is False
+    assert tracing_mod._state["initialized"] is False
 
     def _explode(*_a, **_kw):
         raise AssertionError("must not open a span when uninitialized")
@@ -1213,7 +1213,7 @@ def test_claim_idle_wait_span_ends_node_span_and_opens_idle_wait(
     the real dispatch) and an explicit `claim idle-wait` span is opened for
     the wait."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    trace_mod._state["initialized"] = True
+    tracing_mod._state["initialized"] = True
 
     node_span = _NodeFakeSpan("execute_task claim")
     monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)
@@ -1235,7 +1235,7 @@ def test_claim_idle_wait_span_never_ends_non_node_span(
     ending it would truncate the whole turn trace. The wait then stays inside
     the current span (pre-fix behavior)."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    trace_mod._state["initialized"] = True
+    tracing_mod._state["initialized"] = True
 
     root_span = _NodeFakeSpan("ava-agent-42")
     monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: root_span)
@@ -1256,7 +1256,7 @@ def test_claim_idle_wait_span_skips_non_recording_span(
     is not ended and no idle-wait span is opened — the helper only acts on a
     real recording node span."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    trace_mod._state["initialized"] = True
+    tracing_mod._state["initialized"] = True
 
     node_span = _NodeFakeSpan("execute_task claim", recording=False)
     monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)
@@ -1641,7 +1641,7 @@ def test_initialize_skips_when_collector_unreachable(
     initialize_tracing()
 
     assert calls == []
-    assert trace_mod._state["initialized"] is False
+    assert tracing_mod._state["initialized"] is False
     assert warned
     attrs = warned[0][1]
     assert attrs.get("action") == "recording_disabled_collector_unreachable"  # pyright: ignore[reportUnknownMemberType]
@@ -1665,7 +1665,7 @@ def test_initialize_skips_when_disk_over_watermark(monkeypatch: pytest.MonkeyPat
     initialize_tracing()
 
     assert calls == []
-    assert trace_mod._state["initialized"] is False
+    assert tracing_mod._state["initialized"] is False
     assert warned, "a degradation warning must be logged"
     attrs = warned[0][1]
     assert attrs.get("event") == "trace"  # pyright: ignore[reportUnknownMemberType]

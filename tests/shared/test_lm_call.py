@@ -77,7 +77,7 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
     """
     from opentelemetry import trace as otel_trace
 
-    from shared.telemetry import tracing as trace_mod
+    from shared.telemetry import tracing as tracing_mod
 
     class _Span:
         def __init__(self) -> None:
@@ -100,7 +100,7 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
 
     tracer = _Tracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setitem(tracing_mod._state, "initialized", True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     llm = _FakeLLM(
         AIMessage(
