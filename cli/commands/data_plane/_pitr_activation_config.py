@@ -282,7 +282,7 @@ def _finish_archive_intent(
 def _apply_env(home: Path, record: ActivationRecord) -> bytes:
     """Append the four absent gate keys in one exact, crash-journaled CAS."""
     from shared.config.candidate import validate_env_patch_for_write
-    from shared.envfile import replace_env_bytes_cas
+    from shared.host.env.dotenv_file import replace_env_bytes_cas
 
     if record.pre_activation_env_b64 is None or record.pre_activation_env_digest is None:
         raise RuntimeError("PITR env provisioning requires its captured preimage")

@@ -6,7 +6,7 @@ import urllib.request
 from typing import cast
 
 from services.gate.daemon import entry_port
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 from shared.paths import ava_home
 
 

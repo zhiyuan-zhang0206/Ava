@@ -43,12 +43,12 @@ from ops import cluster_rpc as _cluster_rpc
 from ops import ops_config
 from ops.ops_config import SENSITIVE_MASK
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
-from shared import runtime_config
+from shared.cluster.machine import MachineRole, machine_name
 from shared.config import env_override_values, field_domain, get_config_metadata, settings
 from shared.config.candidate import validate_env_patch_for_write
 from shared.config.editing import ConfigPatchPlan, split_reducer_patch
-from shared.env_audit import check_env_integrity
-from shared.machine import MachineRole, machine_name
+from shared.host.env import runtime_config
+from shared.host.env.audit import check_env_integrity
 
 router = APIRouter()
 
@@ -100,10 +100,10 @@ def _target_capabilities(target: str) -> list[MachineRole]:
     shows the common section).
     """
     if target == machine_name():
-        from shared.machine import machine_role
+        from shared.cluster.machine import machine_role
 
         return cast("list[MachineRole]", sorted(machine_role()))
-    from shared.machines import MachineNotRegistered, lookup_role
+    from shared.cluster.machines import MachineNotRegistered, lookup_role
 
     try:
         # machines.role is written from the capability tokens, so it is a
@@ -124,7 +124,7 @@ async def _dispatch_config_read(target: str) -> ConfigReadResult:
     structural exception as the roster's lightweight local row). Caller has
     already verified the machine is known.
     """
-    from shared.machines import MachineNotRegistered, lookup_role
+    from shared.cluster.machines import MachineNotRegistered, lookup_role
 
     try:
         role = await asyncio.to_thread(lookup_role, target)
@@ -170,7 +170,7 @@ async def _dispatch_config_audit_read(target: str, last: int) -> ConfigAuditRead
     when it has no agent-runner role, and a REMOTE machine without one is
     unreachable by construction. Caller has already verified the machine is known.
     """
-    from shared.machines import MachineNotRegistered, lookup_role
+    from shared.cluster.machines import MachineNotRegistered, lookup_role
 
     try:
         role = await asyncio.to_thread(lookup_role, target)
@@ -227,7 +227,7 @@ async def _dispatch_config_write(
     target-side op applies the correct writability gate (writable vs
     remote_writable). Caller has already verified the machine is known.
     """
-    from shared.machines import MachineNotRegistered, lookup_role
+    from shared.cluster.machines import MachineNotRegistered, lookup_role
 
     try:
         role = await asyncio.to_thread(lookup_role, target)
@@ -396,13 +396,13 @@ async def get_config_audit(
     Omitted `last` returns the configured default count
     (``display.config_audit_default_last`` - 20 out of the box); an explicit
     `last` stays capped at 200. Records are the raw
-    audit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;
+    audit-JSONL entries (`shared/host/env/audit.py`), each tagged with its `machine`;
     values were redacted at write time (non-sensitive fields only), and records
     from before record v2 lack `actor` / `trace_id` / `changed`.
     """
     effective_last = last if last is not None else settings.display.config_audit_default_last
     if machine == "all":
-        from shared.machines import list_agent_runners
+        from shared.cluster.machines import list_agent_runners
 
         runners = await asyncio.to_thread(list_agent_runners)
         names = [name for name, _url in runners]

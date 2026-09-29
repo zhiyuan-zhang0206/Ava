@@ -29,7 +29,7 @@ from typing import ClassVar
 
 import pytest
 
-from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
+from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
 
 _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
 

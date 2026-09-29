@@ -18,7 +18,7 @@ import redis
 from redis.exceptions import AuthenticationError, NoPermissionError
 
 from shared.cluster import ensure_cluster_redis_acl, ownership
-from shared.url_secret import url_with_userinfo
+from shared.host.net.url_secret import url_with_userinfo
 from tests._containers import redis_server
 
 _SECRET = "redisacltestsecret"  # noqa: S105 — test fixture, not a real credential

@@ -11,7 +11,7 @@ import pytest
 
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.ava_root.supervisor import Supervisor, SupervisorConfig
-from shared import daemon_shutdown
+from shared.daemon import shutdown
 from tests.shared.poll_until import poll_until
 
 
@@ -40,7 +40,7 @@ def test_cancel_and_drain_runs_cleanup_and_returns_only_ordinary_failures() -> N
     runner = asyncio.Runner()
     try:
         runner.run(start())
-        failures = daemon_shutdown.cancel_and_drain(runner)
+        failures = shutdown.cancel_and_drain(runner)
         assert sorted(cleaned) == ["cancelled", "failed"]
         assert len(failures) == 1
         assert isinstance(failures[0], RuntimeError)
@@ -68,12 +68,12 @@ def test_hard_exit_flushes_sinks_in_order_before_exiting(
         raise SystemExit(code)
 
     monkeypatch.setattr(loguru_logger, "remove", lambda: calls.append("loguru"))
-    monkeypatch.setattr(daemon_shutdown.logging, "shutdown", lambda: calls.append("logging"))
-    monkeypatch.setattr(daemon_shutdown.sys, "stdout", _Stream("stdout"))
-    monkeypatch.setattr(daemon_shutdown.sys, "stderr", _Stream("stderr"))
-    monkeypatch.setattr(daemon_shutdown.os, "_exit", exit_process)
+    monkeypatch.setattr(shutdown.logging, "shutdown", lambda: calls.append("logging"))
+    monkeypatch.setattr(shutdown.sys, "stdout", _Stream("stdout"))
+    monkeypatch.setattr(shutdown.sys, "stderr", _Stream("stderr"))
+    monkeypatch.setattr(shutdown.os, "_exit", exit_process)
     with pytest.raises(SystemExit) as stopped:
-        daemon_shutdown.hard_exit(7)
+        shutdown.hard_exit(7)
     assert stopped.value.code == 7
     assert calls == ["loguru", "logging", "stdout", "stderr", "exit:7"]
 
@@ -97,8 +97,8 @@ def test_shutdown_line_avoids_the_unregistered_event_alias(
     if sys.platform == "win32":
         previous_break = signal.getsignal(signal.SIGBREAK)
     try:
-        monkeypatch.setattr(daemon_shutdown, "logger", _Capture())
-        daemon_shutdown.install_graceful_shutdown("pg-backup")
+        monkeypatch.setattr(shutdown, "logger", _Capture())
+        shutdown.install_graceful_shutdown("pg-backup")
         with pytest.raises(KeyboardInterrupt):
             signal.raise_signal(signal.SIGTERM)
     finally:
@@ -129,7 +129,7 @@ def test_windows_break_uses_the_shared_interrupt_handler(
     try:
         with monkeypatch.context() as windows_registration:
             windows_registration.setattr(sys, "platform", "win32")
-            daemon_shutdown.install_graceful_shutdown("signal-test")
+            shutdown.install_graceful_shutdown("signal-test")
         assert signal.getsignal(signal.SIGINT) is sigint
         assert signal.getsignal(break_signal) is signal.getsignal(signal.SIGTERM)
         for sig in previous:
@@ -146,7 +146,7 @@ import sys
 import threading
 from pathlib import Path
 sys.path.insert(0, {repo!r})
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon.shutdown import install_graceful_shutdown
 install_graceful_shutdown("private-service-test")
 
 async def run():
@@ -210,7 +210,7 @@ import asyncio
 import sys
 from pathlib import Path
 sys.path.insert(0, {repo!r})
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon.shutdown import install_graceful_shutdown
 from services.agent_host import daemon
 install_graceful_shutdown("private-plugin-restart-test")
 fingerprints = iter(["before", "after"])

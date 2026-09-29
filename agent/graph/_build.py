@@ -136,7 +136,7 @@ def _delayed_stall_sleep(streak: int) -> float:
         settings.lm.llm_stall_retry_initial_interval_seconds * (2 ** (streak - 1)),
         settings.lm.llm_stall_retry_max_interval_seconds,
     )
-    from shared.resilience import jittered
+    from shared.host.net.resilience import jittered
 
     return jittered(base, span=base * settings.lm.llm_stall_retry_jitter_fraction, mode="random")
 

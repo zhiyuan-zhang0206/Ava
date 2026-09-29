@@ -1,6 +1,6 @@
 """Port-block allocation + per-record port reads.
 
-Allocates a free contiguous block from `shared.port_block` at cluster birth
+Allocates a free contiguous block from `shared.host.env.port_block` at cluster birth
 (`allocate_ports` — overlap-aware against every registered record's block,
 live-bind-checked), and reads the service ports back off a record
 (`record_app_port` / `record_pgbouncer_port` / `record_postgres_port` /
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 
 from shared import cluster
-from shared.port_block import (
+from shared.host.env.port_block import (
     BLOCK_MAX,
     BLOCK_SIZE,
     BLOCK_START,
@@ -165,7 +165,7 @@ def record_health_port(rec: cluster.ClusterRecord, svc: str) -> int:
     daemon name).
 
     This is the install-time producer only. A health port is a per-UNIT fact
-    (`shared.env_registry.health_port_env_aliases()`), so nothing hands this value to another
+    (`shared.host.env.registry.health_port_env_aliases()`), so nothing hands this value to another
     unit — a second unit sharing the machine's localhost namespace states its own
     base instead (`ava start --health-port-base`).
 

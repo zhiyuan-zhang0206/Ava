@@ -95,10 +95,10 @@ from shared.cluster.derive import REDIS_PASSWORD_ENV
 from shared.cluster.registry import ClusterRecord
 from shared.config import settings
 from shared.deploy_timing import UNIT_BUNDLE_TTL_S
-from shared.envfile import upsert_env
+from shared.host.env.dotenv_file import upsert_env
+from shared.host.net.url_secret import url_with_userinfo
 from shared.paths import ava_home
 from shared.private_storage import ensure_private_dir, write_private_bytes
-from shared.url_secret import url_with_userinfo
 from shared.verified_file import regular_bytes
 
 _ADMIN_ENV = "AVA_REDIS_ADMIN_PASSWORD"
@@ -471,7 +471,7 @@ def _convert_db(home: Path, record: ClusterRecord, env: DbEnv) -> int:
     from cli.commands.data_plane.pgbouncer import stop_pgbouncer
     from cli.commands.migrations import cmd_migrations_apply
     from shared.cluster import authority, record_postgres_port
-    from shared.envfile import remove_env
+    from shared.host.env.dotenv_file import remove_env
 
     groups = authority.Groups(gateway=authority.GATEWAY_GROUP, runner=authority.RUNNER_GROUP)
     cutover = authority.CutoverAuthority()
@@ -583,7 +583,7 @@ class UnitPlan:
 def _remote_inventory(record: ClusterRecord, database: str, home: Path) -> tuple[Units, Units]:
     """(remote units, units of paused machines) from the gateway's own tables."""
     from cli.commands.data_plane.bringup import admin_session
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     with admin_session(record, database) as conn:
         units = {(m, h) for m, h in conn.execute("SELECT machine_name, home FROM machine_units")}

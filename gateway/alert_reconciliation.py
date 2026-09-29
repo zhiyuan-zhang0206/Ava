@@ -22,8 +22,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from shared.alerts import AlertKey, parse_ts
 from shared.config import settings
+from shared.telemetry.alerts import AlertKey, parse_ts
 
 _log = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-"""Integration tests for `shared/machine_exclusions.py` — the operator-exclusion
+"""Integration tests for `shared/cluster/machine_exclusions.py` — the operator-exclusion
 read the deploy window consults (issue #2160).
 
 Rows are inserted directly so each latch is exactly the written one, including a
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import psycopg
 
-from shared import machine_exclusions
+from shared.cluster import machine_exclusions
 
 
 def test_reports_each_latch_with_reason_and_date(db_conn: psycopg.Connection) -> None:

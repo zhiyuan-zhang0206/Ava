@@ -229,7 +229,7 @@ def test_init_gateway_process_emits_service_started() -> None:
 # `init_cli_process` / `init_gateway_process` resolve `logs_dir()` through
 # `shared.paths`, whose import builds the Settings chain — and a configured
 # runner's Settings build is the gateway fetch, which warns when it continues
-# on a stale config snapshot (`shared/bootstrap.py`). Importing `shared.log`
+# on a stale config snapshot (`shared/host/env/bootstrap.py`). Importing `shared.log`
 # dropped loguru's default handler, so that warning reaches stderr only if the
 # init opened the stderr sink before the import.
 
@@ -257,7 +257,7 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
     import sys
     import time
 
-    from shared import bootstrap
+    from shared.host.env import bootstrap
 
     home = tmp_path / "home"
     (home / "run").mkdir(parents=True)

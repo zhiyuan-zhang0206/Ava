@@ -15,7 +15,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from shared.caller_identity import caller_payload
-from shared.machine import machine_name
+from shared.cluster.machine import machine_name
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess
 from shared.runtime_incarnation import RuntimeIncarnation

@@ -23,7 +23,7 @@ REQUIRED = (
     "services/agent_host/daemon.py",
     "gateway/app.py",
     "ops/spec.py",
-    "shared/dotenv_boot.py",
+    "shared/host/env/dotenv_boot.py",
     "cli/main.py",
     "cli/python_install.py",
     "shared/python_lock.py",

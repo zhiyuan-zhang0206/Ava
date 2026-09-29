@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import sys
 
-from shared.machine import MachineRoles
+from shared.cluster.machine import MachineRoles
 from shared.os_autostart import gui_domain_kickstart_command
 from shared.platform import IS_MACOS
 from shared.platform_probes import gui_login_user, gui_session_domain

@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 
 from shared import process_sha
-from shared.health_schema import DEGRADED, OK, component, render
-from shared.machine import machine_name
+from shared.cluster.machine import machine_name
+from shared.daemon.health_schema import DEGRADED, OK, component, render
 from shared.paths import ava_home
 from shared.runtime_service_identity import normal_runtime_identity
 
@@ -41,7 +41,7 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
 
     `name` is a constant naming the service this route belongs to — the point being
     that an impostor answering here reports its own name, or none. No probe reads it
-    yet; `shared.daemon_health._probe_home` gains the `name` arm only once every
+    yet; `shared.daemon.health._probe_home` gains the `name` arm only once every
     deployed gateway emits the field, and that ordering is load-bearing (#1038)."""
     identity: dict[str, object] = {
         "status": "ok",

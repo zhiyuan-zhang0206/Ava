@@ -84,14 +84,14 @@ from services.agent_ops._boot import (
 from services.agent_ops.dispatch_sync import dispatch_sync
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.agents import AvaAgentError, ResurrectRefused
+from shared.cluster.machine import machine_name
+from shared.cluster.transport_encryption import verify_transport_encryption
 from shared.config import settings
-from shared.daemon_health import health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
+from shared.daemon.health import health_port, start_health_server, stop_health_server
+from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon.shutdown import hard_exit as _hard_exit
 from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
-from shared.machine import machine_name
-from shared.transport_encryption import verify_transport_encryption
 
 _log = logging.getLogger("services.agent_ops.daemon")
 

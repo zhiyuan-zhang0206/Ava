@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from shared.observability import cluster_label
+from shared.telemetry.observability import cluster_label
 
 # Metrics export cadence (PeriodicExportingMetricReader). 15 s keeps Grafana
 # near-live without a per-batch network round-trip; the reader thread owns the
@@ -142,7 +142,7 @@ def _metrics_resource() -> Any:
     (Task #1327) keeps this resource as-is: the collector promotes the
     per-record agent_id/event_name resource attributes (set in
     _EventDimensionResourceExporter) to Loki index labels, and the read side
-    era-slices its selector around the cutover (shared/loki_index_labels.py)
+    era-slices its selector around the cutover (shared/telemetry/loki_index_labels.py)
     — no service_name rewrite needed."""
     import uuid
     from importlib.metadata import version

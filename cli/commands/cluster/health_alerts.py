@@ -70,7 +70,7 @@ def notify_owner(text: str) -> None:
     on_final_failure=log)``."""
     from shared.cluster import home_label
     from shared.config import settings
-    from shared.daemon_health import health_port
+    from shared.daemon.health import health_port
     from shared.paths import ava_home
 
     if not settings.alerts.im_notify_enabled:
@@ -154,7 +154,7 @@ def _ingest_alert(
     writing the row and sending the IM itself (`_ingest_alert_fallback`);
     alerting is a side channel and must never break health observation.
     """
-    from shared.alerts import fingerprint as compute_fingerprint
+    from shared.telemetry.alerts import fingerprint as compute_fingerprint
 
     summary = _alert_summary(recovered=status == "resolved", message=message)
     stable_labels = {"alertname": OPS_RULE_NAME}
@@ -176,7 +176,7 @@ def _ingest_alert(
         ],
     }
     try:
-        from shared.machine import gateway_api_base, gateway_auth_headers
+        from shared.cluster.machine import gateway_api_base, gateway_auth_headers
 
         resp = httpx.post(
             f"{gateway_api_base()}/api/alerts",
@@ -258,14 +258,14 @@ def _ingest_alert_fallback(
     still hears, which matters more than the row when the UI is dark too.
     """
     import shared.db
-    from shared.alerts import (
+    from shared.telemetry.alerts import (
         display_language,
         notify_im,
         notify_text,
         stamp_notified,
         upsert_alert,
     )
-    from shared.alerts import (
+    from shared.telemetry.alerts import (
         fingerprint as compute_fingerprint,
     )
 

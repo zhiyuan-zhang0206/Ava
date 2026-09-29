@@ -26,8 +26,8 @@ import pytest
 from ops import agent_pause, cluster_pause
 from ops.agent_pause_probe import HostIdentity, host_identity_or_none
 from shared import maintenance, maintenance_cohort, pause_owner
+from shared.cluster.machine import machine_name
 from shared.db import create_agent, insert_inbound_message
-from shared.machine import machine_name
 from shared.maintenance_state import MaintenanceHold, MaintenancePhase
 
 WHEN = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)

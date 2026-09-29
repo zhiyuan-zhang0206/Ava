@@ -6,8 +6,8 @@ import psycopg
 import pytest
 
 from shared.agents.messages.chat_delivery import insert_chat_inbound_once, reconcile_chat_inbound
-from shared.audit_events import insert_event_log, insert_event_log_many
 from shared.db import create_agent, insert_inbound_message
+from shared.telemetry.audit_events import insert_event_log, insert_event_log_many
 
 _SOURCE = "external_agent:codex:run-42"
 _CALLER = {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
@@ -90,7 +90,7 @@ def test_single_and_batch_audit_carry_structured_identity(monkeypatch: pytest.Mo
     from unittest.mock import Mock
 
     emit_prepared = Mock()
-    monkeypatch.setattr("shared.audit_events.telemetry.emit_prepared", emit_prepared)
+    monkeypatch.setattr("shared.telemetry.audit_events.telemetry.emit_prepared", emit_prepared)
     insert_event_log(event_type="restart", agent_id=42, source=_SOURCE, payload={"inbound_id": 9})
     insert_event_log_many(
         event_type="restart", agent_id=42, source=_SOURCE, payloads=[{"inbound_id": 10}]

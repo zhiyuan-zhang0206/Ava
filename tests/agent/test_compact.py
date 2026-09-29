@@ -160,7 +160,7 @@ async def test_generate_summary_emits_agent_billing_span(
     """
     from opentelemetry import trace as otel_trace
 
-    from shared import trace as trace_mod
+    from shared.telemetry import tracing as trace_mod
 
     class _Span:
         def __init__(self, name: str) -> None:

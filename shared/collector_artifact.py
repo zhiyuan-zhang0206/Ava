@@ -12,7 +12,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from shared.resilience import Policy, retry
+from shared.host.net.resilience import Policy, retry
 
 # Pinned contrib version — re-validate against the deploy/lgtm backends
 # (Tempo/Loki/Prometheus OTLP intake) when bumping.

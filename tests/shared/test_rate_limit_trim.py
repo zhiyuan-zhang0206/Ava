@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from shared.cluster.rate_limit import LoginRateLimiter, _Entry
 from shared.config import settings
-from shared.rate_limit import LoginRateLimiter, _Entry
 
 
 def test_sweep_trims_oldest_active_entries_over_cap(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -20,7 +20,7 @@ def test_sweep_trims_oldest_active_entries_over_cap(monkeypatch: pytest.MonkeyPa
     stale — the memory bound holds under a sustained many-IP attack."""
     limiter = LoginRateLimiter()
     # shrink the cap so the test needs no 10k entries
-    monkeypatch.setattr("shared.rate_limit._MAX_ENTRIES", 5)
+    monkeypatch.setattr("shared.cluster.rate_limit._MAX_ENTRIES", 5)
     now = 1000.0
     for i in range(8):
         ip = f"10.0.0.{i}"

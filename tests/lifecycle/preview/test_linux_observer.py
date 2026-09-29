@@ -172,7 +172,7 @@ def test_storage_observer_refuses_outside_the_reserved_endpoint(url: str) -> Non
 def test_every_listener_must_belong_to_the_captured_application(
     monkeypatch: pytest.MonkeyPatch, foreign: bool, clock_shift: int
 ) -> None:
-    from shared import port_preflight
+    from shared.cluster import port_preflight
 
     owner = observer.OwnedProcess(40, 100.0, 400)
     child = observer.OwnedProcess(41, 100.0, 401)

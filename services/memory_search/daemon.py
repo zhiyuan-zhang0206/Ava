@@ -27,8 +27,8 @@ from services.memory_search.app import build_app
 from services.memory_search.store import MemoryStore
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.config import settings
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
+from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon.shutdown import hard_exit as _hard_exit
 from shared.log import init_gateway_process
 
 _PIDFILE = settings.services.memory_search_pidfile

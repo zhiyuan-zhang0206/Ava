@@ -40,7 +40,7 @@ _rate_lock = threading.Lock()
 
 def _payload(agent_id: int, exc_type: str, exc_msg: str) -> dict[str, Any]:
     """Alertmanager-webhook-shaped payload (one alert instance, firing)."""
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     labels = {
         "alertname": _ALERT_NAME,
@@ -73,7 +73,7 @@ def _post(agent_id: int, exc_type: str, exc_msg: str) -> None:
     try:
         import httpx
 
-        from shared.machine import gateway_api_base, gateway_auth_headers
+        from shared.cluster.machine import gateway_api_base, gateway_auth_headers
 
         resp = httpx.post(
             f"{gateway_api_base()}/api/alerts",

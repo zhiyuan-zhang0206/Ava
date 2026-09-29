@@ -53,7 +53,7 @@ trigger only costs a cheap commit**.
    merge the ready ones as they arrive (or batch them at the 03:00 consolidate).
 
 Every machine writes to its **own** authoring branch `machine-<name>`, where
-`<name>` is this machine's `AVA_MACHINE_NAME` (`shared/machine.py`: env >
+`<name>` is this machine's `AVA_MACHINE_NAME` (`shared/cluster/machine.py`: env >
 `$AVA_HOME/machine_name` file). Resolve it once, then use `$BRANCH` throughout:
 
 ```bash

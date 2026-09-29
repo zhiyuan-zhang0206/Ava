@@ -27,8 +27,13 @@ from ops import cluster_pause
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 from ops.schema_mismatch import status as schema_mismatch_status
 from shared.api_contracts.status import PausedReason, SchemaMismatchStatus
+from shared.cluster.machine import (
+    is_agent_runner,
+    is_gateway,
+    is_observability_station,
+    machine_name,
+)
 from shared.config import cluster_tz
-from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.proc import process_alive
 from shared.resource_sample import ResourceSample
 from shared.sessions.page_session import is_page_label
@@ -58,7 +63,7 @@ class ClusterStatus(BaseModel):
 
     machine_name: str
     # Three orthogonal capability flags (any combination on a single host) —
-    # never a single categorical "role". See shared/machine.py.
+    # never a single categorical "role". See shared/cluster/machine.py.
     # serve_observability_station defaults False so a client on pre-station
     # code still parses a station host's snapshot.
     serve_gateway: bool
@@ -478,7 +483,7 @@ def _supervisor_online() -> bool | None:
 def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     """Assemble this host's cluster state — used by `/api/cluster/status`.
 
-    When setup is missing, shared/machine.py's machine_name /
+    When setup is missing, shared/cluster/machine.py's machine_name /
     machine_role raise specific exceptions; this function passes them
     through and FastAPI surfaces as default 500 (admin endpoint, not
     consumed by SDK).

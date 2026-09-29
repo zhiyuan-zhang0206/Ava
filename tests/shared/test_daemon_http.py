@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.daemon_http import start_daemon_http
+from shared.daemon.http_transport import start_daemon_http
 
 
 def test_transport_import_cannot_fetch_gateway_configuration() -> None:
@@ -26,11 +26,11 @@ import importlib.abc
 sys.path.insert(0, sys.argv[1])
 class Deny(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, *args):
-        if fullname.startswith(('shared.config', 'shared.bootstrap', 'plugins',
+        if fullname.startswith(('shared.config', 'shared.host.env.bootstrap', 'plugins',
                                 'services.agent_ops.daemon')):
             raise AssertionError(fullname)
 sys.meta_path.insert(0, Deny())
-import shared.daemon_http
+import shared.daemon.http_transport
 import shared.managed_writer_observation
 print('TRANSPORT_ONLY')
 """,

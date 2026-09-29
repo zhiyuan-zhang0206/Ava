@@ -57,7 +57,7 @@ dependencies = [
     "setuptools>=82",
     "pyte>=0.8.0",  # terminal emulation screen model for PTY sessions (S6 step 2)
     "traceloop-sdk>=0.61",
-    # Imported directly: shared/trace.py (span exporter, OTLP protobuf encode)
+    # Imported directly: shared/telemetry/tracing.py (span exporter, OTLP protobuf encode)
     # and shared/telemetry/otlp/telemetry_otlp.py (OTLP/HTTP logs + metrics exporters).
     # Transitively pulled by traceloop-sdk already; declared here because we
     # import them by name.
@@ -267,7 +267,7 @@ ignore_imports = [
 # The one reverse edge shared must never grow: `shared` is the bottom layer,
 # and `services` sits above it (daemons that import gateway). The alerts
 # module used to import services.im_bridge.copy for its IM templates — moved
-# down to shared/alerts_copy.py (tech audit 2026-08-24 P1); this contract
+# down to shared/telemetry/alerts_copy.py (tech audit 2026-08-24 P1); this contract
 # locks the direction so no new shared -> services edge can creep back in.
 [[tool.importlinter.contracts]]
 name = "shared must not import services"

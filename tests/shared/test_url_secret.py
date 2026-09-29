@@ -19,11 +19,11 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
+from shared.cluster.machine import reachable_host, reset_identity
 from shared.config import DataPlaneSettings, data_plane, settings
 from shared.config.data_plane import _self_machine_host
-from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
-from shared.machine import reachable_host, reset_identity
-from shared.url_secret import redacted_url, url_with_password, url_with_userinfo
+from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from shared.host.net.url_secret import redacted_url, url_with_password, url_with_userinfo
 
 _SECRET = "new-secret_v2"  # noqa: S105 — test fixture, not a real credential
 
@@ -392,7 +392,7 @@ class TestPinIpv4Hostaddr:
     """`_pin_ipv4_hostaddr`: db_url gets `?hostaddr=<host>` appended when its
     host is an IPv4 literal — libpq's own resolution bypass for the
     DNS64/NAT64-synthesis-of-a-literal failure mode
-    (shared.netutil.is_ipv4_literal). Not a fix for a proven psycopg bug
+    (shared.host.net.predicates.is_ipv4_literal). Not a fix for a proven psycopg bug
     (psycopg's own `_resolve_hostnames` already skips getaddrinfo for a
     literal) — defense-in-depth for other libpq consumers (PgBouncer's
     upstream dial, psql/pg_dump). redis_url is untouched — redis has no
@@ -442,8 +442,8 @@ class TestPinIpv4Hostaddr:
 
 @pytest.mark.usefixtures("_restore_machine_env")
 class TestSelfMachineHostParity:
-    """`_self_machine_host` is a leaf duplicate of `shared.machine.reachable_host`
-    (the config sub-model cannot import shared.machine — circular), so pin its
+    """`_self_machine_host` is a leaf duplicate of `shared.cluster.machine.reachable_host`
+    (the config sub-model cannot import shared.cluster.machine — circular), so pin its
     precedence (env AVA_MACHINE_HOST > $AVA_HOME/machine_host file > localhost)
     to the real resolver: each source case asserts both return the same value,
     so a future drift in either side fails here."""

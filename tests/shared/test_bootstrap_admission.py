@@ -15,8 +15,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gateway.routers.bootstrap import router
-from shared import bootstrap, config, runtime_config
-from shared.cluster_auth import bearer_header
+from shared import config
+from shared.cluster.auth import bearer_header
+from shared.host.env import bootstrap, runtime_config
 
 _SECRET = "bootstrap-admission-test"  # noqa: S105 — isolated test credential
 _TURN_LIMIT = "AVA_HOST_MAX_CONCURRENT_TURNS"

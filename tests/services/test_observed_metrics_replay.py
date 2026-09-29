@@ -10,7 +10,7 @@ import psycopg
 import pytest
 
 from services.events_maintenance import observed_metrics as replay
-from shared.metrics.observed_metrics import observe_row, write_observations
+from shared.telemetry.metrics.observed_metrics import observe_row, write_observations
 
 
 def _source(db: psycopg.Connection, event_id: int = 1) -> dict[str, Any]:
@@ -140,7 +140,7 @@ def test_archive_replay_preserves_unlabeled_cluster_and_last_row(
 ) -> None:
     from datetime import timedelta
 
-    from shared.loki_index_labels import archive_stream_selector
+    from shared.telemetry.loki_index_labels import archive_stream_selector
 
     freeze = replay.ARCHIVE_FREEZE_AT
     monkeypatch.setattr(replay, "ARCHIVE_FLOOR_AT", freeze - timedelta(minutes=1))

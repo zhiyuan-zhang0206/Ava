@@ -42,7 +42,7 @@ def _installed_machine_identity(unit_home: pathlib.Path) -> Iterator[None]:
     unit, not a virgin one. Modules exercising the install paths opt in with
     `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
     """
-    from shared.machine import reset_identity
+    from shared.cluster.machine import reset_identity
 
     (unit_home / "machine_name").write_text("unit-test-machine", encoding="utf-8")
     reset_identity()
@@ -70,7 +70,7 @@ def as_machine(
     Shared rather than copied because it is exactly the kind of helper whose
     subtle half (the cache reset) gets dropped in the copy.
     """
-    from shared.machine import reset_identity
+    from shared.cluster.machine import reset_identity
 
     @contextmanager
     def _enter(home: pathlib.Path) -> Generator[pathlib.Path]:

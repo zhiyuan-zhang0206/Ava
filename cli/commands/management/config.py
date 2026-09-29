@@ -43,8 +43,8 @@ def _anchored_gateway_base() -> str | None:
     install before first start) or when the checkout is unanchored — an
     unanchored checkout has NO home of its own; its rule-4 scratch home carries
     no identity to read."""
-    from shared import runtime_config
-    from shared.dotenv_boot import AVA_ENV_PATH, checkout_anchored
+    from shared.host.env import runtime_config
+    from shared.host.env.dotenv_boot import AVA_ENV_PATH, checkout_anchored
 
     if not checkout_anchored():
         return None
@@ -119,8 +119,8 @@ def _auth_headers() -> dict[str, str]:
     secret (environment, then `.env`); else, on a remote unit, its installed
     capability's API token, only while this process runs the admitted runtime.
     """
-    from shared import runtime_config
-    from shared.cluster_auth import bearer_header, delivered_token
+    from shared.cluster.auth import bearer_header, delivered_token
+    from shared.host.env import runtime_config
 
     bearer = delivered_token() or os.environ.get("AVA_CLUSTER_SECRET")
     if bearer is None:
@@ -135,7 +135,7 @@ def _auth_headers() -> dict[str, str]:
 
 
 def _get_config(machine: str | None) -> ConfigView:
-    from shared.http_dial import get as dial_get
+    from shared.host.net.http_dial import get as dial_get
 
     params = {"machine": machine} if machine else None
     resp = dial_get(
@@ -149,7 +149,7 @@ def _get_config(machine: str | None) -> ConfigView:
 
 
 def _get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
-    from shared.http_dial import get as dial_get
+    from shared.host.net.http_dial import get as dial_get
 
     params: dict[str, str] = {"last": str(last)}
     if machine:
@@ -165,7 +165,7 @@ def _get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
 
 
 def _put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
-    from shared.http_dial import put as dial_put
+    from shared.host.net.http_dial import put as dial_put
 
     _guard_gateway_write(_gateway_base())
     params = {"machine": machine} if machine else None
@@ -254,7 +254,7 @@ def _resolve_local_field(key: str, index: dict[str, _LocalConfigField]) -> _Loca
 
 
 def _config_source_is_local() -> bool:
-    from shared.bootstrap import config_source_is_local
+    from shared.host.env.bootstrap import config_source_is_local
 
     return config_source_is_local()
 
@@ -289,7 +289,7 @@ def _reject_local_machine(machine: str | None, verb: str) -> int | None:
 
 
 def _local_get(key: str | None) -> int:
-    from shared import runtime_config
+    from shared.host.env import runtime_config
 
     aliases = runtime_config.read_env_aliases()
     fields = _local_fields()
@@ -427,8 +427,8 @@ def cmd_config_audit(last: int, key: str | None, machine: str | None) -> int:
     if not 1 <= last <= 200:
         print("[ava config audit] --last must be between 1 and 200", file=sys.stderr)
         return 1
-    from shared.env_audit import read_env_write_records
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
+    from shared.host.env.audit import read_env_write_records
 
     if machine is None:
         records = [{**record, "machine": machine_name()} for record in read_env_write_records(last)]
@@ -555,9 +555,9 @@ def _edit_local_config(
     pairs: dict[str, str] | None, unset_keys: list[str] | None, verb: str
 ) -> int:
     """Validate and persist one local `.env` patch without booting Settings."""
-    from shared import runtime_config
     from shared.config.candidate import validate_env_patch_for_write
-    from shared.dotenv_boot import checkout_anchored
+    from shared.host.env import runtime_config
+    from shared.host.env.dotenv_boot import checkout_anchored
 
     if not checkout_anchored():
         print(

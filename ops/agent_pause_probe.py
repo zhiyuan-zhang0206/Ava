@@ -8,7 +8,7 @@ from urllib.request import ProxyHandler, build_opener
 from uuid import UUID
 
 from shared.config import settings
-from shared.daemon_health import health_port
+from shared.daemon.health import health_port
 from shared.paths import ava_home
 
 _ROOT_SOCKET_NAME = "ava-root.sock"  # the K1 control socket under root_run_dir()

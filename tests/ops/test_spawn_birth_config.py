@@ -32,7 +32,7 @@ def _spawn_agent(
     (gateway-side, the main data-plane identity) + `_launch_agent_process`
     (runner-side; the autouse guard spy records the launch so tests can assert
     the stamp rides out to the child)."""
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         spawner=spawner, machine=machine_name(), config=config, **kw

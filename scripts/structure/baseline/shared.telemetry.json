@@ -1,0 +1,9 @@
+{
+  "complexity": {
+    "shared/telemetry/alerts.py::upsert_alert": 26,
+    "shared/telemetry/metrics/aggregate.py::_row_reductions": 24,
+    "shared/telemetry/metrics/aggregate.py::_sections_from_aggregate": 31,
+    "shared/telemetry/metrics/plugin_metrics.py::validate_metric_sql": 31,
+    "shared/telemetry/metrics/plugin_metrics_sql.py::_check_from_item": 20
+  }
+}

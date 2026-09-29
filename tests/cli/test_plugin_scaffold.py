@@ -13,8 +13,8 @@ from cli.commands.converge import host as converge_host
 from cli.commands.extensions import memory
 from cli.commands.extensions._plugin_scaffold import ScaffoldResult, run_plugin_scaffolds
 from shared import memory_repo, paths, proc
+from shared.cluster.machine import set_identity
 from shared.config import settings
-from shared.machine import set_identity
 from shared.plugins_config import write_local
 
 

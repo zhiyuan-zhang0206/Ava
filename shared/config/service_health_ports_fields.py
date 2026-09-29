@@ -22,7 +22,7 @@ from pydantic import Field
 # Windows watchdog probed its own port and was answered by the other unit
 # (issue #977). Nothing about a health port is cluster-constrained: the
 # runner computes its own ops URL from its own `health_port('ops')` and
-# registers it (`shared/machines.py`), and the gateway reads that URL back
+# registers it (`shared/cluster/machines.py`), and the gateway reads that URL back
 # off the machines row. So the gateway no longer serves these to runners
 # over /api/bootstrap — and a runner's .env never caches a gateway-served
 # value at all since the 2026-08-01 config refactor (every runner process
@@ -118,7 +118,7 @@ class ServiceHealthPortFields:
     delivery_watchdog_health_url: str = Field(
         default="",
         alias="AVA_DELIVERY_WATCHDOG_HEALTH_URL",
-        description="Delivery watchdog healthcheck URL. Empty = derive via shared.daemon_health.health_port('delivery_watchdog').",
+        description="Delivery watchdog healthcheck URL. Empty = derive via shared.daemon.health.health_port('delivery_watchdog').",
         json_schema_extra={
             "restart_required": "",
             "writable": False,

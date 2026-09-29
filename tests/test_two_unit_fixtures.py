@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 
 def test_gateway_unit_is_gateway(gateway_unit: TestClient) -> None:
-    from shared.machine import machine_role
+    from shared.cluster.machine import machine_role
 
     assert machine_role() == frozenset({"gateway"})
     # the yielded value is a usable gateway TestClient
@@ -18,7 +18,7 @@ def test_gateway_unit_is_gateway(gateway_unit: TestClient) -> None:
 
 
 def test_runner_unit_is_agent_runner(runner_unit: None) -> None:
-    from shared.machine import machine_role
+    from shared.cluster.machine import machine_role
 
     assert machine_role() == frozenset({"agent-runner"})
 
@@ -26,6 +26,6 @@ def test_runner_unit_is_agent_runner(runner_unit: None) -> None:
 def test_role_restored_after_gateway_unit() -> None:
     # session default is agent-runner; after a gateway_unit test tore down,
     # the cache was cleared so the default resolves again.
-    from shared.machine import machine_role
+    from shared.cluster.machine import machine_role
 
     assert machine_role() == frozenset({"agent-runner"})

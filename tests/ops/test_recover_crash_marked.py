@@ -18,7 +18,7 @@ from ops import ops_lifecycle
 from ops.agent_spawn import create_agent_row
 from ops.rpc_schemas import RecoverCrashMarkedResponse
 from shared.agents import AgentNotFound
-from shared.machine import machine_name
+from shared.cluster.machine import machine_name
 from shared.telemetry import Event
 
 

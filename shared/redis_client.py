@@ -35,8 +35,8 @@ import redis.asyncio as aredis
 from redis.exceptions import AuthenticationError, NoPermissionError
 
 from shared.config import settings
+from shared.host.net.predicates import is_ipv4_literal
 from shared.log import logger
-from shared.netutil import is_ipv4_literal
 from shared.redis_resilience import (
     _HEALTH_CHECK_INTERVAL_S,
     _SOCKET_CONNECT_TIMEOUT_S,
@@ -75,8 +75,8 @@ class _PinnedIPv4Connection(_redis_sync.Connection):
     `getaddrinfo` calls, confirmed empirically), so it needs no fix. This
     sync `Connection._connect` calls `socket.getaddrinfo` unconditionally —
     no such check — so on a DNS64/NAT64 network it can receive a synthesized
-    AAAA for a literal host (`shared.netutil.is_ipv4_literal`), the same
-    failure mode `shared/http_dial.py` fixes for httpx's sync transport.
+    AAAA for a literal host (`shared.host.net.predicates.is_ipv4_literal`), the same
+    failure mode `shared/host/net/http_dial.py` fixes for httpx's sync transport.
     """
 
     def _connect(self) -> socket.socket:

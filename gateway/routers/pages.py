@@ -44,7 +44,6 @@ from ops.pages import (
 )
 from ops.rpc_schemas import PageRow
 from shared.agents import AgentStatus
-from shared.alerts import display_language
 from shared.config import settings
 from shared.db import agent_exists
 from shared.docs.pages_copy import (
@@ -57,6 +56,7 @@ from shared.docs.pages_copy import (
 from shared.live_events import PageClosed, PageOpened
 from shared.log import logger
 from shared.redis_client import publish_best_effort
+from shared.telemetry.alerts import display_language
 
 router = APIRouter()
 
@@ -75,7 +75,7 @@ def _page_language(pool: ConnectionPool) -> str:
     """The page copy language — ``user_settings`` display.language (zh | en).
 
     Same single-language-source mechanism as the IM alert copy
-    (``shared.alerts.display_language``); a missing row or unknown value
+    (``shared.telemetry.alerts.display_language``); a missing row or unknown value
     falls back to ``PAGE_LANGUAGE_DEFAULT``. A DB failure also falls back —
     an error page must not turn a proxy 502/504 into a 500 (QA nit A).
     """

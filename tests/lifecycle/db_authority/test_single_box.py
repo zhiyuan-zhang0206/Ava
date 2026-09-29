@@ -36,7 +36,7 @@ from shared import cluster
 from shared.cluster import authority, ownership
 from shared.cluster.authority.api import API_TOKEN_ENV
 from shared.config import settings
-from shared.url_secret import url_with_userinfo
+from shared.host.net.url_secret import url_with_userinfo
 from tests._containers import _free_port
 
 pytestmark = pytest.mark.skipif(
@@ -436,7 +436,7 @@ def _collector_postgres_receiver(born: Born, monkeypatch: pytest.MonkeyPatch) ->
     from cli.commands.observability import otel_collector as oc
 
     monkeypatch.setattr(settings.observability, "telemetry_otlp_enabled", True)
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-machine")
     rendered = oc.generate_config(_REPO, born.home, _ROLES)
     secret = authority.read_secret(born.home, authority.active_generation(born.home))
     credentials = {

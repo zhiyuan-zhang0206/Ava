@@ -22,9 +22,9 @@ from __future__ import annotations
 
 from ops.roster import daemon_identity
 from ops.service_spec import ServiceSpec
+from shared.cluster.machine import MachineRole
 from shared.config import settings
-from shared.daemon_health import health_port
-from shared.machine import MachineRole
+from shared.daemon.health import health_port
 
 # task-maintenance runs on the gateway capability, like the other cluster-wide
 # daemons. Declared here (not reaching into ops's private `_GATEWAY`) so the

@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import pytest
 
-from shared.metrics.core import core_metrics
-from shared.metrics.metrics_logql import validate_logql
-from shared.plugin_metrics import InvalidMetricQuery, render_query, render_targets
+from shared.telemetry.metrics.core import catalog
+from shared.telemetry.metrics.logql import validate_logql
+from shared.telemetry.metrics.plugin_metrics import InvalidMetricQuery, render_query, render_targets
 
 EXPECTED = {
     # name -> (panel, output, event_name, category, n_targets)
@@ -108,11 +108,11 @@ def _load_pack() -> None:
     import importlib
     import sys
 
-    core_metrics.clear_core_registry()
+    catalog.clear_core_registry()
     for module_name in (
-        "shared.metrics.core.core_metrics_observability",
-        "shared.metrics.core.core_metrics_exec_envelope",
-        "shared.metrics.core.core_metrics_frontend",
+        "shared.telemetry.metrics.core.observability",
+        "shared.telemetry.metrics.core.exec_envelope",
+        "shared.telemetry.metrics.core.frontend",
     ):
         sys.modules.pop(module_name, None)
         importlib.import_module(module_name)
@@ -122,7 +122,7 @@ def _all_rendered() -> dict[str, list[str]]:
     """name -> every rendered expr (primary + targets), placeholders filled."""
     return {
         spec.name: [render_query(spec), *render_targets(spec)[1:]]
-        for spec in core_metrics.registered_core_metrics()
+        for spec in catalog.registered_core_metrics()
     }
 
 
@@ -131,7 +131,7 @@ def _all_rendered() -> dict[str, list[str]]:
 
 def test_pack_registers_all_metrics() -> None:
     _load_pack()
-    specs = {m.name: m for m in core_metrics.registered_core_metrics()}
+    specs = {m.name: m for m in catalog.registered_core_metrics()}
     assert set(EXPECTED) == set(specs)
     for name, (panel, output, event_name, category, n_targets) in EXPECTED.items():
         spec = specs[name]
@@ -175,7 +175,7 @@ def test_logql_template_validation_rejects_drift() -> None:
     """The template-form validator refuses: a query that lost the stream
     selector, one without the json pipeline, and one that hardcodes an
     event filter instead of the placeholders."""
-    from shared.metrics.metrics_logql import _validate_logql_template
+    from shared.telemetry.metrics.logql import _validate_logql_template
 
     with pytest.raises(InvalidMetricQuery, match="stream"):
         _validate_logql_template(
@@ -201,7 +201,7 @@ def test_cost_queries_unwrap_cost_usd() -> None:
     """Cost panels unwrap attributes_cost_usd from the payload (producer-side
     catalog pricing, #2626) — the SQL CASE mirroring model rates is gone."""
     _load_pack()
-    specs = {m.name: m for m in core_metrics.registered_core_metrics()}
+    specs = {m.name: m for m in catalog.registered_core_metrics()}
     for name in ("ava_obs_llm_cost_usd", "ava_obs_agent_llm_cost_usd"):
         query = specs[name].query
         assert "unwrap attributes_cost_usd" in query, name
@@ -252,7 +252,7 @@ def test_turn_ok_rate_math_shape() -> None:
 def test_turn_duration_uses_the_alert_histogram_quantiles() -> None:
     """The dashboard follows R18's Prometheus p95 with a p50 companion."""
     _load_pack()
-    spec = {metric.name: metric for metric in core_metrics.registered_core_metrics()}[
+    spec = {metric.name: metric for metric in catalog.registered_core_metrics()}[
         "ava_obs_turn_duration_s"
     ]
     assert spec.query_type == "promql"
@@ -382,7 +382,7 @@ def test_inspector_agent_queries_render_agent_id() -> None:
     rendered query passes the rendered-form validation."""
     _load_pack()
     for name in ("ava_obs_agent_llm_cost_usd", "ava_obs_agent_delivery_stalled_count"):
-        spec = next(m for m in core_metrics.registered_core_metrics() if m.name == name)
+        spec = next(m for m in catalog.registered_core_metrics() if m.name == name)
         rendered = render_query(spec, agent_id=1234)
         assert 'agent_id="1234"' in rendered
         assert "{{agent_id}}" not in rendered

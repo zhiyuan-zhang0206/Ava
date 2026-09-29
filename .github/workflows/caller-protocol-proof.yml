@@ -12,7 +12,7 @@ on:
       - 'gateway/routers/agents*.py'
       - 'cli/commands/agents/control.py'
       - 'ops/rpc_schemas.py'
-      - 'shared/audit_events.py'
+      - 'shared/telemetry/audit_events.py'
       - 'shared/caller*.py'
       - 'shared/agents/messages/chat_delivery.py'
       - 'shared/db.py'

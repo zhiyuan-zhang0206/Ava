@@ -156,7 +156,7 @@ def test_execute_code_child_cannot_read_manifest_certification_proof(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Probe the exact env passed to model-executed Python, not a policy copy."""
-    from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
+    from shared.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
 
     monkeypatch.setenv(MANIFEST_CERTIFICATION_SECRET_ENV, "host-finalizer-proof")
     env = _exec_subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
@@ -167,7 +167,7 @@ def test_execute_code_child_boot_cannot_rematerialize_manifest_certification_pro
     tmp_path: Path,
 ) -> None:
     """A proof-free exec env stays proof-free after its real config boot reads `.env`."""
-    from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
+    from shared.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
 
     home = tmp_path / "home"
     home.mkdir()

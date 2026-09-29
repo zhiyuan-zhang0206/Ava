@@ -1,4 +1,4 @@
-"""shared/resilience.py — R2-D retry primitives tests.
+"""shared/host/net/resilience.py — R2-D retry primitives tests.
 
 Covers the four entity contracts: Policy parameterization, the one retry-loop
 implementation (retry/aretry), the one classification semantics
@@ -15,7 +15,7 @@ import urllib.error
 import httpx
 import pytest
 
-from shared.resilience import (
+from shared.host.net.resilience import (
     ExponentialBackoff,
     Policy,
     aretry,
@@ -63,8 +63,8 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _no_asleep(_s: float) -> None:
         pass
 
-    monkeypatch.setattr("shared.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.resilience._asleep", _no_asleep)
+    monkeypatch.setattr("shared.host.net.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.host.net.resilience._asleep", _no_asleep)
 
 
 class TestRetry:
@@ -131,7 +131,7 @@ class TestRetry:
     def test_backoff_sequence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Exponential shape: base * factor**attempt, capped."""
         sleeps: list[float] = []
-        monkeypatch.setattr("shared.resilience._sleep", sleeps.append)
+        monkeypatch.setattr("shared.host.net.resilience._sleep", sleeps.append)
         f = _Flaky(_http_error(503), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -145,7 +145,7 @@ class TestRetry:
 
     def test_backoff_capped(self, monkeypatch: pytest.MonkeyPatch) -> None:
         sleeps: list[float] = []
-        monkeypatch.setattr("shared.resilience._sleep", sleeps.append)
+        monkeypatch.setattr("shared.host.net.resilience._sleep", sleeps.append)
         f = _Flaky(_http_error(503), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -159,7 +159,7 @@ class TestRetry:
 
     def test_retry_after_overrides_backoff(self, monkeypatch: pytest.MonkeyPatch) -> None:
         sleeps: list[float] = []
-        monkeypatch.setattr("shared.resilience._sleep", sleeps.append)
+        monkeypatch.setattr("shared.host.net.resilience._sleep", sleeps.append)
         f = _Flaky(_http_error(429, retry_after="30"), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -173,7 +173,7 @@ class TestRetry:
 
     def test_respect_retry_after_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         sleeps: list[float] = []
-        monkeypatch.setattr("shared.resilience._sleep", sleeps.append)
+        monkeypatch.setattr("shared.host.net.resilience._sleep", sleeps.append)
         f = _Flaky(_http_error(429, retry_after="30"), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -283,8 +283,8 @@ class TestJitter:
         def _uniform(_low: float, _high: float) -> float:
             return random_value
 
-        monkeypatch.setattr("shared.resilience._agent_phase", self._fixed_phase)
-        monkeypatch.setattr("shared.resilience.random.uniform", _uniform)
+        monkeypatch.setattr("shared.host.net.resilience._agent_phase", self._fixed_phase)
+        monkeypatch.setattr("shared.host.net.resilience.random.uniform", _uniform)
         assert jittered(2.0, span=5.0, mode="phase") == 3.25
 
     def test_phase_mode_bounds(self) -> None:
@@ -300,7 +300,7 @@ class TestJitter:
             assert (low, high) == (-0.5, 0.5)
             return random_value
 
-        monkeypatch.setattr("shared.resilience.random.uniform", _uniform)
+        monkeypatch.setattr("shared.host.net.resilience.random.uniform", _uniform)
         assert jittered(4.0, span=0.5, mode="relative") == expected
 
     def test_relative_mode_bounds(self) -> None:
@@ -312,7 +312,7 @@ class TestJitter:
         def _uniform(_low: float, _high: float) -> float:
             return -2.0
 
-        monkeypatch.setattr("shared.resilience.random.uniform", _uniform)
+        monkeypatch.setattr("shared.host.net.resilience.random.uniform", _uniform)
         assert jittered(0.5, span=2.0, mode="relative") == 0.0
 
     def test_relative_zero_span_returns_delay(self) -> None:
@@ -323,9 +323,9 @@ class TestJitter:
             return 100.0
 
         sleeps: list[float] = []
-        monkeypatch.setattr("shared.resilience._sleep", sleeps.append)
-        monkeypatch.setattr("shared.resilience._agent_phase", self._fixed_phase)
-        monkeypatch.setattr("shared.resilience.random.uniform", _uniform)
+        monkeypatch.setattr("shared.host.net.resilience._sleep", sleeps.append)
+        monkeypatch.setattr("shared.host.net.resilience._agent_phase", self._fixed_phase)
+        monkeypatch.setattr("shared.host.net.resilience.random.uniform", _uniform)
         f = _Flaky(urllib.error.URLError("boom"), 1)
         assert retry(Policy(max_attempts=2, jitter="phase", jitter_span=5.0))(f) == "ok"
         assert sleeps == [2.25]
@@ -338,9 +338,9 @@ class TestJitter:
             return 0.5
 
         sleeps: list[float] = []
-        monkeypatch.setattr("shared.resilience._sleep", sleeps.append)
-        monkeypatch.setattr("shared.resilience._agent_phase", _unexpected_phase)
-        monkeypatch.setattr("shared.resilience.random.uniform", _uniform)
+        monkeypatch.setattr("shared.host.net.resilience._sleep", sleeps.append)
+        monkeypatch.setattr("shared.host.net.resilience._agent_phase", _unexpected_phase)
+        monkeypatch.setattr("shared.host.net.resilience.random.uniform", _uniform)
         f = _Flaky(urllib.error.URLError("boom"), 1)
         assert retry(Policy(max_attempts=2, jitter="relative", jitter_span=0.5))(f) == "ok"
         assert sleeps == [1.5]

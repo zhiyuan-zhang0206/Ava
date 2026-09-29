@@ -21,9 +21,10 @@ from pathlib import Path
 
 import pytest
 
-from shared import pg_tools, resilience
+from shared import pg_tools
 from shared import runtime_binaries as rb
 from shared.config import settings
+from shared.host.net import resilience
 
 
 @pytest.fixture()

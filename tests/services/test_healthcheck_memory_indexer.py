@@ -14,7 +14,7 @@ import pytest
 
 from services.healthchecks import memory_indexer as hc
 from shared.config import settings
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 
 def test_probe_asks_for_this_daemons_identity(monkeypatch: pytest.MonkeyPatch) -> None:

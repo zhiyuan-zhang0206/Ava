@@ -17,7 +17,7 @@ from typing import Any
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from shared.cluster_auth import new_session_id
+from shared.cluster.auth import new_session_id
 from shared.db_transaction import write_transaction
 
 _CACHE_TTL = timedelta(seconds=30)

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from shared.daemon_health import DaemonProbe
-from shared.machine import MachineRole
+from shared.cluster.machine import MachineRole
+from shared.daemon.health import DaemonProbe
 
 # The capability groups a service can belong to. These are `MachineRole` values
 # (`machine_role()` returns a frozenset of them); "capability" and "role" are the

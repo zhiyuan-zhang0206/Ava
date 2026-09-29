@@ -399,7 +399,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Explicit update verbs + conflicts: `cli/commands/extensions/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/extensions/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/extensions/mcp.py`.
 - Rollout skill refresh legs: `cli/commands/_update_local.py:85` (`_refresh_builtin_skills`), `cli/commands/_update_agent_runner.py:250`.
 - Registry model: `shared/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).
-- Plugin discovery + loaders: `shared/plugins_config.py:discover_plugins`, `agent/extensions.py:load_extensions`, `shared/lm/plugin_providers.py`; roots: `shared/paths.py:repo_plugins_dir/plugins_dir`, `shared/runtime_interpreter.py:external_plugin_read_root`.
+- Plugin discovery + loaders: `shared/plugins_config.py:discover_plugins`, `agent/extensions.py:load_extensions`, `shared/lm/plugin_providers.py`; roots: `shared/paths/__init__.py:repo_plugins_dir/plugins_dir`, `shared/runtime_interpreter.py:external_plugin_read_root`.
 - Manifest/engines gate: `shared/plugin_manifest.py` (`host_version_from_repo`, `check_host_engine`), `conventions/plugin-spec-v2.md`.
 - OS jobs: `shared/os_cron.py` (5-min health tick as the registrar template), `cli/commands/converge/_os_jobs.py`, `AVA_OS_JOBS_ENABLED`.
 - Update coordination: `shared/cluster_lock.py`, `cli/commands/status.py:_update_in_flight`, `shared/source_tree_guard.py` (tamper detection, alert-only); objects-only fetch: `cli/commands/extensions/packages_refresh.py`.

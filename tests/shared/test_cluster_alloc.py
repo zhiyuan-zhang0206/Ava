@@ -1,7 +1,7 @@
 import pytest
 
 from shared import cluster
-from shared.port_block import PORT_OFFSETS
+from shared.host.env.port_block import PORT_OFFSETS
 
 
 def test_legacy_ava_ports():

@@ -14,7 +14,7 @@ import psutil
 import pytest
 
 from services.healthchecks import owned_service as probe
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 from shared.native_process.ownership import OwnedProcess
 
 

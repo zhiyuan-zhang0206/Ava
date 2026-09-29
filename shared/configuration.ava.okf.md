@@ -28,9 +28,9 @@ verbs keep deferring everything until first attribute access (`skip` wins over
 `eager`), so metadata-only repair code can load model declarations without
 reading a broken local `.env` or fetching runner configuration.
 
-The boot-path index is generated: `shared/config_lite_table.json` (read by the
-hand-written `shared/config_lite_table.py`, outside this package because
-`shared/env_registry.py` consumes its surfaces before Settings exists) is
+The boot-path index is generated: `shared/host/env/config_lite_table.json` (read by the
+hand-written `shared/host/env/config_lite_table.py`, outside this package because
+`shared/host/env/registry.py` consumes its surfaces before Settings exists) is
 produced from the live registry by `scripts/gen_config_lite_table.py` and
 byte-compared by the `config-lite-table-fresh` gate. A field a process never
 touches is no longer validated at import (the accepted semantic change of task
@@ -43,7 +43,7 @@ tests (`tests/shared/test_config_lite_*.py`); the design record is
 `shared/config_registry.py` is the single projection of field aliases,
 annotations, editor types, choices, and `json_schema_extra` metadata. Both the
 gateway metadata view and the local config CLI use it, preventing scope,
-sensitivity, and editability policy from diverging. `shared/bootstrap.py`
+sensitivity, and editability policy from diverging. `shared/host/env/bootstrap.py`
 remains the authority for whether a unit's `.env` owns cluster configuration or
 a pure runner must fetch it from the gateway. An unanchored checkout (no
 `AVA_HOME`, not the prod source, no `.ava_home` pointer) is neither: the lite
@@ -94,7 +94,7 @@ field. Pure-runner collectors and trace replay consume it while retaining
 independent local listeners. The relay still requires the telemetry token
 (derived from the gateway's human secret, carried in a runner's capability).
 
-Remote station ingress resolution lives in `shared/station_endpoint.py` and is
+Remote station ingress resolution lives in `shared/telemetry/station_endpoint.py` and is
 shared by collector rendering and station health probing. Pure stations on the
 configured host supply their own ingress URL through `machine_units`; hybrid
 units advertise gateway/ops URLs and use the host-scoped

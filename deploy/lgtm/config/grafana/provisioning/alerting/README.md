@@ -20,7 +20,7 @@ dashboards).
 
 ### LogQL migration (task #1467, complete)
 
-- Since the 2026-08-23 index-label cutover (shared/loki_index_labels.py) the
+- Since the 2026-08-23 index-label cutover (shared/telemetry/loki_index_labels.py) the
   collector promotes `event_name` / `agent_id` to stream labels; event-scoped
   rules match them INSIDE the stream selector
   (`{service_name="unknown_service", event_name=...}`) and keep `| json` only

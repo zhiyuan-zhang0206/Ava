@@ -25,7 +25,7 @@ the `register_*` calls it triggers.
 The name given to `importlib.util.spec_from_file_location` is **dotted**
 (`ava_builtins.plugins.<name>.plugin` built-in, `plugins.<name>.plugin`
 external), so importlib sets `__package__` and a `from . import x` inside
-`plugin.py` resolves. A directory under `shared/paths.py:repo_plugins_dir()`
+`plugin.py` resolves. A directory under `shared/paths/__init__.py:repo_plugins_dir()`
 is built-in; anything else is external.
 
 Load order is the `config.plugins` dict order (alphabetical), one by one —

@@ -60,9 +60,9 @@ from shared.api_contracts.mcp_tool_contract import (
     server_instructions,
     tool_description,
 )
-from shared.audit_events import insert_event_log
 from shared.caller_identity import CallerIdentity
-from shared.machine import machine_name
+from shared.cluster.machine import machine_name
+from shared.telemetry.audit_events import insert_event_log
 
 # Provenance of everything this surface creates. `spawner` groups the agents
 # an external tool created under their own root in the fleet views; `source`

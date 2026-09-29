@@ -31,7 +31,7 @@ from pydantic import ValidationError
 # imported here; dispatch after parsing is `args.func(args)`, resolved by the
 # `set_defaults(func=...)` bindings the builders made against their own module globals.
 from cli.parsers import build_parser as _build_parser
-from shared.bootstrap import BootstrapFetchError
+from shared.host.env.bootstrap import BootstrapFetchError
 from shared.platform import LockTimeoutError, ensure_line_buffered_stdio, ensure_utf8_stdio
 
 # Force UTF-8 stdio on Windows before any status glyph is printed (a cp1252
@@ -81,7 +81,7 @@ def _init_cli_logging(args_in: list[str]) -> None:
 # (stop and status must remain available for recovery inspection), so
 # `cli.main` opts them out of the gateway config fetch that every other process
 # performs at Settings build. The fetch decision itself is role-derived
-# (shared.bootstrap.config_source_is_local; AVA_CONFIG_SOURCE is gone).
+# (shared.host.env.bootstrap.config_source_is_local; AVA_CONFIG_SOURCE is gone).
 _LITE_VERBS = frozenset(
     {
         "stop",
@@ -158,9 +158,9 @@ def _print_settings_load_failure(e: ValidationError) -> int:
     return 1
 
 
-# Where the recorded launcher profile lives; shared/dotenv_boot.py reads the
+# Where the recorded launcher profile lives; shared/host/env/dotenv_boot.py reads the
 # same key back (`LAUNCHER_PROFILE_ENV_KEY`). It stays a literal here:
-# importing shared.dotenv_boot at CLI entry is not safe — it resolves the
+# importing shared.host.env.dotenv_boot at CLI entry is not safe — it resolves the
 # process home at import (resolve_ava_home raises for an installed wheel
 # without an explicit absolute AVA_HOME, and on an env/checkout home
 # contradiction), while first start must run exactly on hosts where those
@@ -180,7 +180,7 @@ def _normalize_process_profile() -> None:
 
     The popped value is recorded, not discarded: an agent-launched tree keeps
     the launcher's injected runner DB / Redis projections through the authority
-    pass only under a live-or-recorded agent profile (shared/dotenv_boot.py
+    pass only under a live-or-recorded agent profile (shared/host/env/dotenv_boot.py
     `_enforce_cluster_env_authority`), so popping without recording made that
     exemption unreachable on every CLI path — `ava cluster health-probe` run
     from an agent child on a pure agent-runner fell back to the sentinel

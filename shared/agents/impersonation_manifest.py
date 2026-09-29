@@ -423,7 +423,7 @@ def _alert_capture_failure(participant: LocalParticipant) -> None:
 
 
 def _alerts_upsert() -> Any:
-    from shared.alerts import upsert_alert
+    from shared.telemetry.alerts import upsert_alert
 
     return upsert_alert
 
@@ -643,8 +643,8 @@ def monitor_manifest_health(*, machine: str) -> None:
     This is diagnostic-only: it never changes a pending manifest to complete
     and a live receipt remains open until it seals or reports a real failure.
     """
-    from shared.alerts import upsert_alert
-    from shared.loki_index_labels import retention_floor
+    from shared.telemetry.alerts import upsert_alert
+    from shared.telemetry.loki_index_labels import retention_floor
 
     now = datetime.now(UTC)
     horizon = retention_floor(now)

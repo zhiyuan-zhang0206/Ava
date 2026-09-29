@@ -11,8 +11,8 @@ import logging
 from typing import cast
 
 import shared.host_deploy_state
-from shared import http_dial
-from shared.daemon_health import health_port
+from shared.daemon.health import health_port
+from shared.host.net import http_dial
 from shared.pause_owner import PauseOwnerSnapshot
 
 _log = logging.getLogger(__name__)
@@ -108,8 +108,8 @@ def _settle_stranded_reaps() -> None:
     admission run the existing inbound reconcile and re-deliver the work the
     reap truncated (task #4016).
     """
+    from shared.cluster.machine import machine_name
     from shared.db import connect
-    from shared.machine import machine_name
     from shared.straggler_reap import (
         announce_settled,
         publish_settled_wakes,

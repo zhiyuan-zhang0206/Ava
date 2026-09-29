@@ -34,7 +34,7 @@ bind address not up yet when this cluster's Postgres, PgBouncer or Linux Redis s
 binding Postgres; PgBouncer and authenticated Linux Redis use the same wait).
 macOS Redis remains loopback-only. That covers a LOCAL address only. An enrolled agent-runner's
 start also depends on a REMOTE gateway — its Settings build fetches
-`GET /api/bootstrap` (`shared.bootstrap`) — and on a VPN-joined runner that
+`GET /api/bootstrap` (`shared.host.env.bootstrap`) — and on a VPN-joined runner that
 interface comes up after the boot job fires. This module used to assert the
 hazard class was already handled and emit a fire-once job; the retry above is
 what actually covers it.

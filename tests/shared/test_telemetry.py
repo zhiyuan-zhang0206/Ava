@@ -29,10 +29,10 @@ import pytest
 from opentelemetry import trace as otel_trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext
 
-from shared import observability, telemetry
+from shared import telemetry
 from shared.config import settings
 from shared.events.contract import lineage_event_names
-from shared.telemetry import emitter
+from shared.telemetry import emitter, observability
 
 _AGENT = 8901
 
@@ -163,7 +163,7 @@ def test_no_span_means_null_trace() -> None:
 def test_machine_falls_back_to_hostname_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """The machine dimension is required: without a configured machine_name the
     emitter falls back to the hostname so the field is never empty."""
-    import shared.machine as sm
+    import shared.cluster.machine as sm
 
     def _raise() -> str:
         raise sm.MachineNameMissing("no machine name")

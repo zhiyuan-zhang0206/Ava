@@ -53,13 +53,13 @@ import shared.db
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared import telemetry
 from shared.config import settings
-from shared.daemon_health import (
+from shared.daemon.health import (
     Liveness,
     health_port,
     start_health_server,
     stop_health_server,
 )
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon.shutdown import install_graceful_shutdown
 from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import init_gateway_process

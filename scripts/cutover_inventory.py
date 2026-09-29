@@ -68,7 +68,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 from cli.cutover_hold import ADOPTION_JOURNAL
 from scripts.cutover_legacy_jobs import Host, Jobs, discover
 from shared import cluster
-from shared.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
+from shared.host.env.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
 
 VERSION = 1
 ARCHIVE = "cutover-rollback"
@@ -378,7 +378,7 @@ def env_changes(facts: Facts, inputs: Inputs) -> tuple[list[str], dict[str, str]
 
 
 def dead_keys_are_dead() -> None:
-    from shared.config_lite_table import FIELD_ALIASES
+    from shared.host.env.config_lite_table import FIELD_ALIASES
 
     alive = set(DEAD_KEYS) & set(FIELD_ALIASES.values())
     if alive:

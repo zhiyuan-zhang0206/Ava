@@ -21,7 +21,7 @@ The shared-layer domain map below complements the public
 - [[db.ava.okf.md]] — shared/db.py provides database connection pool, depended on by services and gateway
 - [[gateway-cli.ava.okf.md]] — gateway communicates with agent processes via the contracts in shared/agents/contract.py
 - [[shared/live_events.ava.okf.md]] — `ava:events` live pub/sub payload union
-- [[shared/machine.ava.okf.md]] — machine name + capability set, `machines` table, spawn-target invariant
+- [[shared/cluster/machine.ava.okf.md]] — machine name + capability set, `machines` table, spawn-target invariant
 - [[shared/migrations/migrations.ava.okf.md]] — baseline + delta schema model, applied set, version assertion
 - [[paths.ava.okf.md]] — `$AVA_HOME` layout
 - [[install_registry.ava.okf.md]] — `installed.json` + the skill-scanner gate

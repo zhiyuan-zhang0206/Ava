@@ -197,7 +197,7 @@ def test_cmd_cluster_status_read_timeout_reports_friendly(
     hide the diagnosis the command exists for (#219)."""
     import httpx
 
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
 
     def _slow_get(url: str, **_kw: object) -> None:
         raise httpx.ReadTimeout("timed out", request=None)
@@ -217,7 +217,7 @@ def test_cmd_cluster_status_connect_error_reports_friendly(
     exits 1 instead of raising (#219)."""
     import httpx
 
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
 
     def _refused_get(url: str, **_kw: object) -> None:
         raise httpx.ConnectError("connection refused", request=None)
@@ -236,7 +236,7 @@ def test_cmd_cluster_status_http_error_reports_status(
     """A non-2xx roster response names the status code and exits 1 (#219)."""
     import httpx
 
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
 
     def _server_error_get(url: str, **_kw: object) -> httpx.Response:
         # A real dial returns the 500 response; raise_for_status() in
@@ -256,10 +256,10 @@ def test_cmd_cluster_status_unresolvable_gateway_reports_friendly(
 ) -> None:
     """A host that cannot resolve the gateway URL says why and exits 1 rather
     than raising GatewayApiBaseMissing (#219)."""
-    from shared.machine import GatewayApiBaseMissing
+    from shared.cluster.machine import GatewayApiBaseMissing
 
     monkeypatch.setattr(
-        "shared.machine.gateway_api_base",
+        "shared.cluster.machine.gateway_api_base",
         lambda: (_ for _ in ()).throw(GatewayApiBaseMissing("AVA_GATEWAY_URL unset")),
     )
     rc = cluster_control.cmd_cluster_status()
@@ -273,7 +273,7 @@ def test_cmd_cluster_status_unresolvable_gateway_reports_friendly(
 
 def _patch_roster_get(monkeypatch: pytest.MonkeyPatch, roster: list[dict]) -> list[str]:
     """Stub the gateway URL/headers + httpx.get so cmd_cluster_status renders `roster`."""
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
     calls: list[str] = []
 
     def _fake_get(url, **_kw):
@@ -388,7 +388,7 @@ def test_cmd_cluster_status_fails_fast_on_http_error(
 ) -> None:
     """A 5xx from the gateway exits 1 with the status named — fail-fast, no
     silent fallback, and no unhandled traceback (#219)."""
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.get", lambda *_a, **_kw: _FakeResponse([], status_code=503))  # pyright: ignore[reportUnknownArgumentType]
     rc = cluster_control.cmd_cluster_status()
     assert rc == 1
@@ -420,10 +420,10 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
 
     from cli.parsers import build_parser
 
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", dict)
     monkeypatch.setattr(
-        "shared.http_dial.post",
+        "shared.host.net.http_dial.post",
         lambda *_a, **_kw: _FakeResponse({"name": "wsl", "resumed": True}),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert cluster_control.cmd_cluster_resume("wsl") == 0
@@ -441,10 +441,10 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
 
 
 def _post_returns(monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]) -> None:
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", dict)
     monkeypatch.setattr(
-        "shared.http_dial.post",
+        "shared.host.net.http_dial.post",
         lambda *_a, **_kw: _FakeResponse(payload),  # pyright: ignore[reportUnknownArgumentType]
     )
 

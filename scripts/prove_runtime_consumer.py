@@ -117,7 +117,7 @@ def main() -> None:
     no_home = os.environ.copy()
     no_home.pop("AVA_HOME", None)
     rejected = subprocess.run(  # noqa: S603 — fail-closed bootstrap probe, no data access.
-        [str(python), "-I", "-B", "-c", "import shared.dotenv_boot"],
+        [str(python), "-I", "-B", "-c", "import shared.host.env.dotenv_boot"],
         cwd=root,
         env=no_home,
         capture_output=True,

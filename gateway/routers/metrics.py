@@ -1,8 +1,8 @@
 """Aggregate metrics report over events (category=telemetry/log) for the settings Metrics tab.
 
-`/api/metrics` mirrors `scripts/metrics.py`: both run the same `shared.metrics`
+`/api/metrics` mirrors `scripts/metrics.py`: both run the same `shared.telemetry.metrics`
 aggregates over the Loki windowed fetch, so the CLI digest and the API never
-drift. The fetch is Loki-side aggregated (`shared.metrics.metrics_aggregate.fetch_aggregate`
+drift. The fetch is Loki-side aggregated (`shared.telemetry.metrics.aggregate.fetch_aggregate`
 over `gateway.loki_events`; task #1197 A3) — the SQL path it replaces
 materialized 430K+ rows/day into gateway memory (+47MB RSS per call, finding
 F-s1-4) and the metric units reduce that stream to a few hundred aggregate
@@ -22,7 +22,7 @@ from fastapi import APIRouter, Query, Request
 from gateway import loki_events
 from gateway.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta, MetricsReport
 from shared.config import settings
-from shared.metrics.metrics_aggregate import (
+from shared.telemetry.metrics.aggregate import (
     agent_rollups_from_aggregate,
     build_report_from_aggregate,
     fetch_aggregate,

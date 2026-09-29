@@ -23,7 +23,7 @@ handoff.
 
 **The env POLICY lives elsewhere** (Task #856 Phase C + R2 design convergence
 point A): which keys a child receives is the `child_env(role, platform)`
-projection of the env registry (`shared/env_registry.py` — host-scope facts +
+projection of the env registry (`shared/host/env/registry.py` — host-scope facts +
 AVA_HOME for daemon/session children, plus agent-scope knobs and guide keys for
 agent children, NOT "everything AVA_* minus a drop set"; the old denylist
 forwarded AVA_AGENT_ID and every non-cluster knob into daemon sessions, a
@@ -154,10 +154,10 @@ def _session_forward_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     passthroughs and temp-dir vars non-empty only). POSITIVE allowlist, not a
     drop list (Task #856 Phase C, audit F-s3-4): a non-modeled knob
     (AVA_AGENT_ID, ...) or agent-scope override never rides into a daemon
-    session. The allow/drop decision is the DATA in shared/env_registry.py;
+    session. The allow/drop decision is the DATA in shared/host/env/registry.py;
     this function is the mechanism that applies it.
     """
-    from shared.env_registry import child_env
+    from shared.host.env.registry import child_env
 
     forward = child_env("gateway", "windows" if IS_WINDOWS else "posix")
     forward.update(extra or {})

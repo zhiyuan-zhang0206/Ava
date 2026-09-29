@@ -20,7 +20,7 @@ its time-graded health alerts through the same endpoint with
 (`services/heartbeat/liveness.py`) writes its machine offline/online edges
 straight to the table (`source="machine-probe"`) — every producer rides one
 store/IM pipeline: one row per episode, with another IM when severity increases. The
-store/IM core lives in `shared/alerts.py` (this router is one caller; the
+store/IM core lives in `shared/telemetry/alerts.py` (this router is one caller; the
 probes run the same functions locally). Three HTTP surfaces plus one background
 reconciler:
 
@@ -102,7 +102,7 @@ variant). Templates live in `services/im_bridge/copy.py` — the single source
 of user-visible IM copy (governance ruling 2026-08-08) — with zh/en variants
 (the zh head carries the Chinese firing/resolved words, the en head `⚠️ ALERT [...]`); the language follows `user_settings`
 `display.language` (default zh, user ruling 2026-08-13), resolved by
-`shared.alerts.display_language` at ingest time. Alert labels/annotations
+`shared.telemetry.alerts.display_language` at ingest time. Alert labels/annotations
 data is never translated. All three severities push. Recovery sends only when
 the firing had been IM-notified (`notified_at` set); firing retries while
 `notified_at` stays NULL. An unresolved already-notified instance re-notifies

@@ -8,7 +8,7 @@ import pytest
 
 from ops import observe
 from ops.service_spec import ServiceSpec
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 
 def test_probe_set_gateway_classifies_signal_types() -> None:

@@ -1,6 +1,6 @@
 """`$AVA_HOME/.env` is the single config source of truth.
 
-`shared/runtime_config.py` reads/writes `.env` by each field's env alias.
+`shared/host/env/runtime_config.py` reads/writes `.env` by each field's env alias.
 
 `fake_ava_home` redirects `_ava_home()` (and so `.env`) to tmp_path.
 """
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import runtime_config as rt
+from shared.host.env import runtime_config as rt
 
 
 @pytest.fixture

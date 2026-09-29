@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import shared.daemon_health
+import shared.daemon.health
 import shared.paths
 from services.healthchecks import im_bridge as hc
 from shared.config import settings
@@ -46,7 +46,7 @@ def test_probe_accepts_matching_stale_holder(
     assert "holder pid=4242" in warning
     assert "stale_for=130.5" in warning
     assert seen_timeouts
-    assert all(timeout == shared.daemon_health._PROBE_TIMEOUT_S for timeout in seen_timeouts)
+    assert all(timeout == shared.daemon.health._PROBE_TIMEOUT_S for timeout in seen_timeouts)
 
 
 def test_probe_rejects_an_unreachable_holder(monkeypatch: pytest.MonkeyPatch) -> None:

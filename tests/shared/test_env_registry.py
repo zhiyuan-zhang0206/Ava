@@ -2,7 +2,7 @@
 
 The old seam tests (test_profile_env_keys.py) held hand-written snapshots
 against the field registry. The snapshots are gone — the registry's projections
-(`shared/env_registry.py`) are pure functions of the Settings class metadata.
+(`shared/host/env/registry.py`) are pure functions of the Settings class metadata.
 These tests pin the DERIVATION RULES instead: each projection is re-computed
 here independently from the raw metadata (`_FIELDS` + scope/capability/alias),
 so a future change to a rule (e.g. reverting to capability-derived sets — the
@@ -60,14 +60,14 @@ class TestScopeDerivationRules:
     a deliberate, test-breaking change."""
 
     def test_cluster_scope_is_cluster_pinned_plus_cluster_default(self) -> None:
-        from shared.env_registry import cluster_scope_aliases
+        from shared.host.env.registry import cluster_scope_aliases
 
         expected = _aliases_with(scope=("cluster-pinned", "cluster-default"))
         assert cluster_scope_aliases() == expected
         assert len(expected) > 150  # the six-gap class lives in this set
 
     def test_session_forward_is_host_scope(self) -> None:
-        from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV, session_forward_keys
+        from shared.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV, session_forward_keys
 
         expected = _aliases_with(scope=("host",)) - {MANIFEST_CERTIFICATION_SECRET_ENV}
         assert session_forward_keys() == expected
@@ -78,8 +78,8 @@ class TestScopeDerivationRules:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The host finalizer receives its proof only through a dedicated projection."""
-        from shared import dotenv_boot
-        from shared.env_registry import (
+        from shared.host.env import dotenv_boot
+        from shared.host.env.registry import (
             MANIFEST_CERTIFICATION_FINALIZER_ENV,
             MANIFEST_CERTIFICATION_SECRET_ENV,
             child_env,
@@ -103,8 +103,8 @@ class TestScopeDerivationRules:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """The ticket is consumed before the finalizer loads its unit `.env`."""
-        from shared import dotenv_boot
-        from shared.env_registry import (
+        from shared.host.env import dotenv_boot
+        from shared.host.env.registry import (
             MANIFEST_CERTIFICATION_FINALIZER_ENV,
             MANIFEST_CERTIFICATION_SECRET_ENV,
         )
@@ -125,7 +125,7 @@ class TestScopeDerivationRules:
         assert MANIFEST_CERTIFICATION_FINALIZER_ENV not in os.environ
 
     def test_session_forward_carries_the_ambient_passthroughs(self) -> None:
-        from shared.env_registry import HOST_PASSTHROUGH_KEYS
+        from shared.host.env.registry import HOST_PASSTHROUGH_KEYS
 
         assert (
             frozenset({"DISPLAY", "WAYLAND_DISPLAY", "HOME", "USER", "LOGNAME"})
@@ -138,7 +138,7 @@ class TestScopeDerivationRules:
     ) -> None:
         """A PTY child without USER reads a logged-in macOS Claude Code CLI as
         "Not logged in" (its keychain lookup keys on the account name)."""
-        from shared.env_registry import child_env
+        from shared.host.env.registry import child_env
 
         monkeypatch.setenv("USER", "operator")
         monkeypatch.setenv("LOGNAME", "operator")
@@ -154,7 +154,7 @@ class TestScopeDerivationRules:
         next/font) cannot re-source itself — so every role's child env carries it,
         in both spellings (a shell exports HTTP(S)_PROXY; npm/node/curl read the
         lowercase set), non-empty only (an empty ALL_PROXY means "direct")."""
-        from shared.env_registry import NETWORK_PROXY_KEYS, child_env, network_proxy_configured
+        from shared.host.env.registry import NETWORK_PROXY_KEYS, child_env, network_proxy_configured
 
         assert {
             "HTTP_PROXY",
@@ -185,7 +185,7 @@ class TestScopeDerivationRules:
                 assert "ALL_PROXY" not in env
 
     def test_agent_forward_is_session_plus_agent_scope_plus_guide(self) -> None:
-        from shared.env_registry import agent_forward_keys, session_forward_keys
+        from shared.host.env.registry import agent_forward_keys, session_forward_keys
 
         expected = (
             session_forward_keys()
@@ -207,7 +207,7 @@ class TestScopeDerivationRules:
         assert "AVA_AGENT_ID" not in agent_forward_keys()
 
     def test_agent_runner_cluster_aliases_are_capability_plus_cluster_scope(self) -> None:
-        from shared.env_registry import agent_runner_cluster_aliases
+        from shared.host.env.registry import agent_runner_cluster_aliases
 
         expected = _aliases_with(
             capability="agent-runner", scope=("cluster-pinned", "cluster-default")
@@ -215,7 +215,7 @@ class TestScopeDerivationRules:
         assert agent_runner_cluster_aliases() == expected
         # Disjoint from the host-scope session view (host-scope agent-runner
         # keys are deliberately kept on the gateway — single-box daemons).
-        from shared.env_registry import session_forward_keys
+        from shared.host.env.registry import session_forward_keys
 
         assert not (agent_runner_cluster_aliases() & session_forward_keys())
 
@@ -226,7 +226,7 @@ class TestConsumptionMatrixDeclarations:
     rename follows automatically."""
 
     def test_identity_keys_are_the_home_owned_identity_and_tool_fields(self) -> None:
-        from shared.env_registry import env_identity_keys
+        from shared.host.env.registry import env_identity_keys
 
         expected = _aliases_with(scope=("host",)) & {
             "AVA_MACHINE_SERVE_GATEWAY",
@@ -245,7 +245,7 @@ class TestConsumptionMatrixDeclarations:
         assert "AVA_HOME" not in env_identity_keys()
 
     def test_derived_keys_are_the_derive_env_surface(self) -> None:
-        from shared.env_registry import derived_env_keys, health_port_env_aliases
+        from shared.host.env.registry import derived_env_keys, health_port_env_aliases
 
         expected = {
             "AVA_CLUSTER_SECRET",
@@ -269,7 +269,7 @@ class TestConsumptionMatrixDeclarations:
         assert derived_env_keys() == expected
 
     def test_health_port_aliases_are_host_scope_settings_fields(self) -> None:
-        from shared.env_registry import health_port_env_aliases
+        from shared.host.env.registry import health_port_env_aliases
 
         aliases = health_port_env_aliases()
         assert set(aliases) == {
@@ -303,7 +303,7 @@ class TestRegistryInvariants:
         """A1: a key declared as both a Settings alias and a passthrough row is
         the duplicate-declaration drift class — the registry refuses it at the
         first projection call."""
-        from shared.env_registry import child_env
+        from shared.host.env.registry import child_env
 
         # Exercises _ensure_validated(); raises RuntimeError on a collision.
         child_env("agent", "posix")
@@ -311,7 +311,7 @@ class TestRegistryInvariants:
     def test_every_projection_key_is_registered(self) -> None:
         """A1: no orphan keys — every alias a projection emits is either a
         Settings field alias or a declared passthrough row."""
-        import shared.env_registry as er
+        import shared.host.env.registry as er
 
         registered = set(_aliases_with(scope=())) | _all_aliases()
         registered |= er.HOST_PASSTHROUGH_KEYS | er.WINDOWS_SYSTEM_ENV_KEYS
@@ -342,7 +342,7 @@ class TestRegistryInvariants:
         """The old parallel copy in shared/session_env.py is gone — a single
         declaration in the registry; USERNAME/USERDOMAIN are the Task #963
         lock (getpass.getuser() on Windows)."""
-        from shared.env_registry import WINDOWS_SYSTEM_ENV_KEYS, child_env
+        from shared.host.env.registry import WINDOWS_SYSTEM_ENV_KEYS, child_env
 
         assert "USERNAME" in WINDOWS_SYSTEM_ENV_KEYS
         assert "USERDOMAIN" in WINDOWS_SYSTEM_ENV_KEYS
@@ -361,7 +361,7 @@ class TestRegistryInvariants:
         code page and crash printing CJK (win agent 2528). The windows branch
         must inject PYTHONUTF8=1 for every role; POSIX children are unchanged
         (locale UTF-8)."""
-        from shared.env_registry import child_env
+        from shared.host.env.registry import child_env
 
         for role in ("agent", "runner", "gateway"):
             assert child_env(role, "windows")["PYTHONUTF8"] == "1"
@@ -389,7 +389,7 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
         [
             sys.executable,
             "-c",
-            "import shared.env_registry; import shared.config; print('ok')",
+            "import shared.host.env.registry; import shared.config; print('ok')",
         ],
         cwd=Path(__file__).resolve().parents[2],  # repo root
         capture_output=True,
@@ -402,6 +402,6 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
 
 def _block_env(base: int) -> dict[str, str]:
     """The full health-port env a block-style unit at `base` carries."""
-    from shared.env_registry import health_port_env
+    from shared.host.env.registry import health_port_env
 
     return {alias: str(int(port)) for alias, port in health_port_env(base).items()}

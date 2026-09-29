@@ -11,7 +11,7 @@ from gateway import _loki_logql, _loki_transport, loki_events_cache
 from shared import telemetry
 from shared.config import settings
 from shared.events.contract import EventTier
-from shared.loki_index_labels import LokiReadEra, LokiReadSlice
+from shared.telemetry.loki_index_labels import LokiReadEra, LokiReadSlice
 
 _event_id = telemetry.event_id
 

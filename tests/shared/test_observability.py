@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import observability
+from shared.telemetry import observability
 
 
 @pytest.mark.parametrize(
@@ -61,7 +61,7 @@ def test_home_is_observability_station_marker_or_capability(
 ) -> None:
     """Provider identity is either form: the lgtm-host marker OR the
     observability-station capability on this unit's own home."""
-    from shared.machine import reset_identity, set_identity
+    from shared.cluster.machine import reset_identity, set_identity
 
     home = tmp_path / "station"
     home.mkdir()
@@ -95,7 +95,7 @@ def test_home_is_observability_station_foreign_home_never_capability(
 ) -> None:
     """A role-declared station's capability never leaks to another home (a dev
     worktree home on the same box must not inherit the prod station's identity)."""
-    from shared.machine import reset_identity, set_identity
+    from shared.cluster.machine import reset_identity, set_identity
 
     own = tmp_path / "own"
     foreign = tmp_path / "foreign"
@@ -117,7 +117,7 @@ def test_collector_allowed_for_home_accepts_station_capability(
 ) -> None:
     """A gateway that declares the observability-station capability runs the
     local sidecar exactly like a marked host."""
-    from shared.machine import reset_identity, set_identity
+    from shared.cluster.machine import reset_identity, set_identity
 
     home = tmp_path / "gateway"
     home.mkdir()

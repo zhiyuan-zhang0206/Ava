@@ -1,6 +1,6 @@
 """ava_code Grafana metrics — registered at import time.
 
-``shared/metrics/grafana_dashboard_supply`` imports this module (inside a
+``shared/telemetry/metrics/grafana_dashboard_supply`` imports this module (inside a
 PluginContext) to collect the registrations below for the rendered Ava Ops
 dashboard (``ava lgtm render``, task #3697); the plugin name comes from the
 context. Query templates target the unified event stream in Loki
@@ -27,8 +27,8 @@ panels' pattern); the pre-convention PG rows were backfilled by the
 accompanying migration, Loki rows keep their emit-time category.
 """
 
-from shared.metrics.metrics_logql import CATEGORY_WITH_LEGACY_LOG, event_count
-from shared.plugin_metrics import MetricSpec, register_metric
+from shared.telemetry.metrics.logql import CATEGORY_WITH_LEGACY_LOG, event_count
+from shared.telemetry.metrics.plugin_metrics import MetricSpec, register_metric
 
 register_metric(
     MetricSpec(

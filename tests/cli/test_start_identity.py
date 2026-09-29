@@ -416,7 +416,7 @@ def _runner_start(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, *extra: str
 ) -> Any:
     """A remote runner's first start against a gateway serving the endpoint only."""
-    from shared import bootstrap
+    from shared.host.env import bootstrap
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))

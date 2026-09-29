@@ -264,7 +264,7 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     labeler_health_url: str = Field(
         default="",
         alias="AVA_LABELER_HEALTH_URL",
-        description="Labeler healthcheck URL. Empty = derive via shared.daemon_health.health_port('labeler').",
+        description="Labeler healthcheck URL. Empty = derive via shared.daemon.health.health_port('labeler').",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -289,7 +289,7 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     im_bridge_health_url: str = Field(
         default="",
         alias="AVA_IM_BRIDGE_HEALTH_URL",
-        description="IM Bridge healthcheck URL. Empty = derive via shared.daemon_health.health_port('im_bridge').",
+        description="IM Bridge healthcheck URL. Empty = derive via shared.daemon.health.health_port('im_bridge').",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -469,7 +469,7 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     heartbeat_health_url: str = Field(
         default="",
         alias="AVA_HEARTBEAT_HEALTH_URL",
-        description="Heartbeat healthcheck URL. Empty = derive via shared.daemon_health.health_port('heartbeat').",
+        description="Heartbeat healthcheck URL. Empty = derive via shared.daemon.health.health_port('heartbeat').",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -495,7 +495,7 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     task_maintenance_health_url: str = Field(
         default="",
         alias="AVA_TASK_MAINTENANCE_HEALTH_URL",
-        description="Task-maintenance healthcheck URL. Empty = derive via shared.daemon_health.health_port('task_maintenance').",
+        description="Task-maintenance healthcheck URL. Empty = derive via shared.daemon.health.health_port('task_maintenance').",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -508,7 +508,7 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     events_maintenance_health_url: str = Field(
         default="",
         alias="AVA_EVENTS_MAINTENANCE_HEALTH_URL",
-        description="Events-maintenance healthcheck URL. Empty = derive via shared.daemon_health.health_port('events_maintenance').",
+        description="Events-maintenance healthcheck URL. Empty = derive via shared.daemon.health.health_port('events_maintenance').",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -521,7 +521,7 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     pg_backup_health_url: str = Field(
         default="",
         alias="AVA_PG_BACKUP_HEALTH_URL",
-        description="Postgres backup scheduler healthcheck URL. Empty = derive via shared.daemon_health.health_port('pg_backup').",
+        description="Postgres backup scheduler healthcheck URL. Empty = derive via shared.daemon.health.health_port('pg_backup').",
         json_schema_extra={
             "restart_required": "",
             "writable": False,

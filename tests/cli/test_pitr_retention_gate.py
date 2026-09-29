@@ -35,8 +35,8 @@ from services.pitr.retention_manifest import (
     RetentionPlan,
 )
 from services.pitr.retention_planner import DryRunResult
-from shared import runtime_config
 from shared.config.physical_backup import PhysicalBackupSettings
+from shared.host.env import runtime_config
 
 _PIN_TOKEN = "av-test-pin"  # noqa: S105 — opaque test fixture pin, not a secret
 

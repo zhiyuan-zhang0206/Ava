@@ -44,7 +44,7 @@ _CASES: list[tuple[str, str, str]] = [
 _CHILD = """import json, os
 import shared.config._lite as lite
 from shared.config import _full
-from shared.config_lite_table import FIELD_DOMAINS
+from shared.host.env.config_lite_table import FIELD_DOMAINS
 from shared.config_registry import _DOMAIN_MODELS
 
 MODELS = {

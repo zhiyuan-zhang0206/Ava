@@ -33,7 +33,7 @@ The lower-level escalating APIs below retain their own explicit contracts.
 Signal delivery follows the platform's verified launch shape. POSIX launchers
 exec into the daemon, so SIGTERM reaches the recorded PID directly. Windows
 uses a private console; its recorded root may be a venv redirector, while
-Ctrl-Break reaches the interpreter as SIGBREAK. `shared/daemon_shutdown.py`
+Ctrl-Break reaches the interpreter as SIGBREAK. `shared/daemon/shutdown.py`
 maps both service stop signals to the daemon's KeyboardInterrupt cleanup.
 On Windows the caller's session decides the control channel: same-session
 delivery attaches the target's private console directly; a caller in another

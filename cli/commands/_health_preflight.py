@@ -40,10 +40,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 from cli.commands.converge.spec import ConvergeCtx
 from shared.cluster import port_free
+from shared.cluster.port_preflight import expected_cluster_ports
 from shared.config import settings
 from shared.deploy.git.gitenv import git_env
-from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
-from shared.port_preflight import expected_cluster_ports
+from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.proc import run_bounded
 
 # Bounded git + network probes: a preflight must never hang a start, and the

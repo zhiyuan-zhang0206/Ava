@@ -14,15 +14,15 @@ from urllib.parse import urlsplit
 from pydantic import Field, field_validator, model_validator
 
 from shared.config.base import EnvSettings, _unit_home
-from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
-from shared.netutil import is_ipv4_literal, is_loopback_host
-from shared.url_secret import url_host, url_with_host, url_with_query_param
+from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from shared.host.net.predicates import is_ipv4_literal, is_loopback_host
+from shared.host.net.url_secret import url_host, url_with_host, url_with_query_param
 
 
 def _self_machine_host() -> str:
-    """This host's reachable address, mirroring `shared.machine.reachable_host`
+    """This host's reachable address, mirroring `shared.cluster.machine.reachable_host`
     (env `AVA_MACHINE_HOST` > `$AVA_HOME/machine_host` file > `localhost`).
-    Duplicated at this leaf because shared.machine imports settings — a config
+    Duplicated at this leaf because shared.cluster.machine imports settings — a config
     sub-model cannot import it back. `load_ava_env` pins AVA_HOME into os.environ
     before any sub-model constructs, so the file branch resolves against the same
     home the `.env` came from."""
@@ -523,9 +523,9 @@ class DataPlaneSettings(EnvSettings):
         `_conninfo_attempts._resolve_hostnames` already checks
         `is_ip_address(host)` and skips `getaddrinfo` for a literal (mirrors
         asyncio's `_ensure_resolved` / anyio's `connect_tcp` — see
-        shared/http_dial.py's module docstring for the same pattern in
+        shared/host/net/http_dial.py's module docstring for the same pattern in
         httpx), so psycopg itself is not vulnerable to the NAT64/DNS64
-        synthesis failure mode `shared.netutil.is_ipv4_literal` documents.
+        synthesis failure mode `shared.host.net.predicates.is_ipv4_literal` documents.
         This still earns its keep for every OTHER libpq consumer that reads
         db_url — PgBouncer's own upstream dial to Postgres, `psql` /
         `pg_dump`, any future non-psycopg tool — which don't get psycopg's

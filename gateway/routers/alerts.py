@@ -54,7 +54,10 @@ from gateway.schemas.alerts import (
 )
 from gateway.sse import event_stream
 from shared.agents.impersonation_manifest import retention_loss_panel
-from shared.alerts import (
+from shared.config import settings
+from shared.db_transaction import write_transaction
+from shared.redis_client import sync_redis
+from shared.telemetry.alerts import (
     AlertKey,
     display_language,
     notify_im,
@@ -62,9 +65,6 @@ from shared.alerts import (
     stamp_notified,
     upsert_alert,
 )
-from shared.config import settings
-from shared.db_transaction import write_transaction
-from shared.redis_client import sync_redis
 
 router = APIRouter()
 _log = logging.getLogger(__name__)

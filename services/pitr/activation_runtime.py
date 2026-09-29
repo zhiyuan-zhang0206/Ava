@@ -32,7 +32,7 @@ from shared.paths import ava_home
 
 
 def activation_health_component() -> dict[str, object]:
-    from shared.health_schema import DEGRADED, OK, component
+    from shared.daemon.health_schema import DEGRADED, OK, component
 
     try:
         activation = ActivationRecord.from_json(
@@ -85,7 +85,7 @@ def restore_exact_file(
 ) -> None:
     payload = base64.b64decode(payload_b64, validate=True)
     if path.name == ".env":
-        from shared.envfile import replace_env_bytes_cas
+        from shared.host.env.dotenv_file import replace_env_bytes_cas
 
         replace_env_bytes_cas(
             path,
@@ -163,7 +163,7 @@ PITR_ENV_FIELDS = {
 
 
 def _pitr_env_baseline(payload: bytes | None = None) -> dict[str, str]:
-    from shared.envfile import capture_env_bytes, env_line_key
+    from shared.host.env.dotenv_file import capture_env_bytes, env_line_key
 
     path = ava_home() / ".env"
     if payload is None:
@@ -179,7 +179,7 @@ def _pitr_env_baseline(payload: bytes | None = None) -> dict[str, str]:
 
 
 def capture_pitr_env_baseline(path: Path) -> tuple[str, str, dict[str, str]]:
-    from shared.envfile import capture_env_bytes
+    from shared.host.env.dotenv_file import capture_env_bytes
 
     payload = capture_env_bytes(path)
     return (

@@ -18,7 +18,7 @@ import pytest
 
 from cli.commands import _repo
 from ops import roster, service_spec, spec
-from shared.machine import MachineRole
+from shared.cluster.machine import MachineRole
 
 _GATEWAY_SESSIONS = {
     "gate",
@@ -369,7 +369,7 @@ def test_healthy_protocol_cannot_certify_an_unowned_listener(
     monkeypatch: pytest.MonkeyPatch, service: str
 ) -> None:
     from services.healthchecks import owned_service
-    from shared.daemon_health import DaemonProbe
+    from shared.daemon.health import DaemonProbe
     from shared.native_process.ownership import OwnedProcess
 
     def _fake_probe_home(*_a: object, **_kw: object) -> DaemonProbe:
@@ -392,7 +392,7 @@ def test_healthy_protocol_cannot_certify_an_unowned_listener(
 
     monkeypatch.setattr(roster, "probe_home", _fake_probe_home)
     monkeypatch.setattr(roster, "_browser_probe", _fake_browser_probe)
-    monkeypatch.setattr("shared.daemon_health._probe_daemon", _fake_probe_daemon)
+    monkeypatch.setattr("shared.daemon.health._probe_daemon", _fake_probe_daemon)
     monkeypatch.setattr(roster, "daemon_identity", _fake_daemon_identity)
     monkeypatch.setattr(owned_service, "listener_pids", _fake_listener_pids)
     monkeypatch.setattr(owned_service, "owned_process", _fake_owned_process)
@@ -408,7 +408,7 @@ def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
     carries no field we control, so a 200 there says nothing about whose Chrome
     answered."""
     from services.browser.probe import probe_browser
-    from shared.daemon_health import DaemonProbe
+    from shared.daemon.health import DaemonProbe
 
     browser = next(s for s in roster.build_services() if s.session == "browser")
     probe = browser.identity_probe
@@ -430,11 +430,11 @@ def test_daemon_identity_binds_the_probe_to_one_daemons_facts(
 
     def _capture(name: str, url: str, *, pidfile: Path, **_kw: object) -> object:
         seen.update(name=name, url=url, pidfile=pidfile)
-        from shared.daemon_health import DaemonProbe
+        from shared.daemon.health import DaemonProbe
 
         return DaemonProbe.up("stub")
 
-    monkeypatch.setattr("shared.daemon_health._probe_daemon", _capture)
+    monkeypatch.setattr("shared.daemon.health._probe_daemon", _capture)
     pidfile = tmp_path / "ops.pid"
     assert roster.daemon_identity("ops", pidfile)().alive is True
     assert seen["name"] == "ops"

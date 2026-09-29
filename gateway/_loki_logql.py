@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from shared.events.contract import TIER_BY_EVENT, EventTier
-from shared.loki_index_labels import (
+from shared.telemetry.loki_index_labels import (
     LokiReadEra,
     LokiReadSlice,
     archive_stream_selector,

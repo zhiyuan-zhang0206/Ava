@@ -44,7 +44,7 @@
   "private_imports": {
     "cli/commands/_release_plugin_probe.py::ops.spec._plugin_services": 1,
     "cli/commands/maintenance.py::ops.agent_pause._hold": 1,
-    "cli/commands/observability/trace.py::shared.trace._mirror_day": 1,
-    "cli/commands/observability/trace.py::shared.trace._mirror_sort_key": 1
+    "cli/commands/observability/trace.py::shared.telemetry.tracing._mirror_day": 1,
+    "cli/commands/observability/trace.py::shared.telemetry.tracing._mirror_sort_key": 1
   }
 }

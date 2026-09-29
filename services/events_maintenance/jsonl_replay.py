@@ -21,9 +21,9 @@ from services.events_maintenance.rollup import (
     TokensRow,
 )
 from shared.log import logger
-from shared.loki_index_labels import EVENT_STREAM_RETENTION
 from shared.paths import logs_dir
 from shared.telemetry import is_rollup_source
+from shared.telemetry.loki_index_labels import EVENT_STREAM_RETENTION
 
 
 @dataclass(frozen=True)

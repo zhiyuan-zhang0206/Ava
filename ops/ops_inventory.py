@@ -22,7 +22,7 @@ from ops.rpc_schemas import (
     InventoryWriteOpResult,
 )
 from shared import mcp_enabled, plugins_config
-from shared.machine import is_agent_runner, machine_name, machine_role
+from shared.cluster.machine import is_agent_runner, machine_name, machine_role
 
 
 def _mcp_summary(spec: dict[str, Any]) -> str:

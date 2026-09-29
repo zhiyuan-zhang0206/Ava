@@ -277,7 +277,7 @@ def test_sync_client_weak_network_resilient() -> None:
 
 # ── IPv4-literal dial pinning (_PinnedIPv4Connection): a DNS64/NAT64 network
 # can synthesize an AAAA answer even for a getaddrinfo() call on a plain IPv4
-# literal (shared.netutil.is_ipv4_literal); redis-py's sync
+# literal (shared.host.net.predicates.is_ipv4_literal); redis-py's sync
 # Connection._connect calls getaddrinfo unconditionally (unlike
 # redis.asyncio, which goes through asyncio's own literal-aware
 # _ensure_resolved), so the sync client needs its own bypass. ──

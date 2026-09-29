@@ -12,6 +12,7 @@ from agent.db import claim_inbound_batch
 from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
 from ops.agent_spawn import create_agent_row
 from ops.agent_wake import resurrect_agent
+from shared.cluster.machine import machine_name
 from shared.db import insert_inbound_message
 from shared.incarnation_resources import (
     ExecAllocation,
@@ -21,7 +22,6 @@ from shared.incarnation_resources import (
     ResourceProcess,
     decode_resources,
 )
-from shared.machine import machine_name
 from shared.turn_identity import bind_turn_identity
 
 

@@ -22,7 +22,7 @@ import json
 from contextlib import AsyncExitStack, suppress
 from typing import Any
 
-from shared.resilience import Policy, aretry
+from shared.host.net.resilience import Policy, aretry
 
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one
 # line; lift the stream buffer cap well above StreamReader's 64KiB default

@@ -13,7 +13,7 @@ one MCP tool per gateway route, no logic of its own, so an external agent
 (Claude Code, Codex, any MCP client) drives the same cluster the web UI and the
 `ava` CLI drive, with the same auth and the same failure modes.
 
-Which cluster it drives is not a parameter: `shared.machine.gateway_api_base`
+Which cluster it drives is not a parameter: `shared.cluster.machine.gateway_api_base`
 resolves the gateway of the checkout this `ava` belongs to, and
 `gateway_auth_headers` presents that cluster's secret. The host's global `ava`
 only forwards to the cluster `AVA_HOME` names, and refuses without it; a
@@ -112,7 +112,7 @@ async def _request(
     Raises:
         ToolError: the gateway rejected the call, or could not be reached.
     """
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
 
     url = f"{gateway_api_base()}{path}"
     try:
@@ -218,7 +218,7 @@ def cmd_mcp_serve() -> int:
     gateway configured, rather than starting a server whose every tool would
     error one call later.
     """
-    from shared.machine import gateway_api_base
+    from shared.cluster.machine import gateway_api_base
 
     # Resolve up front: an unconfigured checkout is an install problem, and the
     # message is far more useful on the terminal that ran `serve` than buried in

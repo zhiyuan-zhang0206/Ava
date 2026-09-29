@@ -170,7 +170,7 @@ start_runtime.admit_release = lambda *args, **kwargs: start_runtime.StartRuntime
 prepare = start_intent._prepare_start_locked
 def prepared(*args):
     assert "shared.config" not in sys.modules, "configuration loaded before identity"
-    assert "shared.dotenv_boot" not in sys.modules, "home resolved before identity"
+    assert "shared.host.env.dotenv_boot" not in sys.modules, "home resolved before identity"
     prepare(*args)
 start_intent._prepare_start_locked = prepared
 main._init_cli_logging = lambda _args: None
@@ -527,14 +527,14 @@ def _unanchored(monkeypatch: pytest.MonkeyPatch, home: str = "/scratch/ava-unanc
     """Make this process read as a checkout that claims no cluster — the shape
     `resolve_ava_home` resolves to a private scratch home with anchored=False."""
 
-    import shared.dotenv_boot as _boot
+    import shared.host.env.dotenv_boot as _boot
 
     monkeypatch.setattr(_boot, "resolve_ava_home", lambda: (Path(home), False))
 
 
 def _anchored(monkeypatch: pytest.MonkeyPatch, home: str = "/Users/x/.ava-worktree") -> None:
 
-    import shared.dotenv_boot as _boot
+    import shared.host.env.dotenv_boot as _boot
 
     monkeypatch.setattr(_boot, "resolve_ava_home", lambda: (Path(home), True))
 

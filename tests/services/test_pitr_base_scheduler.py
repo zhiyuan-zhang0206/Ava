@@ -804,7 +804,7 @@ async def test_degraded_domain_condition_keeps_healthz_200() -> None:
     fix it, so the watchdog would restart-flap a healthy daemon every 60s.
     The component reports degraded with gate_readiness=False; readiness
     follows process liveness only."""
-    from shared.daemon_health import Liveness, start_health_server, stop_health_server
+    from shared.daemon.health import Liveness, start_health_server, stop_health_server
 
     state = BaseCandidateState(base_error="GCS credentials rejected")
     port = _find_free_port()

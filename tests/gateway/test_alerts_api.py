@@ -531,7 +531,7 @@ def test_ingest_computes_fingerprint_when_absent(db_conn: psycopg.Connection) ->
         assert row is not None
         fp, n = row
     assert n == 1
-    from shared.alerts import fingerprint as compute_fp
+    from shared.telemetry.alerts import fingerprint as compute_fp
 
     assert fp == compute_fp({"alertname": "test-rule", "team": "ava-ops", "severity": "error"})
 
@@ -948,7 +948,7 @@ def test_start_readiness_alert_lifecycle_on_real_db(
     firing inserts one unresolved row per service, a re-firing start UPDATES it
     (no duplicate, no re-notify), the resolved edge flips it with ends_at, and a
     failure AFTER resolution is a fresh instance with a fresh IM."""
-    import shared.alerts as _alerts
+    import shared.telemetry.alerts as _alerts
     from cli.commands import _probe as _probe_mod
     from cli.commands._repo import ServiceSpec
     from ops.service_spec import _GATEWAY

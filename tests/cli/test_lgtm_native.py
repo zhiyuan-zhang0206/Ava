@@ -11,10 +11,10 @@ import yaml
 
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm_native
-from shared import resilience
 from shared.config import settings
-from shared.lgtm_local import BACKENDS, backend_urls, service_argv
-from shared.loki_index_labels import validate_loki_deploy_config
+from shared.host.net import resilience
+from shared.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
+from shared.telemetry.loki_index_labels import validate_loki_deploy_config
 
 _REAL_VERIFY_LOKI = lgtm_native._verify_loki
 
@@ -57,7 +57,8 @@ def _stub_dashboard_render(monkeypatch: pytest.MonkeyPatch) -> None:
         return _STUB_RENDER, ()
 
     monkeypatch.setattr(
-        "shared.metrics.grafana_dashboard_supply.render_dashboard_json", render_dashboard_json
+        "shared.telemetry.metrics.grafana_dashboard_supply.render_dashboard_json",
+        render_dashboard_json,
     )
 
 
@@ -543,7 +544,7 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
         raise RuntimeError("render exploded")
 
     monkeypatch.setattr(
-        "shared.metrics.grafana_dashboard_supply.render_dashboard_json", broken_render
+        "shared.telemetry.metrics.grafana_dashboard_supply.render_dashboard_json", broken_render
     )
     emitted: list[tuple[object, ...]] = []
 

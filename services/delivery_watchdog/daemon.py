@@ -101,9 +101,9 @@ from shared import telemetry
 from shared.agents import AgentStatus
 from shared.config import settings
 from shared.config.service_read import current_field_values
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
+from shared.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon.shutdown import hard_exit as _hard_exit
 from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
 

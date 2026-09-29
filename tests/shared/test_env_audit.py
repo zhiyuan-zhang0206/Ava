@@ -9,9 +9,9 @@ from typing import cast
 
 import pytest
 
-from shared import env_audit
-from shared import runtime_config as runtime_config
-from shared.env_audit import check_env_integrity, last_env_write_record, record_env_write
+from shared.host.env import audit
+from shared.host.env import runtime_config as runtime_config
+from shared.host.env.audit import check_env_integrity, last_env_write_record, record_env_write
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ def test_record_env_write_redacts_command_arguments(
         def cmdline(self) -> list[str]:
             return ["python", "-c", "cluster-secret-value"]
 
-    monkeypatch.setattr(env_audit.psutil, "Process", Process)
+    monkeypatch.setattr(audit.psutil, "Process", Process)
     (audit_home / ".env").write_text("AVA_MODEL=test-model\n")
 
     record_env_write(audit_home / ".env", {"AVA_MODEL"}, set(), site="test")
@@ -193,7 +193,7 @@ def test_env_key_names_read_export_prefixed_assignments(audit_home: Path) -> Non
     records KEY (never `export KEY`), and comments/bare keys stay out (#2981)."""
     env_path = audit_home / ".env"
     env_path.write_text("export AVA_DB_URL=postgresql://x\n# export AVA_SKIP_ME=1\nBARE_KEY\n")
-    assert env_audit._env_key_names(env_path) == ["AVA_DB_URL"]
+    assert audit._env_key_names(env_path) == ["AVA_DB_URL"]
 
 
 def test_record_env_write_redacts_sensitive_and_unregistered_changes(audit_home: Path) -> None:
@@ -266,7 +266,7 @@ def test_noop_upsert_leaves_no_record_and_a_real_change_still_records(audit_home
     attempt. The change chain stays whole — a real change records its old→new
     diff, and the integrity guard sees a consistent file after both paths.
     """
-    from shared.envfile import upsert_env
+    from shared.host.env.dotenv_file import upsert_env
 
     env_path = audit_home / ".env"
     env_path.write_text("AVA_MODEL=first-model\n")
@@ -305,7 +305,7 @@ def test_noop_upsert_does_not_arm_a_fresh_home(audit_home: Path) -> None:
     A fresh home arms at its first CHANGING write — the deliberate semantics of
     the skip (task #3637); the no-op cannot vouch for a file it did not write.
     """
-    from shared.envfile import upsert_env
+    from shared.host.env.dotenv_file import upsert_env
 
     env_path = audit_home / ".env"
     env_path.write_text("AVA_MODEL=test-model\n")
@@ -342,7 +342,7 @@ def test_env_write_event_carries_actor_without_values(
     def _capture(**kwargs: object) -> None:
         captured.append(kwargs)
 
-    monkeypatch.setattr("shared.audit_events.insert_event_log", _capture)
+    monkeypatch.setattr("shared.telemetry.audit_events.insert_event_log", _capture)
     runtime_config.write_fields(
         {"llm_model": "m3"}, set(), audit_site="test", actor="user_session:administrator"
     )
@@ -369,7 +369,7 @@ def test_record_env_write_withholds_every_value_when_metadata_fails(
     def _boom() -> dict[str, tuple[str, bool]]:
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(env_audit, "_load_alias_metadata", _boom)
+    monkeypatch.setattr(audit, "_load_alias_metadata", _boom)
     record_env_write(
         env_path,
         {"AVA_MODEL"},
@@ -394,7 +394,7 @@ def test_read_env_write_records_returns_newest_first_with_limit(audit_home: Path
     for i in range(3):
         record_env_write(env_path, {"AVA_MODEL"}, set(), site=f"test-{i}")
 
-    records = env_audit.read_env_write_records(2)
+    records = audit.read_env_write_records(2)
     assert [record["site"] for record in records] == ["test-2", "test-1"]
 
 
@@ -406,12 +406,12 @@ def test_read_env_write_records_skips_corrupt_lines_and_missing_history(audit_ho
         fh.write("{not json\n")
         fh.write("[1, 2]\n")
 
-    records = env_audit.read_env_write_records(10)
+    records = audit.read_env_write_records(10)
     assert [record["site"] for record in records] == ["good"]
 
     elsewhere = audit_home / "elsewhere" / ".env"
     elsewhere.parent.mkdir()
-    assert env_audit.read_env_write_records(5, elsewhere) == []
+    assert audit.read_env_write_records(5, elsewhere) == []
 
 
 def test_read_env_write_records_reads_beyond_a_full_tail_window(audit_home: Path) -> None:
@@ -421,10 +421,10 @@ def test_read_env_write_records_reads_beyond_a_full_tail_window(audit_home: Path
         for i in range(400):
             fh.write(json.dumps({"site": f"s{i}", "pad": "x" * 200}) + "\n")
 
-    records = env_audit.read_env_write_records(3)
+    records = audit.read_env_write_records(3)
     assert [record["site"] for record in records] == ["s399", "s398", "s397"]
 
 
 def test_read_env_write_records_rejects_nonpositive_limit(audit_home: Path) -> None:
     with pytest.raises(ValueError, match="limit"):
-        env_audit.read_env_write_records(0)
+        audit.read_env_write_records(0)

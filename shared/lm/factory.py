@@ -302,7 +302,7 @@ def _ensure_provider_key(effective_model: str) -> None:
             # loads its own .env into the process env at boot. The file
             # fallback covers the gateway profile that pops provider keys
             # from os.environ (Task #856 / regression #1562).
-            from shared.runtime_config import read_env_aliases
+            from shared.host.env.runtime_config import read_env_aliases
 
             if provider_api.provider_key_present(env_var) or env_var in read_env_aliases():
                 return
@@ -321,7 +321,7 @@ def _ensure_provider_key(effective_model: str) -> None:
             # fail fast on a genuinely missing key without carrying the
             # secret in the gateway process env (regression: #1562
             # popped the keys and every spawn 400'd).
-            from shared.runtime_config import read_env_aliases
+            from shared.host.env.runtime_config import read_env_aliases
 
             if field_alias(attr) in read_env_aliases():
                 return

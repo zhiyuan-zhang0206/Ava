@@ -17,8 +17,8 @@ import time
 from collections.abc import Callable
 from typing import Any, cast
 
+from shared.host.net.resilience import extract_retry_after, jittered
 from shared.lm.effort import ReasoningEffort
-from shared.resilience import extract_retry_after, jittered
 
 
 def _limiter_sync(provider: str | None) -> Any:

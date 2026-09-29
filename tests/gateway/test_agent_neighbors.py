@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 from gateway import loki_events
 from gateway.app import app
 from gateway.inspect import neighbors
-from shared.loki_index_labels import ARCHIVE_FREEZE_AT
+from shared.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT
 from tests.gateway.loki_fake import FakeLoki
 
 

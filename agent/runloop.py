@@ -10,11 +10,11 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agent.hooks.compact import CompactionFailedError
 from agent.state import BaseAgentState
-from shared.audit_events import insert_event_log_async
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext
 from shared.live_events import Error
 from shared.log import logger
+from shared.telemetry.audit_events import insert_event_log_async
 
 from .graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from .state_channels import (

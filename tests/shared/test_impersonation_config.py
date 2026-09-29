@@ -23,7 +23,8 @@ def test_delivery_policy_defaults() -> None:
 def test_delivery_policy_is_configurable_and_bootstrapped(
     name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared import config, runtime_config
+    from shared import config
+    from shared.host.env import runtime_config
 
     alias = f"AVA_{name.upper()}"
     info = cast(FieldInfo, FIELD_INFOS[name])

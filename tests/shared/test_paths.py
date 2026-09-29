@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from shared import daemon_health, paths
+from shared import paths
+from shared.daemon import health
 
 
 def test_daemon_pidfile_uses_run_directory_only(
@@ -16,10 +17,10 @@ def test_daemon_pidfile_uses_run_directory_only(
     assert current == tmp_path / "run" / "agent_host.pid"
     (tmp_path / current.name).write_text(str(os.getpid()))
 
-    assert daemon_health._recorded_pid(current) is None
+    assert health._recorded_pid(current) is None
 
     current.write_text(str(os.getpid()))
-    assert daemon_health._recorded_pid(current) == os.getpid()
+    assert health._recorded_pid(current) == os.getpid()
 
 
 def test_workspace_dir_creates_per_agent_dir(unit_home: Path) -> None:

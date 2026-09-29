@@ -1,8 +1,8 @@
 """`shared/memory_repo.py` unit tests — role-aware branch_name, pull_main git
 argument sequence, and the gateway init() auto-switch onto main.
 
-Identity is stubbed at its source via shared.machine.set_identity (the same
-mechanism conftest's two-unit fixtures use), so every `from shared.machine
+Identity is stubbed at its source via shared.cluster.machine.set_identity (the same
+mechanism conftest's two-unit fixtures use), so every `from shared.cluster.machine
 import machine_role` call site inside memory_repo sees the injected value.
 These tests do not touch the network or a real remote: _run_git is recorded.
 """
@@ -17,9 +17,9 @@ from typing import ClassVar
 import pytest
 
 from shared import memory_repo
+from shared.cluster.machine import reset_identity, set_identity
 from shared.config import settings
 from shared.config.general import GeneralSettings
-from shared.machine import reset_identity, set_identity
 from shared.paths import gateway_memory_dir
 
 
@@ -625,7 +625,7 @@ def test_bootstrap_from_gateway_clones_bundle_as_machine_branch(
 
     monkeypatch.setattr(memory_repo, "_download_pool_snapshot", _fake_download)
 
-    import shared.machine as _machine
+    import shared.cluster.machine as _machine
 
     monkeypatch.setattr(_machine, "gateway_api_base", lambda: "http://gw.example:8000")
     monkeypatch.setattr(
@@ -671,7 +671,7 @@ def test_bootstrap_from_gateway_head_mismatch_fails_loud(
 
     monkeypatch.setattr(memory_repo, "_download_pool_snapshot", _fake_download)
 
-    import shared.machine as _machine
+    import shared.cluster.machine as _machine
 
     monkeypatch.setattr(_machine, "gateway_api_base", lambda: "http://gw.example:8000")
 
@@ -691,7 +691,7 @@ def test_bootstrap_from_gateway_non_200_fails_loud(
 
     monkeypatch.setattr(memory_repo, "_download_pool_snapshot", _failing_download)
 
-    import shared.machine as _machine
+    import shared.cluster.machine as _machine
 
     monkeypatch.setattr(_machine, "gateway_api_base", lambda: "http://gw")
     set_identity(role="agent-runner", name="test-host-2")
@@ -704,7 +704,7 @@ def test_bootstrap_from_gateway_missing_gateway_url_fails_loud(
 ) -> None:
     """A runner with no gateway URL configured fails with guidance, not the
     raw GatewayApiBaseMissing traceback."""
-    import shared.machine as _machine
+    import shared.cluster.machine as _machine
 
     monkeypatch.setattr(
         _machine,
@@ -729,7 +729,7 @@ def test_bootstrap_from_gateway_corrupt_bundle_fails_loud(
 
     monkeypatch.setattr(memory_repo, "_download_pool_snapshot", _junk_download)
 
-    import shared.machine as _machine
+    import shared.cluster.machine as _machine
 
     monkeypatch.setattr(_machine, "gateway_api_base", lambda: "http://gw.example:8000")
     set_identity(role="agent-runner", name="test-host-2")

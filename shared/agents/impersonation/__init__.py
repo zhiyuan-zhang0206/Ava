@@ -39,6 +39,7 @@ from shared.agents.impersonation._impersonation_store import (
 )
 from shared.agents.impersonation.impersonation_history import append, capture_pending, set_actor
 from shared.caller_identity import CallerIdentity
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.config.service_read import current_field_values
 from shared.db import connect, publish_inbound_wake
@@ -46,7 +47,6 @@ from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
 from shared.live_events import Cancelled
 from shared.log import logger
-from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 
 

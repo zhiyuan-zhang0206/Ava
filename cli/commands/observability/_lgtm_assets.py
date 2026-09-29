@@ -7,7 +7,7 @@ from typing import cast
 
 import yaml
 
-from shared.lgtm_local import NATIVE_SERVICES
+from shared.telemetry.lgtm_local import NATIVE_SERVICES
 
 _NATIVE_CONSTANTS = NATIVE_SERVICES
 

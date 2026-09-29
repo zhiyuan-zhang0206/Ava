@@ -157,7 +157,7 @@ def _current(home: Path) -> dict[str, str] | None:
 
 
 def _status_body(*, operation: str | None) -> dict[str, Any]:
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
     from shared.paths import ava_home
 
     home = ava_home()

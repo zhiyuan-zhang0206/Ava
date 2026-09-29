@@ -19,7 +19,7 @@ from shared.agents import (
     ResurrectBudgetExhausted,
     ResurrectRefused,
 )
-from shared.audit_events import prepare_event_log
+from shared.cluster.machine import machine_name
 from shared.config import field_alias, get_field, settings
 from shared.db import fetch_one, publish_inbound_wake
 from shared.db_transaction import write_transaction
@@ -30,8 +30,8 @@ from shared.lifecycle_acceptance import (
 )
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
-from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
+from shared.telemetry.audit_events import prepare_event_log
 
 # The exact retained hosted identity; or, all three NULL, a never-admitted row
 # whose fresh-INSERT birth marker is still unconsumed, or a row whose unowned
@@ -166,7 +166,7 @@ def _auto_resurrect_max_attempts() -> int:
     local hosted resurrection still runs this transaction in-process. The
     cluster `.env` remains the configuration authority in that profile.
     """
-    from shared.runtime_config import read_env_aliases
+    from shared.host.env.runtime_config import read_env_aliases
 
     raw = read_env_aliases().get(field_alias("auto_resurrect_max_attempts"))
     if raw is not None:

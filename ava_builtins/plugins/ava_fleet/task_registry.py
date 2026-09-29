@@ -219,7 +219,7 @@ def _insert_task(
     if row is None:
         raise RuntimeError("expected exactly one row: task insert")
     task = _row_to_task(row)
-    from shared.audit_events import insert_event_log  # deferred (task #3816)
+    from shared.telemetry.audit_events import insert_event_log  # deferred (task #3816)
 
     insert_event_log(
         event_type="task_create",

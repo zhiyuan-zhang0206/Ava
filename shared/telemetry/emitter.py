@@ -40,9 +40,9 @@ from typing import Any, Literal
 
 from shared.events.contract import EVENTS, lineage_event_names
 from shared.events.contract import category_for_kind as registry_category
-from shared.observability import cluster_label
 from shared.paths import logs_dir
 from shared.telemetry.emitter_sync import synchronize
+from shared.telemetry.observability import cluster_label
 from shared.telemetry.serialization import event_line, event_line_digest, event_payload
 
 __all__ = [
@@ -215,8 +215,8 @@ def _resolve_machine() -> str:
     hostname — it would pin the process's whole telemetry lifetime to a
     wrong dimension with zero trace (audit 2026-08-08 P2: a transient early
     failure split one machine's metric series into two)."""
+    from shared.cluster.machine import MachineNameMissing, machine_name
     from shared.log import logger
-    from shared.machine import MachineNameMissing, machine_name
 
     try:
         return machine_name()
@@ -230,7 +230,7 @@ def _resolve_machine() -> str:
 # ── pipeline state (per-process singleton) ────────────────────────────────────
 
 # The emitter pipeline; None until first init/emit. Dict mutation avoids ruff
-# PLW0603 the same way shared/trace.py does.
+# PLW0603 the same way shared/telemetry/tracing.py does.
 _state: dict[str, Any] = {
     "pipeline": None,
     "process": "unknown",
@@ -385,7 +385,7 @@ def _write_batch(events: list[Event]) -> None:
         return
     _append_jsonl(events)
     try:
-        from shared.metrics.observed_metrics import project_events
+        from shared.telemetry.metrics.observed_metrics import project_events
 
         project_events(events)
     except Exception as exc:
@@ -786,7 +786,7 @@ def _drain_on_exit() -> None:
     pipeline.flush()
     pipeline.stop()
     with contextlib.suppress(Exception):
-        from shared.metrics.observed_metrics import close_projection
+        from shared.telemetry.metrics.observed_metrics import close_projection
 
         close_projection()
     with contextlib.suppress(Exception):

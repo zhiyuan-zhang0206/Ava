@@ -25,8 +25,8 @@ from ops.service_spec import DbAccess
 from shared.cluster.authority.model import Generation
 from shared.cluster.registry import ClusterRecord
 from shared.config import settings
+from shared.host.net.url_secret import url_host
 from shared.log import logger
-from shared.url_secret import url_host
 
 
 def ensure_gateway_data_plane() -> int:
@@ -320,8 +320,8 @@ def db_delivery(cls: DbAccess) -> dict[str, str]:
     remote-managed gateway plane delivers nothing here: its agents keep the
     provider projection.
     """
-    from shared.bootstrap import config_source_is_local
     from shared.cluster.authority import GENERATION_ENV, write_grant
+    from shared.host.env.bootstrap import config_source_is_local
     from shared.paths import ava_home
 
     if not config_source_is_local():
@@ -346,8 +346,8 @@ def api_delivery(cls: DbAccess) -> dict[str, str]:
     A remote-managed plane keeps no write generations and delivers nothing; its
     gateway-local services present the human secret.
     """
-    from shared.bootstrap import config_source_is_local
     from shared.cluster.authority.api import API_TOKEN_ENV, api_token
+    from shared.host.env.bootstrap import config_source_is_local
     from shared.paths import ava_home
 
     if not config_source_is_local():
@@ -386,7 +386,7 @@ def prove_generation_logins(home: Path, generation: Generation, endpoint: str) -
     (the pooler when enabled: SCRAM client auth plus the pass-through hop)."""
     from cli.commands._health_preflight import probe_postgres
     from shared.cluster.authority import read_secret
-    from shared.url_secret import url_with_userinfo
+    from shared.host.net.url_secret import url_with_userinfo
 
     secret = read_secret(home, generation)
     for role in (secret.roles.gateway, secret.roles.runner):

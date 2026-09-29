@@ -19,9 +19,9 @@ _RUNNER_URL = "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
 
 
 def test_projects_owner_url_to_runner_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", Mock(return_value=True))
+    monkeypatch.setattr("shared.host.env.bootstrap.config_source_is_local", Mock(return_value=True))
     monkeypatch.setattr(
-        "shared.runtime_config.read_env_aliases",
+        "shared.host.env.runtime_config.read_env_aliases",
         Mock(return_value={"AVA_DB_URL": _OWNER_URL, "AVA_RUNNER_DB_PASSWORD": "runner-password"}),
     )
 
@@ -29,9 +29,10 @@ def test_projects_owner_url_to_runner_identity(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_missing_runner_password_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", Mock(return_value=True))
+    monkeypatch.setattr("shared.host.env.bootstrap.config_source_is_local", Mock(return_value=True))
     monkeypatch.setattr(
-        "shared.runtime_config.read_env_aliases", Mock(return_value={"AVA_DB_URL": _OWNER_URL})
+        "shared.host.env.runtime_config.read_env_aliases",
+        Mock(return_value={"AVA_DB_URL": _OWNER_URL}),
     )
 
     with pytest.raises(RuntimeError, match="AVA_RUNNER_DB_PASSWORD is missing"):
@@ -41,14 +42,14 @@ def test_missing_runner_password_fails_loudly(monkeypatch: pytest.MonkeyPatch) -
 def test_gateway_url_and_password_come_from_one_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", Mock(return_value=True))
+    monkeypatch.setattr("shared.host.env.bootstrap.config_source_is_local", Mock(return_value=True))
     snapshot = Mock(
         return_value={
             "AVA_DB_URL": "postgresql://ava:new-owner@db-new:6000/new-database",
             "AVA_RUNNER_DB_PASSWORD": "new-runner",
         }
     )
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", snapshot)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", snapshot)
     assert derive.runner_db_url_projection() == (
         "postgresql://ava_runner:new-runner@db-new:6000/new-database"
     )
@@ -56,9 +57,9 @@ def test_gateway_url_and_password_come_from_one_snapshot(
 
 
 def test_missing_snapshot_url_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", Mock(return_value=True))
+    monkeypatch.setattr("shared.host.env.bootstrap.config_source_is_local", Mock(return_value=True))
     monkeypatch.setattr(
-        "shared.runtime_config.read_env_aliases",
+        "shared.host.env.runtime_config.read_env_aliases",
         Mock(return_value={"AVA_RUNNER_DB_PASSWORD": "new-runner"}),
     )
     with pytest.raises(RuntimeError, match="AVA_DB_URL is missing"):
@@ -68,9 +69,11 @@ def test_missing_snapshot_url_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_pure_runner_never_projects_a_login(monkeypatch: pytest.MonkeyPatch) -> None:
     """A pure agent-runner has no provider credential and no bootstrap-served
     login to pass through: the projection refuses without reading anything."""
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", Mock(return_value=False))
+    monkeypatch.setattr(
+        "shared.host.env.bootstrap.config_source_is_local", Mock(return_value=False)
+    )
     snapshot = Mock(side_effect=AssertionError("must not read local credentials"))
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", snapshot)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", snapshot)
     with pytest.raises(RuntimeError, match="installed unit capability"):
         derive.runner_db_url_projection()
     snapshot.assert_not_called()

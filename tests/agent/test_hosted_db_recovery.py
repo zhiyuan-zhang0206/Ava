@@ -28,13 +28,13 @@ from services.agent_host import db_recovery
 from services.agent_host.host import AgentHost
 from shared import hosted_db_wait, maintenance, maintenance_cohort, pause_owner
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.context import AvaContext
 from shared.db import insert_inbound_message
 from shared.hosted_db_wait import database_wait_snapshot
 from shared.hosted_force import install_hosted_force
 from shared.incarnation_resources import ResourceBirth
-from shared.machine import machine_name
 from shared.maintenance_state import MaintenanceHold
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity

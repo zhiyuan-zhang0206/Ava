@@ -15,7 +15,7 @@ from pydantic import (
     NonNegativeInt,
 )
 
-from shared.loki_index_labels import retention_hours
+from shared.telemetry.loki_index_labels import retention_hours
 
 
 class StatsWindowHours(IntEnum):

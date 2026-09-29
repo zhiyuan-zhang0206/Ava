@@ -103,7 +103,7 @@ def test_browser_rotation_and_bearer_share_admin_retry_namespace(
     agent_id: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.cluster_auth import cookie_name
+    from shared.cluster.auth import cookie_name
     from shared.config import settings
 
     secret = "principal-rotation-test-secret"  # noqa: S105 — isolated test credential

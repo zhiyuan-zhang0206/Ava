@@ -13,7 +13,7 @@ from shared.agents.messages.delivery_outbox import (
 )
 from shared.api_contracts import contracts
 from shared.api_contracts.contracts import Idempotency
-from shared.cluster_auth import bearer_header, client_bearer
+from shared.cluster.auth import bearer_header, client_bearer
 from shared.config import settings
 
 # Singleton: process-wide shared connection pool. Connect/read timeout is a
@@ -34,7 +34,7 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
     `_client` directly (e.g. a FastAPI TestClient)."""
     import httpx
 
-    from shared.http_dial import transport_for_url
+    from shared.host.net.http_dial import transport_for_url
 
     global _client  # noqa: PLW0603 — lazy module singleton
     if _client is None:
@@ -52,7 +52,7 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
             timeout=httpx.Timeout(settings.gateway.gateway_client_http_timeout_seconds),
             headers=headers,
             # Pins the dial when GATEWAY_URL's host is an IPv4 literal (e.g. a
-            # private-network address) — see shared/http_dial.py. None (a hostname
+            # private-network address) — see shared/host/net/http_dial.py. None (a hostname
             # target) is httpx's own default transport, unchanged.
             transport=transport_for_url(ava.GATEWAY_URL),
         )

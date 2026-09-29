@@ -30,11 +30,11 @@ from shared.cluster import (
     provision_database,
 )
 from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
+from shared.host.net.url_secret import url_with_userinfo
 from shared.managed_writer_publication import LegacyProtocolZero, publication_admission
-from shared.metrics.observed_metrics import MetricObservation, write_observations
 from shared.pg_admin import owner_conninfo
 from shared.pg_tools import throwaway_postgres
-from shared.url_secret import url_with_userinfo
+from shared.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 
 _RUNNER_PW = "runner-pw-fixture"
 _RUNNER_LOGIN = "ava_g0_runner"

@@ -38,7 +38,11 @@ from cli.commands.cluster.health_alerts import (
     executor_lost,
     notify_owner,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
 )
-from shared.loki_index_labels import LokiReadEra, event_stream_selector, split_index_label_window
+from shared.telemetry.loki_index_labels import (
+    LokiReadEra,
+    event_stream_selector,
+    split_index_label_window,
+)
 
 # Default thresholds. Overridable via CLI flags; the cron wrapper's
 # defaults are set at registration time.
@@ -68,8 +72,8 @@ def _gateway_liveness() -> bool:
     Uses the gateway's own `/api/health` (or equivalent). On a single-box
     host, this is `http://localhost:<port>/api/health`; the URL is resolved
     from Settings."""
-    from shared.http_dial import get as dial_get
-    from shared.machine import gateway_api_base
+    from shared.cluster.machine import gateway_api_base
+    from shared.host.net.http_dial import get as dial_get
 
     base = gateway_api_base()
     url = f"{base}/api/health"
@@ -337,7 +341,7 @@ def _disk_usage_fraction() -> float | None:
     """Used fraction of the data volume, statvfs-family, or None when unmeasurable.
 
     Uses ``shutil.disk_usage`` — the same measurement the trace disk-watermark
-    guard (``AVA_TRACE_DISK_WATERMARK``, ``shared/trace_mirror.py``) and the
+    guard (``AVA_TRACE_DISK_WATERMARK``, ``shared/telemetry/trace_mirror.py``) and the
     macmini resource watcher make, so the probe fires at the line the owner is
     already told about. df(1) was the original measure, but its offset to the
     statvfs family is unstable in both directions (2026-08-24: ~0.8 points

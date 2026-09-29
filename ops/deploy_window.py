@@ -177,9 +177,9 @@ async def _probe_machines(machines: list[tuple[str, str | None]]) -> dict[str, d
 def _machines() -> list[tuple[str, str | None]]:
     """Every registered machine, or an empty list when the table cannot be read."""
     try:
-        import shared.machines
+        import shared.cluster.machines
 
-        return shared.machines.list_all()
+        return shared.cluster.machines.list_all()
     except Exception as exc:
         logger.warning("[deploy-window] could not list machines: {exc!r}", exc=exc)
         return []
@@ -197,7 +197,7 @@ def _read_excluded() -> dict[str, tuple[str, datetime | None]]:
     never less.
     """
     try:
-        from shared.machine_exclusions import list_excluded_machines
+        from shared.cluster.machine_exclusions import list_excluded_machines
 
         return {name: (reason, since) for name, reason, since in list_excluded_machines()}
     except Exception as exc:
@@ -334,7 +334,7 @@ def settle_hosts_converged(hosts: list[str]) -> bool:
     whether still converging or provably stalled
     (`cli/commands/update.py:_still_converging`) — and the release re-probes exactly
     those, read back from the lease's recorded waiting set. Asking a wider question is not a
-    conservative choice, it is a broken one: `shared.machines.list_all()` is every row
+    conservative choice, it is a broken one: `shared.cluster.machines.list_all()` is every row
     that ever registered — no `stopped_at`, capability or liveness filter — so one
     intentionally-stopped host, one decommissioned row, or one gateway-only unit (which
     runs no `ops` daemon at all and so can never answer a `status_probe`) would pin

@@ -142,7 +142,7 @@ class ResolvedConfigView(BaseModel):
 class ConfigAuditView(BaseModel):
     """GET /api/config/audit response — merged `.env`-write audit records, newest first.
 
-    Each record is the raw audit-JSONL entry (`shared/env_audit.py`, record v2:
+    Each record is the raw audit-JSONL entry (`shared/host/env/audit.py`, record v2:
     ts / site / pid / process / cmdline / actor / trace_id / keys_written /
     keys_removed / digest_after / changed), tagged with its `machine`. Values were
     redacted when the record was written (non-sensitive fields only); records from

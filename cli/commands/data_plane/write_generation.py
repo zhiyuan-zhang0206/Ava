@@ -152,7 +152,7 @@ def admit_write_generation(authority: OperationAuthority) -> Generation:
         require_ledger,
         verify_generation,
     )
-    from shared.url_secret import url_with_port
+    from shared.host.net.url_secret import url_with_port
 
     home, record, database = _write_authority()
     with admin_session(record, database) as conn:

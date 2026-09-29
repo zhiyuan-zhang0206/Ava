@@ -33,11 +33,11 @@ from gateway.routers._webhook_auth import authenticate_webhook
 from ops.service_spec import ServiceSpec, api_access
 from services.agent_ops import _boot as ops_boot
 from shared.cluster import authority
+from shared.cluster.auth import bearer_header, client_bearer, cookie_name
 from shared.cluster.authority import api, ledger, unit
-from shared.cluster_auth import bearer_header, client_bearer, cookie_name
+from shared.cluster.machine import MachineRole, gateway_auth_headers
 from shared.config import settings
-from shared.daemon_http import start_daemon_http
-from shared.machine import MachineRole, gateway_auth_headers
+from shared.daemon.http_transport import start_daemon_http
 
 _HUMAN = "human-" + "h" * 40
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
@@ -271,7 +271,7 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(gateway: Path) 
     runner-minted session leaves the list when the fence revokes its generation,
     and an id without a mint (the pre-mint format) never appears."""
     from gateway.session_store import create_session
-    from shared.cluster_auth import new_session_id
+    from shared.cluster.auth import new_session_id
 
     runner = _tokens(gateway).api.runner
     with TestClient(config_app()) as client:
@@ -297,7 +297,7 @@ def test_a_machine_token_cannot_choose_the_human_secret(
 ) -> None:
     """A runner token authenticates the administrator, but it must not turn a
     generation-bound admission into a human bearer of its choosing."""
-    from shared import runtime_config
+    from shared.host.env import runtime_config
 
     store = tmp_path / "config-store"
     store.mkdir()
@@ -319,7 +319,7 @@ def test_a_machine_token_cannot_open_the_mcp_endpoint(
 ) -> None:
     """Switching `/mcp` on decides whether MCP client tokens, which outlive
     every generation, authenticate at all: no config write may choose it."""
-    from shared import runtime_config
+    from shared.host.env import runtime_config
 
     store = tmp_path / "config-store"
     store.mkdir()
@@ -671,7 +671,7 @@ def test_launch_delivers_the_class_token_only_while_authenticated(
     gateway: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tokens = _tokens(gateway).api
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: True)
+    monkeypatch.setattr("shared.host.env.bootstrap.config_source_is_local", lambda: True)
     assert bringup.api_delivery("gateway") == {api.API_TOKEN_ENV: tokens.gateway}
     assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: tokens.runner}
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
@@ -681,7 +681,7 @@ def test_launch_delivers_the_class_token_only_while_authenticated(
 def test_a_pure_runner_launch_delivers_its_capability_token(
     gateway: Path, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: False)
+    monkeypatch.setattr("shared.host.env.bootstrap.config_source_is_local", lambda: False)
     assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: _tokens(gateway).api.runner}
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
         bringup.api_delivery("gateway")

@@ -42,7 +42,7 @@ Everything hangs off these. Get one, and the rest follows.
   the checkpoint the turn committed — `checkpoints.metadata->>'trace_id'`. The
   reverse link is the root span's `ava.checkpoint_id` attribute.
 
-**One trace is exactly one turn.** The root span (`shared/trace.py:turn_span`)
+**One trace is exactly one turn.** The root span (`shared/telemetry/tracing.py:turn_span`)
 wraps one `graph.ainvoke`, and the runloop invokes the graph once per turn —
 the claim node ends the invocation at the turn boundary, so the trace exports
 when the turn ends. The root keeps the name `ava-agent-{agent_id}` and the
@@ -58,7 +58,7 @@ The checkpoint stamp is deliberately failure-tolerant
 `trace_id`**. A missing link is one lost correlation, not a broken system.
 
 Spans are **metadata-only** (trace v2): prompts and completions are stripped at
-record time (`shared/trace.py`). Content comes back from the checkpoint, on
+record time (`shared/telemetry/tracing.py`). Content comes back from the checkpoint, on
 demand, by trace id — never from Tempo.
 
 ## The path
@@ -118,7 +118,7 @@ and the verified query set: [references/spans.md](references/spans.md).
 ## Where this skill does not apply
 
 - Fleet-wide trends and dashboards — those are pre-shaped questions; use the
-  core-metrics dashboards (`shared/metrics/core/core_metrics_observability.py`) and the
+  core-metrics dashboards (`shared/telemetry/metrics/core/observability.py`) and the
   alert rules, not run-level correlation.
 - Deploying or operating the LGTM stack — `deploy/lgtm/README.md`, `ava lgtm`.
 - Computer-use traces (`/api/computer/traces`) — a different subsystem.

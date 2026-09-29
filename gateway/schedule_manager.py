@@ -59,7 +59,7 @@ from psycopg_pool import ConnectionPool
 from shared import telemetry
 from shared.cluster import session_name
 from shared.config import settings
-from shared.daemon.schedules.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
+from shared.daemon.schedules.timing import SCHEDULE_STALL_ALERT_AFTER_S
 from shared.db_transaction import write_transaction
 from shared.paths import ava_home, prod_service_checkout_error
 from shared.session_backend import get_shell_backend

@@ -14,8 +14,8 @@ from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation import impersonation_sessions as sessions
 from shared.agents.impersonation.impersonation_events import consume_events
+from shared.cluster.machine import machine_name
 from shared.db import create_agent, insert_inbound_message
-from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 

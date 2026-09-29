@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "`$AVA_HOME` Layout"
-description: '`shared/paths.py` resolves every per-unit path from `$AVA_HOME`. One home = one unit; co-located units keep separate state because their homes differ. Helpers mkdir on first access, so calling one means the directory is ready.'
+description: '`shared/paths/__init__.py` resolves every per-unit path from `$AVA_HOME`. One home = one unit; co-located units keep separate state because their homes differ. Helpers mkdir on first access, so calling one means the directory is ready.'
 tags:
 - shared
 - library
@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`shared/paths.py` is the single-point resolver for every per-unit path. The root
+`shared/paths/__init__.py` is the single-point resolver for every per-unit path. The root
 comes from `settings.general.ava_home` (env `AVA_HOME`, default `~/.ava`); each
 helper `mkdir(parents=True, exist_ok=True)` on first access, so calling one
 means "this directory is ready and writable".
@@ -64,7 +64,7 @@ crosses one admission boundary for the shared kernel PTY pool.
 
 - **`.env` / `installed.json` lock discipline** (sibling file locks at every door, leaves stay leaves, atomic save vs lost update): [[shared/paths/lock-discipline.ava.okf.md]].
 - The home is resolved **checkout-anchored** by
-  `shared/dotenv_boot.py:resolve_ava_home`, never from cwd and never from a
+  `shared/host/env/dotenv_boot.py:resolve_ava_home`, never from cwd and never from a
   flag: `AVA_HOME` env > the prod source checkout → `~/.ava` > the checkout's
   `.ava_home` pointer > *unanchored*: a checkout claiming no cluster boots bare
   on a private per-process scratch home under the system temp dir — never

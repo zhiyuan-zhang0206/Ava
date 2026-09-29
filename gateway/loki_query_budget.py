@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from shared import telemetry
-from shared.loki_index_labels import LOKI_QUERY_CONCURRENCY
-from shared.loki_query_budget import (
+from shared.telemetry.loki_index_labels import LOKI_QUERY_CONCURRENCY
+from shared.telemetry.loki_query_budget import (
     BudgetErrorFactory,
     BudgetMetrics,
     BudgetObservation,

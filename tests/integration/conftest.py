@@ -75,8 +75,8 @@ def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     from gateway.routers import agents as _agents_router
     from ops.ops_lifecycle import launch_agent_op
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared import machines as _machines
-    from shared.machine import machine_name
+    from shared.cluster import machines as _machines
+    from shared.cluster.machine import machine_name
 
     async def _in_process_forward(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return await launch_agent_op(body, app.state.db_pool)

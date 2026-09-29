@@ -23,7 +23,7 @@ from gateway.schemas import PluginStat, PluginStatStatus, StatsDashboard, StatsW
 from shared import plugin_stats, telemetry
 from shared.config import settings
 from shared.events.contract import StatsDashboardStaleReason
-from shared.loki_index_labels import ledger_gap_plan, retention_floor
+from shared.telemetry.loki_index_labels import ledger_gap_plan, retention_floor
 
 _cache: dict[int, tuple[float, StatsDashboard]] = {}
 _cache_lock = threading.Lock()

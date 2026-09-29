@@ -28,15 +28,15 @@ from shared.agents.impersonation_manifest import (
     stage_central_expected_event,
     unbind_local_participant,
 )
-from shared.alerts import upsert_alert
-from shared.audit_events import prepare_event_log
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import create_agent
-from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
-from shared.loki_index_labels import EVENT_STREAM_RETENTION
-from shared.machine import machine_name
+from shared.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
+from shared.telemetry.alerts import upsert_alert
+from shared.telemetry.audit_events import prepare_event_log
+from shared.telemetry.loki_index_labels import EVENT_STREAM_RETENTION
 from tests.impersonation_support import attested_caller
 from tests.shared import test_impersonation_history as history_cases
 

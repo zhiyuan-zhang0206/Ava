@@ -25,9 +25,9 @@ from cli.commands.service_stop import (
 from cli.cutover_hold import resume_refusal, start_refusal
 from ops.agent_pause import _hold, drain, prepare
 from shared import hold_driver, maintenance, maintenance_cohort, pause_owner, start_serving
+from shared.cluster.machine import machine_name, machine_role
 from shared.db import connect
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.machine import machine_name, machine_role
 
 
 def _gateway_last(*, confirmed: bool) -> None:

@@ -220,7 +220,7 @@ def test_current_field_values_coerces_secretstr(monkeypatch: pytest.MonkeyPatch,
     — `.get_secret_value()` consumers crash on a plain str."""
     from pydantic import SecretStr
 
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"anthropic_api_key": "sk-ant-abc"}, set())
@@ -232,7 +232,7 @@ def test_current_field_values_coerces_secretstr(monkeypatch: pytest.MonkeyPatch,
 
 def test_current_field_values_coerces_bool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A bool field written to .env round-trips through the field type unchanged."""
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"trace_enabled": True}, set())
@@ -244,8 +244,8 @@ def test_current_field_values_coerces_bool(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_bootstrap_serves_comma_list_not_repr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A NoDecode comma-list field set in .env reaches an agent as the raw "a,b"
     env text, not a Python list repr (which the agent would split into garbage)."""
-    from shared import runtime_config as rt
-    from shared.envfile import upsert_env
+    from shared.host.env import runtime_config as rt
+    from shared.host.env.dotenv_file import upsert_env
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
@@ -260,7 +260,7 @@ def test_current_field_values_decodes_nodecode_comma_list(
 ):
     """A NoDecode comma-list field reads back as a list (split like the model's
     _split_comma_list validator), not a silently mis-typed raw string."""
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
@@ -277,7 +277,7 @@ def test_current_field_values_decodes_nodecode_comma_list_without_warning(
     "cannot be decoded" warning — it fired on every panel read / agent spawn
     for AVA_IM_DISABLED_ADAPTERS='weixin,feishu' — and a list[float] field must
     come back floats, not a wrong-typed string split."""
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
@@ -302,7 +302,7 @@ def test_current_field_values_decodes_json_array_spelling(
 ):
     """The JSON-array spelling the model validators also accept must decode
     through the panel path too — both spellings, not just the comma list."""
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
@@ -319,7 +319,7 @@ def test_current_field_values_decodes_empty_nodecode_list(
 ):
     """An empty NoDecode list value decodes to [] (nothing disabled), matching
     Settings construction."""
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
@@ -339,7 +339,7 @@ def test_auth_middleware_set_roundtrips_through_env(
     NAME (AUTH_MIDDLEWARE_ENABLED), which a validation_alias-only field never
     listens on — a written value was silently lost and the panel never served
     the file value."""
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"auth_middleware_enabled": False}, set())
@@ -542,7 +542,7 @@ def test_physical_backup_cluster_pinned_fields_are_never_bootstrap_served() -> N
 def test_bootstrap_distributes_a_behavior_knob(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-default agent-behavior knob is now distributed to agent-runners."""
     from shared import config as cfg
-    from shared import runtime_config
+    from shared.host.env import runtime_config
 
     # .env file may carry a stale value from another test; bypass it so the
     # monkeypatched settings value is the only source.
@@ -886,7 +886,7 @@ def test_permissions_helper_serialization_alias_is_the_new_key() -> None:
 
 
 # --- delay-list env field (AVA_IM_SEND_RETRY_DELAYS; AVA_EMBED_RETRY_DELAYS
-# removed in R2-D — the embedder's retry policy is a shared.resilience Policy
+# removed in R2-D — the embedder's retry policy is a shared.host.net.resilience Policy
 # constant now, per design evaluation-record #14) ---
 
 
@@ -1289,7 +1289,7 @@ def test_current_field_values_warns_on_undecodable_env_value(
     the file and the next process start's Settings construction will fail on it,
     so the operator must hear about it at panel-read time (audit round-2
     config.md P2)."""
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
@@ -1309,7 +1309,7 @@ def test_current_field_values_warns_on_bad_nodecode_list_value(
     """A genuinely undecodable NoDecode list value (non-numeric delays) warns
     and falls back to the boot-time value — never a wrong-typed string split
     (the old fallback served ["banana", "apple"] for a list[float] field)."""
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
@@ -1332,8 +1332,8 @@ def test_current_field_values_silently_serves_boot_db_url_for_agent_profile_refu
     launcher-injected runner projection) with NO warning and only a debug
     note; the old path warned on every panel read / agent send, while the
     guard's fail-fast for a MISSING projection is unchanged."""
-    from shared import runtime_config as rt
     from shared.config import data_plane
+    from shared.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
@@ -1361,8 +1361,8 @@ def test_current_field_values_warns_on_bad_db_url_under_agent_profile_conditions
     decode failures — a malformed URL in the SAME agent-profile/default-home
     context still warns and falls back to the boot-time value, and the
     warning must not suggest removing the load-bearing .env line."""
-    from shared import runtime_config as rt
     from shared.config import data_plane
+    from shared.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
@@ -1390,7 +1390,7 @@ def test_current_field_values_isolates_bad_env_from_good_file_value(
     file). The decode payload covers every field, so model_validate never reads
     os.environ — the old retry did, dropped the good file value, and served
     the boot value instead."""
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)

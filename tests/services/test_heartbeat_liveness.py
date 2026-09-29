@@ -404,7 +404,7 @@ class TestMachineAlertEdges:
     """Machine offline/online edges write alerts rows + IM (Task #1224).
 
     The liveness pass runs the shared alerts core directly (source=
-    'machine-probe'); the IM fan-out is mocked at shared.alerts.notify_im.
+    'machine-probe'); the IM fan-out is mocked at shared.telemetry.alerts.notify_im.
     """
 
     async def _run(self, pool: ConnectionPool, probe: FakeProbe) -> None:
@@ -419,7 +419,7 @@ class TestMachineAlertEdges:
             return cur.fetchall()
 
     def _mock_notify(self, monkeypatch: pytest.MonkeyPatch, func: Callable[[str], bool]) -> None:
-        monkeypatch.setattr("shared.alerts.notify_im", func)
+        monkeypatch.setattr("shared.telemetry.alerts.notify_im", func)
 
     def test_recent_failure_tracks_episode_without_alerting(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
@@ -569,7 +569,7 @@ class TestMachineAlertEdges:
     def test_recovery_resolves_preconvention_and_stable_fingerprint_rows(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from shared.alerts import fingerprint
+        from shared.telemetry.alerts import fingerprint
 
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=3)

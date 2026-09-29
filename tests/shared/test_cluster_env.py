@@ -2,8 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from shared import cluster, env_registry
-from shared.port_block import PORT_OFFSETS
+from shared import cluster
+from shared.host.env import registry
+from shared.host.env.port_block import PORT_OFFSETS
 
 
 def _rec(tmp_path: Path):
@@ -134,7 +135,7 @@ def test_derived_env_keys_in_sync(tmp_path: Path):
         redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
         redis_password="runtime-value",  # noqa: S106 — isolated test credential
     )
-    assert set(env) == env_registry.derived_env_keys()
+    assert set(env) == registry.derived_env_keys()
     assert "AVA_PGBOUNCER_PORT" not in env
 
 
@@ -229,7 +230,7 @@ def test_url_host_reads_host_with_loopback_fallback():
     """`url_host` — the one host-from-URL read the A5 dial sites share: hostname
     when present, 127.0.0.1 when the URL carries none (a defensive floor for a
     hand-written URL; every generated data-plane URL always names a host)."""
-    from shared.url_secret import url_host
+    from shared.host.net.url_secret import url_host
 
     assert url_host("postgresql://x@127.0.0.1:5433/postgres") == "127.0.0.1"
     assert url_host("redis://ava:p@10.0.0.7:6380/0") == "10.0.0.7"
@@ -243,15 +244,15 @@ def test_wsl_default_health_port_base_cannot_collide_with_a_birthed_cluster():
     WSL2 box (`cluster.allocate_ports`, which scans [BLOCK_START, BLOCK_MAX))
     could eventually claim the exact base a WSL2 unit auto-defaulted to,
     recreating the collision this constant exists to avoid."""
-    from shared import port_block
+    from shared.host.env import port_block
 
-    assert env_registry.WSL_DEFAULT_HEALTH_PORT_BASE >= port_block.BLOCK_MAX
+    assert registry.WSL_DEFAULT_HEALTH_PORT_BASE >= port_block.BLOCK_MAX
 
 
 def test_wsl_default_health_port_base_derives_a_legal_block():
     """The reserved base must itself produce ports inside 1024-65535 — asserted
     directly rather than assumed, since `health_port_env` raises otherwise."""
-    ports = env_registry.health_port_env(env_registry.WSL_DEFAULT_HEALTH_PORT_BASE)
+    ports = registry.health_port_env(registry.WSL_DEFAULT_HEALTH_PORT_BASE)
     assert all(1024 <= int(p) <= 65535 for p in ports.values())
 
 
@@ -261,12 +262,12 @@ def test_health_port_env_derives_the_block_from_a_base():
 
     Pinned against `derive_env` on a record with the same base, so the operator's
     hand-set unit and an installed cluster can never diverge on layout."""
-    from shared.port_block import PORT_OFFSETS
+    from shared.host.env.port_block import PORT_OFFSETS
 
-    derived = env_registry.health_port_env(18000)
+    derived = registry.health_port_env(18000)
     assert derived == {
         var: str(18000 + PORT_OFFSETS[svc])
-        for svc, var in env_registry.health_port_env_aliases().items()
+        for svc, var in registry.health_port_env_aliases().items()
     }
 
 
@@ -285,7 +286,7 @@ def test_health_port_env_matches_derive_env_for_the_same_base(tmp_path: Path):
         redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
         redis_password="runtime-value",  # noqa: S106 — isolated test credential
     )
-    hand_set = env_registry.health_port_env(18000)
+    hand_set = registry.health_port_env(18000)
     assert {k: installed[k] for k in hand_set} == hand_set
 
 
@@ -295,7 +296,7 @@ def test_health_port_env_refuses_a_base_that_overflows_the_port_range():
     import pytest
 
     with pytest.raises(ValueError, match="outside 1024-65535"):
-        env_registry.health_port_env(65530)
+        registry.health_port_env(65530)
 
 
 # ── S4 isolation: health-port tables single-sourced + late-slot fallback ──
@@ -311,23 +312,23 @@ def test_health_port_tables_in_sync():
     The tables are now derived from PORT_OFFSETS + _HEALTH_PORT_ENV rather than
     hand-maintained; this test pins the derivation so a future hand edit is a
     test failure, not a silent drift."""
-    from shared import daemon_health
-    from shared.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
+    from shared.daemon import health
+    from shared.host.env.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
 
-    svcs = set(env_registry.health_port_env_aliases())
-    assert set(daemon_health._HEALTH_PORT_OVERRIDES) == svcs
-    assert set(daemon_health.DEFAULT_PORTS) == svcs
+    svcs = set(registry.health_port_env_aliases())
+    assert set(health._HEALTH_PORT_OVERRIDES) == svcs
+    assert set(health.DEFAULT_PORTS) == svcs
     # every health daemon lives in the block table (offsets 16/17 for the two
     # late daemons), so `--health-port-base` / derive / preflight all move it
     assert svcs <= set(PORT_OFFSETS)
     # the legacy fallback is the LEGACY_AVA_PORTS subset, by construction
-    assert {svc: LEGACY_AVA_PORTS[svc] for svc in svcs} == daemon_health.DEFAULT_PORTS
+    assert {svc: LEGACY_AVA_PORTS[svc] for svc in svcs} == health.DEFAULT_PORTS
     # env vars follow the AVA_<NAME>_HEALTH_PORT shape — a rename elsewhere
     # (settings alias, dotenv_boot force set) breaks this loudly
-    for svc, var in env_registry.health_port_env_aliases().items():
+    for svc, var in registry.health_port_env_aliases().items():
         assert var == f"AVA_{svc.upper()}_HEALTH_PORT", f"{svc} -> {var}"
     # every health var is part of the derive surface (subprocess strip + force)
-    assert set(env_registry.health_port_env_aliases().values()) <= env_registry.derived_env_keys()
+    assert set(registry.health_port_env_aliases().values()) <= registry.derived_env_keys()
 
 
 def test_allocate_ports_skips_blocks_overlapping_existing_records(
@@ -344,7 +345,7 @@ def test_allocate_ports_skips_blocks_overlapping_existing_records(
     record, so a block growth should force someone to re-check allocation
     rather than slide past a derived assertion."""
     from shared import cluster as cl
-    from shared.port_block import BLOCK_SIZE, BLOCK_START
+    from shared.host.env.port_block import BLOCK_SIZE, BLOCK_START
 
     monkeypatch.setattr(cl, "port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType]
 

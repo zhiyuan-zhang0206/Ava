@@ -21,8 +21,8 @@ from typing import NamedTuple
 
 from cli.commands.converge.spec import ConvergeCtx
 from shared.config import settings
-from shared.netutil import is_loopback_host
-from shared.url_secret import url_with_host
+from shared.host.net.predicates import is_loopback_host
+from shared.host.net.url_secret import url_with_host
 
 logger = logging.getLogger("cli.converge.redis_bridge")
 
@@ -60,7 +60,7 @@ def _bridge_config(home: Path) -> RedisBridgeConfig | None:
         return None
 
     from shared.cluster import get_record, record_redis_port
-    from shared.machine import reachable_host
+    from shared.cluster.machine import reachable_host
 
     listen_host = reachable_host()
     if is_loopback_host(listen_host):

@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from shared import config, dotenv_boot
+from shared import config
+from shared.host.env import dotenv_boot
 
 _IDENTITY_LINES = [
     f"AVA_DB_URL={os.environ['AVA_DB_URL']}",
@@ -33,7 +34,7 @@ def _restore_authority_env() -> Iterator[None]:
     """`_enforce_cluster_env_authority` mutates os.environ directly (pop /
     force-assign) — snapshot the keys it touches and restore them after each
     test (same fixture as test_dotenv_boot.py)."""
-    from shared.env_registry import (
+    from shared.host.env.registry import (
         agent_runner_cluster_aliases,
         cluster_scope_aliases,
         env_identity_keys,

@@ -179,7 +179,7 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
     newer = _write_skill(tmp_path / "src2" / "edit-demo", "edit-demo", body="Version two.")
     with as_machine(home_a):
         from shared import db as shared_db
-        from shared.machine import machine_name
+        from shared.cluster.machine import machine_name
 
         reg.register_tree(
             shared_db.pool(),

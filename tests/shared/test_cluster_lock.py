@@ -508,7 +508,7 @@ def test_self_holder_is_the_format_the_liveness_probe_parses() -> None:
     """One builder, because `ops.ops_cluster._lock_holder_is_live` parses it to decide
     whether `ava cluster recover` may break a hold. It is also how the Phase-B poll
     re-finds its own lease without the holder being threaded down four frames."""
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     holder = self_holder()
     machine, sep, pid_str = holder.partition(":pid")
@@ -523,7 +523,7 @@ def test_holder_process_gone_only_on_positive_local_death() -> None:
     holder, an operator-chosen (unparseable) name, and a live process all read as
     live — a caller that destroys state on this reading may only ever destroy a
     claim whose owner is definitively gone."""
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     assert holder_process_gone("elsewhere:pid1") is False
     assert holder_process_gone("operator-chosen-campaign") is False
@@ -536,7 +536,7 @@ def test_holder_process_gone_reads_a_recycled_pid_as_gone() -> None:
     after the acquire cannot be the holder (the recycled-pid bound is shared with
     `ops.ops_cluster._lock_holder_is_live`, so manual and automatic recovery can
     never disagree)."""
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     holder = f"{machine_name()}:pid{os.getpid()}"
     assert holder_process_gone(holder, held_for_s=10**9) is True

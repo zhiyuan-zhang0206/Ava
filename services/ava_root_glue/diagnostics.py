@@ -17,7 +17,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 
 from services.ava_root.health import HealthMonitor, ProbeRunner
-from shared.daemon_health import DaemonProbe, ProbeVerdict
+from shared.daemon.health import DaemonProbe, ProbeVerdict
 from shared.paths import ava_home
 
 _log = logging.getLogger(__name__)

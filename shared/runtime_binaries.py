@@ -34,8 +34,8 @@ import urllib.request
 from pathlib import Path
 
 from shared.config import settings
+from shared.host.net.resilience import Policy, retry
 from shared.log import logger
-from shared.resilience import Policy, retry
 
 # Pinned Postgres distribution. A major-version bump is an expand step (a new
 # version dir beside the old + re-initdb / pg_upgrade), never an in-place swap —

@@ -12,7 +12,7 @@ import pytest
 from cli.commands.cluster import registry as lifecycle
 from shared import cluster
 from shared.cluster.ports import ClusterPorts
-from shared.port_block import PORT_OFFSETS
+from shared.host.env.port_block import PORT_OFFSETS
 
 
 @pytest.fixture

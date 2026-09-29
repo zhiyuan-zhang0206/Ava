@@ -300,7 +300,7 @@ class ManifestEntry:
     the executables ALF must allow; every one is written as a glob because every
     Ava-managed path is version-stamped (`Cellar/pgbouncer/1.25.1/`,
     `runtime/pg/17.4.0/`, `uv/python/cpython-3.12.12-.../`). ``machine`` filters
-    the entry to one machine (``shared.machine.machine_name``, e.g. "my-mac");
+    the entry to one machine (``shared.cluster.machine.machine_name``, e.g. "my-mac");
     None applies to every macOS host. ``purpose`` is operator-facing context for
     why the binary accepts inbound traffic. The filter exists for user
     applications an operator decided to allow inbound on a specific machine —
@@ -416,7 +416,7 @@ FIREWALL_LEGACY_FAMILY: tuple[str, ...] = ("~/Library/Android/sdk/platform-tools
 def _machine_name() -> str:
     """This host's stable machine identifier; never raises.
 
-    ``shared.machine.machine_name`` (env > ``$AVA_HOME/machine_name``) is the
+    ``shared.cluster.machine.machine_name`` (env > ``$AVA_HOME/machine_name``) is the
     authoritative source. When it is unset the host is not yet a configured Ava
     unit, so fall back to the normalized ComputerName, then the bare hostname —
     a fresh machine can still be matched by an operator who names entries after
@@ -433,7 +433,7 @@ def _machine_name() -> str:
 
 def _ava_machine_name() -> str | None:
     """The configured Ava machine identifier, or None when unset/unreadable."""
-    from shared.machine import MachineNameMissing, machine_name
+    from shared.cluster.machine import MachineNameMissing, machine_name
 
     with contextlib.suppress(ImportError, MachineNameMissing):
         return machine_name()

@@ -8,7 +8,8 @@ import subprocess
 import psutil
 import pytest
 
-from shared import port_preflight, proc
+from shared import proc
+from shared.cluster import port_preflight
 
 
 @pytest.mark.parametrize("failure", ["timeout", "missing", "denied"])

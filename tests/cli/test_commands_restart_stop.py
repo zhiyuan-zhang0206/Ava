@@ -379,7 +379,7 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
     from shared.paths import ava_home
 
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-host")
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-host")
     events: list[str] = []
     calls: list[tuple[str, dict]] = []
 
@@ -405,7 +405,7 @@ def test_cmd_stop_aborted_confirm_does_not_announce(
     announce stamps `machines.stopped_at`, and only the next `ava start` clears
     it — an announce fired before the gate would mark a running host 'stopped'."""
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-host")
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-host")
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")  # pyright: ignore[reportUnknownArgumentType]
     events: list[str] = []
     monkeypatch.setattr("httpx.post", lambda *_a, **_kw: events.append("announce"))  # pyright: ignore[reportUnknownArgumentType]
@@ -423,7 +423,7 @@ def test_cmd_stop_proceeds_when_announce_fails(
     """If the stopping announce can't reach the gateway, `ava stop` logs and still
     tears down — the announce is best-effort, never a blocker."""
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "wsl")
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "wsl")
 
     def _boom(*_a, **_kw):
         raise RuntimeError("connection refused")

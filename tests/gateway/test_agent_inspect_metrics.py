@@ -33,7 +33,7 @@ from gateway.inspect._plugin_metrics import (
     _render_metric_query,
     _translate_macros,
 )
-from shared.plugin_metrics import MetricSpec, registered_metrics
+from shared.telemetry.metrics.plugin_metrics import MetricSpec, registered_metrics
 
 # A valid inspector query — the static-SQL shape (task #180 PR C): the
 # template era (macros + {event_name}/{category}/{{agent_id}} placeholders)
@@ -594,16 +594,16 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     """The loader imports every shipped plugin metrics.py under its plugin
     context plus the core definition modules — plugin metrics first, then
     core, the old snapshot's two-section order. No file involved."""
-    from shared.metrics.core import core_metrics
     from shared.plugin_context import PluginContext
-    from shared.plugin_metrics import clear_registry
+    from shared.telemetry.metrics.core import catalog
+    from shared.telemetry.metrics.plugin_metrics import clear_registry
 
     # Re-run the registrations fresh — earlier tests in the session may have
     # cleared or reloaded the process-global registries (a module already in
     # sys.modules must be reloaded, a fresh one only imported once).
 
     clear_registry()
-    core_metrics.clear_core_registry()
+    catalog.clear_core_registry()
     for name in ("ava_code", "ava_fleet", "ava_memory"):
         mod_name = f"ava_builtins.plugins.{name}.metrics"
         mod = sys.modules.get(mod_name)
@@ -616,7 +616,7 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     # re-imports and re-registers the whole fresh set — the canonical module
     # list, so a definition split (e.g. cost / frontend out of panels /
     # observability, task #3697 S1) cannot silently shrink the registration.
-    for module_name in core_metrics._CORE_DEFINITION_MODULES:
+    for module_name in catalog._CORE_DEFINITION_MODULES:
         sys.modules.pop(module_name, None)
 
     specs = _plugin_metrics._load_plugin_metrics()
@@ -645,7 +645,7 @@ def test_in_process_loader_drops_partial_registrations_and_recovers(
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
     metrics_py = plugin_dir / "metrics.py"
     source = (
-        "from shared.plugin_metrics import MetricSpec, register_metric\n"
+        "from shared.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
         "register_metric(MetricSpec(name='drop_partial_one', title='Drop partial one', "
         "event_name='task_update', category='audit', output=['inspector'], "
         f"query={_STAT_QUERY!r}))\n"

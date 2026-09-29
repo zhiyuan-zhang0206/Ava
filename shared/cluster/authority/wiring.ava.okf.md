@@ -34,7 +34,7 @@ Each generation's API tokens gate the HTTP API and `/ops`:
 
 Bootstrap (`GET /api/bootstrap`) serves the credential-free endpoint and no
 login, and a runner strips any password an older gateway still serves
-(`shared.bootstrap.fetch_bootstrap_config`). `unit` is the only path that
+(`shared.host.env.bootstrap.fetch_bootstrap_config`). `unit` is the only path that
 carries a login to another home:
 
 - **Issue** (gateway, `ava cluster db-authority issue-unit --machine M --home H

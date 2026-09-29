@@ -331,7 +331,7 @@ def _log_task_update(
     new_owner: int | None,
 ) -> None:
     """Record a task_update audit event (category=audit, kind=task_update)."""
-    from shared.audit_events import insert_event_log  # deferred (task #3816)
+    from shared.telemetry.audit_events import insert_event_log  # deferred (task #3816)
 
     insert_event_log(
         event_type="task_update",

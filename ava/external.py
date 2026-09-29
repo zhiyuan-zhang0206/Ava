@@ -10,8 +10,8 @@ from typing import Any, Self
 from uuid import uuid4
 
 from shared.agents import impersonation as control
+from shared.cluster.machine import machine_name
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
-from shared.machine import machine_name
 from shared.native_process.ownership import process_metadata
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
 

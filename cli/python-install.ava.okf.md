@@ -17,7 +17,7 @@ its checkout, including when `PYTHONSAFEPATH` disables implicit cwd imports.
 
 `cli/_python_index.py` reads one host index from uv settings or the pip settings
 uv does not consume. The installer can pass the existing unit `mirror.env`; real
-environment values win. `shared/dotenv_boot.py` preserves the same precedence
+environment values win. `shared/host/env/dotenv_boot.py` preserves the same precedence
 across both uv single-index aliases when a native command loads the unit files
 before calling the installer. Additional indexes remain separate and are rejected
 by the installer. These files are never rewritten by discovery. Operators configure package-manager transport independently of cluster start.

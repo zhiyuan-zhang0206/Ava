@@ -9,7 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from shared.config import settings
-from shared.loki_index_labels import EVENT_STREAM_RETENTION
+from shared.telemetry.loki_index_labels import EVENT_STREAM_RETENTION
 
 _MANIFEST_ALERT_NAMES = (
     "ImpersonationManifestSealSlow",

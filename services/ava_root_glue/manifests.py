@@ -59,7 +59,7 @@ from services.ava_root.manifest import (
     UnitRegistry,
     load_manifests,
 )
-from shared.machine import MachineRole
+from shared.cluster.machine import MachineRole
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

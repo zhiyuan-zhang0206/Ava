@@ -18,7 +18,7 @@ import time
 from ctypes import wintypes
 from typing import Any
 
-from shared.resilience import Policy, retry
+from shared.host.net.resilience import Policy, retry
 
 PIPE_NAME = "ava-permissions-helper"
 

@@ -27,9 +27,9 @@ def post(monkeypatch: pytest.MonkeyPatch) -> Mock:
     response.status_code = 200
     response.json.return_value = {"status": "enqueued"}
     call = Mock(return_value=response)
-    monkeypatch.setattr("shared.http_dial.post", call)
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://localhost")
-    monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr("shared.host.net.http_dial.post", call)
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://localhost")
+    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", dict)
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
     return call
 

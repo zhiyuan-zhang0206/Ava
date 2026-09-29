@@ -23,9 +23,9 @@ from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
+from shared.cluster.machine import machine_name
 from shared.db import insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
-from shared.machine import machine_name
 from tests.agent.test_hosted_db_recovery import _admit, _graph
 from tests.services.test_agent_host import _PendingScanPool
 from tests.services.test_turn_dispatcher import _ScanScheduler, _stale_age

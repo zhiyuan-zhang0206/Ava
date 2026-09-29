@@ -16,7 +16,7 @@ from gateway.app import app
 from gateway.schemas import FleetGraphNode, FleetGraphResponse
 from shared import telemetry
 from shared.agents import AgentStatus
-from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT
+from shared.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 from tests.gateway.loki_fake import FakeLoki
 
 

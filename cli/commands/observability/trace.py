@@ -1,6 +1,6 @@
 """`ava trace ship` — replay the local trace mirror (collector JSONL) to Tempo.
 
-Recording (shared/trace.py) exports spans over OTLP/HTTP to the local OTel
+Recording (shared/telemetry/tracing.py) exports spans over OTLP/HTTP to the local OTel
 Collector sidecar, whose file exporter mirrors them to `$AVA_HOME/traces/`:
 the active `spans.jsonl` plus rotated `spans-<ISO-timestamp>.jsonl` backups,
 each line a standard OTLP/JSON `ExportTraceServiceRequest`. This command is
@@ -44,8 +44,8 @@ from typing import Any
 
 import httpx
 
+from shared.cluster.machine import machine_role
 from shared.config import settings
-from shared.machine import machine_role
 from shared.paths import traces_dir
 
 _WATERMARK_NAME = ".ship-watermark.json"
@@ -82,7 +82,7 @@ def _require_ship_config() -> _ShipTarget:
             gateway_otel_ingress_endpoint,
             telemetry_bearer,
         )
-        from shared.cluster_auth import bearer_header
+        from shared.cluster.auth import bearer_header
 
         token = telemetry_bearer()
         if not token:
@@ -112,7 +112,7 @@ def _file_day(path: Path) -> date:
     the collector's rotated `spans-<ISO-timestamp>(-size|-time)?.jsonl` names
     (`.gz` suffix tolerated), else the file's mtime (the active `spans.jsonl`
     carries no stamp — its content is today's)."""
-    from shared.trace import _mirror_day
+    from shared.telemetry.tracing import _mirror_day
 
     day = _mirror_day(path)
     if day is not None:
@@ -281,7 +281,7 @@ def cmd_trace_ship(*, since: str | None, until: str | None, dry_run: bool) -> in
     lo = datetime.strptime(since, "%Y-%m-%d").date() if since else date.min  # noqa: DTZ007 — date-only
     hi = datetime.strptime(until, "%Y-%m-%d").date() if until else date.max  # noqa: DTZ007 — date-only
 
-    from shared.trace import _mirror_sort_key
+    from shared.telemetry.tracing import _mirror_sort_key
 
     # Active `spans.jsonl` + rotated `spans-<ts>(-size|-time)?.jsonl` + legacy
     # `spans-YYYYMMDD-<pid>.jsonl` + gzipped old segments (`*.jsonl.gz` — the

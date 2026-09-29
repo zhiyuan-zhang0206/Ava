@@ -22,7 +22,7 @@ from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry, UnknownUnitError
 from services.ava_root.probes import ProbeRegistry
 from services.ava_root.supervisor import Supervisor
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 from shared.native_process.ownership import OwnedProcess
 
 

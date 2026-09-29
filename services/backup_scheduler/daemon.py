@@ -29,10 +29,10 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 from services.pitr.operation_custody import OperationBusyError
 from shared import telemetry
 from shared.config import settings
-from shared.daemon_health import health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.health_schema import DEGRADED, OK, component
+from shared.daemon.health import health_port, start_health_server, stop_health_server
+from shared.daemon.health_schema import DEGRADED, OK, component
+from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon.shutdown import hard_exit as _hard_exit
 from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.backup_scheduler.daemon")

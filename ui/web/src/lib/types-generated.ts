@@ -35,7 +35,7 @@ export interface paths {
          *
          *     Brute-force guard: an IP that fails ``gateway.login_max_failures`` times in
          *     a row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on
-         *     those config fields; enforcement in shared/rate_limit.py).
+         *     those config fields; enforcement in shared/cluster/rate_limit.py).
          *     While locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —
          *     401 would read as "wrong password" and invite exactly the retry loop the
          *     lockout exists to stop. A successful login resets the IP's counter.
@@ -1108,7 +1108,7 @@ export interface paths {
         /**
          * Get Agent Plugin Metrics
          * @description The agent's plugin metrics for the inspector panel — the W13b inspector
-         *     surface of the plugin metric system (see `shared/plugin_metrics.py`).
+         *     surface of the plugin metric system (see `shared/telemetry/metrics/plugin_metrics.py`).
          *
          *     Builds the metric registry in process (task #180 PR D — shipped
          *     plugin `metrics.py` modules + core definitions), keeps the metrics whose
@@ -1874,8 +1874,8 @@ export interface paths {
          *
          *     The staging latch is what keeps a registered staging host out of the
          *     agent-runner target set — `ava start` on it clears its `stopped_at` like any
-         *     host, and this flag is the exclusion (`shared.machines.list_agent_runners`
-         *     skips is_staging rows). Backed by `shared.machines.set_staging`; the CLI
+         *     host, and this flag is the exclusion (`shared.cluster.machines.list_agent_runners`
+         *     skips is_staging rows). Backed by `shared.cluster.machines.set_staging`; the CLI
          *     verbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.
          */
         post: operations["set_machine_staging_api_cluster_machines__name__staging_post"];
@@ -2111,7 +2111,7 @@ export interface paths {
          *     Omitted `last` returns the configured default count
          *     (``display.config_audit_default_last`` - 20 out of the box); an explicit
          *     `last` stays capped at 200. Records are the raw
-         *     audit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;
+         *     audit-JSONL entries (`shared/host/env/audit.py`), each tagged with its `machine`;
          *     values were redacted at write time (non-sensitive fields only), and records
          *     from before record v2 lack `actor` / `trace_id` / `changed`.
          */
@@ -2967,7 +2967,7 @@ export interface paths {
          *
          *     `name` is a constant naming the service this route belongs to — the point being
          *     that an impostor answering here reports its own name, or none. No probe reads it
-         *     yet; `shared.daemon_health._probe_home` gains the `name` arm only once every
+         *     yet; `shared.daemon.health._probe_home` gains the `name` arm only once every
          *     deployed gateway emits the field, and that ordering is load-bearing (#1038).
          */
         get: operations["get_health_api_health_get"];
@@ -4671,7 +4671,7 @@ export interface components {
          * ConfigAuditView
          * @description GET /api/config/audit response — merged `.env`-write audit records, newest first.
          *
-         *     Each record is the raw audit-JSONL entry (`shared/env_audit.py`, record v2:
+         *     Each record is the raw audit-JSONL entry (`shared/host/env/audit.py`, record v2:
          *     ts / site / pid / process / cmdline / actor / trace_id / keys_written /
          *     keys_removed / digest_after / changed), tagged with its `machine`. Values were
          *     redacted when the record was written (non-sensitive fields only); records from
@@ -6580,7 +6580,7 @@ export interface components {
          * @description One plugin metric rendered for the inspector surface — an element of
          *     GET /api/agents/{id}/inspect/metrics.
          *
-         *     Mirrors the registered MetricSpec (see `shared/plugin_metrics.py`):
+         *     Mirrors the registered MetricSpec (see `shared/telemetry/metrics/plugin_metrics.py`):
          *     `panel` selects the payload — `timeseries` / `barchart` / `table` metrics
          *     carry `series` (a bounded recent window, 24h in 1h buckets by default, so
          *     at most a couple of dozen points), `stat` metrics carry `value` (the

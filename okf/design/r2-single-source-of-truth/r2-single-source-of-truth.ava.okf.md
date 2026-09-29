@@ -12,7 +12,7 @@ tags:
 > Design lead #2862 · design v0.4 (2026-08-07) · **status: convergence point A LANDED on main (2026-08-06); B/C/D remain planned**
 
 > Landing status (audit round-2 config.md §4): **A (EnvRegistry) is live** —
-> `shared/env_registry.py` projections (child_env / env_authority_drop_set /
+> `shared/host/env/registry.py` projections (child_env / env_authority_drop_set /
 > env_keep_set) derive from the field registry, and test_env_registry.py +
 > test_gateway_consumer_guard.py are derivation-rule verifiers, not snapshot
 > seams. Residual: `_DERIVED_FIELDS` / `_IDENTITY_FIELDS` / `_GUIDE_FIELDS` /

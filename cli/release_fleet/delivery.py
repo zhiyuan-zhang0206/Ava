@@ -1,6 +1,6 @@
 """Deliver one journaled fleet alert along one route (`alerting.deliveries`).
 
-- **alert row**: `shared.alerts.upsert_alert` with source `release-fleet`; the
+- **alert row**: `shared.telemetry.alerts.upsert_alert` with source `release-fleet`; the
   table deduplicates by `(fingerprint, starts_at)`, so a retried delivery that
   already landed changes nothing.
 - **webhook**: an HTTP POST of the JSON body to the URL held in the
@@ -38,8 +38,8 @@ def deliver_one(home: Path, alert: FleetAlert, delivery: Delivery) -> None:
 
 
 def _alert_row(row: AlertRow) -> None:
-    from shared.alerts import upsert_alert
     from shared.db_transaction import write_transaction
+    from shared.telemetry.alerts import upsert_alert
 
     with write_transaction() as conn:
         upsert_alert(conn, row.payload(), source=row.source)

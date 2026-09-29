@@ -132,14 +132,14 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     (CI / isolated $AVA_HOME / schedule runner). The walk resolves members statically, so
     it never force-evaluates them — otherwise install() crashes load_extensions in the
     child (rc=1)."""
-    import shared.machine
+    import shared.cluster.machine
 
     def _raise() -> str:
-        raise shared.machine.MachineNameMissing("machine name not set")
+        raise shared.cluster.machine.MachineNameMissing("machine name not set")
 
-    monkeypatch.setattr(shared.machine, "machine_name", _raise)
+    monkeypatch.setattr(shared.cluster.machine, "machine_name", _raise)
     # sanity: normal attribute access really does raise under this condition
-    with pytest.raises(shared.machine.MachineNameMissing):
+    with pytest.raises(shared.cluster.machine.MachineNameMissing):
         _ = ava.self.SELF_MACHINE_NAME
 
     fqs = {fq for _parent, _attr, fq in sdk_metering._instrument_targets()}

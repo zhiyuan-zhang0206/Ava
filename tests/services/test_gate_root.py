@@ -23,7 +23,7 @@ from services.ava_root.server import ControlServer
 from services.ava_root.supervisor import Supervisor, SupervisorConfig
 from services.healthchecks import gate
 from shared.config import settings
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 from shared.root_control.client import owned_process
 from tests.services.test_gate import _FakeApp, _FakeGateway, _request, _Servers
 from tests.services.test_gate import servers as servers

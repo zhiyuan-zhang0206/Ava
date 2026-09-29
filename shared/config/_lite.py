@@ -3,7 +3,7 @@
 `import shared.config` no longer constructs `Settings`. It *prepares* the
 boot-lite state — loads the unit's `.env`, runs the config-source decision, and
 validates the boot-path fields fail-fast — then serves reads from the generated
-static index (`shared/config_lite_table.py`) through the `settings` view
+static index (`shared/host/env/config_lite_table.py`) through the `settings` view
 defined here. The eager config chain (15 sub-model imports, pydantic_settings,
 the flat field registry, the `Settings` singleton) is pulled in on first touch
 of anything outside the boot-path surface, exactly once, by `upgrade()`:
@@ -57,12 +57,6 @@ from pathlib import Path
 from threading import RLock, get_ident
 from typing import Any, cast
 
-from shared.bootstrap import (
-    CONFIG_FETCH_ENV,
-    CONFIG_FETCH_SKIP,
-    config_source_is_local,
-    should_fetch_from_gateway,
-)
 from shared.config.profiles import (
     AVA_PROCESS_PROFILE_ENV,
     PROCESS_PROFILES,
@@ -70,14 +64,20 @@ from shared.config.profiles import (
     profile_domain_error,
     profile_unknown_error,
 )
-from shared.config_lite_table import (
+from shared.config_registry import _DOMAIN_ATTRS
+from shared.host.env.bootstrap import (
+    CONFIG_FETCH_ENV,
+    CONFIG_FETCH_SKIP,
+    config_source_is_local,
+    should_fetch_from_gateway,
+)
+from shared.host.env.config_lite_table import (
     FIELD_ALIASES,
     FIELD_DOMAINS,
     LITE_FIELDS,
     REQUIRED_FIELDS,
 )
-from shared.config_registry import _DOMAIN_ATTRS
-from shared.dotenv_boot import UNANCHORED_DB_SENTINEL, checkout_anchored, load_ava_env
+from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL, checkout_anchored, load_ava_env
 
 # `AVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
 BOOT_MODE_ENV = "AVA_CONFIG_BOOT"
@@ -90,7 +90,7 @@ _FULL = "full"
 # waiting on another thread's in-flight eager build. Not config: the wait runs
 # before the config chain exists (reading a field would itself trigger the
 # upgrade), and the value is fixed at 3x the bootstrap fetch bound
-# (shared/bootstrap.py _FETCH_TIMEOUT_S = 10s) -- the slowest legitimate
+# (shared/host/env/bootstrap.py _FETCH_TIMEOUT_S = 10s) -- the slowest legitimate
 # segment of a build. A slower build degrades to the retryable
 # ConfigBuildWaitTimeoutError, so no operator knob is warranted.
 _BUILD_WAIT_TIMEOUT_SECONDS = 30.0
@@ -512,7 +512,7 @@ def _apply_source_decision() -> None:
     `_plant_placeholders` keeps the eager boot's env side effect (the
     never-dialed URLs) so a later `Settings()` construction finds the same
     environment it would have found eagerly. An unanchored checkout (no
-    cluster of its own, `shared.dotenv_boot` rule 4) is asked first and is
+    cluster of its own, `shared.host.env.dotenv_boot` rule 4) is asked first and is
     never a config source nor a fetcher: it boots bare, like a CI checkout."""
     if not checkout_anchored():
         _plant_placeholders()
@@ -521,7 +521,7 @@ def _apply_source_decision() -> None:
     elif os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
         _plant_placeholders()
     elif should_fetch_from_gateway():
-        from shared.bootstrap import inject_config_from_gateway
+        from shared.host.env.bootstrap import inject_config_from_gateway
 
         inject_config_from_gateway()
     else:

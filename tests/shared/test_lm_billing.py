@@ -42,7 +42,7 @@ class _RecordingTracer:
 
 
 def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
-    from shared import trace as trace_mod
+    from shared.telemetry import tracing as trace_mod
 
     tracer = _RecordingTracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)

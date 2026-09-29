@@ -96,17 +96,17 @@ from services.agent_host.stall_guard import run_invocation_with_stall_guard
 from services.agent_host.truncation import reap_truncation_outcome, reap_truncation_stop
 from shared import maintenance
 from shared.agents.history.delta_read_compat import recovery_reconstruction_scope
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
 from shared.event_publisher import AgentEventPublisher
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
-from shared.machine import machine_name
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
 from shared.redis_client import get_async_redis
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from shared.trace import turn_span
+from shared.telemetry.tracing import turn_span
 from shared.turn_identity import bind_turn_identity
 
 _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]

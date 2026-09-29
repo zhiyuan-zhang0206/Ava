@@ -8,12 +8,12 @@ from psycopg.rows import dict_row
 from ava.impersonation_replay import consume_recorded_events, post_completion_integrity_breach
 from shared import maintenance
 from shared.agents.impersonation_manifest import monitor_manifest_health
-from shared.alerts import upsert_alert
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.log import logger
-from shared.loki_index_labels import retention_floor
-from shared.machine import machine_name
+from shared.telemetry.alerts import upsert_alert
+from shared.telemetry.loki_index_labels import retention_floor
 
 
 def reconcile_one() -> None:

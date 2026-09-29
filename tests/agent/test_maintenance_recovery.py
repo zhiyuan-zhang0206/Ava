@@ -13,7 +13,7 @@ from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
 from shared import maintenance, maintenance_cohort, pause_owner
-from shared.machine import machine_name
+from shared.cluster.machine import machine_name
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate

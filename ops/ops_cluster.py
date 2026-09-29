@@ -47,6 +47,8 @@ from shared.api_contracts.release_handoff import (
     entry_environment,
     read_envelope,
 )
+from shared.cluster.machine import machine_name
+from shared.cluster.machines import mark_stopping
 from shared.cluster_lock import (
     claim_recovery_lock,
     read_update_lease,
@@ -55,8 +57,6 @@ from shared.cluster_lock import (
 from shared.config.turn_view import resolve_agent_config_pins
 from shared.host_deploy_state import updater_lease_live
 from shared.log import logger
-from shared.machine import machine_name
-from shared.machines import mark_stopping
 from shared.paths import ava_home
 from shared.proc import run_bounded
 from shared.runtime_abi import current_abi

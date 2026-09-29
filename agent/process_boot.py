@@ -80,15 +80,15 @@ def init_process_scope() -> None:
     path stays sub-second. OpenLLMetry must still be installed before the
     first turn (the LangChain callback-manager wrap and the SDK instrumentors
     are call-time, and the turn root span needs the provider set) — that
-    ordering is enforced by `shared.trace.ensure_init_resolved` inside
+    ordering is enforced by `shared.telemetry.tracing.ensure_init_resolved` inside
     `turn_span`, which is what the first graph invocation waits on.
 
     Process scope, not agent scope: `initialize_tracing` installs the global
     tracer provider, and the span attribution that distinguishes agents is the
-    per-turn root span (`shared.trace.turn_span`), not the provider. The hosted
+    per-turn root span (`shared.telemetry.tracing.turn_span`), not the provider. The hosted
     runner calls this once at daemon boot.
     """
-    from shared.trace import initialize_tracing
+    from shared.telemetry.tracing import initialize_tracing
 
     initialize_tracing()
 

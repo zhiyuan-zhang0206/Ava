@@ -1397,7 +1397,7 @@ def test_a_swallowed_db_error_reports_failure(
     def _boom(*_a: object, **_k: object) -> None:
         raise RuntimeError("emitter broken")
 
-    monkeypatch.setattr("shared.audit_events.insert_event_log_many", _boom)
+    monkeypatch.setattr("shared.telemetry.audit_events.insert_event_log_many", _boom)
     (skill,) = skills_mod.names()
     assert skills_mod._insert_skill_events(1, [skill]) is False
 
@@ -1416,7 +1416,7 @@ def test_insert_skill_events_writes_only_the_loaded_depth(
     def _capture(*, payloads: list[dict[str, str]], **_: object) -> None:
         captured.extend(payloads)
 
-    monkeypatch.setattr("shared.audit_events.insert_event_log_many", _capture)
+    monkeypatch.setattr("shared.telemetry.audit_events.insert_event_log_many", _capture)
     (skill,) = skills_mod.names()
     assert skills_mod._insert_skill_events(1, [skill]) is True
     assert captured == [{"skill": "alpha", "identifier": "alpha", "invocation_depth": "loaded"}]

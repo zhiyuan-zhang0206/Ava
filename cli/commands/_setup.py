@@ -151,7 +151,7 @@ def _resolve_capability(cap: _Capability, arg_value: bool | None) -> bool:  # no
     does the capability default to off. The arg is not written back (see the
     module docstring).
     """
-    from shared.machine import parse_serve_value
+    from shared.cluster.machine import parse_serve_value
     from shared.paths import ava_home
 
     env_val: bool | None = get_field(cap.settings_attr)

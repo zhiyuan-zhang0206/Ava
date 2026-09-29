@@ -30,8 +30,8 @@ from shared.agents import (
     ResurrectError,
 )
 from shared.agents.messages.envelope import wrap_inbound
+from shared.cluster.machine import machine_name
 from shared.config import settings
-from shared.machine import machine_name
 
 
 def _test_pool() -> ConnectionPool:
@@ -72,7 +72,7 @@ def test_machine_pause_resolves_old_and_new_fingerprint_alerts(
     from psycopg.types.json import Jsonb
 
     from gateway.routers._machine_pause import _resolve_machine_alerts_blocking
-    from shared.alerts import fingerprint
+    from shared.telemetry.alerts import fingerprint
 
     identity_labels = {"alertname": "machine offline", "machine": "away"}
     old_labels = {**identity_labels, "severity": "warning"}

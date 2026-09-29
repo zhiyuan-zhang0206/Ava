@@ -277,7 +277,7 @@ def test_sync_full_then_summary_reuse(_mock_feed: Any, tmp_path: Path) -> None:
 
 
 def test_default_root_under_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # The skill script resolves $AVA_HOME via `shared.dotenv_boot.resolve_ava_home`
+    # The skill script resolves $AVA_HOME via `shared.host.env.dotenv_boot.resolve_ava_home`
     # (2026-09-28 fix, PR #3550 follow-up) rather than reading `os.environ`
     # directly, so the env var still works through the real resolution path.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path))

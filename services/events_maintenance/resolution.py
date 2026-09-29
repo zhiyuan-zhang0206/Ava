@@ -34,7 +34,7 @@ from psycopg_pool import ConnectionPool
 from services.events_maintenance.rollup import _query_instant
 from shared import telemetry
 from shared.config import settings
-from shared.loki_index_labels import escape_logql_label
+from shared.telemetry.loki_index_labels import escape_logql_label
 
 _log = logging.getLogger("services.events_maintenance.resolution")
 

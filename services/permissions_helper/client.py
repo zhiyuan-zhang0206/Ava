@@ -29,8 +29,8 @@ from typing import Any, NotRequired, TypedDict
 
 from shared.host.converge.accessibility import AccessibilityState, AccessibilityStatus
 from shared.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
+from shared.host.net.resilience import Policy, retry
 from shared.paths import permissions_helper_socket
-from shared.resilience import Policy, retry
 
 # Transport selection: named pipe on Windows, Unix socket elsewhere. A module
 # constant (not a live os.name check) so tests can flip the transport without

@@ -22,7 +22,7 @@ from shared.cluster import (
     record_redis_port,
 )
 from shared.config.data_plane import DataPlaneSettings
-from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
+from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
 
 _POOLED = "postgresql://ava_main:sek@127.0.0.1:6433/ava_main"
 _DIRECT = "postgresql://ava_main:sek@127.0.0.1:5433/ava_main"

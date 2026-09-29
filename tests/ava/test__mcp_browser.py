@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import ava._mcp_browser as browser_mod
-from shared import resilience
+from shared.host.net import resilience
 
 
 class _FakeWriter:

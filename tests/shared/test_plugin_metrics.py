@@ -4,7 +4,7 @@ Covers what ``register_metric`` enforces at import time: name uniqueness and
 query safety per dialect — the static-SQL whitelist (single SELECT over
 `events` / `agents_meta`, function / operator whitelist, no macros /
 placeholders — task #180 PR C) and the LogQL contract
-(``shared/metrics/metrics_logql.py``).
+(``shared/telemetry/metrics/logql.py``).
 """
 
 import re
@@ -14,7 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from shared.plugin_context import PluginContext
-from shared.plugin_metrics import (
+from shared.telemetry.metrics.plugin_metrics import (
     DuplicateMetric,
     InvalidMetricQuery,
     MetricSpec,
@@ -267,7 +267,7 @@ def test_register_fills_plugin_from_context() -> None:
 
 
 def registered_metrics_names() -> list[str]:
-    from shared.plugin_metrics import registered_metrics
+    from shared.telemetry.metrics.plugin_metrics import registered_metrics
 
     return [m.name for m in registered_metrics()]
 
@@ -350,7 +350,7 @@ def test_render_escapes_quotes_defensively() -> None:
     # event_name/category are validated identifiers, but the literal renderer must
     # still single-quote-escape — defense in depth (a future schema change
     # widening the event_name charset cannot turn into SQL injection).
-    from shared.plugin_metrics import _sql_literal
+    from shared.telemetry.metrics.plugin_metrics import _sql_literal
 
     assert _sql_literal("a'b") == "'a''b'"
 

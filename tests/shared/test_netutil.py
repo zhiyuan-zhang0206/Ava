@@ -1,4 +1,4 @@
-"""`shared/netutil.py` — the config-free loopback + IPv4-literal predicates."""
+"""`shared/host/net/predicates.py` — the config-free loopback + IPv4-literal predicates."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.netutil import is_ipv4_literal, is_loopback_host
+from shared.host.net.predicates import is_ipv4_literal, is_loopback_host
 
 
 @pytest.mark.parametrize(
@@ -30,7 +30,7 @@ def test_netutil_imports_without_config() -> None:
     fails on a fresh host) — a first `ava start` imports it before any settings."""
     import ast
 
-    src = Path(__file__).resolve().parents[2] / "shared" / "netutil.py"
+    src = Path(__file__).resolve().parents[2] / "shared" / "host" / "net" / "predicates.py"
     tree = ast.parse(src.read_text())
     imported = {
         node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module

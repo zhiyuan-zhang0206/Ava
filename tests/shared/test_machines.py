@@ -1,4 +1,4 @@
-"""Unit tests for `shared/machines.py` — env/file precedence + lookup roundtrip + exception paths
+"""Unit tests for `shared/cluster/machines.py` — env/file precedence + lookup roundtrip + exception paths
 + composition (machine_units -> machines) semantics.
 
 machines / machine_units schema uses the schema.sql at the top of conftest; here we only verify helper behavior.
@@ -11,8 +11,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from shared import machines
 from shared.agents import MachineNotRegistered
+from shared.cluster import machines
 from shared.config import settings
 
 
@@ -31,7 +31,7 @@ def _truncate_machines() -> None:
 def test_gateway_url_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """env `AVA_GATEWAY_URL` set > file — env wins."""
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://from-env:8000")
-    monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.cluster.machine.ava_home", lambda: tmp_path)
     (tmp_path / "gateway_url").write_text("http://from-file:8000")
     assert machines.gateway_url() == "http://from-env:8000"
 
@@ -39,7 +39,7 @@ def test_gateway_url_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
 def test_gateway_url_file_when_env_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """env not set → reads `$AVA_HOME/gateway_url`."""
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.cluster.machine.ava_home", lambda: tmp_path)
     (tmp_path / "gateway_url").write_text("http://from-file:8000\n")  # trailing \n trimmed
     assert machines.gateway_url() == "http://from-file:8000"
 
@@ -47,7 +47,7 @@ def test_gateway_url_file_when_env_missing(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_gateway_url_raises_when_neither(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """env not set + file doesn't exist → GatewayUrlMissing."""
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.cluster.machine.ava_home", lambda: tmp_path)
     with pytest.raises(machines.GatewayUrlMissing):
         machines.gateway_url()
 
@@ -57,7 +57,7 @@ def test_gateway_url_raises_when_file_blank(
 ) -> None:
     """Blank file treated as not set — protects users who wrote echo "" without cat check."""
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.cluster.machine.ava_home", lambda: tmp_path)
     (tmp_path / "gateway_url").write_text("   \n")
     with pytest.raises(machines.GatewayUrlMissing):
         machines.gateway_url()
@@ -70,15 +70,15 @@ def test_gateway_url_raises_when_file_blank(
 def _machine_setup(monkeypatch: pytest.MonkeyPatch):
     """Inject machine identity (name/role through _coerce_roles validation) + control home.
 
-    register_self uses `shared.machines.ava_home()` to get the unit's home; by default fake a
+    register_self uses `shared.cluster.machines.ava_home()` to get the unit's home; by default fake a
     fixed home, single-box tests don't need to care. co-located tests use the returned `set_home` to switch to different
     home then register_self, simulating two units on the same machine name. teardown reset_identity() prevents injected values
     from leaking into subsequent test files.
     """
-    from shared.machine import reset_identity, set_identity
+    from shared.cluster.machine import reset_identity, set_identity
 
     state = {"home": "~/.ava"}
-    monkeypatch.setattr("shared.machines.ava_home", lambda: state["home"])
+    monkeypatch.setattr("shared.cluster.machines.ava_home", lambda: state["home"])
     # register_self's loopback guard reads the configured gateway URL to decide
     # whether a loopback ops URL is legal (co-located gateway) or a misconfig
     # (remote gateway). These fixtures model co-located units, so pin the gateway
@@ -147,7 +147,7 @@ def test_register_self_station_only_composes_row(
     is invisible to `ava cluster status`. The composed row advertises the
     station's OTLP ingress URL (its reachable-host dial target, WP4) and
     stopped_at NULL (the unit is live)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.9")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.9")
     _machine_setup(name="station-a", role="observability-station")
     machines.register_self(url=machines.unit_dial_url(frozenset({"observability-station"})))
     gateway_url, role, _desc, stopped_at = _read_machine("station-a")
@@ -177,7 +177,7 @@ def test_unit_dial_url_pure_station_is_otlp_ingress(monkeypatch: pytest.MonkeyPa
     one station address remote consumers dial — derived from reachable_host
     and AVA_TELEMETRY_OTLP_PORT (single source, task #1945). No gateway URL is
     required (a station host does not have one)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.9")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.9")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     assert machines.unit_dial_url(frozenset({"observability-station"})) == ("http://10.0.0.9:4318")
 
@@ -190,7 +190,7 @@ def test_unit_dial_url_gateway_station_is_reachable_host(
     advertised address, but the host is always reachable_host(), never the
     bare gateway URL (WP4: a loopback advertisement makes the page proxy
     refuse the host's page servers)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://gw:8000")
     assert machines.unit_dial_url(frozenset({"gateway", "observability-station"})) == (
         "http://10.0.0.5:8000"
@@ -201,7 +201,7 @@ def test_unit_dial_url_runner_station_is_ops_url(monkeypatch: pytest.MonkeyPatch
     """agent-runner + station keeps the ops-URL dial — the station capability
     must not change the runner unit's advertised address."""
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://gw:8000")
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.5")
     url = machines.unit_dial_url(frozenset({"agent-runner", "observability-station"}))
     assert url is not None and url.startswith("http://10.0.0.5:")
 
@@ -236,7 +236,7 @@ def test_register_self_does_not_fall_back_to_gateway_url_when_url_none(
     register_self(url=None) still writes NULL."""
     _machine_setup(name="test-no-fallback", role="agent-runner")
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://should-be-ignored:8000")
-    monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.cluster.machine.ava_home", lambda: tmp_path)
     machines.register_self(url=None)
     assert machines.list_all() == [("test-no-fallback", None)]
 
@@ -492,9 +492,9 @@ def test_unit_dial_url_single_box_is_loopback_ops(monkeypatch: pytest.MonkeyPatc
     """gateway + agent-runner on a true single box: `reachable_host()` resolves
     to localhost, so the advertised ops URL is loopback (single box needs no
     reachable address)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "localhost")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "localhost")
     monkeypatch.setattr(
-        "shared.daemon_health.health_port",
+        "shared.daemon.health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     assert machines.unit_dial_url(frozenset({"gateway", "agent-runner"})) == "http://localhost:8600"
@@ -508,9 +508,9 @@ def test_unit_dial_url_gateway_runner_uses_reachable_host(
     page proxy's SSRF guard (which only dials registered machine addresses)
     rejects every page registration from agents on the gateway box
     (2026-08-12 serve outage)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
-        "shared.daemon_health.health_port",
+        "shared.daemon.health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     assert machines.unit_dial_url(frozenset({"gateway", "agent-runner"})) == "http://10.0.0.2:8600"
@@ -519,9 +519,9 @@ def test_unit_dial_url_gateway_runner_uses_reachable_host(
 def test_unit_dial_url_split_runner_is_reachable_ops(monkeypatch: pytest.MonkeyPatch) -> None:
     """agent-runner only: the remote gateway must reach it, so the URL carries
     `reachable_host()`, not loopback."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
-        "shared.daemon_health.health_port",
+        "shared.daemon.health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     assert machines.unit_dial_url(frozenset({"agent-runner"})) == "http://10.0.0.2:8600"
@@ -534,9 +534,9 @@ def test_unit_dial_url_gateway_only_is_reachable_host(
     bare gateway URL — a gateway_url naming loopback on a host with a
     reachable identity would advertise a self-dialing address that breaks
     page serves (WP4, 2026-08-30 serve 400)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.cluster.machine.ava_home", lambda: tmp_path)
     (tmp_path / "gateway_url").write_text("https://ava.example:8000")
     assert machines.unit_dial_url(frozenset({"gateway"})) == "http://10.0.0.2:8000"
 
@@ -547,7 +547,7 @@ def test_unit_dial_url_gateway_only_defaults_port_when_url_unresolvable(
     """gateway-only with no resolvable gateway URL still advertises the
     reachable host, on the gateway bind-port setting — the advertisement no
     longer depends on gateway_url being configured (the 400-scenario fix)."""
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
     assert machines.unit_dial_url(frozenset({"gateway"})) == "http://10.0.0.2:8000"
@@ -558,11 +558,11 @@ def test_unit_dial_url_agrees_across_both_writers(monkeypatch: pytest.MonkeyPatc
     the SAME function, so a unit cannot be advertised at two addresses depending on
     which one wrote last. Asserted on the identical capability set both pass.
     """
-    from shared.machine import machine_role, reset_identity, set_identity
+    from shared.cluster.machine import machine_role, reset_identity, set_identity
 
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.7")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.7")
     monkeypatch.setattr(
-        "shared.daemon_health.health_port",
+        "shared.daemon.health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     set_identity(name="split-runner", role="agent-runner")
@@ -720,7 +720,7 @@ def _read_description(name: str) -> str | None:
 
 def test_register_self_writes_description(_machine_setup) -> None:
     """register_self picks up machine_description() and UPSERTs it."""
-    from shared.machine import set_identity
+    from shared.cluster.machine import set_identity
 
     _machine_setup(name="desc-machine")
     set_identity(description="voice IO + browser")
@@ -730,7 +730,7 @@ def test_register_self_writes_description(_machine_setup) -> None:
 
 def test_register_self_description_none_stores_null(_machine_setup) -> None:
     """No description configured → column NULL."""
-    from shared.machine import set_identity
+    from shared.cluster.machine import set_identity
 
     _machine_setup(name="nodesc-machine")
     set_identity(description=None)
@@ -740,7 +740,7 @@ def test_register_self_description_none_stores_null(_machine_setup) -> None:
 
 def test_register_self_updates_description_on_conflict(_machine_setup) -> None:
     """Second register_self overwrites description (ON CONFLICT DO UPDATE)."""
-    from shared.machine import set_identity
+    from shared.cluster.machine import set_identity
 
     _machine_setup(name="upd-machine")
     set_identity(description="old")
@@ -752,7 +752,7 @@ def test_register_self_updates_description_on_conflict(_machine_setup) -> None:
 
 def test_mark_stopping_preserves_description(_machine_setup) -> None:
     """stop-triggered recompute does not touch description (host-level, only register writes it)."""
-    from shared.machine import set_identity
+    from shared.cluster.machine import set_identity
 
     _machine_setup(name="keepdesc", role="agent-runner", home="~/.ava")
     set_identity(description="keep me")

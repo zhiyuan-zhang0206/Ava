@@ -226,7 +226,7 @@ from gateway.routers import (
 from gateway.schedule_manager import ScheduleManager
 from gateway.session_store import touch_session
 from shared.agents import AvaAgentError
-from shared.cluster_auth import cookie_name
+from shared.cluster.auth import cookie_name
 from shared.config import settings
 from shared.context import AvaContext
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded

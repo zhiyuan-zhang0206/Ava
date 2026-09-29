@@ -19,9 +19,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from shared import cluster
-from shared.env_registry import REDIS_PASSWORD_ENV, health_port_env_aliases
+from shared.host.env.registry import REDIS_PASSWORD_ENV, health_port_env_aliases
+from shared.host.net.url_secret import redacted_url, url_with_port, url_with_userinfo
 from shared.platform import IS_WINDOWS
-from shared.url_secret import redacted_url, url_with_port, url_with_userinfo
 
 # The db / Postgres-role / redis-ACL identifier a newly-born cluster uses. Fixed:
 # every cluster owns its instance (exactly one tenant), so the identifier carries
@@ -281,8 +281,8 @@ def runner_db_url_projection() -> str:
     unit projects this; a pure agent-runner's services receive their installed
     unit capability instead (`shared.cluster.authority.unit`).
     """
-    from shared.bootstrap import config_source_is_local
-    from shared.runtime_config import read_env_aliases
+    from shared.host.env.bootstrap import config_source_is_local
+    from shared.host.env.runtime_config import read_env_aliases
 
     if not config_source_is_local():
         raise RuntimeError(
@@ -413,8 +413,8 @@ def derive_env(
     return env
 
 
-# The derived/identity key sets live in shared/env_registry.py (the R2 env
-# registry): shared.dotenv_boot imports them at config-load time without a
+# The derived/identity key sets live in shared/host/env/registry.py (the R2 env
+# registry): shared.host.env.dotenv_boot imports them at config-load time without a
 # cycle. derive_env's output surface is `derived_env_keys()` there.
 
 

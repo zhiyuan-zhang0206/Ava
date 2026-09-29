@@ -92,7 +92,7 @@ class TestFetchUploadB64:
         """The image is fetched over HTTP from the gateway (its URL is the
         address — never the local disk), carrying the bearer header, and
         returned as base64."""
-        from shared import http_dial
+        from shared.host.net import http_dial
 
         raw = b"\x89PNG\r\n\x1a\n" + b"pixels"
         seen: dict[str, object] = {}
@@ -103,7 +103,9 @@ class TestFetchUploadB64:
             return _FakeResp(raw)
 
         monkeypatch.setattr(http_dial, "get", _fake_get)
-        monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw.test:8000")
+        monkeypatch.setattr(
+            "shared.cluster.machine.gateway_api_base", lambda: "http://gw.test:8000"
+        )
         from shared.config import settings
 
         monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
@@ -114,7 +116,7 @@ class TestFetchUploadB64:
         assert seen["headers"] == {"Authorization": "Bearer test-secret"}  # cluster-secret bearer
 
     def test_non_image_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from shared import http_dial
+        from shared.host.net import http_dial
 
         monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: pytest.fail("must not fetch"))  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(ValueError, match="not a recognized image"):
@@ -123,10 +125,12 @@ class TestFetchUploadB64:
     def test_missing_upload_raises_oserror(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A 404 (or any failed fetch) surfaces as OSError — the claim node's
         degrade-to-text-note path catches exactly that."""
-        from shared import http_dial
+        from shared.host.net import http_dial
 
         monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: _FakeResp(b"", status=404))  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw.test:8000")
+        monkeypatch.setattr(
+            "shared.cluster.machine.gateway_api_base", lambda: "http://gw.test:8000"
+        )
         with pytest.raises(OSError, match="404"):
             uploads.fetch_upload_b64(7, "gone.png")
 

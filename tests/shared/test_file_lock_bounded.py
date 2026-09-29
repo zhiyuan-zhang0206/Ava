@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.envfile import ENV_LOCK_TIMEOUT_S, env_lock_path
+from shared.host.env.dotenv_file import ENV_LOCK_TIMEOUT_S, env_lock_path
 from shared.platform import LockTimeoutError, file_lock
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -107,8 +107,8 @@ def test_env_locking_never_touches_the_env_file_itself(
     """Every door must lock a SIBLING. `file_lock`'s POSIX branch opens its path with
     "w", which truncates — pointed at the real `.env` it would empty a cluster's
     secrets outright, which is the accident this guard exists for."""
-    import shared.runtime_config as rc
-    from shared.envfile import upsert_env
+    import shared.host.env.runtime_config as rc
+    from shared.host.env.dotenv_file import upsert_env
 
     env = tmp_path / ".env"
     env.write_text("AVA_KEEP=1\n")
@@ -162,8 +162,8 @@ def test_every_env_write_door_takes_the_lock(
     `rename_env_keys` are two more rewrites. First start uses the same
     upsert_env writer. A lock on one door orders nothing.
     """
-    import shared.envfile as envfile_mod
-    import shared.runtime_config as rc
+    import shared.host.env.dotenv_file as envfile_mod
+    import shared.host.env.runtime_config as rc
 
     env = tmp_path / ".env"
     env.write_text("AVA_OLD=1\n")
@@ -190,8 +190,8 @@ def test_the_write_doors_are_leaves(tmp_path: Path) -> None:
     Asserted on the sources so the invariant survives a future edit."""
     import inspect
 
-    import shared.envfile as envfile_mod
-    import shared.runtime_config as rc
+    import shared.host.env.dotenv_file as envfile_mod
+    import shared.host.env.runtime_config as rc
 
     doors = {
         "upsert_env": envfile_mod.upsert_env,

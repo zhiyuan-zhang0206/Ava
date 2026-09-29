@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Generate ``shared/config_lite_table.json`` — the boot-lite static config index.
+"""Generate ``shared/host/env/config_lite_table.json`` — the boot-lite static config index.
 
 Single source of truth: the field declarations behind ``shared/config_registry``
 (name / domain / env alias / per-agent flag / default) plus the explicit
@@ -11,7 +11,7 @@ Single source of truth: the field declarations behind ``shared/config_registry``
 - ``field_domains`` / ``field_aliases`` / ``field_scopes`` /
   ``field_capabilities`` / ``per_agent_fields`` — the all-field indexes the
   facade accessors (``field_alias`` / ``field_domain`` / ``field_names`` /
-  ``per_agent_field_names``) and ``shared/env_registry.py``'s authority
+  ``per_agent_field_names``) and ``shared/host/env/registry.py``'s authority
   projections serve without building the registry.
 
 The manifest is the ONLY admission gate: a field not listed here still works —
@@ -25,11 +25,11 @@ several columns) blow past the repo's 800-line hard ceiling
 split into focused modules — does not fit one machine-generated table whose
 columns are never read as separate units. A data file carries no line budget
 (precedent: ``shared/lm/pricing_catalog_archive.json``);
-``shared/config_lite_table.py`` is the hand-written reader that materializes the
+``shared/host/env/config_lite_table.py`` is the hand-written reader that materializes the
 named surfaces consumers import.
 
 Index and reader live OUTSIDE the ``shared.config`` package on purpose, like
-``shared/config_registry.py``: ``shared/env_registry.py`` (the env-authority
+``shared/config_registry.py``: ``shared/host/env/registry.py`` (the env-authority
 projections that ``load_ava_env`` runs before Settings exists) imports it, and a
 package submodule import would execute the ``shared.config`` facade first —
 re-entering the boot it is part of.
@@ -62,7 +62,7 @@ from pydantic_core import PydanticUndefined
 # checkout's modules (same pattern as gen_event_registry.py).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-_OUT = Path("shared/config_lite_table.json")
+_OUT = Path("shared/host/env/config_lite_table.json")
 _EMPTY_INDEX: dict[str, object] = {
     "_generated": (
         "BOOTSTRAP STUB — regenerate with `.venv/bin/python scripts/gen_config_lite_table.py`."
@@ -157,7 +157,7 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "cluster clock: cluster_tz_name/format_timestamp/apply_cluster_timezone",
     ),
     LiteField("message_timestamp_weekday", "literal", None, "format_timestamp weekday rendering"),
-    LiteField("machine_name", "literal", None, "shared/machine.py identity reads"),
+    LiteField("machine_name", "literal", None, "shared/cluster/machine.py identity reads"),
     LiteField("machine_serve_gateway", "none", None, "machine_role() capability detection"),
     LiteField("machine_serve_agent_runner", "none", None, "machine_role() capability detection"),
     LiteField(
@@ -393,7 +393,7 @@ def main(*, check: bool = False, out: str | None = None) -> int:
         current = target.read_text(encoding="utf-8")
         if current != rendered:
             print(
-                "ERROR: shared/config_lite_table.json is out of sync with the config registry.\n"
+                "ERROR: shared/host/env/config_lite_table.json is out of sync with the config registry.\n"
                 "   run .venv/bin/python scripts/gen_config_lite_table.py to regenerate"
             )
             return 1

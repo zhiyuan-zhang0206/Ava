@@ -18,7 +18,7 @@ import pytest
 
 import ava._mcp_computer as computer_mod
 from ava._mcp_computer import connect_computer_direct
-from shared import resilience
+from shared.host.net import resilience
 
 
 class FakeServer:

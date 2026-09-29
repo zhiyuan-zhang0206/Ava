@@ -20,13 +20,13 @@ class SamplingPolicy(BaseModel):
 
 
 def _read_policy() -> SamplingPolicy:
-    from shared.bootstrap import (
+    from shared.config import settings
+    from shared.host.env.bootstrap import (
         config_source_is_local,
         fetch_bootstrap_config,
         should_fetch_from_gateway,
     )
-    from shared.config import settings
-    from shared.runtime_config import read_env_aliases
+    from shared.host.env.runtime_config import read_env_aliases
 
     if config_source_is_local() or not should_fetch_from_gateway():
         aliases = read_env_aliases()

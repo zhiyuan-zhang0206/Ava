@@ -8,8 +8,8 @@ from urllib.parse import urlsplit
 import pytest
 
 from shared import config
-from shared import runtime_config as rt
-from shared.envfile import upsert_env
+from shared.host.env import runtime_config as rt
+from shared.host.env.dotenv_file import upsert_env
 
 
 @pytest.fixture
@@ -128,7 +128,7 @@ def test_bootstrap_serves_no_daemon_health_port() -> None:
     payload and the field allowlist: `bootstrap_config_values` skips a None, so a
     field that regained cluster scope would pass a payload-only check on any
     gateway that had not set it."""
-    from shared.env_registry import health_port_env_aliases
+    from shared.host.env.registry import health_port_env_aliases
 
     health_aliases = set(health_port_env_aliases().values())
     assert not (health_aliases & set(config.bootstrap_config_values()))

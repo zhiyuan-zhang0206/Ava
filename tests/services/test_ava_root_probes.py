@@ -18,10 +18,10 @@ import pytest
 
 from services.ava_root import probes
 from services.ava_root.probes import ProbeError, ProbeRegistry
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 _PROBE_MODULE = """
-    from shared.daemon_health import DaemonProbe
+    from shared.daemon.health import DaemonProbe
 
     def probe() -> DaemonProbe:
         return DaemonProbe.up("wired")

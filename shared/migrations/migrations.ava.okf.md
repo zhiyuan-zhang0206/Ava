@@ -66,7 +66,7 @@ then boots into `CodeBehindSchema` and rejects every agent.
 `apply_pending_migrations` therefore reads the cluster's identity from the DB
 (`machine_units` rows with `serve_gateway`) and refuses unless the executing
 checkout claims the same `(machine_name, home)`. The claim comes from
-`shared.dotenv_boot.checkout_anchored_home()` — `resolve_ava_home()` **minus**
+`shared.host.env.dotenv_boot.checkout_anchored_home()` — `resolve_ava_home()` **minus**
 the `AVA_HOME` override — because a process that inherited `AVA_HOME` from
 another cluster's environment has that cluster's DB URL *and* its home, while
 still carrying its own `migrations/`. An unanchored checkout is refused: its

@@ -3,8 +3,8 @@
     "services/healthchecks": 31
   },
   "private_imports": {
-    "services/healthchecks/im_bridge.py::shared.daemon_health._MAX_BODY_BYTES": 2,
-    "services/healthchecks/im_bridge.py::shared.daemon_health._PROBE_TIMEOUT_S": 1,
+    "services/healthchecks/im_bridge.py::shared.daemon.health._MAX_BODY_BYTES": 2,
+    "services/healthchecks/im_bridge.py::shared.daemon.health._PROBE_TIMEOUT_S": 1,
     "services/healthchecks/permissions_helper.py::services.permissions_helper.client._connect": 1,
     "services/healthchecks/permissions_helper.py::services.permissions_helper.client._parse_reply": 1,
     "services/healthchecks/prod_venv.py::shared.editable_install._venv_python": 1

@@ -133,7 +133,7 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
     """Opening the sinks builds Settings; a runner whose gateway is unreachable
     fails there with the same message the command itself would print."""
     import shared.log
-    from shared.bootstrap import BootstrapFetchError
+    from shared.host.env.bootstrap import BootstrapFetchError
 
     def unreachable(*, name: str) -> None:
         raise BootstrapFetchError(f"could not fetch cluster config ({name})")

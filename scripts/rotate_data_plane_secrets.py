@@ -36,9 +36,9 @@ from shared.cluster import (
 )
 from shared.cluster.derive import REDIS_PASSWORD_ENV
 from shared.config import settings
-from shared.envfile import upsert_env
+from shared.host.env.dotenv_file import upsert_env
+from shared.host.net.url_secret import url_host, url_with_password
 from shared.paths import ava_home
-from shared.url_secret import url_host, url_with_password
 
 _TOKEN_BYTES = 32
 _SCOPES = frozenset({"admin", "runner", "both"})

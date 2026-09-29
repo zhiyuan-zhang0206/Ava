@@ -47,7 +47,7 @@ from typing import Literal, cast
 from dotenv import dotenv_values
 
 from services.gateway_side.backup import passphrase
-from shared.envfile import upsert_env
+from shared.host.env.dotenv_file import upsert_env
 from shared.private_storage import write_private_bytes
 from shared.verified_file import regular_bytes
 

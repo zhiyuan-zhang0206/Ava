@@ -44,10 +44,10 @@ from agent.graph._exec import (
     _ExecTimedOut,
 )
 from agent.state import AgentState
+from shared.cluster.machine import machine_name
 from shared.context import AvaContext
 from shared.db import create_agent
 from shared.live_events import EVENT_ADAPTER, Cancelled
-from shared.machine import machine_name
 from tests.agent._fakes import make_fake_ops_pool
 
 # Most tests here drive exec_node/llm_node with mocked _run_in_subprocess / a

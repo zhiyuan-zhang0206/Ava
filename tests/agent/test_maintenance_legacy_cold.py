@@ -22,8 +22,8 @@ from psycopg_pool import AsyncConnectionPool
 from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
 from ops.agent_pause import resume_agents
 from shared import exec_request_evidence, maintenance_cohort, pause_owner
+from shared.cluster.machine import machine_name
 from shared.db import insert_inbound_message
-from shared.machine import machine_name
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 

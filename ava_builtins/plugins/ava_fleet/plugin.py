@@ -59,7 +59,7 @@ def set_label(text: str) -> None:
             "UPDATE agents SET label=%s, label_user_set=TRUE WHERE id=%s",
             (text or None, agent_id),
         )
-        from shared.audit_events import insert_event_log
+        from shared.telemetry.audit_events import insert_event_log
 
         insert_event_log(
             event_type="label_change",

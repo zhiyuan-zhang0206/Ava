@@ -38,7 +38,7 @@ from contextvars import ContextVar
 from typing import Any
 
 import shared.config_registry as _config_registry
-from shared.config_lite_table import FIELD_DOMAINS
+from shared.host.env.config_lite_table import FIELD_DOMAINS
 
 # The current context's pin map: flat field name -> raw pinned value. None =
 # no agent bound (host code outside any turn).

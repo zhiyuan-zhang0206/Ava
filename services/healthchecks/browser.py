@@ -2,7 +2,7 @@
 
 from services.browser.probe import probe_browser
 from shared.config import settings
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 
 def _probe() -> DaemonProbe:

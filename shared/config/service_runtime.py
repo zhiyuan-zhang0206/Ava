@@ -213,7 +213,7 @@ class _ServiceRuntimeSettings(EnvSettings):
     memory_indexer_health_url: str = Field(
         default="",
         alias="AVA_MEMORY_INDEXER_HEALTH_URL",
-        description="Memory indexer healthcheck URL. Empty = derive via shared.daemon_health.health_port('memory_indexer').",
+        description="Memory indexer healthcheck URL. Empty = derive via shared.daemon.health.health_port('memory_indexer').",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -268,7 +268,7 @@ class _ServiceRuntimeSettings(EnvSettings):
     page_server_health_url: str = Field(
         default="",
         alias="AVA_PAGE_SERVER_HEALTH_URL",
-        description="Page server supervisor healthcheck URL. Empty = derive via shared.daemon_health.health_port('page-server').",
+        description="Page server supervisor healthcheck URL. Empty = derive via shared.daemon.health.health_port('page-server').",
         json_schema_extra={
             "restart_required": "",
             "writable": False,

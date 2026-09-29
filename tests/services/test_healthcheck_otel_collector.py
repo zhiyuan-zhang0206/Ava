@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from services.healthchecks import otel_collector as hc
-from shared.machine import MachineRoleInvalid, MachineRoleMissing
+from shared.cluster.machine import MachineRoleInvalid, MachineRoleMissing
 
 
 @pytest.mark.parametrize("owned", [True, False])
@@ -44,7 +44,7 @@ def test_collector_protocol_success_requires_root_owned_listeners(
 def test_collector_cannot_certify_a_listener_without_root_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.daemon_health import ProbeVerdict
+    from shared.daemon.health import ProbeVerdict
     from shared.native_process.ownership import OwnedProcess
     from shared.root_control import client
 
@@ -61,8 +61,8 @@ def test_collector_cannot_certify_a_listener_without_root_identity(
 
 
 def test_collector_discovery_failure_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.daemon_health import ProbeVerdict
-    from shared.port_preflight import ListenerDiscoveryError
+    from shared.cluster.port_preflight import ListenerDiscoveryError
+    from shared.daemon.health import ProbeVerdict
 
     def fail(_port: int) -> list[int]:
         raise ListenerDiscoveryError("cannot inspect listeners")
@@ -72,7 +72,7 @@ def test_collector_discovery_failure_is_unavailable(monkeypatch: pytest.MonkeyPa
 
 
 def test_collector_root_failure_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.daemon_health import ProbeVerdict
+    from shared.daemon.health import ProbeVerdict
     from shared.root_control import client
 
     def fail(_unit: str) -> None:

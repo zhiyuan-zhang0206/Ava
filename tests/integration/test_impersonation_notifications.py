@@ -23,10 +23,10 @@ from ops.ops_exit import _enqueue_termination_inbounds, _force_terminate_transac
 from shared.agents import impersonation as leases
 from shared.agents.impersonation.impersonation_maintenance import remind_expiring_impersonations
 from shared.caller_identity import CallerIdentity
+from shared.cluster.machine import machine_name
 from shared.context import AvaContext
 from shared.db import create_agent, pool
 from shared.hosted_force import original_host_force
-from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
 from tests.impersonation_support import recorded_tree

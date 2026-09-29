@@ -79,10 +79,10 @@ from services.computer.session import ScreenSession
 from services.computer.task_sessions import TaskSessionTracker
 from services.permissions_helper import client as helper
 from services.permissions_helper.client import PermissionsHelperError
-from shared import audit_events
 from shared.config import settings
 from shared.log import logger
 from shared.paths import computer_mcp_socket
+from shared.telemetry import audit_events
 
 # A snapshot PNG can be multi-MB on one line; lift the stream buffer cap well
 # above StreamReader's 64KiB default (same limit as the browser daemon).

@@ -487,7 +487,7 @@ async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:
 def _self_lifecycle_code(action: str) -> str:
     return (
         "import ava, os, psycopg\n"
-        "from shared.env_registry import ADMIN_DATA_PLANE_ALIASES\n"
+        "from shared.host.env.registry import ADMIN_DATA_PLANE_ALIASES\n"
         "assert not ADMIN_DATA_PLANE_ALIASES.intersection(os.environ)\n"
         "with psycopg.connect(ava.DB_URL) as conn:\n"
         "    assert conn.execute('SELECT current_user').fetchone() == ('ava_g0_runner',)\n"

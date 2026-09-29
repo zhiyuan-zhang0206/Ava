@@ -77,7 +77,7 @@ def audit_this_host(roles: frozenset[str]) -> FirewallAudit:
     it on demand. Same detector, so they can never disagree about whether the
     firewall is the cause.
     """
-    from shared.machine import reachable_host
+    from shared.cluster.machine import reachable_host
 
     required = serving_binaries(roles)
     if not required:

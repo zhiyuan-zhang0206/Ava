@@ -189,21 +189,21 @@ from shared.cluster.registry import (
 from shared.cluster.registry import (
     save_record_locked as save_record_locked,
 )
-from shared.platform import file_lock as file_lock
-from shared.port_block import (
+from shared.host.env.port_block import (
     BLOCK_MAX as BLOCK_MAX,
 )
-from shared.port_block import (
+from shared.host.env.port_block import (
     BLOCK_SIZE as BLOCK_SIZE,
 )
-from shared.port_block import (
+from shared.host.env.port_block import (
     BLOCK_START as BLOCK_START,
 )
-from shared.port_block import (
+from shared.host.env.port_block import (
     LEGACY_AVA_PORTS as LEGACY_AVA_PORTS,
 )
-from shared.port_block import (
+from shared.host.env.port_block import (
     PORT_OFFSETS as PORT_OFFSETS,
 )
-from shared.url_secret import url_with_port as url_with_port
-from shared.url_secret import url_with_userinfo as url_with_userinfo
+from shared.host.net.url_secret import url_with_port as url_with_port
+from shared.host.net.url_secret import url_with_userinfo as url_with_userinfo
+from shared.platform import file_lock as file_lock

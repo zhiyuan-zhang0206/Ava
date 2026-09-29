@@ -12,7 +12,7 @@ The "right" fix when this fires is either:
 - Move the field to a gateway-scope domain (services, daemon, gateway)
 - Move the read to a different process (agent-side code should not run in gateway)
 - Consume a popped value with the .env-file fallback when the read must stay in
-  a gateway process (shared.runtime_config.read_env_aliases) and register it in
+  a gateway process (shared.host.env.runtime_config.read_env_aliases) and register it in
   _FALLBACK_CONSUMED_READS — an explicit, pinned exemption, never a blanket skip
 
 This is the structural enforcement the orchestrator asked for — the consumption
@@ -174,7 +174,7 @@ def test_gateway_services_dont_read_agent_runner_cluster_keys() -> None:
     """Every settings read in gateway-side source must NOT resolve to an
     agent-runner cluster alias — those aliases are popped from the gateway
     process's os.environ."""
-    from shared.env_registry import agent_runner_cluster_aliases
+    from shared.host.env.registry import agent_runner_cluster_aliases
 
     runner_cluster_aliases = agent_runner_cluster_aliases()
 
@@ -241,14 +241,14 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
         # permissions_helper_socket() — socket-path helpers called only by
         # agent-runner-side services (browser MCP daemon, permissions helper).
         # Verified 2026-08-06: no gateway-side caller in the import closure.
-        "shared/paths.py",
+        "shared/paths/__init__.py",
     }
 )
 
 # Reads of a popped alias that are deliberately fallback-consumed: the module
 # reads the Settings value and — when the gateway profile has popped the
 # env var (Task #856) — falls back to this unit's `.env` file via
-# `shared.runtime_config.read_env_aliases()`, the sanctioned gateway-side
+# `shared.host.env.runtime_config.read_env_aliases()`, the sanctioned gateway-side
 # source (same shape as shared/lm/factory.py::_ensure_provider_key). Each
 # entry is an explicit, reviewable exemption keyed by (module, field); the
 # companion test below pins every entry to fallback code that actually
@@ -330,7 +330,7 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
     """settings reads in shared/ modules reachable from gateway-side code must
     not resolve to popped aliases, unless the module is agent-only at runtime."""
     from shared.config import _FIELDS, field_alias
-    from shared.env_registry import agent_runner_cluster_aliases
+    from shared.host.env.registry import agent_runner_cluster_aliases
 
     runner_cluster_aliases = agent_runner_cluster_aliases()
 

@@ -104,7 +104,7 @@ def runner_projection(db_url: str | None = None) -> str:
     carried onto `db_url`, which may be a pooler URL.
     """
     from shared.config import settings
-    from shared.url_secret import url_with_userinfo
+    from shared.host.net.url_secret import url_with_userinfo
 
     admin = settings.data_plane.db_url
     grant_runner_login(admin, owner="ava_citest", login=_RUNNER_LOGIN, password=_RUNNER_PASSWORD)
@@ -192,7 +192,7 @@ def grant_runner_login(url: str, *, owner: str, login: str, password: str) -> st
     from psycopg import sql
 
     from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
-    from shared.url_secret import url_with_userinfo
+    from shared.host.net.url_secret import url_with_userinfo
 
     database = urlsplit(url).path.strip("/")
     groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)

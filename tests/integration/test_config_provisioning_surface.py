@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 
 from cli.commands.management import config as cfg
-from shared import runtime_config
 from shared.api_contracts.config import ConfigFieldView
+from shared.host.env import runtime_config
 
 _KEY = "AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET"
 

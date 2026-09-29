@@ -1333,7 +1333,7 @@ class TestValidateModelConfig:
     @staticmethod
     def _set_plugin_keys(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "shared.runtime_config.read_env_aliases",
+            "shared.host.env.runtime_config.read_env_aliases",
             lambda: {
                 "ANTHROPIC_API_KEY": "sk-test",
                 "DEEPSEEK_API_KEY": "sk-test",
@@ -1438,28 +1438,28 @@ class TestValidateModelConfig:
     def test_missing_claude_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """ANTHROPIC_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
             validate_model_config(model="claude-sonnet-5")
 
     def test_missing_deepseek_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """DEEPSEEK_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
             validate_model_config(model="deepseek-flash")
 
     def test_missing_gemini_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GEMINI_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="GEMINI_API_KEY"):
             validate_model_config(model="gemini-3.5-flash")
 
     def test_missing_openai_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """OPENAI_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="OPENAI_API_KEY"):
             validate_model_config(model="gpt-5.6-sol")
 
@@ -1467,7 +1467,7 @@ class TestValidateModelConfig:
         """MIMO_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("legacy-settings-key"))
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="MIMO_API_KEY"):
             validate_model_config(model="mimo-v2.5-pro")
 
@@ -1475,21 +1475,21 @@ class TestValidateModelConfig:
         """MOONSHOT_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("legacy-settings-key"))
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
             validate_model_config(model="kimi-k3")
 
     def test_missing_glm_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GLM_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="GLM_API_KEY"):
             validate_model_config(model="glm-5.2")
 
     def test_missing_qwen_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """DASHSCOPE_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="DASHSCOPE_API_KEY"):
             validate_model_config(model="qwen3.8-max")
 
@@ -1497,7 +1497,7 @@ class TestValidateModelConfig:
         """key is set → validation passes."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(
-            "shared.runtime_config.read_env_aliases",
+            "shared.host.env.runtime_config.read_env_aliases",
             lambda: {"ANTHROPIC_API_KEY": "sk-ant-123"},
         )
         result = validate_model_config(model="claude-sonnet-5")
@@ -1507,7 +1507,7 @@ class TestValidateModelConfig:
         """config.llm_model points to a provider with missing key → ValueError (not the cluster default's key)."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(
-            "shared.runtime_config.read_env_aliases",
+            "shared.host.env.runtime_config.read_env_aliases",
             lambda: {
                 "DEEPSEEK_API_KEY": "sk-test",
                 "GEMINI_API_KEY": "sk-test",
@@ -1524,7 +1524,7 @@ class TestValidateModelConfig:
         """config.llm_model's provider key is set → passes. The cluster default is irrelevant."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(
-            "shared.runtime_config.read_env_aliases",
+            "shared.host.env.runtime_config.read_env_aliases",
             lambda: {"ANTHROPIC_API_KEY": "sk-ant-123"},
         )
         result = validate_model_config(

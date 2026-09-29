@@ -196,12 +196,12 @@ def test_forward_env_dict_carries_the_machine_proxy_configuration(
 def test_windows_system_keys_include_username() -> None:
     """Task #963 lock: the single Windows system-keys declaration must carry
     USERNAME and USERDOMAIN. It lives in the env registry
-    (shared/env_registry.py) — the old parallel copy in a legacy module is gone; a
+    (shared/host/env/registry.py) — the old parallel copy in a legacy module is gone; a
     prune that drops USERNAME re-opens the crash: `getpass.getuser()` with no
     USERNAME in env falls through to `import pwd`, which does not exist on
     Windows (observed in every win rollout updater since the 2026-08-06
     allowlist wave, Task #963)."""
-    from shared.env_registry import WINDOWS_SYSTEM_ENV_KEYS
+    from shared.host.env.registry import WINDOWS_SYSTEM_ENV_KEYS
 
     assert "USERNAME" in WINDOWS_SYSTEM_ENV_KEYS, "dropped USERNAME (Task #963)"
     assert "USERDOMAIN" in WINDOWS_SYSTEM_ENV_KEYS, "dropped USERDOMAIN (Task #963)"

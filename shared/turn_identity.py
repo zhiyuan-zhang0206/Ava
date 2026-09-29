@@ -20,7 +20,7 @@ Process mode binds nothing here, the contextvar stays None, and every read
 falls through to the process slot / env — behavior unchanged.
 
 This lives in `shared/` (not `ava/`) because identity consumers exist below
-the `ava` layer (`shared/lm/_providers.py` cache affinity, `shared/resilience.py`
+the `ava` layer (`shared/lm/_providers.py` cache affinity, `shared/host/net/resilience.py`
 retry de-phasing) and the import layering is `shared < ava`. `ava.agent_identity`
 layers its process slot on top of this module's read.
 

@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from services.im_bridge import daemon
-from shared.daemon_health import Liveness
+from shared.daemon.health import Liveness
 
 
 class _FakeServer:

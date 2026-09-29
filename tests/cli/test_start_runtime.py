@@ -399,7 +399,7 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
     from cli.commands.data_plane import bringup
     from cli.release_transition import stage
     from ops import spec as ops_spec
-    from shared import machine
+    from shared.cluster import machine
 
     home = image.root.parent.parent
     (image.root.parent / "current-release").unlink()
@@ -473,8 +473,9 @@ def test_operation_observation_requires_every_selected_service_ready(
     from cli.commands import _repo
     from cli.release_transition import authority, stage
     from ops import spec as ops_spec
-    from shared import machine, os_boot_unit
-    from shared.machine import MachineRole
+    from shared import os_boot_unit
+    from shared.cluster import machine
+    from shared.cluster.machine import MachineRole
     from shared.native_process.ownership import OwnedProcess
     from shared.root_control import client
 

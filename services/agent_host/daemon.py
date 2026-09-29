@@ -66,22 +66,22 @@ from services.agent_host.pools import build_control_pool, build_shared_pool
 from services.agent_host.stdout_log import _rotate_stdout_log_forever
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared import maintenance, paths, pool_release
+from shared.cluster.machine import machine_name
 from shared.config import settings
-from shared.daemon_health import (
+from shared.daemon.health import (
     Liveness,
     RouteHandler,
     health_port,
     start_health_server,
     stop_health_server,
 )
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
+from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon.shutdown import hard_exit as _hard_exit
 from shared.deploy_timing import AGENT_LEASE_RENEW_INTERVAL_S
 from shared.exec_request_evidence import disposition_hint
 from shared.helper_chain_guard import parent_chain_intact
 from shared.hosted_force import recover_orphaned_hosted_forces
 from shared.log import init_gateway_process, logger
-from shared.machine import machine_name
 from shared.straggler_reap import settle_stranded_reaps_async
 from shared.timing import assert_clock_lattice
 
@@ -630,7 +630,7 @@ def _release_pools_route(
     return handler
 
 
-def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 — RouteHandler, declared in shared.daemon_health
+def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 — RouteHandler, declared in shared.daemon.health
     """Expose cache/activity counters and this running boot's maintenance identity."""
     import json
 

@@ -61,7 +61,7 @@ from _common import source_root
 
 sys.path.insert(0, str(source_root()))
 
-from shared.dotenv_boot import resolve_ava_home
+from shared.host.env.dotenv_boot import resolve_ava_home
 
 _KIND_STRIP = "SPAN_KIND_"
 _STATUS_OK = "STATUS_CODE_OK"
@@ -206,7 +206,7 @@ def cmd_search(args) -> int:
 def _mirror_dir(args) -> Path:
     if args.mirror_dir:
         return Path(args.mirror_dir)
-    # Checkout-anchored, like every other AVA_HOME resolution (shared/dotenv_boot.py):
+    # Checkout-anchored, like every other AVA_HOME resolution (shared/host/env/dotenv_boot.py):
     # an unanchored checkout (case 4) gets its own private scratch home, never a
     # guessed `~/.ava` — so it scans nothing instead of silently reading prod's mirror.
     home, _ = resolve_ava_home()

@@ -19,9 +19,9 @@ from cli.start_runtime import StartRuntime
 from ops.service_spec import ServiceSpec
 from shared import start_serving
 from shared.cluster import session_name
+from shared.cluster.machine import MachineRoles
 from shared.deploy_timing import SERVICE_READY_TIMEOUT_S
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.machine import MachineRoles
 from shared.paths import prod_service_checkout_error
 
 
@@ -246,9 +246,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         _print_missing_setup_error(missing, resolved.get("machine_role"))
         return 1
 
-    # reset identity holder so downstream shared.machine.machine_name() /
+    # reset identity holder so downstream shared.cluster.machine.machine_name() /
     # machine_role() see the just-written machine_serve_* files.
-    from shared.machine import machine_role, reset_identity
+    from shared.cluster.machine import machine_role, reset_identity
 
     reset_identity()
 
@@ -382,9 +382,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # — what a remote agent-runner dials — so whoever just brought the gateway up
     # can enroll runners against it without hunting for the host/port.
     if any(spec.session == "gateway" for spec in started) and not wait.unready:
+        from shared.cluster.machine import reachable_host
         from shared.config import settings as _settings
-        from shared.machine import reachable_host
-        from shared.netutil import is_loopback_host
+        from shared.host.net.predicates import is_loopback_host
 
         port = _settings.gateway.gateway_port
         host = reachable_host()

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import psutil
 
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 from shared.native_process.ownership import OwnedProcess, capture_tree
 from shared.root_control.client import RootClientError, owned_process, peer_pid
 

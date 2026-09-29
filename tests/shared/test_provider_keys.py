@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from shared import paths
-from shared.envfile import upsert_env
+from shared.host.env.dotenv_file import upsert_env
 
 pytest_plugins = ("tests.shared.test_provider_plugins",)
 
@@ -48,7 +48,7 @@ def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
     payload = config.bootstrap_config_values()
     assert payload["TESTP_API_KEY"] == "sk-x"
     valid = {config.field_alias(name) for name in config.BOOTSTRAP_FIELDS}
-    from shared.env_registry import _enabled_provider_key_envs
+    from shared.host.env.registry import _enabled_provider_key_envs
 
     assert set(payload) <= valid | _enabled_provider_key_envs()
 
@@ -112,7 +112,7 @@ def test_agent_child_env_forwards_only_enabled_plugin_keys(
     provider_plugin: Callable[..., None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The detached-agent allowlist carries a declared parent key, never an arbitrary one."""
-    from shared.env_registry import child_env
+    from shared.host.env.registry import child_env
 
     monkeypatch.setenv("TESTP_API_KEY", "sk-x")
     monkeypatch.setenv("UNDECLARED_PROVIDER_KEY", "must-not-forward")
@@ -126,7 +126,7 @@ def test_agent_child_env_excludes_a_disabled_plugin_key(
     provider_plugin: Callable[..., None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A disabled provider may not pass its inherited key to an agent process."""
-    from shared.env_registry import child_env
+    from shared.host.env.registry import child_env
 
     monkeypatch.setenv("TESTP_API_KEY", "sk-x")
     provider_plugin()

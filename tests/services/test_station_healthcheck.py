@@ -182,7 +182,7 @@ def test_alert_fires_after_two_consecutive_failures_and_resolves(
     resolves every open row for the alertname (the machine-offline pattern)."""
     monkeypatch.setattr(hc.settings.alerts, "transition_warning_seconds", 0)
     monkeypatch.setattr(hc.settings.alerts, "transition_error_seconds", 3600)
-    monkeypatch.setattr("shared.alerts.notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.telemetry.alerts.notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType]
     target = hc._StationTarget(url="http://10.0.0.9:4318", advertised=True, name="station-test-a")
     now = datetime.now(UTC)
 

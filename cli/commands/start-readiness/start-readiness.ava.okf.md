@@ -47,4 +47,4 @@ readiness before resuming work.
 - [[cli/start_identity.ava.okf.md]] — first-start identity and operation admission.
 - [[cli/release_transition/release_transition.ava.okf.md]] — retained execution,
   selected-image transitions and recovery.
-- [[shared/machine.ava.okf.md]] — capabilities and the selected service roster.
+- [[shared/cluster/machine.ava.okf.md]] — capabilities and the selected service roster.

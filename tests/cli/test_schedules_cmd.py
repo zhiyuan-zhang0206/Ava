@@ -1,7 +1,7 @@
 """`ava schedules` thin-client commands — each verb forwards to the right
 /api/schedules route and renders the response, verified without a live gateway.
 
-The cmd_* functions import `shared.http_dial` inside their bodies, so patching
+The cmd_* functions import `shared.host.net.http_dial` inside their bodies, so patching
 the module attributes here takes effect at call time (same seam as
 `tests/cli/test_agents_cmd.py`). What's under test is the client-side logic:
 name-or-id resolution, the script-source XOR, the exclude-unset update body,
@@ -58,13 +58,13 @@ def _row(
 
 @pytest.fixture(autouse=True)
 def _gateway(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", dict)
 
 
 def _patch(monkeypatch: pytest.MonkeyPatch, verb: str, payload: object, status: int = 200) -> dict:
-    """Patch one shared.http_dial verb; record url/json/params, return `payload`."""
-    from shared import http_dial
+    """Patch one shared.host.net.http_dial verb; record url/json/params, return `payload`."""
+    from shared.host.net import http_dial
 
     seen: dict[str, object] = {}
 
@@ -117,7 +117,7 @@ def test_get_by_numeric_id_skips_the_name_lookup(
 def test_get_by_name_resolves_via_list(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from shared import http_dial
+    from shared.host.net import http_dial
 
     urls: list[str] = []
 

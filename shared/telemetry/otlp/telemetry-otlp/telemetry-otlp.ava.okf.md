@@ -27,7 +27,7 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
   exporter stack at boot; test/ad-hoc exec children stay off unless an operator
   supplies an explicit endpoint. Their request-file handshake is not an export
   authority.
-- `shared/trace.py` — spans → OTLP/HTTP (protobuf wire, content-stripped) to
+- `shared/telemetry/tracing.py` — spans → OTLP/HTTP (protobuf wire, content-stripped) to
   the sidecar's `/v1/traces`; the sidecar's file exporter writes the OTLP/JSON
   mirror. Producer timeout, circuit-breaker, shedding, and synchronous-flush
   bounds live in [[export-backpressure.ava.okf.md|OTLP export backpressure]].
@@ -51,7 +51,7 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
   payload fields become Prometheus series via a per-field disposition, a
   per-process Resource, and latency-shaping Views — the full mapping contract
   is its own node: [[shared/telemetry/otlp/telemetry-otlp/metrics-mapping.ava.okf.md]].
-- **Traces** — exported with the cluster Resource by `shared/trace.py` to the sidecar's `/v1/traces`
+- **Traces** — exported with the cluster Resource to the sidecar's `/v1/traces`
   (OTLP/HTTP protobuf, content-stripped before leaving the process); the sidecar's
   file exporter mirrors each batch to `$AVA_HOME/traces/spans.jsonl`
   (rotated `spans-<ISO>.jsonl`). Recovery replay is `ava trace ship`: it
@@ -108,7 +108,7 @@ single-box hosts collapse to the local receiver even when their secret is set.
   `deploy/otel-collector/otel-collector.yaml` implement cluster filtering and
   the credential-free (peer, monitoring role) Postgres receiver. Root health: `ops/spec.py`
   (`ava-otel-collector`) + `services/healthchecks/otel_collector.py`.
-- `shared/trace.py` + `cli/commands/observability/trace.py` + `cli/parsers/host.py` — the
+- `shared/telemetry/tracing.py` + `cli/commands/observability/trace.py` + `cli/parsers/host.py` — the
   mirror `ava trace ship` replays, and the ship command.
 
 ## Entry points

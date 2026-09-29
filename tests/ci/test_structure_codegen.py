@@ -317,7 +317,7 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "shared/config_registry.py",
         "shared/config/agent.py",
         "scripts/gen_config_lite_table.py",
-        "shared/config_lite_table.json",
+        "shared/host/env/config_lite_table.json",
     )
     for path in paths:
         assert (ROOT / path).is_file(), f"Freshness matrix path no longer exists: {path}"

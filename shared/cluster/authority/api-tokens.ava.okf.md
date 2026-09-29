@@ -32,7 +32,7 @@ login: the root launcher gives each service its class token (`api_access`,
 unit), so a delivered token always means "present a bearer"; the boot pass
 gives an admitted operator process the same token; exec children and watchers
 inherit it. Clients present `AVA_API_TOKEN` first, else the human secret
-(`shared.cluster_auth.client_bearer`). An empty-secret single box delivers no
+(`shared.cluster.auth.client_bearer`). An empty-secret single box delivers no
 token and keeps its open API.
 
 The OTLP relay ingress is telemetry, not a write path, and does not rotate per

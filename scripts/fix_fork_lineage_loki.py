@@ -38,7 +38,7 @@ import httpx
 
 from gateway import loki_events
 from shared.config import settings
-from shared.loki_index_labels import ARCHIVE_FREEZE_AT
+from shared.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT
 
 
 def _misrecorded_rows() -> list[dict[str, Any]]:

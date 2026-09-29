@@ -29,7 +29,7 @@ import time
 from typing import IO
 
 from shared.boot_policy import BOOT_RETRY_INTERVAL_S
-from shared.dotenv_boot import resolve_ava_home
+from shared.host.env.dotenv_boot import resolve_ava_home
 
 
 def _start_command(start_args: list[str]) -> list[str]:

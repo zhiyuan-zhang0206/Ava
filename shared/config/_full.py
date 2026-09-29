@@ -267,7 +267,7 @@ def refresh_data_plane_settings() -> None:
     full singleton swap would surprise subsystems that cache a sub-model.
     """
     from shared.config import settings
-    from shared.dotenv_boot import load_ava_env
+    from shared.host.env.dotenv_boot import load_ava_env
 
     load_ava_env()
     settings.data_plane = DataPlaneSettings()  # pyright: ignore[reportCallIssue]

@@ -45,15 +45,15 @@ import httpx
 from pydantic import ValidationError
 
 from ops.rpc_schemas import OpEnvelope, OpKind, OpResponse, is_op_kind
-from shared.config import settings
-from shared.machine import gateway_auth_headers
-from shared.machines import (
+from shared.cluster.machine import gateway_auth_headers
+from shared.cluster.machines import (
     MachineGatewayUrlMissing,
     MachineNotRegistered,
 )
-from shared.machines import (
+from shared.cluster.machines import (
     lookup as lookup_machine_url,
 )
+from shared.config import settings
 
 __all__ = [
     "ClusterOpFailed",
@@ -218,7 +218,7 @@ async def _dispatch_once(
         # header at all rather than an illegal "Bearer " value.
         headers = gateway_auth_headers()
         # Cluster-internal dials must never honor the host's system/env proxy:
-        # private peers are not proxy-routable. This matches shared/http_dial.py's
+        # private peers are not proxy-routable. This matches shared/host/net/http_dial.py's
         # PinnedIPv4Transport, which is sync-only; async httpx already handles
         # IPv4-literal hosts natively.
         async with httpx.AsyncClient(

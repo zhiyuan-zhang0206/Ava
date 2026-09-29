@@ -9,7 +9,7 @@ import pytest
 import shared.private_storage
 from shared.config import settings
 from shared.config.general import GeneralSettings
-from shared.envfile import (
+from shared.host.env.dotenv_file import (
     ENV_BACKUP_KEEP,
     env_line_export_prefix,
     env_line_key,
@@ -245,7 +245,7 @@ def test_upsert_noop_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     the same value again and again; before the skip it rewrote the file and
     appended an `old == new` audit record each time — the WSL noise of #3637.
     """
-    from shared import envfile
+    from shared.host.env import dotenv_file
 
     f = tmp_path / ".env"
     f.write_text("A=1\nKEEP=2\n")
@@ -255,9 +255,9 @@ def test_upsert_noop_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     def _record_write(_path: Path, data: bytes) -> None:
         writes.append(data)
 
-    monkeypatch.setattr(envfile, "write_private_bytes", _record_write)
+    monkeypatch.setattr(dotenv_file, "write_private_bytes", _record_write)
 
-    envfile.upsert_env(f, {"A": "1"}, audit_site="test_site")
+    dotenv_file.upsert_env(f, {"A": "1"}, audit_site="test_site")
 
     assert writes == []
     assert f.read_text() == "A=1\nKEEP=2\n"

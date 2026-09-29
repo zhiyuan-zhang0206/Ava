@@ -182,8 +182,8 @@ def test_log_llm_usage_emits_agent_billing_span(
     """
     from opentelemetry import trace as otel_trace
 
-    from shared import trace as trace_mod
     from shared.lm.pricing import quote
+    from shared.telemetry import tracing as trace_mod
 
     class _Span:
         def __init__(self, start_time: int | None) -> None:
@@ -252,7 +252,7 @@ def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
     """
     from opentelemetry import trace as otel_trace
 
-    from shared import trace as trace_mod
+    from shared.telemetry import tracing as trace_mod
 
     class _Span:
         def set_attribute(self, _key: str, _value: Any) -> None:

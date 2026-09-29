@@ -21,7 +21,7 @@ from typing import Protocol
 
 from services.ava_root.manifest import UnknownUnitError
 from services.ava_root.probes import Probe, ProbeError, ProbeRegistry
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 from shared.native_process.ownership import OwnedProcess
 
 _log = logging.getLogger(__name__)

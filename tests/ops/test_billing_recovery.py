@@ -146,7 +146,7 @@ def _capture_events(
     def _record_telemetry(*a: Any, **kw: Any) -> None:
         telemetry.append((a, kw))
 
-    monkeypatch.setattr("shared.audit_events.insert_event_log", _record_audit)
+    monkeypatch.setattr("shared.telemetry.audit_events.insert_event_log", _record_audit)
     monkeypatch.setattr("shared.telemetry.emit", _record_telemetry)
     return audits, telemetry
 
@@ -424,8 +424,9 @@ def _configure_probe(
 ) -> None:
     from pydantic import SecretStr
 
-    from shared import http_dial, runtime_config
     from shared.config import settings
+    from shared.host.env import runtime_config
+    from shared.host.net import http_dial
 
     monkeypatch.setattr(
         settings.lm, "deepseek_api_key", None if key is None else SecretStr(key), raising=False

@@ -225,7 +225,7 @@ def _launchers(
 
 def _service_roster() -> list[dict[str, object]]:
     from ops.spec import services_for_capabilities_annotated
-    from shared.machine import machine_role
+    from shared.cluster.machine import machine_role
     from shared.runtime_interpreter import WHEEL_RUNTIME
 
     if not WHEEL_RUNTIME:

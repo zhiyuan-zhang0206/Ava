@@ -23,8 +23,8 @@ import pytest
 
 from ops import agent_pause, cluster_pause
 from shared import maintenance, maintenance_cohort, pause_owner
+from shared.cluster.machine import machine_name
 from shared.db import create_agent, insert_inbound_message
-from shared.machine import machine_name
 from shared.maintenance_state import MaintenanceHold
 from shared.straggler_reap import (
     REAP_LIFECYCLE_OUTCOME,

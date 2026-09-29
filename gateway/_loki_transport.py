@@ -15,7 +15,7 @@ import httpx
 from gateway import loki_query_budget
 from shared import telemetry
 from shared.log import logger
-from shared.observability import endpoint_override_is_explicit, gateway_observability_home
+from shared.telemetry.observability import endpoint_override_is_explicit, gateway_observability_home
 
 _HTTP_TIMEOUT_S = 45.0
 _SLOW_QUERY_LOG_S = 5.0
@@ -30,7 +30,7 @@ def _read_gate() -> None:
     home = gateway_observability_home()
     if home is None:
         return
-    from shared.observability import home_is_observability_station
+    from shared.telemetry.observability import home_is_observability_station
 
     if not home_is_observability_station(home) and not endpoint_override_is_explicit(
         "AVA_TELEMETRY_LOKI_URL"

@@ -353,7 +353,7 @@ def _gateway_base() -> str:
     own reachable address is equivalent to loopback and keeps one origin
     everywhere, mirroring how remote agent-runners dial the gateway.
     """
-    from shared.machine import reachable_host
+    from shared.cluster.machine import reachable_host
 
     host = reachable_host()
     if ":" in host and not host.startswith("["):
@@ -367,7 +367,7 @@ def main() -> None:
     parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
     args = parser.parse_args()
 
-    from shared.daemon_shutdown import install_graceful_shutdown
+    from shared.daemon.shutdown import install_graceful_shutdown
     from shared.log import init_gateway_process
 
     init_gateway_process("gate")

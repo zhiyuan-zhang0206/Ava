@@ -14,7 +14,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from shared import maintenance
 from shared.agent_observation import AdmissionOutcome
-from shared.audit_events import insert_event_log_async
 from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import (
     AGENT_LEASE_TTL_S,
@@ -41,6 +40,7 @@ from shared.runtime_admission import (
     require_current_for_managed,
 )
 from shared.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
+from shared.telemetry.audit_events import insert_event_log_async
 
 
 class _HostedAdmissionRefusedError(Exception):

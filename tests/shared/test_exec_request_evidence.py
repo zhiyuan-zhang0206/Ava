@@ -308,7 +308,7 @@ def test_bounded_age_resolves_profile_safely_without_the_sandbox_domain(
 ) -> None:
     """A sandbox-less process reads the cluster .env, then the declared default."""
     from shared import config as config_module
-    from shared import runtime_config
+    from shared.host.env import runtime_config
 
     class _NoSandbox:
         def has_domain(self, _name: str) -> bool:

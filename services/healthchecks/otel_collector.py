@@ -4,12 +4,12 @@ import re
 import urllib.request
 from dataclasses import dataclass
 
+from shared.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+from shared.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
 from shared.config import settings
-from shared.daemon_health import DaemonProbe
-from shared.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+from shared.daemon.health import DaemonProbe
 from shared.native_process.ownership import OwnedProcess, leader_owns_pids
-from shared.observability import collector_allowed_for_home, gateway_observability_home
-from shared.port_preflight import ListenerDiscoveryError, strict_listeners_on
+from shared.telemetry.observability import collector_allowed_for_home, gateway_observability_home
 
 _QUEUE_SAMPLE = re.compile(
     r"^otelcol_exporter_queue_(?P<kind>capacity|size)\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9.eE+-]+)$"

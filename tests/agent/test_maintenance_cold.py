@@ -8,8 +8,8 @@ import psycopg
 import pytest
 
 from shared import maintenance_cohort, pause_owner
+from shared.cluster.machine import machine_name
 from shared.db import insert_inbound_message
-from shared.machine import machine_name
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 

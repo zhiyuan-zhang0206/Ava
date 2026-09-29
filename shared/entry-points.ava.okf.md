@@ -15,8 +15,8 @@ tags:
 - `shared/lm/pricing.py:tally_tokens` / `cost_usd` — token usage and three-tier cost calculation
 - `shared/agents/contract.py:AgentStatus` — agent lifecycle status enum (RUNNING / IDLING / RESTARTING / TERMINATED)
 - `shared/message_kwargs.py:read_ava_kwargs` — typed reading entry point for message `additional_kwargs`
-- `shared/metrics/metrics_aggregate.py:build_report_from_aggregate` — assemble metrics report
-- `shared/bootstrap.py` — system boot entry point
+- `shared/telemetry/metrics/aggregate.py:build_report_from_aggregate` — assemble metrics report
+- `shared/host/env/bootstrap.py` — system boot entry point
 
 
 Parent: [[shared/shared.ava.okf.md|Shared Libraries]].

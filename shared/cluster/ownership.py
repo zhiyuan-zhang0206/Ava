@@ -18,8 +18,8 @@ import psutil
 import psycopg
 from redis.asyncio import Redis
 
+from shared.cluster.port_preflight import strict_listeners_on
 from shared.native_process.ownership import OwnedProcess, capture_tree
-from shared.port_preflight import strict_listeners_on
 
 
 class RedisConnectionCustody:

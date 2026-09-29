@@ -338,7 +338,7 @@ def test_probe_reports_unconfigured_when_registry_record_is_missing(
     def _missing_record(_home: Path) -> None:
         return None
 
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.64.0.7")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.64.0.7")
     monkeypatch.setattr("shared.cluster.get_record", _missing_record)
     monkeypatch.setattr(bridge, "_job_loaded", lambda: False)
 

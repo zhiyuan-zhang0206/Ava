@@ -166,8 +166,8 @@ def _collect_blocks(
     is skipped silently, like an empty entry.
 
     Returns (blocks, remote_ancestors)."""
-    from shared import machine as host_machine
-    from shared.machine import MachineNameMissing
+    from shared.cluster import machine as host_machine
+    from shared.cluster.machine import MachineNameMissing
 
     chain = _ancestor_chain(agent_id)
     if chain is None:

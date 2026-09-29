@@ -20,9 +20,9 @@ _TIMEOUT_S = 15.0
 
 
 def _dial() -> tuple[str, dict[str, str], Any, Any]:
-    from shared.http_dial import get as dial_get
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import get as dial_get
+    from shared.host.net.http_dial import post as dial_post
 
     base = f"{gateway_api_base()}/api"
     headers = gateway_auth_headers()

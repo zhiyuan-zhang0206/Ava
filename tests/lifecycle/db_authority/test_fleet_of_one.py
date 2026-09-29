@@ -138,7 +138,7 @@ class RootlessGateway(GatewayUnit):
 @pytest.fixture
 def fleet(born: Born, executor: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[FleetRequest]:
     """The born home as the cluster's one registered unit, on release A, with one agent."""
-    import shared.machine
+    import shared.cluster.machine
 
     del executor
     home = born.home
@@ -146,8 +146,8 @@ def fleet(born: Born, executor: str, monkeypatch: pytest.MonkeyPatch) -> Iterato
     cluster.save_record_locked(born.record, path=registry)
     mark_phase(home, "provisioned")
     mark_phase(home, "ready")
-    monkeypatch.setattr(shared.machine, "machine_name", lambda: _MACHINE)
-    monkeypatch.setattr(shared.machine, "machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(shared.cluster.machine, "machine_name", lambda: _MACHINE)
+    monkeypatch.setattr(shared.cluster.machine, "machine_role", lambda: frozenset({"gateway"}))
     (home / "releases").mkdir()
     _point(home, _PREVIOUS)
     with born.admin() as conn:

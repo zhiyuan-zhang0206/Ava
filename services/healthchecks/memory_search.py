@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from shared.config import settings
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 _TIMEOUT_S = 3.0
 

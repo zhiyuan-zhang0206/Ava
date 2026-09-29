@@ -8,7 +8,7 @@ network, no Tempo; the mirror walk uses tmp_path files.
 
 Also locks the 2026-09-27 "unanchored checkout reaches production" fix:
 `_mirror_dir` / `_cluster_secret` / `_gateway_get` resolve `$AVA_HOME` via
-`shared.dotenv_boot.resolve_ava_home` instead of guessing `~/.ava` — an
+`shared.host.env.dotenv_boot.resolve_ava_home` instead of guessing `~/.ava` — an
 unanchored checkout must never read a guessed home's `.env` or dial a
 guessed gateway with its secret (see `tests/shared/test_unanchored_checkout.py`
 for the same bug class against `shared.config` itself).
@@ -22,7 +22,7 @@ stays meaningful for tests that DO exercise Settings.
 
 `_common.py::source_root` tests (2026-09-28 fix, PR #3550 follow-up P2-2):
 `read_trace.py` / `fetch_trace.py` each need to locate the `shared` package
-before they can import `shared.dotenv_boot.resolve_ava_home` — a bootstrap
+before they can import `shared.host.env.dotenv_boot.resolve_ava_home` — a bootstrap
 problem `resolve_ava_home` itself cannot solve. The walk-up-from-`__file__`
 branch (the dev checkout, or a converged `$AVA_HOME/skills/...` copy invoked
 with an interpreter that already carries `shared` on `sys.path`) needs no fix

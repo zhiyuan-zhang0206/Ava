@@ -208,7 +208,7 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
     from ops import agent_spawn
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agents_meta")

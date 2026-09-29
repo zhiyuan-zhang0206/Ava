@@ -2,7 +2,7 @@
 
 A 200 on the gateway port only proves *something* listens there. What makes the
 answer believable is the identity the body carries, so every field in it is a
-contract with `shared.daemon_health` and is pinned here rather than left to
+contract with `shared.daemon.health` and is pinned here rather than left to
 whatever the handler happens to return.
 
 `name` is the newest of those fields and the reason this module exists: it is
@@ -23,7 +23,7 @@ from psycopg_pool import PoolTimeout
 
 from gateway.app import app
 from shared import process_sha
-from shared.machine import machine_name
+from shared.cluster.machine import machine_name
 from shared.paths import ava_home
 
 

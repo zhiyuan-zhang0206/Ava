@@ -75,10 +75,10 @@ from pathlib import Path
 
 import psycopg
 
+from shared.cluster.machine import MachineNameMissing, machine_name
 from shared.db import PG_KEEPALIVE_KWARGS
-from shared.dotenv_boot import checkout_anchored_home
+from shared.host.env.dotenv_boot import checkout_anchored_home
 from shared.log import logger
-from shared.machine import MachineNameMissing, machine_name
 from shared.migration_errors import CodeBehindSchema as CodeBehindSchema
 from shared.migration_errors import MigrationAuthorityMismatch as MigrationAuthorityMismatch
 from shared.migration_errors import MigrationError as MigrationError

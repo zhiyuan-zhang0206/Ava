@@ -50,7 +50,7 @@ def recover_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, bool]:
     # The pid probe itself moved to `shared.cluster_lock.holder_process_gone`
     # (the liveness rule the automatic reclaim shares), so its inputs are the
     # seams to pin: machine identity for the holder parse + process liveness.
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "m1")
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "m1")
     monkeypatch.setattr(_ops, "updater_lease_live", lambda: False)
 
     def _claim(_holder: str, observed: DeployLease | None) -> RecoveryClaim:

@@ -51,10 +51,11 @@ from cli.release_transition.authority import adopt_executor_authority
 from cli.release_transition.journal import exclusive, read_operation
 from cli.release_transition.request import ReleaseRef
 from cli.start_identity import mark_phase
-from shared import cluster, db_connections, dotenv_boot
+from shared import cluster, db_connections
 from shared.cluster import authority
 from shared.cluster.authority import delivery
 from shared.config import settings
+from shared.host.env import dotenv_boot
 from shared.log import logger
 from shared.runtime_release import VerifiedRelease, current_pointer
 from shared.start_inputs import configuration_digest
@@ -183,15 +184,15 @@ def _process(environment: Mapping[str, str]) -> Generator[None]:
 @pytest.fixture
 def cycle(born: Born, monkeypatch: pytest.MonkeyPatch) -> Iterator[Cycle]:
     """The born home as the cluster's one registered unit, selecting image A."""
-    import shared.machine
+    import shared.cluster.machine
 
     home = born.home
     registry = Path(cluster.registry_path())
     cluster.save_record_locked(born.record, path=registry)
     mark_phase(home, "provisioned")
     mark_phase(home, "ready")
-    monkeypatch.setattr(shared.machine, "machine_name", lambda: _MACHINE)
-    monkeypatch.setattr(shared.machine, "machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(shared.cluster.machine, "machine_name", lambda: _MACHINE)
+    monkeypatch.setattr(shared.cluster.machine, "machine_role", lambda: frozenset({"gateway"}))
     with born.admin() as conn:
         conn.execute(
             "INSERT INTO machines (name, role) VALUES (%s, '{gateway,agent-runner}')", (_MACHINE,)

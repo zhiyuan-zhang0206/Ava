@@ -38,10 +38,10 @@ from psycopg_pool import ConnectionPool
 
 from gateway import loki_events, loki_query_budget
 from gateway.schemas import MetricPoint, PluginMetricResult
-from shared.metrics.core import core_metrics
-from shared.metrics.metrics_logql import validate_logql
 from shared.plugin_context import PluginContext
-from shared.plugin_metrics import (
+from shared.telemetry.metrics.core import catalog
+from shared.telemetry.metrics.logql import validate_logql
+from shared.telemetry.metrics.plugin_metrics import (
     MetricSpec,
     PluginMetricError,
     drop_plugin_metrics,
@@ -129,8 +129,8 @@ def _load_plugin_metrics() -> list[MetricSpec]:
         except BaseException as exc:
             plugin_load_report.report_plugin_load_failure(name, exc)
             drop_plugin_metrics(name)
-    core_metrics.collect_core_metrics()
-    return registered_metrics() + core_metrics.registered_core_metrics()
+    catalog.collect_core_metrics()
+    return registered_metrics() + catalog.registered_core_metrics()
 
 
 def _render_metric_query(spec: MetricSpec, agent_id: int | None) -> str:

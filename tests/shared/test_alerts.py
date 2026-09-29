@@ -1,8 +1,8 @@
-"""shared.alerts IM-copy contract tests (Task #1261, user ruling 2026-08-13).
+"""shared.telemetry.alerts IM-copy contract tests (Task #1261, user ruling 2026-08-13).
 
 Locks the alert-push governance contract: the user-visible alert templates
-live in shared/alerts_copy.py (no head/trigger/jump-link literals in
-shared/alerts.py; services/im_bridge/copy.py re-exports them), the template
+live in shared/telemetry/alerts_copy.py (no head/trigger/jump-link literals in
+shared/telemetry/alerts.py; services/im_bridge/copy.py re-exports them), the template
 language follows user_settings ``display.language`` ("zh" | "en", default
 "zh"), and only template/framework copy is translated — alert
 labels/annotations data passes through verbatim.
@@ -18,11 +18,11 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-import shared.alerts as shared_alerts
-from shared import alerts_copy as copy
-from shared.alerts import display_language, format_local, frontend_base_url, notify_text
+import shared.telemetry.alerts as shared_alerts
 from shared.config import settings
 from shared.config.general import GeneralSettings
+from shared.telemetry import alerts_copy as copy
+from shared.telemetry.alerts import display_language, format_local, frontend_base_url, notify_text
 
 
 def _alert(*, status: str = "firing", severity: str = "error") -> dict[str, Any]:
@@ -48,14 +48,14 @@ def _head(lang: str, *, resolved: bool, severity: str = "ERROR") -> str:
 
 def test_alert_format_literals_not_hardcoded_in_alerts_module() -> None:
     """Governance (user ruling 2026-08-08): user-visible IM copy lives in
-    shared/alerts_copy.py — the alert head literals must not creep back into
-    shared/alerts.py."""
+    shared/telemetry/alerts_copy.py — the alert head literals must not creep back into
+    shared/telemetry/alerts.py."""
     src = Path(shared_alerts.__file__).read_text(encoding="utf-8")
     for literal in (
-        "⚠️ ALERT",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
-        "✅ RESOLVED",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
-        "⚠️ \u544a\u8b66",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
-        "✅ \u5df2\u6062\u590d",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
+        "⚠️ ALERT",  # emoji-ok: asserting the governance guard (head literals banned from shared/telemetry/alerts.py)
+        "✅ RESOLVED",  # emoji-ok: asserting the governance guard (head literals banned from shared/telemetry/alerts.py)
+        "⚠️ \u544a\u8b66",  # emoji-ok: asserting the governance guard (head literals banned from shared/telemetry/alerts.py)
+        "✅ \u5df2\u6062\u590d",  # emoji-ok: asserting the governance guard (head literals banned from shared/telemetry/alerts.py)
     ):
         assert literal not in src
 

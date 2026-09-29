@@ -19,7 +19,7 @@ import pytest
 
 from cli.start_identity import IdentityInput, prepare_identity
 from shared import cluster
-from shared.port_block import BLOCK_SIZE
+from shared.host.env.port_block import BLOCK_SIZE
 
 
 def test_two_clusters_disjoint_ports_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

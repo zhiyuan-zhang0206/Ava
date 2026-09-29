@@ -28,8 +28,8 @@ from gateway import loki_events, prom_metrics, telemetry_staleness
 from gateway.app import app
 from gateway.routers import fleet_graph
 from shared.cluster import home_label
-from shared.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 from shared.paths import ava_home
+from shared.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 from tests.gateway.loki_fake import FakeLoki
 
 

@@ -60,7 +60,7 @@ def __getattr__(name: str) -> object:
         return ava.agent_identity.agent_id()
     if name == "MACHINE_SPEC":
         import ava
-        from shared.machine import machine_description, machine_name
+        from shared.cluster.machine import machine_description, machine_name
 
         return ava.const(
             (machine_name(), machine_description() or ""),
@@ -71,7 +71,7 @@ def __getattr__(name: str) -> object:
         )
     if name == "SELF_MACHINE_NAME":
         import ava
-        from shared.machine import machine_name
+        from shared.cluster.machine import machine_name
 
         return ava.const(
             machine_name(),
@@ -303,7 +303,7 @@ def compact(summary: str) -> NoReturn:
             "VALUES (%s, %s, 'compact_summary')",
             (agent_identity.agent_id(), summary),
         )
-        from shared.audit_events import insert_event_log
+        from shared.telemetry.audit_events import insert_event_log
 
         insert_event_log(
             event_type="compact",

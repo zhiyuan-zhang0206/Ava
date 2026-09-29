@@ -4,11 +4,11 @@
 consolidation scripts under `skills/scripts/` (`consolidate.py`, `steward.py`,
 `arbiter_merge.py`, `gen_indexes.py`, `rebuild_memory_index.py`) as
 `ava_builtins.plugins.ava_memory.pool_ops`, so a run needs the checkout's venv
-(`ava_builtins` importable). It still avoids `shared.dotenv_boot`'s
+(`ava_builtins` importable). It still avoids `shared.host.env.dotenv_boot`'s
 checkout-anchored home resolution: `ava_home()` takes the opposite, simpler
 stance, requiring an explicit `AVA_HOME` and failing fast instead of
 defaulting to `Path.home() / ".ava"` — the same "unanchored checkout reaches
-production" bug class as `shared/dotenv_boot.py`, but for a script with no
+production" bug class as `shared/host/env/dotenv_boot.py`, but for a script with no
 per-invocation identity to anchor to. `pool_dir()` / `refresh_index()` are
 write paths (git commit + push to the pool, `ava memory refresh`), so a wrong
 guess would not just misread a stray file, it would mutate whatever machine

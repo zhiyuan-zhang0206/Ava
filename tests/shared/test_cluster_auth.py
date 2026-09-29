@@ -1,8 +1,8 @@
-"""Unit tests for shared/cluster_auth.py — bearer and cookie primitives."""
+"""Unit tests for shared/cluster/auth.py — bearer and cookie primitives."""
 
 from base64 import urlsafe_b64decode
 
-from shared.cluster_auth import (
+from shared.cluster.auth import (
     bearer_header,
     new_session_id,
     session_cookie_header,

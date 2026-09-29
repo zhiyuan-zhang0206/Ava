@@ -88,8 +88,8 @@ def cmd_agents_ls(
     *, scope: str = "live", query: str = "", before_id: int | None = None, limit: int = 100
 ) -> int:
     """Render one agent directory page and its continuation cursor."""
-    from shared.http_dial import get as dial_get
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import get as dial_get
 
     url = f"{gateway_api_base()}/api/agents"
     params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
@@ -224,8 +224,8 @@ def send_agent_message(
     import httpx
 
     from shared.agents.messages import delivery_outbox
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import post as dial_post
 
     if tail_file is not None:
         # Delivering the notice is the primary contract; the tail is a rider.
@@ -319,8 +319,8 @@ def cmd_agents_cancel(agent_id: int) -> int:
     A running step interrupts immediately; if the agent is between steps the next
     claim halts it to idle. Either way it stops but stays alive and resumes on the
     next message — the soft stop, vs terminate / kill which end the agent."""
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/cancel"
     resp = dial_post(
@@ -346,8 +346,8 @@ def cmd_agents_restart(
     import json
     import sys
 
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/restart"
     caller = _explicit_caller(source)
@@ -384,8 +384,8 @@ def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
     Brings a terminated agent back: a fresh process is respawned attached to the
     same agent_id (history preserved). An already-running agent returns
     `already_alive`."""
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/resurrect"
     caller = _explicit_caller(source, field="resurrected_by")
@@ -410,8 +410,8 @@ def cmd_agents_resurrect_billing(*, execute: bool) -> int:
     `resurrect-billing-v1` on each home machine) and prints the per-agent
     outcome. Refused runs exit 1; previews and runs exit 0.
     """
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/agents/resurrect-billing"
     resp = dial_post(
@@ -459,8 +459,8 @@ def _terminate(
     leaves the server default in place.
     `kill_all_shell_sessions` is sent only when set; the output reports what
     the kill did, so it is verifiable from the output alone."""
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import post as dial_post
 
     verb = "kill" if force else "terminate"
     url = f"{gateway_api_base()}/api/agents/{agent_id}/terminate"
@@ -531,8 +531,8 @@ def cmd_agents_compact(agent_id: int) -> int:
     A terminated target is auto-resurrected first; a
     wedged target consumes it once recovered (turn-liveness restart, or an
     operator kill + resurrect) — the request is durable and waits."""
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/compact"
     resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())

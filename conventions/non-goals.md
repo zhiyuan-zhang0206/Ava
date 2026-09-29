@@ -154,7 +154,7 @@ first and ask "what changed that made it worth doing".
   reading the agents' log files + `get_status()` alone can't keep up, or cross-machine monitoring is needed; then
   bring in a metrics pipeline. See
   self-rolling-release design record in git).
-  (Distributed *tracing* is no longer on this list: `shared/trace.py` records
+  (Distributed *tracing* is no longer on this list: `shared/telemetry/tracing.py` records
   vendor-neutral OTLP/JSON spans to a local mirror — Traceloop/OpenLLMetry
   auto-instruments the LLM/tool path; `ava trace ship` replays the mirror to a
   self-hosted viewer out-of-band. That is span recording, not a metrics pipeline;

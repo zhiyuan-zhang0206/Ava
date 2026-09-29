@@ -127,7 +127,7 @@ class WriteGrant:
 
     def dsn(self, endpoint: str) -> str:
         """``endpoint`` (the home's credential-free URL) dialed as this login."""
-        from shared.url_secret import url_with_userinfo
+        from shared.host.net.url_secret import url_with_userinfo
 
         return url_with_userinfo(endpoint, self.role, self.password)
 

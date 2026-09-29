@@ -189,7 +189,7 @@ def credential_blocker() -> str | None:
     identity, `gh` on PATH, the Trunk token file. No network probes — the
     sampler itself reports its own fetch failures loudly when it runs.
     """
-    from shared.observability import production_identity
+    from shared.telemetry.observability import production_identity
 
     if not production_identity():
         return "not the registered production home"

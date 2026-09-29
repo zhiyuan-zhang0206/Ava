@@ -12,7 +12,7 @@ makes the pool footprint config-driven with explicit caller sizes winning.
 from __future__ import annotations
 
 from shared.config.data_plane import DataPlaneSettings, resolved_pool_size, sslmode_for_url
-from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
+from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
 
 # A foreign host that could never be this machine's own reachable address in
 # the test env (AVA_MACHINE_HOST=localhost, so a `localhost` URL is rewritten

@@ -88,7 +88,7 @@ def test_an_unreadable_lease_does_not_suppress(
         "shared.cluster_lock.read_update_lease",
         lambda: (_ for _ in ()).throw(RuntimeError("db gone")),
     )
-    monkeypatch.setattr("shared.machines.list_all", list)
+    monkeypatch.setattr("shared.cluster.machines.list_all", list)
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
     monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(health, "_ingest_alert", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]

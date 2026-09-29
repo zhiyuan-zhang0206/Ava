@@ -49,12 +49,12 @@ from shared.agents import (
     InvalidModelConfig,
     SpawnTargetNotAgentRunner,
 )
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.labels import publish_label_updated, spawn_prompt_with_label
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
-from shared.machine import machine_name
 
 router = APIRouter()
 
@@ -188,7 +188,7 @@ def _spawn_preflight_blocking(
     else None.
     """
     from shared.agents import MachinePaused
-    from shared.machines import is_paused, lookup_role
+    from shared.cluster.machines import is_paused, lookup_role
 
     # Capability is read from the cluster registry — the same source the forward
     # resolves the target's ops URL from — uniformly for every target, local

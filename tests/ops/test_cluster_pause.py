@@ -17,9 +17,9 @@ import pytest
 from ops import agent_pause, cluster_pause
 from ops.cluster_pause import unpause_local_cluster as _real_unpause_local_cluster
 from shared import maintenance, pause_owner
+from shared.cluster.machine import machine_name
 from shared.db import create_agent, insert_inbound_message
 from shared.host_deploy_state import HostDeployState
-from shared.machine import machine_name
 
 
 @pytest.fixture

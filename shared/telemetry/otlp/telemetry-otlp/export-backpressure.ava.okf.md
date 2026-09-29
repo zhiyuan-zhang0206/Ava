@@ -26,7 +26,7 @@ the collector sidecar owns durable mirroring after acceptance.
 - SDK-owned log and metric threads perform network I/O. Both OTLP/HTTP
   exporters and their processors receive explicit 2-second deadlines; errors
   cannot raise into an Ava producer thread.
-- `shared/trace.py:OtlpJsonHttpSpanExporter` gives each protobuf trace batch one
+- `shared/telemetry/tracing.py:OtlpJsonHttpSpanExporter` gives each protobuf trace batch one
   2-second POST. Three consecutive failed batches open a 30-second circuit.
   During cooldown it returns `FAILURE` without encoding or posting and counts
   dropped batches and spans; after cooldown exactly one half-open probe runs.
