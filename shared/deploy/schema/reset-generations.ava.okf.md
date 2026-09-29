@@ -10,7 +10,7 @@ tags:
 # Schema reset generations
 
 The 2026-09-23 reset folds the 101 preceding migration pairs into the baseline
-and removes their seed stamps. `shared/migration_history.py` retains that exact
+and removes their seed stamps. `shared/deploy/schema/migration_history.py` retains that exact
 inventory plus the earlier 59-name generation: older backup/PITR restores have
 not been ruled out. Before convergence deletes tracking rows, either partial
 generation raises `MigrationHistoryGap`. Without the current reset anchor, the
@@ -44,4 +44,4 @@ fix-forward and alerts loudly instead.
 
 ## Key dependencies
 
-- [[shared/migrations/migrations.ava.okf.md]] — baseline, applied-set runner, and migration authority
+- [[shared/deploy/schema/migrations.ava.okf.md]] — baseline, applied-set runner, and migration authority

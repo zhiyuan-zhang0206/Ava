@@ -193,7 +193,7 @@ def provision_database(
         # every object is owned by the role, not the bootstrap superuser — the
         # role must own them for later migrations and its grants. The role never
         # logs in here. schema.sql is a trusted multi-statement script read from
-        # disk; same pattern as shared/migrations.py applying a body.
+        # disk; same pattern as shared/deploy/schema/migrations.py applying a body.
         with owner_session(
             base_admin_url,
             database=identity,
@@ -305,7 +305,7 @@ def _expected_checkpoint_schema_versions() -> frozenset[int]:
     """The upstream versions explicitly approved by Ava's rollback contract."""
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    from shared import migrations as ava_migrations
+    from shared.deploy.schema import migrations as ava_migrations
 
     declared_versions = sorted(CHECKPOINT_SCHEMA_AVA_MIGRATIONS)
     expected_declared = list(

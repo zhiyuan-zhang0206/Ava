@@ -58,7 +58,7 @@ def _sanitize_restore_drill(work: Path, _worker: OperationWorker | None) -> None
     cluster; after proven closure its owner lock is released, so the
     throwaway sweep reaps it now instead of at the next throwaway start.
     """
-    from shared.pg_tools import sweep_orphaned_throwaway_clusters
+    from shared.cluster.dataplane.pg_tools import sweep_orphaned_throwaway_clusters
 
     scratch = work / "scratch"
     if scratch.is_dir() and not scratch.is_symlink():

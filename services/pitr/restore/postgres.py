@@ -26,8 +26,8 @@ from services.pitr.restore.proof import (
     _same_live,
     update_restore_owner,
 )
-from shared.pg_foreground import start_foreground_postgres
-from shared.pg_tools import pg_start_env
+from shared.cluster.dataplane.pg_foreground import start_foreground_postgres
+from shared.cluster.dataplane.pg_tools import pg_start_env
 
 
 def _migration_hash(conn: psycopg.Connection[tuple[object, ...]]) -> str:

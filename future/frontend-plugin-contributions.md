@@ -204,7 +204,7 @@ value is validated as a CSS color literal.
   of this design's scope: a plugin metric declared for `inspector` renders as
   an inspect panel with zero UI declaration.
 - **Config**: plugin config schemas are Pydantic models in
-  `shared/plugin_config_registry.py`; the settings area auto-renders them as
+  `shared/packages/plugins/config_registration.py`; the settings area auto-renders them as
   forms. A plugin gets a settings page by having config at all.
 
 ## Slotting into plugin-spec-v2

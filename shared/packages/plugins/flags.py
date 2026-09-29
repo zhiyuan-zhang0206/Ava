@@ -34,9 +34,9 @@ process or agent start: values are read at start, not live.
 
 from typing import Any
 
-from shared.config_registry import _DOMAIN_ATTRS, _fields
+from shared.host.env.config_registry import DOMAIN_ATTRS, fields
+from shared.packages.plugins.config_registration import _field_is_sensitive
 from shared.packages.plugins.context import current_plugin_name
-from shared.plugin_config_registry import _field_is_sensitive
 
 
 class PluginFlagError(Exception):
@@ -172,15 +172,15 @@ def _validate_flag_key(key: str) -> str:
     domain, field = key.split(".")
     if not domain or not field:
         raise UnknownFlag(f"unknown plugin flag {key!r}: flags must use exactly <domain>.<field>.")
-    if domain not in _DOMAIN_ATTRS:
+    if domain not in DOMAIN_ATTRS:
         raise UnknownFlag(f"unknown plugin flag {key!r}: {domain!r} is not a Settings domain.")
 
-    fields = _fields()
-    if field not in fields or fields[field].domain != domain:
+    field_refs = fields()
+    if field not in field_refs or field_refs[field].domain != domain:
         raise UnknownFlag(
             f"unknown plugin flag {key!r}: {field!r} is not a field in the {domain!r} domain."
         )
-    ref = fields[field]
+    ref = field_refs[field]
     if _field_is_sensitive(ref.info.json_schema_extra):
         raise UnknownFlag(f"unknown plugin flag {key!r}: secrets are not flags.")
     return key

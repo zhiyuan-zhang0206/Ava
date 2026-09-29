@@ -5,7 +5,7 @@ every cluster (including the prod default home) runs its own Postgres+Redis inst
 under its `$AVA_HOME`; the shared-instance + logical-isolation model and
 `cli/commands/_compose.py` are gone. Slice 3 (bundling the binaries so there is no
 brew/apt dependency) is **half done**: Postgres is vendored
-(`shared/runtime_binaries.py`), redis is not. That remaining leg lives entirely in
+(`shared/cluster/dataplane/runtime_binaries.py`), redis is not. That remaining leg lives entirely in
 [`vendored-data-plane-binaries.md`](vendored-data-plane-binaries.md) — this doc does
 not re-describe it.
 

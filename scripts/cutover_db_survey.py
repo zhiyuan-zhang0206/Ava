@@ -337,7 +337,10 @@ def cleared_publication(evidence: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _migrations(conn: psycopg.Connection[Any], legacy_commit: str | None) -> dict[str, Any]:
-    from shared.migration_layout import required_migration_set, required_migration_set_at_ref
+    from shared.deploy.schema.migration_layout import (
+        required_migration_set,
+        required_migration_set_at_ref,
+    )
 
     applied = {row[0] for row in conn.execute("SELECT name FROM schema_migrations")}
     current = required_migration_set()

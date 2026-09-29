@@ -20,7 +20,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
-import shared.config_registry as _config_registry
+import shared.host.env.config_registry as _config_registry
 from shared.config._lite import _plant_placeholders
 from shared.config.agent import AgentSettings
 from shared.config.alerts import AlertsSettings
@@ -48,7 +48,7 @@ from shared.config.sandbox import SandboxSettings
 from shared.config.services import ServiceSettings
 from shared.config.telegram import TelegramSettings
 from shared.config.web import WebSettings
-from shared.config_registry import _DOMAIN_ATTRS, _DOMAIN_MODELS, _schema_extra
+from shared.host.env.config_registry import DOMAIN_ATTRS, DOMAIN_MODELS, schema_extra
 
 
 class Settings(BaseModel):
@@ -105,7 +105,7 @@ class Settings(BaseModel):
         self.profile = profile
         if profile is not None:
             allowed = PROCESS_PROFILES[profile]
-            for attr, *_rest in _DOMAIN_MODELS:
+            for attr, *_rest in DOMAIN_MODELS:
                 if attr not in allowed:
                     vars(self).pop(attr, None)
 
@@ -117,7 +117,7 @@ class Settings(BaseModel):
         profile = self.profile
         if (
             profile is not None
-            and name in _DOMAIN_ATTRS
+            and name in DOMAIN_ATTRS
             and name not in PROCESS_PROFILES[cast_profile(profile)]
         ):
             raise profile_domain_error(profile, name)
@@ -171,7 +171,7 @@ def _facade_exports() -> dict[str, Any]:
     from shared.config import service_read as _service_read
     from shared.config import turn_view as _turn_view
 
-    fields = _config_registry._fields()
+    fields = _config_registry.fields()
     return {
         "Settings": Settings,
         "_FIELDS": fields,
@@ -219,9 +219,9 @@ def _bootstrap_fields() -> tuple[str, ...]:
     cluster scopes are distributed; host / agent fields are not."""
     return tuple(
         name
-        for name, ref in _config_registry._fields().items()
-        if _schema_extra(ref.info).get("scope") in ("cluster-pinned", "cluster-default")
-        and _schema_extra(ref.info).get("bootstrap", True) is not False
+        for name, ref in _config_registry.fields().items()
+        if schema_extra(ref.info).get("scope") in ("cluster-pinned", "cluster-default")
+        and schema_extra(ref.info).get("bootstrap", True) is not False
     )
 
 
@@ -237,7 +237,7 @@ def flat_dump(mode: str = "python") -> dict[str, Any]:
     from shared.config.service_read import _all_domains_settings
 
     out: dict[str, Any] = {}
-    for attr, _label, _model, _cap in _DOMAIN_MODELS:
+    for attr, _label, _model, _cap in DOMAIN_MODELS:
         try:
             sub = getattr(settings, attr)
         except AttributeError:

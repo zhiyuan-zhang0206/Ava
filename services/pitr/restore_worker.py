@@ -130,7 +130,7 @@ def _run_drill(
 
 def main() -> None:
     # Importing `shared.log` drops loguru's default handler: without a sink,
-    # every record `shared.pg_tools` and the restore code write is discarded.
+    # every record `shared.cluster.dataplane.pg_tools` and the restore code write is discarded.
     # Stderr is the operation's `stderr.log`; this worker holds no home, so it
     # opens no file sink.
     init_restricted_process()

@@ -167,7 +167,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="config",
-        entry_points=("shared.plugin_config_registry:register_plugin_config",),
+        entry_points=("shared.packages.plugins.config_registration:register_plugin_config",),
         manifest_key="config",
         protocol=None,
         note=(

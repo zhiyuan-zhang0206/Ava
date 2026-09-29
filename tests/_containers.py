@@ -1,7 +1,7 @@
 """Throwaway Postgres + Redis for the test / eval suites — native processes, no Docker.
 
 Each pytest-session worker gets its OWN throwaway Postgres cluster and Redis
-server: the Postgres cluster comes from `shared.pg_tools.throwaway_postgres`
+server: the Postgres cluster comes from `shared.cluster.dataplane.pg_tools.throwaway_postgres`
 (a fresh `initdb` on an ephemeral localhost port), and a `redis-server` runs on
 its own ephemeral port. The provisioning fixtures point `settings.data_plane.db_url` /
 `settings.data_plane.redis_url` at them. No external server and no `*_DB_URL` env var is
@@ -32,7 +32,7 @@ from pathlib import Path
 import psycopg
 import redis
 
-from shared.pg_tools import throwaway_postgres
+from shared.cluster.dataplane.pg_tools import throwaway_postgres
 
 _SCHEMA_SQL = Path(__file__).resolve().parent.parent / "db" / "schema.sql"
 
@@ -80,7 +80,7 @@ def postgres() -> Generator[str]:
     migration, and its port never binds. Applying migrations at provisioning time
     keeps every future migration covered without special-casing any one of them.
     """
-    from shared.migrations import apply_pending_migrations
+    from shared.deploy.schema.migrations import apply_pending_migrations
 
     with throwaway_postgres(schema_sql=_SCHEMA_SQL.read_text()) as url:
         # Non-autocommit conn: apply_pending_migrations manages its own

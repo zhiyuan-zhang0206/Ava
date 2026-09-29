@@ -64,7 +64,6 @@ from shared.config.profiles import (
     profile_domain_error,
     profile_unknown_error,
 )
-from shared.config_registry import _DOMAIN_ATTRS
 from shared.host.env.bootstrap import (
     CONFIG_FETCH_ENV,
     CONFIG_FETCH_SKIP,
@@ -77,6 +76,7 @@ from shared.host.env.config_lite_table import (
     LITE_FIELDS,
     REQUIRED_FIELDS,
 )
+from shared.host.env.config_registry import DOMAIN_ATTRS
 from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL, checkout_anchored, load_ava_env
 
 # `AVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
@@ -427,7 +427,7 @@ class _SettingsView:
             return getattr(_current_settings(), name)
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)
-        if name in _DOMAIN_ATTRS:
+        if name in DOMAIN_ATTRS:
             _check_domain_allowed(name)
             domains: dict[str, _DomainView] = object.__getattribute__(self, "_domains")
             view = domains.get(name)

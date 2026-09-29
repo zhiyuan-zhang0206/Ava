@@ -184,7 +184,7 @@ def checkout_anchored_home() -> tuple[Path, bool]:
     launched by one cluster runs code from another checkout — every agent
     process inherits `AVA_HOME=~/.ava` from the prod session env, so a bare
     `ava start` inside a dev worktree resolves to the prod home while running
-    the worktree's code. `shared.migrations` compares this against the identity
+    the worktree's code. `shared.deploy.schema.migrations` compares this against the identity
     the DB carries and refuses to migrate on a mismatch.
 
     `anchored` is False for case 4 (a checkout that claims no cluster), whose

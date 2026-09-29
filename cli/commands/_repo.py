@@ -152,7 +152,7 @@ def _ensure_frontend_deps(repo: Path) -> None:
 def _assert_schema_current_or_die() -> int:
     """Verify the DB's applied migration set == the code's required set. Targeted
     hints for the two failure shapes (DB behind code / code behind DB)."""
-    from shared.migrations import (
+    from shared.deploy.schema.migrations import (
         CodeBehindSchema,
         SchemaVersionMismatch,
         assert_schema_current,

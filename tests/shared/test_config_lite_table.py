@@ -21,7 +21,6 @@ from pydantic import ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
-from shared.config_registry import _build_registry, _schema_extra, field_alias
 from shared.host.env.config_lite_table import (
     FIELD_ALIASES,
     FIELD_CAPABILITIES,
@@ -31,6 +30,7 @@ from shared.host.env.config_lite_table import (
     PER_AGENT_FIELDS,
     REQUIRED_FIELDS,
 )
+from shared.host.env.config_registry import _build_registry, field_alias, schema_extra
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _READER = _REPO_ROOT / "shared" / "host" / "env" / "config_lite_table.py"
@@ -47,8 +47,8 @@ def test_stall_exit_record_deadline_contract() -> None:
     assert FIELD_ALIASES[name] == alias
     assert FIELD_DOMAINS[name] == FIELD_CAPABILITIES[name] == "gateway"
     assert FIELD_SCOPES[name] == "cluster-pinned"
-    assert _schema_extra(info)["restart_required"] == "schedule"
-    assert _schema_extra(info)["writable"] is True
+    assert schema_extra(info)["restart_required"] == "schedule"
+    assert schema_extra(info)["writable"] is True
     configured = GatewaySettings.model_validate({alias: 4.5})
     assert configured.schedule_stall_exit_record_deadline_seconds == 4.5
     for value in (0, -1, float("inf"), float("nan")):
@@ -83,10 +83,10 @@ def test_all_field_faces_match_the_live_registry() -> None:
     assert set(FIELD_SCOPES) == set(FIELD_CAPABILITIES) == set(names)
     assert {name: reg[name].domain for name in names} == FIELD_DOMAINS
     assert {name: field_alias(name) for name in names} == FIELD_ALIASES
-    assert {name: str(_schema_extra(reg[name].info).get("scope")) for name in names} == FIELD_SCOPES
+    assert {name: str(schema_extra(reg[name].info).get("scope")) for name in names} == FIELD_SCOPES
     assert {name: reg[name].capability for name in names} == FIELD_CAPABILITIES
     assert {
-        name for name in names if _schema_extra(reg[name].info).get("per_agent") is True
+        name for name in names if schema_extra(reg[name].info).get("per_agent") is True
     } == PER_AGENT_FIELDS
     required: set[str] = set()
     for name in names:

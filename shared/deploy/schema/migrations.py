@@ -78,39 +78,53 @@ import psycopg
 from shared.cluster.machine import MachineNameMissing, machine_name
 from shared.db import connect_url
 from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME as WHEEL_RUNTIME
+from shared.deploy.schema.migration_errors import CodeBehindSchema as CodeBehindSchema
+from shared.deploy.schema.migration_errors import (
+    MigrationAuthorityMismatch as MigrationAuthorityMismatch,
+)
+from shared.deploy.schema.migration_errors import MigrationError as MigrationError
+from shared.deploy.schema.migration_errors import MigrationFailed as MigrationFailed
+from shared.deploy.schema.migration_errors import MigrationHistoryGap as MigrationHistoryGap
+from shared.deploy.schema.migration_errors import MigrationLayoutError as MigrationLayoutError
+from shared.deploy.schema.migration_errors import RollbackBelowFloor as RollbackBelowFloor
+from shared.deploy.schema.migration_errors import SchemaVersionMismatch as SchemaVersionMismatch
+from shared.deploy.schema.migration_history import _RESET_ANCHOR, assert_reset_history
+from shared.deploy.schema.migration_history import _V010_PRE_RESET_SET as _V010_PRE_RESET_SET
+from shared.deploy.schema.migration_layout import _BASELINE_NAME as _BASELINE_NAME
+from shared.deploy.schema.migration_layout import _DOWN_FILENAME_RE as _DOWN_FILENAME_RE
+from shared.deploy.schema.migration_layout import _FILENAME_RE as _FILENAME_RE
+from shared.deploy.schema.migration_layout import _STEM_RE as _STEM_RE
+from shared.deploy.schema.migration_layout import _assert_unique as _assert_unique
+from shared.deploy.schema.migration_layout import _down_path as _down_path
+from shared.deploy.schema.migration_layout import _git_probe as _git_probe
+from shared.deploy.schema.migration_layout import _list_migration_files as _list_migration_files
+from shared.deploy.schema.migration_layout import _migration_stem as _migration_stem
+from shared.deploy.schema.migration_layout import (
+    _tracked_migration_paths as _tracked_migration_paths,
+)
+from shared.deploy.schema.migration_layout import required_migration_set as required_migration_set
+from shared.deploy.schema.migration_layout import (
+    unreadable_migration_files as unreadable_migration_files,
+)
+from shared.deploy.schema.migration_layout import (
+    untracked_migration_files as untracked_migration_files,
+)
+from shared.deploy.schema.migration_layout import (
+    validate_migration_layout as validate_migration_layout,
+)
+from shared.deploy.schema.migration_layout import (
+    validate_migrations_at_ref as validate_migrations_at_ref,
+)
+from shared.deploy.schema.runtime_migration import ReleaseMigrationContext
+from shared.deploy.schema.runtime_migration import (
+    installed_migration_paths as installed_migration_paths,
+)
 from shared.host.env.dotenv_boot import checkout_anchored_home
 from shared.log import logger
-from shared.migration_errors import CodeBehindSchema as CodeBehindSchema
-from shared.migration_errors import MigrationAuthorityMismatch as MigrationAuthorityMismatch
-from shared.migration_errors import MigrationError as MigrationError
-from shared.migration_errors import MigrationFailed as MigrationFailed
-from shared.migration_errors import MigrationHistoryGap as MigrationHistoryGap
-from shared.migration_errors import MigrationLayoutError as MigrationLayoutError
-from shared.migration_errors import RollbackBelowFloor as RollbackBelowFloor
-from shared.migration_errors import SchemaVersionMismatch as SchemaVersionMismatch
-from shared.migration_history import _RESET_ANCHOR, assert_reset_history
-from shared.migration_history import _V010_PRE_RESET_SET as _V010_PRE_RESET_SET
-from shared.migration_layout import _BASELINE_NAME as _BASELINE_NAME
-from shared.migration_layout import _DOWN_FILENAME_RE as _DOWN_FILENAME_RE
-from shared.migration_layout import _FILENAME_RE as _FILENAME_RE
-from shared.migration_layout import _STEM_RE as _STEM_RE
-from shared.migration_layout import _assert_unique as _assert_unique
-from shared.migration_layout import _down_path as _down_path
-from shared.migration_layout import _git_probe as _git_probe
-from shared.migration_layout import _list_migration_files as _list_migration_files
-from shared.migration_layout import _migration_stem as _migration_stem
-from shared.migration_layout import _tracked_migration_paths as _tracked_migration_paths
-from shared.migration_layout import required_migration_set as required_migration_set
-from shared.migration_layout import unreadable_migration_files as unreadable_migration_files
-from shared.migration_layout import untracked_migration_files as untracked_migration_files
-from shared.migration_layout import validate_migration_layout as validate_migration_layout
-from shared.migration_layout import validate_migrations_at_ref as validate_migrations_at_ref
 from shared.native_process.os_platform import CREATE_NO_WINDOW as CREATE_NO_WINDOW
-from shared.runtime_migration import ReleaseMigrationContext
-from shared.runtime_migration import installed_migration_paths as installed_migration_paths
 
-# Repo root = shared/.. = `<root>/`; migrations dir is under repo root.
-MIGRATIONS_DIR: Path = Path(__file__).resolve().parent.parent / "migrations"
+# Repo root = shared/deploy/schema/../../.. = `<root>/`; migrations dir is under repo root.
+MIGRATIONS_DIR: Path = Path(__file__).resolve().parents[3] / "migrations"
 
 # Fixed key for the Postgres advisory lock that serializes the whole apply loop
 # (see `_schema_mutation_lock`). Arbitrary but stable cluster-wide; ASCII "AVMI".

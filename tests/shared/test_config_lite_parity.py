@@ -45,11 +45,11 @@ _CHILD = """import json, os
 import shared.config._lite as lite
 from shared.config import _full
 from shared.host.env.config_lite_table import FIELD_DOMAINS
-from shared.config_registry import _DOMAIN_MODELS
+from shared.host.env.config_registry import DOMAIN_MODELS
 
 MODELS = {
     attr: getattr(_full, model_name)
-    for attr, _label, model_name, _cap in _DOMAIN_MODELS
+    for attr, _label, model_name, _cap in DOMAIN_MODELS
     if isinstance(model_name, str)
 }
 

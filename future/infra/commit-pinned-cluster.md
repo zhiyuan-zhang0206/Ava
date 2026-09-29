@@ -45,7 +45,7 @@
 ## Today: schema-level consistency
 
 The cross-node contract is **DB schema version**, not git SHA. Every agent-runner
-talks to the central node's DB; `shared/migrations.py:check_schema_version`
+talks to the central node's DB; `shared/deploy/schema/migrations.py:check_schema_version`
 asserts `applied == required` (strict, both directions) at every daemon start,
 and a `CodeBehindSchema` host self-heals via the watchdog. Nodes may run
 *different commits* as long as their schema requirement matches.

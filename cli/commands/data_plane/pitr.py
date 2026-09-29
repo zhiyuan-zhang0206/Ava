@@ -22,9 +22,9 @@ from services.pitr.restore.rollback_snapshot_archive import (
 )
 from services.pitr.retention.planner import inspect_dry_run_plan
 from services.pitr.stores.factory import get_store_group
+from shared.cluster.dataplane.pg_tools import pg_tool
 from shared.config import settings
 from shared.paths import ava_home
-from shared.pg_tools import pg_tool
 
 
 def cmd_pitr_retention_status() -> int:

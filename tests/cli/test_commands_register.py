@@ -265,12 +265,12 @@ def test_code_behind_schema_hint_names_working_commands(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import cli.commands._repo as _repo_commands
-    from shared.migrations import CodeBehindSchema
+    from shared.deploy.schema.migrations import CodeBehindSchema
 
     def _ahead(_url: str) -> None:
         raise CodeBehindSchema("DB has migrations this checkout lacks")
 
-    monkeypatch.setattr("shared.migrations.assert_schema_current", _ahead)
+    monkeypatch.setattr("shared.deploy.schema.migrations.assert_schema_current", _ahead)
 
     assert _repo_commands._assert_schema_current_or_die() == 1
     err = capsys.readouterr().err

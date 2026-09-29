@@ -7,7 +7,7 @@ immediately and every call site already handles it) but a peer that completes th
 TCP handshake and then never speaks — a runner that changed networks, a stale
 route, a firewall that drops rather than rejects. libpq has no application-level
 bound on that wait unless `connect_timeout` is set, so
-`shared.migrations.assert_schema_current` — the FIRST thing a daemon does at boot
+`shared.deploy.schema.migrations.assert_schema_current` — the FIRST thing a daemon does at boot
 — used to hang there forever. The supervisor's `respawn_and_verify` then polls
 for 20s, reports the daemon down, and respawns another one that wedges the same
 way: bounded churn, but the diagnosis reads "failed to start" when the process is
@@ -142,7 +142,7 @@ def test_resilience_kwargs_bound_the_connect(silent_peer_url: str) -> None:
 def test_assert_schema_current_fails_fast(silent_peer_url: str) -> None:
     """The reported defect: a daemon's boot-time schema assertion raises instead
     of wedging the whole startup on a black-holed database."""
-    from shared.migrations import assert_schema_current
+    from shared.deploy.schema.migrations import assert_schema_current
 
     _assert_fails_fast(lambda: assert_schema_current(silent_peer_url))
 

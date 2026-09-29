@@ -18,7 +18,7 @@ gateway response names the restart targets.
 
 `--local` operates directly on this unit's `$AVA_HOME/.env` and never dials the
 gateway. It reads aliases, sensitivity, scope, editability, type, choices, and
-restart metadata from `shared.config_registry`; sensitive values are masked.
+restart metadata from `shared.host.env.config_registry`; sensitive values are masked.
 Before writing, it validates the full affected candidate through
 `shared.config.candidate`, so a cross-field-invalid patch cannot replace the
 only local config file. Host fields are locally writable; a pure runner cannot

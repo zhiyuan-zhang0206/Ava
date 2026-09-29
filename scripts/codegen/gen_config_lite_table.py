@@ -29,7 +29,7 @@ columns are never read as separate units. A data file carries no line budget
 named surfaces consumers import.
 
 Index and reader live OUTSIDE the ``shared.config`` package on purpose, like
-``shared/config_registry.py``: ``shared/host/env/registry.py`` (the env-authority
+``shared/host/env/config_registry.py``: ``shared/host/env/registry.py`` (the env-authority
 projections that ``load_ava_env`` runs before Settings exists) imports it, and a
 package submodule import would execute the ``shared.config`` facade first —
 re-entering the boot it is part of.
@@ -120,10 +120,10 @@ def _ensure_index_present() -> None:
 os.environ["AVA_CONFIG_FETCH"] = "skip"
 _ensure_index_present()
 
-from shared.config_registry import (  # noqa: E402 — must follow the bootstrap above
+from shared.host.env.config_registry import (  # noqa: E402 — must follow the bootstrap above
     _build_registry,
-    _schema_extra,
     field_alias,
+    schema_extra,
 )
 
 
@@ -358,9 +358,9 @@ def _collect() -> tuple[
     names = sorted(reg)
     domains = {name: reg[name].domain for name in names}
     aliases = {name: field_alias(name) for name in names}
-    scopes = {name: str(_schema_extra(reg[name].info).get("scope")) for name in names}
+    scopes = {name: str(schema_extra(reg[name].info).get("scope")) for name in names}
     capabilities = {name: reg[name].capability for name in names}
-    per_agent = [name for name in names if _schema_extra(reg[name].info).get("per_agent") is True]
+    per_agent = [name for name in names if schema_extra(reg[name].info).get("per_agent") is True]
     required: list[str] = []
     for name in names:
         info = cast(FieldInfo, reg[name].info)

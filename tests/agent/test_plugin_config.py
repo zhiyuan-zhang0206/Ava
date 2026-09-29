@@ -17,8 +17,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from shared.packages.plugins.context import PluginContext
-from shared.plugin_config_registry import (
+from shared.packages.plugins.config_registration import (
     _PLUGIN_CONFIG_CLASSES,
     _PLUGIN_CONFIGS,
     DuplicateRegistration,
@@ -38,6 +37,7 @@ from shared.plugin_config_registry import (
     validate_config_overlay,
     write_default_disk_image,
 )
+from shared.packages.plugins.context import PluginContext
 
 
 class _FixtureConfig(BaseModel):
@@ -318,7 +318,7 @@ def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
     code = textwrap.dedent(
         """
         from shared.lm.registry import MODELS
-        from shared.plugin_config_registry import validate_config_overlay
+        from shared.packages.plugins.config_registration import validate_config_overlay
 
         assert not MODELS, "fresh process must start with an empty registry"
         validate_config_overlay({"llm_model": "deepseek-flash"})
@@ -588,7 +588,7 @@ def test_syntax_fix_ruff_format_overlay_is_accepted() -> None:
     """Per-agent A/B of the ruff format gate (task #1858 follow-up, user chose
     a paired experiment): the field must accept a spawn config_overlay, like
     prompt_codeact_enabled after #719."""
-    from shared.plugin_config_registry import validate_config_overlay
+    from shared.packages.plugins.config_registration import validate_config_overlay
 
     validate_config_overlay({"syntax_fix_ruff_format": True})  # must not raise
     validate_config_overlay({"syntax_fix_ruff_format": False})

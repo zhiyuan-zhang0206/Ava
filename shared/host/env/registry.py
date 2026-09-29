@@ -5,7 +5,7 @@ in the Settings class metadata — except removable provider keys, whose enabled
 plugin binding is their declaration:
 
 - **Settings fields** declare themselves in `shared/config/<domain>.py`
-  (`json_schema_extra` metadata); `shared/config_registry.py` builds the flat
+  (`json_schema_extra` metadata); `shared/host/env/config_registry.py` builds the flat
   field registry from class metadata only (no Settings instantiation), and
   every projection below is a pure function of it — a new cluster-scoped field
   is force/dropped by the env-authority pass, forwarded to sessions, and

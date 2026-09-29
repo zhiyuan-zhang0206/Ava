@@ -1049,7 +1049,7 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
     import subprocess
     import tempfile
 
-    from shared.pg_tools import pg_tool
+    from shared.cluster.dataplane.pg_tools import pg_tool
 
     port = 39617
     # Short socket root: the default pytest tmp_path on macOS exceeds
@@ -1146,7 +1146,7 @@ def test_frozen_pg_state_contract_with_real_reader(
     from types import SimpleNamespace
 
     from shared.cluster import db_identity, postgres
-    from shared.pg_tools import pg_tool
+    from shared.cluster.dataplane.pg_tools import pg_tool
 
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -1414,7 +1414,7 @@ def test_probe_switch_privilege_against_real_pg(
     import subprocess
     import tempfile
 
-    from shared.pg_tools import pg_tool
+    from shared.cluster.dataplane.pg_tools import pg_tool
 
     port = 39614
     # The socket directory must live under a SHORT root: the default pytest

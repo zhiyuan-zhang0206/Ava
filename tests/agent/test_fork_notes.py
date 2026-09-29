@@ -50,8 +50,8 @@ def memory_plugin() -> Any:
     tests/plugins/test_ava_memory_notes.py) so the memory-note registrations
     exist regardless of what earlier modules cleared."""
     from agent.state import clear_plugin_registrations
+    from shared.packages.plugins.config_registration import bind_from_disk
     from shared.packages.plugins.context import PluginContext
-    from shared.plugin_config_registry import bind_from_disk
 
     clear_plugin_registrations()
     for name in list(sys.modules):

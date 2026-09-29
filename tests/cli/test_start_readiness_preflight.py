@@ -50,7 +50,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "cli.commands.converge.port_preflight.collect_port_conflicts",
         lambda _ctx: [],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("shared.migrations.unreadable_migration_files", list)
+    monkeypatch.setattr("shared.deploy.schema.migrations.unreadable_migration_files", list)
     return home
 
 
@@ -205,7 +205,7 @@ def test_migration_readability_is_fatal(
     """The apply-side vet: a tracked migration the applier cannot open would fail
     `ava start`'s apply on the stopped host."""
     monkeypatch.setattr(
-        "shared.migrations.unreadable_migration_files",
+        "shared.deploy.schema.migrations.unreadable_migration_files",
         lambda: [("20260912T010000_x", "Permission denied: 'x.sql'")],
     )
 
@@ -220,12 +220,12 @@ def test_migration_enumeration_failure_is_fatal(
 ) -> None:
     """An enumeration the loader itself refuses (not a git worktree) also fails
     the apply; it must refuse here, not surprise the stopped host."""
-    from shared.migrations import MigrationLayoutError
+    from shared.deploy.schema.migrations import MigrationLayoutError
 
     def _raise() -> list[tuple[str, str]]:
         raise MigrationLayoutError("migrations dir does not exist: /x/migrations")
 
-    monkeypatch.setattr("shared.migrations.unreadable_migration_files", _raise)
+    monkeypatch.setattr("shared.deploy.schema.migrations.unreadable_migration_files", _raise)
 
     assert _run(repo) == 1
     assert "cannot be enumerated" in capsys.readouterr().err

@@ -21,7 +21,7 @@ Pin values remain raw: validation happened before they reached agents_meta,
 and reading the stored value must not silently coerce it a second time.
 
 Scope: framework `Settings` fields only. Plugin-scope config
-(`shared/plugin_config_registry._PLUGIN_CONFIGS`) is a separate process-global
+(`shared/packages/plugins/config_registration.py:_PLUGIN_CONFIGS`) is a separate process-global
 with the same problem, scoped the same way by its own view —
 `shared/packages/plugins/config_view.py`.
 
@@ -37,7 +37,7 @@ from collections.abc import Generator, Mapping
 from contextvars import ContextVar
 from typing import Any
 
-import shared.config_registry as _config_registry
+import shared.host.env.config_registry as _config_registry
 from shared.host.env.config_lite_table import FIELD_DOMAINS
 
 # The current context's pin map: flat field name -> raw pinned value. None =
@@ -63,7 +63,7 @@ def resolve_agent_config_pins(
     field was deleted from Settings after the overlay was stored. Reading old
     stored configuration does not restore a deleted field.
     """
-    fields = _config_registry._fields()
+    fields = _config_registry.fields()
     pins: dict[str, Any] = {}
     for source in (birth_config, config_overlay):
         if not source:
@@ -140,7 +140,7 @@ class TurnSettings:
             # Delegate non-domain attributes (has_domain, profile) straight to
             # the singleton; only real domain attributes get a read proxy.
             attr = getattr(settings, name)  # raises the singleton's own AttributeError
-            if name not in _config_registry._DOMAIN_ATTRS:
+            if name not in _config_registry.DOMAIN_ATTRS:
                 return attr
             proxy = domains[name] = _TurnDomain(name)
         return proxy

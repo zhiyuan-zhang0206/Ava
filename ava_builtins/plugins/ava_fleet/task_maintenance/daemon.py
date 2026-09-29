@@ -540,7 +540,7 @@ async def run() -> None:
 
 
 def main() -> None:
-    from shared.migrations import assert_schema_current
+    from shared.deploy.schema.migrations import assert_schema_current
 
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="task_maintenance")

@@ -51,7 +51,7 @@ class _FakeResult:
 
 # Captured before any monkeypatch: the start-path tests stub subprocess.run to
 # intercept session / docker / probe commands, but `ava start`'s migration step
-# consults git (`shared.migrations._tracked_migration_paths`, Task #998) — a
+# consults git (`shared.deploy.schema.migrations._tracked_migration_paths`, Task #998) — a
 # blank fake result would trip the git-tracking gate's fail-closed path and
 # abort cmd_start. `git` invocations therefore reach the real binary (read-only
 # rev-parse / ls-files, milliseconds).

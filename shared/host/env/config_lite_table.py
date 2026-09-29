@@ -17,7 +17,7 @@ materializes the named surfaces every consumer imports:
 - ``REQUIRED_FIELDS`` — the no-default fields ``_lite.prepare`` requires.
 
 The module lives OUTSIDE the ``shared.config`` package on purpose, like
-``shared/config_registry.py``: ``shared/host/env/registry.py`` (the env-authority
+``shared/host/env/config_registry.py``: ``shared/host/env/registry.py`` (the env-authority
 projections that ``load_ava_env`` runs before Settings exists) imports it, and a
 package submodule import would execute the ``shared.config`` facade first —
 re-entering the boot it is part of.

@@ -1,5 +1,5 @@
 """The throwaway-Postgres orphan sweep + serialized port allocation
-(`shared/pg_tools.py`).
+(`shared/cluster/dataplane/pg_tools.py`).
 
 Two directions, and the refusal is the important one:
 
@@ -36,7 +36,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from shared import pg_throwaway_base, pg_tools
+from shared.cluster.dataplane import pg_throwaway_base, pg_tools
 from shared.config import settings
 from shared.native_process.os_platform import IS_WINDOWS
 from shared.paths import repo_root
@@ -107,8 +107,8 @@ def throwaway_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 _ORPHAN_OWNER = """
 import os, sys, time
-import shared.pg_throwaway_base as pg_base
-import shared.pg_tools as pg_tools
+import shared.cluster.dataplane.pg_throwaway_base as pg_base
+import shared.cluster.dataplane.pg_tools as pg_tools
 
 pg_base._tmpfs_base = sys.argv[1]
 # `cm` must stay referenced: a dropped context manager is finalized, and its

@@ -29,7 +29,7 @@ class LmSettings(EnvSettings):
             # into agents at spawn — owned by neither capability alone.
             "capability": "common",
             # per_agent: gates the spawn/restart config-overlay (read by
-            # shared/plugin_config_registry.py for both framework Settings and
+            # shared/packages/plugins/config_registration.py for both framework Settings and
             # plugin config fields). Orthogonal to scope: scope is the ownership
             # axis (drives bootstrap distribution); per_agent is the override
             # gate. They coexist on llm_model.

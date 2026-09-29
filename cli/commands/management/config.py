@@ -209,7 +209,7 @@ def _field_extra(field_info: Any) -> dict[str, Any]:
 
 def _local_fields() -> dict[str, _LocalConfigField]:
     """Build local-edit metadata from the registry, never from Settings values."""
-    from shared.config_registry import FIELD_INFOS, field_alias, field_editor_type
+    from shared.host.env.config_registry import FIELD_INFOS, field_alias, field_editor_type
 
     fields: dict[str, _LocalConfigField] = {}
     for name, info in FIELD_INFOS.items():

@@ -125,7 +125,7 @@ def _commit(
 
 def main() -> None:
     # Importing `shared.log` drops loguru's default handler: without sinks,
-    # every record `shared.db`, `shared.pg_tools` and the candidate code write
+    # every record `shared.db`, `shared.cluster.dataplane.pg_tools` and the candidate code write
     # is discarded. Stderr is the operation's `stderr.log`, whose tail a
     # failure carries; the file is `$AVA_HOME/logs/pitr-base-worker.log`.
     init_cli_process(name="pitr-base-worker")

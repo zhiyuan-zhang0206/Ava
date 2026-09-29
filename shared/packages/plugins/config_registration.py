@@ -30,7 +30,7 @@ by per-agent CLI overlay" (used in PR-E; current PR-D only stores metadata).
 Usage (`ava_builtins/plugins/<name>/default_config.py`):
 
     from pydantic import BaseModel, ConfigDict, Field
-    from shared.plugin_config_registry import register_plugin_config
+    from shared.packages.plugins.config_registration import register_plugin_config
 
     class MyConfig(BaseModel):
         model_config = ConfigDict(frozen=True)
@@ -333,7 +333,7 @@ def _schema_extra(info: FieldInfo) -> dict[str, Any]:
     """Collapse pydantic's `FieldInfo.json_schema_extra` (typed as
     dict | callable | None, its dict branch partially Unknown) to a plain
     `dict[str, Any]` for the per_agent metadata lookups. Mirrors
-    `shared/config/__init__._schema_extra`."""
+    `shared/config/__init__.schema_extra`."""
     extra = info.json_schema_extra
     return cast("dict[str, Any]", extra) if isinstance(extra, dict) else {}
 

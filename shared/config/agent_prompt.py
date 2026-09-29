@@ -89,7 +89,7 @@ class AgentPromptSettings(EnvSettings):
             "writable": True,
             "sensitive": False,
             # cluster-default + per_agent: a spawner narrows one worker's index
-            # below the catalog (shared/plugin_config_registry.py reads the gate).
+            # below the catalog (shared/packages/plugins/config_registration.py reads the gate).
             "scope": "cluster-default",
             "per_agent": True,
             "lifecycle": "frozen",

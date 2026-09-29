@@ -291,7 +291,7 @@ def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     would otherwise read as "my migration ran". Gateway-only: the gateway is the
     single schema writer (e9d51acea).
     """
-    from shared.migrations import untracked_migration_files
+    from shared.deploy.schema.migrations import untracked_migration_files
 
     names = untracked_migration_files()
     if names:

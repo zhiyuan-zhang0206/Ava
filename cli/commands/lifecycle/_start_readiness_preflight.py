@@ -244,7 +244,7 @@ def _migration_findings() -> list[str]:
     stop; this asks the next question the applier will ask — can the file be
     opened — while the answer is still free.
     """
-    from shared.migrations import MigrationLayoutError, unreadable_migration_files
+    from shared.deploy.schema.migrations import MigrationLayoutError, unreadable_migration_files
 
     try:
         problems = unreadable_migration_files()

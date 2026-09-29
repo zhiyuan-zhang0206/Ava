@@ -36,7 +36,7 @@ kind and alerts until `ava pitr operations retire` re-proves closure; a killed
 scheduler leaves the same block.
 
 Scheduled restore drills opt into `throwaway_postgres(foreground=True)`.
-`shared/pg_foreground.py` starts Postgres directly in the worker group,
+`shared/cluster/dataplane/pg_foreground.py` starts Postgres directly in the worker group,
 receipts it in the operation's controls and verifies its data directory before
 readiness. The caller owns its handle before readiness checks can fail. Every
 postmaster child calls `setsid`, so the group close alone never reaches them:

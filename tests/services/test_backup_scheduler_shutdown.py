@@ -108,7 +108,7 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
 
 
 def _restore(root: Path, mode: str, postgres_base: Path) -> None:
-    from shared.pg_tools import throwaway_postgres
+    from shared.cluster.dataplane.pg_tools import throwaway_postgres
 
     with throwaway_postgres(base=postgres_base, foreground=True) as url:
         import psycopg

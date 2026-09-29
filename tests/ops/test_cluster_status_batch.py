@@ -325,7 +325,7 @@ def test_status_snapshot_preserves_invalid_real_catalog_diagnosis(
     monkeypatch: pytest.MonkeyPatch,
     snapshot_dependencies: tuple[HostDeployState, DeployLease],
 ) -> None:
-    from shared.migrations import applied_migration_names
+    from shared.deploy.schema.migrations import applied_migration_names
 
     state, lease = snapshot_dependencies
     pool = _Pool(db_conn)

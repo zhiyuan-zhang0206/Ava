@@ -36,7 +36,7 @@ Each kind quarantines into `quarantine/<kind>/` beside its control root.
 - the leader is reaped.
 
 The worker receipts each postmaster it starts
-(`shared/pg_foreground.py:start_foreground_postgres`) into its controls. The
+(`shared/cluster/dataplane/pg_foreground.py:start_foreground_postgres`). The
 data directory is receipted before launch, and the native birth right after.
 The controller then closes in this order (`operation.custody.close_operation`):
 

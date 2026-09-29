@@ -55,8 +55,8 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
     wrong-but-harmless default contributes a phantom "missing rule" instead of a
     real one.
     """
+    from shared.cluster.dataplane.pg_tools import pg_tool
     from shared.paths import otel_collector_binary
-    from shared.pg_tools import pg_tool
 
     candidates = [Path(sys.executable)]
     if "gateway" in roles:

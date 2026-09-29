@@ -24,10 +24,10 @@ import psycopg
 from services import backup
 from shared.agents.history import checkpoint as checkpoint_reader
 from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP
+from shared.cluster.dataplane.pg_throwaway_base import format_bytes, select_throwaway_base
+from shared.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
 from shared.config import settings
 from shared.log import logger
-from shared.pg_throwaway_base import format_bytes, select_throwaway_base
-from shared.pg_tools import pg_tool, throwaway_postgres
 
 
 @dataclass(frozen=True)

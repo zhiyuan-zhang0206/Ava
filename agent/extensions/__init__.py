@@ -145,7 +145,7 @@ def load_extensions(*, surface: bool = False) -> plugins_cfg.PluginsConfig:
     # complete, so that when hook callbacks actually fire,
     # `ava._settings.plugins.<n>` is ready. Missing disk image auto-writes
     # default; schema drift raises (guides `ava plugins update`).
-    from shared.plugin_config_registry import bind_from_disk
+    from shared.packages.plugins.config_registration import bind_from_disk
 
     bind_from_disk()
 

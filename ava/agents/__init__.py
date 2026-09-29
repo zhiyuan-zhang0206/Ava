@@ -437,7 +437,7 @@ def spawn_impl(
                     f"config_overlay['preset'] must be a non-empty string, got {name!r}"
                 )
         if overlay:
-            from shared.plugin_config_registry import validate_config_overlay
+            from shared.packages.plugins.config_registration import validate_config_overlay
 
             validate_config_overlay(overlay)
     return _client.spawn(

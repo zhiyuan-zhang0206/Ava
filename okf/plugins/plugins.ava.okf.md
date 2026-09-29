@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Plugin System
-description: Plugins are Ava's primary extension mechanism—inserting custom behavior into the agent runtime through multiple injection points. Each plugin is a directory containing a `plugin.py` entry point, loaded at agent process startup by `load_extensions()` (`agent/extensions/__init__.py`); a plugin may add an `agent_runtime.py` face. A plugin may use every injection surface at once; `agent/extensions/catalog.py:SURFACES` is the enumeration, and `ava plugins inspect` renders it.
+description: Plugins are Ava's primary extension mechanism—inserting custom behavior into the agent runtime through multiple injection points. Each plugin is a directory containing a `plugin.py` entry point, loaded at agent process startup by `load_extensions()`; a plugin may add an `agent_runtime.py` face. A plugin may use every injection surface at once; `agent/extensions/catalog.py:SURFACES` is the enumeration, and `ava plugins inspect` renders it.
 tags: []
 ---
 
@@ -26,7 +26,7 @@ The four hook container nodes (after_init / before_llm / before_exec / after_exe
 ### 4. SDK Namespace Registration
 `ava.register_namespace(name, module)` — registers a new namespace under `ava.*` (e.g., `ava.cwd` from the ava_code plugin). The registered object is also placed in `sys.modules` as `ava.<name>`, so `import ava.<name>` resolves to the same object as attribute access; SimpleNamespace namespaces are materialized as real modules. `ava.register_sdk_expand(name)` promotes that namespace into the system prompt's expanded SDK reference. `ava.register_namespace_member(namespace, name, fn)` — attaches a callable member to an already-registered namespace (used by ava_fleet to inject task helpers); all three are exported from `ava/__init__.py`.
 
-### 5. Plugin Config (`shared/plugin_config_registry.py`)
+### 5. Plugin Config (`shared/packages/plugins/config_registration.py`)
 Two-phase design:
 - `register_plugin_config(Cls)` — registers a Pydantic BaseModel class
 - `bind_from_disk()` — the framework reads from `~/.ava/configs/<plugin>/config.json` and instantiates

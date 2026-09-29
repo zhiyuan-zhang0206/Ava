@@ -25,9 +25,9 @@ from cli.commands.data_plane import maintenance_stop
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler, _native_birth
 from shared.cluster import ownership
+from shared.cluster.dataplane.pg_tools import throwaway_postgres
 from shared.config import settings
 from shared.native_process.ownership import OwnedProcess
-from shared.pg_tools import throwaway_postgres
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="native POSIX pooler")
 

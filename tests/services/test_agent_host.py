@@ -47,8 +47,8 @@ from shared.agents.context import AvaContext
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.lm.factory import validate_model_config
+from shared.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
 from shared.packages.plugins.config_view import turn_plugin_config
-from shared.plugin_config_registry import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
 from tests.shared.poll_until import poll_until_async
 
 

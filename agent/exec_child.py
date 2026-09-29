@@ -183,7 +183,7 @@ def _apply_overlay_scope(
     """Apply both maps at one scope — birth first, overlay on top (the same
     precedence the host uses when it resolves stored configuration).
     Returns True when at least one map applied."""
-    from shared.plugin_config_registry import apply_config_overlay
+    from shared.packages.plugins.config_registration import apply_config_overlay
 
     applied = False
     for value in (birth, overlay):

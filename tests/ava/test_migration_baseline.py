@@ -11,7 +11,7 @@ import pytest
 from psycopg import sql
 
 from shared.config import settings
-from shared.migrations import (
+from shared.deploy.schema.migrations import (
     apply_pending_migrations,
     required_migration_set,
 )

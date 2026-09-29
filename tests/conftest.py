@@ -90,7 +90,7 @@ from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 # startup" (HINT: set LC_ALL to a valid locale) on macOS when the locale
 # environment is missing: locale init goes through CoreFoundation, which
 # spawns a thread, and the postmaster refuses to run multithreaded. The suite
-# provisions its own throwaway postmaster via `pg_ctl` (shared/pg_tools.py),
+# provisions its own throwaway postmaster via `pg_ctl` (shared/cluster/dataplane/pg_tools.py),
 # which inherits this process's environment, so pinning LC_ALL here — above
 # every project import and any postmaster spawn — fixes every run on a box
 # whose shell (session backend / launchd / CI) never set it. Only macOS needs this;
