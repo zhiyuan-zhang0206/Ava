@@ -207,9 +207,9 @@ def _init_logger(agent_id: int | None) -> None:
         return
     init_subprocess_logger(agent_id=agent_id)
     try:
-        from shared.log import _add_postgres_sink
+        from shared.log import add_postgres_sink
 
-        _add_postgres_sink(process="agent-exec", agent_id=agent_id)
+        add_postgres_sink(process="agent-exec", agent_id=agent_id)
     except Exception:
         logger.warning(
             "[exec-child] event pipeline sink unavailable — sdk_call events "

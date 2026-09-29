@@ -122,7 +122,7 @@ class TestDefaultBinding:
         with (
             mock.patch.object(slog.logger, "add"),
             mock.patch.object(slog, "_add_file_sink"),
-            mock.patch.object(slog, "_add_postgres_sink"),
+            mock.patch.object(slog, "add_postgres_sink"),
             mock.patch.object(slog, "_install_stdlib_intercept"),
             mock.patch.object(slog.logger, "info"),
             mock.patch.object(slog.logger, "configure") as configure,

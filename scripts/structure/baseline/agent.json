@@ -4,8 +4,5 @@
     "agent/impersonation.py::establish_relay": 16,
     "agent/impersonation.py::settle_checkpoint": 15,
     "agent/impersonation.py::supervise_relay": 21
-  },
-  "private_imports": {
-    "agent/exec_child.py::shared.log._add_postgres_sink": 1
   }
 }

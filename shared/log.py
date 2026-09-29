@@ -116,6 +116,7 @@ from shared.turn_identity import (
 # case). An init_* caller is a real service and pays settings anyway.
 
 __all__ = [
+    "add_postgres_sink",
     "init_agent_process",
     "init_cli_process",
     "init_gateway_process",
@@ -209,7 +210,7 @@ def _read_deploy_lease() -> bool:
     Runs on the cache-refresh thread. Deferred import: `shared.cluster_lock`
     imports `shared.db` imports this module at module scope, so a top-level
     import here is a hard circular-import failure (same shape as
-    `_add_postgres_sink`'s deferred `import shared.db`).
+    `add_postgres_sink`'s deferred `import shared.db`).
     """
     from shared.cluster_lock import read_update_lease
 
@@ -436,11 +437,16 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
     return True
 
 
-def _add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None) -> int:
+def add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None) -> int:
     """Eagerly open the unified event pipeline + register the loguru adapter.
     Pipeline open failure raises during init_* (it no longer touches the DB);
     agent / gateway startup fails loud, never becomes "sink silently
     does not work" silent degrade.
+
+    Public for a boot seam that composes its own sinks instead of calling an
+    init_*: the exec child (`agent/exec_child.py`) pairs
+    `init_subprocess_logger` with this, best-effort, so a pipeline outage
+    degrades it to the file sink rather than stopping agent code.
 
     The pipeline lives in `shared.telemetry` (bounded queue + drain thread —
     the same batching/backpressure shape the former `_ThreadedPostgresSink`
@@ -510,7 +516,7 @@ def init_agent_process(*, agent_id: int) -> None:
     from shared.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"agent-{agent_id}.log")
-    _add_postgres_sink(process="agent-kernel", agent_id=agent_id)
+    add_postgres_sink(process="agent-kernel", agent_id=agent_id)
     _install_stdlib_intercept()
     _init_done = True
 
@@ -607,7 +613,7 @@ def init_gateway_process(name: str = "gateway") -> None:
     from shared.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"{name}.log")
-    _add_postgres_sink(process=name)
+    add_postgres_sink(process=name)
     _install_stdlib_intercept()
     # Capture the commit this process loaded, here at the top of its main() —
     # the earliest seam every gateway-style process shares. Deferring the
@@ -662,7 +668,7 @@ def init_cli_process(*, name: str) -> None:
     from shared.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"{name}.log")
-    _add_postgres_sink(process=name)
+    add_postgres_sink(process=name)
     _install_stdlib_intercept()
     _init_done = True
 

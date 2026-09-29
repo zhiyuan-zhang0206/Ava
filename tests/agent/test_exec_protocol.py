@@ -130,10 +130,10 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(tmp_path: Path)
     """Request writes and reads record the final envelope size and their own
     serialization cost in the durable event stream."""
     from shared import telemetry
-    from shared.log import _add_postgres_sink, logger
+    from shared.log import add_postgres_sink, logger
 
     events_before = len(_exec_envelope_events())
-    sink_id = _add_postgres_sink(process="test-exec-envelope")
+    sink_id = add_postgres_sink(process="test-exec-envelope")
     try:
         path = make_request_path(tmp_path, agent_id=7)
         write_request(path, code="print('hi')", agent_id=7, timeout_s=1.0, state=_make_state_dump())

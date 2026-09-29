@@ -138,7 +138,7 @@ def _install_stdlib_intercept() -> None:
 
     Level INFO is the floor for everyone — it keeps third-party DEBUG spam
     (httpx / psycopg / urllib3) out without an extra filter, matching
-    `_add_postgres_sink`'s own threshold. `_FIRST_PARTY_LOGGER_NAMES` then
+    `add_postgres_sink`'s own threshold. `_FIRST_PARTY_LOGGER_NAMES` then
     raises that floor back to DEBUG for our own code only, so a controller's
     or daemon's `_log.debug(...)` still reaches the file sink (which is
     itself level=DEBUG — see `_add_file_sink`) the way a native

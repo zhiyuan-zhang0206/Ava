@@ -244,7 +244,7 @@ def test_production_loguru_sink_routes_through_the_emitter() -> None:
 
     src = inspect.getsource(slog._postgres_sink)
     assert "telemetry.emit" in src
-    wiring = inspect.getsource(slog._add_postgres_sink)
+    wiring = inspect.getsource(slog.add_postgres_sink)
     assert "telemetry.init_telemetry" in wiring
     assert "_postgres_sink" in wiring  # the adapter is the loguru handler
 
@@ -255,7 +255,7 @@ def _rec(extra: dict[str, Any]) -> Any:
 
 
 def test_add_postgres_sink_registers_at_most_once() -> None:
-    """Two `_add_postgres_sink` calls (exec_child's env + request init paths)
+    """Two `add_postgres_sink` calls (exec_child's env + request init paths)
     must not double-register the adapter: one loguru record lands exactly one
     mirror row. The 2026-08-24 double registration wrote every post-init
     record twice — byte-identical rows, same surrogate id — into the JSONL
@@ -264,8 +264,8 @@ def test_add_postgres_sink_registers_at_most_once() -> None:
 
     from shared.log import logger as _g
 
-    first = slog._add_postgres_sink(process="test-dup-guard")
-    second = slog._add_postgres_sink(process="test-dup-guard")
+    first = slog.add_postgres_sink(process="test-dup-guard")
+    second = slog.add_postgres_sink(process="test-dup-guard")
     assert second == first, "repeat registration must return the live sink id"
 
     marker = f"dup-guard-{time.time_ns()}"
