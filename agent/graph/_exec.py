@@ -283,7 +283,7 @@ def _dispatch_exec_result(
             # Exhaustive fallthrough: future LifecycleExit subclass not handled
             # in the two cases above falls here and raises — safer than silently
             # taking the "ordinary exception" halted=False path. Implements
-            # CLAUDE.md "enum dispatch must be exhaustive".
+            # AGENTS.md "enum dispatch must be exhaustive".
             raise TypeError(
                 f"Unrecognized LifecycleExit subclass: {type(other_exc).__name__!r} — "
                 f"dispatch ladder missed update"
