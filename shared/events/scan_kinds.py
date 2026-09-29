@@ -58,11 +58,14 @@ EXCLUDE_DIRS = {
     ".mypy_cache",
     ".pyright",
     "demos",
-    "deploy",
     "web",
     "desktop",
     "dashboards",
 }
+
+# Top-level directories only: `deploy/` holds service configuration, while
+# `shared/deploy/` is a production package whose emissions must be scanned.
+_ROOT_EXCLUDE_DIRS = {"deploy"}
 
 EVENT_RE = re.compile(r"""\bevent\s*=\s*["']([^"']+)["']""")
 LABEL_RE = re.compile(r"""\blabel\s*=\s*["']([^"']+)["']""")
@@ -73,7 +76,8 @@ SSE_ROLE_RE = re.compile(r'role: Literal\["([^"]+)"\]')
 def iter_production_py(repo: Path) -> Iterator[tuple[str, Path]]:
     """Yield (relative_path, path) for every production .py file."""
     for dirpath, dirnames, filenames in os.walk(repo):
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
+        excluded = EXCLUDE_DIRS | _ROOT_EXCLUDE_DIRS if Path(dirpath) == repo else EXCLUDE_DIRS
+        dirnames[:] = [d for d in dirnames if d not in excluded]
         for fn in filenames:
             if not fn.endswith(".py"):
                 continue
