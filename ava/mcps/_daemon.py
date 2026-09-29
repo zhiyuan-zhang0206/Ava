@@ -531,10 +531,19 @@ def _socket_is_live(socket_path: str) -> bool:
 
 
 _DAEMON_MODULE = "ava.mcps._daemon"
+# Expand-contract for the module rename (`ava._mcps_daemon` -> `ava.mcps._daemon`):
+# a daemon a pre-rename release launched keeps its old argv, and a crashed one left
+# behind with a dead socket must still be recognized (and reaped) as a ghost of this
+# unit. Delete this constant — and the matching `pgrep` alternative in
+# .agents/skills/operating-ava-cluster/SKILL.md — once every host runs the renamed
+# module and a process census shows no `-m ava._mcps_daemon` left.
+_LEGACY_DAEMON_MODULE = "ava._mcps_daemon"
+_DAEMON_MODULES = frozenset({_DAEMON_MODULE, _LEGACY_DAEMON_MODULE})
 
 
 def _is_daemon_cmdline(cmdline: list[str]) -> bool:
-    """True when *cmdline* is an actual ``python -m ava.mcps._daemon`` launch.
+    """True when *cmdline* is an actual ``python -m ava.mcps._daemon`` launch
+    (or the pre-rename ``python -m ava._mcps_daemon``, see `_LEGACY_DAEMON_MODULE`).
 
     Substring matching is NOT enough: the session backend wraps the launch in
     ``bash -lc 'cd <root> && ... .venv/bin/python -m ava.mcps._daemon'``, so the
@@ -547,7 +556,7 @@ def _is_daemon_cmdline(cmdline: list[str]) -> bool:
     image IS the daemon, argv unchanged).
     """
     for i, part in enumerate(cmdline):
-        if part == _DAEMON_MODULE and i > 0 and cmdline[i - 1] == "-m":
+        if part in _DAEMON_MODULES and i > 0 and cmdline[i - 1] == "-m":
             return True
     return False
 
@@ -557,7 +566,8 @@ def _reap_stale_daemons(project_root: Path | None) -> None:
 
     A fresh bind must be the only listener; ghosts from earlier respawn storms
     are reaped first. Only processes whose argv IS the daemon launch
-    (``-m ava.mcps._daemon``) qualify — the session backend's ``bash -lc``
+    (``-m ava.mcps._daemon``, or a pre-rename ``-m ava._mcps_daemon`` ghost)
+    qualify — the session backend's ``bash -lc``
     wrapper carries the module name in its command string but is never reaped
     (killing it would orphan the live daemon and fake a dead session, #1199).
     Ownership = cwd under this unit's project root OR the process

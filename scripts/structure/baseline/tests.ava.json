@@ -7,7 +7,7 @@
     "tests/ava": 56
   },
   "files": {
-    "tests/ava/mcps/test_daemon.py": 2115,
+    "tests/ava/mcps/test_daemon.py": 2110,
     "tests/ava/test_agents_sdk.py": 1163,
     "tests/ava/test_mcps.py": 1367,
     "tests/ava/test_self_evolution_collect.py": 913,

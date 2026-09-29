@@ -885,6 +885,26 @@ def test_unlink_own_socket_missing_file_noop(tmp_path: Path) -> None:
     assert not (tmp_path / "nope.sock").exists()
 
 
+class _FakeProc:
+    """A psutil.Process stand-in for the reaper: argv, cwd, env, and a kill flag."""
+
+    def __init__(self, pid: int, cmdline: list[str], cwd: str, env: dict[str, str]) -> None:
+        self.pid = pid
+        self.info = {"cmdline": cmdline}
+        self._cwd = cwd
+        self._env = env
+        self.killed = False
+
+    def cwd(self) -> str:
+        return self._cwd
+
+    def environ(self) -> dict[str, str]:
+        return self._env
+
+    def kill(self) -> None:
+        self.killed = True
+
+
 def test_reap_stale_daemons_kills_only_this_unit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -893,44 +913,15 @@ def test_reap_stale_daemons_kills_only_this_unit(
     monkeypatch.setattr(daemon_mod, "_reap_stale_daemons", _ORIG_REAP)
 
     home = str(settings.general.ava_home)
-    root = str(Path(daemon_mod.__file__).resolve().parent.parent)
+    root = str(Path(daemon_mod.__file__).resolve().parents[2])
 
-    class FakeProc:
-        def __init__(self, pid: int, cmdline: list[str], cwd: str, env: dict[str, str]) -> None:
-            self.pid = pid
-            self.info = {"cmdline": cmdline}
-            self._cwd = cwd
-            self._env = env
-            self.killed = False
-
-        def cwd(self) -> str:
-            return self._cwd
-
-        def environ(self) -> dict[str, str]:
-            return self._env
-
-        def kill(self) -> None:
-            self.killed = True
-
+    argv = [".venv/bin/python", "-m", "ava.mcps._daemon"]
     procs = [
-        FakeProc(
-            os.getpid(), [".venv/bin/python", "-m", "ava.mcps._daemon"], root, {"AVA_HOME": home}
-        ),  # self
-        FakeProc(
-            1001, [".venv/bin/python", "-m", "ava.mcps._daemon"], root, {}
-        ),  # same unit via cwd
-        FakeProc(
-            1002, [".venv/bin/python", "-m", "ava.mcps._daemon"], "/elsewhere", {"AVA_HOME": home}
-        ),  # same via env
-        FakeProc(
-            1003,
-            [".venv/bin/python", "-m", "ava.mcps._daemon"],
-            "/other/root",
-            {"AVA_HOME": "/other/home"},
-        ),  # other unit
-        FakeProc(
-            1004, ["python", "-m", "something.else"], root, {"AVA_HOME": home}
-        ),  # not a daemon
+        _FakeProc(os.getpid(), argv, root, {"AVA_HOME": home}),  # self
+        _FakeProc(1001, argv, root, {}),  # same unit via cwd
+        _FakeProc(1002, argv, "/elsewhere", {"AVA_HOME": home}),  # same via env
+        _FakeProc(1003, argv, "/other/root", {"AVA_HOME": "/other/home"}),  # other unit
+        _FakeProc(1004, ["python", "-m", "something.else"], root, {"AVA_HOME": home}),  # no daemon
     ]
     with patch("psutil.process_iter", return_value=procs):
         daemon_mod._reap_stale_daemons(Path(root))
@@ -942,9 +933,11 @@ def test_reap_stale_daemons_kills_only_this_unit(
 def _is_daemon_cmdline_cases() -> list[tuple[list[str], bool]]:
     """(cmdline, expected) pairs for `_is_daemon_cmdline`."""
     return [
-        # The daemon's own launch shapes.
+        # The daemon's own launch shapes, and a pre-rename release's (`_LEGACY_DAEMON_MODULE`).
         ([".venv/bin/python", "-m", "ava.mcps._daemon"], True),
         ([".venv/bin/python", "-m", "ava.mcps._daemon", "/tmp/x.sock"], True),  # noqa: S108
+        ([".venv/bin/python", "-m", "ava._mcps_daemon"], True),
+        (["bash", "-lc", "cd /root && .venv/bin/python -m ava._mcps_daemon"], False),
         # A `bash -lc` wrapper: the whole launch command is ONE argv element
         # that contains the module name — no element equals it, never matched.
         (
@@ -988,41 +981,43 @@ def test_reap_stale_daemons_skips_bash_lc_session_wrapper(
     monkeypatch.setattr(daemon_mod, "_reap_stale_daemons", _ORIG_REAP)
 
     home = str(settings.general.ava_home)
-    root = str(Path(daemon_mod.__file__).resolve().parent.parent)
-
-    class FakeProc:
-        def __init__(self, pid: int, cmdline: list[str], cwd: str, env: dict[str, str]) -> None:
-            self.pid = pid
-            self.info = {"cmdline": cmdline}
-            self._cwd = cwd
-            self._env = env
-            self.killed = False
-
-        def cwd(self) -> str:
-            return self._cwd
-
-        def environ(self) -> dict[str, str]:
-            return self._env
-
-        def kill(self) -> None:
-            self.killed = True
+    root = str(Path(daemon_mod.__file__).resolve().parents[2])
 
     inner = (
         f"cd {root} && export VIRTUAL_ENV={root}/.venv && "
         f'export PATH={root}/.venv/bin:"$PATH" && .venv/bin/python -m ava.mcps._daemon'
     )
     procs = [
-        FakeProc(2001, ["bash", "-lc", inner], root, {"AVA_HOME": home}),  # live session wrapper
-        FakeProc(
+        _FakeProc(2001, ["bash", "-lc", inner], root, {"AVA_HOME": home}),  # live session wrapper
+        _FakeProc(
             2002, [".venv/bin/python", "-m", "ava.mcps._daemon"], root, {"AVA_HOME": home}
         ),  # the real daemon it launched
-        FakeProc(2003, ["bash", "-lc", inner], "/other/root", {"AVA_HOME": "/other/home"}),
+        _FakeProc(2003, ["bash", "-lc", inner], "/other/root", {"AVA_HOME": "/other/home"}),
     ]
     with patch("psutil.process_iter", return_value=procs):
         daemon_mod._reap_stale_daemons(Path(root))
 
     assert not procs[0].killed and not procs[2].killed  # wrappers survive
     assert procs[1].killed  # the actual daemon is reaped
+
+
+def test_reap_stale_daemons_reaps_a_pre_rename_ghost(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ghost a pre-rename release left behind (`-m ava._mcps_daemon`, dead socket)
+    is still this unit's daemon: reaped when it shares the unit's AVA_HOME, never
+    when it belongs to another unit, and its `bash -lc` wrapper is spared."""
+    monkeypatch.setattr(daemon_mod, "_reap_stale_daemons", _ORIG_REAP)
+    home = str(settings.general.ava_home)
+    root = str(Path(daemon_mod.__file__).resolve().parents[2])
+    legacy = [".venv/bin/python", "-m", daemon_mod._LEGACY_DAEMON_MODULE]
+    procs = [
+        _FakeProc(3001, legacy, "/old/release/root", {"AVA_HOME": home}),  # same unit
+        _FakeProc(3002, legacy, "/other/root", {"AVA_HOME": "/other/home"}),  # other unit
+        _FakeProc(3003, ["bash", "-lc", ".venv/bin/python -m ava._mcps_daemon"], root, {}),
+    ]
+    with patch("psutil.process_iter", return_value=procs):
+        daemon_mod._reap_stale_daemons(Path(root))
+    assert procs[0].killed
+    assert not procs[1].killed and not procs[2].killed
 
 
 def test_main_refuses_live_socket(monkeypatch: pytest.MonkeyPatch) -> None:
