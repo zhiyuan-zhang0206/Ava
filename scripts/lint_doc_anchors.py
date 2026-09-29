@@ -171,7 +171,7 @@ def iter_doc_files(root: Path) -> list[Path]:
 
 # Directories the OKF walk never descends: tooling/vendored trees that are not
 # hidden (and so survive the hidden-dir rule) and can hold thousands of files.
-_OKF_SKIP_DIRS = {".venv", "node_modules", "__pycache__", ".mypy_cache", ".ruff_cache"}
+_OKF_SKIP_DIRS = {".venv", "node_modules", "__pycache__", ".cache"}
 
 
 def iter_okf_docs() -> list[Path]:

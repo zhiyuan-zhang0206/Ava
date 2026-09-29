@@ -124,7 +124,7 @@ _HEADER_LINE_RE = re.compile(r"^#{1,6} ")
 # Directories the axis-search rglob skips (mirrors okf_graph.find_files'
 # hidden-dir policy plus the heavy trees a whole-repo walk would drag in).
 _NON_NODE_EXCLUDES = frozenset(
-    {"node_modules", "tmp", ".next", "runs", "logs", "outputs", ".pytest_cache", ".ruff_cache"}
+    {"node_modules", "tmp", ".next", "runs", "logs", "outputs", ".cache"}
 )
 
 

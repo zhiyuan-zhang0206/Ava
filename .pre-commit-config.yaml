@@ -430,7 +430,10 @@ repos:
       # import graph, so pass_filenames: false + trigger on any .py change.
       - id: lint-imports
         name: lint import direction (layered architecture)
-        entry: .venv/bin/lint-imports
+        # import-linter has no pyproject.toml cache-dir key (cache_dir is a CLI/API
+        # arg only) — pass it explicitly so its cache lands under .cache/ like
+        # every other tool (conventions/dev-setup.md "Tool caches").
+        entry: .venv/bin/lint-imports --cache-dir .cache/import-linter
         language: system
         types: [python]
         pass_filenames: false

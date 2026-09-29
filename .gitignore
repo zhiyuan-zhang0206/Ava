@@ -20,9 +20,10 @@ venv/
 *.egg-info/
 dist/
 build/
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
+
+# Tool caches: every tool writes under `.cache/<tool>/` (pytest, ruff,
+# import-linter, ...) — see conventions/dev-setup.md "Tool caches".
+/.cache/
 
 # Per-checkout home pointer: maps a dev worktree to its cluster's $AVA_HOME so
 # bare invocations resolve the right home (written by `ava start`).
