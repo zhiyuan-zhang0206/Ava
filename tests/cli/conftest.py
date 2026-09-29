@@ -19,8 +19,8 @@ from contextlib import AbstractContextManager, contextmanager
 import psutil
 import pytest
 
-from shared import service_selection as ds
 from shared.config import settings
+from shared.deploy.lifecycle import service_selection as ds
 from shared.native_process.ownership import OwnedProcess
 from shared.paths import run_dir
 from shared.session_backend import PtySessionBackend
@@ -110,7 +110,7 @@ def _isolate_disabled_services_marker(
 @pytest.fixture(autouse=True)
 def _isolate_local_pause_journal(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A failed stop intentionally retains its hold; it must not hold the next test."""
-    from shared import pause_owner
+    from shared.deploy.maintenance import pause_owner
 
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause-owner.json")
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause-owner.lock")

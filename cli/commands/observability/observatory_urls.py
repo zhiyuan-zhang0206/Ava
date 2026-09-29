@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from shared.atomic_io import write_text_atomic
 from shared.config import settings
+from shared.host.atomic_io import write_text_atomic
 
 
 def _observability_datasource_urls() -> tuple[str, str, str]:

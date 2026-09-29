@@ -17,7 +17,7 @@ from pydantic import (
     ConfigDict,
 )
 
-from shared.resource_sample import ResourceSample
+from shared.host.resource_sample import ResourceSample
 
 # Why a host's status snapshot reads `paused` — the first true clause of the
 # paused verdict, in the verdict's own order (ops/cluster_status.py::_paused_reason):
@@ -107,7 +107,7 @@ class MachineStatus(BaseModel):
     # was not restarted — only running_sha reveals the stale code.
     running_sha: str | None = None
     schema_mismatch: SchemaMismatchStatus | None = None
-    # The live deploy lease (`shared.cluster_lock.read_update_lease().describe()`):
+    # The live deploy lease (`shared.deploy.state.cluster_lock.read_update_lease().describe()`):
     # holder, how long it has been held, when it lapses, plus the settle note when
     # it is a hold rather than an executing rollout. None = no live lease. The lease
     # is cluster-global, so it is read once server-side and stamped identically
@@ -137,7 +137,7 @@ class MachineStatus(BaseModel):
     session_count: int = 0
     # Sessions grouped by agent for hierarchical display.
     agent_groups: list[dict[str, object]] = []
-    # This machine's LIVE CPU / memory / disk reading (shared.resource_sample) —
+    # This machine's LIVE CPU / memory / disk reading (shared.host.resource_sample) —
     # one sample, not a series: the history lives in Prometheus (issue #46) and
     # this is the degraded answer for a deployment without the LGTM backend.
     # None when psutil could not read the machine.

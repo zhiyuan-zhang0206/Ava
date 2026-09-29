@@ -547,7 +547,7 @@ async def pending_interrupt_reason(
 
     The branch reads the mark's full shape — the same predicate the stamp
     writes (`ops.agent_pause._reap_agent`) and the settle selector matches
-    (`shared.straggler_reap._MARKED_ROWS`): `applied_at IS NULL AND
+    (`shared.deploy.maintenance.straggler_reap._MARKED_ROWS`): `applied_at IS NULL AND
     observed_at IS NULL AND status IN ('pending','claimed') AND payload ?
     'maintenance'`. `observed_at IS NULL` is implied by `applied_at IS NULL`
     (schema `inbound_lifecycle_target_check`) and kept explicit so every face

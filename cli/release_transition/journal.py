@@ -32,13 +32,13 @@ from cli.release_transition.authority_evidence import Fence, Issue, require_cohe
 from cli.release_transition.native import DARWIN, LINUX
 from cli.release_transition.pitr.evidence import PitrProgress, PitrSeal
 from cli.release_transition.request import PitrRequest, Record, ReleaseRef
-from shared.atomic_io import write_text_atomic
+from shared.deploy.release.runtime_release import current_pointer
+from shared.deploy.release.verified_file import regular_bytes
+from shared.host.atomic_io import write_text_atomic
+from shared.host.private_storage import ensure_private_dir, private_file_problem
 from shared.native_process.ownership import OwnedProcess
 from shared.platform import file_lock
-from shared.private_storage import ensure_private_dir, private_file_problem
 from shared.process_evidence import ExpectedProcess
-from shared.runtime_release import current_pointer
-from shared.verified_file import regular_bytes
 
 Phase = Literal[
     "prepared",
@@ -224,7 +224,7 @@ class Operation(Record):
         if self.pitr is None or self.pitr.seal is None:
             self.request.require_configuration()
             return
-        from shared.start_inputs import require_configuration
+        from shared.deploy.release.start_inputs import require_configuration
 
         require_configuration(Path(self.request.home), self.pitr.seal.configuration_digest)
 

@@ -1,4 +1,4 @@
-"""`shared.cluster_pin` — the legacy pinned commit (`cluster_pin.target_sha`).
+"""`shared.deploy.state.cluster_pin` — the legacy pinned commit (`cluster_pin.target_sha`).
 
 Real-DB tests (the pin IS a Postgres singleton row). No current lifecycle
 writes it; the tests seed the historical value with SQL and verify the one
@@ -11,7 +11,7 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
-from shared.cluster_pin import get_cluster_target_sha
+from shared.deploy.state.cluster_pin import get_cluster_target_sha
 
 
 @pytest.fixture(autouse=True)

@@ -125,7 +125,9 @@ def test_executor_receipt_is_computed_under_the_lock_for_its_own_attempt(
     # execute() exports the captured home to its own process environment; keep
     # that write away from this test process.
     monkeypatch.setattr(execute, "os", SimpleNamespace(environ={}, getpid=os.getpid))
-    monkeypatch.setattr("shared.runtime_interpreter.verify_loaded_image", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "shared.deploy.release.runtime_interpreter.verify_loaded_image", lambda *_a, **_k: None
+    )
     real = journal.exclusive
 
     @contextmanager

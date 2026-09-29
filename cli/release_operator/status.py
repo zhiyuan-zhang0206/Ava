@@ -23,7 +23,7 @@ from cli.release_fleet.progress import FleetProgress, UnitProgress
 from cli.release_fleet.request import FleetRequest
 from cli.release_operator.current import current_release
 from cli.release_transition.journal import Operation, read_operation
-from shared.verified_file import regular_bytes
+from shared.deploy.release.verified_file import regular_bytes
 
 
 def _active_operation_path(home: Path) -> Path | None:

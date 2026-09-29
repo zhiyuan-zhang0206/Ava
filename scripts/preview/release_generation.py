@@ -38,9 +38,9 @@ import psycopg
 from dotenv import dotenv_values
 
 from shared.cluster.authority import active_generation, read_secret, render_userlist
+from shared.host.private_storage import write_private_bytes
 from shared.native_process.ownership import OwnedProcess
 from shared.pg_admin import pg_socket_path
-from shared.private_storage import write_private_bytes
 
 # A refused login: SCRAM fails first for a login whose verifier was removed,
 # NOLOGIN after it; the pooler reports its own SCRAM failure.

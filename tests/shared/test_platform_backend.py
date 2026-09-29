@@ -1,4 +1,4 @@
-"""Tests for shared.platform_backend — singleton dispatch + capability queries."""
+"""Tests for shared.host.system.backend — singleton dispatch + capability queries."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.platform_backend import (
+from shared.host.system.backend import (
     LinuxPlatformBackend,
     MacPlatformBackend,
     PlatformBackend,
@@ -81,9 +81,9 @@ def test_windows_scheduling_delegates_to_schtasks(
     calls: list[str] = []
     unregistered: list[tuple[str, tuple[object, ...]]] = []
     for mod, name in [
-        ("shared.os_autostart", "autostart"),
-        ("shared.os_cron", "cron"),
-        ("shared.os_logs_job", "logs"),
+        ("shared.host.system.autostart", "autostart"),
+        ("shared.host.system.cron", "cron"),
+        ("shared.host.system.logs_job", "logs"),
     ]:
         monkeypatch.setattr(f"{mod}._register_windows", lambda *_a, _n=name: calls.append(_n) or 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
@@ -123,9 +123,9 @@ def test_windows_scheduling_failure_degrades_to_a_warning(
     is worse than one that is up and loudly unsupervised, and every `ava start`
     retries. POSIX keeps failing fast — this is the Windows backend alone."""
     for mod, _name in [
-        ("shared.os_autostart", "autostart"),
-        ("shared.os_cron", "health probe"),
-        ("shared.os_logs_job", "logs maintenance"),
+        ("shared.host.system.autostart", "autostart"),
+        ("shared.host.system.cron", "health probe"),
+        ("shared.host.system.logs_job", "logs maintenance"),
     ]:
         monkeypatch.setattr(f"{mod}._register_windows", lambda *_a: "ERROR: Access is denied.")  # pyright: ignore[reportUnknownArgumentType]
 
@@ -170,7 +170,7 @@ def test_venv_python_path() -> None:
 def test_linux_autostart_has_one_native_manager_and_explicit_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared import os_boot_unit
+    from shared.host.system import boot_unit as os_boot_unit
 
     calls: list[Path | str] = []
 
@@ -191,7 +191,7 @@ def test_linux_autostart_has_one_native_manager_and_explicit_home(
 
 
 def test_linux_autostart_propagates_unavailable_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared import os_boot_unit
+    from shared.host.system import boot_unit as os_boot_unit
 
     monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: False)
     with pytest.raises(RuntimeError, match="systemd"):

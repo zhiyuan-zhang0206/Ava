@@ -6,8 +6,8 @@ import threading
 import time
 from collections.abc import Callable
 
-from shared.cluster_lock import lease_may_lapse, renew_update_lock
-from shared.deploy_timing import LEASE_RENEW_INTERVAL_S
+from shared.deploy.progress_timeout import LEASE_RENEW_INTERVAL_S
+from shared.deploy.state.cluster_lock import lease_may_lapse, renew_update_lock
 from shared.log import logger
 
 

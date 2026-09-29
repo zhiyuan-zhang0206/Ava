@@ -12,9 +12,9 @@ import sys
 from typing import Any, NamedTuple
 
 from cli.commands._repo import ServiceSpec, session_name
-from shared.cluster_drift import prod_source_branch_drift as _detect_prod_source_drift
-from shared.deploy_timing import CRITICAL_SERVICE_SESSIONS as CRITICAL_SERVICE_SESSIONS
-from shared.deploy_timing import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
+from shared.deploy.git.cluster_drift import prod_source_branch_drift as _detect_prod_source_drift
+from shared.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS as CRITICAL_SERVICE_SESSIONS
+from shared.deploy.progress_timeout import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
 from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 
 __all__ = ["_detect_prod_source_drift"]

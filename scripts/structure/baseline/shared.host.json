@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "shared/host/system/job_observation.py::observe_crontab": 15
+  }
+}

@@ -12,7 +12,7 @@ import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
 import cli.commands.converge.host as converge_host
 import cli.commands.root_driver as _root_driver_commands
-from shared.start_serving import RootBirth
+from shared.deploy.lifecycle.start_serving import RootBirth
 
 # Explicit shared surface: every name the split test modules import from here.
 __all__ = [
@@ -157,7 +157,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     Default role="gateway" (full service set). To test secondary, explicitly override:
         monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
         monkeypatch.setattr(_cli, "_collect_setup_values", lambda _a: (..., []))"""
-    from shared.runtime_interpreter import LoadedRuntimeIdentity
+    from shared.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 
     def fixture_runtime(_self: object, _home: Path) -> LoadedRuntimeIdentity:
         return serving_root.runtime

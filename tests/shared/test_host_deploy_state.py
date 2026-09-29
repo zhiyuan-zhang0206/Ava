@@ -1,4 +1,4 @@
-"""shared.host_deploy_state — posture/updater-lease row (R1, Task #1021).
+"""shared.deploy.state.host_deploy_state — posture/updater-lease row (R1, Task #1021).
 
 Covers the R1 host-level explicit model: the posture transitions the pause
 lifecycle drives (idle -> paused -> idle) and the retained updater-lease
@@ -13,7 +13,7 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
-from shared import host_deploy_state as hds
+from shared.deploy.state import host_deploy_state as hds
 
 
 @pytest.fixture(autouse=True)

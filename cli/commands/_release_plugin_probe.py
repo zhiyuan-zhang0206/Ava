@@ -11,9 +11,9 @@ from unittest.mock import patch
 from agent.extensions import load_extensions
 from ops.spec import _plugin_services
 from shared import paths, plugins_config
+from shared.deploy.release.runtime_release import ReleaseRejectedError
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.runtime_plugins import declared_plugins
-from shared.runtime_release import ReleaseRejectedError
 
 
 def prove_plugin_registration(root: Path, required: tuple[str, ...]) -> None:

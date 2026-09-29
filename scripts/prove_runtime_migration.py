@@ -20,8 +20,15 @@ import psycopg
 
 from cli.commands.start import cmd_start
 from cli.start_runtime import StartRuntime
-from shared import home_lifecycle_locks
 from shared.config import settings
+from shared.deploy.lifecycle import home_lifecycle_locks
+from shared.deploy.release.identity import ApplicationIdentity
+from shared.deploy.release.runtime_release import (
+    ReleaseRejectedError,
+    current_pointer,
+    verify_release,
+)
+from shared.deploy.release.verified_file import regular_bytes
 from shared.machine import machine_name
 from shared.migrations import (
     MIGRATIONS_DIR,
@@ -31,11 +38,8 @@ from shared.migrations import (
     check_schema_version,
     required_migration_set,
 )
-from shared.release_identity import ApplicationIdentity
 from shared.runtime_abi import current_abi
 from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
-from shared.runtime_release import ReleaseRejectedError, current_pointer, verify_release
-from shared.verified_file import regular_bytes
 
 
 def require(condition: bool, message: str) -> None:  # noqa: FBT001 — proof predicate.

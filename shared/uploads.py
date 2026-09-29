@@ -18,7 +18,7 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-from shared.private_storage import ensure_private_dir
+from shared.host.private_storage import ensure_private_dir
 
 # Suffix -> MIME for image uploads that can be inlined as native model content.
 # Mirrors the image row of `ava._understand`'s media map; a suffix not listed

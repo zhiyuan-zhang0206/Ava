@@ -30,7 +30,10 @@ def main() -> None:
     from cli.commands.observability.otel_collector import ensure_otel_collector
 
     rejected_home = home / "must-not-be-created"
-    with patch("shared.runtime_interpreter.runtime_otel_binary", return_value=home / "missing"):
+    with patch(
+        "shared.deploy.release.runtime_interpreter.runtime_otel_binary",
+        return_value=home / "missing",
+    ):
         try:
             ensure_otel_collector(home / "no-source", rejected_home, None)
         except RuntimeError as exc:

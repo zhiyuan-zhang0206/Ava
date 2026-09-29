@@ -225,7 +225,7 @@ count.
 test uses real time or a lattice clock; a new timing constant defines a relation
 outside the lattice.
 
-**Evidence.** [`shared/timing.py`](../shared/timing.py) makes `CLOCKS` the
+**Evidence.** [`shared/deploy/timing.py`](../shared/deploy/timing.py) makes `CLOCKS` the
 single authority for ordered timing constants, including boot stall, launch
 confirmation, boot budget, and reap grace, as well as `NO_PROGRESS` and
 `LOCK_TTL`. In the 2026-07-30 spawn incident, launch confirmation was extended

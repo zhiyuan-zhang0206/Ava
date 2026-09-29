@@ -11,10 +11,10 @@ from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 
 from shared import process_sha
+from shared.deploy.release.runtime_service_identity import normal_runtime_identity
 from shared.health_schema import DEGRADED, OK, component, render
 from shared.machine import machine_name
 from shared.paths import ava_home
-from shared.runtime_service_identity import normal_runtime_identity
 
 _STARTED_AT = time.time()
 

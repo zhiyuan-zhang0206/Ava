@@ -26,6 +26,7 @@ from pathlib import Path
 
 from cli.commands.converge.spec import ConvergeCtx
 from shared import cluster
+from shared.host.proc import process_cmdline
 from shared.port_preflight import (
     env_port_drift,
     occupied_ports,
@@ -42,7 +43,6 @@ from shared.port_preflight import (
 from shared.port_preflight import (
     listeners_on as _listeners_on,
 )
-from shared.proc import process_cmdline
 
 
 def _occupant_detail(port: int) -> str:

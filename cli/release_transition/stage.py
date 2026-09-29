@@ -33,7 +33,7 @@ def start_operation(path: Path) -> int:
     os.environ["AVA_CLUSTER_REGISTRY"] = request.registry
     _require_native_root_owner(operation, home)
     from cli.release_transition.authority import require_issued
-    from shared.release_operation import authorized_start
+    from shared.deploy.release.operation import authorized_start
 
     # The launch delivers the ledger's active generation and binds it into the
     # launch digest: it must be exactly this direction's authorized issue.
@@ -52,7 +52,7 @@ def _require_native_root_owner(operation: Operation, home: Path) -> None:
 
     if not helper_root(operation.launch):
         # Existing PID publication also checks ControlPID/birth.
-        from shared.os_boot_unit import in_boot_unit
+        from shared.host.system.boot_unit import in_boot_unit
 
         if not in_boot_unit(home):
             raise RuntimeError("Linux release start must run inside the ordinary root boot unit")
@@ -119,8 +119,8 @@ def preflight_operation(path: Path, *, previous: bool = False) -> int:
     from cli.commands.root_driver import root_child_env, start_roster, tree_manifest
     from cli.commands.start_generation import launch_digest
     from ops import spec as ops_spec
+    from shared.deploy.lifecycle.service_selection import resolve_selection
     from shared.machine import machine_role
-    from shared.service_selection import resolve_selection
 
     roles = machine_role()
     names = {spec.session for spec, _reason in ops_spec.services_for_capabilities_annotated(roles)}
@@ -176,8 +176,8 @@ def observe_operation(path: Path) -> int:
     )
     from cli.commands.root_driver import admit_live_start, start_roster, wait_for_service_tree
     from ops import spec as ops_spec
+    from shared.deploy.lifecycle.service_selection import resolve_selection
     from shared.machine import machine_role
-    from shared.service_selection import resolve_selection
 
     roles = machine_role()
     names = {spec.session for spec, _reason in ops_spec.services_for_capabilities_annotated(roles)}
@@ -212,7 +212,7 @@ def _require_root_owned(operation: Operation, home: Path) -> None:
         # (ppid, keeper PID, run dir); the executor then checks the journaled
         # birth, the helper's kernel identity and the pinned seed.
         return
-    from shared.os_boot_unit import manager_properties, process_cgroup, unit_name
+    from shared.host.system.boot_unit import manager_properties, process_cgroup, unit_name
     from shared.root_control.client import root_process
 
     root = root_process()

@@ -26,10 +26,10 @@ from cli.release_prepare.acquisition_process import Commands
 from cli.release_prepare.inputs import validate_inputs
 from cli.release_prepare.models import FileInput, LocalInputs, TreeInput, encode
 from cli.release_prepare.source_distributions import validate_distributions
-from shared.brew_pin import UV_VERSION
+from shared.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
+from shared.deploy.release.verified_file import regular_bytes
+from shared.host.brew_pin import UV_VERSION
 from shared.runtime_plugins import declared_plugins
-from shared.runtime_release import ReleaseRejectedError, file_sha256
-from shared.verified_file import regular_bytes
 
 
 def _input_paths(request: Acquisition) -> list[Path]:
@@ -83,7 +83,9 @@ def _source_inputs(request: Acquisition, captured: CapturedSource) -> dict[str, 
             )
         )
     if request.collector:
-        names.extend(("scripts/prepare_otel_release.py", "shared/collector_artifact.py"))
+        names.extend(
+            ("scripts/prepare_otel_release.py", "shared/deploy/release/collector_artifact.py")
+        )
     return {name: file_input(captured.source / name) for name in names}
 
 

@@ -10,8 +10,8 @@ from cli.release_prepare.acquisition_dependencies import tree_input
 from cli.release_prepare.acquisition_models import FrontendTools
 from cli.release_prepare.acquisition_process import Commands
 from cli.release_prepare.models import TreeInput
-from shared.runtime_prepare import inventory_digest, tree_inventory
-from shared.runtime_release import ReleaseRejectedError, file_sha256
+from shared.deploy.release.runtime_prepare import inventory_digest, tree_inventory
+from shared.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
 
 
 def validate_frontend_tools(tools: FrontendTools) -> None:

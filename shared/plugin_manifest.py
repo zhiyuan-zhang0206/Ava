@@ -571,7 +571,8 @@ def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list
         return [f"manifest invalid: {exc}"]
     if manifest is None:
         return []
-    from shared import host_version, paths
+    from shared import paths
+    from shared.deploy.git import host_version
 
     target = repo or paths.repo_root()
     try:
@@ -635,7 +636,7 @@ def _git_rc(repo: Path, *args: str) -> int | None:
 
 def _git_run(repo: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
     from shared.deploy.git.gitenv import git_env
-    from shared.proc import run_bounded
+    from shared.host.proc import run_bounded
 
     try:
         return run_bounded(  # git + fixed args, no user input

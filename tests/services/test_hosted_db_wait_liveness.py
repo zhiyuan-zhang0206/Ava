@@ -17,9 +17,10 @@ from services.agent_host import daemon, db_recovery
 from services.agent_host.dispatcher import InboundWakeDispatcher, PendingInboundWake, TurnScheduler
 from services.agent_host.host import AgentHost
 from services.delivery_watchdog import turn_liveness
-from shared import hosted_db_wait, maintenance_cohort, pause_owner
+from shared import hosted_db_wait
 from shared.config import settings
 from shared.db import insert_inbound_message
+from shared.deploy.maintenance import cohort, pause_owner
 from shared.hosted_db_wait import database_wait_snapshot
 from shared.machine import machine_name
 from shared.turn_identity import bind_turn_identity
@@ -56,7 +57,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # n
     if held:
         acquired = datetime.now(UTC)
         pause_owner.begin_maintenance("waiting", acquired)
-        maintenance_cohort.prepare(
+        cohort.prepare(
             db_conn,
             machine=machine_name(),
             host_owner=incarnation.owner,

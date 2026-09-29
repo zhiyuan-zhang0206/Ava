@@ -24,10 +24,10 @@ from cli.release_fleet.request import CoordinatorEndpoint, UnitReceipt, UnitRequ
 from cli.release_transition.journal import create
 from cli.release_transition.local import LocalTransition
 from shared.cluster.authority.unit import Enrollment, UnitIdentity, unit_enrollment_path
-from shared.private_storage import write_private_bytes
+from shared.deploy.release.runtime_release import activate_release
+from shared.deploy.release.start_inputs import configuration_digest
+from shared.host.private_storage import write_private_bytes
 from shared.runtime_abi import current_abi
-from shared.runtime_release import activate_release
-from shared.start_inputs import configuration_digest
 from tests.lifecycle.release_operator.conftest import build_image
 
 _MACHINE = "macbook-air"
@@ -87,15 +87,15 @@ class Unit:
 @pytest.fixture
 def unit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Unit:
     import shared.cluster
+    import shared.host.system.boot_unit
     import shared.machine
-    import shared.os_boot_unit
 
     home = tmp_path.resolve() / "home"
     home.mkdir(mode=0o700)
     monkeypatch.setattr(shared.machine, "machine_name", lambda: _MACHINE)
     monkeypatch.setattr(shared.machine, "machine_role", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(shared.cluster, "registry_path", lambda: home.parent / "clusters.json")
-    monkeypatch.setattr(shared.os_boot_unit, "systemd_running", lambda: True)
+    monkeypatch.setattr(shared.host.system.boot_unit, "systemd_running", lambda: True)
     return Unit(home)
 
 

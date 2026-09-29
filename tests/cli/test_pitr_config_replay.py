@@ -52,7 +52,7 @@ def native_auto(
     def authorized(_home: Path) -> None:
         return None
 
-    monkeypatch.setattr("shared.release_operation.require_pitr_authorized", authorized)
+    monkeypatch.setattr("shared.deploy.release.operation.require_pitr_authorized", authorized)
     try:
         yield tmp_path, record
     finally:

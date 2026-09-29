@@ -21,8 +21,8 @@ A stopping host's release is bounded (`services/agent_host/host.py`,
 `_RELEASE_OWNER_TIMEOUT_S`) so the whole stop fits ava-root's TERM window; with
 the database unreachable it fails and the leases expire by TTL.
 
-Lease TTL and renewal ordering live in `shared/deploy_timing.py` and
-`shared/timing.py`. A lease is runtime ownership evidence, not an agent identity
+Lease TTL and renewal ordering live in `shared/deploy/progress_timeout.py` and
+`shared/deploy/timing.py`. A lease is runtime ownership evidence, not an agent identity
 count: the status page counts non-terminated local identities, including idle
 and maintenance-paused agents. Heartbeat selects eligible idle identities
 without requiring an independently resident agent process.

@@ -23,11 +23,11 @@ the retained executor. Full image
 verification includes packaged source identity and every up/down migration SQL
 file; an unchanged squashed baseline alone does not establish equal SQL.
 No platform is captured: each verification, boot included, checks the image's
-ABI tag against the host as observed then ([[shared/runtime_release.ava.okf.md]]).
+ABI tag against the host as observed then ([[shared/deploy/release/runtime_release.ava.okf.md]]).
 
 `identity.py` requires the existing initialized start intent to match the exact
 captured registry reservation. Configuration admission uses settings-free
-`shared/start_inputs.py`, before Settings and at effect/readiness boundaries.
+`shared/deploy/release/start_inputs.py`, before Settings and at effect/readiness boundaries.
 It includes desired service selection. These comparisons detect changed inputs;
 they do not claim a lock over independent configuration writers.
 

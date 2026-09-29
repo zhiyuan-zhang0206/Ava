@@ -38,7 +38,7 @@ from psycopg_pool import AsyncConnectionPool
 from shared.audit_events import insert_event_log_async
 from shared.config import settings
 from shared.db_transaction import async_write_transaction
-from shared.deploy_timing import CORPSE_REAP_GRACE_S
+from shared.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from shared.live_announce import publish_agent_updated
 from shared.log import logger

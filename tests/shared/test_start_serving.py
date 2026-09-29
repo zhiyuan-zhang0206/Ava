@@ -7,12 +7,12 @@ from threading import Event, Thread
 
 import pytest
 
-from shared.start_serving import RootBirth
+from shared.deploy.lifecycle.start_serving import RootBirth
 
 
 @pytest.fixture
 def state_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     path = tmp_path / "start-serving.json"
     monkeypatch.setattr(start_serving, "state_path", lambda: path)
@@ -27,7 +27,7 @@ def test_new_start_attempt_invalidates_a_previous_serving_generation(
     Replacing the matching-generation check with an unconditional serving write
     would let an earlier start mark the later attempt serving and fail this test.
     """
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     previous = start_serving.begin_start()
     assert start_serving.mark_serving(previous, runtime=serving_root.runtime) is True
@@ -43,7 +43,7 @@ def test_new_start_attempt_invalidates_a_previous_serving_generation(
 
 def test_clear_serving_keeps_revival_blocked(serving_root: RootBirth, state_path: Path) -> None:
     """Stopping a host removes its authority to revive work."""
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
@@ -62,7 +62,7 @@ def test_start_waits_for_an_authorized_recovery_action(
     thread finish ``begin_start`` before the action completes, reproducing the
     pre-readiness check-then-act race.
     """
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
@@ -98,7 +98,7 @@ def test_start_waits_for_an_authorized_recovery_action(
 def test_old_birth_cannot_grant_after_observed_generation_changes(
     serving_root: RootBirth, state_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
     from shared.root_control.client import RootClientError
 
     generation = start_serving.begin_start()
@@ -132,7 +132,7 @@ def test_old_birth_cannot_grant_after_observed_generation_changes(
 def test_marker_rejects_a_different_loaded_runtime(
     serving_root: RootBirth, state_path: Path
 ) -> None:
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start()
     other = serving_root.runtime.model_copy(update={"interpreter": "/foreign/python"})
@@ -145,7 +145,7 @@ def test_marker_rejects_a_different_loaded_runtime(
     "contents", ["{}", '{"schema_version":1,"state":"serving","generation":"old"}']
 )
 def test_missing_or_old_markers_are_not_birth_evidence(state_path: Path, contents: str) -> None:
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     assert start_serving.born_identity() is None
     state_path.write_text(contents)
@@ -162,7 +162,7 @@ def test_linux_birth_uses_ticks_not_recomputed_wall_clock(serving_root: RootBirt
 def test_birth_read_refuses_marker_replaced_during_native_observation(
     serving_root: RootBirth, state_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
@@ -181,7 +181,7 @@ def test_direct_process_e2e_injects_only_its_explicit_fixture_gate(
     import runpy
     import sys
 
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
     from tests.e2e._proc import fixture_entrypoint
 
     gate = tmp_path / "e2e-serving"

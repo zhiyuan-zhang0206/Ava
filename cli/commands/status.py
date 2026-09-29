@@ -29,14 +29,14 @@ from cli.commands._repo import (
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.cluster_instance import print_data_plane_status
 from ops.service_spec import ServiceSpec
-from shared import service_selection
+from shared.deploy.lifecycle import service_selection
 from shared.machine import MachineRoles
 
 
 def _update_in_flight() -> bool:
     """Whether a live cluster deploy lease is held (package refresh skips then)."""
     with suppress(Exception):
-        from shared.cluster_lock import update_lock_holder
+        from shared.deploy.state.cluster_lock import update_lock_holder
 
         if update_lock_holder() is not None:
             return True
@@ -154,9 +154,9 @@ def _release_identity_lines(repo: Path) -> list[str]:
     home without one runs its source checkout. Unreadable records print as
     unreadable — never replaced by a guess or by a historical value.
     """
-    from shared.cluster_drift import checkout_head_sha
+    from shared.deploy.git.cluster_drift import checkout_head_sha
+    from shared.deploy.release.runtime_release import current_pointer
     from shared.paths import ava_home
-    from shared.runtime_release import current_pointer
 
     home = ava_home()
     try:
@@ -181,7 +181,7 @@ def _release_identity_lines(repo: Path) -> list[str]:
 def _home_operation_line(home: Path) -> str | None:
     """The active release/PITR operation unless it completed cleanly."""
     from cli.release_transition.journal import read_operation
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.verified_file import regular_bytes
 
     try:
         journal = Path(regular_bytes(home / "updates" / "active").decode().strip())
@@ -212,7 +212,7 @@ def _print_host_resources() -> None:
     and the data-plane view below it.
     """
     try:
-        from shared.resource_sample import resource_sample
+        from shared.host.resource_sample import resource_sample
 
         s = resource_sample()
     except Exception as e:  # fail-fast-ok: psutil may be absent; the rest of status still prints

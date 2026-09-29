@@ -51,7 +51,7 @@ unconditionally in the Windows start roster and fails every time.
 
 `cli/commands/data_plane/pgbouncer.py` signals with `os.kill(pid, SIGHUP)` /
 `os.kill(pid, 0)`. On Windows `os.kill(pid, 0)` **terminates** the target — the
-hazard `shared/proc.py` documents and routes around. PgBouncer is enabled by
+hazard `shared/host/proc.py` documents and routes around. PgBouncer is enabled by
 default (`shared/config/data_plane.py`) and is part of `ensure_cluster_instance`.
 
 ## Also missing

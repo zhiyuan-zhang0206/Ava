@@ -41,7 +41,7 @@ _RECORD_OWNER_TOLERANCE_S = 2.0
 # socket plus no record is conclusive evidence of an orphan. An unresponsive
 # host could still be in that short startup window; `new` leaves it alone for
 # this long, while an explicit `kill` may force-reap it immediately.
-# Local, non-lattice timeouts (deliberately NOT in shared/timing.py: no
+# Local, non-lattice timeouts (deliberately NOT in shared/deploy/timing.py: no
 # ordering relation with any registered clock).
 _ORPHAN_HOST_STARTUP_LEEWAY_S = 5.0
 _ORPHAN_HOST_KILL_WAIT_S = 3.0

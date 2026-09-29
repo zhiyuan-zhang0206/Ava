@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from cli import main as cli_main
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance.state import MaintenanceHold
 
 
 def _dispatched_fetch_env(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> str | None:

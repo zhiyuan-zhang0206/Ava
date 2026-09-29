@@ -10,7 +10,8 @@ import pytest
 
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster import health_alerts as cluster_health_alerts
-from shared import pause_owner, service_selection
+from shared.deploy.lifecycle import service_selection
+from shared.deploy.maintenance import pause_owner
 
 
 def _select_excluded(names: set[str]) -> None:

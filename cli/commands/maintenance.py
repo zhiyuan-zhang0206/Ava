@@ -24,8 +24,9 @@ from cli.commands.service_stop import (
 )
 from cli.cutover_hold import resume_refusal, start_refusal
 from ops.agent_pause import _hold, drain, prepare
-from shared import hold_driver, maintenance, maintenance_cohort, pause_owner, start_serving
 from shared.db import connect
+from shared.deploy.lifecycle import start_serving
+from shared.deploy.maintenance import admission, cohort, hold_driver, pause_owner
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.machine import machine_name, machine_role
 
@@ -48,23 +49,23 @@ def stop(
     if hold.phase not in ("drained", "stopping", "stopped"):
         raise RuntimeError("stop requires a completed drain for this operation")
     with connect() as conn:
-        maintenance_cohort.verify_drained(conn, hold)
+        cohort.verify_drained(conn, hold)
     if "agent-runner" in machine_role() and hold.phase == "drained":
         identity = host_identity_or_none()
         if identity is not None and identity.active:
             raise RuntimeError("agent-host still has active continuations")
     # Only now close ordinary API admission. In-flight native actions retained
     # their dependency APIs throughout prepare/drain.
-    from shared.host_deploy_state import set_posture
+    from shared.deploy.state.host_deploy_state import set_posture
 
     if hold.phase == "drained":
-        maintenance.set_phase(holder, at, "stopping")
+        admission.set_phase(holder, at, "stopping")
     set_posture("paused")
     ops_quiescent(remaining(deadline))
     stopped = stop_services(remaining(deadline), keep_terminals=keep_terminals)
     remaining(deadline)
     if hold.phase != "stopped":
-        maintenance.set_phase(holder, at, "stopped")
+        admission.set_phase(holder, at, "stopped")
     print(f"Stopped local recorded services: {stopped}; data plane remains available")
 
 
@@ -78,13 +79,13 @@ def _start(holder: str, at: datetime) -> int:
     if hold.phase == "stopped":
         if refusal := start_refusal(ava_home(), holder, at):
             raise RuntimeError(refusal)
-        maintenance.set_phase(holder, at, "starting")
-    with maintenance.authorized_start(holder, at):
+        admission.set_phase(holder, at, "starting")
+    with admission.authorized_start(holder, at):
         result = cmd_start(persist_services=False)
     if result == 0:
         if not start_serving.is_serving():
             return SERVICES_NOT_READY_EXIT_CODE
-        maintenance.set_phase(holder, at, "ready")
+        admission.set_phase(holder, at, "ready")
     return result
 
 
@@ -109,7 +110,7 @@ def resume(holder: str, at: datetime, *, cancel: bool) -> None:
         conn.execute("SELECT 1")
     # Preserve the hold if dependency/posture restoration fails. A crash after
     # its release is recovered by existing durable restart-pointer scanning.
-    with maintenance.authorized_start(holder, at):
+    with admission.authorized_start(holder, at):
         unpause_local_cluster()
 
 
@@ -148,10 +149,10 @@ def _repair(holder: str, at: datetime, *, operator: str | None) -> None:
     with connect() as conn:
         conn.execute("SELECT 1")
     record = _repair_record(operator)
-    maintenance.repair(holder, at, record)
+    admission.repair(holder, at, record)
     # Preserve the hold if dependency/posture restoration fails. The repaired
     # journal stays; a partial release is completed by resume --cancel.
-    with maintenance.authorized_start(holder, at):
+    with admission.authorized_start(holder, at):
         unpause_local_cluster()
     print(
         f"Repaired {len(hold.failures)} failed receipt(s) "
@@ -267,8 +268,8 @@ def run(args: argparse.Namespace) -> int:
             )
         )
         return 0
+    from shared.deploy.release.operation import require_start_authorized
     from shared.paths import ava_home
-    from shared.release_operation import require_start_authorized
 
     require_start_authorized(ava_home())
     at = _generation(args)

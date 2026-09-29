@@ -23,7 +23,7 @@ install, register, start, stop, or update anything.
    limit, battery restriction, or idle-only condition. It does not wake a sleeping
    Windows host.
 2. **Linux:** ordinary start convergence registers and enables the home-scoped
-   systemd unit `ava-boot.<home-slug>.service` (`shared/os_boot_unit.py`). It runs
+   systemd unit `ava-boot.<home-slug>.service` (`shared/host/system/boot_unit.py`). It runs
    ordinary start directly with the exact home, checkout and registry. Systemd
    supplies retry (`Restart=on-failure`, `RestartSec=60`, no attempt cap), and
    `TimeoutStartSec=900` bounds initial readiness. The successful start publishes

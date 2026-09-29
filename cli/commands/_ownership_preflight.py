@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cli.commands.converge.spec import ConvergeCtx
-from shared.platform_backend import get_backend
+from shared.host.system.backend import get_backend
 
 
 def collect_ownership_warnings(ctx: ConvergeCtx) -> list[str]:

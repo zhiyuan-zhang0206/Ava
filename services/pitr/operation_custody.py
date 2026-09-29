@@ -42,8 +42,8 @@ from typing import cast
 
 import psutil
 
-from shared.atomic_io import write_text_atomic
 from shared.exec_process_domain import ExecProcessDomain
+from shared.host.atomic_io import write_text_atomic
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess
 from shared.pg_foreground import POSTMASTER_SHUTDOWN_S, FamilyCustody, family_refusal

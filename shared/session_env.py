@@ -55,8 +55,8 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from shared.host.system.backend import get_backend
 from shared.platform import IS_WINDOWS
-from shared.platform_backend import get_backend
 
 # Keep this in sync with the provisioned Node locations in scripts/provision/node.sh.
 _FRONTEND_TOOLCHAIN_DIRS = (
@@ -133,7 +133,7 @@ def admit_service_path(value: str, *, excluded: tuple[Path, ...] = ()) -> str:
 
 def managed_service_env(service_path: str) -> dict[str, str]:
     """Use the admitted host PATH; interactive session forwarding is separate."""
-    from shared.runtime_interpreter import runtime_venv
+    from shared.deploy.release.runtime_interpreter import runtime_venv
 
     env = forward_env_dict()
     bindir = runtime_venv() / get_backend().venv_bin_dir_name()
@@ -221,7 +221,7 @@ def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
     # allowlist never carried PATH/VIRTUAL_ENV, and on Windows the env block is
     # a wholesale replacement, so the child must get them here. (The temp-dir
     # vars and the Windows system keys ride in `child_env` already.)
-    from shared.runtime_interpreter import runtime_venv
+    from shared.deploy.release.runtime_interpreter import runtime_venv
 
     venv = runtime_venv()
     venv_bin = venv / get_backend().venv_bin_dir_name()
@@ -247,7 +247,7 @@ def venv_activation_prefix() -> str:
     session runs bare `npm` after that profile has had a chance to discard PATH.
     Mirrors the child-env activation `ops.agent_launch` does for agents.
     """
-    from shared.runtime_interpreter import runtime_venv
+    from shared.deploy.release.runtime_interpreter import runtime_venv
 
     venv = runtime_venv()
     bindir = venv / get_backend().venv_bin_dir_name()

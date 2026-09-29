@@ -23,7 +23,7 @@ from typing import cast
 import psutil
 import pytest
 
-from shared.os_boot_unit import BootUnitContext
+from shared.host.system.boot_unit import BootUnitContext
 from shared.root_control.client import RootClient, RootClientError
 from shared.root_control.ipc import ResponsePayload
 
@@ -512,7 +512,7 @@ def _systemd_starter(
         f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
         "import psutil\n"
         "from shared.root_control.client import RootClient, RootClientError, native_identity\n"
-        "from shared.os_boot_unit import publish_root_ready, root_pid_path\n"
+        "from shared.host.system.boot_unit import publish_root_ready, root_pid_path\n"
         "from shared.native_process.ownership import OwnedProcess\n"
         "from dataclasses import asdict\n"
         f"receipt = Path({str(receipt)!r})\n"
@@ -590,7 +590,7 @@ def _systemd_test_context(home: Path) -> BootUnitContext:
 
 
 def _assert_failed_adoption(ctx: BootUnitContext, receipt: Path, failure: str) -> None:
-    from shared import os_boot_unit
+    from shared.host.system import boot_unit as os_boot_unit
 
     assert receipt.with_suffix(".failure").read_text() == failure
     births = json.loads(receipt.read_text())
@@ -605,7 +605,7 @@ def _assert_failed_adoption(ctx: BootUnitContext, receipt: Path, failure: str) -
 
 
 def _require_native_systemd() -> None:
-    from shared import os_boot_unit
+    from shared.host.system import boot_unit as os_boot_unit
 
     if sys.platform != "linux" or not os_boot_unit.systemd_running():
         pytest.skip("native Linux systemd required")
@@ -622,7 +622,7 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
     this does not claim database protocol or durability verification. The
     dedicated Ubuntu CI step asserts systemd and sudo before invoking this test.
     """
-    from shared import os_boot_unit
+    from shared.host.system import boot_unit as os_boot_unit
 
     _require_native_systemd()
     ctx = _systemd_test_context(tmp_path / "home")

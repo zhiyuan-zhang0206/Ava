@@ -8,7 +8,7 @@ member's in-flight turn. The turn's next fail-closed guard read
 then refuses it: the row's status has left (running, idling). That refusal is a
 *deliberate* truncation, not an ownership loss — the drain already released the
 member with the honest `reaped` receipt and a successor boundary settles the
-mark (`shared.straggler_reap`). Classifying it here lets the host end the turn
+mark (`shared.deploy.maintenance.straggler_reap`). Classifying it here lets the host end the turn
 as truncated instead of recording an unclassified crash; every other ownership
 loss still raises (fail-closed, unchanged).
 

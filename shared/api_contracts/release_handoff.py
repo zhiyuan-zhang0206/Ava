@@ -43,9 +43,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from shared.release_identity import read_application_identity
+from shared.deploy.release.identity import read_application_identity
+from shared.deploy.release.runtime_release import VerifiedRelease, verify_release
 from shared.runtime_abi import AbiTag
-from shared.runtime_release import VerifiedRelease, verify_release
 
 ReleaseImageEntry = Literal["receipt", "preflight", "submit"]
 ENTRY_MODULE = "cli.release_handoff"

@@ -15,7 +15,7 @@ import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
 import cli.commands.status as _status_commands
 import ops.roster as _roster
-import shared.cluster_drift as _cluster_drift
+import shared.deploy.git.cluster_drift as _cluster_drift
 from shared.config import settings
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
@@ -51,7 +51,7 @@ def _local_status_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_status_explains_persistently_unselected_services(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from shared import service_selection
+    from shared.deploy.lifecycle import service_selection
 
     monkeypatch.setattr(
         service_selection,
@@ -349,7 +349,9 @@ def _init_prod_source(source: Path, *, branch: str = "main") -> None:
 def test_detect_prod_source_drift_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No source repo → None (nothing to check)."""
 
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
+    monkeypatch.setattr(
+        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+    )
     assert _cluster_drift.prod_source_branch_drift() is None
 
 
@@ -357,7 +359,9 @@ def test_detect_prod_source_drift_on_main(monkeypatch: pytest.MonkeyPatch, tmp_p
     """Prod source on `main` → None (no drift)."""
 
     _init_prod_source(tmp_path / "source")
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
+    monkeypatch.setattr(
+        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+    )
     assert _cluster_drift.prod_source_branch_drift() is None
 
 
@@ -368,7 +372,9 @@ def test_detect_prod_source_drift_feature_branch(
     incident: an agent developing in the prod tree instead of a worktree)."""
 
     _init_prod_source(tmp_path / "source", branch="ava-7/fix")
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
+    monkeypatch.setattr(
+        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+    )
     assert _cluster_drift.prod_source_branch_drift() == "ava-7/fix"
 
 
@@ -402,7 +408,9 @@ def test_cmd_status_prints_no_frozen_cluster_pin(
     """The cluster pin has no writer; a historical value must not be presented
     as the current target, nor a bare `ava cluster update` offered as a remedy."""
     _quiet_status(monkeypatch, tmp_path)
-    monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda **_kw: "a" * 40)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        "shared.deploy.state.cluster_pin.get_cluster_target_sha", lambda **_kw: "a" * 40
+    )  # pyright: ignore[reportUnknownArgumentType]
 
     assert _status_commands.cmd_status() == 0
     out = capsys.readouterr().out
@@ -428,7 +436,7 @@ def test_cmd_status_names_the_source_checkout_it_runs(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     _quiet_status(monkeypatch, tmp_path)
-    monkeypatch.setattr("shared.cluster_drift.checkout_head_sha", lambda _repo: "c" * 40)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.deploy.git.cluster_drift.checkout_head_sha", lambda _repo: "c" * 40)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _status_commands.cmd_status() == 0
     out = capsys.readouterr().out
@@ -564,7 +572,7 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
     monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        "shared.resource_sample.resource_sample",
+        "shared.host.resource_sample.resource_sample",
         lambda: (_ for _ in ()).throw(RuntimeError("no psutil here")),
     )
 

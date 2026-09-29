@@ -156,7 +156,7 @@ def test_pitr_admits_only_its_reserved_gateway_home_as_a_fleet_of_one(
     refuses any other registered writer or another machine's operation."""
     import shared.machine
     from cli.release_transition.pitr import transition
-    from shared import runtime_release
+    from shared.deploy.release import runtime_release
 
     def selected(_store: Path) -> str:
         return "selected"

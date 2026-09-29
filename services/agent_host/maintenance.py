@@ -9,7 +9,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from services.agent_host.dispatcher import PendingInboundWake
-from shared import maintenance
+from shared.deploy.maintenance import admission
 from shared.resource_admission import DRAINED_RESOURCES
 
 FailureFences = dict[int, tuple[str | None, datetime | None]]
@@ -40,7 +40,7 @@ async def record_failure(agent_id: int, exc: BaseException, fences: FailureFence
     # Fail closed before reading the journal: both read and write can fail.
     # The unknown generation remains a same-boot fence until explicit resume.
     fences[agent_id] = (None, None)
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     if current is None:
         # A successful read proves this ordinary failure belongs to no hold.
         # An unreadable journal still leaves the unknown fence set above.
@@ -54,14 +54,14 @@ async def record_failure(agent_id: int, exc: BaseException, fences: FailureFence
         # held-control path, whose explicit re-flush must succeed before the
         # restart is claimed and the drain can certify.
         fences.pop(agent_id, None)
-        await asyncio.to_thread(maintenance.record_undelivered, agent_id, category)
+        await asyncio.to_thread(admission.record_undelivered, agent_id, category)
         return
     fences[agent_id] = (current.holder, current.acquired_at)
-    await asyncio.to_thread(maintenance.record_failure, agent_id, category)
+    await asyncio.to_thread(admission.record_failure, agent_id, category)
 
 
 async def record_drained(pool: AsyncConnectionPool, owner: UUID, agent_id: int) -> None:
-    command_id = maintenance.pending_command(agent_id)
+    command_id = admission.pending_command(agent_id)
     if command_id is not None:
         # This is after the shielded graph continuation, resource closure
         # and final owner settlement; applied_at alone is not this proof.
@@ -79,7 +79,7 @@ async def record_drained(pool: AsyncConnectionPool, owner: UUID, agent_id: int) 
                 )
             ).fetchone()
         if row is not None:
-            await asyncio.to_thread(maintenance.record_drained, agent_id, command_id)
+            await asyncio.to_thread(admission.record_drained, agent_id, command_id)
 
 
 async def run_held(
@@ -88,18 +88,18 @@ async def run_held(
     fences: FailureFences,
     control: Callable[[int, str], Awaitable[None]],
 ) -> bool:
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     if current is None:
         fences.pop(agent_id, None)
         return False
     failed = fences.get(agent_id) in ((None, None), (current.holder, current.acquired_at))
-    if not failed and maintenance.pending_command(agent_id) is not None:
+    if not failed and admission.pending_command(agent_id) is not None:
         await control(agent_id, status)
     return True
 
 
 def pending_wakes(fences: FailureFences) -> list[PendingInboundWake] | None:
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     if current is None or current.maintenance is None:
         return None
     # A stale-turn cancel could interrupt the action maintenance is draining.
@@ -108,6 +108,6 @@ def pending_wakes(fences: FailureFences) -> list[PendingInboundWake] | None:
     return [
         PendingInboundWake(agent_id=agent, stale=False)
         for agent in current.maintenance.commands
-        if maintenance.pending_command(agent) is not None
+        if admission.pending_command(agent) is not None
         and fences.get(agent) not in ((None, None), (current.holder, current.acquired_at))
     ]

@@ -47,7 +47,7 @@ from types import FrameType
 from loguru import logger
 
 import shared.db
-import shared.proc
+import shared.host.proc
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.paths import ava_home, prod_service_checkout_error
@@ -230,7 +230,7 @@ def _stall_action(schedule_id: int, message: str, run_id: int | None) -> None:
         # Snapshot descendants while ancestry still proves ownership. Retain
         # their identities through TERM/KILL; never signal the shared PTY group.
         # setsid alone stays covered; already-reparented daemons are exempt.
-        shared.proc.kill_process_tree(os.getpid(), include_root=False)
+        shared.host.proc.kill_process_tree(os.getpid(), include_root=False)
     except Exception:
         logger.exception("Schedule {} child cleanup failed", schedule_id)
     try:

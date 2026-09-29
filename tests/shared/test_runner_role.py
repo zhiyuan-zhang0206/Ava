@@ -30,7 +30,7 @@ from shared.cluster import (
     provision_database,
 )
 from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
-from shared.managed_writer_publication import LegacyProtocolZero, publication_admission
+from shared.deploy.writers.publication import LegacyProtocolZero, publication_admission
 from shared.metrics.observed_metrics import MetricObservation, write_observations
 from shared.pg_admin import owner_conninfo
 from shared.pg_tools import throwaway_postgres

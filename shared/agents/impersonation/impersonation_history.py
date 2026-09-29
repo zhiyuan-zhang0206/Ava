@@ -20,9 +20,9 @@ from pydantic import BaseModel
 
 from shared.db import connect
 from shared.db_transaction import write_transaction
+from shared.host.private_storage import write_private_bytes
 from shared.machine import machine_name
 from shared.paths import workspace_dir
-from shared.private_storage import write_private_bytes
 
 # A consumed event's durable identity is content parsed from the original log line.
 # Reader-synthesized projections (event id, line_sha256, tier, or future additions)

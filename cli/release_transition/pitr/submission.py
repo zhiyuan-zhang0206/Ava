@@ -14,15 +14,15 @@ from cli.release_transition.journal import Operation, exclusive, read_operation
 from cli.release_transition.request import PitrRequest, ReleaseRef
 from cli.release_transition.submit import submit_request
 from services.pitr.activation_state import ActivationRecord, load_record, record_path
+from shared.deploy.release.runtime_release import current_pointer, verify_release
+from shared.deploy.release.start_inputs import configuration_files, files_digest
+from shared.deploy.release.verified_file import regular_bytes
 from shared.runtime_abi import current_abi
-from shared.runtime_release import current_pointer, verify_release
-from shared.start_inputs import configuration_files, files_digest
-from shared.verified_file import regular_bytes
 
 
 def selected_image(home: Path) -> ReleaseRef:
     """Capture source/schema facts only through the selected verified inventory."""
-    from shared.release_identity import (
+    from shared.deploy.release.identity import (
         ApplicationIdentity,
         application_identity_members,
         read_application_identity,
@@ -82,7 +82,7 @@ def _rollback(operation: Operation) -> PitrRequest:
         digest = hashlib.sha256(
             regular_bytes(record_path(Path(operation.request.home)))
         ).hexdigest()
-        from shared import pause_owner
+        from shared.deploy.maintenance import pause_owner
 
         current = pause_owner.read()
         at = journal.operation.maintenance_at

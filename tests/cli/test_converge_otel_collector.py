@@ -19,8 +19,8 @@ import pytest
 import yaml
 
 from cli.commands.observability import otel_collector as oc
-from shared import collector_artifact as artifact
 from shared import resilience
+from shared.deploy.release import collector_artifact as artifact
 
 
 def _fail_ensure_otel_collector(*_args: object, **_kwargs: object) -> None:

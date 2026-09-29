@@ -145,7 +145,7 @@ def write_fields(
     `actor` / `trace_id` describe the initiator for the write audit (the `.env`
     record and the `env_write` event) whenever `audit_site` is set.
     """
-    from shared.release_operation import require_configuration_write_authorized
+    from shared.deploy.release.operation import require_configuration_write_authorized
 
     path = env_file_path()
     require_configuration_write_authorized(path.parent)

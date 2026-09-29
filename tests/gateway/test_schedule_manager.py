@@ -18,9 +18,9 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import gateway.schedule_manager as sm
-from shared import start_serving
 from shared.cluster import session_name
 from shared.config import settings
+from shared.deploy.lifecycle import start_serving
 
 
 class _FakeBackend:

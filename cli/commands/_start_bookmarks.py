@@ -18,7 +18,7 @@ def record_running_sha(repo: Path) -> None:
             timeout=10,
         )
         if result.returncode == 0:
-            from shared import running_sha
+            from shared.deploy.git import running_sha
 
             running_sha.set(result.stdout.strip())
     except Exception as exc:

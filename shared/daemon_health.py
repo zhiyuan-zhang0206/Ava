@@ -243,7 +243,7 @@ def _healthz_payload(
     # the agent-runner self-update stops services in-process after checkout +
     # uv sync, so the identity code must load from the just-pulled image, not
     # the pre-pull one (PR #932 import-closure invariant).
-    from shared.runtime_service_identity import normal_runtime_identity
+    from shared.deploy.release.runtime_service_identity import normal_runtime_identity
 
     payload: dict[str, object] = {
         "name": name,

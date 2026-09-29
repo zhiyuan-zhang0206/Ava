@@ -22,13 +22,13 @@ from typing import Any, Literal, cast
 import psutil
 from pydantic import Field, model_validator
 
-from shared.atomic_io import write_text_atomic
+from shared.deploy.release.verified_file import regular_bytes
+from shared.host.atomic_io import write_text_atomic
+from shared.host.private_storage import ensure_private_dir
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess, capture_tree
 from shared.platform import file_lock
-from shared.private_storage import ensure_private_dir
 from shared.process_evidence import EvidenceModel, ExpectedProcess
-from shared.verified_file import regular_bytes
 
 # Retain unreaped direct children through admission, including ambiguous failure.
 _CHILDREN: list[subprocess.Popen[bytes]] = []

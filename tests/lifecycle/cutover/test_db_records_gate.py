@@ -105,8 +105,8 @@ def _committed_publication() -> dict[str, object]:
     """A `current` the retired updater's managed-writer mode committed; it decodes."""
     from datetime import UTC, datetime
 
-    from shared.managed_writer_barrier import RolloutIdentity
-    from shared.managed_writer_publication import CommittedPublication, PublishedUnit
+    from shared.deploy.writers.barrier import RolloutIdentity
+    from shared.deploy.writers.publication import CommittedPublication, PublishedUnit
 
     at = datetime(2026, 9, 20, tzinfo=UTC)
     unit = PublishedUnit(

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import pause_owner
+from shared.deploy.maintenance import pause_owner
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +30,7 @@ def test_begin_maintenance_records_and_refresh_re_stamps_the_shepherd() -> None:
     keep it, a refresh (a new ladder step) re-stamps it."""
     from dataclasses import replace
 
-    from shared.hold_driver import HoldDriver, mint_driver
+    from shared.deploy.maintenance.hold_driver import HoldDriver, mint_driver
 
     shepherd = mint_driver()
     before = pause_owner.begin_maintenance("op1", _when(), driver=shepherd).snapshot
@@ -47,7 +47,7 @@ def test_begin_maintenance_records_and_refresh_re_stamps_the_shepherd() -> None:
 
 def test_a_legacy_journal_without_a_shepherd_reads_none() -> None:
     """A pre-#3270 journal is valid state with missing evidence, not an error."""
-    from shared.maintenance_state import MaintenanceHold
+    from shared.deploy.maintenance.state import MaintenanceHold
 
     pause_owner.state_path().write_text(
         '{"state":"paused","holder":"A","acquired_at":"2026-08-25T01:02:00+00:00",'
@@ -63,7 +63,7 @@ def test_a_malformed_shepherd_degrades_to_none_never_a_broken_journal() -> None:
     the verdict reports the missing identity loudly instead."""
     import json
 
-    from shared.maintenance_state import MaintenanceHold
+    from shared.deploy.maintenance.state import MaintenanceHold
 
     pause_owner.state_path().write_text(
         json.dumps(

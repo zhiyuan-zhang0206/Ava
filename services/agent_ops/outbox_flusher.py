@@ -21,8 +21,8 @@ import logging
 
 from psycopg_pool import ConnectionPool
 
-from shared import maintenance
 from shared.agents.messages import delivery_outbox
+from shared.deploy.maintenance import admission
 
 _log = logging.getLogger("services.agent_ops.outbox_flusher")
 
@@ -50,7 +50,7 @@ def stop() -> None:
 
 async def _run(pool: ConnectionPool, interval: float) -> None:
     while True:
-        if not maintenance.quiesced():
+        if not admission.quiesced():
             try:
                 report = await asyncio.to_thread(delivery_outbox.flush, pool)
             except Exception:

@@ -7,8 +7,9 @@ import pytest
 
 from cli.commands import _temporary_stop as stop
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
-from shared import cluster, paths, start_serving
-from shared.hold_driver import HoldDriver
+from shared import cluster, paths
+from shared.deploy.lifecycle import start_serving
+from shared.deploy.maintenance.hold_driver import HoldDriver
 from shared.machine import MachineRoles
 
 
@@ -102,8 +103,8 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
         steps.append("native")
         return []
 
-    monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: None)
-    monkeypatch.setattr("shared.proc.hosting_supervised_session", lambda: None)
+    monkeypatch.setattr("shared.host.proc.hosting_exec_domain", lambda: None)
+    monkeypatch.setattr("shared.host.proc.hosting_supervised_session", lambda: None)
     monkeypatch.setattr(stop, "_stop_plan", _fake_stop_plan)
     monkeypatch.setattr(stop, "pause_agents", _fake_pause_agents)
     monkeypatch.setattr(stop, "_services_phase_action", _fake_services_phase_action)

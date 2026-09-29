@@ -71,9 +71,9 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "chrome_page_ttl_expired",  # services/browser/page_lifecycle.py:reap_expired_pages telemetry.emit("log", ...)
         "chrome_page_ttl_renewed",  # services/browser/page_lifecycle.py:renew_agent_page telemetry.emit("telemetry", ...)
         "frontend_interaction",  # gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)
-        "editable_pth_repaired",  # shared/editable_install.py:repair_editable_ava_pth
-        "editable_direct_url_repaired",  # shared/editable_install.py:repair_editable_direct_url
-        "exec_editable_install_poisoned",  # shared/editable_install.py:guard_editable_install
+        "editable_pth_repaired",  # shared/deploy/release/editable_install.py:repair_editable_ava_pth
+        "editable_direct_url_repaired",  # shared/deploy/release/editable_install.py:repair_editable_direct_url
+        "exec_editable_install_poisoned",  # shared/deploy/release/editable_install.py:guard_editable_install
         "lgtm_dashboard_render_failed",  # cli/commands/observability/_lgtm_provisioning.py:_render_ava_ops_dashboard telemetry.emit("telemetry", ...)
         "event_log_drop",  # shared/telemetry/loss.py:loss_event constructs Event directly
         "sdk_call",  # ava/sdk_metering.py recorder (via shared/sdk_telemetry)
@@ -92,7 +92,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "backup_operation_custody",  # services/pitr/operation_custody.py:report (positional emit)
         "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore + services/pitr/base_scheduler_daemon.py:run (positional emit)
         "plugin_load_failed",  # shared/plugin_load_report.py:report_plugin_load_failure telemetry.emit("telemetry", ...)
-        "converge_file_preserved",  # shared/host/converge/converge_preserve_report.py:report_converge_preserve telemetry.emit("telemetry", ...)
+        "converge_file_preserved",  # shared/host/converge/preserve_report.py:report_converge_preserve telemetry.emit("telemetry", ...)
         "loki_query_budget",  # gateway/loki_query_budget.py:_emit_observation
         "telemetry_read_stale",  # gateway/telemetry_staleness.py:_emit
         "telemetry_read_recovered",  # gateway/telemetry_staleness.py:_emit
@@ -109,7 +109,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "resolution_status",
         "checkpoint_table_sizes",  # services/events_maintenance/blob_vacuum.py telemetry.emit (positional)
         "pause_lifecycle_wait",  # ops/agent_pause.py:_emit_lifecycle_wait (positional emit)
-        "pause_orphan_claim_settled",  # shared/maintenance_cohort.py:_emit_orphan_settlements
+        "pause_orphan_claim_settled",  # shared/deploy/maintenance/cohort.py:_emit_orphan_settlements
         "update_straggler_reaped",  # ops/agent_pause.py:_reap_agents (positional emit)
         # Positional emit from the frozen-archive reader (task #2004).
         "archive_fetch_degraded",  # gateway/inspect/neighbors.py:_emit_archive_degraded

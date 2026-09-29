@@ -10,10 +10,10 @@ from __future__ import annotations
 import logging
 from typing import cast
 
-import shared.host_deploy_state
+import shared.deploy.state.host_deploy_state
 from shared import http_dial
 from shared.daemon_health import health_port
-from shared.pause_owner import PauseOwnerSnapshot
+from shared.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 
 _log = logging.getLogger(__name__)
 _UNSET = object()
@@ -25,7 +25,7 @@ _POOL_RELEASE_TIMEOUT_S = 5.0
 
 
 def is_paused(
-    state: shared.host_deploy_state.HostDeployState | object | None = _UNSET,
+    state: shared.deploy.state.host_deploy_state.HostDeployState | object | None = _UNSET,
 ) -> bool:
     """Whether this host is paused — the `host_deploy_state.posture` row written
     by the gateway's pause fan-out (R1, Task #1021).
@@ -37,7 +37,7 @@ def is_paused(
     """
     if state is _UNSET:
         try:
-            resolved_state = shared.host_deploy_state.read()
+            resolved_state = shared.deploy.state.host_deploy_state.read()
         except Exception:
             _log.warning(
                 "[cluster] is_paused: host_deploy_state read failed; reading as not paused",
@@ -45,7 +45,7 @@ def is_paused(
             )
             return False
     else:
-        resolved_state = cast(shared.host_deploy_state.HostDeployState | None, state)
+        resolved_state = cast(shared.deploy.state.host_deploy_state.HostDeployState | None, state)
     return resolved_state is not None and resolved_state.posture == "paused"
 
 
@@ -77,7 +77,7 @@ def unpause_local_cluster() -> None:
     host stayed up, so the marker rows would otherwise outlive their drain.
     """
     from ops.agent_pause import resume_agents
-    from shared import maintenance
+    from shared.deploy.maintenance import admission as maintenance
 
     current = maintenance.snapshot()
     if current is None:
@@ -109,12 +109,12 @@ def _settle_stranded_reaps() -> None:
     reap truncated (task #4016).
     """
     from shared.db import connect
-    from shared.machine import machine_name
-    from shared.straggler_reap import (
+    from shared.deploy.maintenance.straggler_reap import (
         announce_settled,
         publish_settled_wakes,
         settle_stranded_reaps,
     )
+    from shared.machine import machine_name
 
     try:
         with connect() as conn, conn.transaction():
@@ -142,7 +142,7 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
             f"then ava maintenance repair --operation {current.holder} "
             f"--acquired-at {current.acquired_at.isoformat()}"
         )
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     if (
         current.maintenance is not None
@@ -155,8 +155,8 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
 
 def _unpause_local_cluster() -> None:
     """Restore this unit's HTTP posture without launching any agent or service."""
-    from shared import maintenance
-    from shared.host_deploy_state import set_posture
+    from shared.deploy.maintenance import admission as maintenance
+    from shared.deploy.state.host_deploy_state import set_posture
 
     maintenance.require_start_allowed()
     set_posture("idle")

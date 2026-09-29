@@ -24,7 +24,7 @@ all 66 orphaned `ssh.exe` processes had zero TCP connections — they never dial
 GitHub, so they were wedged locally *before* the connect that `ConnectTimeout`
 governs (a 4-day-old `ssh-keyscan.exe` sat in the same state despite a hard
 5-second internal timeout). The only real bound is the caller's:
-`shared.proc.run_bounded`.
+`shared.host.proc.run_bounded`.
 """
 
 from __future__ import annotations

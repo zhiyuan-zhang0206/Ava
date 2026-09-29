@@ -8,17 +8,17 @@ from pathlib import Path
 
 import pytest
 
-from shared import os_cron
-from shared import os_logs_job as job
+from shared.host.system import cron
+from shared.host.system import logs_job as job
 
 
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(os_cron, "_home_slug", lambda: "ava-deadbeef")
-    monkeypatch.setattr(os_cron, "ava_binary_path", lambda: "/work tree/.venv/bin/ava")
-    monkeypatch.setattr(os_cron, "job_home", lambda: "/home/u/.ava")
-    monkeypatch.setattr(os_cron, "launchd_path_env", lambda: "/work tree/.venv/bin:/usr/bin")
+    monkeypatch.setattr(cron, "_home_slug", lambda: "ava-deadbeef")
+    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/work tree/.venv/bin/ava")
+    monkeypatch.setattr(cron, "job_home", lambda: "/home/u/.ava")
+    monkeypatch.setattr(cron, "launchd_path_env", lambda: "/work tree/.venv/bin:/usr/bin")
 
 
 def _ok() -> types.SimpleNamespace:
@@ -52,7 +52,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
         calls.append(argv)
         return _ok()
 
-    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    monkeypatch.setattr(cron.subprocess, "run", run)
 
     assert job._register_macos() == 0
     plist = job._launchd_plist_path("ava-deadbeef")
@@ -77,7 +77,7 @@ def test_macos_unregister_removes_only_the_requested_clusters_job(
         calls.append(argv)
         return _ok()
 
-    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    monkeypatch.setattr(cron.subprocess, "run", run)
 
     assert job._unregister_macos("ava-deadbeef") == 0
 
@@ -87,7 +87,7 @@ def test_macos_unregister_removes_only_the_requested_clusters_job(
         [
             "launchctl",
             "bootout",
-            f"gui/{os_cron.os.getuid()}/com.ava.ava-deadbeef.logs-maintenance",
+            f"gui/{cron.os.getuid()}/com.ava.ava-deadbeef.logs-maintenance",
         ]
     ]
 
@@ -102,7 +102,7 @@ def test_linux_registration_replaces_only_this_clusters_line(
     def which(_name: str) -> str:
         return "/usr/bin/crontab"
 
-    monkeypatch.setattr(os_cron.shutil, "which", which)
+    monkeypatch.setattr(cron.shutil, "which", which)
 
     def run(argv: list[str], **kwargs: object) -> types.SimpleNamespace:
         if argv == ["crontab", "-l"]:
@@ -112,7 +112,7 @@ def test_linux_registration_replaces_only_this_clusters_line(
         written["body"] = str(kwargs["input"])
         return _ok()
 
-    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    monkeypatch.setattr(cron.subprocess, "run", run)
 
     assert job._register_linux() == 0
     assert other in written["body"]
@@ -132,14 +132,14 @@ def test_linux_crontab_failures_and_empty_table(
     def available(_name: str) -> str:
         return "/usr/bin/crontab"
 
-    monkeypatch.setattr(os_cron.shutil, "which", missing)
+    monkeypatch.setattr(cron.shutil, "which", missing)
     assert job._register_linux() == 1
     assert capsys.readouterr().err == (
         "  * logs maintenance: crontab not installed; daily rotation and "
         "retention cannot be registered\n"
     )
 
-    monkeypatch.setattr(os_cron.shutil, "which", available)
+    monkeypatch.setattr(cron.shutil, "which", available)
     writes: list[str] = []
     read = types.SimpleNamespace(returncode=1, stdout="stale", stderr="permission denied")
     write_failure = False
@@ -153,7 +153,7 @@ def test_linux_crontab_failures_and_empty_table(
         read.stdout = str(kwargs["input"])
         return _ok()
 
-    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    monkeypatch.setattr(cron.subprocess, "run", run)
     assert job._register_linux() == 1
     assert writes == []
     assert capsys.readouterr().err == (
@@ -200,7 +200,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     def record_error(*args: object) -> None:
         errors.append(args)
 
-    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    monkeypatch.setattr(cron.subprocess, "run", run)
     monkeypatch.setattr(job.logger, "error", record_error)
     assert job._register_macos() == 1
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
@@ -229,7 +229,7 @@ def test_converge_registers_logs_maintenance(monkeypatch: pytest.MonkeyPatch) ->
 def test_windows_registration_uses_two_daily_tasks_one_minute_apart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared import os_schtasks
+    from shared.host.system import schtasks
 
     calls: list[tuple[str, tuple[str, ...], int, int]] = []
 
@@ -244,7 +244,7 @@ def test_windows_registration_uses_two_daily_tasks_one_minute_apart(
         assert time_limit_s == 1800
         calls.append((kind, args, hour, minute))
 
-    monkeypatch.setattr(os_schtasks, "create_daily_task", create)
+    monkeypatch.setattr(schtasks, "create_daily_task", create)
 
     assert job._register_windows() is None
     assert calls == [

@@ -139,7 +139,8 @@ def _agent_population(min_agents: int) -> bool:
 def _agent_population_failure_class(min_agents: int) -> str | None:
     """Classify observed low population against DB availability and local intent."""
     import shared.db
-    from shared import pause_owner, service_selection
+    from shared.deploy.lifecycle import service_selection
+    from shared.deploy.maintenance import pause_owner
 
     try:
         with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
@@ -284,7 +285,7 @@ def _service_probes() -> list[str]:
     means another unit holds this unit's port and no amount of waiting fixes it."""
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    from shared.service_selection import read_selection
+    from shared.deploy.lifecycle.service_selection import read_selection
 
     roles = _repo_commands._roles_or_none()
     if roles is None:
@@ -385,10 +386,10 @@ def _editable_install_failure() -> str | None:
     The shared inspection helper applies exact-root allowlisting (production
     source plus the stable ~/Ava clone), never an arbitrary descendant.
     """
-    import shared.cluster_drift
-    import shared.editable_install as ei
+    import shared.deploy.git.cluster_drift
+    import shared.deploy.release.editable_install as ei
 
-    source_root = shared.cluster_drift.prod_source_dir()
+    source_root = shared.deploy.git.cluster_drift.prod_source_dir()
     if source_root is None:
         return None
     violations = list(
@@ -412,16 +413,16 @@ def _source_tree_failure(home: Path) -> str | None:
     unknown, never healthy. This alert-only check cannot authorize rollback:
     selecting a release does not repair arbitrary edits.
     """
-    import shared.cluster_drift
-    import shared.source_tree_guard as stg
-    from shared.runtime_release import current_pointer
+    import shared.deploy.git.cluster_drift
+    import shared.deploy.git.source_tree_guard as stg
+    from shared.deploy.release.runtime_release import current_pointer
 
     try:
         if current_pointer(home / "releases") is not None:
             return None
     except (OSError, ValueError) as exc:
         return f"prod source tree guard skipped: release selector unreadable ({exc})"
-    source_root = shared.cluster_drift.prod_source_dir()
+    source_root = shared.deploy.git.cluster_drift.prod_source_dir()
     if source_root is None:
         return None
     violations = stg.source_tree_violations(source_root)

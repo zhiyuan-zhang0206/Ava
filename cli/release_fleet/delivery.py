@@ -51,8 +51,8 @@ def webhook_url(home: Path, url_file: str) -> str:
     The URL is usually a bearer in itself, so the file must be this user's
     and no one else's to read or write (0600); anything wider is refused.
     """
-    from shared.private_storage import private_file_problem
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.verified_file import regular_bytes
+    from shared.host.private_storage import private_file_problem
 
     path = home / "secrets" / url_file
     if problem := private_file_problem(path):

@@ -575,7 +575,7 @@ def _prove_activation(home: Path, record: ActivationRecord, holder: str) -> Acti
 
 
 def rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
-    from shared.release_operation import require_pitr_authorized
+    from shared.deploy.release.operation import require_pitr_authorized
 
     require_pitr_authorized(home)
     if record.phase == "rollback_restart_pending":

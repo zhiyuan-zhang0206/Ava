@@ -19,7 +19,7 @@ from services.ava_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.ava_root.wiring import WiringContext, WiringParticipant
 from services.ava_root_glue.diagnostic_probes import build_diagnostics
 from services.ava_root_glue.diagnostics import Diagnostic, DiagnosticMonitor, RootHealthRounds
-from shared.deploy_timing import (
+from shared.deploy.progress_timeout import (
     CRITICAL_SERVICE_SESSIONS,
     NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
     SERVICE_READY_TIMEOUT_S,
@@ -37,8 +37,8 @@ contract).
 
 def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     """The reference participant set: health monitor + tree self-check."""
+    from shared.deploy.release.runtime_interpreter import capture_loaded_runtime
     from shared.paths import ava_home
-    from shared.runtime_interpreter import capture_loaded_runtime
 
     home = ava_home().resolve(strict=True)
     identity = capture_loaded_runtime(home)

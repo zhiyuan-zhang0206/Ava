@@ -7,10 +7,10 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
+from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME
 from shared.log import logger
 from shared.migration_errors import MigrationLayoutError
 from shared.platform import CREATE_NO_WINDOW
-from shared.runtime_interpreter import WHEEL_RUNTIME
 from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
 
 # The squashed baseline: one sentinel row that stands in for the entire history

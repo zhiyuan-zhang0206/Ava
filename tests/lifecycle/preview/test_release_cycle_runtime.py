@@ -20,9 +20,9 @@ from cli.release_transition.request import ReleaseRef
 from scripts.preview import release_cycle_runtime as runtime
 from scripts.preview import release_cycle_state as state
 from scripts.preview import release_generation
+from shared.deploy.release.runtime_release import VerifiedRelease
+from shared.host.system.boot_unit import BootStartAction, BootUnitContext
 from shared.native_process.ownership import OwnedProcess
-from shared.os_boot_unit import BootStartAction, BootUnitContext
-from shared.runtime_release import VerifiedRelease
 from tests.lifecycle.transition.phases import at_phase
 from tests.lifecycle.transition.test_journal import request_record as request_record
 
@@ -699,8 +699,8 @@ def test_the_cycle_admits_only_distinct_commits_over_one_schema_before_any_stop(
         else {"schema_digest": "0" * 64}
     )
     refs = {"previous": request_record.previous, "candidate": b}
-    monkeypatch.setattr("shared.os_boot_unit.systemd_running", lambda: True)
-    monkeypatch.setattr("shared.os_boot_unit.unit_name", lambda _home: "ava-home.service")
+    monkeypatch.setattr("shared.host.system.boot_unit.systemd_running", lambda: True)
+    monkeypatch.setattr("shared.host.system.boot_unit.unit_name", lambda _home: "ava-home.service")
     monkeypatch.setattr(runtime, "dotenv_values", lambda *_a, **_k: dict(runtime.local.PROFILE))
     monkeypatch.setattr(
         runtime, "captured", lambda _run, receipt, *_bind: (refs[receipt.name], receipt, {})

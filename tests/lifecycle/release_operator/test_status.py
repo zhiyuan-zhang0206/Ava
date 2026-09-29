@@ -18,8 +18,8 @@ from cli.release_operator import status as status_module
 from cli.release_transition.request import ReleaseRef
 from shared import machine as shared_machine
 from shared import paths as shared_paths
+from shared.deploy.release.runtime_release import activate_release
 from shared.runtime_abi import current_abi
-from shared.runtime_release import activate_release
 from tests.lifecycle.release_operator.conftest import build_image, digest
 from tests.lifecycle.transition.phases import at_phase
 

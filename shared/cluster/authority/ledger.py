@@ -55,10 +55,10 @@ from shared.cluster.authority.model import (
     generation_names,
     origin_of,
 )
+from shared.deploy.release.runtime_release import ReleaseRejectedError
+from shared.deploy.release.verified_file import regular_bytes
+from shared.host.private_storage import ensure_private_dir, write_private_bytes
 from shared.platform import file_lock
-from shared.private_storage import ensure_private_dir, write_private_bytes
-from shared.runtime_release import ReleaseRejectedError
-from shared.verified_file import regular_bytes
 
 _MAX_FILE_BYTES = 256 * 1024
 _SECRET_NAME = re.compile(r"^(0|[1-9][0-9]*)\.json$")

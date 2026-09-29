@@ -103,14 +103,14 @@ def test_a_data_plane_birth_inside_a_release_executor_cgroup_is_rejected(
 ) -> None:
     """The r6 pooler lived in the executor's KillMode=control-group unit and
     died 90 s after the executor exited; the observer names that custody."""
-    from shared import os_boot_unit
+    from shared.host.system import boot_unit
 
     cgroups = {
         40: "/system.slice/ava-boot.home-58520e1a.service",
         41: "/user.slice/user-501.slice/session-2.scope",
         42: "/system.slice/ava-update.19bfeb73b5acb26d3ba4c60d69c26d24.a0.service",
     }
-    monkeypatch.setattr(os_boot_unit, "process_cgroup", cgroups.__getitem__)
+    monkeypatch.setattr(boot_unit, "process_cgroup", cgroups.__getitem__)
     births = {
         "postgres": observer.OwnedProcess(40, 100.0, 400),
         "redis": observer.OwnedProcess(41, 100.0, 401),

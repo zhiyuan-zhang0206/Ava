@@ -27,12 +27,12 @@ tags:
 - **Configuration & bootstrapping** ([[shared/configuration.ava.okf.md]]): per-domain runtime settings, settings-free field metadata, bootstrap, transport-encryption precondition, and `.env` integrity — [[env-audit.ava.okf.md]].
 - **Infrastructure utilities** (`shared/db.py`, `shared/agents/messages/chat_delivery.py`, `shared/redis_client.py`, `shared/pg_*.py`): Postgres/Redis client wrappers, the transaction-level message identity, the never-raise publish primitive, the streaming live events, and the long-lived pub/sub listener — [[infrastructure-utilities.ava.okf.md]].
 - **Local query admission** (`shared/loki_query_budget.py`): bounded FIFO slots shared as a state machine, not as capacity. The gateway observes its four-slot budget; events maintenance owns a separate capacity-one budget.
-- **Canonical Python lock** (`shared/python_lock.py`): stdlib-only source validation used by the packaged installer and the dependency-free CI lint entry point; see [[../cli/python-install.ava.okf.md]].
-- **Installation & paths** (`shared/install_registry.py`, `shared/paths.py`, `shared/editable_install.py`, `shared/plugins_config.py`, `shared/private_storage.py`): the machine-local package registry that gates the skill scanner, per-machine plugin enable state, `$AVA_HOME` path resolution, and the editable-install assertion/repair guard. POSIX structurally protects site-packages, Ava dist-info and venv bin directories except during an active cluster update; protection and write windows share one path set. Each exec spawn verifies and repairs its current interpreter without caching the small file-stat cost. Also provides owner-only storage with atomic local bytes writes for secrets and uploads — see the child nodes below.
+- **Canonical Python lock** (`shared/deploy/release/python_lock.py`): stdlib-only source validation used by the packaged installer and the dependency-free CI lint entry point; see [[../cli/python-install.ava.okf.md]].
+- **Installation & paths** (`shared/install_registry.py`, `shared/paths.py`, `shared/deploy/release/editable_install.py`, `shared/plugins_config.py`, `shared/host/private_storage.py`): the machine-local package registry that gates the skill scanner, per-machine plugin enable state, `$AVA_HOME` path resolution, and the editable-install assertion/repair guard. POSIX structurally protects site-packages, Ava dist-info and venv bin directories except during an active cluster update; protection and write windows share one path set. Each exec spawn verifies and repairs its current interpreter without caching the small file-stat cost. Also provides owner-only storage with atomic local bytes writes for secrets and uploads — see the child nodes below.
 - **Process supervision**: native service/orchestration/agent sessions, PTY-hosted agent shells, start-serving readiness gating, and daemon health/liveness — [[process-supervision.ava.okf.md]].
 - **Health envelope** (`shared/health_schema.py`, `shared/daemon_health.py`): daemon `/healthz` and gateway `/api/health` return identity, liveness, readiness, components, and reasons; a degraded component is HTTP 503 for watchdog recovery.
 - **Native process identity** (`shared/native_process/`): dependency-free boot scope and birth keys are separate from process observation and signaling. Linux requires exact start ticks; reconstructed wall timestamps are diagnostic. Independent observations use native keys while retained receipt bytes remain exact. Descendant enumeration is a hint: capture validates each current ancestry edge against native generations before accepting a member. Repeated captures preserve the original receipt per birth. Linux signals retain a pidfd through identity verification and delivery; a stdlib-only libc adapter also serves finite preparation, independent of optional Python build bindings; unknown identity never grants cleanup or recovery authority.
-- **Transition alert policy** (`shared/transition.py`): one dependency-free
+- **Transition alert policy** (`shared/deploy/transition.py`): one dependency-free
   elapsed-time policy shared by machine liveness and the cluster health probe;
   a live deploy explains the bounded window, then unexplained episodes grade
   from silent to WARNING to ERROR using cluster-pinned alert thresholds.
@@ -46,7 +46,7 @@ The shared-layer public entry points: [[shared/entry-points.ava.okf.md]].
 
 ## Notes
 
-- `shared/macos_firewall.py` — declarative macOS Application Firewall manifest,
+- `shared/host/macos_firewall.py` — declarative macOS Application Firewall manifest,
   audit, status renderer, and rootless-first reconciliation with bounded
   `sudo -n` / manual-command fallback; see
   [[shared/session-backend/session-backend.ava.okf.md|session backend]].

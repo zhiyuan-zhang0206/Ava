@@ -9,7 +9,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from shared import cluster_drift, editable_install, proc, process_env
+from shared import process_env
+from shared.deploy.git import cluster_drift
+from shared.deploy.release import editable_install
+from shared.host import proc
 
 _log = logging.getLogger("services.healthchecks.prod_venv")
 

@@ -24,9 +24,10 @@ from cli.commands.service_stop import (
 )
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause_probe import ops_quiescent
-from shared import maintenance, start_serving
+from shared.deploy.lifecycle import start_serving
+from shared.deploy.lifecycle.status_journal import begin, finish, phase, status_path
+from shared.deploy.maintenance import admission
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.lifecycle_status import begin, finish, phase, status_path
 from shared.machine import MachineRoles, machine_role
 from shared.native_process.ownership import retain_processes
 
@@ -221,9 +222,9 @@ def _report_incomplete(
 
 def _mark_stopped(holder: str, acquired_at: datetime) -> None:
     """Move the held maintenance generation to stopped (re-validating it)."""
-    current = maintenance.require_operation(holder, acquired_at)
+    current = admission.require_operation(holder, acquired_at)
     if current.maintenance is not None and current.maintenance.phase == "stopping":
-        maintenance.set_phase(holder, acquired_at, "stopped")
+        admission.set_phase(holder, acquired_at, "stopped")
 
 
 def _timed_phase(phases: list[tuple[str, float]], label: str, step: Callable[[], object]) -> None:
@@ -339,7 +340,7 @@ def stop(
     from cli.commands.stop import _announce_stopping, _confirm_stop
 
     os.environ.pop("AVA_HOME_OVERRIDE", None)
-    from shared.proc import hosting_exec_domain, hosting_supervised_session
+    from shared.host.proc import hosting_exec_domain, hosting_supervised_session
 
     # An exec-domain leg is SIGKILLed with the call's process group as the tool
     # call returns, mid-drain (the 2026-09-12 stranding shape). Name the one
@@ -395,7 +396,7 @@ def stop(
             return _finish_stop(owns_journal=owns_journal)
         # Task #3270: an operator's own stop/pause binds the hold to this
         # command's shepherding process; daemon-driven pauses stay unbound.
-        from shared.hold_driver import mint_driver
+        from shared.deploy.maintenance.hold_driver import mint_driver
 
         _timed_phase(
             phases, "drain", lambda: pause_agents(remaining(deadline), driver=mint_driver())
@@ -403,17 +404,17 @@ def stop(
         start_serving.clear_serving()
         if announce:
             _announce_stopping()
-        current = maintenance.snapshot()
+        current = admission.snapshot()
         assert current is not None and current.maintenance is not None  # noqa: S101
         assert current.holder is not None and current.acquired_at is not None  # noqa: S101
         holder, acquired_at = current.holder, current.acquired_at
         if current.maintenance.phase == "drained":
-            from shared.host_deploy_state import set_posture
+            from shared.deploy.state.host_deploy_state import set_posture
 
             # A failed posture write leaves the drained phase retryable. The
             # stopped phase never dials a data plane that is already offline.
             set_posture("paused")
-            maintenance.set_phase(current.holder, current.acquired_at, "stopping")
+            admission.set_phase(current.holder, current.acquired_at, "stopping")
         _timed_phase(phases, "quiesce", lambda: ops_quiescent(remaining(deadline)))
         _timed_phase(
             phases,

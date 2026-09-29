@@ -168,7 +168,7 @@ class ScheduleManager:
         await asyncio.to_thread(self._sync_blocking, schedule_id)
 
     def _sync_blocking(self, schedule_id: int) -> None:
-        from shared import maintenance
+        from shared.deploy.maintenance import admission as maintenance
 
         if maintenance.held():
             return
@@ -212,7 +212,7 @@ class ScheduleManager:
             self._reconcile_locked()
 
     def _reconcile_locked(self) -> None:
-        from shared import maintenance
+        from shared.deploy.maintenance import admission as maintenance
 
         if maintenance.held():
             return
@@ -232,7 +232,7 @@ class ScheduleManager:
         }
         now = time.monotonic()
         self._report_stalled_schedules(status, live, now)
-        from shared import start_serving
+        from shared.deploy.lifecycle import start_serving
 
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
@@ -407,7 +407,7 @@ class ScheduleManager:
                 self._close_null_runs(sid)
 
     def _launch(self, schedule_id: int) -> None:
-        from shared import maintenance
+        from shared.deploy.maintenance import admission as maintenance
 
         if maintenance.held():
             return

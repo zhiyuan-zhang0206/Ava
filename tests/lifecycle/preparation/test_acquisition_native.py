@@ -15,7 +15,7 @@ from cli.release_prepare.acquire import acquire_inputs, verify_acquisition
 from cli.release_prepare.acquisition_dependencies import file_input, tree_input
 from cli.release_prepare.acquisition_models import Acquisition, AcquisitionReceipt
 from cli.release_prepare.source_distributions import export_distributions
-from shared.runtime_release import ReleaseRejectedError
+from shared.deploy.release.runtime_release import ReleaseRejectedError
 
 # ruff: noqa: S603 -- explicitly opted-in cold tools operate only within tmp_path.
 

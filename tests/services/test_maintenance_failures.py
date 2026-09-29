@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from shared import maintenance, pause_owner
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance import admission, pause_owner
+from shared.deploy.maintenance.state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 from tests.services.test_agent_host import _Build, _Row
@@ -21,7 +21,7 @@ async def test_failure_is_latched_before_any_journal_io(
     broken_io: str,
 ) -> None:
     host, graph, _pool = wired({11: _Row(status="idling")})
-    real_snapshot = maintenance.snapshot
+    real_snapshot = admission.snapshot
     fail_next_read = False
 
     def read() -> pause_owner.PauseOwnerSnapshot | None:
@@ -44,13 +44,13 @@ async def test_failure_is_latched_before_any_journal_io(
         fail_next_read = broken_io == "read"
         raise RuntimeError("isolated final flush failure")
 
-    monkeypatch.setattr(maintenance, "snapshot", read)
+    monkeypatch.setattr(admission, "snapshot", read)
     if broken_io == "write":
-        monkeypatch.setattr(maintenance, "record_failure", write)
+        monkeypatch.setattr(admission, "record_failure", write)
     monkeypatch.setattr(graph, "ainvoke", broken)
     with pytest.raises((RuntimeError, OSError), match="journal"):
         await host.run_turn(11)
-    assert maintenance.pending_command(11) == 100
+    assert admission.pending_command(11) == 100
     control = AsyncMock()
     monkeypatch.setattr(host, "_run_held_controls", control)
     await host.run_turn(11)

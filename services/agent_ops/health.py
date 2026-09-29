@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 
-from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
+from shared.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 from shared.health_schema import DEGRADED, OK, component
 
 _WEDGE_AFTER_S = NO_PROGRESS_TIMEOUT_S + 300.0  # 900s no-progress bound + 5min margin = 1200s

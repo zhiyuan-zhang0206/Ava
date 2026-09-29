@@ -118,7 +118,7 @@ def test_runtime_consumers_do_not_load_retired_rollout_authority() -> None:
     repo = Path(__file__).resolve().parents[2]
     code = (
         "import sys;sys.path.insert(0,sys.argv[1]);"
-        "import cli.release_build,shared.runtime_service_identity,shared.native_job_observation;"
+        "import cli.release_build,shared.deploy.release.runtime_service_identity,shared.host.system.job_observation;"
         "loaded=[name for name in sys.modules if name.startswith("
         "('shared.managed_writer','shared.runtime_publication','cli.commands._update'))];"
         "assert not loaded, loaded"

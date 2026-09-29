@@ -42,7 +42,7 @@ def complete_boot_start() -> None:
     """Hand Linux systemd the verified root after ordinary readiness succeeds."""
     if sys.platform != "linux":
         return
-    from shared.os_boot_unit import in_boot_unit, publish_root_ready
+    from shared.host.system.boot_unit import in_boot_unit, publish_root_ready
     from shared.paths import ava_home
     from shared.root_control.client import native_identity
 
@@ -299,7 +299,7 @@ def _seed_via_helper(
     from services.permissions_helper import client as helper_client
 
     try:
-        from shared.atomic_io import write_text_atomic
+        from shared.host.atomic_io import write_text_atomic
 
         seed: helper_client.RootSeedConfig = {
             "argv": _root_argv(run_dir, manifests, runtime),
@@ -660,7 +660,7 @@ def _wait_for_root_services_ready(
 ) -> ReadinessWait:
     """Every success uses one fresh whole-roster observation, never sticky ALIVE."""
     from cli.commands._probe import CRITICAL_SERVICE_SESSIONS
-    from shared.deploy_timing import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
+    from shared.deploy.progress_timeout import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
 
     client = _root_client()
     started_at = time.monotonic()

@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from functools import wraps
 
 from cli.cutover_hold import CutoverHold, held_start_command, release_command, standing_hold
-from shared import maintenance, pause_owner, start_serving
+from shared.deploy.lifecycle import start_serving
+from shared.deploy.maintenance import admission, pause_owner
 
 
 @dataclass(frozen=True)
@@ -20,7 +21,7 @@ def exclusive_resources[**P, R](operation: Callable[P, R]) -> Callable[P, R]:
 
     @wraps(operation)
     def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
-        from shared.home_lifecycle_locks import resource_lock
+        from shared.deploy.lifecycle.home_lifecycle_locks import resource_lock
 
         with resource_lock(purpose=f"cli.{operation.__name__}"):
             return operation(*args, **kwargs)
@@ -51,7 +52,7 @@ def _start_held_for_cutover(
             f"its first start is {held_start_command(ava_home())} (a remote unit adds "
             "`--db-capability BUNDLE`), and an ordinary start never releases it"
         )
-    with maintenance.authorized_start(cutover.holder, cutover.acquired_at):
+    with admission.authorized_start(cutover.holder, cutover.acquired_at):
         result = start()
     if result != 0:
         return result
@@ -62,7 +63,7 @@ def _start_held_for_cutover(
         )
         return result
     if phase == "starting":
-        maintenance.set_phase(cutover.holder, cutover.acquired_at, "ready")
+        admission.set_phase(cutover.holder, cutover.acquired_at, "ready")
     print(
         f"\n→ cutover hold {cutover.holder} kept: business stays closed until the "
         f"go/no-go gate releases it with {release_command(ava_home())}"
@@ -75,11 +76,11 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
 
     @exclusive_resources
     def start_locked(*args: P.args, **kwargs: P.kwargs) -> int | StartDelegation:
+        from shared.deploy.release.operation import require_start_authorized
         from shared.paths import ava_home
-        from shared.release_operation import require_start_authorized
 
         operation_hold = require_start_authorized(ava_home())
-        current = maintenance.snapshot()
+        current = admission.snapshot()
         if current is None:
             if operation_hold is not None:
                 raise RuntimeError("release startup requires its exact maintenance hold")
@@ -91,14 +92,14 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
         if operation_hold is not None:
             # Operation startup restores services while its executor retains
             # the hold. Only that executor may resume after observation.
-            with maintenance.authorized_start(*operation_hold):
+            with admission.authorized_start(*operation_hold):
                 return start(*args, **kwargs)
-        if maintenance.start_authorized():
+        if admission.start_authorized():
             return start(*args, **kwargs)
         assert current.holder is not None and current.acquired_at is not None  # noqa: S101
         if (cutover := standing_hold(ava_home())) is not None:
             return _start_held_for_cutover(cutover, current, lambda: start(*args, **kwargs))
-        with maintenance.authorized_start(current.holder, current.acquired_at):
+        with admission.authorized_start(current.holder, current.acquired_at):
             result = start(*args, **kwargs)
         if result == 0 and start_serving.is_serving():
             from ops.cluster_pause import unpause_local_cluster

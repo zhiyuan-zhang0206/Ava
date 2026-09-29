@@ -33,10 +33,10 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.hosted_ownership import admit_hosted_runtime
 from shared.db import create_agent
+from shared.deploy.writers.publication import AdmissionDecision, LegacyProtocolZero
+from shared.deploy.writers.runtime_admission import RuntimeAdmission
 from shared.host_process_evidence import LocalHostEvidence, local_host_evidence
-from shared.managed_writer_publication import AdmissionDecision, LegacyProtocolZero
 from shared.paths import ava_home, exec_run_dir
-from shared.runtime_admission import RuntimeAdmission
 from shared.runtime_incarnation import RuntimeIncarnation
 
 

@@ -1068,7 +1068,7 @@ async def test_connect_server_enforces_requires_before_connecting(
     _write_config(fake_home, {"chrome": {"command": "npx", "requires": {"display": True}}})
     import ava.mcp_config as _cfg
 
-    # display_available is imported into mcp_config from shared.platform_probes;
+    # display_available is imported into mcp_config from shared.host.system.probes;
     # patch the bound name (where assert_requirements calls it).
     monkeypatch.setattr(_cfg, "display_available", lambda: False)
     called = False

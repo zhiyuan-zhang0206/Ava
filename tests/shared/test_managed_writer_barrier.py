@@ -13,7 +13,7 @@ import pytest
 from psycopg import sql
 from pydantic import ValidationError
 
-from shared.managed_writer_barrier import (
+from shared.deploy.writers.barrier import (
     ManagedUnit,
     ManagedUnitClosure,
     ManagedWriterBarrierError,

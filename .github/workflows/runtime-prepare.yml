@@ -2,14 +2,14 @@ name: Inactive runtime preparation
 on:
   pull_request:
     paths:
-      - 'shared/runtime_prepare.py'
+      - 'shared/deploy/release/runtime_prepare.py'
       - 'shared/process_group_closure.py'
       - 'shared/runtime_abi.py'
-      - 'shared/runtime_release.py'
-      - 'shared/release_identity.py'
-      - 'shared/runtime_interpreter.py'
-      - 'shared/runtime_publication_input.py'
-      - 'shared/verified_file.py'
+      - 'shared/deploy/release/runtime_release.py'
+      - 'shared/deploy/release/identity.py'
+      - 'shared/deploy/release/runtime_interpreter.py'
+      - 'shared/deploy/release/runtime_publication_input.py'
+      - 'shared/deploy/release/verified_file.py'
       - 'shared/migration_layout.py'
       - 'cli/release_build.py'
       - 'cli/release_prepare/build-tools.txt'
@@ -18,7 +18,7 @@ on:
       - 'scripts/prove_exec_owner_installed.py'
       - 'scripts/runtime-node-version'
       - 'shared/dotenv_boot.py'
-      - 'shared/platform_backend.py'
+      - 'shared/host/system/backend.py'
       - 'shared/session_env.py'
       - 'ops/spec.py'
       - 'agent/graph/_exec_subprocess.py'
@@ -37,13 +37,13 @@ on:
       - 'scripts/prove_release_inventory.py'
       - 'cli/commands/release_inventory.py'
       - 'scripts/prepare_plugin_fixture.py'
-      - 'shared/updater_handoff.py'
+      - 'shared/deploy/updater/handoff.py'
       - 'services/agent_ops/daemon.py'
-      - 'shared/updater_recovery.py'
-      - 'shared/managed_writer_publication.py'
-      - 'shared/managed_writer_barrier.py'
-      - 'shared/managed_writer_observation.py'
-      - 'shared/native_job_observation.py'
+      - 'shared/deploy/updater/recovery.py'
+      - 'shared/deploy/writers/publication.py'
+      - 'shared/deploy/writers/barrier.py'
+      - 'shared/deploy/writers/observation.py'
+      - 'shared/host/system/job_observation.py'
       - 'scripts/prove_runtime_migration.py'
       - 'shared/runtime_migration.py'
       - 'scripts/verify_runtime_wheel.py'
@@ -138,7 +138,7 @@ jobs:
           uv run --locked --no-dev python - <<'PYINPUT'
           import os
           from pathlib import Path
-          from shared.runtime_prepare import inventory_digest, tree_inventory
+          from shared.deploy.release.runtime_prepare import inventory_digest, tree_inventory
           digest = inventory_digest(tree_inventory(Path(os.environ['RUNNER_TEMP']) / 'prepare/otel-input'))
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'digest={digest}\n')
@@ -162,9 +162,9 @@ jobs:
           PY
       - name: Type-check retained collector integration
         shell: bash
-        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/observability/otel_collector.py cli/commands/release_inventory.py
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py shared/runtime_plugins.py shared/deploy/release/runtime_prepare.py shared/deploy/release/runtime_interpreter.py shared/paths.py shared/deploy/updater/handoff.py cli/commands/observability/otel_collector.py cli/commands/release_inventory.py
       - name: Type-check publication input reader
-        run: uv run --locked pyright shared/runtime_publication_input.py shared/verified_file.py scripts/prove_runtime_publication_input.py
+        run: uv run --locked pyright shared/deploy/release/runtime_publication_input.py shared/deploy/release/verified_file.py scripts/prove_runtime_publication_input.py
       - name: Publication selector compatibility
         if: runner.os == 'Linux'
         run: uv run --locked pytest tests/shared/test_runtime_publication_input.py -q
@@ -186,9 +186,9 @@ jobs:
         run: |
           uv run --locked --no-dev python - <<'PY'
           import json, os, pathlib
-          from shared.release_identity import read_application_identity
+          from shared.deploy.release.identity import read_application_identity
           from shared.runtime_abi import current_abi
-          from shared.runtime_release import release_abi, verify_release
+          from shared.deploy.release.runtime_release import release_abi, verify_release
           root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'prepare'
           build = json.loads((root / 'application-build/build-receipt.json').read_bytes())
           proof = json.loads((root / 'proof.json').read_bytes())

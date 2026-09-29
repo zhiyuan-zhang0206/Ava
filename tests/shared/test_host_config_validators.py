@@ -1,4 +1,4 @@
-"""Unit tests for shared.host_config_validators.
+"""Unit tests for shared.host.config_validators.
 
 The aggregate browser_capable() gate and the individual display / Chrome probes
 are monkeypatched so the tests are deterministic on any host (headless CI has
@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-import shared.host_config_validators as hcv
-from shared.host_config_validators import ValidationResult, read_time_capability, validate
+import shared.host.config_validators as hcv
+from shared.host.config_validators import ValidationResult, read_time_capability, validate
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -22,13 +22,13 @@ from shared.host_config_validators import ValidationResult, read_time_capability
 def _patch_browser_capable(monkeypatch: pytest.MonkeyPatch, *, capable: bool) -> None:
     # browser_capable is the aggregate gate (display + Chrome + npx) imported
     # into hcv; the validator consults it first. It probes inside
-    # shared.platform_probes, so patching hcv.display_available alone cannot
+    # shared.host.system.probes, so patching hcv.display_available alone cannot
     # influence it — patch the bound name in hcv directly.
     monkeypatch.setattr(hcv, "browser_capable", lambda: capable)
 
 
 def _patch_display(monkeypatch: pytest.MonkeyPatch, *, available: bool) -> None:
-    # display_available is imported into hcv from shared.platform_probes; patch
+    # display_available is imported into hcv from shared.host.system.probes; patch
     # the name as bound in the validator module (where the validator calls it).
     monkeypatch.setattr(hcv, "display_available", lambda: available)
 

@@ -12,8 +12,10 @@ import pytest
 from cli.commands.converge import host as converge_host
 from cli.commands.extensions import memory
 from cli.commands.extensions._plugin_scaffold import ScaffoldResult, run_plugin_scaffolds
-from shared import memory_repo, paths, proc
+from shared import paths
 from shared.config import settings
+from shared.deploy.git import memory_repo
+from shared.host import proc
 from shared.machine import set_identity
 from shared.plugins_config import write_local
 

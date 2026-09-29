@@ -16,14 +16,14 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 from pydantic import ValidationError
 
-from shared.managed_writer_barrier import (
+from shared.deploy.writers.barrier import (
     ManagedUnit,
     ManagedUnitClosure,
     ManagedWriterBarrierError,
     ManagedWriterCollection,
     RolloutIdentity,
 )
-from shared.managed_writer_publication import (
+from shared.deploy.writers.publication import (
     CommittedPublication,
     PendingPublication,
     PublishedUnit,
@@ -61,7 +61,7 @@ def publication_db(db_conn: psycopg.Connection) -> Iterator[psycopg.Connection]:
 
 
 def normal_start_proposal(conn: psycopg.Connection) -> PendingPublication:
-    from shared.managed_writer_publication import CandidateUnitPlan, NormalService, NormalStartPlan
+    from shared.deploy.writers.publication import CandidateUnitPlan, NormalService, NormalStartPlan
 
     current = seed_current(conn)
     proposal = pending(conn, current)
@@ -113,7 +113,7 @@ def normal_start_proposal(conn: psycopg.Connection) -> PendingPublication:
 def test_normal_plan_allows_only_known_agent_host_service(
     publication_db: psycopg.Connection, session: str, allowed: bool
 ) -> None:
-    from shared.managed_writer_publication import CandidateUnitPlan
+    from shared.deploy.writers.publication import CandidateUnitPlan
 
     proposal = normal_start_proposal(publication_db)
     assert proposal.normal_start_plan is not None

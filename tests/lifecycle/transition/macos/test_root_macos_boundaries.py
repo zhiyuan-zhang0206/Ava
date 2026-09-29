@@ -154,7 +154,7 @@ def test_root_owner_follows_the_recorded_executor_kind() -> None:
 
 
 def _transition(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> LocalTransition:
-    from shared import maintenance
+    from shared.deploy.maintenance import admission as maintenance
 
     request = journal.read_operation(harness.path).request
     assert isinstance(request, FleetRequest)
@@ -204,7 +204,7 @@ def test_stop_authenticates_the_helper_before_and_proves_its_stop_intent_after(
 ) -> None:
     from cli.commands import maintenance as maintenance_commands
     from cli.commands import root_driver, service_stop
-    from shared import maintenance
+    from shared.deploy.maintenance import admission as maintenance
 
     transition = _transition(harness, monkeypatch)
     hold = SimpleNamespace(phase="drained")
@@ -246,7 +246,7 @@ def _darwin_operation(harness: Harness) -> Operation:
 def test_macos_start_action_must_be_a_finite_tool_of_the_recorded_executor(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import os_boot_unit
+    from shared.host.system import boot_unit as os_boot_unit
 
     operation = _darwin_operation(harness)
     home = Path(operation.request.home)
@@ -274,7 +274,7 @@ def test_macos_start_action_must_be_a_finite_tool_of_the_recorded_executor(
 def test_linux_start_action_still_requires_the_boot_unit(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import os_boot_unit
+    from shared.host.system import boot_unit as os_boot_unit
 
     operation = journal.read_operation(harness.path).model_copy(
         update={"launch": {"kind": native.LINUX}}
@@ -287,7 +287,7 @@ def test_linux_start_action_still_requires_the_boot_unit(
 def test_macos_observation_has_no_boot_unit_but_must_run_on_macos(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import os_boot_unit
+    from shared.host.system import boot_unit as os_boot_unit
 
     operation = _darwin_operation(harness)
     monkeypatch.setattr(os_boot_unit, "manager_properties", lambda _home: pytest.fail("systemd"))

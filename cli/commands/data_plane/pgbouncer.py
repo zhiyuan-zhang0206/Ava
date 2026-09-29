@@ -61,11 +61,11 @@ from cli.commands.data_plane.cluster_instance import (
 )
 from shared.cluster import ownership
 from shared.cluster.authority import POOLER_ADMIN
+from shared.host.proc import process_alive
 from shared.machine import reachable_host
 from shared.paths import ava_home
 from shared.pg_tools import brew_prefix, is_macos
 from shared.platform import LockTimeoutError
-from shared.proc import process_alive
 from shared.process_env import daemon_process_env
 
 # Transaction-pooling defaults. max_client_conn
@@ -198,7 +198,7 @@ def _write_config(
 ) -> bool:
     """Write pgbouncer.ini + userlist.txt (0600); True when either file's bytes
     changed, which requires a pooler restart (a reload never revokes a user)."""
-    from shared.private_storage import write_private_bytes
+    from shared.host.private_storage import write_private_bytes
 
     ini = _render_ini(
         pg_port=pg_port, listen_port=listen_port, db_name=db_name, cluster_secret=cluster_secret

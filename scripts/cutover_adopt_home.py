@@ -106,7 +106,7 @@ from scripts.cutover_legacy_jobs import (
     retire_unit,
 )
 from shared import cluster
-from shared.private_storage import ensure_private_dir, write_private_bytes
+from shared.host.private_storage import ensure_private_dir, write_private_bytes
 
 _AUDIT = "cutover_adopt_home"
 
@@ -210,8 +210,8 @@ def _archive(home: Path, effect: dict[str, Any]) -> None:
 
 def _create_hold(home: Path, journal: dict[str, Any]) -> None:
     """The cutover hold: the existing pause-owner journal, maintenance phase `stopped`."""
-    from shared import pause_owner
-    from shared.maintenance_state import MaintenanceHold
+    from shared.deploy.maintenance import pause_owner
+    from shared.deploy.maintenance.state import MaintenanceHold
     from shared.platform import file_lock
 
     holder, at = journal["hold"]["holder"], journal["hold"]["acquired_at"]
@@ -240,7 +240,7 @@ def _create_hold(home: Path, journal: dict[str, Any]) -> None:
 
 def _require_hold(home: Path, journal: dict[str, Any], phase: str) -> None:
     """The adopted legacy hold is still exactly the one the journal recorded."""
-    from shared import pause_owner
+    from shared.deploy.maintenance import pause_owner
 
     holder, at = journal["hold"]["holder"], datetime.fromisoformat(journal["hold"]["acquired_at"])
     current = pause_owner.read_for_home(home)
@@ -467,7 +467,7 @@ def held_start(home: Path, db_capability: str | None = None) -> int:
     repair's first run would set `idle`. A runner's start joins through that
     gateway's bootstrap, so it cannot precede W7 either.
     """
-    from shared import pause_owner
+    from shared.deploy.maintenance import pause_owner
 
     journal = read_journal(home)
     if not _complete(journal):
@@ -509,9 +509,9 @@ def release(home: Path) -> int:
     next unit is released (conventions/cutover-home-adoption.md).
     """
     from cli.commands.maintenance import resume
-    from shared import pause_owner
+    from shared.deploy.maintenance import pause_owner
+    from shared.deploy.release.operation import require_start_authorized
     from shared.paths import ava_home
-    from shared.release_operation import require_start_authorized
 
     journal = read_journal(home)
     if not _complete(journal):
@@ -564,26 +564,27 @@ def _records_repair_missing(home: Path) -> str | None:
 def _start_inside_hold(
     home: Path, holder: str, at: datetime, phase: str, db_capability: str | None
 ) -> int:
-    from shared import maintenance, start_serving
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission
     from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
     from shared.paths import ava_home
 
     if ava_home().resolve() != home:
         raise RefusedError(f"this checkout's home is {ava_home()}, not {home}")
     if phase == "stopped":
-        maintenance.set_phase(holder, at, "starting")
+        admission.set_phase(holder, at, "starting")
     from cli.parsers import build_parser
     from cli.start_intent import run_start
 
     argv = ["start"] if db_capability is None else ["start", "--db-capability", db_capability]
     args = build_parser().parse_args(argv)
-    with maintenance.authorized_start(holder, at):
+    with admission.authorized_start(holder, at):
         rc = run_start(args)
     if rc != 0:
         return rc
     if not start_serving.is_serving():
         return SERVICES_NOT_READY_EXIT_CODE
-    maintenance.set_phase(holder, at, "ready")
+    admission.set_phase(holder, at, "ready")
     return 0
 
 

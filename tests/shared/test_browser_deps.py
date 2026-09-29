@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from shared import platform_probes
 from shared.host.converge import browser_deps
+from shared.host.system import probes
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -113,7 +113,7 @@ def test_ensure_browser_deps_returns_none_when_host_is_already_capable(
 
 def test_ensure_browser_deps_rechecks_after_repair(monkeypatch: pytest.MonkeyPatch) -> None:
     """A successful repair is confirmed by the same capability probe, not assumed."""
-    reasons = iter([platform_probes.NPX_INCAPABILITY_REASON, None])
+    reasons = iter([probes.NPX_INCAPABILITY_REASON, None])
     monkeypatch.setattr(browser_deps, "browser_deps_incapability", lambda: next(reasons))
     monkeypatch.setattr(browser_deps, "install_nodejs", lambda: True)
     assert browser_deps.ensure_browser_deps() is None
@@ -124,10 +124,10 @@ def test_ensure_browser_deps_returns_npx_reason_when_repair_fails(
 ) -> None:
     """A failed best-effort repair keeps the actionable missing-npx reason."""
     monkeypatch.setattr(
-        browser_deps, "browser_deps_incapability", lambda: platform_probes.NPX_INCAPABILITY_REASON
+        browser_deps, "browser_deps_incapability", lambda: probes.NPX_INCAPABILITY_REASON
     )
     monkeypatch.setattr(browser_deps, "install_nodejs", lambda: False)
-    assert browser_deps.ensure_browser_deps() == platform_probes.NPX_INCAPABILITY_REASON
+    assert browser_deps.ensure_browser_deps() == probes.NPX_INCAPABILITY_REASON
 
 
 def test_ensure_browser_deps_does_not_install_node_for_missing_display(
@@ -148,16 +148,16 @@ def test_runtime_and_settings_free_probes_share_the_npx_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A changed npx message cannot split runtime gating from enrollment repair."""
-    monkeypatch.setattr(platform_probes, "display_available", lambda: True)
-    monkeypatch.setattr(platform_probes, "resolve_chrome_binary", lambda: "/chrome")
-    monkeypatch.setattr(platform_probes, "_platform_chrome_binary", lambda: "/chrome")
+    monkeypatch.setattr(probes, "display_available", lambda: True)
+    monkeypatch.setattr(probes, "resolve_chrome_binary", lambda: "/chrome")
+    monkeypatch.setattr(probes, "_platform_chrome_binary", lambda: "/chrome")
     monkeypatch.setattr(
-        platform_probes.shutil,
+        probes.shutil,
         "which",
         lambda _name: None,  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert platform_probes.browser_incapability() == platform_probes.NPX_INCAPABILITY_REASON
-    assert platform_probes.browser_deps_incapability() == platform_probes.NPX_INCAPABILITY_REASON
+    assert probes.browser_incapability() == probes.NPX_INCAPABILITY_REASON
+    assert probes.browser_deps_incapability() == probes.NPX_INCAPABILITY_REASON
 
 
 def test_browser_deps_warning_names_the_npx_reason_and_platform_fix(
@@ -165,8 +165,8 @@ def test_browser_deps_warning_names_the_npx_reason_and_platform_fix(
 ) -> None:
     """The warning tells the operator both why ava-browser is skipped and how to fix it."""
     monkeypatch.setattr(browser_deps, "node_install_command", lambda: "install-node-here")
-    warning = browser_deps.browser_deps_warning(platform_probes.NPX_INCAPABILITY_REASON)
-    assert platform_probes.NPX_INCAPABILITY_REASON in warning
+    warning = browser_deps.browser_deps_warning(probes.NPX_INCAPABILITY_REASON)
+    assert probes.NPX_INCAPABILITY_REASON in warning
     assert "install-node-here" in warning
     assert "ava-browser will not run on this host until this is fixed" in warning
 

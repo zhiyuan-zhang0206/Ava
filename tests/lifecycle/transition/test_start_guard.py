@@ -13,14 +13,14 @@ import pytest
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.journal import create
 from cli.release_transition.request import ReleaseRef
-from shared.deploy_timing import EXECUTOR_HEARTBEAT_TTL_S
-from shared.release_operation import (
+from shared.deploy.progress_timeout import EXECUTOR_HEARTBEAT_TTL_S
+from shared.deploy.release.operation import (
     authorized_start,
     operation_in_flight,
     require_start_authorized,
 )
-from shared.runtime_release import ReleaseRejectedError
-from shared.start_inputs import configuration_digest
+from shared.deploy.release.runtime_release import ReleaseRejectedError
+from shared.deploy.release.start_inputs import configuration_digest
 
 
 def _operation(home: Path) -> Path:
@@ -310,7 +310,8 @@ def test_operation_start_preserves_exact_hold_after_service_result(
     operation_path: Path, monkeypatch: pytest.MonkeyPatch, result: int
 ) -> None:
     from cli.commands._pause_resume import resume_after_start
-    from shared import maintenance, start_serving
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission as maintenance
 
     _set_state(operation_path, phase="starting")
     _hold(operation_path, monkeypatch)
@@ -332,7 +333,7 @@ def test_operation_start_preserves_exact_hold_after_service_result(
 
 def _hold(path: Path, monkeypatch: pytest.MonkeyPatch, *, kind: str = "exact") -> None:
     from shared import paths
-    from shared.maintenance_state import MaintenanceHold
+    from shared.deploy.maintenance.state import MaintenanceHold
 
     home = _home(path)
     (home / "run").mkdir(exist_ok=True)
@@ -360,7 +361,7 @@ def test_operation_start_cannot_bypass_missing_changed_or_unsettled_hold(
     operation_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, ambient_authority: bool
 ) -> None:
     from cli.commands._pause_resume import resume_after_start
-    from shared import maintenance
+    from shared.deploy.maintenance import admission as maintenance
 
     _set_state(operation_path, phase="starting")
     _hold(operation_path, monkeypatch, kind=kind)

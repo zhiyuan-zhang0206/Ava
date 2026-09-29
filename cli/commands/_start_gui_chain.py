@@ -14,10 +14,10 @@ from __future__ import annotations
 import os
 import sys
 
+from shared.host.system.autostart import gui_domain_kickstart_command
+from shared.host.system.probes import gui_login_user, gui_session_domain
 from shared.machine import MachineRoles
-from shared.os_autostart import gui_domain_kickstart_command
 from shared.platform import IS_MACOS
-from shared.platform_probes import gui_login_user, gui_session_domain
 
 
 def _current_account_name() -> str | None:

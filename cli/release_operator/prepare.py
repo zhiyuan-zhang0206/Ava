@@ -27,8 +27,8 @@ from pathlib import Path
 from cli.release_operator.layout import prepare_work_dir, prepare_work_root, releases_store
 from cli.release_prepare import LocalInputs, Preparation, prepare_image
 from cli.release_prepare.models import encode
-from shared.private_storage import ensure_private_dir
-from shared.verified_file import regular_bytes
+from shared.deploy.release.verified_file import regular_bytes
+from shared.host.private_storage import ensure_private_dir
 
 
 def cmd_release_prepare(*, commit: str, inputs: Path, repo: Path | None) -> int:

@@ -13,10 +13,10 @@ import pytest
 
 # ruff: noqa: S603 -- fixed Git argv operate only on the generated fixture repository.
 from cli import release_build as build
-from shared.release_identity import read_application_identity
+from shared.deploy.release.identity import read_application_identity
+from shared.deploy.release.runtime_prepare import _materialize_venv_links
+from shared.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
 from shared.runtime_abi import AbiTag
-from shared.runtime_prepare import _materialize_venv_links
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
 
 _LINUX = AbiTag("linux", "x86_64", "glibc", "2.39", None, None, "cpython-312", "")
 _MACOS = AbiTag("macos", "arm64", None, None, "26", "11.0", "cpython-312", "")

@@ -78,7 +78,7 @@ home. Both check the durable home operation gate before effects, recheck before
 stop, and pass the identical captured runtime into startup.
 
 The retained operation also binds the authoritative configuration through the
-Settings-free `shared/start_inputs.py` digest. Start, preflight, observation and
+Settings-free `shared/deploy/release/start_inputs.py` digest. Start, preflight, observation and
 resume refuse changed inputs; stage checks precede Settings loading and repeat
 after startup or readiness. The explicit startup capability rechecks this digest
 before ordinary release start prepares identity or loads Settings. These checks

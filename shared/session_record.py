@@ -146,7 +146,7 @@ class SessionRecord:
         listings (`list_sessions` on both platforms) then unlink a record
         whose process is still alive — a live agent silently forgotten by
         `ava stop`'s no-DB reap (audit 2026-08-08 P1). Same shape
-        `shared/launch_failures.py` uses for the same reason."""
+        `shared/deploy/lifecycle/launch_failures.py` uses for the same reason."""
         path.parent.mkdir(parents=True, exist_ok=True)
         _fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
         try:

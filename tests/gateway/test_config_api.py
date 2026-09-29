@@ -28,8 +28,9 @@ from gateway.app import app
 from gateway.routers import config as config_router
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigWriteOpResult, FieldWriteResult
-from shared import host_config_validators, runtime_config
+from shared import runtime_config
 from shared.config import settings
+from shared.host import config_validators
 from shared.machine import machine_name
 
 
@@ -135,10 +136,9 @@ def _stub_browser_capability(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force the browser_enabled read-time capability to a deterministic verdict:
     the aggregate browser_capable() gate reports capable -> can_enable True.
 
-    Patches the predicate as bound in `host_config_validators` so the test does
-    not depend on the machine actually having a display / Chrome / npx.
+    Patches the predicate as bound in `config_validators`: no real display / Chrome / npx.
     """
-    monkeypatch.setattr(host_config_validators, "browser_capable", lambda: True)
+    monkeypatch.setattr(config_validators, "browser_capable", lambda: True)
 
 
 def test_get_self_host_fields_carry_capability_hint(_stub_browser_capability: None) -> None:
@@ -165,8 +165,8 @@ def test_get_self_host_fields_carry_capability_hint(_stub_browser_capability: No
 
 def test_get_self_browser_disabled_when_no_display(monkeypatch: pytest.MonkeyPatch) -> None:
     """GET self with no display: browser_enabled.can_enable is False + a reason."""
-    monkeypatch.setattr(host_config_validators, "browser_capable", lambda: False)
-    monkeypatch.setattr(host_config_validators, "display_available", lambda: False)
+    monkeypatch.setattr(config_validators, "browser_capable", lambda: False)
+    monkeypatch.setattr(config_validators, "display_available", lambda: False)
     with TestClient(app) as client:
         resp = client.get("/api/config")
     assert resp.status_code == 200, resp.text
@@ -588,9 +588,9 @@ def test_put_self_edits_writable_host_capability_field(
     remote_writable) is editable on the self/Cluster view — the local write honors
     `writable`."""
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _f, _v: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"cross_machine_transfer_backend": "none"})
@@ -669,9 +669,9 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
     the two used to collapse because both resolve target to machine_name(), leaving
     heartbeat_enabled / task_maintenance_enabled uneditable on a single box."""
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _f, _v: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     with TestClient(app) as client:
         # Cluster view (machine omitted): writable=False -> rejected read-only.

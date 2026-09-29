@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, cast
 
-from shared.atomic_io import fsync_parent, write_text_atomic
+from shared.host.atomic_io import fsync_parent, write_text_atomic
 
 SCHEMA_VERSION = 1
 _TOOL_RE = re.compile(r"[a-z][a-z0-9-]*")

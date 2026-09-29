@@ -21,8 +21,8 @@ from pathlib import Path
 import psutil
 from pydantic import BaseModel, ConfigDict, Field
 
+from shared.deploy.release.verified_file import regular_bytes
 from shared.native_process.ownership import OwnedProcess
-from shared.verified_file import regular_bytes
 
 # A macOS release needs the finite mode plus the keeper's durable stop, shutdown
 # and seed report: admission refuses an older helper before any work stops.

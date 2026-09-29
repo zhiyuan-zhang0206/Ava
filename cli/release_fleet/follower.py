@@ -37,8 +37,8 @@ from cli.release_fleet.progress import Instruction, Report, ReportState, UnitPro
 from cli.release_fleet.request import UnitRequest
 from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation
+from shared.deploy.maintenance.state import MaintenanceHold
 from shared.log import logger
-from shared.maintenance_state import MaintenanceHold
 
 Clock = Callable[[], datetime]
 POLL_S = 5.0

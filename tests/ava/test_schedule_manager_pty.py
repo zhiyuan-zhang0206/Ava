@@ -21,9 +21,9 @@ from psycopg_pool import ConnectionPool
 
 from gateway import schedule_manager as sm
 from shared.cluster import session_name
+from shared.deploy.lifecycle.start_serving import RootBirth
 from shared.platform import IS_WINDOWS
 from shared.session_backend import get_shell_backend
-from shared.start_serving import RootBirth
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -125,7 +125,7 @@ def _point_backend_home(monkeypatch: pytest.MonkeyPatch, _pty_home: str) -> None
 @pytest.fixture(autouse=True)
 def _host_is_serving(serving_root: RootBirth, _point_backend_home: None) -> Iterator[None]:
     """PTY schedule cases model a gateway that completed its start gate."""
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True

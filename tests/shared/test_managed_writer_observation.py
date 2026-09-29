@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 
 from shared.daemon_http import start_daemon_http
-from shared.managed_writer_observation import (
+from shared.deploy.writers.observation import (
     ExpectedLauncher,
     ExpectedSession,
     ExpectedUnitWriters,
@@ -22,7 +22,7 @@ from shared.managed_writer_observation import (
     observe_launcher,
     observe_session,
 )
-from shared.native_job_observation import NativeReadUnavailableError
+from shared.host.system.job_observation import NativeReadUnavailableError
 from shared.process_evidence import ExpectedProcess
 
 
@@ -106,7 +106,7 @@ def test_observe_launcher_passes_absent_through_and_unknowns_refuse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An absent definition is a fenced-removal fact, not a lost observation."""
-    from shared import managed_writer_observation as observation
+    from shared.deploy.writers import observation as observation
 
     expected = ExpectedLauncher(kind="launchd", name="com.ava.test", definition_digest="a" * 64)
     unit = ExpectedUnitWriters(

@@ -30,9 +30,9 @@ from cli.release_transition.launchd_custody import Birth, DarwinLaunch, RootCust
 from cli.release_transition.root_service import observe as observe_selected
 from cli.release_transition.root_service import stage_environment
 from services.permissions_helper import client, finite_artifact
+from shared.deploy.release.runtime_release import VerifiedRelease
+from shared.deploy.release.verified_file import regular_bytes
 from shared.native_process.ownership import OwnedProcess
-from shared.runtime_release import VerifiedRelease
-from shared.verified_file import regular_bytes
 
 # The ordinary start's own readiness bound, as for the Linux unit start action.
 START_TIMEOUT_S = 660
@@ -154,7 +154,7 @@ def _run_start_action(operation: Operation, image: VerifiedRelease) -> None:
     """The selected image's ordinary start, as a finite tool of the executor job."""
     import pwd
 
-    from shared.proc import run_bounded
+    from shared.host.proc import run_bounded
 
     request = operation.request
     account = pwd.getpwuid(os.getuid())

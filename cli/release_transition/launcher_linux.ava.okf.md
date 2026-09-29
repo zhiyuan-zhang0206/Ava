@@ -8,7 +8,7 @@ tags: [cluster-lifecycle, release, linux]
 # Linux release executor custody
 
 `launcher_linux.py` submits one finite executor to the system manager, the same
-manager scope as `shared/os_boot_unit.py`. It does not own application services.
+manager scope as `shared/host/system/boot_unit.py`. It does not own application services.
 macOS requires its helper ancestry adapter; there is no direct-spawn or session
 fallback here.
 

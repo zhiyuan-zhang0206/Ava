@@ -26,9 +26,9 @@ from shared.env_registry import (
     env_identity_keys,
     health_port_env,
 )
+from shared.host.private_storage import ensure_private_dir
 from shared.netutil import is_loopback_host
 from shared.platform import IS_WINDOWS, IS_WSL, file_lock
-from shared.private_storage import ensure_private_dir
 
 _CAP_ARGS = {
     "gateway": "serve_gateway",
@@ -196,7 +196,7 @@ def _join_credential(home: Path, capability: str | None, *, remote: bool) -> tup
         no_capability_message,
         open_bundle,
     )
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.verified_file import regular_bytes
 
     transport_key = os.environ.pop(CAPABILITY_KEY_ENV, "")
     bundle = None
@@ -428,7 +428,7 @@ def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) 
             runtime = StartRuntime.development(_checkout())
         home = _home(worktree=args.worktree, runtime=runtime)
         runtime.validate(home)
-        from shared.release_operation import require_start_authorized
+        from shared.deploy.release.operation import require_start_authorized
 
         if runtime.release is not None:
             require_start_authorized(home)
@@ -451,7 +451,7 @@ def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) 
             )
             if result == 0:
                 from cli.commands.root_driver import complete_boot_start
-                from shared.start_serving import clear_serving
+                from shared.deploy.lifecycle.start_serving import clear_serving
 
                 try:
                     complete_boot_start()

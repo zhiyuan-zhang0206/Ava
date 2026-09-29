@@ -1,4 +1,4 @@
-"""shared.os_schtasks — the Windows scheduler primitives.
+"""shared.host.system.schtasks — the Windows scheduler primitives.
 
 Pins the decisions that would silently degrade the Windows experience if a later
 edit undid them (a console flash every 60s; a job running the wrong interpreter;
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import os_schtasks as st
+from shared.host.system import schtasks as st
 
 # A path with a space in it, because a Windows user profile may contain one
 # (`C:\Users\First Last\...`) and `<Command>` must carry it unquoted.
@@ -130,7 +130,7 @@ def test_interpreter_falls_back_to_python_without_pythonw(
     scripts = tmp_path / ".venv" / "Scripts"
     scripts.mkdir(parents=True)
     monkeypatch.setattr("shared.paths.repo_root", lambda: tmp_path)
-    monkeypatch.setattr("shared.platform_backend.get_backend", _scripts_backend)
+    monkeypatch.setattr("shared.host.system.backend.get_backend", _scripts_backend)
     assert st._pythonw().name == "python.exe"
 
 
@@ -141,7 +141,7 @@ def test_interpreter_prefers_pythonw_when_present(
     scripts.mkdir(parents=True)
     (scripts / "pythonw.exe").write_text("")
     monkeypatch.setattr("shared.paths.repo_root", lambda: tmp_path)
-    monkeypatch.setattr("shared.platform_backend.get_backend", _scripts_backend)
+    monkeypatch.setattr("shared.host.system.backend.get_backend", _scripts_backend)
     assert st._pythonw().name == "pythonw.exe"
 
 
@@ -416,15 +416,15 @@ def test_delete_targets_the_given_slug_not_this_process(monkeypatch: pytest.Monk
 
 
 def _register_health_probe() -> str | None:
-    from shared import os_cron
+    from shared.host.system import cron
 
-    return os_cron._register_windows(300)
+    return cron._register_windows(300)
 
 
 def _register_autostart() -> str | None:
-    from shared import os_autostart
+    from shared.host.system import autostart
 
-    return os_autostart._register_windows()
+    return autostart._register_windows()
 
 
 @pytest.mark.parametrize(

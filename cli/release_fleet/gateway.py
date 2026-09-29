@@ -107,7 +107,11 @@ class DeployLease:
         a first hold means. Both writes stay compare-and-set, so a lease taken
         between the read and the write still refuses.
         """
-        from shared.cluster_lock import acquire_update_lock, renew_update_lock, update_lock_holder
+        from shared.deploy.state.cluster_lock import (
+            acquire_update_lock,
+            renew_update_lock,
+            update_lock_holder,
+        )
 
         if self._renewer is not None:
             return
@@ -120,8 +124,8 @@ class DeployLease:
         self._renewer.start()
 
     def _renew(self) -> None:
-        from shared.cluster_lock import lease_may_lapse, renew_update_lock
-        from shared.deploy_timing import LEASE_RENEW_INTERVAL_S
+        from shared.deploy.progress_timeout import LEASE_RENEW_INTERVAL_S
+        from shared.deploy.state.cluster_lock import lease_may_lapse, renew_update_lock
 
         renewed = time.monotonic()
         while not self._stop.wait(LEASE_RENEW_INTERVAL_S):
@@ -143,7 +147,7 @@ class DeployLease:
 
     def release(self) -> None:
         """Stop renewing, then release; a lease this operation never took is left alone."""
-        from shared.cluster_lock import release_update_lock
+        from shared.deploy.state.cluster_lock import release_update_lock
 
         self._stop.set()
         if self._renewer is not None:
@@ -252,7 +256,7 @@ class GatewayUnit(LocalTransition):
 
     def publish(self, completion: Completion) -> None:
         """Write `releases/fleet-state.json` once per operation; a retry is a no-op."""
-        from shared.atomic_io import write_text_atomic
+        from shared.host.atomic_io import write_text_atomic
 
         prior = read_state(self.home)
         if prior is not None and prior.operation == completion.operation:
@@ -294,7 +298,7 @@ class GatewayUnit(LocalTransition):
 
 def read_state(home: Path) -> FleetState | None:
     """The published cluster release state, or None before the first completion."""
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.verified_file import regular_bytes
 
     path = home / "releases" / _STATE
     try:

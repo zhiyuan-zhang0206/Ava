@@ -20,11 +20,11 @@ from uuid import UUID
 import psutil
 import pytest
 
-from shared import updater_handoff as handoff
-from shared import updater_recovery as recovery
-from shared.managed_writer_barrier import RolloutIdentity
-from shared.managed_writer_observation import ExpectedUnitWriters, ObservationChallenge
-from shared.managed_writer_publication import (
+from shared.deploy.updater import handoff as handoff
+from shared.deploy.updater import recovery as recovery
+from shared.deploy.writers.barrier import RolloutIdentity
+from shared.deploy.writers.observation import ExpectedUnitWriters, ObservationChallenge
+from shared.deploy.writers.publication import (
     NormalService,
     NormalServiceReadback,
     PublishedUnit,
@@ -445,7 +445,7 @@ def test_malformed_marker_is_conservatively_invalid(
     _write_handoff("g", owner_pid=7, owner_create_time=1.0)
     payload = json.loads(handoff.state_path().read_text())
     handoff.state_path().write_text(json.dumps(payload | mutation))
-    with caplog.at_level(logging.WARNING, logger="shared.updater_handoff"):
+    with caplog.at_level(logging.WARNING, logger="shared.deploy.updater.handoff"):
         assert handoff.read().status == "invalid"
     assert "invalid" in caplog.text
 
@@ -575,7 +575,7 @@ def test_failed_gc_keeps_the_generation_spawn_attempts(
         raise exc
 
     monkeypatch.setattr(handoff.shutil, "rmtree", _refuse_removal)
-    with caplog.at_level(logging.WARNING, logger="shared.updater_handoff"):
+    with caplog.at_level(logging.WARNING, logger="shared.deploy.updater.handoff"):
         assert handoff.clear("bootstrap")
     assert "spawn-attempt GC left evidence in place" in caplog.text
     assert (attempts / "ava-ops.gate").read_text(encoding="utf-8") == "held"

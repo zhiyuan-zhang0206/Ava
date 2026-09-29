@@ -84,10 +84,10 @@ from scripts.cutover_inventory import (
     registry_path,
 )
 from scripts.cutover_inventory import read_journal as read_adoption
+from shared.host.private_storage import ensure_private_dir, write_private_bytes
 from shared.incarnation_resources import IncarnationResources, ResourceEvidenceError
 from shared.pg_admin import OwnerAuthority
 from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
-from shared.private_storage import ensure_private_dir, write_private_bytes
 
 VERSION = 2  # 2: each run names the adoption it belongs to
 RECORD = f"{ARCHIVE}/db-records"
@@ -441,7 +441,7 @@ def adoption(home: Path) -> dict[str, str] | None:
 
 def read_journal(home: Path) -> dict[str, Any] | None:
     """The journal; refuses one whose last run belongs to another adoption of the home."""
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.verified_file import regular_bytes
 
     path = home / JOURNAL
     try:

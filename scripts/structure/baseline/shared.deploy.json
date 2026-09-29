@@ -1,5 +1,20 @@
 {
   "complexity": {
-    "shared/deploy/git/worktree_guard.py::find_live_anchors": 17
+    "shared/deploy/git/memory_repo.py::init": 15,
+    "shared/deploy/git/worktree_guard.py::find_live_anchors": 17,
+    "shared/deploy/lifecycle/status_journal.py::read": 17,
+    "shared/deploy/maintenance/admission.py::record_drained": 19,
+    "shared/deploy/maintenance/cohort.py::_classify": 24,
+    "shared/deploy/maintenance/cohort.py::_refuse_inflight_lifecycle": 18,
+    "shared/deploy/maintenance/cold.py::require_no_consumers": 18,
+    "shared/deploy/maintenance/cold.py::require_persisted_end": 17,
+    "shared/deploy/maintenance/state.py::MaintenanceHold.decode": 18,
+    "shared/deploy/release/editable_install.py::editable_import_gate": 15,
+    "shared/deploy/release/runtime_prepare.py::prepare_release": 31,
+    "shared/deploy/release/runtime_publication_input.py::resolve_runtime_publication_input": 16,
+    "shared/deploy/release/runtime_release.py::verify_release": 29,
+    "shared/deploy/updater/handoff.py::_read_unlocked": 16,
+    "shared/deploy/updater/recovery.py::NormalReleaseRecoveryJournal.coherent_phase": 16,
+    "shared/deploy/writers/publication.py::WriterPublication.unique_units": 21
   }
 }

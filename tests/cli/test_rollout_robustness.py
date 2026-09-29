@@ -85,10 +85,10 @@ def _paused_posture(monkeypatch: pytest.MonkeyPatch) -> None:
     `cluster_paused` file)."""
     from datetime import datetime
 
-    from shared.host_deploy_state import HostDeployState
+    from shared.deploy.state.host_deploy_state import HostDeployState
 
     monkeypatch.setattr(
-        "shared.host_deploy_state.read",
+        "shared.deploy.state.host_deploy_state.read",
         lambda *_a, **_k: HostDeployState(  # pyright: ignore[reportUnknownArgumentType]
             machine="test",
             posture="paused",
@@ -107,7 +107,7 @@ def test_declined_restart_releases_a_pause_no_rollout_owns(
     sit with its restarter killed until the 10-minute stranded-pause recovery."""
 
     _paused_posture(monkeypatch)
-    monkeypatch.setattr("shared.cluster_lock.update_lock_holder", lambda: None)
+    monkeypatch.setattr("shared.deploy.state.cluster_lock.update_lock_holder", lambda: None)
     unpaused: list[bool] = []
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", lambda: unpaused.append(True))
 
@@ -122,7 +122,7 @@ def test_declined_restart_leaves_a_rollouts_pause_alone(
     itself; unpausing now would let old-code agents respawn mid-migration."""
 
     _paused_posture(monkeypatch)
-    monkeypatch.setattr("shared.cluster_lock.update_lock_holder", lambda: "cloud:pid1")
+    monkeypatch.setattr("shared.deploy.state.cluster_lock.update_lock_holder", lambda: "cloud:pid1")
     unpaused: list[bool] = []
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", lambda: unpaused.append(True))
 

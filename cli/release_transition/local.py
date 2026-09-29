@@ -24,9 +24,9 @@ from cli.release_transition.authority_evidence import GenerationRef
 from cli.release_transition.journal import Journal, Operation
 from cli.release_transition.native import helper_root
 from cli.release_transition.request import verify_pair
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance.state import MaintenanceHold
+from shared.deploy.release.runtime_release import VerifiedRelease, activate_release, current_pointer
 from shared.runtime_abi import current_abi
-from shared.runtime_release import VerifiedRelease, activate_release, current_pointer
 
 # Whatever is live after the cancel grace gets SIGKILL over its captured birth;
 # this bounds only the kernel observation of that kill.
@@ -52,7 +52,7 @@ class LocalTransition:
         """Drain local agents under the operation's hold; the drained hold is the cohort."""
         from cli.release_transition.root_service import preflight
         from ops import agent_pause
-        from shared import maintenance
+        from shared.deploy.maintenance import admission as maintenance
 
         self.preflight()
         preflight(operation, self.previous, previous=True)
@@ -79,7 +79,8 @@ class LocalTransition:
         from cli.commands.root_driver import require_root_absent
         from cli.release_transition import root_macos
         from ops import pty_close_notices
-        from shared import maintenance, pause_owner
+        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import pause_owner
 
         self.preflight()
         policy = self.request.policy
@@ -181,7 +182,7 @@ class LocalTransition:
     def start(self, journal: Journal) -> None:
         """Journal access lets the macOS owner record helper custody around its effect."""
         self.request.require_configuration()
-        from shared import maintenance
+        from shared.deploy.maintenance import admission as maintenance
 
         operation = journal.operation
         holder, at = str(self.request.id), operation.maintenance_at
@@ -210,7 +211,7 @@ class LocalTransition:
 
     def observe(self, operation: Operation) -> None:
         self.request.require_configuration()
-        from shared import maintenance
+        from shared.deploy.maintenance import admission as maintenance
 
         self.observe_root(operation)
         self.request.require_configuration()
@@ -227,7 +228,9 @@ class LocalTransition:
     def resume(self, operation: Operation) -> None:
         self.request.require_configuration()
         from cli.commands import maintenance as maintenance_commands
-        from shared import maintenance, pause_owner, start_serving
+        from shared.deploy.lifecycle import start_serving
+        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import pause_owner
 
         # An executor may have died after recording this phase. A durable
         # serving marker or an earlier observation cannot admit work now.
@@ -253,7 +256,7 @@ class LocalTransition:
         is observed and resumes, all under the same hold.
         """
         from cli.commands import maintenance as maintenance_commands
-        from shared import pause_owner
+        from shared.deploy.maintenance import pause_owner
 
         operation = journal.operation
         holder, at = str(self.request.id), operation.maintenance_at

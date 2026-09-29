@@ -15,7 +15,8 @@ from cli.release_transition import execute, journal, native, submit
 from cli.release_transition import launcher_linux as linux
 from cli.release_transition import launcher_macos as macos
 from cli.release_transition.request import PitrRequest
-from shared import os_boot_unit, paths
+from shared import paths
+from shared.host.system import boot_unit
 from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import Harness
 from tests.lifecycle.transition.macos.launchd_fake import harness as harness
@@ -41,9 +42,9 @@ def test_recorded_launch_with_no_kind_refuses_without_any_default() -> None:
 
 def test_host_adapter_has_no_fallback(monkeypatch: pytest.MonkeyPatch, harness: Harness) -> None:
     request = journal.read_operation(harness.path).request
-    monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: True)
+    monkeypatch.setattr(boot_unit, "systemd_running", lambda: True)
     assert native.for_host(request) is linux
-    monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: False)
+    monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
     monkeypatch.setattr(native, "_host_platform", lambda: "win32")
     with pytest.raises(RuntimeError, match="no fallback"):
         native.for_host(request)
@@ -57,7 +58,7 @@ def test_darwin_submission_refuses_pitr_before_any_reservation(
     home = tmp_path.resolve() / "home"
     home.mkdir()
     monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: False)
+    monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
     monkeypatch.setattr(native, "_host_platform", lambda: "darwin")
 
     def unexpected(*_args: object, **_kwargs: object) -> None:
@@ -78,7 +79,7 @@ def test_darwin_release_scope_is_the_common_preflight_before_reservation(
     home = tmp_path.resolve() / "home"
     home.mkdir()
     monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: False)
+    monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
     monkeypatch.setattr(native, "_host_platform", lambda: "darwin")
     gates: list[str] = []
 

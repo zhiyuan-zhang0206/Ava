@@ -9,7 +9,7 @@ from pathlib import Path
 
 from cli.release_prepare import LocalInputs, Preparation, prepare_image
 from cli.release_prepare.models import encode
-from shared.verified_file import regular_bytes
+from shared.deploy.release.verified_file import regular_bytes
 
 
 def main() -> int:

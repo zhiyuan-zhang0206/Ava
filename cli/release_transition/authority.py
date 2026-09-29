@@ -34,7 +34,7 @@ from shared.cluster.authority import (
     active_generation,
     require_ledger,
 )
-from shared.runtime_release import current_pointer
+from shared.deploy.release.runtime_release import current_pointer
 
 
 def _authority(operation: Operation) -> OperationAuthority:

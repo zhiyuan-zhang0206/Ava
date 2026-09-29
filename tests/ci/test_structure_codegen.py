@@ -298,7 +298,7 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "shared/agents/impersonation/impersonation_history.py",
         "shared/sdk_telemetry.py",
         "shared/agent_snapshot.py",
-        "shared/resource_sample.py",
+        "shared/host/resource_sample.py",
         "ops/rpc_schemas.py",
         "ops/rpc_terminate.py",
         "ui/web/src/lib/types-generated.ts",

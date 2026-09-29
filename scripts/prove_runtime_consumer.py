@@ -11,9 +11,9 @@ from pathlib import Path
 
 from ops.spec import build_services
 from shared.cluster import frontend_service_cmd
+from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_python, runtime_venv
+from shared.host.system.backend import get_backend
 from shared.migrations import required_migration_set
-from shared.platform_backend import get_backend
-from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_python, runtime_venv
 from shared.session_env import forward_env_dict, venv_activation_prefix
 
 

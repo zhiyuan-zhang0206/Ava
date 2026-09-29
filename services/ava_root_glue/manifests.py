@@ -59,8 +59,8 @@ from services.ava_root.manifest import (
     UnitRegistry,
     load_manifests,
 )
+from shared.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease
 from shared.machine import MachineRole
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -249,7 +249,7 @@ def build_manifest(
 def write_manifest(path: Path, manifest: Mapping[str, object]) -> Path:
     """Write the manifest JSON (validate with `build_manifest` first)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    from shared.atomic_io import write_text_atomic
+    from shared.host.atomic_io import write_text_atomic
 
     write_text_atomic(path, json.dumps(manifest, indent=2) + "\n", mode=0o600, sync_parent=True)
     return path

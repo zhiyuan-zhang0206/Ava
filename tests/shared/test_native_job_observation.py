@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import native_job_observation as jobs
+from shared.host.system import job_observation as jobs
 
 
 def deadline() -> datetime:

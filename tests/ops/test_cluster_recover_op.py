@@ -18,7 +18,7 @@ import pytest
 
 import ops.ops_cluster as _ops
 from ops.ops_cluster import ClusterUpdateInProgress
-from shared.cluster_lock import DeployLease, RecoveryClaim
+from shared.deploy.state.cluster_lock import DeployLease, RecoveryClaim
 
 _Kind = Literal["rollout", "restart", "update"]
 
@@ -47,7 +47,7 @@ def recover_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, bool]:
     """Stub the collaborators; record whether the clear + unpause writes ran."""
     calls = {"released": False, "unpaused": False}
     monkeypatch.setattr(_ops, "machine_name", lambda: "m1")
-    # The pid probe itself moved to `shared.cluster_lock.holder_process_gone`
+    # The pid probe itself moved to `shared.deploy.state.cluster_lock.holder_process_gone`
     # (the liveness rule the automatic reclaim shares), so its inputs are the
     # seams to pin: machine identity for the holder parse + process liveness.
     monkeypatch.setattr("shared.machine.machine_name", lambda: "m1")
@@ -89,7 +89,7 @@ def _set_lease(monkeypatch: pytest.MonkeyPatch, lease: DeployLease | None) -> No
 
 
 def _set_alive(monkeypatch: pytest.MonkeyPatch, alive: Callable[[int], bool]) -> None:
-    monkeypatch.setattr("shared.proc.process_alive", alive)
+    monkeypatch.setattr("shared.host.proc.process_alive", alive)
 
 
 def test_dead_local_holders_unexpired_lease_is_cleared_at_once(

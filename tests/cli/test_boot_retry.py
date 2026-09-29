@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from cli import boot_retry
-from shared.boot_policy import BOOT_RETRY_INTERVAL_S
+from shared.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 
 
 @pytest.fixture

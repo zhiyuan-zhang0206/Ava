@@ -17,8 +17,8 @@ from pathlib import Path
 import psutil
 import pytest
 
-from shared import lifecycle_status as journal
 from shared.config import settings
+from shared.deploy.lifecycle import status_journal as journal
 
 
 @pytest.fixture

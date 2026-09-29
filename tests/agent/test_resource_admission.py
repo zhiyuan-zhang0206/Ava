@@ -13,6 +13,8 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from shared.deploy.writers.publication import AdmissionDecision, CurrentAdmission
+from shared.deploy.writers.runtime_admission import RuntimeAdmission
 from shared.exec_owner_protocol import OwnerClosed, OwnerContext, OwnerReady
 from shared.incarnation_resources import (
     IncarnationResources,
@@ -23,9 +25,7 @@ from shared.incarnation_resources import (
     decode_resources,
     register_exec,
 )
-from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
 from shared.resource_admission import admit_resources
-from shared.runtime_admission import RuntimeAdmission
 from shared.runtime_incarnation import RuntimeIncarnation
 from tests.agent.test_incarnation_resources import _admitted, _entry, _force, _process
 

@@ -1,4 +1,4 @@
-"""`shared.cluster_lock` — the cluster-wide "a deploy owns this cluster" lease.
+"""`shared.deploy.state.cluster_lock` — the cluster-wide "a deploy owns this cluster" lease.
 
 Real-DB tests (the lease IS a Postgres compare-and-set; mocking it would test
 nothing). Verifies a second live holder is blocked, release frees it, release is
@@ -21,7 +21,8 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from shared import db_transaction
-from shared.cluster_lock import (
+from shared.config import settings
+from shared.deploy.state.cluster_lock import (
     SETTLE_TTL_S,
     DeployLease,
     acquire_update_lock,
@@ -35,7 +36,6 @@ from shared.cluster_lock import (
     settle_note,
     update_lock_holder,
 )
-from shared.config import settings
 
 
 def _seed_settle_hold(

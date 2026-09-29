@@ -19,9 +19,9 @@ from __future__ import annotations
 import logging
 
 from ops.rpc_schemas import UploadReceivePayload, UploadReceiveResult
+from shared.host.private_storage import write_private_bytes
 from shared.http_dial import get as http_get
 from shared.machine import gateway_api_base
-from shared.private_storage import write_private_bytes
 from shared.uploads import agent_upload_dir, sanitize_upload_name
 
 _log = logging.getLogger(__name__)

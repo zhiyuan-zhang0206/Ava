@@ -97,7 +97,7 @@ The selection commits before the boot action installs; if the install fails
 (`sudo -n` wanting a password) or the process dies in between, re-running
 adopt with the same receipt keeps the selection and finishes the install. A
 release operation that holds startup refuses adopt as it refuses `ava start`
-(`shared.release_operation.require_start_authorized`): one that activated its
+(`shared.deploy.release.operation.require_start_authorized`): one that activated its
 candidate leaves the same pointer, and its boot action is not adopt's to
 replace. It holds the home's start-intent and lifecycle locks throughout.
 

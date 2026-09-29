@@ -9,7 +9,7 @@ from pathlib import Path
 
 from cli.commands.converge.spec import ConvergeCtx
 from shared.config import settings
-from shared.private_storage import ensure_private_dir
+from shared.host.private_storage import ensure_private_dir
 
 
 def _atomic_publish(source: Path, destination: Path) -> None:

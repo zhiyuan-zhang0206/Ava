@@ -45,8 +45,8 @@ from cli.release_transition.pitr.evidence import DataOwner, DataStop
 from shared.cluster import ownership
 from shared.cluster import postgres as owned_postgres
 from shared.config import settings
+from shared.deploy.release.verified_file import regular_bytes
 from shared.process_evidence import ExpectedProcess
-from shared.verified_file import regular_bytes
 
 
 def capture_postgres() -> OwnedProcess | None:

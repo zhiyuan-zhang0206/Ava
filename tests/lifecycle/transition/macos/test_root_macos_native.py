@@ -47,9 +47,9 @@ from cli.release_transition.request import ReleaseRef
 from services.permissions_helper import client, lifecycle
 from shared import paths
 from shared.config import settings
+from shared.deploy.release.runtime_release import MANIFEST_VERSION, VerifiedRelease, file_sha256
 from shared.native_process.ownership import OwnedProcess
 from shared.runtime_abi import current_abi
-from shared.runtime_release import MANIFEST_VERSION, VerifiedRelease, file_sha256
 from tests.lifecycle.release_fleet.fakes import OffDutyGateway, drive
 from tests.lifecycle.transition.macos import native_fixture
 from tests.lifecycle.transition.phases import journal_fence, journal_issue

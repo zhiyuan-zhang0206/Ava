@@ -472,7 +472,7 @@ def _refresh_gateway_checkout() -> None:
     logged at ERROR and retried next cycle — a stale index can no longer
     rot silently. Keep-local mode: `pull_main` is a no-op.
     """
-    from shared.memory_repo import gateway_memory_dir, pull_main
+    from shared.deploy.git.memory_repo import gateway_memory_dir, pull_main
 
     cwd = gateway_memory_dir()
     try:

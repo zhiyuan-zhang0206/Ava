@@ -7,7 +7,7 @@ import pytest
 from psycopg_pool import PoolTimeout
 
 from services.agent_host import maintenance as receipts
-from shared import maintenance, pause_owner
+from shared.deploy.maintenance import admission, pause_owner
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -15,7 +15,7 @@ from tests.agent.test_maintenance import isolate as isolate
 def _held() -> None:
     before = pause_owner.begin_maintenance("grade", WHEN).snapshot
     assert before.maintenance is not None
-    from shared.maintenance_state import MaintenanceHold
+    from shared.deploy.maintenance.state import MaintenanceHold
 
     pause_owner.change_maintenance("grade", WHEN, before.maintenance, MaintenanceHold("draining"))
 
@@ -39,7 +39,7 @@ def test_database_outage_failures_are_recorded_undelivered(
     fences: receipts.FailureFences = {}
     asyncio.run(receipts.record_failure(7, exc, fences))
     assert fences == {}
-    current = maintenance.require_operation("grade", WHEN)
+    current = admission.require_operation("grade", WHEN)
     assert current.maintenance is not None
     assert current.maintenance.failures == {}
     assert current.maintenance.undelivered == {7: category}
@@ -58,7 +58,7 @@ def test_bare_timeout_error_latches_a_blocking_failure() -> None:
     _held()
     fences: receipts.FailureFences = {}
     asyncio.run(receipts.record_failure(7, TimeoutError("llm ttft bound"), fences))
-    current = maintenance.require_operation("grade", WHEN)
+    current = admission.require_operation("grade", WHEN)
     assert current.maintenance is not None
     assert fences == {7: (current.holder, current.acquired_at)}
     assert current.maintenance.failures == {7: "TimeoutError"}
@@ -69,7 +69,7 @@ def test_ordinary_failure_still_latches_blocking_and_fenced() -> None:
     _held()
     fences: receipts.FailureFences = {}
     asyncio.run(receipts.record_failure(7, RuntimeError("node failed"), fences))
-    current = maintenance.require_operation("grade", WHEN)
+    current = admission.require_operation("grade", WHEN)
     assert current.maintenance is not None
     assert fences == {7: (current.holder, current.acquired_at)}
     assert current.maintenance.failures == {7: "RuntimeError"}
@@ -80,7 +80,7 @@ def test_failure_outside_a_hold_leaves_no_fence_and_no_receipt() -> None:
     fences: receipts.FailureFences = {}
     asyncio.run(receipts.record_failure(7, RuntimeError("isolated"), fences))
     assert fences == {}
-    assert maintenance.snapshot() is None
+    assert admission.snapshot() is None
 
 
 def test_undelivered_record_is_idempotent_and_preserves_other_receipts() -> None:
@@ -88,7 +88,7 @@ def test_undelivered_record_is_idempotent_and_preserves_other_receipts() -> None
     asyncio.run(receipts.record_failure(7, PoolTimeout("again"), {}))
     asyncio.run(receipts.record_failure(7, PoolTimeout("again"), {}))
     asyncio.run(receipts.record_failure(8, psycopg.OperationalError("refused"), {}))
-    current = maintenance.require_operation("grade", WHEN)
+    current = admission.require_operation("grade", WHEN)
     assert current.maintenance is not None
     assert current.maintenance.undelivered == {7: "PoolTimeout", 8: "OperationalError"}
     assert current.maintenance.failures == {}
@@ -99,7 +99,7 @@ def _hold_with(
 ) -> None:
     before = pause_owner.begin_maintenance("grade", WHEN).snapshot
     assert before.maintenance is not None
-    from shared.maintenance_state import MaintenanceHold
+    from shared.deploy.maintenance.state import MaintenanceHold
 
     hold = MaintenanceHold.decode(
         {

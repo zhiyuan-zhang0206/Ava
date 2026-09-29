@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from shared.release_tags import parse_release_tag, pick_latest_tag
+from shared.deploy.release.tags import parse_release_tag, pick_latest_tag
 
 
 def test_parse_full_tag() -> None:

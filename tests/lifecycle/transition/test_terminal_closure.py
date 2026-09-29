@@ -20,7 +20,7 @@ import pytest
 from cli.commands import service_stop as strict
 from cli.commands._maintenance_stop_report import StopIncompleteError
 from ops import pty_close_notices
-from shared import maintenance
+from shared.deploy.maintenance import admission as maintenance
 from shared.platform import IS_WINDOWS
 from shared.session_backend import PtySessionBackend
 from shared.sessions.pty import session_tree
@@ -353,7 +353,7 @@ def test_pitr_stop_apps_closes_terminals_after_root_and_before_evidence(
     from cli.commands import root_driver
     from cli.release_transition.pitr import transition as pitr_transition
     from ops import pty_close_notices
-    from shared import maintenance
+    from shared.deploy.maintenance import admission as maintenance
 
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
@@ -405,7 +405,7 @@ def test_pitr_stop_apps_evidence_check_refuses_a_terminal_live_after_closure(
     from cli.commands import maintenance as maintenance_commands
     from cli.commands import root_driver
     from cli.release_transition.pitr import transition as pitr_transition
-    from shared import maintenance
+    from shared.deploy.maintenance import admission as maintenance
 
     def drained(*_args: object) -> SimpleNamespace:
         return SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))

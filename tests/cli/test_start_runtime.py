@@ -21,16 +21,16 @@ from cli import start_runtime
 from cli.commands import root_driver, start_generation
 from ops.service_spec import ServiceSpec
 from services.ava_root_glue import manifests
-from shared import runtime_interpreter
-from shared.runtime_abi import current_abi
-from shared.runtime_release import (
+from shared.deploy.release import runtime_interpreter
+from shared.deploy.release.runtime_release import (
     MANIFEST_VERSION,
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
     verify_release,
 )
-from shared.start_inputs import configuration_digest, require_configuration
+from shared.deploy.release.start_inputs import configuration_digest, require_configuration
+from shared.runtime_abi import current_abi
 
 
 @pytest.fixture
@@ -219,7 +219,7 @@ def test_development_cannot_bypass_a_dangling_release_selector(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared import runtime_interpreter
+    from shared.deploy.release import runtime_interpreter
 
     monkeypatch.setattr(runtime_interpreter, "WHEEL_RUNTIME", False)
     (tmp_path / "releases").mkdir()
@@ -473,7 +473,8 @@ def test_operation_observation_requires_every_selected_service_ready(
     from cli.commands import _repo
     from cli.release_transition import authority, stage
     from ops import spec as ops_spec
-    from shared import machine, os_boot_unit
+    from shared import machine
+    from shared.host.system import boot_unit
     from shared.machine import MachineRole
     from shared.native_process.ownership import OwnedProcess
     from shared.root_control import client
@@ -492,7 +493,7 @@ def test_operation_observation_requires_every_selected_service_ready(
         for name in ("gateway", "delivery-watchdog")
     )
     root = OwnedProcess(1234, 5678.0, 90)
-    cgroup = f"/system.slice/{os_boot_unit.unit_name(home)}"
+    cgroup = f"/system.slice/{boot_unit.unit_name(home)}"
     observed: list[str] = []
 
     def operation(_path: Path) -> SimpleNamespace:
@@ -539,8 +540,8 @@ def test_operation_observation_requires_every_selected_service_ready(
     monkeypatch.setattr(root_driver, "admit_live_start", admitted)
     monkeypatch.setattr(root_driver, "wait_for_service_tree", readiness)
     monkeypatch.setattr(client, "root_process", lambda: root)
-    monkeypatch.setattr(os_boot_unit, "manager_properties", native_properties)
-    monkeypatch.setattr(os_boot_unit, "process_cgroup", process_group)
+    monkeypatch.setattr(boot_unit, "manager_properties", native_properties)
+    monkeypatch.setattr(boot_unit, "process_cgroup", process_group)
     # The write-generation check runs on real PostgreSQL in
     # tests/lifecycle/db_authority/test_release_fence.py; here only its place.
     monkeypatch.setattr(authority, "verify_active", _observing_generation(observed))
@@ -568,7 +569,7 @@ def test_release_run_start_checks_configuration_before_identity_and_settings(
     from cli.release_fleet.request import FleetRequest
     from cli.release_transition.journal import create
     from cli.release_transition.request import ReleaseRef
-    from shared.release_operation import authorized_start
+    from shared.deploy.release.operation import authorized_start
 
     home = image.root.parent.parent
     runtime = _admit(image)

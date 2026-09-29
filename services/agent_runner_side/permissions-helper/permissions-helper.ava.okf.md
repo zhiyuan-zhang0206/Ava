@@ -75,6 +75,6 @@ readback, closure/retirement): [[cli/release_transition/launcher_macos.ava.okf.m
 - `scripts/tcc-preauth.sh` — read-only helper/TCC diagnostics and manual grant list
 
 ## Notes
-- macOS + Windows; configuration gate `AVA_PERMISSIONS_HELPER_ENABLED`, capability probe `shared.platform_probes.permissions_helper_incapability` (macOS: swift/codesign/display; Windows: csc.exe — the helper's session capability is checked at runtime, converge runs in Session 0).
+- macOS + Windows; configuration gate `AVA_PERMISSIONS_HELPER_ENABLED`, capability probe `shared.host.system.probes.permissions_helper_incapability` (macOS: swift/codesign/display; Windows: csc.exe — the helper's session capability is checked at runtime, converge runs in Session 0).
 - Windows: C# helper (`services/permissions_helper/windows/helper.cs`, built with the .NET Framework csc.exe every Windows install ships; DPI-aware via SetProcessDPIAware so click coordinates are physical pixels), served over the named pipe `\\.\pipe\ava-permissions-helper`, registered as the logon scheduled task `AvaPermissionsHelper` (`/IT` so it starts in the user's interactive session). Client dials the pipe automatically (`_IS_WINDOWS` transport switch in `client.py`).
 - Outside `ServiceSpec`: launchd owns helper keepalive. Root records read-only protocol/job diagnostics; no diagnostic may repair, re-sign, bootout, or force-restart its ancestor.

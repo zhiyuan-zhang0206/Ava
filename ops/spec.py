@@ -42,21 +42,21 @@ from pathlib import Path
 
 from ops.service_spec import ServiceSpec as ServiceSpec  # re-export: generated plugin fixtures
 from shared.config import settings
-from shared.log import logger
-from shared.machine import MachineRoles
-from shared.observability import collector_allowed_for_home, gateway_observability_home
-from shared.platform import IS_WINDOWS
-from shared.platform_probes import (
+from shared.host.system.probes import (
     browser_incapability,
     browser_mcp_incapability,
     permissions_helper_incapability,
     unix_sockets_available,
 )
+from shared.log import logger
+from shared.machine import MachineRoles
+from shared.observability import collector_allowed_for_home, gateway_observability_home
+from shared.platform import IS_WINDOWS
 
 
 def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
     """Bind Python services to the loaded runtime without changing their gates."""
-    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_python
+    from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_python
 
     prefix = ".venv/bin/python "
     if not WHEEL_RUNTIME or not spec.cmd.startswith(prefix):

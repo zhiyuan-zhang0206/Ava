@@ -135,8 +135,8 @@ def cmd_packages_status(*, json_output: bool = False) -> int:
     channel/policy/applied-rev/last-result/declared-range. Read-only."""
     import json
 
-    from shared import host_version as host_version_mod
     from shared import install_registry, paths
+    from shared.deploy.git import host_version as host_version_mod
 
     registry = install_registry.load()
     try:

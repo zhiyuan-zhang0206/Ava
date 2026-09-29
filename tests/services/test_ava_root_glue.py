@@ -234,7 +234,10 @@ def test_reference_wiring_refuses_unobserved_manifest_unit(
 async def test_glue_uses_shared_readiness_tiers_for_native_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.deploy_timing import NON_CRITICAL_SERVICE_READY_TIMEOUT_S, SERVICE_READY_TIMEOUT_S
+    from shared.deploy.progress_timeout import (
+        NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
+        SERVICE_READY_TIMEOUT_S,
+    )
 
     context = _context(tmp_path, _registry(("gate", "labeler")))
     specs = tuple(

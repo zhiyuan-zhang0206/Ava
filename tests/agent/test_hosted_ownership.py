@@ -25,9 +25,12 @@ from agent.hosted_ownership import (
 from agent.impersonation import native_status
 from shared.agents.impersonation import ImpersonationError
 from shared.db import create_agent, insert_inbound_message
+from shared.deploy.writers.publication import AdmissionDecision, CurrentAdmission
+from shared.deploy.writers.runtime_admission import (
+    PublicationAdmissionDeferredError,
+    RuntimeAdmission,
+)
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
-from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
-from shared.runtime_admission import PublicationAdmissionDeferredError, RuntimeAdmission
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import bind_turn_identity
 
@@ -382,7 +385,7 @@ async def test_held_continuation_admits_at_protocol_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A deferred publication continuing a held command advertises zero (issue #2159)."""
-    from shared import maintenance
+    from shared.deploy.maintenance import admission
 
     agent_id, owner = _agent(db_conn), uuid4()
     db_conn.execute(
@@ -395,8 +398,8 @@ async def test_held_continuation_admits_at_protocol_zero(
     def one_pending(_agent_id: int) -> int:
         return 1
 
-    monkeypatch.setattr(maintenance, "held", lambda: True)
-    monkeypatch.setattr(maintenance, "pending_command", one_pending)
+    monkeypatch.setattr(admission, "held", lambda: True)
+    monkeypatch.setattr(admission, "pending_command", one_pending)
 
     class _DeferredRuntimeAdmission(RuntimeAdmission):
         async def decide_async(self, conn: psycopg.AsyncConnection) -> AdmissionDecision:

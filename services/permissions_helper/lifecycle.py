@@ -34,8 +34,8 @@ from services.permissions_helper.launchd_job import (
     helper_stop_intent,
 )
 from shared.config import settings
+from shared.host.proc import run_bounded
 from shared.paths import logs_dir, permissions_helper_socket
-from shared.proc import run_bounded
 
 _CERT_CN = "Ava Permissions Helper Code Signing"
 _BUNDLE_ID = HELPER_BUNDLE_ID  # alias: the job identity lives in launchd_job
@@ -81,7 +81,7 @@ _SIGNING_REACH_REMEDY = (
 # recover from; the recovery machinery was never the gap, the trigger was. None
 # of these is a performance budget -- each sits well above what the work costs.
 #
-# The bound is applied by `shared.proc.run_bounded`, not `subprocess.run(timeout=)`,
+# The bound is applied by `shared.host.proc.run_bounded`, not `subprocess.run(timeout=)`,
 # which kills only the process Python spawned and leaves its descendants running.
 # Every git-driving module bounds git through the same helper.
 _TIMEOUTS_S = {

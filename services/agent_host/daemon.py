@@ -65,7 +65,7 @@ from services.agent_host.pooled_checkpoint import PooledPostgresSaver
 from services.agent_host.pools import build_control_pool, build_shared_pool
 from services.agent_host.stdout_log import _rotate_stdout_log_forever
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import maintenance, paths, pool_release
+from shared import paths, pool_release
 from shared.config import settings
 from shared.daemon_health import (
     Liveness,
@@ -76,14 +76,15 @@ from shared.daemon_health import (
 )
 from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
 from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.deploy_timing import AGENT_LEASE_RENEW_INTERVAL_S
+from shared.deploy.maintenance import admission
+from shared.deploy.maintenance.straggler_reap import settle_stranded_reaps_async
+from shared.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
+from shared.deploy.timing import assert_clock_lattice
 from shared.exec_request_evidence import disposition_hint
 from shared.helper_chain_guard import parent_chain_intact
 from shared.hosted_force import recover_orphaned_hosted_forces
 from shared.log import init_gateway_process, logger
 from shared.machine import machine_name
-from shared.straggler_reap import settle_stranded_reaps_async
-from shared.timing import assert_clock_lattice
 
 _log = logging.getLogger("services.agent_host.daemon")
 
@@ -119,7 +120,7 @@ def _plugins_fingerprint() -> str:
     any other file under the dir does not. The directory itself missing is a
     valid state (no plugins) — the fingerprint is then empty, not an error.
     """
-    from shared.runtime_interpreter import external_plugin_read_root
+    from shared.deploy.release.runtime_interpreter import external_plugin_read_root
 
     root = external_plugin_read_root()
     if not root.exists():
@@ -230,7 +231,7 @@ async def _beat_forever(
         # leases alive across the whole window and add DB work the window
         # exists to stop. The leases lapse with their TTL; the first beat after
         # resume refreshes every row this host still owns.
-        if not maintenance.quiesced():
+        if not admission.quiesced():
             try:
                 await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
             except TimeoutError:
@@ -318,7 +319,7 @@ async def _page_reconcile_forever(pool: AsyncConnectionPool) -> None:
     while True:
         # A quiesced unit (stop window) skips its pass, silently, until
         # resume: page probing would borrow the pools the stop released.
-        if not maintenance.quiesced():
+        if not admission.quiesced():
             try:
                 await reconcile_all_open_pages(
                     pool, interval_s=interval_s, event_publisher=publisher

@@ -8,17 +8,17 @@ from pathlib import Path
 
 import pytest
 
-from shared import os_cron
-from shared import os_pr_flow as job
+from shared.host.system import cron
+from shared.host.system import pr_flow_job as job
 
 
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(os_cron, "_home_slug", lambda: "ava-deadbeef")
-    monkeypatch.setattr(os_cron, "ava_binary_path", lambda: "/work tree/.venv/bin/ava")
-    monkeypatch.setattr(os_cron, "job_home", lambda: str(tmp_path / ".ava"))
-    monkeypatch.setattr(os_cron, "launchd_path_env", lambda: "/work tree/.venv/bin:/usr/bin")
+    monkeypatch.setattr(cron, "_home_slug", lambda: "ava-deadbeef")
+    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/work tree/.venv/bin/ava")
+    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".ava"))
+    monkeypatch.setattr(cron, "launchd_path_env", lambda: "/work tree/.venv/bin:/usr/bin")
     monkeypatch.setattr("shared.paths.repo_root", lambda: Path("/check/out"))
 
 
@@ -68,7 +68,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
         calls.append(argv)
         return _ok()
 
-    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    monkeypatch.setattr(cron.subprocess, "run", run)
 
     assert job._register_macos() == 0
     plist = job._launchd_plist_path("ava-deadbeef")
@@ -89,7 +89,7 @@ def test_linux_registration_replaces_only_this_clusters_line(
     def which(_name: str) -> str:
         return "/usr/bin/crontab"
 
-    monkeypatch.setattr(os_cron.shutil, "which", which)
+    monkeypatch.setattr(cron.shutil, "which", which)
 
     def run(argv: list[str], **kwargs: object) -> types.SimpleNamespace:
         if argv == ["crontab", "-l"]:
@@ -99,7 +99,7 @@ def test_linux_registration_replaces_only_this_clusters_line(
         written["body"] = str(kwargs["input"])
         return _ok()
 
-    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    monkeypatch.setattr(cron.subprocess, "run", run)
 
     assert job._register_linux() == 0
     assert other in written["body"]
@@ -120,13 +120,13 @@ def test_linux_crontab_failures_and_empty_table(
     def available(_name: str) -> str:
         return "/usr/bin/crontab"
 
-    monkeypatch.setattr(os_cron.shutil, "which", missing)
+    monkeypatch.setattr(cron.shutil, "which", missing)
     assert job._register_linux() == 1
     assert capsys.readouterr().err == (
         "  * PR flow: crontab not installed; the daily sampler job cannot be registered\n"
     )
 
-    monkeypatch.setattr(os_cron.shutil, "which", available)
+    monkeypatch.setattr(cron.shutil, "which", available)
     writes: list[str] = []
     read = types.SimpleNamespace(returncode=1, stdout="stale", stderr="permission denied")
     write_failure = False
@@ -140,7 +140,7 @@ def test_linux_crontab_failures_and_empty_table(
         read.stdout = str(kwargs["input"])
         return _ok()
 
-    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    monkeypatch.setattr(cron.subprocess, "run", run)
     assert job._register_linux() == 1
     assert writes == []
     assert capsys.readouterr().err == (
@@ -186,7 +186,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     def record_error(*args: object) -> None:
         errors.append(args)
 
-    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    monkeypatch.setattr(cron.subprocess, "run", run)
     monkeypatch.setattr(job.logger, "error", record_error)
     assert job._register_macos() == 1
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
@@ -234,13 +234,13 @@ def test_credential_blocker_names_each_missing_piece(
 
 def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     skipped: list[str] = []
-    monkeypatch.setattr(os_cron, "os_jobs_enabled", lambda: False)
-    monkeypatch.setattr(os_cron, "skip_os_job", skipped.append)
+    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: False)
+    monkeypatch.setattr(cron, "skip_os_job", skipped.append)
 
     def no_backend():
         raise AssertionError("backend must not be touched with OS jobs off")
 
-    monkeypatch.setattr("shared.platform_backend.get_backend", no_backend)
+    monkeypatch.setattr("shared.host.system.backend.get_backend", no_backend)
     job.register_pr_flow_job()
     assert skipped == ["pr flow"]
 
@@ -248,28 +248,28 @@ def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatc
 def test_register_skips_without_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(os_cron, "os_jobs_enabled", lambda: True)
+    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     monkeypatch.setattr("shared.observability.production_identity", lambda: True)
     monkeypatch.setattr(job.shutil, "which", _which_missing)  # no gh
 
     def no_backend():
         raise AssertionError("backend must not be touched without credentials")
 
-    monkeypatch.setattr("shared.platform_backend.get_backend", no_backend)
+    monkeypatch.setattr("shared.host.system.backend.get_backend", no_backend)
     job.register_pr_flow_job()
 
 
 def test_register_delegates_when_credentials_pass(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(os_cron, "os_jobs_enabled", lambda: True)
+    monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     _passing_credentials(monkeypatch, tmp_path)
     calls: list[str] = []
     fake_backend = types.SimpleNamespace(
         register_pr_flow_job=lambda: calls.append("register"),
         unregister_pr_flow_job=lambda slug: calls.append(f"unregister:{slug}"),
     )
-    monkeypatch.setattr("shared.platform_backend.get_backend", lambda: fake_backend)
+    monkeypatch.setattr("shared.host.system.backend.get_backend", lambda: fake_backend)
 
     job.register_pr_flow_job()
     assert calls == ["register"]
@@ -280,7 +280,7 @@ def test_register_delegates_when_credentials_pass(
 
 
 def test_windows_backend_is_a_documented_noop() -> None:
-    from shared.platform_backend import WindowsPlatformBackend
+    from shared.host.system.backend import WindowsPlatformBackend
 
     backend = WindowsPlatformBackend()
     backend.register_pr_flow_job()  # logs only — must not raise

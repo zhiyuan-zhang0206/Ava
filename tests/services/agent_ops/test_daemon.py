@@ -24,7 +24,7 @@ import psycopg
 import pytest
 
 from services.agent_ops import daemon, health
-from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
+from shared.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 
 _REPO = Path(__file__).resolve().parents[3]
 

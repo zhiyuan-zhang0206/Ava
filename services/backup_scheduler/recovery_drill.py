@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from services.backup import _cluster_tz, backup_dir
 from shared.config import settings
-from shared.private_storage import write_private_bytes
+from shared.host.private_storage import write_private_bytes
 
 _WEEKLY_RESTORE_WEEKDAY = 6
 _SUCCESS_MARKER = ".logical-restore-drill.json"

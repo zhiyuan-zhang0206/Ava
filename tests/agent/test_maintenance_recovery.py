@@ -12,7 +12,7 @@ from agent.db import claim_inbound_batch
 from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
-from shared import maintenance, maintenance_cohort, pause_owner
+from shared.deploy.maintenance import admission, cohort, pause_owner
 from shared.machine import machine_name
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_maintenance import WHEN, _agent
@@ -31,7 +31,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
     )
     assert incarnation is not None
     pause_owner.begin_maintenance("owner", WHEN)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=old._owner, holder="owner", acquired_at=WHEN
     )
     with bind_turn_identity(agent, incarnation=incarnation):
@@ -42,11 +42,11 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         pool=aops_pool, checkpointer=MagicMock(), graph=MagicMock(), machine=machine_name()
     )
     await successor.run_turn(agent)
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.drained == ()
     await old.run_turn(agent)
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.drained == (agent,)
 
@@ -76,7 +76,7 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
 
     monkeypatch.setattr(pause_owner, "change_maintenance", fail_once)
     with pytest.raises(OSError, match="journal failure"):
-        maintenance_cohort.prepare(
+        cohort.prepare(
             db_conn, machine=machine_name(), host_owner=owner, holder="retry", acquired_at=WHEN
         )
     committed = db_conn.execute(
@@ -84,7 +84,7 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
     ).fetchall()
     db_conn.commit()
     assert len(committed) == (1 if failure_write == 2 else 0)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=owner, holder="retry", acquired_at=WHEN
     )
     rows = db_conn.execute(
@@ -104,7 +104,7 @@ def test_unowned_idle_intent_is_preserved_without_restart_or_termination(
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     db_conn.commit()
     pause_owner.begin_maintenance("parked", WHEN)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=uuid4(), holder="parked", acquired_at=WHEN
     )
     assert hold.parked == (agent,)
@@ -114,7 +114,7 @@ def test_unowned_idle_intent_is_preserved_without_restart_or_termination(
         db_conn.execute("SELECT id FROM inbound_messages WHERE agent_id=%s", (agent,)).fetchall()
         == []
     )
-    maintenance_cohort.verify_drained(db_conn, hold)
+    cohort.verify_drained(db_conn, hold)
 
 
 async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
@@ -154,11 +154,11 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         is not None
     )
     pause_owner.begin_maintenance("idle", WHEN)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=original._owner, holder="idle", acquired_at=WHEN
     )
     await original.run_turn(agent)
-    current = maintenance.require_operation("idle", WHEN)
+    current = admission.require_operation("idle", WHEN)
     assert current.maintenance is not None and current.maintenance.drained == (agent,)
     pause_owner.change_maintenance(
         "idle", WHEN, current.maintenance, current.maintenance, resumed=True
@@ -210,7 +210,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
 
     monkeypatch.setattr(pause_owner, "change_maintenance", fail_final)
     with pytest.raises(OSError):
-        maintenance_cohort.prepare(
+        cohort.prepare(
             db_conn,
             machine=machine_name(),
             host_owner=host._owner,
@@ -222,7 +222,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
         assert len(batch) == 1
         assert await apply_hosted_lifecycle(aops_pool, incarnation) == "restart"
     monkeypatch.setattr(pause_owner, "change_maintenance", original)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn,
         machine=machine_name(),
         host_owner=host._owner,
@@ -232,6 +232,6 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     assert hold.commands == {agent: batch[0].id}
     assert hold.drained == ()
     await host.run_turn(agent)
-    current = maintenance.require_operation("commit-gap", WHEN)
+    current = admission.require_operation("commit-gap", WHEN)
     assert current.maintenance is not None and current.maintenance.drained == (agent,)
-    maintenance_cohort.verify_drained(db_conn, current.maintenance)
+    cohort.verify_drained(db_conn, current.maintenance)

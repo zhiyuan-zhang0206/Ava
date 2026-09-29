@@ -22,8 +22,8 @@ from typing import Any, Literal
 
 import httpx
 
-from shared.release_operation import InFlight
-from shared.transition import transition_severity
+from shared.deploy.release.operation import InFlight
+from shared.deploy.transition import transition_severity
 
 # Transition state for owner alerts: message, episode starts_at, last-fired
 # severity (empty until the episode reaches WARNING), one logical field per
@@ -416,8 +416,8 @@ def _alert_recovery(home: Path) -> None:
 
 def _release_operation() -> InFlight | None:
     """This home's in-flight release or PITR operation; an unreadable one explains nothing."""
+    from shared.deploy.release.operation import operation_in_flight
     from shared.paths import ava_home
-    from shared.release_operation import operation_in_flight
 
     try:
         return operation_in_flight(ava_home())

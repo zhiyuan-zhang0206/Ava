@@ -10,12 +10,12 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.hosted_ownership import admit_hosted_runtime
 from shared.db import create_agent
-from shared.managed_writer_publication import (
+from shared.deploy.writers.publication import (
     AdmissionDecision,
     CurrentAdmission,
     WriterPublication,
 )
-from shared.runtime_admission import (
+from shared.deploy.writers.runtime_admission import (
     PublicationAdmissionDeferredError,
     RuntimeAdmission,
     require_activation,

@@ -23,7 +23,7 @@ Checked, all read-only:
   that converge would abort on (a symlink, or not a directory), and the
   `logs/.metadata_never_index` marker being non-regular. Non-regular nodes
   INSIDE the trees (sockets, FIFOs, devices) are reported as observations only:
-  converge skips them (see `shared/private_storage.py`).
+  converge skips them (see `shared/host/private_storage.py`).
 - **daemon health ports** — the blocking pre-bind gate (issue #977), on the
   roster the coming start will launch. Only terminal verdicts count, so an
   idempotent restart passes. The warning-only port-block scan and

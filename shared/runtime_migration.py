@@ -17,7 +17,7 @@ from pathlib import Path
 
 import psycopg
 
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
+from shared.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
 
 
 def installed_migration_paths(directory: Path) -> set[Path]:
@@ -66,7 +66,7 @@ class ReleaseMigrationContext:
 
     def assert_operation(self, conn: psycopg.Connection) -> None:
         """Reject a stale receipt, another operation, and post-rollout settle holds."""
-        from shared.cluster_lock import read_update_lease
+        from shared.deploy.state.cluster_lock import read_update_lease
 
         lease = read_update_lease(conn=conn)
         if (

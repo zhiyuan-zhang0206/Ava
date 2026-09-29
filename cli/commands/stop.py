@@ -192,7 +192,7 @@ def _force_stop(
 
     # A deliberate stop must revoke the prior start's recovery authority before
     # any daemon has a chance to observe its own shutdown or a dead peer.
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     start_serving.clear_serving()
 
@@ -348,11 +348,11 @@ def _release_self_heal_pause() -> None:
     later (the controller's finer discrimination is unsafe in the failing
     process, #1098).
     """
-    from shared import maintenance
-    from shared.cluster_lock import update_lock_holder
-    from shared.host_deploy_state import read
+    from shared.deploy.maintenance import admission
+    from shared.deploy.state.cluster_lock import update_lock_holder
+    from shared.deploy.state.host_deploy_state import read
 
-    held = maintenance.snapshot()
+    held = admission.snapshot()
     if (
         held is not None
         and held.maintenance is not None
@@ -391,8 +391,8 @@ def _release_self_heal_pause() -> None:
 
 def _require_restart_runtime(runtime: StartRuntime, home: Path) -> None:
     """Recheck the captured runtime and operation gate before disruptive work."""
+    from shared.deploy.release.operation import require_start_authorized
     from shared.paths import prod_service_checkout_error
-    from shared.release_operation import require_start_authorized
 
     require_start_authorized(home)
     runtime.validate(home)
@@ -403,8 +403,8 @@ def _require_restart_runtime(runtime: StartRuntime, home: Path) -> None:
 def _restart_runtime(home: Path) -> StartRuntime:
     """Admit the currently executing source or image before restart effects."""
     from cli.start_runtime import admit_loaded_release
-    from shared.release_operation import require_start_authorized
-    from shared.runtime_interpreter import WHEEL_RUNTIME
+    from shared.deploy.release.operation import require_start_authorized
+    from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME
 
     require_start_authorized(home)
     runtime = (
@@ -422,8 +422,8 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     """
     from cli.commands import _repo, _start_readiness_preflight, start
     from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from shared.host.proc import hosting_exec_domain, hosting_supervised_session
     from shared.paths import ava_home
-    from shared.proc import hosting_exec_domain, hosting_supervised_session
 
     # Admission precedes even the restart journal: an incompatible caller must
     # leave the running generation and its maintenance state untouched.
@@ -467,19 +467,19 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     repo = runtime.code_root
     print(f"[ava restart] cwd = {repo}")
     from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
-    from shared import lifecycle_status
-    from shared.deploy_timing import SERVICE_READY_TIMEOUT_S
+    from shared.deploy.lifecycle import status_journal
+    from shared.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 
     # Only the journal's opener closes it — the same owns_journal contract
     # _temporary_stop keeps (task #2898). When an outer operation's journal is
     # still running, this restart records phases into it and leaves the finish
     # to that caller instead of clobbering its diagnosis.
-    owns_journal = lifecycle_status.begin("restart")
+    owns_journal = status_journal.begin("restart")
     print(
         f"[ava restart] budget contract: stop up to {PAUSE_TIMEOUT_SECONDS:.0f}s + "
         f"start readiness up to {SERVICE_READY_TIMEOUT_S:.0f}s + bounded preflight probes; "
         "an outer caller's timeout must exceed this total. Status journal: "
-        f"{lifecycle_status.status_path()} (phase progress and the final diagnosis "
+        f"{status_journal.status_path()} (phase progress and the final diagnosis "
         "stay readable there even if this process is cut off)",
         flush=True,
     )
@@ -489,13 +489,13 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     # host in "services dead, can't start" after the stop below.
     # On failure the host keeps serving — abort without stopping.
     print("\n→ preflight probes (validate-before-kill)")
-    with lifecycle_status.phase("preflight"):
+    with status_journal.phase("preflight"):
         rc = _repo._preflight_probes()
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
         _release_self_heal_pause()
         if owns_journal:
-            lifecycle_status.finish(RESTART_DECLINED_EXIT_CODE, error="preflight probes failed")
+            status_journal.finish(RESTART_DECLINED_EXIT_CODE, error="preflight probes failed")
         return RESTART_DECLINED_EXIT_CODE
 
     # Start-readiness preflight (task #3165): the read-only local checks of the
@@ -508,7 +508,7 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     # `.venv/bin/ava`; the gate's interpreter check covers the venv seam the
     # session launches actually use.
     print("\n→ start readiness preflight (validate-before-kill, local state)")
-    with lifecycle_status.phase("preflight"):
+    with status_journal.phase("preflight"):
         rc = _start_readiness_preflight.preflight_start_readiness(
             repo, check_launcher=False, runtime=runtime
         )
@@ -520,7 +520,7 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
         )
         _release_self_heal_pause()
         if owns_journal:
-            lifecycle_status.finish(
+            status_journal.finish(
                 RESTART_DECLINED_EXIT_CODE, error="start-readiness preflight failed"
             )
         return RESTART_DECLINED_EXIT_CODE
@@ -530,7 +530,7 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     _require_restart_runtime(runtime, home)
 
     # Restart retains the private data plane while replacing application services.
-    with lifecycle_status.phase("stop"):
+    with status_journal.phase("stop"):
         rc = _do_stop(
             repo,
             require_confirmation=False,
@@ -544,14 +544,14 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
         # journal phases (drain / services / ...) remain readable.
         _release_self_heal_pause()
         if owns_journal:
-            lifecycle_status.finish(rc, error="stop leg failed")
+            status_journal.finish(rc, error="stop leg failed")
         return rc
     # Keep the captured runtime and the operator's durable selection through
     # startup; neither is recaptured from a later caller or moving selector.
-    with lifecycle_status.phase("start"):
+    with status_journal.phase("start"):
         rc = start._cmd_start_body(persist_services=False, runtime=runtime)
     if owns_journal:
-        lifecycle_status.finish(rc, error=None if rc == 0 else f"start leg failed with rc={rc}")
+        status_journal.finish(rc, error=None if rc == 0 else f"start leg failed with rc={rc}")
     return rc
 
 

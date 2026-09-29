@@ -22,7 +22,7 @@ from shared.platform import IS_WINDOWS
 def test_managed_service_path_preserves_tools_across_callers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runtime: str
 ) -> None:
-    from shared import runtime_interpreter
+    from shared.deploy.release import runtime_interpreter
 
     venv = tmp_path / runtime
     bindir = venv / session_env.get_backend().venv_bin_dir_name()

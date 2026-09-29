@@ -405,7 +405,7 @@ async def post_memory_refresh() -> MemoryRefreshResponse:
     04:06-04:35 watchdog kill loop). `asyncio.to_thread` — the same hop the
     memory indexer uses for its own pull.
     """
-    from shared import memory_repo
+    from shared.deploy.git import memory_repo
 
     head = await asyncio.to_thread(memory_repo.pull_main)
     return MemoryRefreshResponse(head=head)
@@ -544,7 +544,7 @@ def _build_pool_bundle(root: Path) -> tuple[str, bytes]:
     transport/OS layer."""
     import tempfile
 
-    from shared.proc import run_bounded
+    from shared.host.proc import run_bounded
 
     with tempfile.TemporaryDirectory(prefix="memory-pool-bundle-") as tmp:
         bundle_path = Path(tmp) / "pool.bundle"

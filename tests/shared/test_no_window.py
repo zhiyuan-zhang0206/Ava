@@ -48,8 +48,8 @@ def test_ava_shell_run_passes_creationflags(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_run_bounded_defaults_creationflags(monkeypatch: pytest.MonkeyPatch) -> None:
-    """shared.proc.run_bounded injects CREATE_NO_WINDOW when the caller did not."""
-    from shared import proc as proc_mod
+    """shared.host.proc.run_bounded injects CREATE_NO_WINDOW when the caller did not."""
+    from shared.host import proc as proc_mod
 
     captured: dict = {}
 
@@ -74,7 +74,7 @@ def test_run_bounded_respects_caller_creationflags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A caller-supplied creationflags wins over the default."""
-    from shared import proc as proc_mod
+    from shared.host import proc as proc_mod
 
     captured: dict = {}
 
@@ -96,14 +96,14 @@ def test_run_bounded_respects_caller_creationflags(
 
 
 def test_memory_repo_git_passes_creationflags(monkeypatch: pytest.MonkeyPatch) -> None:
-    """shared.memory_repo._run_git forwards CREATE_NO_WINDOW.
+    """shared.deploy.git.memory_repo._run_git forwards CREATE_NO_WINDOW.
 
     Stubs `run_bounded` — `_run_git` goes through it rather than
     `subprocess.run` so a wedged git cannot hold a daemon's exit open past
     SIGTERM. The test above pins the other half of the chain: `run_bounded`
     passes creationflags on to Popen.
     """
-    from shared import memory_repo as mr
+    from shared.deploy.git import memory_repo as mr
 
     captured: dict = {}
 

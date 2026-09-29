@@ -298,7 +298,7 @@ def test_unreadable_bounded_disposition_switch_off_retains(
 
 def test_bounded_age_tracks_the_registered_exec_node_timeout() -> None:
     """Where the profile keeps the sandbox domain, the bound is 2x the clock."""
-    from shared.timing import EXEC_NODE_TIMEOUT_S
+    from shared.deploy.timing import EXEC_NODE_TIMEOUT_S
 
     assert exec_request_evidence._unreadable_expiry_age_s() == 2.0 * EXEC_NODE_TIMEOUT_S
 

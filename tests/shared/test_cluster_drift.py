@@ -1,4 +1,4 @@
-"""Tests for shared.cluster_drift — prod-source git introspection."""
+"""Tests for shared.deploy.git.cluster_drift — prod-source git introspection."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.cluster_drift import (
+from shared.deploy.git.cluster_drift import (
     _prod_source_dir,
     checkout_head_sha,
     prod_source_branch_drift,
@@ -49,30 +49,40 @@ def _commit(source: Path, content: str, msg: str) -> str:
 
 def test_head_sha_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No source repo → None (nothing to read)."""
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
+    monkeypatch.setattr(
+        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+    )
     assert prod_source_head_sha() is None
 
 
 def test_head_sha_returns_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     sha = _init_prod_source(tmp_path / "source")
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
+    monkeypatch.setattr(
+        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+    )
     assert prod_source_head_sha() == sha
 
 
 def test_branch_drift_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
+    monkeypatch.setattr(
+        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+    )
     assert prod_source_branch_drift() is None
 
 
 def test_branch_drift_on_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _init_prod_source(tmp_path / "source")
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
+    monkeypatch.setattr(
+        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+    )
     assert prod_source_branch_drift() is None
 
 
 def test_branch_drift_feature_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _init_prod_source(tmp_path / "source", branch="ava-7/fix")
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
+    monkeypatch.setattr(
+        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+    )
     assert prod_source_branch_drift() == "ava-7/fix"
 
 

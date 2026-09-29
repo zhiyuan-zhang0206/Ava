@@ -85,7 +85,7 @@ def test_an_unreadable_lease_does_not_suppress(
     goes quiet the moment its evidence source breaks is the failure it exists to
     catch."""
     monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease",
+        "shared.deploy.state.cluster_lock.read_update_lease",
         lambda: (_ for _ in ()).throw(RuntimeError("db gone")),
     )
     monkeypatch.setattr("shared.machines.list_all", list)
@@ -104,7 +104,7 @@ def test_release_settle_hold_never_touches_an_executing_lease() -> None:
     check from unlocking a rollout that is actively executing."""
     import inspect
 
-    from shared import cluster_lock
+    from shared.deploy.state import cluster_lock
 
     sql = inspect.getsource(cluster_lock.release_settle_hold)
     assert "settle_hosts IS NOT NULL" in sql

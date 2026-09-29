@@ -15,7 +15,7 @@ import re
 import shutil
 import subprocess
 
-from shared.memory_repo import memory_remote
+from shared.deploy.git.memory_repo import memory_remote
 from shared.platform import CREATE_NO_WINDOW
 
 __all__ = ["github_pr_blocker", "memory_repo_slug"]

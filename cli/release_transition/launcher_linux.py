@@ -22,10 +22,10 @@ from cli.release_transition.journal import Journal, exclusive, read_operation
 from cli.release_transition.native import LINUX
 from cli.release_transition.native import require_private_operation as _private_operation
 from cli.release_transition.request import Record
+from shared.deploy.release.operation import open_launch_grace
+from shared.deploy.release.runtime_release import VerifiedRelease
+from shared.host.system.boot_unit import systemd_running
 from shared.native_process.ownership import OwnedProcess
-from shared.os_boot_unit import systemd_running
-from shared.release_operation import open_launch_grace
-from shared.runtime_release import VerifiedRelease
 
 _PROPERTIES = (
     "Id",

@@ -436,7 +436,7 @@ class PauseLifecycleWait(TypedDict):
 
 
 class PauseOrphanClaimSettled(TypedDict):
-    """`pause_orphan_claim_settled` payload — shared/maintenance_cohort.py."""
+    """`pause_orphan_claim_settled` payload — shared/deploy/maintenance/cohort.py."""
 
     agent: int
     message_id: int
@@ -458,7 +458,7 @@ class UpdateStragglerReaped(TypedDict):
 
 
 class UpdateStragglerReapSettled(TypedDict):
-    """`update_straggler_reap_settled` payload — shared/straggler_reap.py.
+    """`update_straggler_reap_settled` payload — shared/deploy/maintenance/straggler_reap.py.
 
     One row per boot/resume boundary that restored stranded reap marks
     (task #4016). `site` is "boot" (the agent-host boot) or "resume" (the

@@ -7,7 +7,7 @@ Task #4016: an update-family drain releases an un-landed cohort member as
 durable truncation signal read by `agent.db.has_pending_interrupt`), its
 in-flight turn interrupted, and it is released with the honest `reaped`
 outcome — never a flush/apply receipt. The mark is settled at the successor
-boundary (`shared.straggler_reap`): the row returns to runnable and the
+boundary (`shared.deploy.maintenance.straggler_reap`): the row returns to runnable and the
 never-applied command is closed with an honest `lifecycle_result`.
 """
 
@@ -22,15 +22,15 @@ import psycopg
 import pytest
 
 from ops import agent_pause, cluster_pause
-from shared import maintenance, maintenance_cohort, pause_owner
 from shared.db import create_agent, insert_inbound_message
-from shared.machine import machine_name
-from shared.maintenance_state import MaintenanceHold
-from shared.straggler_reap import (
+from shared.deploy.maintenance import admission, cohort, pause_owner
+from shared.deploy.maintenance.state import MaintenanceHold
+from shared.deploy.maintenance.straggler_reap import (
     REAP_LIFECYCLE_OUTCOME,
     REAP_LIFECYCLE_REASON,
     settle_stranded_reaps,
 )
+from shared.machine import machine_name
 
 _MAINTENANCE_PAYLOAD: dict[str, object] = {
     "maintenance": {"holder": "ops:test:1", "acquired_at": "2026-09-19T00:00:00+00:00"}
@@ -83,7 +83,7 @@ def test_drain_reaps_a_straggler_past_its_window(
 
     cluster_pause.pause_local_cluster()
 
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     hold = current.maintenance
     assert hold.phase == "drained"
@@ -113,7 +113,7 @@ def test_drain_accepts_the_reaped_turns_failure_with_a_fresh_lease(
     _fake_host(monkeypatch, owner, {agent})
     _reap_window(monkeypatch, 0.001)
     monkeypatch.setattr("shared.config.settings.gateway.update_quiesce_timeout_seconds", 10.0)
-    record_reaped = maintenance.record_reaped
+    record_reaped = admission.record_reaped
 
     def receipt(agent_id: int, reason: str) -> None:
         assert db_conn.execute(
@@ -123,12 +123,12 @@ def test_drain_accepts_the_reaped_turns_failure_with_a_fresh_lease(
         with pytest.raises(ImpersonationError, match="no longer owns"):
             native_status(agent_id, incarnation)
         if failure_first:
-            maintenance.record_failure(agent_id, "ImpersonationError")
+            admission.record_failure(agent_id, "ImpersonationError")
         record_reaped(agent_id, reason)
         if not failure_first:
-            maintenance.record_failure(agent_id, "ImpersonationError")
+            admission.record_failure(agent_id, "ImpersonationError")
 
-    monkeypatch.setattr(maintenance, "record_reaped", receipt)
+    monkeypatch.setattr(admission, "record_reaped", receipt)
     cluster_pause.pause_local_cluster()
 
     current = pause_owner.read()
@@ -136,7 +136,7 @@ def test_drain_accepts_the_reaped_turns_failure_with_a_fresh_lease(
     assert current.maintenance.phase == "drained"
     assert current.maintenance.unsettled_failures() == {}
     assert current.maintenance.reaped == {agent: REAP_LIFECYCLE_REASON}
-    maintenance_cohort.verify_drained(db_conn, current.maintenance)
+    cohort.verify_drained(db_conn, current.maintenance)
 
 
 def test_drain_with_a_zero_window_keeps_the_abort_behavior(
@@ -152,7 +152,7 @@ def test_drain_with_a_zero_window_keeps_the_abort_behavior(
         cluster_pause.pause_local_cluster()
 
     assert "reaped this wave" not in str(raised.value)
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.reaped == {}
     assert db_conn.execute(
@@ -179,7 +179,7 @@ def test_drain_excludes_takeover_rows_from_the_reap(
     with pytest.raises(TimeoutError, match="without force"):
         cluster_pause.pause_local_cluster()
 
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.reaped == {}
     assert db_conn.execute(
@@ -198,12 +198,12 @@ def test_verify_drained_accepts_the_reap_state_and_rejects_drift(
     db_conn.commit()
     hold = MaintenanceHold("draining", {agent: command}, reaped={agent: "update_straggler_reap"})
 
-    maintenance_cohort.verify_drained(db_conn, hold)
+    cohort.verify_drained(db_conn, hold)
 
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent,))
     db_conn.commit()
     with pytest.raises(RuntimeError, match="reap state"):
-        maintenance_cohort.verify_drained(db_conn, hold)
+        cohort.verify_drained(db_conn, hold)
 
 
 def test_settle_stranded_reaps_restores_and_closes_honestly(
@@ -292,14 +292,14 @@ def test_next_wave_prepare_is_effective_after_settle(db_conn: psycopg.Connection
     assert before.maintenance is not None
 
     with pytest.raises(RuntimeError, match="stranded update straggler-reap mark"):
-        maintenance_cohort.prepare(
+        cohort.prepare(
             db_conn, machine=machine_name(), host_owner=None, holder=holder, acquired_at=when
         )
 
     with db_conn.transaction():
         assert settle_stranded_reaps(db_conn, machine_name()) == [agent]
 
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=None, holder=holder, acquired_at=when
     )
     assert hold.phase == "draining"
@@ -325,7 +325,7 @@ def test_unpause_settles_stranded_reaps_and_wakes_them(
     db_conn.commit()
     woke: list[int] = []
     monkeypatch.setattr(shared_db, "publish_inbound_wake", lambda aid, _source: woke.append(aid))
-    monkeypatch.setattr("shared.host_deploy_state.set_posture", lambda _posture: None)
+    monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", lambda _posture: None)
 
     cluster_pause.unpause_local_cluster()
 
@@ -337,7 +337,7 @@ def test_unpause_settles_stranded_reaps_and_wakes_them(
 
 async def test_settle_async_restores_the_same_shape(db_conn: psycopg.Connection, aops_pool) -> None:
     """The boot transport is the same settle on the async pool."""
-    from shared.straggler_reap import settle_stranded_reaps_async
+    from shared.deploy.maintenance.straggler_reap import settle_stranded_reaps_async
 
     agent = create_agent(db_conn)
     db_conn.execute(
@@ -373,7 +373,7 @@ def test_record_reaped_rejects_agents_outside_the_cohort() -> None:
         "ops:test:1", when, MaintenanceHold(), MaintenanceHold("draining", {7: 100})
     )
     with pytest.raises(RuntimeError, match="cohort"):
-        maintenance.record_reaped(9, "update_straggler_reap")
+        admission.record_reaped(9, "update_straggler_reap")
 
 
 def test_reaped_receipts_roundtrip_and_reject_invalid_shapes() -> None:
@@ -457,7 +457,10 @@ def test_restarting_mark_exits_are_enumerated() -> None:
     """Rows leave 'restarting' through exactly the settle face and the legacy
     cold normalization — a new exit must be weighed against the interrupt."""
     cleared = {rel for rel, text in _production_sources().items() if _REAP_CLEAR.search(text)}
-    assert cleared == {"shared/straggler_reap.py", "shared/maintenance_cold.py"}
+    assert cleared == {
+        "shared/deploy/maintenance/straggler_reap.py",
+        "shared/deploy/maintenance/cold.py",
+    }
 
 
 _SHAPE_FRAGMENTS = (

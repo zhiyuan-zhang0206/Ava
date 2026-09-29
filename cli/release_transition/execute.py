@@ -16,8 +16,8 @@ from cli.release_fleet.request import FleetRequest
 from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation, exclusive, read_operation
 from cli.release_transition.request import PitrRequest
+from shared.deploy.release.operation import executor_heartbeat
 from shared.log import init_cli_process
-from shared.release_operation import executor_heartbeat
 
 
 def execute(path: Path) -> None:
@@ -25,7 +25,7 @@ def execute(path: Path) -> None:
     request = operation.request
     os.environ["AVA_HOME"] = request.home
     os.environ["AVA_CLUSTER_REGISTRY"] = request.registry
-    from shared.runtime_interpreter import verify_loaded_image
+    from shared.deploy.release.runtime_interpreter import verify_loaded_image
 
     image = request.executor.verify(Path(request.home))
     verify_loaded_image(
@@ -43,7 +43,7 @@ def execute(path: Path) -> None:
             raise RuntimeError("release executor belongs to a retired native launch attempt")
         journal.record_native(_executor_receipt(operation.launch))
         # The health probe trusts the journal to explain an outage only while
-        # this stamp is fresh (shared.release_operation.operation_in_flight).
+        # this stamp is fresh (shared.deploy.release.operation.operation_in_flight).
         with executor_heartbeat(path):
             _drive(journal, path)
 
@@ -52,7 +52,7 @@ def _drive(journal: Journal, path: Path) -> None:
     request = journal.operation.request
     if isinstance(request, PitrRequest):
         from cli.release_transition.pitr.inputs import require_inputs
-        from shared.release_operation import authorized_pitr
+        from shared.deploy.release.operation import authorized_pitr
 
         require_inputs(journal.operation)
         with authorized_pitr(path, journal.pitr_record_write):

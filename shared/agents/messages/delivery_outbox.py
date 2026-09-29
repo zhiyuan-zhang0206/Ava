@@ -66,8 +66,8 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
 from shared.agents.messages.delivery_outbox_types import FlushReport
-from shared.atomic_io import write_text_atomic
 from shared.daemon.schedules import completion_notices
+from shared.host.atomic_io import write_text_atomic
 from shared.log import logger
 from shared.paths import ava_home
 from shared.turn_identity import effective_agent_id

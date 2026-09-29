@@ -76,6 +76,7 @@ from pathlib import Path
 import psycopg
 
 from shared.db import PG_KEEPALIVE_KWARGS
+from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME as WHEEL_RUNTIME
 from shared.dotenv_boot import checkout_anchored_home
 from shared.log import logger
 from shared.machine import MachineNameMissing, machine_name
@@ -105,7 +106,6 @@ from shared.migration_layout import untracked_migration_files as untracked_migra
 from shared.migration_layout import validate_migration_layout as validate_migration_layout
 from shared.migration_layout import validate_migrations_at_ref as validate_migrations_at_ref
 from shared.platform import CREATE_NO_WINDOW as CREATE_NO_WINDOW
-from shared.runtime_interpreter import WHEEL_RUNTIME as WHEEL_RUNTIME
 from shared.runtime_migration import ReleaseMigrationContext
 from shared.runtime_migration import installed_migration_paths as installed_migration_paths
 
@@ -243,7 +243,7 @@ def _schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
     `_run_gateway_local_update`, a manual / watchdog `ava start`, a recovery
     `rollback_to` — on one key, so a second mutator blocks until the first
     finishes instead of racing and losing on the `schema_migrations` primary key.
-    Independent of the TTL'd cluster-update lock (`shared.cluster_lock`): that one
+    Independent of the TTL'd cluster-update lock (`shared.deploy.state.cluster_lock`): that one
     serializes whole rollout orchestrations; this one guards the mutation step
     itself, so even non-orchestration mutators (the bootstrap `ava start`) are safe
     without entangling bootstrap with the rollout lock.

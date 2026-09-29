@@ -67,9 +67,9 @@ from shared.host.converge.accessibility import (
 )
 from shared.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
 from shared.host.converge.screen_capture import clear_status, write_status
+from shared.host.system.probes import browser_incapability
 from shared.lgtm_local import BACKENDS
 from shared.machine import MachineRoles
-from shared.platform_probes import browser_incapability
 
 __all__ = [
     "ALL_ROLES",
@@ -144,7 +144,7 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:  # noqa: ARG001
         return
     if not settings.services.permissions_helper_enabled:
         raise RuntimeError("macOS root supervision requires the permissions helper")
-    from shared.platform_probes import permissions_helper_incapability
+    from shared.host.system.probes import permissions_helper_incapability
 
     reason = permissions_helper_incapability()
     if reason is not None:
@@ -231,7 +231,7 @@ def _ensure_screen_capture(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     host that cannot run one, that step already said so, and a derived second
     complaint here would be noise rather than news.
     """
-    from shared.platform_probes import permissions_helper_incapability
+    from shared.host.system.probes import permissions_helper_incapability
 
     if (
         not settings.services.permissions_helper_enabled
@@ -260,7 +260,7 @@ def _ensure_accessibility(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     helper's answer for the next agent startup to report, after the helper has
     been brought up and only where it can exist.
     """
-    from shared.platform_probes import permissions_helper_incapability
+    from shared.host.system.probes import permissions_helper_incapability
 
     if (
         not settings.services.permissions_helper_enabled
@@ -555,7 +555,7 @@ def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool)
 
 def _desired_service_names(roles: MachineRoles | None) -> frozenset[str]:
     from cli.commands._repo import _services_for_roles_annotated
-    from shared.service_selection import read_selection
+    from shared.deploy.lifecycle.service_selection import read_selection
 
     if roles is None:
         return frozenset()
@@ -570,10 +570,10 @@ def _desired_service_names(roles: MachineRoles | None) -> frozenset[str]:
 def cmd_converge() -> int:
     """`ava converge` — bring this host to the state the current code expects (idempotent)."""
     from cli.commands import _repo
-    from shared import maintenance
+    from shared.deploy.maintenance import admission
     from shared.platform import raise_fd_limit
 
-    maintenance.require_start_allowed()
+    admission.require_start_allowed()
     raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
     repo = _repo._repo_root()
     roles = _repo._roles_or_none()

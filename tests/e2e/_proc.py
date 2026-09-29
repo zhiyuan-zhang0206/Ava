@@ -555,7 +555,7 @@ def fixture_entrypoint() -> None:
     """
     import runpy
 
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     gate, module, *arguments = sys.argv[1:]
     path = Path(gate)

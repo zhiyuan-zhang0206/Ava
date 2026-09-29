@@ -61,7 +61,7 @@ class ServiceCustody:
             "stage": "running",
             "processes": [asdict(item) for item in sorted(identities, key=lambda p: p.pid)],
         }
-        from shared.atomic_io import write_text_atomic
+        from shared.host.atomic_io import write_text_atomic
 
         self._expected = json.dumps(self._body)
         if os.name == "nt":

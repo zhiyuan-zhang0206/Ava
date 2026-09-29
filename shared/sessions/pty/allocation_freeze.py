@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, cast
 
-from shared.atomic_io import fsync_parent, write_text_atomic
+from shared.host.atomic_io import fsync_parent, write_text_atomic
 from shared.platform import file_lock
 
 SCHEMA_VERSION = 1

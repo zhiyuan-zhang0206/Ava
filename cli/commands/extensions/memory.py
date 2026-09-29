@@ -17,9 +17,9 @@ from typing import TypedDict, cast
 
 import httpx
 
+from shared.deploy.git.memory_repo import MemoryBranchMismatch
 from shared.http_dial import post as dial_post
 from shared.machine import gateway_api_base, gateway_auth_headers
-from shared.memory_repo import MemoryBranchMismatch
 
 _TIMEOUT_S = 30.0
 

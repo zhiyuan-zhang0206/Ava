@@ -24,8 +24,8 @@ from cli.release_transition.request import ReleaseRef, sql_inventory
 from scripts.preview import local
 from scripts.preview.linux_observer import _require_context
 from scripts.preview.linux_runtime import bound_runtime
-from shared.runtime_release import VerifiedRelease, current_pointer
-from shared.verified_file import regular_bytes
+from shared.deploy.release.runtime_release import VerifiedRelease, current_pointer
+from shared.deploy.release.verified_file import regular_bytes
 
 # The captured watch window of each cycle release: long enough for the
 # coordinator's own samples, short against the 900 s executor wait.
@@ -92,7 +92,7 @@ def prepare(
 ) -> None:
     """Capture both images; each release request is built later, at its dispatch,
     by the public `ava cluster release request` in the then-admitted image."""
-    from shared.os_boot_unit import systemd_running, unit_name
+    from shared.host.system.boot_unit import systemd_running, unit_name
 
     if not systemd_running():
         raise RuntimeError("image cycle requires the native Linux system manager")

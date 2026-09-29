@@ -165,7 +165,7 @@ def test_enrollment_commands_refuse_while_a_release_operation_is_incomplete(
     monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: True)
     monkeypatch.setattr("shared.paths.ava_home", lambda: gateway)
     monkeypatch.setattr(
-        "shared.release_operation.require_configuration_write_authorized", incomplete
+        "shared.deploy.release.operation.require_configuration_write_authorized", incomplete
     )
     for command in (
         cluster_cmd.cmd_db_authority_rotate_enrollment,

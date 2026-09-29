@@ -31,7 +31,7 @@ database). A routed failure's traceback lands there.
 
 While it runs, the executor stamps `updates/<id>/executor-heartbeat` from a
 thread every `LEASE_RENEW_INTERVAL_S` and removes it when it leaves
-(`shared/release_operation.py::executor_heartbeat`). The health probe lets an
+(`shared/deploy/release/operation.py::executor_heartbeat`). The health probe lets an
 incomplete operation explain an outage only while that stamp is at most
 `EXECUTOR_HEARTBEAT_TTL_S` old; before the first beat, the stamp the
 submission and each native dispatch leave (`open_launch_grace`). Past it the
@@ -77,7 +77,7 @@ receipt. A durable serving marker is not a substitute for a live observation.
 `stage.py` admits the captured image and uses ordinary `run_start`. Release
 startup does not mutate an editable checkout, install dependencies, migrate, or
 silently prepare external assets. After observation, `boot.py` becomes the
-steady pinned-image boot action on Linux; on macOS the keeper's pinned seed is. `shared/release_operation.py` blocks unrelated
+steady pinned-image boot action on Linux; on macOS the keeper's pinned seed is. `shared/deploy/release/operation.py` blocks unrelated
 ordinary startup while an operation remains incomplete. Only the exact current
 starting journal revision grants the in-process start capability; child
 processes do not inherit it.

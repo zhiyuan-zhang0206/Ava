@@ -37,8 +37,8 @@ from urllib.parse import unquote, urlsplit
 from cli.commands._rendered_file import write_rendered_guarded
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._otel_collector_exporters import BACKEND_EXPORTERS, RELAY_EXPORTERS
-from shared import collector_artifact
-from shared.atomic_io import write_text_atomic
+from shared.deploy.release import collector_artifact
+from shared.host.atomic_io import write_text_atomic
 from shared.machine import MachineRoles
 from shared.observability import collector_allowed_for_home
 
@@ -497,7 +497,7 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
     and skip — the sidecar session will not start and the agent preflight
     disables OTLP export with a reported warning.
     """
-    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_otel_binary
+    from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_otel_binary
 
     if WHEEL_RUNTIME:
         binary = runtime_otel_binary()

@@ -39,14 +39,15 @@ from pathlib import Path
 from loguru import logger
 
 from cli.commands.extensions.skills_sync import _Source, iter_sources
-from shared import host_version, install_registry, paths, plugin_manifest
+from shared import install_registry, paths, plugin_manifest
 from shared.config import settings
+from shared.deploy.git import host_version
 from shared.deploy.git.gitenv import git_env
-from shared.os_cron import os_jobs_enabled
+from shared.host.proc import run_bounded
+from shared.host.system.cron import os_jobs_enabled
 from shared.packages.skills import skill_scan
 from shared.packages.skills.skill_names import match_key
 from shared.platform import LockTimeoutError, file_lock
-from shared.proc import run_bounded
 
 # Backoff: failures double the effective interval, capped after this many
 # doublings (so a repeatedly failing package still re-checks about weekly).

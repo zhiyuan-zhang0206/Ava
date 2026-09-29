@@ -14,8 +14,8 @@ from dotenv import dotenv_values
 
 from cli.start_identity import read_intent
 from scripts import cutover_adopt_home as adopt
-from shared import pause_owner
 from shared.cluster import home_slug
+from shared.deploy.maintenance import pause_owner
 from tests.lifecycle.cutover.conftest import (
     CANARY,
     MACHINE_KEY,
@@ -163,8 +163,8 @@ def _assert_gateway_jobs(legacy: LegacyHome) -> None:
 def test_gateway_adoption_completes_the_port_block_and_translates_selection(
     make_legacy: Make, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import service_selection
     from shared.config import settings
+    from shared.deploy.lifecycle import service_selection
 
     legacy = make_legacy(roles=("gateway", "agent-runner"), platform="linux")
     records = legacy.registry_records()
@@ -196,8 +196,8 @@ def test_the_cutover_hold_is_a_standing_maintenance_hold(
 ) -> None:
     legacy = make_legacy()
     assert _run(legacy, "--execute", "--cutover-id", "c2") == 0
-    from shared import maintenance
     from shared.config import settings
+    from shared.deploy.maintenance import admission as maintenance
 
     monkeypatch.setattr(settings.general, "ava_home", str(legacy.home))
     hold = _journal(legacy)["hold"]
@@ -282,8 +282,8 @@ def test_a_remote_units_held_start_installs_its_capability_bundle(
     make_legacy: Make, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import cli.start_intent
-    from shared import start_serving
     from shared.config import settings
+    from shared.deploy.lifecycle import start_serving
 
     legacy = make_legacy()
     assert _run(legacy, "--execute") == 0
@@ -621,8 +621,9 @@ def test_held_start_runs_start_inside_the_hold_and_leaves_it_closed(
     make_legacy: Make, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import cli.start_intent
-    from shared import maintenance, start_serving
     from shared.config import settings
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission as maintenance
 
     legacy = make_legacy(roles=("gateway", "agent-runner"))
     argv = ["--home", str(legacy.home), "--start"]
@@ -678,8 +679,9 @@ def test_a_completed_legacy_stop_hold_becomes_the_cutover_hold(
     make_legacy: Make, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import cli.start_intent
-    from shared import maintenance, start_serving
     from shared.config import settings
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission as maintenance
 
     legacy = make_legacy()
     doc = _legacy_stop_hold(legacy)

@@ -205,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     # cannot retry a failed job for us (Linux cron `@reboot`, Windows ONLOGON):
     # `ava start` re-run while the machine is still coming up. Dispatched here,
     # before the settings-gated import, so it can retry a start that failed for
-    # ANY reason — a settings error included. See shared/boot_policy.py.
+    # ANY reason — a settings error included. See shared/host/system/boot_policy.py.
     if args_in and args_in[0] == "boot":
         from cli.boot_retry import run_boot
 

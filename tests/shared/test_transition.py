@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from shared.transition import transition_severity
+from shared.deploy.transition import transition_severity
 
 
 @pytest.mark.parametrize(

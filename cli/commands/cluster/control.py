@@ -346,8 +346,8 @@ def _gateway_authority_home(verb: str) -> Path | None:
     """
     from shared.bootstrap import config_source_is_local
     from shared.config import settings
+    from shared.deploy.release.operation import require_configuration_write_authorized
     from shared.paths import ava_home
-    from shared.release_operation import require_configuration_write_authorized
 
     if not config_source_is_local() or settings.data_plane.is_remote:
         print(

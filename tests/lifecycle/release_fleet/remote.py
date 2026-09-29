@@ -42,7 +42,7 @@ from cli.release_transition.journal import (
 )
 from cli.release_transition.request import ReleaseRef
 from shared.cluster.authority.unit import UnitIdentity, ensure_enrollment
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance.state import MaintenanceHold
 from tests.lifecycle.release_fleet.fakes import OffDutyGateway
 from tests.lifecycle.transition.phases import journal_fence, journal_issue
 

@@ -13,7 +13,7 @@ import logging
 from datetime import datetime
 
 from shared.api_contracts.status import MachineStatus
-from shared.cluster_lock import DeployLease
+from shared.deploy.state.cluster_lock import DeployLease
 
 _log = logging.getLogger("gateway.routers._roster_rows")
 

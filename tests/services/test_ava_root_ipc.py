@@ -238,8 +238,8 @@ async def test_serving_reads_bound_runtime_from_native_peer(
     short_tmp: Path, monkeypatch: pytest.MonkeyPatch, bad: str | None
 ) -> None:
     """Real local transport plus strict local receipt; no application launch."""
-    from shared import start_serving
-    from shared.runtime_interpreter import LoadedRuntimeIdentity
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 
     short_tmp = short_tmp.resolve()
     runtime = LoadedRuntimeIdentity(

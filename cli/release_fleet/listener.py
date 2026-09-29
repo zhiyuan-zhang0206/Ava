@@ -58,7 +58,10 @@ from shared.cluster.authority.channel import (
     verify_request,
 )
 from shared.cluster.authority.unit import Enrollment, UnitIdentity, load_enrollment
-from shared.deploy_timing import COORDINATOR_READ_TIMEOUT_S, COORDINATOR_REQUEST_DEADLINE_S
+from shared.deploy.progress_timeout import (
+    COORDINATOR_READ_TIMEOUT_S,
+    COORDINATOR_REQUEST_DEADLINE_S,
+)
 from shared.log import logger
 
 MAX_BODY_BYTES = 64 * 1024

@@ -1067,8 +1067,8 @@ def test_expiry_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> N
 def test_closure_restores_six_native_owners(db_conn: psycopg.Connection, ending: str) -> None:
     from shared.agents.impersonation.impersonation_maintenance import reap_impersonations
     from shared.db import pool
-    from shared.maintenance_cohort import _classify, _RuntimeRow
-    from shared.maintenance_state import MaintenanceHold
+    from shared.deploy.maintenance.cohort import _classify, _RuntimeRow
+    from shared.deploy.maintenance.state import MaintenanceHold
 
     host = uuid4()
     owners: list[int] = []

@@ -25,7 +25,7 @@ from cli.release_fleet.workload import CORE_SIGNALS, AgentReport, CoreReport, Un
 from cli.release_transition.authority_evidence import GenerationRef
 from cli.release_transition.journal import Journal, Operation
 from cli.release_transition.request import ReleaseRef
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance.state import MaintenanceHold
 from tests.lifecycle.transition.phases import generation
 
 

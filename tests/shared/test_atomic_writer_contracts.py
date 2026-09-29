@@ -1,4 +1,4 @@
-"""Observable contracts of the writers being moved to shared.atomic_io."""
+"""Observable contracts of the writers being moved to shared.host.atomic_io."""
 
 from __future__ import annotations
 
@@ -14,16 +14,13 @@ import pytest
 
 from cli.commands.observability import grafana_render, observatory_urls, otel_collector
 from ops import pty_close_notices
-from shared import (
-    atomic_io,
-    coding_session_owner_record,
-    editable_install,
-    home_lifecycle_locks,
-    pause_owner,
-    start_serving,
-)
-from shared import updater_handoff as handoff
+from shared import coding_session_owner_record
 from shared.agents.messages import delivery_outbox
+from shared.deploy.lifecycle import home_lifecycle_locks, start_serving
+from shared.deploy.maintenance import pause_owner
+from shared.deploy.release import editable_install
+from shared.deploy.updater import handoff as handoff
+from shared.host import atomic_io
 from shared.sessions.pty import allocation_freeze
 from tests.shared.test_updater_handoff import (
     _isolated as _isolated,

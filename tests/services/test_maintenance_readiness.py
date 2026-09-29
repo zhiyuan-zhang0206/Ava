@@ -17,11 +17,14 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from gateway.app import app
 from services.agent_ops import daemon
-from shared import config, host_deploy_state, maintenance, pause_owner, start_serving
+from shared import config
 from shared import runtime_config as rt
 from shared.cluster_auth import bearer_header
 from shared.config import settings
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.lifecycle import start_serving
+from shared.deploy.maintenance import admission, pause_owner
+from shared.deploy.maintenance.state import MaintenanceHold
+from shared.deploy.state import host_deploy_state
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -43,7 +46,7 @@ def test_gateway_health_probes_database_during_hold_and_business_stays_closed() 
         assert health.json()["name"] == "gateway"
         assert health.json()["status"] == "ok"
         assert client.get("/api/agents").status_code == 503
-    assert maintenance.held()
+    assert admission.held()
     assert not start_serving.is_serving()
 
 
@@ -61,7 +64,7 @@ def test_held_gateway_health_still_reports_database_failure(
         assert response.status_code == 503
         assert response.json()["status"] == "degraded"
         assert "PoolTimeout" in response.text
-    assert maintenance.held()
+    assert admission.held()
     assert not start_serving.is_serving()
 
 
@@ -91,7 +94,7 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
         def inspect_before_drain() -> None:
             response = client.get("/api/agents")
             assert response.status_code == 200, response.text
-            current = maintenance.snapshot()
+            current = admission.snapshot()
             assert current is not None and current.maintenance is not None
             assert current.maintenance.phase == "preparing"
             raise ProbeBoundaryError
@@ -102,7 +105,7 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
         with pytest.raises(ProbeBoundaryError):
             agent_pause.prepare("fleet", WHEN)
     # The release's abort, not the drain, releases the hold (cli/release_fleet).
-    assert maintenance.held()
+    assert admission.held()
 
 
 @pytest.mark.usefixtures("held")
@@ -114,7 +117,7 @@ def test_held_health_exemption_preserves_authentication(monkeypatch: pytest.Monk
         # the authenticated status surface public too.
         assert client.get("/api/health").status_code == 200
         assert client.get("/api/cluster/status").status_code == 401
-    assert maintenance.held()
+    assert admission.held()
 
 
 @pytest.mark.usefixtures("held")
@@ -140,7 +143,7 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
         status = await request("status_probe", {})
         assert status["status"] == "completed"
         assert status["result"]["paused"] is True
-        assert maintenance.held()
+        assert admission.held()
 
 
 @pytest.mark.usefixtures("held")
@@ -149,7 +152,7 @@ def test_maintenance_start_waiver_does_not_publish_ready(monkeypatch: pytest.Mon
 
     monkeypatch.setattr("cli.commands.start.cmd_start", MagicMock(return_value=0))
     assert cli_maintenance._start("update", WHEN) != 0
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.phase == "starting"
 
@@ -184,7 +187,7 @@ def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
     payload = "".join(body.values())
     for role in (served_gateway_home.roles.runner, served_gateway_home.roles.gateway):
         assert role.name not in payload and role.password not in payload
-    assert maintenance.business_paused()
+    assert admission.business_paused()
 
 
 @pytest.mark.usefixtures("held")
@@ -227,4 +230,4 @@ def test_a_runners_held_first_start_joins_a_held_gateway(
         )
     installed = unit.require_unit_capability(runner)
     assert installed.api is not None and not bundle.exists()
-    assert maintenance.business_paused()
+    assert admission.business_paused()

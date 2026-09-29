@@ -60,10 +60,10 @@ from agent.turn_progress import (
     turn_progress_snapshot,
 )
 from services.agent_host.runtime import _active_turn_config_fingerprint
-from shared import maintenance
+from shared.deploy.maintenance import admission
+from shared.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 from shared.hosted_db_wait import database_wait_snapshot
 from shared.log import logger
-from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 
 # The pattern one subscription covers: every agent's inbound channel. Kept
 # derived from `inbound_channel` (via the shared prefix) so the publish side
@@ -721,7 +721,7 @@ class InboundWakeDispatcher:
             return
         if self._stale_after_s is None:
             raise RuntimeError("hosted pending scan configured without stale_after_s")
-        if maintenance.in_stop_leg():
+        if admission.in_stop_leg():
             # Leave pending rows for the start leg, which scans even while held;
             # pub/sub has no replay. The operator owns stop-leg cancellation.
             return

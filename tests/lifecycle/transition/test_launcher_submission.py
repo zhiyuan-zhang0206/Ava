@@ -17,7 +17,8 @@ from pydantic import JsonValue
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, submit
 from cli.release_transition import launcher_linux as linux
-from shared import os_boot_unit, paths
+from shared import paths
+from shared.host.system import boot_unit
 from tests.lifecycle.transition.phases import advance_to
 from tests.lifecycle.transition.test_launcher_linux import (
     _closed_attempt,
@@ -33,7 +34,7 @@ def _request_file(plan: dict[str, JsonValue], monkeypatch: pytest.MonkeyPatch) -
     request_path = operation.request.path.with_name("request.json")
     request_path.write_text(operation.request.model_dump_json())
     monkeypatch.setattr(paths, "ava_home", lambda: Path(operation.request.home))
-    monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: True)
+    monkeypatch.setattr(boot_unit, "systemd_running", lambda: True)
     monkeypatch.setattr(submit, "GatewayUnit", _unexpected)
     return request_path
 

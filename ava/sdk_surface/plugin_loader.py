@@ -204,7 +204,7 @@ def scan_and_load(
     imported.
     """
     if plugin_dir is None:
-        from shared.runtime_interpreter import external_plugin_read_root
+        from shared.deploy.release.runtime_interpreter import external_plugin_read_root
 
         root = external_plugin_read_root()
     else:

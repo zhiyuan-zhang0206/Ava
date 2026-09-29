@@ -21,10 +21,11 @@ from ops.rpc_schemas import (
     FieldWriteResult,
     HostConfigField,
 )
-from shared import host_config_validators, runtime_config
+from shared import runtime_config
 from shared.config import env_override_values, field_domain, get_config_metadata
 from shared.config.candidate import validate_env_patch_for_write
 from shared.config.editing import field_editable, split_reducer_patch
+from shared.host import config_validators
 from shared.machine import machine_name
 
 SENSITIVE_MASK = "••••••••"
@@ -53,7 +54,7 @@ def config_read_op() -> ConfigReadResult:
         value = meta.current_value
         if meta.sensitive and value:
             value = SENSITIVE_MASK
-        cap = host_config_validators.read_time_capability(meta.name)
+        cap = config_validators.read_time_capability(meta.name)
         host_fields[meta.name] = HostConfigField(
             value=value,
             overridden=meta.name in set_fields,
@@ -129,7 +130,7 @@ def config_write_op(
             # Explicit unset — no value to validate.
             results[field] = FieldWriteResult(ok=True, reason=None)
             continue
-        vr = host_config_validators.validate(field, value)
+        vr = config_validators.validate(field, value)
         results[field] = FieldWriteResult(ok=vr.ok, reason=vr.reason)
 
     # all() over an empty dict is True, so an empty payload is trivially applied.

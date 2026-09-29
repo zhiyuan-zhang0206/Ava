@@ -33,7 +33,7 @@ def cmd_cluster_recover() -> int:
     """
     from cli.cutover_hold import release_command, standing_hold
     from ops.ops_cluster import ClusterUpdateInProgress, cluster_recover_op
-    from shared.cluster_lock import update_lock_holder
+    from shared.deploy.state.cluster_lock import update_lock_holder
     from shared.paths import ava_home
 
     if (cutover := standing_hold(ava_home())) is not None:

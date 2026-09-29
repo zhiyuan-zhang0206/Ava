@@ -196,7 +196,7 @@ def read_journal(home: Path) -> dict[str, Any] | None:
     completed `intent` step no longer has its start intent: a rollback (R0, R1)
     undid that adoption, and a retry must not read the home as adopted."""
     from cli.start_identity import INTENT_NAME
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.verified_file import regular_bytes
 
     path = home / ADOPTION_JOURNAL
     try:
@@ -309,7 +309,7 @@ def _pidfiles(facts: Facts) -> None:
 
 
 def _pause_owner(facts: Facts) -> None:
-    from shared import pause_owner
+    from shared.deploy.maintenance import pause_owner
 
     snapshot = pause_owner.read_for_home(facts.home)
     hold = snapshot.maintenance

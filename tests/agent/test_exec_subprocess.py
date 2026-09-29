@@ -35,9 +35,9 @@ from agent.graph._exec_result import (
 from agent.graph._exec_stream import ExecOutputChunkPublisher
 from agent.graph._exec_subprocess import _run_in_subprocess
 from shared.config import settings
+from shared.host.proc import kill_process_tree
 from shared.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from shared.paths import logs_dir
-from shared.proc import kill_process_tree
 from tests._test_env_file import rewrite_line
 
 _AGENT_ID = 424242

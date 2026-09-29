@@ -1,4 +1,4 @@
-"""`shared/memory_repo.py` unit tests — role-aware branch_name, pull_main git
+"""`shared/deploy/git/memory_repo.py` unit tests — role-aware branch_name, pull_main git
 argument sequence, and the gateway init() auto-switch onto main.
 
 Identity is stubbed at its source via shared.machine.set_identity (the same
@@ -16,9 +16,9 @@ from typing import ClassVar
 
 import pytest
 
-from shared import memory_repo
 from shared.config import settings
 from shared.config.general import GeneralSettings
+from shared.deploy.git import memory_repo
 from shared.machine import reset_identity, set_identity
 from shared.paths import gateway_memory_dir
 

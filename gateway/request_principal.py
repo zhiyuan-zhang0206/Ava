@@ -85,8 +85,8 @@ def _session_key(home: Path, *, create: bool) -> bytes | None:
     None when absent and `create` is false (then no session authenticates).
     Losing the file ends every session; the next login mints a new key.
     """
-    from shared.private_storage import create_private_bytes, private_file_problem
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.verified_file import regular_bytes
+    from shared.host.private_storage import create_private_bytes, private_file_problem
 
     path = session_key_path(home)
     if create and not path.exists():

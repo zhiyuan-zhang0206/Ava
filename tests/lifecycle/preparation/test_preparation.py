@@ -14,15 +14,15 @@ import pytest
 from cli.release_build import ApplicationBuild
 from cli.release_prepare import FileInput, LocalInputs, Preparation, PreparationReceipt, TreeInput
 from cli.release_prepare import prepare as preparation
-from shared.runtime_abi import current_abi
-from shared.runtime_prepare import PrepareInputs, inventory_digest, tree_inventory
-from shared.runtime_release import (
+from shared.deploy.release.runtime_prepare import PrepareInputs, inventory_digest, tree_inventory
+from shared.deploy.release.runtime_release import (
     MANIFEST_VERSION,
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
     verify_release,
 )
+from shared.runtime_abi import current_abi
 
 # ruff: noqa: S603 -- commands operate only on a generated fixture repository or isolated test child.
 

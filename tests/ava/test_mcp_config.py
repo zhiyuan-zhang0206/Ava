@@ -312,7 +312,7 @@ def test_assert_requirements_noop_without_requires() -> None:
 
 
 def test_assert_requirements_display_ok_with_display(monkeypatch: pytest.MonkeyPatch) -> None:
-    # display_available is imported into cfg_mod from shared.platform_probes;
+    # display_available is imported into cfg_mod from shared.host.system.probes;
     # patch the bound name (where assert_requirements calls it).
     monkeypatch.setattr(cfg_mod, "display_available", lambda: True)
     cfg_mod.assert_requirements({"requires": {"display": True}})  # no raise

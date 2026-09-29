@@ -1,6 +1,6 @@
 """services.browser.daemon — capability assertion, arg construction, and the
 exec entrypoint. The three-prong capability check (display + Chrome + npx) now
-lives in shared.platform_probes.browser_incapability (tested per-prong in
+lives in shared.host.system.probes.browser_incapability (tested per-prong in
 tests/shared/test_platform_probes.py); assert_browser_capable is a thin raising
 wrapper over it, so these tests patch browser_incapability as bound in the daemon
 module. The real exec is not unit-tested (it replaces the process); the testable

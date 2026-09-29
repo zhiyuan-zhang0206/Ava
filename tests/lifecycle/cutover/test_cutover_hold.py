@@ -18,9 +18,10 @@ import pytest
 
 from cli.commands._pause_resume import resume_after_start
 from scripts import cutover_adopt_home as adopt
-from shared import maintenance, start_serving
 from shared.config import settings
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.lifecycle import start_serving
+from shared.deploy.maintenance import admission
+from shared.deploy.maintenance.state import MaintenanceHold
 from tests.lifecycle.cutover.conftest import SERVICE_PATH, LegacyHome
 
 Make = Callable[..., LegacyHome]
@@ -48,7 +49,7 @@ def _bare_start(monkeypatch: pytest.MonkeyPatch) -> tuple[Callable[[], int], Mag
 
     @resume_after_start
     def start() -> int:
-        authorized.append(maintenance.start_authorized())
+        authorized.append(admission.start_authorized())
         return 0
 
     return start, unpause, authorized
@@ -60,8 +61,8 @@ def test_a_start_after_the_held_first_start_keeps_the_cutover_hold(
     """A reboot's autostart (or a typed `ava start`) between the held first start
     and the go/no-go gate brings the unit up and leaves business closed."""
     legacy, holder, at = _adopted(make_legacy, monkeypatch)
-    maintenance.set_phase(holder, at, "starting")
-    maintenance.set_phase(holder, at, "ready")
+    admission.set_phase(holder, at, "starting")
+    admission.set_phase(holder, at, "ready")
     start, unpause, authorized = _bare_start(monkeypatch)
     capsys.readouterr()
 
@@ -69,9 +70,9 @@ def test_a_start_after_the_held_first_start_keeps_the_cutover_hold(
 
     assert authorized == [True]
     unpause.assert_not_called()
-    current = maintenance.require_operation(holder, at)
+    current = admission.require_operation(holder, at)
     assert current.maintenance is not None and current.maintenance.phase == "ready"
-    assert maintenance.business_paused()
+    assert admission.business_paused()
     out = capsys.readouterr().out
     assert f"cutover_adopt_home.py --home {legacy.home} --resume" in out
     assert "hold released" not in out
@@ -89,7 +90,7 @@ def test_a_start_that_passes_readiness_completes_a_starting_cutover_hold(
     it to `ready`, so the release command it prints is accepted; a start that is
     not serving leaves `starting` and prints no release command."""
     _legacy, holder, at = _adopted(make_legacy, monkeypatch)
-    maintenance.set_phase(holder, at, "starting")
+    admission.set_phase(holder, at, "starting")
     start, unpause, authorized = _bare_start(monkeypatch)
     monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
     capsys.readouterr()
@@ -98,10 +99,10 @@ def test_a_start_that_passes_readiness_completes_a_starting_cutover_hold(
 
     assert authorized == [True]
     unpause.assert_not_called()
-    current = maintenance.require_operation(holder, at)
+    current = admission.require_operation(holder, at)
     assert current.maintenance is not None
     assert current.maintenance.phase == ("ready" if serving else "starting")
-    assert maintenance.business_paused()
+    assert admission.business_paused()
     assert ("--resume" in capsys.readouterr().out) == serving
 
 
@@ -119,7 +120,7 @@ def test_a_start_before_the_held_first_start_refuses_and_names_it(
     assert str(legacy.home) in str(refused.value)
     assert authorized == []
     unpause.assert_not_called()
-    current = maintenance.require_operation(holder, at)
+    current = admission.require_operation(holder, at)
     assert current.maintenance is not None and current.maintenance.phase == "stopped"
 
 
@@ -168,7 +169,7 @@ def test_maintenance_start_is_no_side_door_around_the_held_first_start(
 
     legacy, holder, at = _adopted(make_legacy, monkeypatch)
     if case == "cutover-starting":
-        maintenance.set_phase(holder, at, "starting")
+        admission.set_phase(holder, at, "starting")
     if case == "later-unreadable-journal":
         holder, at = _LATER
         owner = {
@@ -184,7 +185,7 @@ def test_maintenance_start_is_no_side_door_around_the_held_first_start(
     starts: list[bool] = []
 
     def cmd_start(*, persist_services: bool) -> int:
-        starts.append(maintenance.start_authorized())
+        starts.append(admission.start_authorized())
         return 0
 
     monkeypatch.setattr("cli.commands.start.cmd_start", cmd_start)
@@ -197,10 +198,10 @@ def test_maintenance_start_is_no_side_door_around_the_held_first_start(
     else:
         assert maintenance_command._start(holder, at) == 0
 
-    held = maintenance.require_operation(holder, at).maintenance
+    held = admission.require_operation(holder, at).maintenance
     assert held is not None and held.phase == ("stopped" if refused else "ready")
     assert starts == ([] if refused else [True])
-    assert maintenance.business_paused()
+    assert admission.business_paused()
 
 
 def _journal_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, adopted: bool) -> Path:

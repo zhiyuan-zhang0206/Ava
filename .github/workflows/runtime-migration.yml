@@ -5,7 +5,7 @@ on:
       - 'shared/runtime_migration.py'
       - 'shared/migrations.py'
       - 'shared/migration_layout.py'
-      - 'shared/runtime_release.py'
+      - 'shared/deploy/release/runtime_release.py'
       - 'cli/start_runtime.py'
       - 'cli/start_identity.py'
       - 'cli/start_intent.py'

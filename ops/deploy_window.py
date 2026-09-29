@@ -15,18 +15,18 @@ was shorter than the dangerous one**: Phase B polled each agent-runner back for 
 most a POSIX-era 120 s, and a host that outran that was written off while its
 checkout had moved and its processes had not. The orchestration returns, the
 `finally` releases, and the cluster is open in exactly the state a second deploy must
-not start into. Two things close that: a **settle hold** (`shared.cluster_lock`'s
+not start into. Two things close that: a **settle hold** (`shared.deploy.state.cluster_lock`'s
 settle fields; its writer went with the old phase-based orchestration and has been
 removed as dead code — the read side, `settle_hosts_converged` below, remains live
 for a future writer) keeps the lease held across the window, and
-`shared.deploy_timing` removes the mismatch that opened it — one no-progress
+`shared.deploy.progress_timeout` removes the mismatch that opened it — one no-progress
 definition shared by the poll, the settle TTL and the host-local stall reaper, plus
 a lease renewed while the orchestration runs so its TTL is no longer a budget the
 rollout has to fit inside.
 
 ## The two signals, and why the polarity differs between them
 
-1. **A live lease** (`shared.cluster_lock.read_update_lease`) — the floor. The
+1. **A live lease** (`shared.deploy.state.cluster_lock.read_update_lease`) — the floor. The
    gateway holds it, so it stays true even while the transitioning host is
    unreachable, which is precisely when the danger is highest. Everything else here
    is secondary to it.
@@ -117,7 +117,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 
-from shared.host_deploy_state import POSTURE_IDLE, HostDeployState, read_all
+from shared.deploy.state.host_deploy_state import POSTURE_IDLE, HostDeployState, read_all
 from shared.log import logger
 
 # One short probe per machine, in parallel. This runs on the rollout-refusal path
@@ -362,7 +362,7 @@ def settle_hosts_converged(hosts: list[str]) -> bool:
     if not hosts:
         return False  # an empty recorded set is not evidence of convergence
     try:
-        from shared.cluster_pin import get_cluster_target_sha
+        from shared.deploy.state.cluster_pin import get_cluster_target_sha
 
         pin = get_cluster_target_sha()
     except Exception as exc:
@@ -404,7 +404,7 @@ def _lease_hold() -> DeployWindow | None:
     traceback on the rollback path.
     """
     try:
-        from shared.cluster_lock import read_update_lease
+        from shared.deploy.state.cluster_lock import read_update_lease
 
         lease = read_update_lease()
     except Exception as exc:
@@ -418,7 +418,7 @@ def _lease_hold() -> DeployWindow | None:
             active=True, detail=f"a cluster deploy is in progress — {lease.describe()}"
         )
     if settle_hosts_converged(lease.settle_hosts or []):
-        from shared.cluster_lock import release_settle_hold
+        from shared.deploy.state.cluster_lock import release_settle_hold
 
         if release_settle_hold(lease.holder):
             logger.info(
@@ -432,7 +432,7 @@ def _lease_hold() -> DeployWindow | None:
             # ends HERE, so this is the only place its duration can be printed.
             # Server-side elapsed (`settle_elapsed_s`) — no cross-host clock
             # skew — and the held host set read back from the lease just released.
-            from shared.rollout_telemetry import settle_ended
+            from shared.deploy.rollout_telemetry import settle_ended
 
             settle_ended(dur_s=lease.settle_elapsed_s, hosts=lease.settle_hosts or [])
             return None

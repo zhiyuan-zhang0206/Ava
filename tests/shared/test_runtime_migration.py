@@ -9,20 +9,20 @@ from unittest.mock import MagicMock, patch
 import psycopg
 import pytest
 
-from shared.cluster_lock import DeployLease
 from shared.config import settings
+from shared.deploy.release.runtime_release import (
+    MANIFEST_VERSION,
+    ReleaseRejectedError,
+    file_sha256,
+    verify_release,
+)
+from shared.deploy.state.cluster_lock import DeployLease
 from shared.migrations import (
     MigrationAuthorityMismatch,
     _assert_migration_authority,
 )
 from shared.runtime_abi import current_abi
 from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
-from shared.runtime_release import (
-    MANIFEST_VERSION,
-    ReleaseRejectedError,
-    file_sha256,
-    verify_release,
-)
 
 
 def test_installed_readonly_inventory_rejects_unlisted_and_changed_sql(tmp_path: Path) -> None:
@@ -68,7 +68,7 @@ def test_migration_context_rejects_another_acquisition() -> None:
         acquired_at=datetime(2026, 9, 4, tzinfo=UTC),
     )
     with (
-        patch("shared.cluster_lock.read_update_lease", return_value=other),
+        patch("shared.deploy.state.cluster_lock.read_update_lease", return_value=other),
         pytest.raises(ReleaseRejectedError, match="current rollout"),
     ):
         context.assert_operation(MagicMock())

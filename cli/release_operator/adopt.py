@@ -1,6 +1,6 @@
 """`ava cluster release adopt` — first image selection for a source-run home.
 
-Wires `shared.runtime_release.activate_release(expected_current=None)` plus
+Wires `shared.deploy.release.runtime_release.activate_release(expected_current=None)` plus
 `cli.release_transition.root_service.install_steady` — exactly the sequence
 `scripts/preview/release_cycle_runtime.py::initial` already exercises for the
 preview's own captured bundle — to a real home/registry and a real
@@ -31,9 +31,9 @@ from pathlib import Path
 
 from cli.release_prepare.models import PreparationReceipt
 from cli.release_transition.request import ReleaseRef
+from shared.deploy.release.runtime_release import VerifiedRelease, activate_release, current_pointer
+from shared.deploy.release.verified_file import regular_bytes
 from shared.runtime_abi import current_abi
-from shared.runtime_release import VerifiedRelease, activate_release, current_pointer
-from shared.verified_file import regular_bytes
 
 
 def _host_supports_adoption() -> bool:
@@ -44,10 +44,10 @@ def _host_supports_adoption() -> bool:
 
 
 def _adopt(receipt: Path) -> tuple[ReleaseRef, VerifiedRelease]:
-    from shared.home_lifecycle_locks import resource_lock
+    from shared.deploy.lifecycle.home_lifecycle_locks import resource_lock
+    from shared.host.private_storage import ensure_private_dir
     from shared.paths import ava_home
     from shared.platform import file_lock
-    from shared.private_storage import ensure_private_dir
 
     if not _host_supports_adoption():
         raise ValueError(
@@ -77,8 +77,8 @@ def _select_and_install(home: Path, reference: ReleaseRef, receipt: Path) -> Ver
     from cli.commands.root_driver import require_root_absent
     from cli.release_transition.root_service import install_steady
     from shared.cluster import registry_path
-    from shared.private_storage import ensure_private_dir
-    from shared.release_operation import require_start_authorized
+    from shared.deploy.release.operation import require_start_authorized
+    from shared.host.private_storage import ensure_private_dir
 
     # An operation that activated its candidate leaves the pointer on this
     # receipt's image, which the re-run below would otherwise accept; its boot

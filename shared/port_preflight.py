@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
-import shared.proc
+import shared.host.proc
 from shared.cluster import (
     LEGACY_AVA_PORTS,
     ClusterPorts,
@@ -238,7 +238,7 @@ def _lsof_listeners_on(port: int) -> list[int]:
         )
     try:
         # S603: static argv; the only interpolated piece is an int port.
-        out = shared.proc.run_bounded(argv, capture_output=True, text=True, timeout=10)
+        out = shared.host.proc.run_bounded(argv, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ListenerDiscoveryError(f"listener discovery failed on port {port}: {exc}") from exc
     if out.returncode not in (0, 1) or out.stderr.strip() or (out.returncode == 1 and out.stdout):
@@ -311,7 +311,7 @@ def listener_addrs(port: int) -> set[str]:
         return set()
     try:
         # S603: static argv; the only interpolated piece is an int port.
-        out = shared.proc.run_bounded(argv, capture_output=True, text=True, timeout=10)
+        out = shared.host.proc.run_bounded(argv, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return set()
     if out.returncode != 0:

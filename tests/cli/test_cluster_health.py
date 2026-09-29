@@ -218,9 +218,9 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # (correctly) reports that as "guard skipped" and fails the probe. Unit
     # tests have no prod tree by construction, so stub the lookup itself;
     # check 8's own behavior is pinned by the dedicated tests below.
-    import shared.cluster_drift
+    from shared.deploy.git import cluster_drift
 
-    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: None)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: None)
     return tmp_path
 
 
@@ -432,14 +432,13 @@ def test_source_tree_guard_skipped_is_a_distinct_alert(
     """A blind guard must not look like a clean tree: when
     ``source_tree_violations`` reports the guard as skipped, the probe names
     the failure 'guard skipped' (with the reason), never 'tampered'."""
-    import shared.cluster_drift
-    import shared.source_tree_guard
+    from shared.deploy.git import cluster_drift, source_tree_guard
 
     def _violations_skipped(_repo: Path) -> tuple[str, ...]:
         return ("guard skipped: git unavailable",)
 
-    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
-    monkeypatch.setattr(shared.source_tree_guard, "source_tree_violations", _violations_skipped)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
+    monkeypatch.setattr(source_tree_guard, "source_tree_violations", _violations_skipped)
 
     failure = cluster_health._source_tree_failure(tmp_path)
 
@@ -456,14 +455,13 @@ def test_source_tree_check_skips_a_home_that_runs_a_selected_image(
 ) -> None:
     """A home with a selected release image executes verified image bytes, so a
     leftover checkout cannot reach running code: its state is not an alert."""
-    import shared.cluster_drift
-    import shared.source_tree_guard
+    from shared.deploy.git import cluster_drift, source_tree_guard
 
     def _tampered(_repo: Path) -> tuple[str, ...]:
         return ("tracked change: M tracked.txt",)
 
-    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
-    monkeypatch.setattr(shared.source_tree_guard, "source_tree_violations", _tampered)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
+    monkeypatch.setattr(source_tree_guard, "source_tree_violations", _tampered)
     _select_release(
         tmp_path, '{"artifact_digest":"' + "a" * 64 + '","manifest_digest":"' + "b" * 64 + '"}'
     )
@@ -475,12 +473,12 @@ def test_source_tree_check_reports_an_unreadable_release_selector(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """An unreadable selector leaves the executing code unknown — never healthy."""
-    import shared.source_tree_guard
+    from shared.deploy.git import source_tree_guard
 
     def _unexpected(_repo: Path) -> tuple[str, ...]:
         raise AssertionError("an unknown runtime origin must not be judged as a checkout")
 
-    monkeypatch.setattr(shared.source_tree_guard, "source_tree_violations", _unexpected)
+    monkeypatch.setattr(source_tree_guard, "source_tree_violations", _unexpected)
     _select_release(tmp_path, "not json")
 
     failure = cluster_health._source_tree_failure(tmp_path)
@@ -697,7 +695,7 @@ def test_service_probes_respect_durable_service_intent(
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
     import ops.service_spec as _service_spec
-    from shared import service_selection
+    from shared.deploy.lifecycle import service_selection
 
     wanted = _service_spec.ServiceSpec("gateway", "unused", frozenset({"gateway"}), True)
     excluded = _service_spec.ServiceSpec("frontend", "unused", frozenset({"gateway"}), False)
@@ -727,7 +725,7 @@ def test_service_probes_unreadable_selection_is_unhealthy(monkeypatch: pytest.Mo
         raise ValueError("corrupt selection")
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("shared.service_selection.read_selection", unreadable)
+    monkeypatch.setattr("shared.deploy.lifecycle.service_selection.read_selection", unreadable)
     assert cluster_health._service_probes() == ["service selection unavailable (corrupt selection)"]
 
 
@@ -1820,11 +1818,11 @@ def test_agent_min_explicit_overrides_settings(
 @pytest.fixture
 def _prod_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the probe at a throwaway prod checkout, never the real venv."""
-    import shared.cluster_drift
+    from shared.deploy.git import cluster_drift
 
     source_root = tmp_path / "prod" / "source"
     source_root.mkdir(parents=True)
-    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: source_root)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: source_root)
     return source_root
 
 
@@ -1880,9 +1878,9 @@ def test_editable_install_no_prod_source_is_silent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No installed prod checkout → nothing to probe (runner-only hosts)."""
-    import shared.cluster_drift
+    from shared.deploy.git import cluster_drift
 
-    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: None)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: None)
     assert cluster_health._editable_install_failure() is None
 
 

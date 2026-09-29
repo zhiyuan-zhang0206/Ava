@@ -47,9 +47,9 @@ from typing import Literal, cast
 from dotenv import dotenv_values
 
 from services.gateway_side.backup import passphrase
+from shared.deploy.release.verified_file import regular_bytes
 from shared.envfile import upsert_env
-from shared.private_storage import write_private_bytes
-from shared.verified_file import regular_bytes
+from shared.host.private_storage import write_private_bytes
 
 _TOKEN_BYTES = 32
 _SECRET_ENV = "AVA_CLUSTER_SECRET"  # noqa: S105 — env key name, not a credential

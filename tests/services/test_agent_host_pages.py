@@ -102,8 +102,8 @@ async def test_page_reconcile_forever_skips_passes_while_quiesced(
 ) -> None:
     """A stop-window unit runs no pass — probing would borrow the released
     pools — and resumes its passes once the window ends."""
-    from shared import maintenance
     from shared.config import settings
+    from shared.deploy.maintenance import admission
 
     state = {"quiesced": True}
     calls = 0
@@ -113,7 +113,7 @@ async def test_page_reconcile_forever_skips_passes_while_quiesced(
         calls += 1
 
     monkeypatch.setattr("agent.startup.reconcile_all_open_pages", _fake_all)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(maintenance, "quiesced", lambda: state["quiesced"])
+    monkeypatch.setattr(admission, "quiesced", lambda: state["quiesced"])
     monkeypatch.setattr(settings.daemon, "heartbeat_interval_seconds", 0.01)
 
     task = asyncio.create_task(_page_reconcile_forever(object()))  # type: ignore[arg-type]

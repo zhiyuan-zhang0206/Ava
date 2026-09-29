@@ -74,7 +74,7 @@ fleet cutover's hold (`cli/cutover_hold.py`, deleted with the cutover scripts);
 one exit, `scripts/cutover_adopt_home.py --resume`.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `cli/commands/maintenance.py` and `_maintenance_probe`.
-They reuse the [durable maintenance journal](../../shared/maintenance/maintenance.ava.okf.md).
+They reuse the [durable maintenance journal](../../shared/deploy/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
 Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,

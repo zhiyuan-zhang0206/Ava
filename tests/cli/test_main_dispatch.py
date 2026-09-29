@@ -129,8 +129,8 @@ from cli.release_transition.journal import Operation
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.request import ReleaseRef
 from shared import cluster
-from shared.maintenance_state import MaintenanceHold
-from shared.start_inputs import configuration_digest
+from shared.deploy.maintenance.state import MaintenanceHold
+from shared.deploy.release.start_inputs import configuration_digest
 from tests.lifecycle._start_identity import prepare_start_identity
 
 home = Path(os.environ["AVA_HOME"])
@@ -676,7 +676,7 @@ sys.modules["cli.commands.start"] = types.SimpleNamespace(cmd_start=start)
 sys.modules["cli.commands.root_driver"] = types.SimpleNamespace(
     complete_boot_start=lambda: calls.append("boot-complete")
 )
-sys.modules["shared.start_serving"] = types.SimpleNamespace(
+sys.modules["shared.deploy.lifecycle.start_serving"] = types.SimpleNamespace(
     clear_serving=lambda: calls.append("clear-serving")
 )
 assert main.main(["start", "--worktree"]) == 0

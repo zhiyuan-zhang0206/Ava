@@ -12,8 +12,8 @@ from dataclasses import dataclass
 
 from ops.service_spec import ServiceSpec
 from ops.spec import services_for_capabilities_annotated
+from shared.host.proc import process_alive
 from shared.machine import MachineRoles
-from shared.proc import process_alive
 from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 
 _log = logging.getLogger(__name__)

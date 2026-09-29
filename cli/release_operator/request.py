@@ -42,7 +42,7 @@ from cli.release_operator.current import current_release
 from cli.release_operator.layout import receipt_path, require_commit_shape
 from cli.release_prepare.models import PreparationReceipt
 from cli.release_transition.request import ReleaseRef, verify_pair
-from shared.verified_file import regular_bytes
+from shared.deploy.release.verified_file import regular_bytes
 
 
 def _candidate_from_receipt(home: Path, commit: str, receipt: Path | None) -> ReleaseRef:
@@ -145,9 +145,9 @@ def _build_request(
     acknowledged_rejection: str | None = None,
 ) -> FleetRequest:
     from shared.cluster import registry_path
+    from shared.deploy.release.start_inputs import configuration_digest
     from shared.machine import machine_name
     from shared.paths import ava_home
-    from shared.start_inputs import configuration_digest
 
     require_commit_shape(commit)
     home = ava_home()

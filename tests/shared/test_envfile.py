@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-import shared.private_storage
+import shared.host.private_storage
 from shared.config import settings
 from shared.config.general import GeneralSettings
 from shared.envfile import (
@@ -218,7 +218,7 @@ def test_upsert_atomically_replaces_the_complete_env(
 ) -> None:
     env = tmp_path / ".env"
     env.write_text("SECRET=old\nKEEP=1\n")
-    real_replace = shared.private_storage.os.replace
+    real_replace = shared.host.private_storage.os.replace
     replaced: list[Path] = []
 
     def _replace(source: str | Path, destination: str | Path) -> None:
@@ -228,7 +228,7 @@ def test_upsert_atomically_replaces_the_complete_env(
         real_replace(source, destination)
         replaced.append(Path(destination))
 
-    monkeypatch.setattr(shared.private_storage.os, "replace", _replace)
+    monkeypatch.setattr(shared.host.private_storage.os, "replace", _replace)
 
     upsert_env(env, {"SECRET": "new"})
 

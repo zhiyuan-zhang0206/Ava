@@ -81,7 +81,7 @@ Cardinality is filtered at the source, not in Prometheus: synthetic mounts
 ## One history
 
 Prometheus is the only store that retains these. `ava status` and the status
-page carry a single LIVE reading per machine (`shared/resource_sample.py`) so
+page carry a single LIVE reading per machine (`shared/host/resource_sample.py`) so
 they still answer on a deployment whose LGTM backend is down or was never
 deployed; the retired `shared/resource_monitor.py` kept a parallel 300-sample
 ring buffer, which meant two drifting answers to "what was the CPU on machine

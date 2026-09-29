@@ -33,10 +33,10 @@ from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus
 from ops.schema_mismatch import status as schema_mismatch_status
 from shared import machines
-from shared.cluster_drift import prod_source_head_sha
-from shared.cluster_lock import DeployLease
 from shared.config import settings
 from shared.db_transaction import write_transaction
+from shared.deploy.git.cluster_drift import prod_source_head_sha
+from shared.deploy.state.cluster_lock import DeployLease
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 
 router = APIRouter()

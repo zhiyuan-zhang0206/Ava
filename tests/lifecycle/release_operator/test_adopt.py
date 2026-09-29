@@ -31,9 +31,9 @@ from cli.release_operator import adopt as adopt_module
 from cli.release_transition import root_service
 from cli.release_transition.request import ReleaseRef
 from shared import paths as shared_paths
-from shared.os_boot_unit import BootStartAction, BootUnitContext
+from shared.deploy.release.runtime_release import activate_release, current_pointer
+from shared.host.system.boot_unit import BootStartAction, BootUnitContext
 from shared.runtime_abi import current_abi
-from shared.runtime_release import activate_release, current_pointer
 from tests.lifecycle.release_operator.conftest import build_image, digest
 from tests.lifecycle.transition.phases import at_phase
 

@@ -23,7 +23,7 @@ prevent startup success. The frontend is included, even while it builds. There
 is no readiness waiver for boot, update, or recovery callers.
 
 The CLI reports 0 only for a fully ready selected roster, 4 for incomplete
-readiness, and 1 for failed setup or launch. `shared.start_serving` admits work
+readiness, and 1 for failed setup or launch. `shared.deploy.lifecycle.start_serving` admits work
 only after that successful generation is recorded. Failed startup preserves the
 closed serving boundary and the evidence needed for an idempotent retry.
 

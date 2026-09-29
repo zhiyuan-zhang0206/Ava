@@ -41,7 +41,7 @@ from shared.cluster.authority.api import API_TOKEN_ENV
 from shared.config import settings
 from shared.config.service_read import served_db_endpoint
 from shared.db_connections import NoDatabaseAuthorityError, _guard_db_url
-from shared.deploy_timing import UNIT_BUNDLE_MAX_TTL_S
+from shared.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S
 from tests.lifecycle._start_identity import prepare_start_identity
 from tests.lifecycle.db_authority import test_single_box as _single_box
 from tests.lifecycle.db_authority.test_single_box import Born, _refused

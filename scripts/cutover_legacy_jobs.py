@@ -372,7 +372,7 @@ def discover(home: Path, host: Host) -> Jobs:
 
 
 def _move(source: Path, destination: Path) -> None:
-    from shared.private_storage import ensure_private_dir
+    from shared.host.private_storage import ensure_private_dir
 
     if not source.exists():
         return
@@ -392,7 +392,7 @@ def retire_launchd(host: Host, job: LaunchdJob, archive: Path) -> None:
 
 def remove_cron_lines(host: Host, lines: tuple[str, ...], archive: Path) -> int:
     """Remove exactly `lines` (whole-line equality) under the crontab lock."""
-    from shared.private_storage import ensure_private_dir, write_private_bytes
+    from shared.host.private_storage import ensure_private_dir, write_private_bytes
 
     with file_lock(host.crontab_lock):
         content, error = read_crontab(host)
@@ -425,7 +425,7 @@ def retire_unit(host: Host, unit: SystemdUnit, archive: Path) -> None:
     without lingering, fails loudly before the file moves). Once the unit file
     is gone a re-run only reloads the manager: the retirement already ran.
     """
-    from shared.private_storage import ensure_private_dir, write_private_bytes
+    from shared.host.private_storage import ensure_private_dir, write_private_bytes
 
     path = Path(unit.path)
     if unit.scope == "user":

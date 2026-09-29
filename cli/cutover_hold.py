@@ -44,7 +44,7 @@ class CutoverHold:
 
 def recorded_hold(home: Path) -> CutoverHold | None:
     """The hold `home`'s adoption journal recorded; None when it was never adopted."""
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.verified_file import regular_bytes
 
     path = home / ADOPTION_JOURNAL
     try:
@@ -64,7 +64,7 @@ def recorded_hold(home: Path) -> CutoverHold | None:
 
 def standing_hold(home: Path) -> CutoverHold | None:
     """The recorded cutover hold, only while it is the hold standing on `home`."""
-    from shared import pause_owner
+    from shared.deploy.maintenance import pause_owner
 
     recorded = recorded_hold(home)
     if recorded is None:

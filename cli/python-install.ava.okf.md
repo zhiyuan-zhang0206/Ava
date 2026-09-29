@@ -24,7 +24,7 @@ by the installer. These files are never rewritten by discovery. Operators config
 Additional/explicit-only indexes fail rather than silently losing their source policy.
 
 The lock-source lint runs before installation. Its stdlib implementation lives in
-`shared/python_lock.py`, included in the runtime wheel; the checkout-only
+`shared/deploy/release/python_lock.py`, included in the runtime wheel; the checkout-only
 `scripts/lint_python_lock.py` is a thin CLI entry point. Both transports first run
 offline, freshness-checked uv export to temporary hashed requirements, before
 any uv command can create or recreate the target environment. This also protects
