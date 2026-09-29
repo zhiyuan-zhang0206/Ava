@@ -36,7 +36,7 @@ def save_error(home: Path, record: ActivationRecord, exc: BaseException) -> None
     else:
         code, detail = "activation_failure", "activation step failed closed"
     logger.exception(
-        "PITR activation failed operation_id=%s phase=%s code=%s",
+        "PITR activation failed operation_id={} phase={} code={}",
         record.operation_id,
         record.phase,
         code,

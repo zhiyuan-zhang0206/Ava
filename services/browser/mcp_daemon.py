@@ -533,7 +533,7 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
     # serving; refuse to start instead of stealing.
     if await _socket_in_use(sock):
         logger.error(
-            "[browser-mcp] socket %s is already served by a live daemon — "
+            "[browser-mcp] socket {} is already served by a live daemon — "
             "refusing to start a second instance",
             sock,
         )
