@@ -128,15 +128,17 @@ async def test_a_wake_cancelled_before_its_row_read_latches_only_live_continuati
 
 
 @pytest.mark.parametrize("phase", ["stopping", "stopped", "starting", "ready"])
-async def test_a_drained_members_held_wake_claims_nothing(
-    wired: _Build, monkeypatch: pytest.MonkeyPatch, phase: str
+@pytest.mark.parametrize("agent", [2, 5], ids=["drained", "parked"])
+async def test_a_settled_members_held_wake_claims_nothing(
+    wired: _Build, monkeypatch: pytest.MonkeyPatch, phase: str, agent: int
 ) -> None:
-    """Why its failure is no receipt: after the certified drain its wake reads
-    the row and returns; it never reaches the held control that claims."""
-    host, _graph, pool = wired({2: _Row(status="idling")})
+    """Why its failure is no receipt: after the certified drain a drained or
+    parked member's wake reads the row and returns; it never reaches the held
+    control that claims, so its inbound messages stay pending."""
+    host, _graph, pool = wired({agent: _Row(status="idling")})
     control = AsyncMock()
     monkeypatch.setattr(host, "_run_held_controls", control)
-    fc10_hold(phase)
-    await host.run_turn(2)
+    fc10_hold(phase, parked=(5,))
+    await host.run_turn(agent)
     control.assert_not_awaited()
     assert pool.reads == 1

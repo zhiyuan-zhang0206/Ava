@@ -18,9 +18,9 @@ own records first.
 
 Any other hold, including a later stop's on an adopted home, keeps the
 ordinary release. The adoption also reads a legacy stop's hold here
-(`legacy_hold_facts`) and settles its failure receipts of other machines'
-agents (`settle_foreign_receipts`). Deleted with the `scripts/cutover_*`
-scripts after the cutover.
+(`legacy_hold_facts`) and settles its failure receipts that carry no lost work
+(`settle_receipts`). Deleted with the `scripts/cutover_*` scripts after the
+cutover.
 """
 
 from __future__ import annotations
@@ -47,17 +47,34 @@ class CutoverHold:
     acquired_at: datetime
 
 
-def legacy_hold_facts(home: Path) -> dict[str, Any]:
+# The legacy rules that make every unsettled receipt on a `stopped` hold a
+# post-drain one: they hold from this commit (#1872, the maintenance journal's
+# introduction) on, unchanged at every later commit writing a maintenance phase.
+LEGACY_RECEIPT_RULES_SINCE = "cc5c5e2098385fa0e28e42b882e273f0bdecdfed"
+LEGACY_RECEIPT_RULES = (
+    "shared/maintenance.py::set_phase: entering `drained` requires no unsettled "
+    "failure, and no other code moves a hold past `draining`",
+    "shared/maintenance.py::record_drained: a drained receipt is refused once the "
+    "agent has a failure",
+)
+# Classes the adoption settles: other machines' agents, then members that have
+# nothing to continue after the certified drain.
+SETTLED_CLASSES = ("foreign", "drained", "parked")
+
+
+def legacy_hold_facts(home: Path, checkout: Path) -> dict[str, Any]:
     """`home`'s pause-owner journal as the inventory reports it, and whether the
     adoption may keep its hold as the cutover hold.
 
-    A completed legacy `ava stop` leaves its hold in phase `stopped`. A failure
-    receipt refuses the adoption unless it is `foreign`: its agent is outside
-    the cohort the legacy preparation captured, so it has no continuation in
-    the hold. The legacy host latched such receipts when its stop cancelled
-    wakes it had received for other machines' agents (FC-10 F20); the adoption
-    records them in its journal and settles them. A receipt of an agent in the
-    cohort (`local`) still refuses.
+    A completed legacy `ava stop` leaves its hold in phase `stopped`. Its
+    unsettled receipts are classified by agent: `foreign` (outside the cohort
+    the legacy preparation captured, so no continuation in the hold: the host
+    latched other machines' woken agents, FC-10 F20), `drained`, `parked`, and
+    `other` (a member neither drained nor reaped, which a certified drain
+    rules out). Foreign ones always settle. Drained and parked ones settle
+    when the legacy code carries `LEGACY_RECEIPT_RULES` (`legacy_rules`): those
+    receipts then postdate the certified drain, and such a wake claims nothing.
+    Any other receipt refuses the adoption.
     """
     from shared import pause_owner
 
@@ -66,46 +83,119 @@ def legacy_hold_facts(home: Path) -> dict[str, Any]:
         "status": snapshot.status,
         "holder": snapshot.holder,
         "acquired_at": snapshot.acquired_at.isoformat() if snapshot.acquired_at else None,
-        **_maintenance_facts(snapshot.maintenance),
+        **_maintenance_facts(snapshot.maintenance, home, checkout),
     }
     facts["adoptable"] = (
         snapshot.status == "paused"
         and facts["maintenance_phase"] == "stopped"
-        and not facts["local_receipts"]
+        and not facts["unsettleable"]
     )
     return facts
 
 
-def _maintenance_facts(hold: MaintenanceHold | None) -> dict[str, Any]:
+def _maintenance_facts(hold: MaintenanceHold | None, home: Path, checkout: Path) -> dict[str, Any]:
     if hold is None:
         return {
             "maintenance_phase": None,
             "cohort": [],
             "parked": [],
             "drained": [],
-            "foreign_receipts": {},
-            "local_receipts": [],
+            "receipts": {},
+            "legacy_rules": None,
+            "settle": {},
+            "unsettleable": [],
         }
-    foreign = hold.receipts_outside_cohort()
+    unsettled = hold.unsettled_failures()
+    classes = _classify(hold, unsettled)
+    rules = None
+    if hold.phase == "stopped" and (classes["drained"] or classes["parked"]):
+        rules = legacy_rules(home, checkout)
+    settle = _settleable(classes, post_drain=bool(rules and rules["hold"]))
     return {
         "maintenance_phase": hold.phase,
         "cohort": sorted(hold.commands),
         "parked": list(hold.parked),
         "drained": list(hold.drained),
-        "foreign_receipts": {str(agent): cause for agent, cause in sorted(foreign.items())},
-        "local_receipts": sorted(set(hold.unsettled_failures()) - set(foreign)),
+        "receipts": {name: _keyed(receipts) for name, receipts in classes.items()},
+        "legacy_rules": rules,
+        "settle": _keyed(settle),
+        "unsettleable": sorted(set(unsettled) - set(settle)),
     }
 
 
-def settle_foreign_receipts(
-    hold: MaintenanceHold, receipts: dict[int, str], record: dict[str, str]
+def _keyed(receipts: dict[int, str]) -> dict[str, str]:
+    """Receipts keyed as the journal writes them, ordered by agent."""
+    return {str(agent): cause for agent, cause in sorted(receipts.items())}
+
+
+def _settleable(classes: dict[str, dict[int, str]], *, post_drain: bool) -> dict[int, str]:
+    """Foreign receipts, and with the legacy rules proven also drained and parked ones."""
+    settle: dict[int, str] = {}
+    for name in SETTLED_CLASSES if post_drain else ("foreign",):
+        settle |= classes[name]
+    return settle
+
+
+def _classify(hold: MaintenanceHold, unsettled: dict[int, str]) -> dict[str, dict[int, str]]:
+    foreign = hold.receipts_outside_cohort()
+    drained = {agent: cause for agent, cause in unsettled.items() if agent in hold.drained}
+    parked = {agent: cause for agent, cause in unsettled.items() if agent in hold.parked}
+    known = set(foreign) | set(drained) | set(parked)
+    other = {agent: cause for agent, cause in unsettled.items() if agent not in known}
+    return {"foreign": foreign, "drained": drained, "parked": parked, "other": other}
+
+
+def legacy_rules(home: Path, checkout: Path) -> dict[str, Any]:
+    """Whether the legacy code that stopped `home` carries `LEGACY_RECEIPT_RULES`.
+
+    The legacy commit is `installed_sha`, the commit the legacy code last
+    installed and started (by adoption time the checkout already moved to the
+    new code); `git merge-base --is-ancestor` in the owning checkout decides.
+    Anything unreadable leaves the rules unproven (`hold` false, with `reason`).
+    """
+    import re
+    import subprocess
+
+    from shared.deploy.git.gitenv import git_env
+    from shared.proc import run_bounded
+
+    since = LEGACY_RECEIPT_RULES_SINCE
+    evidence: dict[str, Any] = {
+        "legacy_commit": None,
+        "rules_since": since,
+        "rules": list(LEGACY_RECEIPT_RULES),
+        "hold": False,
+    }
+    try:
+        legacy = (home / "installed_sha").read_text().strip()
+    except OSError as exc:
+        return {**evidence, "reason": f"no legacy commit: installed_sha is unreadable ({exc})"}
+    if not re.fullmatch(r"[0-9a-f]{40}", legacy):
+        return {**evidence, "reason": f"installed_sha is not a commit id: {legacy[:60]!r}"}
+    evidence["legacy_commit"] = legacy
+    argv = ["git", "-C", str(checkout), "merge-base", "--is-ancestor", since, legacy]
+    try:
+        result = run_bounded(argv, capture_output=True, text=True, env=git_env(), timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {**evidence, "reason": f"git merge-base could not run: {exc}"}
+    if result.returncode == 0:
+        return {**evidence, "hold": True, "reason": f"{legacy} descends from {since}"}
+    if result.returncode == 1:
+        return {**evidence, "reason": f"{legacy} does not descend from {since}"}
+    detail = result.stderr.strip()[:200]
+    return {**evidence, "reason": f"git merge-base in {checkout} failed: {detail}"}
+
+
+def settle_receipts(
+    hold: MaintenanceHold, receipts: dict[int, str], record: dict[str, str], *, post_drain: bool
 ) -> MaintenanceHold | None:
     """`hold` with exactly `receipts` moved into `repaired` under `record`;
     None when an earlier run already did.
 
-    Refuses unless the hold's unsettled failures are exactly `receipts`, every
-    one outside its cohort, and no repair record stands: an operator's is
-    never replaced.
+    Refuses unless the hold is `stopped`, its unsettled failures are exactly
+    `receipts`, each foreign or (with `post_drain`, the legacy rules proven)
+    of a drained or parked member, and no repair record stands: an operator's
+    is never replaced.
     """
     from dataclasses import replace
 
@@ -114,10 +204,11 @@ def settle_foreign_receipts(
     unsettled = hold.unsettled_failures()
     if not unsettled and receipts.items() <= hold.repaired.items():
         return None
-    if unsettled != receipts or hold.receipts_outside_cohort() != receipts:
+    allowed = _settleable(_classify(hold, unsettled), post_drain=post_drain)
+    if hold.phase != "stopped" or unsettled != receipts or not receipts.keys() <= allowed.keys():
         raise RuntimeError(
-            f"the hold's failure receipts changed under the adoption ({unsettled}, planned "
-            f"{receipts}); run the inventory again"
+            f"the hold's failure receipts changed under the adoption ({hold.phase}, "
+            f"{unsettled}, planned {receipts}); run the inventory again"
         )
     if hold.repair_record is not None:
         raise RuntimeError("the hold already carries an operator's repair record")

@@ -72,14 +72,17 @@ class MaintenanceHold:
         captured = self.phase != "preparing" or bool(self.commands or self.parked)
         return captured and agent_id not in self.commands and agent_id not in self.parked
 
-    def drained_and_certified(self, agent_id: int) -> bool:
-        """Whether `agent_id` drained and the drain is certified.
+    def settled_after_drain(self, agent_id: int) -> bool:
+        """Whether the drain is certified and `agent_id` is a member with nothing
+        left to continue: it drained, or it is parked (never drains).
 
-        Such a member's continuation already settled, and a wake of it under
-        the hold claims nothing (no restart command is pending), so no receipt
-        of it gates the hold. Until `drained` its failures still record.
+        A wake of either under the hold claims nothing (no restart command is
+        pending), so no receipt of it gates the hold. Until `drained` their
+        failures still record.
         """
-        return self.phase in _CERTIFIED_PHASES and agent_id in self.drained
+        return self.phase in _CERTIFIED_PHASES and (
+            agent_id in self.drained or agent_id in self.parked
+        )
 
     def receipts_outside_cohort(self) -> dict[int, str]:
         """The unsettled failures of agents with no continuation in this hold."""

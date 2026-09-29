@@ -523,7 +523,7 @@ def gather(
         facts.problems.append(f"start intent: {exc}")
     _roles(facts)
     _registry(facts)
-    facts.pause_owner = legacy_hold_facts(facts.home)
+    facts.pause_owner = legacy_hold_facts(facts.home, facts.checkout)
     facts.legacy_files = sorted(
         set(_existing(home, LEGACY_FILES)) | set(_relative_matches(home, LEGACY_GLOBS))
     )

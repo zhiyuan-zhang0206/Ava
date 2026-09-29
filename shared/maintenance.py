@@ -361,5 +361,5 @@ def record_failure(agent_id: int, category: str) -> None:
     # Callers grade database-outage exceptions into `record_undelivered`
     # instead: those are crash-equivalent and must not block resume. They also
     # drop agents with no continuation left in the hold (`MaintenanceHold`'s
-    # `outside_cohort` and `drained_and_certified`).
+    # `outside_cohort` and `settled_after_drain`).
     record_drained(agent_id, 0, failure=category)

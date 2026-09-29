@@ -159,7 +159,9 @@ FC10_AT = datetime(2026, 9, 29, 5, 35, 53, 41351, tzinfo=UTC)
 FC10_FOREIGN = (3, 8, 9)
 
 
-def fc10_hold(phase: str = "stopping", drained: tuple[int, ...] = (2, 6, 7)) -> None:
+def fc10_hold(
+    phase: str = "stopping", drained: tuple[int, ...] = (2, 6, 7), parked: tuple[int, ...] = ()
+) -> None:
     """The LX hold, cohort 2, 6, 7; as its services stop began, all drained."""
     before = pause_owner.begin_maintenance(FC10_HOLDER, FC10_AT).snapshot
     assert before.maintenance is not None
@@ -169,7 +171,7 @@ def fc10_hold(phase: str = "stopping", drained: tuple[int, ...] = (2, 6, 7)) -> 
             "commands": {"2": 34, "6": 35, "7": 36},
             "drained": list(drained),
             "failures": {},
-            "parked": [],
+            "parked": list(parked),
         }
     )
     pause_owner.change_maintenance(FC10_HOLDER, FC10_AT, before.maintenance, hold)
@@ -228,9 +230,14 @@ def test_before_the_cohort_is_captured_every_failure_is_recorded() -> None:
     assert _receipts() == ({3: "CancelledError"}, {})
 
 
-@pytest.mark.parametrize("phase", ["draining", "stopped"])
-def test_parked_agents_belong_to_the_unit(phase: str) -> None:
-    """A parked member never drains, so its failure records in every phase."""
+@pytest.mark.parametrize(
+    ("phase", "latched"), [("draining", {5: "CancelledError"}), ("stopped", {})]
+)
+def test_a_parked_member_records_until_the_drain_is_certified(
+    phase: str, latched: dict[int, str]
+) -> None:
+    """Parked agents belong to the unit; like drained members, they have
+    nothing to continue once the drain is certified."""
     before = pause_owner.begin_maintenance(FC10_HOLDER, FC10_AT).snapshot
     assert before.maintenance is not None
     hold = MaintenanceHold.decode(
@@ -239,4 +246,4 @@ def test_parked_agents_belong_to_the_unit(phase: str) -> None:
     pause_owner.change_maintenance(FC10_HOLDER, FC10_AT, before.maintenance, hold)
     asyncio.run(receipts.record_failure(5, asyncio.CancelledError(), {}))
     asyncio.run(receipts.record_failure(3, asyncio.CancelledError(), {}))
-    assert _receipts() == ({5: "CancelledError"}, {})
+    assert _receipts() == (latched, {})
