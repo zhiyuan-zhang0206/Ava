@@ -77,7 +77,7 @@
 ## A · OS-coupling as-is inventory (condensed; the full table with file:line evidence lives in the source material)
 
 ### A0 · The current three-layer structure
-1. **Session/process execution layer**: `shared/session_backend.py` unified protocol + three implementations (posixproc / winproc / helperproc) + the `shared/_reparent` double-fork primitive.
+1. **Session/process execution layer**: `shared/sessions/backend.py` unified protocol + three implementations (posixproc / winproc / helperproc) + the `shared/_reparent` double-fork primitive.
 2. **OS job/host layer**: four job writers (`os_cron` health probe / `os_autostart` autostart / `os_logs_job` logs / `os_watchdog_probe` probe) + the platform-capability ABC (`platform_backend.py`) + the low-level fact source (`platform.py`).
 3. **Permission adaptation layer**: `services/permissions_helper/` (macOS Swift + Windows C#) + the status channels (`accessibility` / `screen_capture`) + firewall (`macos_firewall`).
 
@@ -257,7 +257,7 @@ Each (machine × cluster) has one complete **process tree**: a general root supe
 - The helperproc session path (currently the canary branch) → the final-state main path.
 
 **Retired** (concepts/mechanisms that no longer exist in the final state):
-- The `AVA_PERMISSIONS_HELPER_SPAWN` switch + the `permissions_helper_enabled` double switch gate (`shared/session_backend.py:627-644`).
+- The `AVA_PERMISSIONS_HELPER_SPAWN` switch + the `permissions_helper_enabled` double switch gate (`shared/sessions/backend.py:627-644`).
 - "Pick a backend once per process" (the `get_backend` singleton) — root is the sole spawn executor; there is no backend-selection concept.
 - The "dual track / spare" semantics of posixproc/helperproc/winproc — restated as **root's platform execution implementations** (one contract, three implementations), not a runtime either-or.
 - `_reparent`'s double fork (forbidden by I2; zombie prevention moves to root's reaper — E2(b)).

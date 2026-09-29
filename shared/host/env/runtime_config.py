@@ -43,7 +43,7 @@ from shared.host.env.dotenv_file import (
     env_lock_path,
     snapshot_env,
 )
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 
 _log = logging.getLogger(__name__)
 

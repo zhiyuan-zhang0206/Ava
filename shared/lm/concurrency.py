@@ -230,7 +230,7 @@ def get_limiter() -> LLMConcurrencyLimiter:
     `restart_required: agent` setting, a change takes effect on the next
     agent restart.
     """
-    global _limiter  # noqa: PLW0603 — module-level singleton (shared/log.py pattern)
+    global _limiter  # noqa: PLW0603 — module-level singleton (shared/log/__init__.py pattern)
     if _limiter is None:
         from shared.config import settings
 

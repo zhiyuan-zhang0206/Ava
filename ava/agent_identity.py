@@ -1,6 +1,6 @@
 """Agent identity for host turns, exec children and launched scripts.
 
-The agent host binds a turn contextvar (`shared/turn_identity.py`) around
+The agent host binds a turn contextvar (`shared/native_process/turn_identity.py`) around
 execution. It never establishes one process-wide agent id for its many agents.
 A disposable exec child or launched script may call `establish` once, and
 shell-launched children can derive the same identity from AVA_AGENT_ID.
@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 
-from shared.turn_identity import current_turn_agent_id
+from shared.native_process.turn_identity import current_turn_agent_id
 
 # This process's agent id — the single framework-internal source of truth, set
 # once by `establish`. `None` (not `0`) is the pre-bootstrap placeholder: a real

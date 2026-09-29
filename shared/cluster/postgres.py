@@ -24,10 +24,10 @@ from pydantic import Field, model_validator
 
 from shared.atomic_io import write_text_atomic
 from shared.native_process import native_boot_id
+from shared.native_process.evidence import EvidenceModel, ExpectedProcess
+from shared.native_process.os_platform import file_lock
 from shared.native_process.ownership import OwnedProcess, capture_tree
-from shared.platform import file_lock
 from shared.private_storage import ensure_private_dir
-from shared.process_evidence import EvidenceModel, ExpectedProcess
 from shared.verified_file import regular_bytes
 
 # Retain unreaped direct children through admission, including ambiguous failure.

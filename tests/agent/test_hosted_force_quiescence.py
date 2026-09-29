@@ -619,7 +619,7 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     from agent.graph.exec._result import _ExecCrashed
     from agent.graph.exec._subprocess import _run_in_subprocess
     from agent.ownership.hosted import apply_hosted_lifecycle, settle_hosted_runtime
-    from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+    from shared.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
     from tests.agent.test_inbound_ownership import _admit
 
     agent_id = _agent(db_conn)
@@ -657,7 +657,7 @@ async def test_real_missing_executable_is_not_an_unresolved_child(
 ) -> None:
     from agent.graph.exec._result import _ExecCrashed
     from agent.graph.exec._subprocess import _run_in_subprocess
-    from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+    from shared.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 
     monkeypatch.setattr("agent.graph.exec._subprocess.sys.executable", str(tmp_path / "absent"))
     scope = HostedTurnResources()
@@ -678,7 +678,7 @@ async def test_real_missing_executable_is_not_an_unresolved_child(
 def test_unreadable_group_member_is_not_an_empty_domain(
     monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
 ) -> None:
-    from shared.exec_process_domain import _process_group_has_live_member
+    from shared.native_process.exec_domain import _process_group_has_live_member
 
     process = Mock(info={"pid": 123, "status": psutil.STATUS_RUNNING})
 
@@ -690,7 +690,7 @@ def test_unreadable_group_member_is_not_an_empty_domain(
     def unreadable(pid: int) -> int:
         raise failure()
 
-    monkeypatch.setattr("shared.exec_process_domain.os.getpgid", unreadable)
+    monkeypatch.setattr("shared.native_process.exec_domain.os.getpgid", unreadable)
     with pytest.raises(failure):
         _process_group_has_live_member(123)
 

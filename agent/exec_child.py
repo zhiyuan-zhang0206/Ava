@@ -71,7 +71,7 @@ import shared.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side e
 # the child's early-import order intact.
 from agent.graph.exec.protocol import RequestPayload
 from shared.log import init_subprocess_logger, logger
-from shared.winjob import EXEC_JOB_GATE_ENV, await_parent_job_gate
+from shared.native_process.winjob import EXEC_JOB_GATE_ENV, await_parent_job_gate
 
 # Covers child runtime setup after initial module imports, ending immediately
 # before agent-authored code begins. The parent-owned exec duration includes
@@ -470,7 +470,7 @@ def _run(request_path: str, result_path: str) -> None:
     if request.agent_id is not None:
         agent_identity.establish(request.agent_id, owns_loop=True)
         if request.incarnation is not None:
-            from shared.runtime_incarnation import bind_child_incarnation
+            from shared.native_process.runtime_incarnation import bind_child_incarnation
 
             bind_child_incarnation(request.incarnation)
         _init_logger(request.agent_id)

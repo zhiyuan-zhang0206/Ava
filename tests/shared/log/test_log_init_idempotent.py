@@ -320,7 +320,7 @@ def test_add_file_sink_tightens_permissions(tmp_path: Path) -> None:
 #
 # loguru's own default is `diagnose=True`: on a formatted exception it renders
 # every local variable's value from every frame of the traceback into the
-# sink's output. `shared.log_sinks.add_sink` is the seam every sink goes
+# sink's output. `shared.log.sinks.add_sink` is the seam every sink goes
 # through, and it forces `diagnose=False`; `scripts/lint/logger_add_diagnose.py`
 # keeps every other `logger.add(...)` call honest.
 

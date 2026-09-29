@@ -21,8 +21,8 @@ from psycopg_pool import ConnectionPool
 
 from gateway.schedules import manager as sm
 from shared.cluster import session_name
-from shared.platform import IS_WINDOWS
-from shared.session_backend import get_shell_backend
+from shared.native_process.os_platform import IS_WINDOWS
+from shared.sessions.backend import get_shell_backend
 from shared.start_serving import RootBirth
 
 REPO = Path(__file__).resolve().parents[2]

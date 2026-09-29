@@ -491,7 +491,7 @@ def _local_machine_status_blocking(
     capability (pure gateway) — via to_thread: the paused flag (file read),
     prod-source HEAD (git rev-parse subprocess), the frozen process commit and
     the psutil resource snapshot must not run on the event loop."""
-    from shared import process_sha as _process_sha
+    from shared.native_process import loaded_commit as _process_sha
 
     paused = cluster_is_paused()
     return MachineStatus(

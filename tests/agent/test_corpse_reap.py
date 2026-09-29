@@ -33,7 +33,7 @@ from ops.agents import wake
 from shared.config import settings
 from shared.db import create_agent
 from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def _agent(conn: psycopg.Connection[Any], machine: str = "host-test") -> int:

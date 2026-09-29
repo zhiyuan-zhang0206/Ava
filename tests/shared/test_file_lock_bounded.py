@@ -1,4 +1,4 @@
-"""`shared.platform.file_lock`'s bounded mode, and `.env`'s use of it.
+"""`shared.native_process.os_platform.file_lock`'s bounded mode, and `.env`'s use of it.
 
 The property under test is *cross-process*, so the tests spawn real interpreters.
 An in-process test of a file lock proves almost nothing: `fcntl.flock` is advisory
@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from shared.host.env.dotenv_file import ENV_LOCK_TIMEOUT_S, env_lock_path
-from shared.platform import LockTimeoutError, file_lock
+from shared.native_process.os_platform import LockTimeoutError, file_lock
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -29,7 +29,7 @@ def _spawn_holder(target: Path, ready: Path, hold_s: float) -> subprocess.Popen[
     code = textwrap.dedent(f"""
         import pathlib, sys, time
         sys.path.insert(0, {str(_REPO)!r})
-        from shared.platform import file_lock
+        from shared.native_process.os_platform import file_lock
         with file_lock(pathlib.Path({str(target)!r}), timeout_s=60):
             pathlib.Path({str(ready)!r}).write_text("1")
             time.sleep({hold_s})

@@ -23,7 +23,7 @@ from shared.managed_writer_observation import (
     observe_session,
 )
 from shared.native_job_observation import NativeReadUnavailableError
-from shared.process_evidence import ExpectedProcess
+from shared.native_process.evidence import ExpectedProcess
 
 
 def test_session_malformed_or_changed_is_not_absent(tmp_path: Path) -> None:

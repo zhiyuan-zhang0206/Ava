@@ -32,8 +32,8 @@ import json
 from pathlib import Path
 from typing import Any, TypedDict
 
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.paths import ava_home, mcps_dir, repo_root
-from shared.platform import IS_WINDOWS
 from shared.platform_probes import display_available, unix_sockets_available
 from shared.runtime_interpreter import external_plugin_read_root
 
@@ -120,7 +120,7 @@ def server_capability(spec: dict[str, Any]) -> tuple[bool, str | None]:
 # The relative interpreter path every `.mcp.json` we own is authored with. It is
 # a repo convention, not a platform fact — the file is committed once and read on
 # every platform, so the reader maps it onto this host's venv layout (the same
-# substitution `shared.session_backend` does for supervised session commands).
+# substitution `shared.sessions.backend` does for supervised session commands).
 _POSIX_VENV_PYTHON = ".venv/bin/python"
 _WINDOWS_VENV_PYTHON = ".venv\\Scripts\\python.exe"
 

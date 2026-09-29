@@ -26,9 +26,9 @@ from services.pitr.restore.proof import (
 from services.pitr.stores.factory import get_store_group
 from shared.config import settings
 from shared.config.physical_backup import PhysicalBackupSettings
+from shared.native_process.child_env import forwarded_proxy_env, restricted_process_env
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
-from shared.process_env import forwarded_proxy_env, restricted_process_env
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
 # A stopped drill stops its sandbox postmaster (bounded at 20 s), scans for

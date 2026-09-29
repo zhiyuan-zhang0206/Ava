@@ -425,7 +425,7 @@ def cmd_pitr_operations_status() -> int:
 def cmd_pitr_operations_retire(*, confirm: bool) -> int:
     """Re-prove closure of blocked operations; `--confirm` quarantines the proven ones."""
     from services.pitr.operation.custody import retire_blocked
-    from shared.platform import LockTimeoutError
+    from shared.native_process.os_platform import LockTimeoutError
 
     refused = found = False
     for kind in _operation_kinds():
@@ -465,7 +465,7 @@ def cmd_pitr_operations_discard_candidate(*, chain: str, confirm: bool) -> int:
     from services.pitr.base_backup.candidate import BaseCandidateError, discard_resumable_candidate
     from services.pitr.base_worker import candidate_kind
     from services.pitr.operation.custody import blocked_operations
-    from shared.platform import LockTimeoutError, file_lock
+    from shared.native_process.os_platform import LockTimeoutError, file_lock
 
     root = ava_home() / "physical-backup"
     kind = candidate_kind(root)

@@ -113,7 +113,7 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
 
     from cli.start_identity import retire_checkout_binding
     from services.permissions_helper.launchd_job import unregister_helper
-    from shared.platform import file_lock
+    from shared.native_process.os_platform import file_lock
     from shared.private_storage import write_private_bytes
 
     # Publish a terminal intent before stopping. Concurrent/internal starts must

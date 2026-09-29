@@ -115,7 +115,7 @@ def _retry_thread_id() -> str:
     turn, so the bound identity resolves to the same string. `?` keeps tests
     and non-agent entry points from crashing on an unbound identity.
     """
-    from shared.turn_identity import effective_agent_id
+    from shared.native_process.turn_identity import effective_agent_id
 
     ident = effective_agent_id()
     return str(ident) if ident is not None else "?"
@@ -180,7 +180,7 @@ def _retry_phase_jitter() -> float:
     offset is deterministic so an agent keeps its own phase across restarts.
     Absent an identity (tests, non-agent entry points) → 0 (no offset).
     """
-    from shared.turn_identity import effective_agent_id
+    from shared.native_process.turn_identity import effective_agent_id
 
     ident = effective_agent_id()
     if ident is None:

@@ -49,7 +49,7 @@ def _local_snapshot_blocking() -> ClusterStatus:
     paused flag (file), orchestration liveness (session probe) and the
     prod-source HEAD (git rev-parse) are all child-process / disk reads that
     must not run on the event loop."""
-    from shared import process_sha as _process_sha
+    from shared.native_process import loaded_commit as _process_sha
 
     paused = cluster_is_paused()
     return ClusterStatus(
@@ -178,7 +178,7 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
 # --- Admin ops (token-only ops, ssh-free) -------------------------------------
 # Replaces what used to require SSH to the gateway host:
 #   - Reading service logs: query the `events` PG table directly. Daemons
-#     route stdlib logging through loguru's PG sink (see shared/log.py's
+#     route stdlib logging through loguru's PG sink (see shared/log/__init__.py's
 #     `_StdlibInterceptHandler` + `_postgres_sink`), so every INFO+ line from
 #     gateway / scheduler / labeler / agent-host / watchdog / memory-
 #     indexer lands here. agent processes also write here.

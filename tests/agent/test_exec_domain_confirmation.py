@@ -13,10 +13,10 @@ import psutil
 import pytest
 
 from agent.graph.exec import _process
-from shared import process_group_closure
-from shared.platform import IS_WINDOWS
-from shared.winjob import WindowsJob, _kernel32
-from shared.winjob_pipes import PipedJobChild, start_piped_job_process
+from shared.native_process import group_closure
+from shared.native_process.os_platform import IS_WINDOWS
+from shared.native_process.winjob import WindowsJob, _kernel32
+from shared.native_process.winjob_pipes import PipedJobChild, start_piped_job_process
 
 
 def _belongs_to_job(job: WindowsJob, pid: int) -> bool:
@@ -226,7 +226,7 @@ def test_group_signal_precedes_any_absence_sample(monkeypatch: pytest.MonkeyPatc
     )
     events: list[str] = []
     original = os.killpg
-    listing = process_group_closure.group_members
+    listing = group_closure.group_members
 
     def signal_group(pid: int, sig: int) -> None:
         events.append("signal")
@@ -237,7 +237,7 @@ def test_group_signal_precedes_any_absence_sample(monkeypatch: pytest.MonkeyPatc
         return listing(pgid)
 
     monkeypatch.setattr(os, "killpg", signal_group)
-    monkeypatch.setattr(process_group_closure, "group_members", sample)
+    monkeypatch.setattr(group_closure, "group_members", sample)
     try:
         domain.close_confirmed(time.monotonic() + 5)
         assert events == ["signal", "sample"]
@@ -296,7 +296,7 @@ def test_signal_failure_retains_unreaped_owner(
 
 @pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_native_capture_failure_retains_launched_handle(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.exec_process_domain import ExecDomainBirthError
+    from shared.native_process.exec_domain import ExecDomainBirthError
     from shared.native_process.ownership import OwnedProcess
 
     def denied(_process: psutil.Process) -> OwnedProcess:
@@ -370,8 +370,8 @@ def test_confirmed_domain_does_not_reobserve_reused_numeric_group(
     def unknown(_pid: int) -> bool:
         raise AssertionError("terminal domain cannot inspect a new numeric group")
 
-    monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", unknown)
-    monkeypatch.setattr(process_group_closure, "group_members", unknown)
+    monkeypatch.setattr("shared.native_process.exec_domain._process_group_has_live_member", unknown)
+    monkeypatch.setattr(group_closure, "group_members", unknown)
     domain.close_confirmed(time.monotonic() + 5)
 
 
@@ -393,9 +393,9 @@ def test_group_listing_names_exited_leader_and_live_members(tmp_path: Path) -> N
             time.sleep(0.01)
         child = int(receipt.read_text())
         # The unreaped leader stays listed after exit, alongside its live member.
-        assert process_group_closure.group_members(root.pid) == sorted([root.pid, child])
+        assert group_closure.group_members(root.pid) == sorted([root.pid, child])
         domain.close_confirmed(time.monotonic() + 5)
-        assert process_group_closure.group_members(root.pid) == [root.pid]
+        assert group_closure.group_members(root.pid) == [root.pid]
     finally:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(root.pid, 9)
@@ -431,8 +431,8 @@ def _late_listing_domain(
         return [root.pid, 0x7FFFFFFF] if late else [root.pid]
 
     monkeypatch.setattr(os, "killpg", signal_group)
-    monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", empty)
-    monkeypatch.setattr(process_group_closure, "group_members", listing)
+    monkeypatch.setattr("shared.native_process.exec_domain._process_group_has_live_member", empty)
+    monkeypatch.setattr(group_closure, "group_members", listing)
     return root, domain, events
 
 

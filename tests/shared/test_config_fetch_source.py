@@ -284,7 +284,7 @@ def test_runner_daemon_boot_from_session_env_handoff(
     """The daemon-boot chain under the 2026-08-02 session-env policy, end to end:
 
     a watchdog/start process on a pure runner forwards its env through
-    `shared.session_env`'s session-env handoff (`forward_env_dict` for `ava start`
+    `shared.sessions.env_forwarding`'s session-env handoff (`forward_env_dict` for `ava start`
     children and the watchdog respawn) — host-scope keys only, cluster-scope
     keys (a stale frozen copy) dropped. The daemon then
     boots from that env: load_ava_env, then the Settings-build fetch from the
@@ -295,7 +295,7 @@ def test_runner_daemon_boot_from_session_env_handoff(
     must fetch fresh values from the gateway instead.
     """
 
-    from shared import session_env
+    from shared.sessions import env_forwarding
 
     handler = _BootstrapHandler
     handler.payload = {
@@ -334,7 +334,7 @@ def test_runner_daemon_boot_from_session_env_handoff(
         monkeypatch.setattr(os, "environ", dict(spawner_env))
 
         # `ava start`'s child env: host-scope kept, cluster-scope gone.
-        child = session_env.forward_env_dict()
+        child = env_forwarding.forward_env_dict()
         assert child["AVA_HOME"] == str(home)
         assert child["AVA_MACHINE_HOST"] == "10.0.0.9"
         assert child["AVA_GATEWAY_URL"] == f"http://127.0.0.1:{port}"

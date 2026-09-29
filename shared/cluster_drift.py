@@ -4,7 +4,7 @@ The prod source (`$AVA_HOME/source`) is the tree a source-run home's services
 run out of. Facts about it that status surfaces show:
 
 - `prod_source_head_sha()` — its HEAD commit, reported per host in the roster
-  beside the commit the answering process loaded (`shared.process_sha`).
+  beside the commit the answering process loaded (`shared.native_process.loaded_commit`).
 - `checkout_head_sha(repo)` — the same read for an explicit checkout.
 - `prod_source_branch_drift()` — its current branch when it is not `main`, i.e.
   an agent developed *in* the prod tree instead of a worktree (un-reviewed code
@@ -94,7 +94,7 @@ def running_from_prod_source() -> bool:
 
     Every "checkout vs running code" comparison needs this: the checkout facts
     (`prod_source_head_sha`) are read from the installed prod source, while
-    `shared.process_sha` reports the tree the *process* was loaded from. On prod
+    `shared.native_process.loaded_commit` reports the tree the *process* was loaded from. On prod
     those are the same tree and the comparison is meaningful; in a dev worktree
     they are two different checkouts, so a difference says nothing about drift.
     Returns False when the prod source cannot be resolved — unknown layout, so no

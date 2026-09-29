@@ -11,8 +11,8 @@ def stop_permissions_helper(*, force: bool = False, timeout_s: float = 30.0) -> 
     """Stop this home's macOS helper; the Windows helper is user-wide."""
     from services.permissions_helper.launchd_job import unregister_helper
     from shared.config import settings
+    from shared.native_process.os_platform import IS_MACOS
     from shared.paths import ava_home
-    from shared.platform import IS_MACOS
 
     if IS_MACOS:
         unregister_helper(

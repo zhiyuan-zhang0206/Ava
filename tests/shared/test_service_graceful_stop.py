@@ -24,10 +24,10 @@ from pathlib import Path
 import psutil
 import pytest
 
-from shared import posixproc
-from shared.platform import IS_WINDOWS
-from shared.session_backend import PosixProcSessionBackend
-from shared.session_env import exec_into
+from shared.native_process.os_platform import IS_WINDOWS
+from shared.sessions import posixproc
+from shared.sessions.backend import PosixProcSessionBackend
+from shared.sessions.env_forwarding import exec_into
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
 

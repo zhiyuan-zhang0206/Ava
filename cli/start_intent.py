@@ -27,7 +27,7 @@ from shared.host.env.registry import (
     health_port_env,
 )
 from shared.host.net.predicates import is_loopback_host
-from shared.platform import IS_WINDOWS, IS_WSL, file_lock
+from shared.native_process.os_platform import IS_WINDOWS, IS_WSL, file_lock
 from shared.private_storage import ensure_private_dir
 
 _CAP_ARGS = {
@@ -354,7 +354,7 @@ def _inputs(
 
 
 def _service_path(values: dict[str, str], home: Path) -> str:
-    from shared.session_env import admit_service_path
+    from shared.sessions.env_forwarding import admit_service_path
 
     if "AVA_SERVICE_PATH" in values:
         return admit_service_path(values["AVA_SERVICE_PATH"])

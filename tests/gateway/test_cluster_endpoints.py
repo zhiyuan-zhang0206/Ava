@@ -61,7 +61,7 @@ def _pin_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     ``session_name`` is patched at its source (``shared.cluster``) because the
     naming scheme is one fact for the whole process — the ``ops`` cluster modules
     reach it through that module precisely so one setattr pins it for all of them.
-    The pause tests patch ``shared.session_backend.get_backend`` to a recording
+    The pause tests patch ``shared.sessions.backend.get_backend`` to a recording
     fake, so the composed names are what the assertions read.
     """
     monkeypatch.setattr("shared.cluster.session_name", lambda svc: f"ava-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
@@ -231,7 +231,7 @@ def pause_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
     from ops import agent_pause
 
     backend = _FakeSessionBackend()
-    monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
+    monkeypatch.setattr("shared.sessions.backend.get_backend", lambda: backend)
     monkeypatch.setattr(agent_pause, "host_running", lambda: False)
     return backend
 
@@ -433,7 +433,7 @@ class TestStatusSnapshot:
         so the roster can expose a node running stale code even when its checkout
         reads on-pin."""
         set_machine_identity(role="agent-runner", name="wsl")
-        monkeypatch.setattr("shared.process_sha.get", lambda: "def5678")
+        monkeypatch.setattr("shared.native_process.loaded_commit.get", lambda: "def5678")
         assert cluster_status.status_snapshot().running_sha == "def5678"
 
     def test_snapshot_ignores_the_start_bookmark(
@@ -453,7 +453,7 @@ class TestStatusSnapshot:
         answers from the process, so the stale commit survives the bookmark's
         advance and the divergence every drift renderer keys on is there."""
         set_machine_identity(role="agent-runner", name="wsl")
-        monkeypatch.setattr("shared.process_sha.get", lambda: "0ld0ld0aaaa")
+        monkeypatch.setattr("shared.native_process.loaded_commit.get", lambda: "0ld0ld0aaaa")
         monkeypatch.setattr("shared.running_sha.get", lambda: "n3wn3w0bbbb")
         monkeypatch.setattr("shared.cluster_drift.prod_source_head_sha", lambda: "n3wn3w0bbbb")
 

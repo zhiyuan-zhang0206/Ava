@@ -7,9 +7,9 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
-from shared.session_record import SessionRecord
 from shared.sessions.pty import cli
 from shared.sessions.pty._paths import record_path, socket_path, transcript_path
+from shared.sessions.record import SessionRecord
 
 
 def _mock_process(create_time: float) -> Mock:
@@ -67,7 +67,7 @@ def test_sweep_defers_while_record_lock_is_held(
     """The sweep side of the issue #2063 mutex: a sweep never unlinks while
     another holder owns the pty record lock — it skips (the dead record
     survives one scan), and the next scan sweeps it once the lock is free."""
-    from shared.platform import file_lock
+    from shared.native_process.os_platform import file_lock
     from shared.sessions.pty import records as records_module
     from shared.sessions.pty._paths import records_lock_path
 
@@ -114,7 +114,7 @@ def test_sweep_cannot_unlink_a_record_written_under_the_lock(  # noqa: PLR0915 -
     re-reads the fresh live record and retains it."""
     import threading
 
-    from shared.platform import file_lock
+    from shared.native_process.os_platform import file_lock
     from shared.sessions.pty import records as records_module
     from shared.sessions.pty._paths import records_lock_path, write_record
 
@@ -217,7 +217,7 @@ def test_bring_up_defers_while_record_lock_is_held(
     the same record lock as the sweep, so while another holder owns the lock
     it refuses with the failure exit code and never runs any bind/write work
     outside the lock."""
-    from shared.platform import file_lock
+    from shared.native_process.os_platform import file_lock
     from shared.sessions.pty import launch as launch_module
     from shared.sessions.pty._paths import records_lock_path
 

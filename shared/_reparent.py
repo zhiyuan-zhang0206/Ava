@@ -1,6 +1,6 @@
 """Reparenting spawn helper — the POSIX "detach a child to init" primitive.
 
-`shared.posixproc.new_session` runs this as ``python -m shared._reparent`` to
+`shared.sessions.posixproc.new_session` runs this as ``python -m shared._reparent`` to
 launch a long-running agent process fully detached from whoever spawned it. The
 gateway / ops daemon that starts an agent is long-lived, so a naive
 ``Popen(start_new_session=True)`` agent would linger as a zombie in that parent

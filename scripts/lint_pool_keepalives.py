@@ -26,7 +26,7 @@ definition of the *values* even where a site is not the single definition of
 the *call*.
 
 Without a check the invariant is "each call site remembered", which is exactly
-the state that produced the defect: the sync pools in `shared/log.py`,
+the state that produced the defect: the sync pools in `shared/log/__init__.py`,
 `gateway/app.py` and `services/agent_ops/daemon.py` all wrote
 `kwargs={"prepare_threshold": None}` and stopped there, and PR #940's sweep of the
 bare `psycopg.connect` sites left them untouched because they are a different

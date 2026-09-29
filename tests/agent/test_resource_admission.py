@@ -24,9 +24,9 @@ from shared.incarnation_resources import (
     register_exec,
 )
 from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.resource_admission import admit_resources
 from shared.runtime_admission import RuntimeAdmission
-from shared.runtime_incarnation import RuntimeIncarnation
 from tests.agent.test_incarnation_resources import _admitted, _entry, _force, _process
 
 

@@ -31,8 +31,8 @@ import psutil
 
 import shared.paths
 from shared import atomic_io
+from shared.native_process.os_platform import file_lock
 from shared.native_process.ownership import create_time_matches, stable_create_time
-from shared.platform import file_lock
 from shared.updater_recovery import BootstrapRecoveryJournal
 
 _LOCK_TIMEOUT_S = 5.0

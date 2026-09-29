@@ -25,8 +25,8 @@ from shared.config import settings
 from shared.context import AvaContext
 from shared.db import PG_KEEPALIVE_KWARGS
 from shared.hosted_force import recover_orphaned_hosted_forces
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
 from tests.agent.test_lifecycle_intent import _command
 

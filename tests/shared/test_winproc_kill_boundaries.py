@@ -1,4 +1,4 @@
-"""Tests for what a `shared.winproc` session kill is allowed to touch.
+"""Tests for what a `shared.sessions.windows.winproc` session kill is allowed to touch.
 
 The defect these cover: on Windows nothing reparents a spawned process —
 ``DETACHED_PROCESS`` suppresses the console, it does not detach the parent link,
@@ -44,8 +44,8 @@ from typing import cast
 import psutil
 import pytest
 
-from shared import winproc
-from shared.session_record import SessionRecord
+from shared.sessions.record import SessionRecord
+from shared.sessions.windows import winproc
 
 # Well above any real pid on the CI host, so a fake pid can never collide with
 # the live ancestry `_self_ancestry_below` walks.

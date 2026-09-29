@@ -23,8 +23,8 @@ from shared import service_selection as ds
 from shared.config import settings
 from shared.native_process.ownership import OwnedProcess
 from shared.paths import run_dir
-from shared.session_backend import PtySessionBackend
-from shared.session_record import SessionRecord
+from shared.sessions.backend import PtySessionBackend
+from shared.sessions.record import SessionRecord
 
 
 @pytest.fixture

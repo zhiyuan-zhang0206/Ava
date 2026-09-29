@@ -29,8 +29,8 @@ from services.pitr.retention.planner import DryRunResult
 from services.pitr.retention.scheduler import RetentionDryRunState
 from services.pitr.retention.scheduler import health_component as retention_health_component
 from shared import telemetry
-from shared.platform import LockTimeoutError
-from shared.process_env import restricted_process_env
+from shared.native_process.child_env import restricted_process_env
+from shared.native_process.os_platform import LockTimeoutError
 
 
 def _candidate(chain_id: str) -> CandidateManifest:

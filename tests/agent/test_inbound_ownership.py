@@ -18,8 +18,8 @@ from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
 from shared.db import create_agent
 from shared.db_transaction import async_write_transaction
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 
 
 def _agent(conn: psycopg.Connection) -> int:

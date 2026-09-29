@@ -14,7 +14,7 @@ from shared.cluster import frontend_service_cmd
 from shared.migrations import required_migration_set
 from shared.platform_backend import get_backend
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_python, runtime_venv
-from shared.session_env import forward_env_dict, venv_activation_prefix
+from shared.sessions.env_forwarding import forward_env_dict, venv_activation_prefix
 
 
 def require(condition: bool, detail: str) -> None:  # noqa: FBT001 — assertion predicate, not a mode flag.

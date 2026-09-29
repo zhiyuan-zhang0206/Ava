@@ -23,9 +23,9 @@ from typing import cast
 import psutil
 import pytest
 
+from shared.native_process.root_control.client import RootClient, RootClientError
+from shared.native_process.root_control.ipc import ResponsePayload
 from shared.os_boot_unit import BootUnitContext
-from shared.root_control.client import RootClient, RootClientError
-from shared.root_control.ipc import ResponsePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -511,7 +511,7 @@ def _systemd_starter(
         "from pathlib import Path\n"
         f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
         "import psutil\n"
-        "from shared.root_control.client import RootClient, RootClientError, native_identity\n"
+        "from shared.native_process.root_control.client import RootClient, RootClientError, native_identity\n"
         "from shared.os_boot_unit import publish_root_ready, root_pid_path\n"
         "from shared.native_process.ownership import OwnedProcess\n"
         "from dataclasses import asdict\n"

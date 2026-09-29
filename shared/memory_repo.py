@@ -48,8 +48,8 @@ from typing import Any
 
 from shared.cluster.machine import is_agent_runner, is_gateway, machine_name
 from shared.config import cluster_tz, settings
+from shared.native_process.os_platform import CREATE_NO_WINDOW
 from shared.paths import ava_home, gateway_memory_dir, memory_dir
-from shared.platform import CREATE_NO_WINDOW
 from shared.proc import run_bounded
 
 # Memory pool physical path is `$AVA_HOME/memory` via `memory_dir()` (same

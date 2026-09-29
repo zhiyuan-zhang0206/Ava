@@ -19,9 +19,9 @@ from services.permissions_helper.launchd_job import (
     read_helper_job,
 )
 from shared.daemon.health import DaemonProbe
+from shared.native_process.os_platform import IS_MACOS
 from shared.native_process.ownership import OwnedProcess
 from shared.paths import permissions_helper_socket
-from shared.platform import IS_MACOS
 
 _PING_TIMEOUT_S = 3.0
 _PING_RESPONSE_LIMIT = 64 * 1024
@@ -47,7 +47,7 @@ def _helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
 
 
 def _read_helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
-    from shared.root_control.client import peer_pid, root_process
+    from shared.native_process.root_control.client import peer_pid, root_process
 
     root = root_process()
     if root is None:

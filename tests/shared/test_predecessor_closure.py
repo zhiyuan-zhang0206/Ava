@@ -26,9 +26,9 @@ from shared.incarnation_resources import (
 )
 from shared.maintenance_cohort import _applied_capture, verify_drained
 from shared.maintenance_state import MaintenanceHold
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
 
 _DRAIN = {
     "maintenance": {"holder": "legacy-host:pid41", "acquired_at": "2026-09-27T01:00:00+00:00"}

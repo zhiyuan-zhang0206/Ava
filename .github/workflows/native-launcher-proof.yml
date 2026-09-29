@@ -17,11 +17,11 @@ on:
       - 'services/ava_root/**'
       - 'services/ava_root_glue/**'
       - 'shared/winjob*.py'
-      - 'shared/winproc.py'
+      - 'shared/sessions/windows/winproc.py'
       - 'shared/native_process/ownership.py'
-      - 'shared/session_backend.py'
-      - 'shared/windows_terminal/**'
-      - 'shared/root_control/**'
+      - 'shared/sessions/backend.py'
+      - 'shared/sessions/windows/terminal/**'
+      - 'shared/native_process/root_control/**'
       - 'cli/commands/lifecycle/_temporary_stop.py'
       - 'cli/commands/lifecycle/service_stop.py'
       - 'cli/commands/lifecycle/stop.py'
@@ -120,7 +120,7 @@ jobs:
       - name: Native pipe, singleton, Job closure and durable terminal survival
         shell: bash
         run: |
-          uv run pyright --pythonplatform Windows services/ava_root/windows shared/root_control services/ava_root_glue/windows_terminal.py services/ava_root_glue/windows_terminal_owner.py shared/windows_terminal shared/winjob.py shared/winjob_spawn.py
+          uv run pyright --pythonplatform Windows services/ava_root/windows shared/native_process/root_control services/ava_root_glue/windows_terminal.py services/ava_root_glue/windows_terminal_owner.py shared/sessions/windows/terminal shared/native_process/winjob.py shared/native_process/winjob_spawn.py
           uv run pytest --confcutdir=tests/lifecycle/native_root tests/lifecycle/native_root -q --basetemp=proof/native --junitxml=proof/windows-root.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()

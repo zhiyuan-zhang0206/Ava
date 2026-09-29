@@ -26,10 +26,10 @@ from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceBirth, decode_resources
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
-from shared.runtime_incarnation import RuntimeIncarnation
 from shared.straggler_reap import settle_stranded_reaps
-from shared.turn_identity import bind_turn_identity
 from tests.shared.test_predecessor_closure import _retired
 
 

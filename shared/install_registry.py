@@ -27,9 +27,9 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from shared import paths
+from shared.native_process.os_platform import LockTimeoutError as LockTimeoutError
+from shared.native_process.os_platform import file_lock
 from shared.packages.skills.skill_names import match_key
-from shared.platform import LockTimeoutError as LockTimeoutError
-from shared.platform import file_lock
 
 # Junk that must affect neither a package's tree hash nor its synced copy —
 # otherwise e.g. a __pycache__ appearing in a source tree would read as a

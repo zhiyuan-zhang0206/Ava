@@ -15,8 +15,8 @@ from agent.state import AgentState
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
+from shared.native_process.turn_identity import bind_turn_identity
 from shared.plugin_config_view import bind_agent_plugin_config
-from shared.turn_identity import bind_turn_identity
 
 
 def _plugin(unit_home: Path) -> None:

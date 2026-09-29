@@ -21,9 +21,9 @@ import psutil
 import pytest
 
 from shared.native_process import ownership, pid_starttime_ticks
+from shared.native_process.os_platform import IS_LINUX, IS_WINDOWS
 from shared.native_process.ownership import OwnedProcess
 from shared.paths import run_dir
-from shared.platform import IS_LINUX, IS_WINDOWS
 from shared.proc import (
     child_state,
     hosting_supervised_session,
@@ -34,7 +34,7 @@ from shared.proc import (
 from shared.proc import (
     timeout_stderr_tail as proc_timeout_stderr_tail,
 )
-from shared.session_record import SessionRecord
+from shared.sessions.record import SessionRecord
 
 
 def test_own_pid_is_alive() -> None:

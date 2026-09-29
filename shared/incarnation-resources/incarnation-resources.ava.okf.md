@@ -79,7 +79,7 @@ The owner remains alive after host EOF, closes the managed domain, reaps its
 root, joins the output reader and exclusively publishes the terminal receipt.
 Request files live in exact domain subdirectories outside legacy age pruning.
 Missing/partial receipts and owner death without a receipt retain uncertainty.
-The native domain and close-grace constant live in `shared.exec_process_domain`;
+The native domain and close-grace constant live in `shared.native_process.exec_domain`;
 the owner never imports `agent.graph` or its eager SDK/plugin initialization.
 Control is read nonblockingly by the owner loop itself, without a buffered-stdin
 daemon that could hold an interpreter shutdown lock. Partial/oversized records

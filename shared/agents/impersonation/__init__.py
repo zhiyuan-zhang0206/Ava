@@ -47,7 +47,7 @@ from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
 from shared.live_events import Cancelled
 from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def _ttl(value: int) -> int:

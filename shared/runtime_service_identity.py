@@ -14,8 +14,8 @@ from pathlib import Path
 import psutil
 
 from shared.native_process import pid_starttime_ticks
+from shared.native_process.evidence import Digest, EvidenceModel, ExpectedProcess
 from shared.native_process.ownership import stable_create_time
-from shared.process_evidence import Digest, EvidenceModel, ExpectedProcess
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
 from shared.runtime_release import ReleaseRejectedError, file_sha256
 

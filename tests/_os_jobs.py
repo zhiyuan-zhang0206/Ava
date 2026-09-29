@@ -22,7 +22,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from shared.platform import IS_WINDOWS
+from shared.native_process.os_platform import IS_WINDOWS
 
 # The crontab comment markers the registrars stamp their lines with
 # (`shared.os_cron` / `os_autostart` / `os_watchdog_probe` / `os_hold_watchdog` / `os_logs_job`). A line carrying one

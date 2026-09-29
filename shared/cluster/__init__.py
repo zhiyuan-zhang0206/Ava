@@ -215,4 +215,4 @@ from shared.host.env.port_block import (
 )
 from shared.host.net.url_secret import url_with_port as url_with_port
 from shared.host.net.url_secret import url_with_userinfo as url_with_userinfo
-from shared.platform import file_lock as file_lock
+from shared.native_process.os_platform import file_lock as file_lock

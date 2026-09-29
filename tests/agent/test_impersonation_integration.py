@@ -29,9 +29,9 @@ from shared.caller_identity import CallerIdentity
 from shared.cluster.machine import machine_name
 from shared.context import AvaContext
 from shared.db import create_agent, insert_inbound_message
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 from shared.plugin_context import PluginContext
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
 from tests.impersonation_support import attested_caller, recorded_tree
 
 

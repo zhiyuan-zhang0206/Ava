@@ -10,9 +10,9 @@ from pathlib import Path
 import psutil
 import pytest
 
-from shared import posixproc
 from shared.native_process import pid_starttime_ticks
-from shared.session_record import SessionRecord
+from shared.sessions import posixproc
+from shared.sessions.record import SessionRecord
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX expected-record contract")
 
@@ -104,7 +104,7 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
     import signal
     from dataclasses import replace
 
-    from shared import session_record
+    from shared.sessions import record
 
     argv = [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
     with subprocess.Popen(argv) as child:  # noqa: S603 — fixed isolated test child
@@ -123,7 +123,7 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
             def record_path(_name: str) -> Path:
                 return path
 
-            monkeypatch.setattr(session_record, "pid_starttime_ticks", read_ticks)
+            monkeypatch.setattr(record, "pid_starttime_ticks", read_ticks)
             monkeypatch.setattr(posixproc, "_record_path", record_path)
             assert (
                 posixproc.graceful_signal("ava-private-ticks", expected=expected) is should_signal

@@ -36,7 +36,7 @@ def posture(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def local_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _StubBackend:
     """Keep each operation's journal private and leave real DB drain intact."""
     backend = _StubBackend()
-    monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
+    monkeypatch.setattr("shared.sessions.backend.get_backend", lambda: backend)
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
     monkeypatch.setattr(agent_pause, "host_running", lambda: False)

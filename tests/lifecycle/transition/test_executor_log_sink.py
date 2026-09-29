@@ -102,7 +102,7 @@ _SENTINEL_PASSWORD = "SENTINEL-PASSWORD-do-not-log-me-1234567890"  # noqa: S105 
 # `role.password`'s raw string regardless of `RoleSecret.password`'s
 # `repr=False` field (confirmed empirically: field-level repr hiding does not
 # reach diagnose's per-line token dump). The one guard that stops this is
-# `shared.log_sinks.add_sink` forcing `diagnose=False` on every sink
+# `shared.log.sinks.add_sink` forcing `diagnose=False` on every sink
 # `init_cli_process` registers (the executor's stderr and its log file).
 _CHILD_SECRET = f"""
 from cli.release_transition import execute

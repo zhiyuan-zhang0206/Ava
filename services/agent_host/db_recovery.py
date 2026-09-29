@@ -27,7 +27,7 @@ from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import AGENT_LEASE_TTL_S
 from shared.hosted_db_wait import DatabaseWait, database_wait
 from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 _PROBE_TIMEOUT_SECONDS = 5.0
 # The observed checkpoint read/recovery band reaches 25-45s under load, and a

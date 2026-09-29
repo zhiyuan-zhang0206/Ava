@@ -31,8 +31,8 @@ from shared.managed_writer_publication import (
     SelectorReadback,
     UnitActivationReadback,
 )
+from shared.native_process.evidence import ExpectedProcess
 from shared.native_process.ownership import stable_create_time
-from shared.process_evidence import ExpectedProcess
 
 
 def _bootstrap_journal(stage: str, *, normal_release_planned: bool = False) -> dict[str, object]:

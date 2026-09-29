@@ -740,7 +740,7 @@ def test_schedule_manager_uses_shell_backend() -> None:
     loop on it would collide with the live PTY sessions on relaunch (the
     inverse of #1119).
     """
-    from shared.session_backend import get_backend, get_shell_backend
+    from shared.sessions.backend import get_backend, get_shell_backend
 
     assert sm.get_shell_backend is get_shell_backend
     assert sm.get_shell_backend is not get_backend

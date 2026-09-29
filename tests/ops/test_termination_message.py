@@ -528,7 +528,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     from ops import lifecycle
     from ops.rpc_schemas.terminate import ShellSessionsKill
     from shared.cluster import session_name
-    from shared.session_backend import PtySessionBackend
+    from shared.sessions.backend import PtySessionBackend
     from shared.sessions.page_session import page_session_name
 
     monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))

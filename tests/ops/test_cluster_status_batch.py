@@ -99,7 +99,7 @@ def snapshot_dependencies(
     monkeypatch.setattr(cluster_status, "is_agent_runner", lambda: True)
     monkeypatch.setattr(cluster_status, "is_observability_station", lambda: False)
     monkeypatch.setattr("shared.cluster_drift.prod_source_head_sha", lambda: None)
-    monkeypatch.setattr("shared.process_sha.get", lambda: None)
+    monkeypatch.setattr("shared.native_process.loaded_commit.get", lambda: None)
     return state, lease
 
 
@@ -123,8 +123,8 @@ def test_collect_sessions_batches_timestamp_reads(monkeypatch: pytest.MonkeyPatc
     """Each backend receives one timestamp batch, never one read per session."""
     service = _BatchOnlyBackend("ava-main-agent-host")
     shell = _BatchOnlyBackend("ava-main-agent-7-shell-0")
-    monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: shell)
+    monkeypatch.setattr("shared.sessions.backend.get_backend", lambda: service)
+    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", lambda: shell)
 
     sessions, _, _ = cluster_status._collect_sessions()
 
@@ -142,8 +142,8 @@ def test_collect_sessions_stamps_cluster_zone(monkeypatch: pytest.MonkeyPatch) -
     from zoneinfo import ZoneInfo
 
     service = _BatchOnlyBackend("ava-main-agent-host")
-    monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: _BatchOnlyBackend("x"))
+    monkeypatch.setattr("shared.sessions.backend.get_backend", lambda: service)
+    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", lambda: _BatchOnlyBackend("x"))
     from shared.config import settings
     from shared.config.general import GeneralSettings
 

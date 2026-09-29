@@ -43,9 +43,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from shared.exec_process_domain import KILL_GRACE_S as KILL_GRACE_S
 from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from shared.native_process.exec_domain import KILL_GRACE_S as KILL_GRACE_S
+from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 # Envelope schema versions — bumped only on a breaking shape change.
 REQUEST_VERSION = 1

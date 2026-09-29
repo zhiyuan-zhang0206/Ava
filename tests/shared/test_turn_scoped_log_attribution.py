@@ -4,7 +4,7 @@ Prerequisite 3 of `future/infra/agent-runner-as-server.md` Phase 1.
 `init_agent_process` used to freeze the agent id into loguru's `extra` at
 process boot, which is exact for one agent per process and wrong for the hosted
 runner: every record the process writes would carry whichever agent booted it.
-The binding is now a `shared.turn_identity.TurnScopedAgentId` resolved per
+The binding is now a `shared.native_process.turn_identity.TurnScopedAgentId` resolved per
 record — turn contextvar first, this process's agent second.
 
 Locked here: process-mode equivalence (the resolved value is the boot agent),
@@ -21,9 +21,10 @@ from unittest import mock
 
 import pytest
 
-from shared import telemetry, turn_identity
+from shared import telemetry
 from shared.log import _message_to_params
-from shared.turn_identity import (
+from shared.native_process import turn_identity
+from shared.native_process.turn_identity import (
     TURN_SCOPED_AGENT_ID,
     TurnScopedAgentId,
     bind_turn_identity,

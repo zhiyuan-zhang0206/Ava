@@ -261,7 +261,7 @@ def test_connected_helper_peer_must_be_root_native_parent(
 
     import psutil
 
-    from shared.root_control import client as root_client
+    from shared.native_process.root_control import client as root_client
 
     root = SimpleNamespace(pid=10, live=lambda: True)
     parent = SimpleNamespace(pid=20, live=lambda: True)
@@ -278,6 +278,6 @@ def test_connected_helper_peer_must_be_root_native_parent(
     monkeypatch.setattr(root_client, "root_process", lambda: root)
     monkeypatch.setattr(hc.psutil, "Process", _fake_process)
     monkeypatch.setattr(hc.OwnedProcess, "capture", _fake_capture)
-    monkeypatch.setattr("shared.root_control.client.peer_pid", _fake_peer_pid)
+    monkeypatch.setattr("shared.native_process.root_control.client.peer_pid", _fake_peer_pid)
     with pytest.raises(hc._ParentEvidenceError, match="not the captured root parent"):
         hc._helper_parent(cast(socket.socket, object()))

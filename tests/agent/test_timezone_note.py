@@ -81,7 +81,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
     no process-wide id — the turn contextvar is the identity. The note must
     resolve through it, not the process slot (task #3939: reading the slot
     directly silently dropped this note from every hosted head)."""
-    from shared.turn_identity import bind_turn_identity
+    from shared.native_process.turn_identity import bind_turn_identity
 
     monkeypatch.setattr("ava.agent_identity._agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)

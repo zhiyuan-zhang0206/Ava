@@ -21,10 +21,10 @@ import psutil
 from pydantic import model_validator
 
 from shared.atomic_io import fsync_parent, write_text_atomic
+from shared.native_process.evidence import Digest, EvidenceModel, ExpectedProcess
+from shared.native_process.os_platform import file_lock
 from shared.native_process.ownership import OwnedProcess
 from shared.paths import ava_home, run_dir
-from shared.platform import file_lock
-from shared.process_evidence import Digest, EvidenceModel, ExpectedProcess
 from shared.runtime_interpreter import LoadedRuntimeIdentity
 from shared.verified_file import regular_bytes
 
@@ -86,7 +86,11 @@ def _read_state() -> ServingState | None:
 
 
 def _observe_root() -> RootBirth:
-    from shared.root_control.client import RootClient, RootClientError, native_identity
+    from shared.native_process.root_control.client import (
+        RootClient,
+        RootClientError,
+        native_identity,
+    )
 
     home = ava_home().resolve(strict=True)
     response = RootClient(home / "run/ava-root/ava-root.sock", timeout=2).status()

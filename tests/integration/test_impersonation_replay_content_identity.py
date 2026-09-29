@@ -13,7 +13,7 @@ from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation.impersonation_events import consume_events
 from shared.cluster.machine import machine_name
 from shared.db import create_agent
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.shared import test_impersonation_history as history_cases
 
 

@@ -102,7 +102,7 @@ Emit sites and consumers: see the comments at each emit point.
 _TELEMETRY_INTRO = """
 ## 3. Telemetry events (category=telemetry, {n})
 
-Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
+Telemetry-side event name resolution (`shared/log/__init__.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
 (formatted full text) + exception traceback. `(L)` marks names currently produced via
 **label fallback** (no explicit event=); `(SQL)` marks writes that bypass loguru and

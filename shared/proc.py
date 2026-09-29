@@ -28,8 +28,8 @@ from typing import Any, Literal
 
 import psutil
 
+from shared.native_process.os_platform import CREATE_NO_WINDOW, SIGKILL
 from shared.native_process.ownership import OwnedProcess, capture_tree
-from shared.platform import CREATE_NO_WINDOW, SIGKILL
 from shared.platform_backend import get_backend
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
@@ -84,12 +84,12 @@ def hosting_supervised_session() -> str | None:
     different process (start-time mismatch), does not count.
     """
     # Function-local: `shared.paths` pulls in `shared.config` settings and
-    # `shared.winproc` its session stack, which this leaf module keeps out of its
+    # `shared.sessions.windows.winproc` its session stack, which this leaf module keeps out of its
     # import-time closure; each call also reads the owners' current bindings.
-    from shared import winproc
     from shared.native_process.ownership import stable_create_time
     from shared.paths import run_dir
-    from shared.session_record import SessionRecord
+    from shared.sessions.record import SessionRecord
+    from shared.sessions.windows import winproc
 
     try:
         me = psutil.Process()
@@ -274,7 +274,7 @@ def request_stop(pid: int) -> None:
 
     **On Windows this is not gentler than `force_kill`, and that is stated rather
     than hidden.** There is no signal to deliver to an arbitrary process: Ctrl-Break
-    reaches only a process group we own (`shared.winproc.graceful_signal`), and
+    reaches only a process group we own (`shared.sessions.windows.winproc.graceful_signal`), and
     TerminateProcess — what psutil's `terminate()` calls — is uncatchable. A caller
     escalating request_stop -> wait -> force_kill therefore gets a real grace period
     on POSIX and an immediate stop on Windows. That is a platform fact, not a bug to

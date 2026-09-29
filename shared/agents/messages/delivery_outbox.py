@@ -69,8 +69,8 @@ from shared.agents.messages.delivery_outbox_types import FlushReport
 from shared.atomic_io import write_text_atomic
 from shared.daemon.schedules import completion_notices
 from shared.log import logger
+from shared.native_process.turn_identity import effective_agent_id
 from shared.paths import ava_home
-from shared.turn_identity import effective_agent_id
 
 _ENTRY_SCHEMA = 1
 _ENTRY_SUFFIX = ".json"

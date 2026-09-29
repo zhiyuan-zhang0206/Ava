@@ -32,7 +32,7 @@ from psycopg_pool import AsyncConnectionPool
 from services.agent_host.runtime import TurnOutcome
 from shared.agents.impersonation import ImpersonationError
 from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 __all__ = ["force_termination_outcome", "force_termination_stop"]
 

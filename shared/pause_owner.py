@@ -23,7 +23,7 @@ from typing import Literal, Never, cast
 from shared.atomic_io import fsync_parent, write_text_atomic
 from shared.hold_driver import HoldDriver, mint_driver
 from shared.maintenance_state import MaintenanceHold
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 
 _LOCK_TIMEOUT_S = 5.0
 _log = logging.getLogger("shared.pause_owner")

@@ -122,7 +122,7 @@ def _agent_jitter_seconds() -> float:
     contextvar in the host, or AVA_AGENT_ID carried by a launched child) so an agent keeps its own offset across restarts; no identity
     (tests, non-agent callers) → 0 (no offset).
     """
-    from shared.turn_identity import effective_agent_id
+    from shared.native_process.turn_identity import effective_agent_id
 
     ident = effective_agent_id()
     if ident is None:

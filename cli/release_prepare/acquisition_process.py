@@ -14,7 +14,7 @@ from pathlib import Path
 from cli.release_prepare.acquisition_models import CommandEvidence
 from cli.release_prepare.models import FileInput
 from shared.atomic_io import write_text_atomic
-from shared.posix_command import run_owned_command
+from shared.native_process.posix_command import run_owned_command
 from shared.runtime_release import ReleaseRejectedError, file_sha256
 
 

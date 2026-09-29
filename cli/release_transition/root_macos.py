@@ -74,8 +74,8 @@ def _keeper(helper: OwnedProcess) -> client.RootStatus:
 
 def _live_root(helper: OwnedProcess, keeper: client.RootStatus) -> OwnedProcess:
     """The root answering this home's control socket is the keeper's live direct child."""
+    from shared.native_process.root_control.client import root_process
     from shared.paths import root_run_dir
-    from shared.root_control.client import root_process
 
     root = root_process()
     if root is None:

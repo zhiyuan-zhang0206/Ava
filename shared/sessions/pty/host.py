@@ -45,11 +45,10 @@ from typing import Any, cast
 
 import psutil
 
-from shared import session_log
 from shared.log import logger
-from shared.log_sinks import add_sink
+from shared.log.sinks import add_sink
 from shared.native_process.ownership import OwnedProcess, stable_create_time
-from shared.session_record import SessionRecord
+from shared.sessions import log_prefix
 from shared.sessions.pty import session_tree
 from shared.sessions.pty._paths import (
     CAPTURE_MAX_LINES,
@@ -57,6 +56,7 @@ from shared.sessions.pty._paths import (
     err,
     ok,
 )
+from shared.sessions.record import SessionRecord
 
 # A pid is "the same process we launched" only if its start-time matches to
 # within this tolerance — guards against the OS recycling the pid onto an
@@ -109,8 +109,8 @@ def _set_winsz(fd: int, cols: int, rows: int) -> None:
 def _load_env_file(path: str) -> dict[str, str]:
     """Parse a 0600 session-env file (KEY=quoted-value lines) into a dict.
 
-    The writer lives in cli.py (``write_env_file``) and mirrors
-    ``shared.session_env.env_load_prefix``'s on-disk format. Parsed with
+    The writer lives in cli.py (``write_env_file``) and shares its on-disk format with
+    ``shared.sessions.backend._write_session_env_file``. Parsed with
     shlex so quoted values — spaces, newlines — survive; a comment or a
     non-assignment token is skipped.
     """
@@ -156,7 +156,7 @@ class PtySession:
         # would import them eagerly (no TYPE_CHECKING by repo convention).
         self._screen: Any = None
         self._ring = bytearray()
-        self._log_fd, created = session_log.open_session_log(log_path, name, pid=pid)
+        self._log_fd, created = log_prefix.open_session_log(log_path, name, pid=pid)
         self._log_written = os.fstat(self._log_fd).st_size if created else 0
         self._log_cap = log_cap
         self._lock = threading.Lock()

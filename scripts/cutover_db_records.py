@@ -725,7 +725,7 @@ def _check(conn: psycopg.Connection[Any], home: Path, inputs: Inputs, rows_out: 
 
 
 def _run(conn: psycopg.Connection[Any], home: Path, inputs: Inputs) -> int:
-    from shared.platform import file_lock
+    from shared.native_process.os_platform import file_lock
 
     ensure_private_dir(home / ARCHIVE)
     ensure_private_dir(home / RECORD)

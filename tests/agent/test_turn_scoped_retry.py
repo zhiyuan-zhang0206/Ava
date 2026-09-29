@@ -30,7 +30,7 @@ from langgraph.types import RetryPolicy
 
 from agent.graph._build import _RETRY_JITTER_SPAN_S, _build_llm_retry, _TurnScopedRetryPolicy
 from shared.config import settings
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.turn_identity import bind_turn_identity
 
 
 class TestPerAgentResolution:

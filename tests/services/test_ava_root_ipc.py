@@ -1,4 +1,4 @@
-"""shared.root_control.ipc + server/client: the K1 wire protocol.
+"""shared.native_process.root_control.ipc + server/client: the K1 wire protocol.
 
 One JSON object per line, validated fail-fast on both ends: a malformed
 request or a response that drifts from the agreed shape is rejected at the
@@ -17,8 +17,8 @@ import pytest
 
 from services.ava_root.server import ControlServer
 from shared.native_process.ownership import OwnedProcess
-from shared.root_control.client import RootClient, RootClientError
-from shared.root_control.ipc import (
+from shared.native_process.root_control.client import RootClient, RootClientError
+from shared.native_process.root_control.ipc import (
     ErrorCode,
     ProtocolError,
     RequestPayload,
@@ -293,7 +293,7 @@ def test_linux_ipc_requires_both_observed_tick_identities(
 ) -> None:
     from types import SimpleNamespace
 
-    from shared.root_control import client
+    from shared.native_process.root_control import client
 
     monkeypatch.setattr(client, "sys", SimpleNamespace(platform="linux"))
 
@@ -336,7 +336,7 @@ def test_ipc_native_birth_rules_preserve_platform_authority(
     from types import SimpleNamespace
 
     from shared.native_process import ownership
-    from shared.root_control import client
+    from shared.native_process.root_control import client
 
     # Both halves of the rule read the platform: the client's tick requirement
     # and the identity comparison itself.

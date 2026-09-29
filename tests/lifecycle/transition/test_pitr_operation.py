@@ -18,7 +18,7 @@ from cli.release_transition.pitr.evidence import PitrSeal
 from cli.release_transition.pitr.inputs import read_record, require_inputs
 from cli.release_transition.request import PitrRequest, ReleaseRef
 from services.pitr.activation.state import ActivationRecord, record_path, write_record
-from shared.process_evidence import ExpectedProcess
+from shared.native_process.evidence import ExpectedProcess
 from shared.release_operation import (
     authorized_pitr,
     authorized_start,

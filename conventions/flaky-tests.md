@@ -33,7 +33,7 @@ asynchronously collects it, and `pid_exists` remains true meanwhile. PR #964
 applied the same discipline to the forced-shutdown PITR test in
 `tests/services/test_pitr_base_scheduler.py`; its root-cause fix was a daemon
 ownership-adoption `Event`, not a test relaxation. PR #1303 made
-`shared/posixproc.py` liveness zombie-aware
+`shared/sessions/posixproc.py` liveness zombie-aware
 (`is_running()` and `status() != STATUS_ZOMBIE`) and exposed a separate
 regression: `_FakeProc` did not implement the new `status()` probe, so CI shard
 8 failed twice at the same `AttributeError`.

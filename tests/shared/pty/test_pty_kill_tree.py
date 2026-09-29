@@ -27,8 +27,8 @@ import psutil
 import pytest
 
 from shared.native_process import pid_starttime_ticks
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.native_process.ownership import OwnedProcess, stable_create_time
-from shared.platform import IS_WINDOWS
 from shared.sessions.pty import cli as pty_cli
 from shared.sessions.pty import session_tree
 from shared.sessions.pty._paths import host_identity, record_path, socket_path

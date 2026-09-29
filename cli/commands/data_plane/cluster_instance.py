@@ -61,6 +61,7 @@ from shared.cluster.machine import reachable_host
 from shared.config import settings
 from shared.config.physical_backup import pitr_replication_hba_lines
 from shared.host.net.url_secret import url_host
+from shared.native_process.child_env import daemon_process_env, inherited_process_env
 from shared.paths import ava_home
 from shared.pg_admin import pg_admin_url as _shared_pg_admin_url
 from shared.pg_admin import pg_socket_dir
@@ -75,7 +76,6 @@ from shared.pg_tools import (
 )
 from shared.platform_backend import get_backend
 from shared.private_storage import write_private_bytes
-from shared.process_env import daemon_process_env, inherited_process_env
 
 _LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
 

@@ -79,9 +79,9 @@ from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from shared.daemon.shutdown import hard_exit as _hard_exit
 from shared.deploy_timing import AGENT_LEASE_RENEW_INTERVAL_S
 from shared.exec_request_evidence import disposition_hint
-from shared.helper_chain_guard import parent_chain_intact
 from shared.hosted_force import recover_orphaned_hosted_forces
 from shared.log import init_gateway_process, logger
+from shared.sessions.helper_chain_guard import parent_chain_intact
 from shared.straggler_reap import settle_stranded_reaps_async
 from shared.timing import assert_clock_lattice
 

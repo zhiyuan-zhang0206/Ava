@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Literal, Never, cast
 
 from shared.atomic_io import fsync_parent, write_text_atomic
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 
 SCHEMA_VERSION = 1
 _LOCK_TIMEOUT_S = 60.0

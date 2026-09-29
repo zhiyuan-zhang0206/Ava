@@ -11,7 +11,7 @@ from __future__ import annotations
 import secrets
 from pathlib import Path
 
-from shared.platform import IS_LINUX, IS_MACOS
+from shared.native_process.os_platform import IS_LINUX, IS_MACOS
 
 __all__ = ["candidate_drive_dirs", "find_writable_google_drive"]
 

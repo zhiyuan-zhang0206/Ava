@@ -164,7 +164,7 @@ def test_personal_write_uses_hosted_turn_identity(
     memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import shared.paths
-    from shared.turn_identity import bind_turn_identity
+    from shared.native_process.turn_identity import bind_turn_identity
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)

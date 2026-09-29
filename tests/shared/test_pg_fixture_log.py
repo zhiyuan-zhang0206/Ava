@@ -21,7 +21,7 @@ import pytest
 
 from shared import pg_throwaway_base, pg_tools
 from shared.config import settings
-from shared.platform import IS_WINDOWS
+from shared.native_process.os_platform import IS_WINDOWS
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="throwaway clusters are POSIX-only")
 

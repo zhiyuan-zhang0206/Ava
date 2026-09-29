@@ -14,16 +14,10 @@ import pytest
 
 from cli.commands.observability import grafana_render, observatory_urls, otel_collector
 from ops import pty_close_notices
-from shared import (
-    atomic_io,
-    coding_session_owner_record,
-    editable_install,
-    home_lifecycle_locks,
-    pause_owner,
-    start_serving,
-)
+from shared import atomic_io, editable_install, home_lifecycle_locks, pause_owner, start_serving
 from shared import updater_handoff as handoff
 from shared.agents.messages import delivery_outbox
+from shared.sessions import coding_session_owner_record
 from shared.sessions.pty import allocation_freeze
 from tests.shared.test_updater_handoff import (
     _isolated as _isolated,

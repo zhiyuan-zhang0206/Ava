@@ -9,12 +9,13 @@ from typing import NoReturn
 import psutil
 import pytest
 
-from shared import paths, winproc
+from shared import paths
 from shared.native_process.ownership import OwnedProcess
-from shared.session_backend import WinprocSessionBackend
-from shared.session_record import SessionRecord
-from shared.windows_terminal import record as terminal_record
-from shared.windows_terminal.backend import WindowsTerminalBackend
+from shared.sessions.backend import WinprocSessionBackend
+from shared.sessions.record import SessionRecord
+from shared.sessions.windows import winproc
+from shared.sessions.windows.terminal import record as terminal_record
+from shared.sessions.windows.terminal.backend import WindowsTerminalBackend
 
 
 def forbidden(*_args: object, **_kwargs: object) -> NoReturn:

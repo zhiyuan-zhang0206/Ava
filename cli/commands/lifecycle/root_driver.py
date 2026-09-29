@@ -42,9 +42,9 @@ def complete_boot_start() -> None:
     """Hand Linux systemd the verified root after ordinary readiness succeeds."""
     if sys.platform != "linux":
         return
+    from shared.native_process.root_control.client import native_identity
     from shared.os_boot_unit import in_boot_unit, publish_root_ready
     from shared.paths import ava_home
-    from shared.root_control.client import native_identity
 
     home = ava_home()
     if not in_boot_unit(home):
@@ -95,15 +95,15 @@ def _root_tree_roster(roles: MachineRoles, launch_skip: set[str]) -> tuple[Servi
 
 def _root_client(*, timeout: float = 5.0) -> Any:
     """A blocking client bound to this cluster's root control socket."""
+    from shared.native_process.root_control.client import RootClient
     from shared.paths import root_run_dir
-    from shared.root_control.client import RootClient
 
     return RootClient(root_run_dir() / _ROOT_SOCKET_NAME, timeout=timeout)
 
 
 def _root_status(client: Any) -> dict[str, Any] | None:
     """The daemon's status result, or None when no root answers (yet)."""
-    from shared.root_control.client import RootClientError
+    from shared.native_process.root_control.client import RootClientError
 
     try:
         response = client.status()
@@ -158,8 +158,8 @@ def _require_root_owner(status: dict[str, Any]) -> None:
 
     from services.permissions_helper import client as helper_client
     from shared.native_process.ownership import OwnedProcess
+    from shared.native_process.root_control.client import native_identity
     from shared.paths import root_run_dir
-    from shared.root_control.client import native_identity
 
     root = native_identity(status.get("root"))
     if not root.live():
@@ -202,7 +202,7 @@ def _root_argv(run_dir: Path, manifests: Path, runtime: StartRuntime | None = No
 def root_child_env() -> dict[str, str]:
     """The root env, including the proof it may pass only to agent-host."""
     from shared.host.env.registry import manifest_certification_secret_env
-    from shared.session_env import managed_service_env
+    from shared.sessions.env_forwarding import managed_service_env
 
     return managed_service_env(settings.general.service_path) | manifest_certification_secret_env()
 
@@ -385,7 +385,7 @@ def _stop_root_process(
     run_dir: Path, client: Any, status: dict[str, Any], *, timeout_s: float
 ) -> None:
     """Stop through the keeper on macOS, or SIGTERM; await native root exit."""
-    from shared.root_control.client import native_identity
+    from shared.native_process.root_control.client import native_identity
 
     _require_root_owner(status)
     identity = native_identity(status["root"])

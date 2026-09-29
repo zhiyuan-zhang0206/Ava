@@ -17,8 +17,8 @@ from urllib.parse import urlsplit
 from services.ava_root_glue.diagnostics import Diagnostic
 from shared.config import settings
 from shared.daemon.health import DaemonProbe
+from shared.native_process.os_platform import IS_MACOS, IS_WINDOWS
 from shared.native_process.ownership import OwnedProcess
-from shared.platform import IS_MACOS, IS_WINDOWS
 from shared.telemetry.station_endpoint import StationTarget
 
 

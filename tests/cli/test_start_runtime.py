@@ -477,7 +477,7 @@ def test_operation_observation_requires_every_selected_service_ready(
     from shared.cluster import machine
     from shared.cluster.machine import MachineRole
     from shared.native_process.ownership import OwnedProcess
-    from shared.root_control import client
+    from shared.native_process.root_control import client
 
     home = image.root.parent.parent
     # Same raw-env seam as above: stage.preflight_operation writes these directly to

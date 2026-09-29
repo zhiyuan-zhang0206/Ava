@@ -25,7 +25,7 @@ from cli.commands.lifecycle import service_stop as stop
 from shared import lifecycle_status
 from shared.native_process import ownership
 from shared.native_process.ownership import OwnedProcess
-from shared.session_record import SessionRecord
+from shared.sessions.record import SessionRecord
 from tests.agent.test_maintenance import WHEN
 from tests.cli.test_maintenance_stop import Launcher
 from tests.cli.test_maintenance_stop import home as home

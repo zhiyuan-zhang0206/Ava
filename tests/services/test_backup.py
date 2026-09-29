@@ -31,7 +31,7 @@ from services.pitr.stores import factory, logical_dump_names
 from services.pitr.stores.checksums import MD5, ObjectChecksum
 from services.pitr.stores.object_store import RemoteObjectAck
 from shared.config import settings
-from shared.platform import LockTimeoutError
+from shared.native_process.os_platform import LockTimeoutError
 
 _CLUSTER_TZ = "America/Los_Angeles"
 _REPO = Path(__file__).resolve().parents[2]

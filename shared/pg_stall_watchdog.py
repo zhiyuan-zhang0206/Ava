@@ -26,7 +26,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from shared.log import logger
-from shared.platform import IS_MACOS
+from shared.native_process.os_platform import IS_MACOS
 
 # How long the cluster may stay unresponsive before we call it stalled and
 # fail fast. Probe cadence is deliberately coarse: the cluster is disposable

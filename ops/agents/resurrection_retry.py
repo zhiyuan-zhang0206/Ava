@@ -10,7 +10,7 @@ from ops.rpc_schemas import OpFailure
 from shared.agents import AgentNotFound, MachinePaused, ResurrectError, ResurrectRefused
 from shared.incarnation_resources import ResourceBirth, ResourceShapeError, decode_resources
 from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 # The ops server's wire form of an exception it returns as a failed result.
 _REMOTE_REFUSAL = f"{ResurrectRefused.__name__}: "

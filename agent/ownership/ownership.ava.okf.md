@@ -35,6 +35,6 @@ without requiring an independently resident agent process.
 - `agent/ownership/inbound.py` — the owner lock every inbound queue mutation takes
 - `agent/ownership/lifecycle_intent.py` — the durable lifecycle command pointer
 - `services/agent_host/daemon.py` — owner health beat
-- `shared/runtime_incarnation.py` — context-bound execution identity
+- `shared/native_process/runtime_incarnation.py` — context-bound execution identity
 
 Related: [[../startup/admission.ava.okf.md]] and [[../lifecycle.ava.okf.md]].

@@ -1,5 +1,7 @@
 {
   "complexity": {
-    "shared/sessions/pty/cli.py::main": 17
+    "shared/sessions/pty/cli.py::main": 17,
+    "shared/sessions/windows/console_signal.py::send_private_console_break": 22,
+    "shared/sessions/windows/winproc.py::graceful_signal": 16
   }
 }

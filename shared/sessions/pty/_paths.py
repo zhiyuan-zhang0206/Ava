@@ -22,7 +22,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, cast
 
-from shared.session_record import SessionRecord
+from shared.sessions.record import SessionRecord
 
 # NOTE: `shared.paths` is imported inside each path resolver, never at module
 # top: importing it builds the pydantic Settings singleton (~31 MB RSS,

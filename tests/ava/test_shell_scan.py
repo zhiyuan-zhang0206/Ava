@@ -89,7 +89,7 @@ def test_capture_is_scanned(monkeypatch: pytest.MonkeyPatch, findings: list[Any]
             assert name == "fake-session"
             return payload
 
-    monkeypatch.setattr("shared.session_backend._shell_backend", _FakeBackend())
+    monkeypatch.setattr("shared.sessions.backend._shell_backend", _FakeBackend())
 
     out = sessions.capture(1)
 
@@ -109,7 +109,7 @@ def test_capture_without_scrollback_is_also_scanned(
             assert scrollback is False
             return _INJECTION
 
-    monkeypatch.setattr("shared.session_backend._shell_backend", _FakeBackend())
+    monkeypatch.setattr("shared.sessions.backend._shell_backend", _FakeBackend())
 
     assert sessions.capture(1, scrollback=False) == _INJECTION
     assert [src for src, _ in findings] == ["shell.sessions.capture"]
@@ -130,7 +130,7 @@ def test_capture_default_lines_follow_display_config(monkeypatch: pytest.MonkeyP
             seen["lines"] = lines
             return "ok"
 
-    monkeypatch.setattr("shared.session_backend._shell_backend", _FakeBackend())
+    monkeypatch.setattr("shared.sessions.backend._shell_backend", _FakeBackend())
 
     assert sessions.capture(1) == "ok"
     assert seen["lines"] == 137

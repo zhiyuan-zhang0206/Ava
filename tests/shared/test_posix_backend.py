@@ -1,5 +1,5 @@
-"""Tests for ``shared.session_backend.PosixProcSessionBackend`` — the native
-POSIX backend wrapping ``shared.posixproc``, migration target for service
+"""Tests for ``shared.sessions.backend.PosixProcSessionBackend`` — the native
+POSIX backend wrapping ``shared.sessions.posixproc``, migration target for service
 sessions.
 
 Most of these spawn REAL child processes (the double-fork reparent path is the
@@ -20,9 +20,9 @@ from pathlib import Path
 import psutil
 import pytest
 
-from shared import posixproc
-from shared.platform import IS_WINDOWS
-from shared.session_backend import (
+from shared.native_process.os_platform import IS_WINDOWS
+from shared.sessions import posixproc
+from shared.sessions.backend import (
     PosixProcSessionBackend,
     PtySessionBackend,
     SessionBackend,
@@ -122,7 +122,7 @@ def test_new_session_no_login_shell_passthrough(monkeypatch: pytest.MonkeyPatch)
 def test_posix_backend_keeps_its_own_log_file():
     """The native supervisor owns a session log file (liveness consumers can
     watch it); the abstract default answers None — a backend without a file."""
-    from shared.session_backend import SessionBackend
+    from shared.sessions.backend import SessionBackend
 
     posix_be = _backend()
     assert posix_be.session_log_path("ava-x") is not None
@@ -354,7 +354,7 @@ def test_get_shell_backend_returns_pty_backend():
     the self-hosted PTY supervisor on POSIX (S6 step 2), winproc on Windows —
     a singleton distinct from the get_backend() singleton (service sessions
     live on the native backend; interactive shells on the PTY one)."""
-    from shared.session_backend import get_backend
+    from shared.sessions.backend import get_backend
 
     b1 = get_shell_backend()
     b2 = get_shell_backend()

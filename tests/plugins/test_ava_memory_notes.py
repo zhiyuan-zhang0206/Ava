@@ -299,7 +299,7 @@ def test_personal_index_uses_hosted_turn_identity(
     from ava import agent_identity
     from ava_builtins.plugins.ava_memory import notes
     from shared.config import settings
-    from shared.turn_identity import bind_turn_identity
+    from shared.native_process.turn_identity import bind_turn_identity
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)

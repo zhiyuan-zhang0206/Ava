@@ -267,7 +267,7 @@ async def running_agent(aops_pool: AsyncConnectionPool):
 
     from agent.ownership.hosted import admit_hosted_runtime
     from shared.cluster.machine import machine_name
-    from shared.turn_identity import bind_turn_identity
+    from shared.native_process.turn_identity import bind_turn_identity
 
     agent_id = spawn_agent()
     incarnation = await admit_hosted_runtime(
@@ -1597,7 +1597,7 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     """Hosted restart: goto END with `restart_requested` (not `exit_requested`),
     leaves lifecycle application to the host after the acceptance checkpoint
     has been flushed."""
-    from shared.turn_identity import bind_turn_identity
+    from shared.native_process.turn_identity import bind_turn_identity
     from tests.agent.test_inbound_ownership import _admit, _agent
 
     tid = _agent(db_conn)
@@ -2263,8 +2263,8 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
     from ops.agents.wake import resurrect_agent
     from shared.cluster.machine import machine_name
-    from shared.runtime_incarnation import current_incarnation
-    from shared.turn_identity import bind_turn_identity
+    from shared.native_process.runtime_incarnation import current_incarnation
+    from shared.native_process.turn_identity import bind_turn_identity
 
     tid = running_agent()
     stop = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")

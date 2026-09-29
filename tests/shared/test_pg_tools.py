@@ -32,7 +32,7 @@ import pytest
 
 from shared import pg_throwaway_base, pg_tools
 from shared.config import settings
-from shared.process_env import daemon_process_env
+from shared.native_process.child_env import daemon_process_env
 
 _MMAP_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
 

@@ -24,7 +24,7 @@ from shared.incarnation_resources import (
     freeze_resources,
     register_exec,
 )
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def _process(pid: int, birth: float) -> ResourceProcess:

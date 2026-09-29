@@ -38,9 +38,9 @@ from shared import cluster
 from shared.cluster import authority
 from shared.config import settings
 from shared.host.net.url_secret import url_with_port
+from shared.native_process.child_env import restricted_process_env
 from shared.pg_admin import local_owner_authority
 from shared.pg_tools import pg_tool
-from shared.process_env import restricted_process_env
 from tests.lifecycle.db_authority.test_single_box import Born
 from tests.lifecycle.db_authority.test_single_box import born as born
 from tests.lifecycle.db_authority.test_single_box import configured as configured

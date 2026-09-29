@@ -108,11 +108,11 @@ from shared.context import AvaContext
 from shared.event_publisher import AgentEventPublisher
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
+from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from shared.native_process.turn_identity import bind_turn_identity
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
 from shared.redis_client import get_async_redis
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.telemetry.tracing import turn_span
-from shared.turn_identity import bind_turn_identity
 
 _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 
@@ -201,7 +201,7 @@ class AgentHost:
         Durable interrupts still stop cooperative LLM/exec work. Repeated outer
         cancellation must not release this agent to a concurrent successor.
         """
-        from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+        from shared.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 
         # A settled reap asks for one admission attempt, even if the row then
         # proves unrunnable or another wake reached it first.

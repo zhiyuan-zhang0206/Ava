@@ -16,7 +16,7 @@ import pytest
 import shared.pg_tools
 from services import backup
 from services.gateway_side.backup import snapshot as _snapshot
-from shared.platform import LockTimeoutError
+from shared.native_process.os_platform import LockTimeoutError
 
 
 def _activation_progress(line: str) -> None:

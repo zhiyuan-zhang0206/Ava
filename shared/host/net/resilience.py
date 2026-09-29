@@ -43,7 +43,7 @@ from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from typing import Protocol, TypeVar
 
-from shared.turn_identity import effective_agent_id
+from shared.native_process.turn_identity import effective_agent_id
 
 __all__ = [
     "ExponentialBackoff",

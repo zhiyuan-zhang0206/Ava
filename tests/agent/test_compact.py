@@ -971,7 +971,7 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
 ):
     """Lifecycle acceptance is serial; a summary cannot run in the exiting owner."""
     from agent.ownership.hosted import apply_hosted_lifecycle
-    from shared.turn_identity import bind_turn_identity
+    from shared.native_process.turn_identity import bind_turn_identity
     from tests.agent.test_inbound_ownership import _admit, _agent
 
     tid = _agent(db_conn)
@@ -1014,7 +1014,7 @@ async def test_compact_in_same_batch_as_restart(
 ):
     """The admitted successor, not the exiting owner, consumes the same summary."""
     from agent.ownership.hosted import apply_hosted_lifecycle
-    from shared.turn_identity import bind_turn_identity
+    from shared.native_process.turn_identity import bind_turn_identity
     from tests.agent.test_inbound_ownership import _admit, _agent
 
     tid = _agent(db_conn)

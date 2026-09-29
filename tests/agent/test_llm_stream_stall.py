@@ -37,7 +37,7 @@ from agent.state import AgentState
 from shared.config import settings
 from shared.context import AvaContext
 from shared.lm.registry import MODELS, ModelSpec
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent._fakes import make_fake_ops_pool
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}

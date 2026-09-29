@@ -739,7 +739,7 @@ async def reconcile_all_open_pages(
     per agent and never raise.
     """
     from shared.cluster.machine import reachable_host
-    from shared.turn_identity import bind_turn_identity
+    from shared.native_process.turn_identity import bind_turn_identity
 
     try:
         async with pool.connection() as conn, conn.cursor() as cur:

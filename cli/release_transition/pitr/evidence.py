@@ -12,8 +12,8 @@ from typing import Literal, Self
 from pydantic import AwareDatetime, Field, model_validator
 
 from cli.release_transition.request import Digest, Record
+from shared.native_process.evidence import ExpectedProcess
 from shared.native_process.ownership import OwnedProcess
-from shared.process_evidence import ExpectedProcess
 
 
 class DataOwner(Record):

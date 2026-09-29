@@ -55,7 +55,7 @@ from shared.cluster.authority.model import (
     generation_names,
     origin_of,
 )
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 from shared.private_storage import ensure_private_dir, write_private_bytes
 from shared.runtime_release import ReleaseRejectedError
 from shared.verified_file import regular_bytes

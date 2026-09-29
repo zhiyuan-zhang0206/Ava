@@ -16,7 +16,7 @@ from psycopg_pool import AsyncConnectionPool
 from shared.db_transaction import async_write_transaction
 from shared.exec_request_evidence import RequestEvidence, quarantine_stale
 from shared.lifecycle_acceptance import COMMAND_KILLS_SHELL_SESSIONS
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def install_hosted_force(conn: psycopg.Connection, agent_id: int, command_id: int) -> None:
@@ -42,7 +42,7 @@ def install_hosted_force(conn: psycopg.Connection, agent_id: int, command_id: in
         (command_id, agent_id),
     )
     from shared.incarnation_resources import freeze_resources
-    from shared.runtime_incarnation import RuntimeIncarnation
+    from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
     resources = conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent_id,)

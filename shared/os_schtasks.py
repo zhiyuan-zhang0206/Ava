@@ -73,7 +73,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 from loguru import logger
 
-from shared.platform import CREATE_NO_WINDOW
+from shared.native_process.os_platform import CREATE_NO_WINDOW
 
 # Root folder for every task this repo registers, so `schtasks /Query /TN \Ava\`
 # shows the whole set and nothing of ours is loose in the root namespace.

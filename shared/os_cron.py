@@ -33,7 +33,11 @@ from typing import TextIO
 from loguru import logger
 
 from shared.config import settings
-from shared.platform import crontab_lock, descends_from_launchd_job, launchd_job_label
+from shared.native_process.os_platform import (
+    crontab_lock,
+    descends_from_launchd_job,
+    launchd_job_label,
+)
 
 DEFAULT_INTERVAL_SECONDS = 300  # 5 minutes
 
@@ -219,8 +223,8 @@ def ava_binary_path() -> str:
     health probe against prod's home. Resolving from
     `repo_root()` makes binary, `$AVA_HOME` and label come from one checkout.
     """
+    from shared.native_process.os_platform import IS_WINDOWS
     from shared.paths import repo_root
-    from shared.platform import IS_WINDOWS
     from shared.platform_backend import get_backend
 
     scripts = repo_root() / ".venv" / get_backend().venv_bin_dir_name()
@@ -383,7 +387,7 @@ def _own_probe_job_of(own_labels: set[str]) -> str | None:
     """The health-probe label this process runs under, or None when external.
 
     ``XPC_SERVICE_NAME`` matches only for the job's direct child — exec'd
-    descendants read "0" (see `shared.platform.descends_from_launchd_job`) —
+    descendants read "0" (see `shared.native_process.os_platform.descends_from_launchd_job`) —
     so the environment is a fast path and the live process tree is the proof.
     Labels are probed in sorted order for deterministic logging/reporting."""
     current = launchd_job_label()

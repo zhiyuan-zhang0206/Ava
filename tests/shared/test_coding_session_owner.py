@@ -12,10 +12,10 @@ from typing import cast
 
 import pytest
 
-from shared import coding_session_owner as owner
-from shared import coding_session_owner_record as record_codec
 from shared.config import settings
-from shared.platform import IS_WINDOWS
+from shared.native_process.os_platform import IS_WINDOWS
+from shared.sessions import coding_session_owner as owner
+from shared.sessions import coding_session_owner_record as record_codec
 
 NOW = dt.datetime(2026, 9, 2, 0, 0, tzinfo=dt.UTC)
 

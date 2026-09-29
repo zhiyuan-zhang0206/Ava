@@ -16,7 +16,7 @@ from pydantic import Field
 
 from shared.managed_writer_observation import ExcludedRegistration, ExpectedUnitWriters
 from shared.managed_writer_publication import PublishedUnit
-from shared.process_evidence import Digest, EvidenceModel
+from shared.native_process.evidence import Digest, EvidenceModel
 from shared.runtime_abi import current_abi
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
 from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release

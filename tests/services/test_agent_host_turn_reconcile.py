@@ -24,8 +24,8 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from services.agent_host import settlement as settlement_mod
 from shared.config import settings
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import (
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import (
     HostedTurnResources,
     bind_hosted_resources,
     current_turn_incarnation,

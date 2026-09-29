@@ -17,7 +17,7 @@ from pathlib import Path
 
 import psutil
 
-from shared.posixproc import _group_empty
+from shared.sessions.posixproc import _group_empty
 
 
 def listener_evidence(port: int, phase: str) -> dict[str, object]:
@@ -113,7 +113,7 @@ def kill_group_or_prove_already_gone(
     outright — leaving a zombie that is the group's sole member. macOS answers
     `killpg` on such a zombie-only group with EPERM, not ESRCH (measured: 0/20
     in isolation, 3/3 under 8 CPU-saturating processes) — the same case
-    `shared.posixproc._group_empty` already carries a fallback for.
+    `shared.sessions.posixproc._group_empty` already carries a fallback for.
 
     Both halves must hold before the refusal reads as "already gone": the
     leader itself has actually exited (bounded `wait`, not just believed to),

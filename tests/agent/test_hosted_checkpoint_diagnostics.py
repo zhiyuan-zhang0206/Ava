@@ -12,7 +12,7 @@ from agent.impersonation import flush_checkpoint
 from services.agent_host.daemon import _build_checkpointer
 from shared.config import settings
 from shared.log import logger
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.turn_identity import bind_turn_identity
 
 
 @pytest.mark.parametrize("method", ["aput", "aput_writes", "flush"])

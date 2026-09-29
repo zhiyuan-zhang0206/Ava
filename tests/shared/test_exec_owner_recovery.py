@@ -138,8 +138,8 @@ def test_wire_receipt_requires_explicit_native_fields() -> None:
 def test_same_host_admission_keeps_original_receipt_after_clock_movement(
     linux_birth: dict[str, float | int],
 ) -> None:
+    from shared.native_process.runtime_incarnation import RuntimeIncarnation
     from shared.resource_admission import _next
-    from shared.runtime_incarnation import RuntimeIncarnation
 
     original = ResourceProcess.capture(psutil.Process())
     target = RuntimeIncarnation(1, uuid4(), uuid4())

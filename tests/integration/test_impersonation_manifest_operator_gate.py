@@ -32,7 +32,7 @@ from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import create_agent
 from shared.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
 from shared.telemetry.alerts import upsert_alert
 from shared.telemetry.audit_events import prepare_event_log

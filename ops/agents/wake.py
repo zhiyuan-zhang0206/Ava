@@ -33,7 +33,7 @@ from shared.lifecycle_acceptance import (
 )
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry.audit_events import prepare_event_log
 
 # The exact retained hosted identity; or, all three NULL, a never-admitted row

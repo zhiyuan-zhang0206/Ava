@@ -17,7 +17,7 @@ from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 
-from shared.process_evidence import Digest, EvidenceModel
+from shared.native_process.evidence import Digest, EvidenceModel
 
 
 class ManagedWriterBarrierError(RuntimeError):

@@ -21,11 +21,17 @@ import psutil
 from pydantic import BaseModel, ConfigDict
 
 from services.ava_root.wiring import WiringContext
+from shared.native_process.os_platform import CREATE_NO_WINDOW
 from shared.native_process.ownership import OwnedProcess
-from shared.platform import CREATE_NO_WINDOW
 from shared.sessions.pty.allocation_freeze import locked_freeze_state
-from shared.windows_terminal.backend import query
-from shared.windows_terminal.record import NativeBirth, TerminalRecord, publish, read, record_path
+from shared.sessions.windows.terminal.backend import query
+from shared.sessions.windows.terminal.record import (
+    NativeBirth,
+    TerminalRecord,
+    publish,
+    read,
+    record_path,
+)
 
 
 class StartRequest(BaseModel):

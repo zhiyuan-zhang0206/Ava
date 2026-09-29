@@ -2,7 +2,7 @@ name: Hosted incarnation regression proof
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: ['agent/**', 'services/agent_host/**', 'shared/*incarnation*', 'shared/turn_identity.py', 'tests/agent/test_hosted_ownership.py', 'tests/services/test_agent_host.py', 'tests/services/test_turn_dispatcher.py', '.github/workflows/hosted-incarnation-proof.yml']
+    paths: ['agent/**', 'services/agent_host/**', 'shared/*incarnation*', 'shared/native_process/turn_identity.py', 'tests/agent/test_hosted_ownership.py', 'tests/services/test_agent_host.py', 'tests/services/test_turn_dispatcher.py', '.github/workflows/hosted-incarnation-proof.yml']
 permissions:
   contents: read
 jobs:

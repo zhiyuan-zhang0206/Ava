@@ -40,7 +40,7 @@ Bare `python` is deliberate, not shorthand: every agent process (and every
 `ava.shell` command it runs, one-shot or persistent) descends from
 `services.ava_root`, which is launched with this checkout's venv `bin/`
 (`Scripts\` on Windows) already first on `PATH`
-(`cli/commands/lifecycle/root_driver.py::root_child_env`, `shared/session_env.py::
+(`cli/commands/lifecycle/root_driver.py::root_child_env`, `shared/sessions/env_forwarding.py::
 forward_env_dict`) — so `python` always resolves to the right interpreter for
 prod home, a dev worktree cluster, or Windows alike, with no
 `.venv/bin/` / `$AVA_HOME/source/.venv/bin/` / `Scripts\` prefix needed.

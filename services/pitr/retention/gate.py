@@ -29,8 +29,8 @@ from services.pitr.retention.manifest import RetentionPlan
 from services.pitr.retention.planner import inspect_dry_run_plan
 from shared.config import field_alias_map
 from shared.host.env import runtime_config
+from shared.native_process.turn_identity import effective_agent_id
 from shared.paths import ava_home
-from shared.turn_identity import effective_agent_id
 
 ARMED_FIELD = "pitr_retention_delete_armed"
 DIGEST_FIELD = "pitr_retention_delete_approved_digest"

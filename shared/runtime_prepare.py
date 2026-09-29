@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from shared.process_group_closure import close_unadmitted, wait_group_finished
+from shared.native_process.group_closure import close_unadmitted, wait_group_finished
 from shared.runtime_abi import AbiTag, AbiTagError, current_abi, parse_abi_tag
 from shared.runtime_release import (
     MANIFEST_VERSION,

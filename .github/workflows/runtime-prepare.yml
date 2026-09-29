@@ -3,7 +3,7 @@ on:
   pull_request:
     paths:
       - 'shared/runtime_prepare.py'
-      - 'shared/process_group_closure.py'
+      - 'shared/native_process/group_closure.py'
       - 'shared/runtime_abi.py'
       - 'shared/runtime_release.py'
       - 'shared/release_identity.py'
@@ -19,7 +19,7 @@ on:
       - 'scripts/runtime-node-version'
       - 'shared/host/env/dotenv_boot.py'
       - 'shared/platform_backend.py'
-      - 'shared/session_env.py'
+      - 'shared/sessions/env_forwarding.py'
       - 'ops/spec.py'
       - 'agent/graph/exec/_subprocess.py'
       - 'scripts/release_proofs/prove_runtime_consumer.py'

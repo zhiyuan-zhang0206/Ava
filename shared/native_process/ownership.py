@@ -181,7 +181,7 @@ def _windows_live(identity: OwnedProcess) -> bool:
     appear RUNNING. A zero-time handle wait distinguishes it without waiting
     for PID disappearance or mistaking exit code 259 for STILL_ACTIVE.
     """
-    from shared.winjob import _get_last_error, _kernel32, last_error
+    from shared.native_process.winjob import _get_last_error, _kernel32, last_error
 
     api = _kernel32()
     raw = api.OpenProcess(0x00100000, 0, identity.pid)  # SYNCHRONIZE, non-inheritable

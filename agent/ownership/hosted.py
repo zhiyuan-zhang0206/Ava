@@ -29,6 +29,7 @@ from shared.incarnation_resources import (
 from shared.lifecycle_acceptance import RECORD_APPLIED, terminate_kills_shell_sessions
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
+from shared.native_process.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
 from shared.paths import ava_home
 from shared.resource_admission import admit_resources_async
 from shared.runtime_admission import (
@@ -39,7 +40,6 @@ from shared.runtime_admission import (
     process_runtime_admission,
     require_current_for_managed,
 )
-from shared.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
 from shared.telemetry.audit_events import insert_event_log_async
 
 
@@ -108,7 +108,7 @@ async def apply_hosted_lifecycle(
     lock before the `terminated` write: the last step is over, and a crash
     cannot commit the death without the kill — the retry kills again.
     """
-    from shared.turn_identity import hosted_resources_settled
+    from shared.native_process.turn_identity import hosted_resources_settled
 
     if not hosted_resources_settled():
         return None
@@ -611,7 +611,7 @@ async def settle_hosted_runtime(
     or an open circuit breaker) leaves it for the reaper. Writing it here would
     only relabel a crash-dead row healthy and resume its lease renewal forever.
     """
-    from shared.turn_identity import hosted_resources_settled
+    from shared.native_process.turn_identity import hosted_resources_settled
 
     if not hosted_resources_settled():
         return False

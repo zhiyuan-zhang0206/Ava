@@ -40,7 +40,7 @@ from shared.cluster.machine import MachineRoles
 from shared.config import settings
 from shared.deploy_timing import GATEWAY_PREFLIGHT_BUDGET_S
 from shared.platform_backend import get_backend
-from shared.session_env import frontend_toolchain_env
+from shared.sessions.env_forwarding import frontend_toolchain_env
 
 _services_for_roles = _spec.services_for_capabilities
 _services_for_roles_annotated = _spec.services_for_capabilities_annotated

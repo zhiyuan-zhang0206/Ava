@@ -5,7 +5,7 @@ import pytest
 
 from shared import cluster
 from shared.cluster import port_preflight
-from shared.platform import LockTimeoutError, file_lock
+from shared.native_process.os_platform import LockTimeoutError, file_lock
 
 
 def test_registry_lock_contention_has_a_bounded_wait(tmp_path: Path) -> None:

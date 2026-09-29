@@ -28,8 +28,8 @@ from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
 from shared.agents.messages.envelope import wrap_inbound
 from shared.context import AvaContext, agent_id_from_config
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from shared.turn_identity import hosted_resources_settled
+from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from shared.native_process.turn_identity import hosted_resources_settled
 
 
 async def native_status(agent_id: int) -> dict[str, Any] | None:
@@ -282,7 +282,7 @@ def _spawn_codex_relay(
     discarded because delivery uses the app-server Steer path; stderr flows
     into this process's log.
     """
-    from shared.session_env import forward_env_dict
+    from shared.sessions.env_forwarding import forward_env_dict
 
     relay_env = forward_env_dict()
     if codex_home is not None:

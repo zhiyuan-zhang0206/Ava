@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shared.cluster import home_slug
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 
 CAPABILITIES = ("gateway", "agent-runner", "observability-station")
 LGTM_BACKENDS = ("loki", "prometheus", "grafana")
@@ -94,7 +94,7 @@ class Host:
 
     @classmethod
     def current(cls) -> Host:
-        from shared.platform import user_systemd_unit_dir
+        from shared.native_process.os_platform import user_systemd_unit_dir
 
         linux = sys.platform.startswith("linux")
         return cls(

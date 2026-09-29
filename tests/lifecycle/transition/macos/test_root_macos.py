@@ -24,7 +24,7 @@ from services.permissions_helper import client, finite_artifact
 from shared import paths
 from shared.native_process import ownership
 from shared.native_process.ownership import OwnedProcess
-from shared.root_control import client as root_client
+from shared.native_process.root_control import client as root_client
 from shared.runtime_release import VerifiedRelease
 from tests.lifecycle.transition.macos.launchd_fake import HELPER, Harness
 from tests.lifecycle.transition.macos.launchd_fake import harness as harness

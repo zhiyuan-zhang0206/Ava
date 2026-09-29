@@ -82,8 +82,8 @@ from shared.daemon.health import Liveness, health_port, start_health_server, sto
 from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from shared.daemon.shutdown import hard_exit as _hard_exit
 from shared.log import init_gateway_process
+from shared.native_process.os_platform import CREATE_NO_WINDOW
 from shared.paths import gateway_memory_dir
-from shared.platform import CREATE_NO_WINDOW
 
 _log = logging.getLogger("services.memory_indexer.daemon")
 

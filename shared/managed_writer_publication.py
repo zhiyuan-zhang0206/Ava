@@ -28,7 +28,7 @@ from shared.managed_writer_barrier import (
     lock_rollout,
     validate_collection_for_write,
 )
-from shared.process_evidence import Digest, EvidenceModel, ExpectedProcess
+from shared.native_process.evidence import Digest, EvidenceModel, ExpectedProcess
 
 
 @dataclass(frozen=True)

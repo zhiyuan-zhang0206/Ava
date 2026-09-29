@@ -25,8 +25,8 @@ from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle import service_stop as stop
 from shared.config import settings
 from shared.native_process import pid_starttime_ticks
-from shared.session_backend import PosixProcSessionBackend, PtySessionBackend
-from shared.session_record import SessionRecord
+from shared.sessions.backend import PosixProcSessionBackend, PtySessionBackend
+from shared.sessions.record import SessionRecord
 from tests.e2e._proc import kill_group_if_alive
 
 Launcher = Callable[[str, str], subprocess.Popen[str]]

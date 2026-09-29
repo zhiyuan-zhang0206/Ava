@@ -28,12 +28,12 @@ from typing import Any, cast
 import psutil
 import pytest
 
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.native_process.ownership import OwnedProcess, shown_name, stable_create_time
-from shared.platform import IS_WINDOWS
-from shared.session_record import SessionRecord, pid_starttime_ticks
 from shared.sessions.pty import cli as pty_cli
 from shared.sessions.pty import host as pty_host
 from shared.sessions.pty import orphan_reaper, session_tree
+from shared.sessions.record import SessionRecord, pid_starttime_ticks
 from tests.cli.conftest import PtyReaper
 from tests.cli.conftest import pty_reaper as pty_reaper
 

@@ -13,8 +13,8 @@ import pytest
 
 from shared.native_process import ownership as proc_tree
 from shared.native_process import pid_starttime_ticks
+from shared.native_process.os_platform import IS_LINUX
 from shared.native_process.ownership import OwnedProcess, create_time_matches, stable_create_time
-from shared.platform import IS_LINUX
 
 
 def _identity_with_drift(offset: float) -> OwnedProcess:

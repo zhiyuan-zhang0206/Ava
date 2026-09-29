@@ -1,4 +1,4 @@
-"""Tests for how shared.winproc hands a session command to CreateProcess.
+"""Tests for how shared.sessions.windows.winproc hands a session command to CreateProcess.
 
 The defect these cover: every session ran as ``cmd /c <cmd>`` under
 ``DETACHED_PROCESS``, and cmd.exe — finding itself without a console — allocates
@@ -25,7 +25,8 @@ from typing import IO, ClassVar
 
 import pytest
 
-from shared import winjob, winproc
+from shared.native_process import winjob
+from shared.sessions.windows import winproc
 
 # ── _plan_launch: which commands avoid cmd.exe ──────────────────────────────
 
@@ -336,7 +337,7 @@ def test_new_session_spawns_a_control_steward_bound_to_the_record_identity(
     command = call.command
     assert isinstance(command, list)
     assert command[0] == sys.executable and command[1] == "-I"
-    assert command[2].endswith("windows_session_steward.py")
+    assert command[2].endswith("steward.py")
     # record path, pid, create_time, control port, delivery token, session name
     assert len(command) == 9
     rec = winproc._read_record("zz-daemon")
@@ -367,7 +368,7 @@ def test_list_sessions_reaps_a_dead_record(
     """A dead session's record is removed by the listing. The loopback control
     channel leaves no filesystem residue, so the record is the only artifact
     reaping has to take."""
-    from shared.session_record import SessionRecord
+    from shared.sessions.record import SessionRecord
 
     rec = SessionRecord(
         900000,

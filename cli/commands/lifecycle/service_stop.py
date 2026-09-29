@@ -42,9 +42,9 @@ from ops import pty_close_notices
 from shared.cluster.machine import machine_name
 from shared.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from shared.paths import run_dir
-from shared.session_backend import get_shell_backend
-from shared.session_record import SessionRecord
+from shared.sessions.backend import get_shell_backend
 from shared.sessions.pty import host_identity, host_starttime, session_tree
+from shared.sessions.record import SessionRecord
 
 # How often the completed-work wait re-reads the terminal trees.
 _WORK_POLL_S = 0.5

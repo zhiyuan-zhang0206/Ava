@@ -28,7 +28,7 @@ from shared.agents.impersonation_manifest_grants import grant_manifest_runner_ac
 from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import create_agent
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
 from tests._containers import grant_runner_login
 from tests.impersonation_support import attested_caller

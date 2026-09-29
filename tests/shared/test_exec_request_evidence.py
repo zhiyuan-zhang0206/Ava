@@ -23,7 +23,7 @@ from shared.exec_request_evidence import (
     survey,
 )
 from shared.incarnation_resources import IncarnationResources, ResourceProcess
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 _AGENT = 424242
 

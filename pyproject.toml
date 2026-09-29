@@ -358,7 +358,7 @@ ignore = [
 # telemetry / retry-policy readers sit outside node signatures, so a blanket
 # ban is not possible. New uses need a written justification in the PR
 # description before joining the per-file-ignores allowlist below.
-"contextvars" = { msg = "contextvars is allowlisted only — owners: shared/turn_identity.py, shared/config/turn_view.py, shared/plugin_config_view.py, shared/plugin_context.py, shared/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
+"contextvars" = { msg = "contextvars is allowlisted only — owners: shared/native_process/turn_identity.py, shared/config/turn_view.py, shared/plugin_config_view.py, shared/plugin_context.py, shared/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
@@ -421,7 +421,7 @@ ignore = [
 # contextvar mechanism owners — the only files allowed to import contextvars
 # (allowlist lock, user ruling 2026-08-27, audit #3607). New use points must be
 # justified in the PR description before joining this list.
-"shared/turn_identity.py" = ["TID251"]
+"shared/native_process/turn_identity.py" = ["TID251"]
 # SDK async tasks must not share active call frames or borrowed identity.
 "shared/sdk_telemetry.py" = ["TID251"]
 "shared/config/turn_view.py" = ["TID251"]

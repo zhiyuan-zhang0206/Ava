@@ -27,11 +27,11 @@ from shared.exec_owner_protocol import (
     read_owner_bytes,
     read_owner_context,
 )
-from shared.exec_process_domain import KILL_GRACE_S, ExecProcessDomain
 from shared.incarnation_resources import ResourceProcess
-from shared.platform import IS_WINDOWS
-from shared.winjob import WindowsJob
-from shared.winjob_pipes import PipedJobChild, start_piped_job_process
+from shared.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
+from shared.native_process.os_platform import IS_WINDOWS
+from shared.native_process.winjob import WindowsJob
+from shared.native_process.winjob_pipes import PipedJobChild, start_piped_job_process
 
 
 def _ended(identity: psutil.Process) -> bool:

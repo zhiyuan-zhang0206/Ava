@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 from gateway.run_timeline import _events as reads
 from gateway.run_timeline import router as timeline
-from shared.turn_identity import bind_turn_identity, current_turn_agent_id
+from shared.native_process.turn_identity import bind_turn_identity, current_turn_agent_id
 
 
 @pytest.mark.parametrize("tied", [False, True])

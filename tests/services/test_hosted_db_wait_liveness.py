@@ -22,7 +22,7 @@ from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import insert_inbound_message
 from shared.hosted_db_wait import database_wait_snapshot
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_hosted_db_recovery import _admit, _graph
 from tests.services.test_delivery_watchdog_turn_liveness import FakeRedis
 

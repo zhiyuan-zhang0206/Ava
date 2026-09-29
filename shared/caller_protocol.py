@@ -4,7 +4,7 @@ import psycopg
 from psycopg.pq import TransactionStatus
 
 from shared.caller_identity import PREFIXES, CallerIdentity
-from shared.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
 
 
 class CallerProtocolUnavailableError(ValueError):

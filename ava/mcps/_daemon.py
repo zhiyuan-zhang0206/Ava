@@ -39,7 +39,7 @@ from loguru import logger
 
 from ava.mcp_config import assert_requirements, is_transport_error, load_mcp_config, server_url
 from shared.config import settings
-from shared.log_sinks import add_sink
+from shared.log.sinks import add_sink
 
 from ._oauth import _OAUTH_FLOW_TIMEOUT_S
 

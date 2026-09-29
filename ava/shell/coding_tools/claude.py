@@ -23,7 +23,7 @@ import uuid
 from pathlib import Path
 
 import ava
-from shared import coding_session_owner
+from shared.sessions import coding_session_owner
 
 from ._claude_checks import (
     _bootstrap_count,

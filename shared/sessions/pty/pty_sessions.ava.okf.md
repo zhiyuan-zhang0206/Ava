@@ -121,7 +121,7 @@ named-PTY rule covers `<name>.{out,host}.log` without traversing any subtree.
 
 ## Consumers
 
-`shared/session_backend.PtySessionBackend` (`get_shell_backend()` on POSIX)
+`shared/sessions/backend.PtySessionBackend` (`get_shell_backend()` on POSIX)
 — mutating ops via CLI subprocess, enumeration via the in-process record
 scan. Above it: `ava.shell.sessions`, `ava.watcher`, the gateway
 ScheduleManager, the page-server daemon, `ops.cluster_status` capture/kill, and
@@ -132,7 +132,7 @@ ScheduleManager, the page-server daemon, `ops.cluster_status` capture/kill, and
 - POSIX-only (`pty.fork`; Windows has no pty backend —
   [conventions/windows-setup.md](../../../conventions/windows-setup.md)).
 - One pty per session counts against the host-wide `kern.tty.ptmx_max`
-  ceiling (macOS default 511) — see `shared/platform.py`.
+  ceiling (macOS default 511) — see `shared/native_process/os_platform.py`.
 - [[generation-boundary.ava.okf.md]] defines the desired-state implications of
   a freeze and the fail-closed corrupt-marker repair contract.
 - Session records carry the generation under which their host was admitted.

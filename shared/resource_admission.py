@@ -19,7 +19,7 @@ from shared.incarnation_resources import (
     ResourceProcess,
     decode_resources,
 )
-from shared.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 _LOCK = "SELECT incarnation_resources,runtime_generation,runtime_owner,runtime_kind,pid,started_at,runtime_protocol_version FROM agents_meta WHERE id=%s FOR UPDATE"
 # The one predecessor rule: a settled lifecycle receipt for (agent, generation,

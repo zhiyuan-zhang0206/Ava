@@ -51,10 +51,10 @@ from shared.host.env.registry import (
     MANIFEST_CERTIFICATION_SECRET_ENV,
 )
 from shared.log import logger
+from shared.native_process.os_platform import CREATE_NO_WINDOW, IS_WINDOWS
+from shared.native_process.turn_identity import current_hosted_resources
+from shared.native_process.winjob import EXEC_JOB_GATE_ENV, WindowsJob, publish_parent_job_gate
 from shared.paths import exec_run_dir
-from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
-from shared.turn_identity import current_hosted_resources
-from shared.winjob import EXEC_JOB_GATE_ENV, WindowsJob, publish_parent_job_gate
 
 from . import _process
 

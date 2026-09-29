@@ -11,8 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 import ava
-from shared import coding_session_owner
 from shared.agents import AgentNotFound, AgentStatus
+from shared.sessions import coding_session_owner
 
 
 def resolve_dir(dir_path: str) -> Path:

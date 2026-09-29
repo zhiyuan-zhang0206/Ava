@@ -119,7 +119,7 @@ def bind_agent_plugin_config(
     """Bind `pins` as the current context's plugin-config view.
 
     The hosted dispatcher wraps turn-task creation in this, alongside
-    `shared.config.bind_agent_config` and `shared.turn_identity.bind_turn_identity`.
+    `shared.config.bind_agent_config` and `shared.native_process.turn_identity.bind_turn_identity`.
     """
     token = _AGENT_PLUGIN_CONFIG.set(_PluginConfigView(pins))
     try:

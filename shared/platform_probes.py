@@ -235,7 +235,7 @@ def unix_sockets_available() -> bool:
     failing a connect. Probed by attribute presence, not by ``sys.platform``,
     because the attribute IS the thing every caller actually needs. Windows-only
     IPC must not depend on it: the winproc control steward
-    (``shared/winproc.py``) uses loopback TCP for exactly this reason (CPython
+    (``shared/sessions/windows/winproc.py``) uses loopback TCP for exactly this reason (CPython
     issue #77589).
     """
     return hasattr(socket, "AF_UNIX")

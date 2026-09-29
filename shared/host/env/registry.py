@@ -41,7 +41,7 @@ The module stays importable before Settings exists: `dotenv_boot` runs its
 authority pass at `.env`-load time. Provider-plugin declarations load lazily
 only at the delivery boundaries that consume them.
 
-POSIX delivery is the backend env-dict handoff (`shared.session_env.forward_env_dict`);
+POSIX delivery is the backend env-dict handoff (`shared.sessions.env_forwarding.forward_env_dict`);
 Windows delivers a dict. KEY=VALUE argv delivery stays forbidden (secrets never ride
 argv — decisions/2026-07-30-secrets-never-ride-argv.md).
 """
@@ -156,7 +156,7 @@ def network_proxy_configured() -> bool:
 # first import (`import _overlapped`, WinError 10106 — v0.1.34 win daemons,
 # 2026-08-07 agent spawn). Copied from os.environ, non-empty only; POSIX needs
 # none of them (login shell rebuilds). Single declaration — the old parallel
-# copy in shared/session_env.py is gone.
+# copy in shared/sessions/env_forwarding.py is gone.
 _WINDOWS_SYSTEM_ROWS = tuple(
     EnvField(key)
     for key in (
@@ -552,7 +552,7 @@ def child_env(role: ProcessRole, platform: str) -> dict[str, str]:
     empty $DISPLAY means "no display".
 
     The allow/drop decision is the DATA in this registry; the callers
-    (shared.session_env / ops.agent_launch) are the mechanism that applies it.
+    (shared.sessions.env_forwarding / ops.agent_launch) are the mechanism that applies it.
     """
     _require_role(role)
     _ensure_validated()

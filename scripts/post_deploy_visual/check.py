@@ -39,7 +39,7 @@ from scripts.post_deploy_visual.policy import (  # noqa: E402
     validate_wave_id,
 )
 from scripts.post_deploy_visual.runner import run_browser_gate  # noqa: E402
-from shared.process_env import inherited_process_env  # noqa: E402
+from shared.native_process.child_env import inherited_process_env  # noqa: E402
 
 DEFAULT_OUTPUT_ROOT = Path.home() / "post-deploy-visual"
 VISUAL_PASS_TIMEOUT_SECONDS = 28 * 60

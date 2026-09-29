@@ -36,8 +36,8 @@ from shared.hosted_db_wait import database_wait_snapshot
 from shared.hosted_force import install_hosted_force
 from shared.incarnation_resources import ResourceBirth
 from shared.maintenance_state import MaintenanceHold
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 
 
 @pytest.fixture(autouse=True)

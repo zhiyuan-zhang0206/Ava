@@ -12,8 +12,8 @@ from agent.ownership.inbound import RuntimeOwnershipLostError
 from services.agent_host import host as host_module
 from shared.config import settings
 from shared.context import AvaContext
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_hosted_compact_failure import _prepare_graph
 from tests.agent.test_inbound_ownership import _admit, _agent
 from tests.agent.test_lifecycle_intent import _command

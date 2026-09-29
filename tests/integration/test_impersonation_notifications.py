@@ -30,8 +30,8 @@ from shared.cluster.machine import machine_name
 from shared.context import AvaContext
 from shared.db import create_agent, pool
 from shared.hosted_force import original_host_force
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from shared.native_process.turn_identity import bind_turn_identity
 from tests.impersonation_support import recorded_tree
 
 

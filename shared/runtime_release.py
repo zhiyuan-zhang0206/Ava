@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
-from shared.platform import file_lock
+from shared.native_process.os_platform import file_lock
 from shared.runtime_abi import AbiTag, AbiTagError, abi_refusal, parse_abi_tag
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")

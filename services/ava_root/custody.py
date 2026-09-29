@@ -40,7 +40,7 @@ class ServiceCustody:
         self._body: dict[str, object] = {"version": 1, "unit": unit, "stage": "spawning"}
         self._expected = json.dumps(self._body)
         if os.name == "nt":
-            from shared.root_control.windows.storage import publish
+            from shared.native_process.root_control.windows.storage import publish
 
             publish(self.path, self._expected, exclusive=True)
             return
@@ -65,7 +65,7 @@ class ServiceCustody:
 
         self._expected = json.dumps(self._body)
         if os.name == "nt":
-            from shared.root_control.windows.storage import publish
+            from shared.native_process.root_control.windows.storage import publish
 
             publish(self.path, self._expected)
             return
@@ -75,7 +75,7 @@ class ServiceCustody:
         """Remove only this owner's record after completed native cleanup."""
         self._require_unchanged()
         if os.name == "nt":
-            from shared.root_control.windows.storage import clear
+            from shared.native_process.root_control.windows.storage import clear
 
             clear(self.path)
             return
