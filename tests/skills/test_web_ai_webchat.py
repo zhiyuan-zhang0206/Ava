@@ -1,5 +1,5 @@
 """Unit tests for the web-ai shared driver
-(ava_builtins.skill_support.web_ai.webchat), plus its `_utils` leaf helpers
+(ava_builtins/skills/web-ai/scripts/webchat.py), plus its `_utils` leaf helpers
 (split out of webchat.py, 2026-08-07, Task #1011).
 
 The live browser behavior (real chrome MCP against the logged-in sites) was
@@ -18,13 +18,27 @@ just for a cosmetic label rather than a write or credential target.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-from ava_builtins.skill_support.web_ai import _utils, webchat
+from tests.skills import load_skill_script
+
+# `_utils.py` is a module-only sibling of `webchat.py`, reached in production
+# only through a child sub-skill script's own __file__-derived sys.path guard
+# (e.g. ava_builtins/skills/web-ai/console/scripts/ask.py). Loading it here
+# directly reproduces that guard — tests are outside Structure Rule 6's scope
+# (see tests/skills/__init__.py) — so this file does not depend on collection
+# order putting some other skill's guard on sys.path first.
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2] / "ava_builtins" / "skills" / "web-ai" / "scripts")
+)
+
+_utils = load_skill_script("web-ai", "scripts", "_utils.py")
+webchat = load_skill_script("web-ai", "scripts", "webchat.py")
 
 _PAGE_LIST = (
     "## Pages\n"

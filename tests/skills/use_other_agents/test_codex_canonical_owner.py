@@ -21,9 +21,7 @@ from ava.shell.coding_tools import _common, codex
 from shared import coding_session_owner
 from shared.platform import IS_WINDOWS
 
-_REFERENCE = (
-    Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"
-)
+_SKILL_DIR = Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents"
 
 
 def _load(name: str, path: Path) -> ModuleType:
@@ -35,8 +33,8 @@ def _load(name: str, path: Path) -> ModuleType:
     return module
 
 
-spawn_codex = _load("spawn_codex_under_test", _REFERENCE / "spawn_codex.py")
-watch_work = _load("watch_work_under_test", _REFERENCE / "watch_work.py")
+spawn_codex = _load("spawn_codex_under_test", _SKILL_DIR / "scripts" / "spawn_codex.py")
+watch_work = _load("watch_work_under_test", _SKILL_DIR / "scripts" / "watch_work.py")
 
 
 def _record_app_server(events: list[str], _endpoint: str, *, log_path: Path | None = None) -> None:
@@ -120,7 +118,7 @@ def test_fresh_launch_publishes_full_handle_and_durable_context(tmp_path: Path) 
         coding_session_owner.full_session_name(41, 7, "codex-workspace-11111111")
         == "ava-agent-41-shell-7-codex-workspace-11111111"
     )
-    contract = _REFERENCE / "collaboration_protocol.md"
+    contract = _SKILL_DIR / "references" / "collaboration_protocol.md"
     message = _common.worker_bootstrap(contract, workspace, tasks_file, work_file)
     assert str(contract) in message
     assert str(workspace) in message
@@ -129,7 +127,7 @@ def test_fresh_launch_publishes_full_handle_and_durable_context(tmp_path: Path) 
 
 
 def test_supervisor_bootstrap_restores_owner_identity(tmp_path: Path) -> None:
-    command = codex._supervisor_command(_owner(tmp_path), _REFERENCE / "watch_work.py")
+    command = codex._supervisor_command(_owner(tmp_path), _SKILL_DIR / "scripts" / "watch_work.py")
 
     argv = shlex.split(command)
     assert argv[:3] == ["exec", "env", "AVA_AGENT_ID=41"]
@@ -179,7 +177,9 @@ def test_codex_supervisor_uses_projected_session_environment(
     monkeypatch.setattr(codex, "_supervisor_code", supervisor_probe)
     name = coding_session_owner.full_session_name(41, 7, codex._supervisor_name(owner))
     try:
-        sid, actual_name = codex._launch_supervisor(owner, 120, _REFERENCE / "watch_work.py")
+        sid, actual_name = codex._launch_supervisor(
+            owner, 120, _SKILL_DIR / "scripts" / "watch_work.py"
+        )
         assert (sid, actual_name) == (7, name)
         deadline = time.monotonic() + 15
         while not report.exists() and time.monotonic() < deadline:
@@ -288,7 +288,7 @@ def test_failed_early_publish_kills_codex_session_before_startup(
             workspace / "tasks.md",
             workspace / "work.md",
             3600,
-            reference_dir=_REFERENCE,
+            skill_dir=_SKILL_DIR,
         )
 
     assert events == ["claim", "attach", "new", "publish"]
@@ -375,9 +375,7 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
 
     workspace = Path(launching.key.workspace)
     brief = "Goal: replace the agent. The briefing is inline; read no files."
-    rc = codex.launch(
-        workspace, None, None, 3600, None, "Fix login", brief, reference_dir=_REFERENCE
-    )
+    rc = codex.launch(workspace, None, None, 3600, None, "Fix login", brief, skill_dir=_SKILL_DIR)
 
     assert rc == 0
     assert events == [

@@ -37,7 +37,7 @@ round, spawn a separate quality-check supervisor that judges *this round's* outp
    Launch it first so you do not miss the target's idle transition.
 
    ```python
-   watcher = ava.files.read(f"{ava.skills.ava_goal.path}/reference/watch_idle.py")
+   watcher = ava.files.read(f"{ava.skills.ava_goal.path}/scripts/watch_idle.py")
    watcher = watcher.replace("TARGET_AGENT_ID = 0", f"TARGET_AGENT_ID = {target_id}")
    ava.watcher.launch(watcher, timeout="6h")
    ```
@@ -90,7 +90,7 @@ round, spawn a separate quality-check supervisor that judges *this round's* outp
          "Fix all of the above; anything marked omitted needs a real implementation, "
          "not a comment.",
      )
-     watcher = ava.files.read(f"{ava.skills.ava_goal.path}/reference/watch_idle.py")
+     watcher = ava.files.read(f"{ava.skills.ava_goal.path}/scripts/watch_idle.py")
      watcher = watcher.replace("TARGET_AGENT_ID = 0", f"TARGET_AGENT_ID = {target_id}")
      ava.watcher.launch(watcher, timeout="6h")
      ```
@@ -118,7 +118,7 @@ Goals that span many hours need two extra disciplines, both cheap:
 
 ## The watcher
 
-`reference/watch_idle.py` listens for the target's "idle" lifecycle signal and
+`scripts/watch_idle.py` listens for the target's "idle" lifecycle signal and
 messages you (`ava.agents.send_message`) once when it fires. Delivery retries
 across a gateway / agent restart window (doubling gaps, ~10.5 min); if every
 attempt fails the watcher exits 2, so the loss surfaces in its exit notice. It

@@ -14,8 +14,9 @@ request records it (``--codex-remote``) and the relay delivers into the same
 server.
 
 The ``ava-use-other-agents`` skill's ``spawn_codex.py`` is the command-line
-entry; it passes its own reference directory, which holds the collaboration
-contract and the supervisor script, and locates the impersonator guide.
+entry; it passes its own skill directory, whose ``references/`` holds the
+collaboration contract (and locates the impersonator guide) and whose
+``scripts/`` holds the supervisor script.
 """
 
 from __future__ import annotations
@@ -419,7 +420,7 @@ class _LaunchRequest:
     caller_instance: str | None
     takeover_name: str | None
     takeover_brief: str
-    reference_dir: Path
+    skill_dir: Path
     resume: str | None
 
 
@@ -477,12 +478,12 @@ def _start_codex(
             request.takeover_name,
             request.takeover_brief,
             remote,
-            impersonator_guide(request.reference_dir),
+            impersonator_guide(request.skill_dir),
         )
     else:
         assert request.tasks_file is not None and request.work_file is not None  # noqa: S101
         message = worker_bootstrap(
-            request.reference_dir / "collaboration_protocol.md",
+            request.skill_dir / "references" / "collaboration_protocol.md",
             request.workspace,
             request.tasks_file,
             request.work_file,
@@ -518,7 +519,7 @@ def _start_generation(
             owner.state_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
         else:
             watcher_id, watcher_name = _launch_supervisor(
-                owner, request.ttl_seconds, request.reference_dir / "watch_work.py"
+                owner, request.ttl_seconds, request.skill_dir / "scripts" / "watch_work.py"
             )
             owner = coding_session_owner.attach_supervisor(
                 key,
@@ -561,16 +562,17 @@ def launch(
     impersonation_name: str | None = None,
     brief: str | None = None,
     *,
-    reference_dir: Path,
+    skill_dir: Path,
     resume: str | None = None,
 ) -> int:
     """Launch a supervised worker, or a takeover when ``impersonation_name`` is set.
 
-    ``reference_dir`` is the calling skill's reference directory: it holds the
-    collaboration contract and the supervisor script, and locates the
-    impersonator guide. ``resume`` reopens a recorded Codex session (the
-    ``codex_session`` an earlier launch printed) instead of starting a new
-    one. Prints one ``key=value`` per line and returns the exit code.
+    ``skill_dir`` is the calling skill's own directory: its ``references/``
+    holds the collaboration contract and locates the impersonator guide, and
+    its ``scripts/`` holds the supervisor script. ``resume`` reopens a
+    recorded Codex session (the ``codex_session`` an earlier launch printed)
+    instead of starting a new one. Prints one ``key=value`` per line and
+    returns the exit code.
     """
     from shared.external_caller import launch_caller_assignment
 
@@ -582,7 +584,7 @@ def launch(
         caller_instance,
         impersonation_name,
         _checked_brief(impersonation_name, brief, tasks_file, work_file),
-        reference_dir,
+        skill_dir,
         resume,
     )
     # Validate before creating files, owner records, or sessions.

@@ -9,14 +9,11 @@ tags:
 
 # Skill System
 
-Skills are reusable instruction packs that agents load at runtime. They are
-organized into functional groups under the `ava_builtins/skills/` directory:
-
-- [[ava_builtins/skills/comms/comms.ava.okf.md|Communication & User Interaction]] — UI pages, IM Bridge, SMS, Gmail
-- [[ava_builtins/skills/ops_lifecycle/ops_lifecycle.ava.okf.md|Ops, Scheduling & Lifecycle]] — guide, watcher, schedule writer, long-running agent
-- [[ava_builtins/skills/orchestration/orchestration.ava.okf.md|Orchestration & Workflow]] — fleet, goal, workflow phases
-- [[ava_builtins/skills/self_improvement/self_improvement.ava.okf.md|Self-Improvement]] — self-development, self-evolution, skill creator, sweeper
-- [[ava_builtins/skills/web_media/web_media.ava.okf.md|Web & Media]] — web AI, web sources, audio transcription
+Skills are reusable instruction packs that agents load at runtime. Each repo
+skill is a self-contained directory under `ava_builtins/skills/<name>/`
+(`SKILL.md` + optional `scripts/` / `references/` / `assets/`); the full
+catalog, grouped by what each skill does, is
+[[ava_builtins/skills/skills.ava.okf.md|the skills index]].
 
 ## How Skills Work
 Skills are loaded on-demand by agents via `ava.help(ava.skills.<name>)`.

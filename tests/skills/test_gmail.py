@@ -11,13 +11,12 @@ from pathlib import Path
 import pytest
 
 # The skill is a standalone CLI; import its pure helpers for unit testing.
-_SKILL_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "skills" / "gmail" / "reference"
+_SKILL_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "skills" / "gmail" / "scripts"
 sys.path.insert(0, str(_SKILL_DIR))
 import feed as gmail  # noqa: E402  # pyright: ignore[reportMissingImports]
+import imap as gmail_imap  # noqa: E402  # pyright: ignore[reportMissingImports]
 
-from ava_builtins.skill_support.gmail import imap as gmail_imap  # noqa: E402
-
-# The skill under test is a standalone reference file injected via
+# The skill under test is a standalone script file injected via
 # sys.path at runtime — pyright cannot resolve its module type, so every
 # call site reports Unknown. File-level downgrade of the two call-site
 # rules keeps the rest of this file's strict checks intact (audit round-2

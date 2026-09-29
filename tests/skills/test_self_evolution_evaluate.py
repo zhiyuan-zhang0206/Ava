@@ -14,7 +14,7 @@ import ava
 
 
 def _evaluate_module() -> ModuleType:
-    path = Path(".agents/skills/ava-self-evolution/reference/evaluate.py")
+    path = Path(".agents/skills/ava-self-evolution/scripts/evaluate.py")
     sys.path.insert(0, str(path.parent))
     spec = importlib.util.spec_from_file_location("test_evaluate", path)
     assert spec is not None and spec.loader is not None

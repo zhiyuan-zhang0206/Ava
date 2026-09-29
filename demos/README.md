@@ -18,7 +18,8 @@ Each demo lives in its own category folder under `demos/<category>/`.
 | **Chrome MCP** | `chrome-mcp/` | Browser | 1 agent | Shared browser context between user and agents |
 | **Permission Hooks** | `permission-hooks/` | Hooks | 1 agent | Sensitive-operation gate examples |
 
-> Orchestrator reference scripts live at `ava_builtins/skills/ava-dynamic-workflow/reference/`.
+> Orchestrator reference scripts live at `ava_builtins/skills/ava-dynamic-workflow/references/`
+> (the two runnable lite demos are in its `scripts/` instead).
 >
 > **Note (2026-08-08)**: `dynamic-workflow-travel.md` is a stale duplicate of the
 > Deep Research prompt (the described Travel Booking demo was never written);

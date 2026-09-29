@@ -8,7 +8,7 @@
 ```
 Load dynamic workflow skill: ava.help(ava.skills.ava_dynamic_workflow)
 
-Then use the script from reference/deep_research_orchestrator.py to conduct a deep research.
+Then use the script from references/deep_research_orchestrator.py to conduct a deep research.
 Topic: "AI coding agent 2026 competitive landscape".
 
 Use the script directly, do not modify it — the script has already written all the parameters and prompts for each wave.

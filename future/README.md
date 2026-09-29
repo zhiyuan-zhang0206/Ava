@@ -21,7 +21,6 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | File | What's left |
 |------|------|
 | [Ava / Ava Code prompt architecture](../agent/prompt-architecture.md) | Living doc; the core-vs-`ava_code` responsibility split + the mechanics-vs-behavior axis. Open: malicious-code refusal stance (pending a threat-model call), a minor whitespace nudge. The `ava_code` memory layer was **rejected**, not deferred |
-| [Default bundled skills](../ava_builtins/default-skills.md) | Which external capability packs ship as repo defaults. Direction settled (**vendor-and-adapt**); open: per-overlap reconciliation, vendor location |
 | [Compaction redesign](../agent/compaction-redesign.md) | Forced / command / spontaneous compact mechanics |
 | [Import an existing agent's history](../agent/import-existing-agent-history.md) | Onboarding demo script — distil a new user's Claude Code / Codex history into the memory pool. Gated on going public |
 

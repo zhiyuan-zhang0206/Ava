@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from ava_builtins.skill_support.audio_transcribe import transcribe as T  # noqa: N812
+from tests.skills import load_skill_script
+
+T = load_skill_script("audio-transcribe", "scripts", "transcribe.py")
 
 
 def _cp(cmd: list[str], stdout: str = "") -> subprocess.CompletedProcess[str]:

@@ -39,4 +39,4 @@ Out-of-band pushes are only allowed for truly urgent matters: irreversible risk 
 
 - [[ava_builtins/plugins/ava_fleet/notify.ava.okf.md|Notify]] — queue channel itself (`ava.ui.notify`)
 - [[ava_builtins/plugins/ava_fleet/skills/ava-fleet/ava-fleet.ava.okf.md|ava-fleet skill]] — fleet general outline of the same communication dichotomy
-- [[ava_builtins/skills/comms/comms.ava.okf.md|Communication skills group]] — push channel skills like telegram
+- [[ava_builtins/skills/skills.ava.okf.md|Skills index]] — push channel skills like telegram
