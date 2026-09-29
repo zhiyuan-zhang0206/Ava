@@ -37,11 +37,10 @@ def hf(wave: int, role: str) -> Path:
 
 
 def spawn(prompt: str, label: str = "") -> int:
-    """`label` is accepted for the caller's own bookkeeping — `ava.agents.spawn`
-    itself has no such parameter (pre-existing skill/SDK drift found while
-    moving this file, fixed here since forwarding it always raised)."""
-    del label
-    return ava.agents.spawn(prompt=prompt)
+    # `label` is added by the ava_fleet `agents.spawn` wrap
+    # (ava_builtins/plugins/ava_fleet/plugin.py); the core signature does not
+    # carry it.
+    return ava.agents.spawn(prompt=prompt, label=label)  # pyright: ignore[reportCallIssue]
 
 
 def read_state() -> dict:
