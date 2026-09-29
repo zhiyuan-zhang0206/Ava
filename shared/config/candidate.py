@@ -24,7 +24,7 @@ from pydantic_core import ErrorDetails, PydanticUndefined
 
 from shared import runtime_config
 from shared.config import FIELD_INFOS, field_alias
-from shared.config.service_read import _domain_model_classes
+from shared.config.service_read import domain_model_classes
 from shared.config_registry import field_domain
 from shared.envfile import capture_env_bytes
 
@@ -79,7 +79,7 @@ def validate_env_patch_for_write(
     payload = capture_env_bytes(runtime_config.env_file_path())
     aliases = _env_aliases(payload)
 
-    models = _domain_model_classes()
+    models = domain_model_classes()
     errors: list[str] = []
     errors_by_domain: dict[str, list[str]] = {}
     for domain in sorted(patched_domains):

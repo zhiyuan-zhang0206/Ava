@@ -301,15 +301,15 @@ def _admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0
     Backend readiness is proven separately by the caller, as each delivered
     login. Public bind verification reads the socket table, never a self-dial.
     """
-    import psycopg
-
+    from shared.db_connections import connect_url
     from shared.url_secret import url_with_userinfo
 
     url = url_with_userinfo(
         f"postgresql://@{host}:{listen_port}/pgbouncer", POOLER_ADMIN, admin_password
     )
     try:
-        with psycopg.connect(url, connect_timeout=3, autocommit=True, prepare_threshold=None):
+        # The console runs no Postgres statements: no ceiling in its startup packet.
+        with connect_url(url, autocommit=True, connect_timeout=3, unbounded=True):
             return True
     except Exception:
         return False

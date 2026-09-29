@@ -26,6 +26,7 @@ def agent_is_alive(status: str | None, lease_expires_at: datetime | None) -> boo
 def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: str) -> None
 async_pool  (re-export of shared.db_connections.async_pool)
 connect  (re-export of shared.db_connections.connect)
+connect_url  (re-export of shared.db_connections.connect_url)
 def create_agent(db: psycopg.Connection) -> int
 direct_db_url  (re-export of shared.db_connections.direct_db_url)
 def fetch_one(cur: psycopg.Cursor, context: str) -> tuple[Any, ...]

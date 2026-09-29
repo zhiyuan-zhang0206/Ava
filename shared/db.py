@@ -33,6 +33,7 @@ from shared.db_connections import NoDatabaseAuthorityError as NoDatabaseAuthorit
 from shared.db_connections import UnanchoredHomeError as UnanchoredHomeError
 from shared.db_connections import async_pool as async_pool
 from shared.db_connections import connect as connect
+from shared.db_connections import connect_url as connect_url
 from shared.db_connections import direct_db_url as direct_db_url
 from shared.db_connections import pool as pool
 from shared.db_transaction import write_transaction

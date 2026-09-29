@@ -55,10 +55,9 @@ class NoDatabaseAuthorityError(RuntimeError):
 # does: against a peer that black-holes packets (dropped, not ECONNREFUSED) an
 # unbounded connect never errors, so the caller reads as "hung" rather than
 # "failed". This constant is therefore the single definition of that posture:
-# `connect()` / `pool()` / `async_pool()` apply it, and it is exported to the
-# admin-plane dial parameterized on a URL rather than on settings (the boot-time
-# schema assertion in shared/migrations.py). Fail-fast behaviour is pinned by
-# tests/shared/test_connect_fail_fast.py.
+# `connect()` / `connect_url()` / `pool()` / `async_pool()` apply it, bounded or
+# not (a caller may shorten `connect_url`'s connect timeout for a probe).
+# Fail-fast behaviour is pinned by tests/shared/test_connect_fail_fast.py.
 PG_KEEPALIVE_KWARGS: dict[str, Any] = {
     "keepalives": 1,
     "keepalives_idle": 30,
@@ -103,9 +102,10 @@ PG_STATEMENT_TIMEOUT_OPTIONS = "-c statement_timeout=60000"
 # `cli/commands/data_plane/pgbouncer.py` also runs it as the pooler's `connect_query` so
 # every pooled backend is bounded at birth regardless of the client's code path.
 PG_STATEMENT_TIMEOUT_SET_SQL = "SET statement_timeout = 60000"
-# The full kwargs `connect()` / `pool()` pass to psycopg. `options` is the
-# direct-connection delivery path (Postgres parses it itself); pooled dials
-# additionally run PG_STATEMENT_TIMEOUT_SET_SQL (see connect/pool).
+# The full kwargs the bounded dials (`connect()` / `connect_url()` / `pool()`)
+# pass to psycopg. `options` is the direct-connection delivery path (Postgres
+# parses it itself); pooled dials additionally run PG_STATEMENT_TIMEOUT_SET_SQL
+# (see connect/pool).
 PG_STATEMENT_TIMEOUT_KWARGS: dict[str, Any] = {
     **PG_KEEPALIVE_KWARGS,
     "options": PG_STATEMENT_TIMEOUT_OPTIONS,
@@ -212,16 +212,11 @@ def _statement_kwargs(url: str) -> dict[str, Any]:
     return {**PG_STATEMENT_TIMEOUT_KWARGS, "options": f"{own} {PG_STATEMENT_TIMEOUT_OPTIONS}"}
 
 
-def _guard_db_url(url: str) -> str:
-    """Refuse the unanchored sentinel and an undelivered credential-free endpoint;
-    return the url otherwise. The single point every sanctioned connection passes
-    through, so both footguns are caught once here rather than at each call site.
+def _refuse_unanchored(url: str) -> None:
+    """Refuse the never-dialed placeholder, whichever entry point was handed it.
 
     Raises:
         UnanchoredHomeError: url is the unanchored sentinel.
-        NoDatabaseAuthorityError: this home keeps a write-generation ledger, no
-            login was delivered to this process, url carries no password, and it
-            is not the administrator URL this process adopted.
     """
     if url == UNANCHORED_DB_SENTINEL:
         raise UnanchoredHomeError(
@@ -234,6 +229,21 @@ def _guard_db_url(url: str) -> str:
             "(AVA_CONFIG_FETCH=skip, the maintenance verbs' gateway-down mode) and "
             "this operation needs the cluster config a fetch would have provided."
         )
+
+
+def _guard_db_url(url: str) -> str:
+    """Refuse the unanchored sentinel and an undelivered credential-free endpoint;
+    return the url otherwise. The single point every settings-resolved connection
+    passes through, so both footguns are caught once here rather than at each
+    call site.
+
+    Raises:
+        UnanchoredHomeError: url is the unanchored sentinel.
+        NoDatabaseAuthorityError: this home keeps a write-generation ledger, no
+            login was delivered to this process, url carries no password, and it
+            is not the administrator URL this process adopted.
+    """
+    _refuse_unanchored(url)
     from shared import dotenv_boot
 
     refusal = dotenv_boot.db_authority_refusal()
@@ -363,10 +373,12 @@ def connect(
     `unbounded=True` (admin plane only — the migration applier) drops the
     statement-timeout ceiling entirely: migration DDL runs may legitimately
     exceed 60s (a large-table rebuild, a partition backfill), and the applier
-    must stay unbounded. On a direct dial this means no `options` parameter; on
-    a pooled dial the pooler's `connect_query` still bounds the backend at
-    birth, so an unbounded pooled dial is not truly unbounded — pair it with
-    `direct=True` wherever the ceiling must actually be off.
+    must stay unbounded. The keepalives and connect timeout stay: a long DDL on
+    a remote link is exactly the flow a dead peer would otherwise pin. On a
+    direct dial this means no `options` parameter; on a pooled dial the
+    pooler's `connect_query` still bounds the backend at birth, so an unbounded
+    pooled dial is not truly unbounded — pair it with `direct=True` wherever the
+    ceiling must actually be off.
 
     Raises:
         UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
@@ -385,7 +397,7 @@ def connect(
         prepare_threshold=None,
         # sslmode only when the URL is silent (config is the fallback, never an override).
         **({"sslmode": sslmode} if sslmode else {}),
-        **({} if unbounded else _statement_kwargs(url)),
+        **_transport_kwargs(url, unbounded=unbounded),
     )
     if not direct and not unbounded:
         # Pooled dial: PgBouncer dropped the `options` startup parameter above
@@ -397,6 +409,53 @@ def connect(
         # own their backend exclusively, so no scrub is needed there).
         _restore_pooled_session(conn)
     return conn
+
+
+def connect_url(
+    url: str,
+    *,
+    autocommit: bool = False,
+    unbounded: bool = False,
+    connect_timeout: int = PG_KEEPALIVE_KWARGS["connect_timeout"],
+) -> psycopg.Connection:
+    """Open one connection to an explicit Postgres target the caller names.
+
+    `connect()` dials the cluster's own URL from settings; this is the admin
+    plane's door for every other target — a dump source, a replication login
+    under test, a scratch instance a restore check provisions, the pooler's
+    admin console, a URL a probe or boot check is handed. The caller owns the
+    target: the URL carries its host, credential, database, startup options and
+    `sslmode`, and nothing here reads settings, so no cluster login is
+    substituted and the configured `AVA_DB_SSLMODE` is not injected. (This
+    module still resolves a home and imports settings at load, so a process
+    that must do neither — the restricted restore worker, the throwaway-Postgres
+    tooling — dials on its own; see the `postgres-dial` allowed map in
+    scripts/structure/locality.py.)
+
+    The door owns the transport posture, the same as `connect()`'s:
+    `prepare_threshold=None`, `PG_KEEPALIVE_KWARGS`, and the statement ceiling
+    appended after any startup options the URL carries itself. `connect_timeout`
+    bounds establishing the connection (a short probe passes its own);
+    `unbounded=True` drops the statement ceiling for a caller whose statements
+    may legitimately run long (DDL, full-table reads of a restored copy), and
+    keeps the keepalives. The session is never scrubbed: an explicit target is
+    a backend the caller dials directly, not a borrowed pooled one (a probe of
+    the cluster's pooled URL runs only read-only statements).
+
+    Raises:
+        UnanchoredHomeError: url is the unanchored sentinel.
+    """
+    _refuse_unanchored(url)
+    transport: dict[str, Any] = {
+        **_transport_kwargs(url, unbounded=unbounded),
+        "connect_timeout": connect_timeout,
+    }
+    return psycopg.connect(url, autocommit=autocommit, prepare_threshold=None, **transport)
+
+
+def _transport_kwargs(url: str, *, unbounded: bool) -> dict[str, Any]:
+    """Keepalives always; the statement ceiling unless the dial is unbounded."""
+    return PG_KEEPALIVE_KWARGS if unbounded else _statement_kwargs(url)
 
 
 def pool(
@@ -423,7 +482,7 @@ def pool(
     contract while still inheriting the shared pool's transport settings.
 
     This only sanctioned sync-pool builder applies `prepare_threshold=None`,
-    `PG_KEEPALIVE_KWARGS`; `scripts/lint_pool_keepalives.py` rejects bypasses.
+    `PG_KEEPALIVE_KWARGS`; the structure gate's `postgres-dial` rule rejects bypasses.
 
     `timeout` bounds how long `pool.connection()` waits for a connection before
     raising `PoolTimeout`. It is worth knowing about, not just tuning: `open=True`

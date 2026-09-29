@@ -120,6 +120,17 @@ def test_repo_is_clean() -> None:
     assert _lint.main([]) == 0
 
 
+def test_default_scope_is_what_rule_5_does_not_see() -> None:
+    """In the governed packages the structure gate's `postgres-dial` rule rejects
+    any pool outside its owner, so a bare run scans only the rest: `scripts/`
+    (not governed) and the modules that decision allows to dial directly."""
+    from scripts.structure.locality import DECISIONS
+
+    root = Path(__file__).resolve().parents[1]
+    scanned = {path.relative_to(root).as_posix() for path in _lint.default_targets()}
+    assert scanned == {"scripts", *DECISIONS["postgres-dial"].allowed}
+
+
 def test_explicit_missing_target_is_an_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -8,6 +8,7 @@ live settings URL (the conftest testcontainer) and pass options through.
 from __future__ import annotations
 
 from shared import db
+from shared.config import settings
 from shared.redis_client import sync_redis
 
 
@@ -25,6 +26,17 @@ def test_connect_autocommit_passthrough() -> None:
 def test_connect_defaults_to_manual_commit() -> None:
     with db.connect() as conn:
         assert conn.autocommit is False
+
+
+def test_connect_url_bounds_statements_unless_unbounded() -> None:
+    """Against a real Postgres named explicitly: the door delivers the 60s
+    statement ceiling by default and none when the caller dials unbounded."""
+    url = settings.data_plane.db_url
+    with db.connect_url(url) as conn:
+        assert conn.execute("SHOW statement_timeout").fetchone() == ("1min",)
+    with db.connect_url(url, autocommit=True, unbounded=True) as conn:
+        assert conn.autocommit is True
+        assert conn.execute("SHOW statement_timeout").fetchone() == ("0",)
 
 
 def test_pool_hands_out_working_connections() -> None:

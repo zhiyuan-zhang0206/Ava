@@ -30,6 +30,7 @@ __all__ = [
     "_service_field_value",
     "bootstrap_config_values",
     "current_field_values",
+    "domain_model_classes",
 ]
 
 
@@ -103,9 +104,11 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str]) -> None:
 
 
 @lru_cache(maxsize=1)
-def _domain_model_classes() -> dict[str, type[Any]]:
+def domain_model_classes() -> dict[str, type[Any]]:
     """`{domain attr: sub-model class}` — the registry's deferred class imports,
-    resolved once per process without constructing any Settings."""
+    resolved once per process without constructing any Settings. Public because
+    overlay validation (`shared.plugin_config_registry`) re-validates each
+    framework field against its owning sub-model class."""
     from importlib import import_module
 
     from shared.config_registry import _DOMAIN_MODELS, _MODEL_CLASSES
@@ -198,7 +201,7 @@ def _decode_env_file_values(
     served SILENTLY (debug-logged only): warning on every fresh read (every
     panel read / agent send) would bury the genuine decode failures.
     """
-    model = _domain_model_classes()[domain]
+    model = domain_model_classes()[domain]
     file_values = {name: raw for name, _alias, raw in batch}
     try:
         decoded = model.model_validate(_isolated_domain_payload(model, file_values))

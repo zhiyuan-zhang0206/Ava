@@ -76,6 +76,84 @@ def test_async_pool_fixes_the_transport_posture(monkeypatch: pytest.MonkeyPatch)
     }
 
 
+def _spy_dials(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
+    """Record each psycopg.connect (conninfo, kwargs) and refuse the pooled scrub:
+    the door must decide the posture without dialing anything real."""
+    dials: list[tuple[str, dict[str, Any]]] = []
+
+    def spy(conninfo: str = "", **kwargs: Any) -> object:
+        dials.append((conninfo, kwargs))
+        return object()
+
+    def no_scrub(_conn: object) -> None:
+        raise AssertionError("an explicit-target dial must not scrub a pooled session")
+
+    monkeypatch.setattr(psycopg, "connect", spy)
+    monkeypatch.setattr(db_connections, "_restore_pooled_session", no_scrub)
+    return dials
+
+
+def test_connect_url_owns_the_transport_posture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The explicit-target door carries `connect()`'s posture — no prepared
+    statements, keepalives, the statement ceiling after the URL's own startup
+    options — and reads no settings: the configured sslmode is not injected and
+    the session is never scrubbed."""
+    monkeypatch.setattr(settings.data_plane, "db_sslmode", "require")
+    dials = _spy_dials(monkeypatch)
+    url = "postgresql://owner@/ava?host=/tmp/sock&options=-c%20role%3Dava"
+    db.connect_url(url, autocommit=True)
+    assert dials == [
+        (
+            url,
+            {
+                "autocommit": True,
+                "prepare_threshold": None,
+                **db.PG_KEEPALIVE_KWARGS,
+                "options": "-c role=ava -c statement_timeout=60000",
+            },
+        )
+    ]
+
+
+def test_connect_url_unbounded_keeps_the_keepalives(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`unbounded=True` drops only the statement ceiling; a caller's shorter
+    connect timeout replaces the door's default."""
+    dials = _spy_dials(monkeypatch)
+    db.connect_url("postgresql://u@127.0.0.1:1/x", unbounded=True, connect_timeout=2)
+    assert dials == [
+        (
+            "postgresql://u@127.0.0.1:1/x",
+            {
+                "autocommit": False,
+                "prepare_threshold": None,
+                **db.PG_KEEPALIVE_KWARGS,
+                "connect_timeout": 2,
+            },
+        )
+    ]
+
+
+def test_connect_unbounded_keeps_the_keepalives(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The migration applier's unbounded direct dial drops only the ceiling: a
+    long DDL on a remote link is the flow a dead peer would otherwise pin."""
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u:p@db.example:5432/x")
+    monkeypatch.setattr(settings.data_plane, "db_sslmode", "")
+    monkeypatch.setattr(db_connections, "direct_db_url", lambda: "postgresql://u:p@db:5432/x")
+    dials = _spy_dials(monkeypatch)
+    db.connect(direct=True, unbounded=True)
+    assert dials == [
+        (
+            "postgresql://u:p@db:5432/x",
+            {"autocommit": False, "prepare_threshold": None, **db.PG_KEEPALIVE_KWARGS},
+        )
+    ]
+
+
+def test_connect_url_refuses_unanchored_sentinel() -> None:
+    with pytest.raises(db.UnanchoredHomeError):
+        db.connect_url(UNANCHORED_DB_SENTINEL)
+
+
 def _seed_agent(db_conn: psycopg.Connection, status: str, *, live_lease: bool = True) -> int:
     """Create an agent + its agents_meta row in the given status, return id.
 

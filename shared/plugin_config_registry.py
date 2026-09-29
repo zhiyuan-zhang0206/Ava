@@ -547,7 +547,7 @@ def validate_config_overlay(overlay: dict[str, object]) -> None:
     that's `apply_config_overlay`'s job at new process boot.
     """
     from shared.config import field_domain
-    from shared.config.service_read import _domain_model_classes
+    from shared.config.service_read import domain_model_classes
 
     targets = resolve_overlay_targets(overlay)
     grouped: dict[str | None, dict[str, object]] = {}
@@ -566,7 +566,7 @@ def validate_config_overlay(overlay: dict[str, object]) -> None:
                 for f, v in updates.items():
                     by_domain.setdefault(field_domain(f), {})[f] = v
                 for dom, upd in by_domain.items():
-                    cls = _domain_model_classes()[dom]
+                    cls = domain_model_classes()[dom]
                     sub = cls()
                     cls.model_validate({**sub.model_dump(), **upd})
             else:

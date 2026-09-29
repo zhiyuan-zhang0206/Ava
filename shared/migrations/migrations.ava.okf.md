@@ -121,9 +121,10 @@ Every long-running process (gateway / agent-host / ops / labeler) calls
 `CodeBehindSchema` refuses startup. No watchdog or automatic updater repairs the
 code/schema mismatch; the operator must establish a compatible image and schema.
 
-Startup schema connections use `shared.db.PG_KEEPALIVE_KWARGS`, including a 5s
-`connect_timeout`, so dropped packets raise a bounded connection failure rather
-than leaving startup blocked on the OS TCP retransmission timeout.
+Startup schema connections dial through `shared.db.connect_url()`, whose
+transport posture includes a 5s `connect_timeout`, so dropped packets raise a
+bounded connection failure rather than leaving startup blocked on the OS TCP
+retransmission timeout.
 
 ## Notes
 

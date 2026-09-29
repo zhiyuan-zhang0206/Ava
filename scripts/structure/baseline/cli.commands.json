@@ -36,11 +36,6 @@
   "nesting": {
     "cli/commands/observability/trace.py::_post_line": 6
   },
-  "owner_bypasses": {
-    "cli/commands/_health_preflight.py::postgres-dial": 1,
-    "cli/commands/data_plane/pgbouncer.py::postgres-dial": 1,
-    "cli/commands/data_plane/pitr_activation.py::postgres-dial": 1
-  },
   "private_imports": {
     "cli/commands/_release_plugin_probe.py::ops.spec._plugin_services": 1,
     "cli/commands/maintenance.py::ops.agent_pause._hold": 1,
