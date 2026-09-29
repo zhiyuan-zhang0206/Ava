@@ -246,7 +246,7 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
             # Fail OPEN — run the service — and log, so one plugin's gate bug
             # can never take the supervisor down; the capability filter above
             # already scoped the service to this host's role.
-            logger.warning("gate for %s raised (failing open): %s", spec.session, exc)
+            logger.warning("gate for {} raised (failing open): {}", spec.session, exc)
             return None
     session = spec.session
     if session in ("browser", "browser-mcp"):

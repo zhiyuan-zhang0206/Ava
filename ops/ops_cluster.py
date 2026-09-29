@@ -396,7 +396,7 @@ def cluster_cancel_op() -> dict[str, object]:
             f"could not interrupt the orchestration pid {pid}: {exc!r}"
         ) from exc
     logger.warning(
-        "[cluster] cancel: SIGINT sent to rollout holder %s (pid %d); its own finally "
+        "[cluster] cancel: SIGINT sent to rollout holder {} (pid {}); its own finally "
         "is unwinding — compensating resume, settle/release of the deploy lease, "
         "maintenance marker cleared",
         holder,

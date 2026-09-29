@@ -228,6 +228,12 @@ code by ruff `T20`. Exempt: `cli/` (terminal output), `ava/` + `plugins/`
 (agent-facing dump), `scripts/` (tooling).
 One-off legitimate cases use inline `# noqa: T201` with a reason.
 
+`shared.log.logger` is loguru: a message takes `{}` fields
+(`logger.warning("gate for {} raised: {}", name, exc)`), never printf `%s`,
+which loguru leaves in the text while dropping the arguments. Enforced by
+`scripts/lint/loguru_format.py` (hook `lint-loguru-format`); stdlib
+`logging` loggers keep `%s`.
+
 ## No decorative emoji in core Python
 
 Agent + backend code stays glyph-free. Enforced by

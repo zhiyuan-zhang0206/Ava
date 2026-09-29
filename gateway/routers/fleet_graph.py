@@ -345,7 +345,7 @@ def _fetch_archive_edges() -> tuple[list[dict[str, Any]], bool]:
     )
     if has_more:
         logger.warning(
-            "fleet_graph Loki archive edge stream exceeded the %d-row fetch cap — edges truncated",
+            "fleet_graph Loki archive edge stream exceeded the {}-row fetch cap — edges truncated",
             LOKI_EDGE_LIMIT,
         )
     return rows, has_more

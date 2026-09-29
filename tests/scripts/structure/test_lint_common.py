@@ -22,7 +22,7 @@ from scripts import (
     lint_termination_source,
     lint_time_bomb,
 )
-from scripts.lint import lint_logger_add_diagnose
+from scripts.lint import lint_logger_add_diagnose, loguru_format
 from scripts.structure import lint_common
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -56,6 +56,7 @@ def test_missing_scan_dir_is_an_error(tmp_path: Path) -> None:
         lint_termination_source._SCAN_DIRS,
         lint_time_bomb._SCAN_DIRS,
         lint_logger_add_diagnose._SCAN_DIRS,
+        loguru_format._SCAN_DIRS,
     ],
 )
 def test_framework_scoped_lints_cover_every_framework_dir(scan_dirs: tuple[str, ...]) -> None:

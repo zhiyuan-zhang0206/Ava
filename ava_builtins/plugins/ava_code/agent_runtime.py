@@ -271,7 +271,7 @@ class _InjectCwdNotesAfterExecHook(Hook):
                     result["ava_code__project_skills_seen_compact"] = compact_v
 
         if notes:
-            logger.info("[ava_code] injecting %d finding(s) as system notes", len(notes))
+            logger.info("[ava_code] injecting {} finding(s) as system notes", len(notes))
             result["messages"] = notes
             return result
         return None

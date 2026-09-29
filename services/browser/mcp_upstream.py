@@ -63,7 +63,7 @@ async def _bounded(awaitable: Awaitable[object], what: str) -> None:
         await asyncio.wait_for(awaitable, timeout=_SHUTDOWN_STEP_TIMEOUT_S)
     except TimeoutError:
         logger.warning(
-            "[browser-mcp] %s did not finish within %.0fs; continuing shutdown",
+            "[browser-mcp] {} did not finish within {:.0f}s; continuing shutdown",
             what,
             _SHUTDOWN_STEP_TIMEOUT_S,
         )
