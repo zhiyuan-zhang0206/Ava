@@ -666,41 +666,6 @@ def supersede_lifecycle_for_force(conn: psycopg.Connection, agent_id: int, force
 def supersede_lifecycle_for_resurrect(conn: psycopg.Connection, agent_id: int, resurrect_id: int) -> None
 async def terminate_kills_shell_sessions(conn: psycopg.AsyncConnection, agent_id: int) -> bool
 
-## base.agents.incarnation.predecessor_closure
-class ClosureEvidence(BaseModel)
-  attestation_sha256: str = ...
-  machine: str = ...
-  model_config = ...
-  operator: str = ...
-  reason: str = ...
-@dataclass(frozen=True)
-class PredecessorClosure
-  after: IncarnationResources
-  agent_id: int
-  before: object
-  receipt: int
-@dataclass(frozen=True)
-class Refusal
-  reason: str
-  verdict: Literal['inadmissible', 'unconvertible']
-SUCCESSOR_COLUMNS: LiteralString = ...
-@dataclass(frozen=True)
-class SettledReceipt
-  closed_already: bool
-  id: int
-  kind: Literal['restart', 'terminate']
-@dataclass(frozen=True)
-class SuccessorRow
-  lease_free: bool
-  lifecycle_command_id: int | None
-  pid: int | None
-  runtime_generation: UUID | None
-  runtime_kind: str | None
-  runtime_owner: UUID | None
-  status: str
-def close_retired_predecessor(conn: psycopg.Connection, agent_id: int, *, before: object, receipt: int, evidence: ClosureEvidence) -> PredecessorClosure
-def successor_refusal(row: SuccessorRow, closed: tuple[UUID, UUID], receipt: SettledReceipt | None) -> Refusal | None
-
 ## base.agents.incarnation.resource_admission
 DRAINED_RESOURCES = ...
 PREDECESSOR_RECEIPT = ...
