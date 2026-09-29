@@ -18,6 +18,7 @@ from base.cluster.machine import machine_name, machine_role
 from base.db import connect
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, cohort, hold_driver, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import (
     deadline_after,
@@ -26,8 +27,15 @@ from cli.commands.lifecycle.service_stop import (
     stop_data_plane,
     stop_services,
 )
-from ops.agent_pause import _hold, drain, prepare
+from ops.agent_pause import drain, prepare
 from ops.agent_pause.probe import host_identity_or_none, ops_quiescent
+
+
+def _hold(holder: str, at: datetime) -> MaintenanceHold:
+    """This generation's hold, read through the maintenance journal's own door."""
+    current = admission.require_operation(holder, at)
+    assert current.maintenance is not None  # noqa: S101
+    return current.maintenance
 
 
 def _gateway_last(*, confirmed: bool) -> None:

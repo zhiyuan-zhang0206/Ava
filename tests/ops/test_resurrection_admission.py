@@ -11,7 +11,6 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
-from tests.shared.test_predecessor_closure import _closed_form, _retired
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
@@ -34,6 +33,7 @@ from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.spawn import create_agent_row
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.lifecycle import termination
+from tests.base.test_predecessor_closure import _closed_form, _retired
 
 
 @pytest.fixture(autouse=True)
