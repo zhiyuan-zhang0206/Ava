@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from ops.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 from shared.cluster import frontend_service_cmd
 from shared.config import settings
 from shared.daemon_health import DaemonProbe, health_port, probe_daemon, probe_home
-from shared.paths import otel_collector_binary, otel_collector_config
+from shared.paths import ava_home, otel_collector_binary, otel_collector_config
 
 # The roster body moved verbatim and still resolves these policy helpers by
 # name. Lazy delegation keeps their definitions in ops.spec without introducing
@@ -58,10 +61,8 @@ def _frontend_probe() -> DaemonProbe:
 
     Next.js serves no /healthz it can sign, so the frontend is identified by
     process ownership: the app-port listener must belong to the frontend's
-    expected owner — the recorded session, or, on a root-driven host, the
-    ava-root tree unit (services/healthchecks/frontend.py, task #3370). An old
-    orphan that answers 200 without either is not frontend health (issue
-    #2123).
+    captured ava-root unit (services/healthchecks/frontend.py). An old orphan
+    that answers 200 outside that process lineage is not frontend health.
     """
     from services.healthchecks.frontend import probe_frontend
 
@@ -85,6 +86,29 @@ def _browser_probe() -> DaemonProbe:
     return probe_browser()
 
 
+def _bind_owned_probe(spec: ServiceSpec) -> ServiceSpec:
+    """Bind each network readiness verdict to the root-owned process generation."""
+    from services.healthchecks.owned_service import probe_endpoint
+
+    if spec.session in {"frontend", "otel-collector", "loki", "prometheus", "grafana"}:
+        return spec  # These probes already bind every listener to root ownership.
+    port = spec.tcp_port
+    if spec.curl_url is not None:
+        url = urlsplit(spec.curl_url)
+        port = url.port
+        if port is None:
+            port = {"http": 80, "https": 443}[url.scheme]
+    if port is None:
+        return spec  # Unix protocols bind their connected peer to root directly.
+    if spec.identity_probe is None:
+        raise ValueError(f"service {spec.session!r} has no protocol readiness probe")
+    if not 0 < port < 65536:
+        raise ValueError(f"service {spec.session!r} has invalid readiness port {port}")
+    return replace(
+        spec, identity_probe=partial(probe_endpoint, spec.session, port, spec.identity_probe)
+    )
+
+
 def build_services() -> tuple[ServiceSpec, ...]:
     """Return the canonical service roster with probe ports/URLs derived from settings.
 
@@ -97,12 +121,11 @@ def build_services() -> tuple[ServiceSpec, ...]:
     (memory-indexer is not here: it is declared by the ava_memory plugin, which
     owns the pool it indexes — `plugins/ava_memory/services.py`.)
     """
-    # The Next.js app port, read from the gate's own accessor: AVA_APP_PORT when set
-    # (converge writes it from the cluster record), else the entry port + 1. Not
-    # re-derived here — the gate PROXIES to this port, so a second derivation that
-    # drifts is a gate forwarding to nothing.
-    from services.gate.daemon import app_port
-    from services.healthchecks.otel_collector import probe_collector, take_over_stale_collector
+    # Share the public entry/app port definition with the serving process.
+    from services.gate.daemon import app_port, entry_port
+    from services.healthchecks.gate import probe as probe_gate
+    from services.healthchecks.otel_collector import probe_collector
+    from services.healthchecks.owned_service import probe as probe_owned_service
 
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
@@ -111,10 +134,19 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # gateway, the frontend, and cluster-wide nudgers (heartbeat plus idle shell
     # reminders). They only INSERT inbound rows — the insert trigger wakes the
     # owner on any machine, so they belong to the single gateway, not each
-    # runner. The gateway also owns the memory/vector stack and its watchdog.
+    # runner. The gateway also owns the memory/vector stack.
     # The fleet task-maintenance nudger lives in the ava_fleet plugin — see
     # `_plugin_services()`.
     gateway_services = (
+        ServiceSpec(
+            session="gate",
+            cmd=".venv/bin/python -m services.gate.daemon",
+            capabilities=_GATEWAY,
+            requires_db=False,
+            curl_url=f"http://127.0.0.1:{entry_port()}/__ava/healthz",
+            identity_probe=probe_gate,
+            healthcheck_module="services.healthchecks.gate",
+        ),
         ServiceSpec(
             session="gateway",
             cmd=".venv/bin/python -m gateway",
@@ -206,6 +238,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # opens a Postgres connection, so a pg outage is not its business.
             requires_db=False,
             tcp_port=settings.services.milvus_port,
+            identity_probe=partial(probe_owned_service, "milvus"),
             healthcheck_module="services.healthchecks.milvus",
         ),
         # memory-search before memory-indexer too: the indexer's cold-start
@@ -219,6 +252,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # a pg outage is not its business (same as milvus).
             requires_db=False,
             tcp_port=settings.services.memory_search_port,
+            identity_probe=partial(probe_owned_service, "memory-search"),
             healthcheck_module="services.healthchecks.memory_search",
         ),
         ServiceSpec(
@@ -279,24 +313,12 @@ def build_services() -> tuple[ServiceSpec, ...]:
             ),
             healthcheck_module="services.healthchecks.pitr_base_backup",
         ),
-        # One watchdog PER CAPABILITY (not a role-union daemon): two co-located
-        # units on one host would otherwise collide on a single host-singleton
-        # watchdog session, leaving one capability's services unrevived. The
-        # watchdog itself is not monitored (healthcheck_module=None).
-        ServiceSpec(
-            session="gateway-watchdog",
-            cmd=".venv/bin/python -m services.watchdog.daemon --role gateway",
-            capabilities=_GATEWAY,
-            requires_db=True,  # its schema controller queries the DB every round
-            pidfile=settings.services.gateway_watchdog_pidfile,
-            healthcheck_module=None,
-        ),
     )
 
     # ── agent-runner-only services ──────────────────────────────────────────
     # The agent-runner capability owns everything that only makes sense next to
     # running agents: the inbound ops server, one agent host, the runner's
-    # watchdog, and the shared headed browser.
+    # shared headed browser.
     agent_runner_services = (
         # page-server: supervises page servers per agent_pages row (R3 door 3).
         # One per runner — it spawns/kills the detached page server processes
@@ -310,14 +332,6 @@ def build_services() -> tuple[ServiceSpec, ...]:
             curl_url=_hz("page_server"),
             identity_probe=daemon_identity("page_server", settings.services.page_server_pidfile),
             healthcheck_module="services.healthchecks.page_server",
-        ),
-        ServiceSpec(
-            session="agent-runner-watchdog",
-            cmd=".venv/bin/python -m services.watchdog.daemon --role agent-runner",
-            capabilities=_AGENT_RUNNER,
-            requires_db=True,  # its schema controller queries the DB every round
-            pidfile=settings.services.agent_runner_watchdog_pidfile,
-            healthcheck_module=None,
         ),
         # One agent host per runner owns every local agent's turn tasks.
         ServiceSpec(
@@ -370,6 +384,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # Same story: a Unix-socket multiplexer in front of chrome-devtools-mcp.
             # Its whole data plane is that socket plus CDP.
             requires_db=False,
+            identity_probe=partial(probe_owned_service, "browser-mcp"),
             healthcheck_module="services.healthchecks.browser_mcp",
         ),
         # computer-mcp: per-machine computer-use executor. Every desktop action
@@ -383,6 +398,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             cmd=".venv/bin/python -m services.computer.mcp_daemon",
             capabilities=_AGENT_RUNNER,
             requires_db=True,
+            identity_probe=partial(probe_owned_service, "computer-mcp"),
             healthcheck_module="services.healthchecks.computer_mcp",
         ),
         # mcp-daemon: ONE shared MCP daemon for every agent on this machine
@@ -397,6 +413,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             capabilities=_AGENT_RUNNER,
             # Config is local files (mcp.json); no DB at boot or runtime.
             requires_db=False,
+            identity_probe=partial(probe_owned_service, "mcp-daemon"),
             healthcheck_module="services.healthchecks.mcp_daemon",
         ),
     )
@@ -415,23 +432,48 @@ def build_services() -> tuple[ServiceSpec, ...]:
     both_services: tuple[ServiceSpec, ...] = (
         ServiceSpec(
             session="otel-collector",
-            cmd=f"{otel_collector_binary()} --config {otel_collector_config()}",
+            cmd=shlex.join(
+                [str(otel_collector_binary()), "--config", str(otel_collector_config())]
+            ),
+            config_inputs=(otel_collector_config(),),
             capabilities=_BOTH,
             requires_db=False,
             # The healthcheck POSTs a valid empty ExportTraceServiceRequest; bare TCP is insufficient.
             # The port follows AVA_TELEMETRY_OTLP_PORT (single source, task #1945).
             tcp_port=settings.observability.telemetry_otlp_port,
             identity_probe=probe_collector,
-            before_launch=take_over_stale_collector,
             healthcheck_module="services.healthchecks.otel_collector",
         ),
     )
 
-    core = gateway_services + agent_runner_services + both_services
+    from services.healthchecks.lgtm import probe_backend
+    from shared.lgtm_local import (
+        BACKENDS,
+        HEALTH_PATHS,
+        backend_urls,
+        service_argv,
+        service_input_paths,
+    )
+
+    urls = backend_urls()
+    observability_services = tuple(
+        ServiceSpec(
+            session=name,
+            cmd=shlex.join(service_argv(ava_home(), name)),
+            config_inputs=service_input_paths(ava_home(), name),
+            capabilities=frozenset({"gateway", "agent-runner", "observability-station"}),
+            requires_db=False,
+            curl_url=urls[name] + HEALTH_PATHS[name],
+            identity_probe=partial(probe_backend, name),
+            healthcheck_module="services.healthchecks.lgtm",
+        )
+        for name in BACKENDS
+    )
+    core = gateway_services + agent_runner_services + both_services + observability_services
     # Plugin-registered services (e.g. ava_fleet's task-maintenance) are appended
     # so this stays THE single roster: a plugin declares a ServiceSpec, ops
     # discovers it. Session-name collisions fail fast — the roster's keys must be
     # unique for the watchdog/status derivations keyed on `session`.
     plugin = _plugin_services()
     _assert_unique_sessions(core, plugin)
-    return tuple(_bind_runtime_command(spec) for spec in core + plugin)
+    return tuple(_bind_runtime_command(_bind_owned_probe(spec)) for spec in core + plugin)

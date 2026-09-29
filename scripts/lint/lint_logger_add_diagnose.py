@@ -32,9 +32,9 @@ are rendered, so it carries none of this risk.
 
 ## The rule
 
-Every call whose attribute is `.add(` on a `logger`-named object (`logger`,
-`_logger`, `self.logger`, ...) must pass a keyword argument `diagnose` whose
-value is the literal `False`. Missing the keyword, passing a non-`False`
+Every call whose attribute is `.add(` on a `logger`-named object in any case
+(`logger`, `_logger`, `self.logger`, `LOGGER`, ...) must pass a keyword
+argument `diagnose` whose value is the literal `False`. Missing the keyword, passing a non-`False`
 literal, or passing a value this script cannot verify statically (a name, a
 `**kwargs` unpack) are all violations — an unverifiable pass would be an
 unenforced rule wearing an enforced rule's clothes.
@@ -78,15 +78,16 @@ def _is_test_file(rel_path: str) -> bool:
 
 def _is_logger_add_call(func: ast.expr) -> bool:
     """True for `logger.add(...)` / `_logger.add(...)` / `self.logger.add(...)` —
-    an attribute call named `add` on an object whose own name ends in `logger`
-    (case-sensitive; the repo's own convention is always lowercase)."""
+    an attribute call named `add` on an object whose own name ends in `logger`,
+    in any case (`LOGGER.add`, `runLogger.add`): the repo's convention is
+    lowercase, but a name that breaks it is still a loguru sink."""
     if not isinstance(func, ast.Attribute) or func.attr != "add":
         return False
     base = func.value
     if isinstance(base, ast.Name):
-        return base.id.endswith("logger")
+        return base.id.lower().endswith("logger")
     if isinstance(base, ast.Attribute):
-        return base.attr.endswith("logger")
+        return base.attr.lower().endswith("logger")
     return False
 
 

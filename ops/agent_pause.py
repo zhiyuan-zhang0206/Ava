@@ -27,10 +27,14 @@ from shared.db import connect, publish_inbound_wake
 from shared.hold_driver import HoldDriver
 from shared.machine import machine_name, machine_role
 from shared.maintenance_state import MaintenanceHold
+from shared.resource_admission import DRAINED_RESOURCES
 
 _log = logging.getLogger(__name__)
 
 PAUSE_TIMEOUT_SECONDS = 300.0
+
+# Every hold a local pause or stop takes is named with this prefix.
+STOP_HOLDER_PREFIX = "local-pause:"
 
 # The retry cadence for the bounded wait on an in-flight agent lifecycle
 # command (task #3591). Every attempt re-runs cohort preparation inside its
@@ -72,7 +76,7 @@ def _emit_lifecycle_wait(waited: float, outcome: str, agents: tuple[int, ...]) -
     )
 
 
-def _prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> None:
+def prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> None:
     """Publish the hold and enqueue restarts.
 
     `driver` is the shepherding identity of an operator-side entry (task
@@ -318,7 +322,7 @@ def _reap_agents(
     return bool(marked)
 
 
-def _drain(holder: str, at: datetime, timeout: float, *, reap: bool = False) -> None:
+def drain(holder: str, at: datetime, timeout: float, *, reap: bool = False) -> None:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("drain timeout must be finite and positive")
     deadline = time.monotonic() + timeout
@@ -403,9 +407,9 @@ def _stall_report(hold: MaintenanceHold, pending: list[int]) -> str:
     try:
         with connect() as conn:
             raw_rows = conn.execute(
-                "SELECT m.status, m.runtime_kind, m.runtime_owner, "
+                "SELECT m.status, m.runtime_kind, m.runtime_owner, "  # noqa: S608 -- constant SQL fragment
                 "m.lease_expires_at IS NOT NULL AND m.lease_expires_at > clock_timestamp(), "
-                "m.incarnation_resources IS NULL, m.last_active_at, "
+                f"{DRAINED_RESOURCES}, m.last_active_at, "
                 "i.status, i.applied_at IS NOT NULL "
                 "FROM unnest(%s::int[], %s::bigint[]) AS cohort(agent_id, command_id) "
                 "LEFT JOIN agents_meta m ON m.id = cohort.agent_id "
@@ -476,8 +480,8 @@ def pause_agents(
     """Idempotently drain this unit, leaving persistent terminals untouched.
 
     `driver` is minted by operator-side callers (`ava stop` / `ava pause`);
-    daemon-driven callers (`spawn_update`, the update quiesce) pass None so a
-    long-lived caller process never masks a dead ladder shepherd.
+    daemon-driven callers (`ops.cluster_pause.pause_local_cluster`) pass None so
+    a long-lived caller process never masks a dead ladder shepherd.
 
     `reap` enables the update straggler reap (task #4016): a cohort member
     still un-landed W seconds after its restart command's issuance is
@@ -495,16 +499,17 @@ def pause_agents(
         if driver is not None:
             pause_owner.refresh_driver(holder, at, driver=driver)
     else:
-        holder, at = f"local-pause:{machine_name()}:{os.getpid()}:{uuid4()}", datetime.now(UTC)
+        holder = f"{STOP_HOLDER_PREFIX}{machine_name()}:{os.getpid()}:{uuid4()}"
+        at = datetime.now(UTC)
     if (
         current.status != "paused"
         or current.maintenance is None
         or current.maintenance.phase == "preparing"
     ):
-        _prepare(holder, at, driver=driver)
+        prepare(holder, at, driver=driver)
     hold = _hold(holder, at)
     if hold.phase in ("preparing", "draining", "drained"):
-        _drain(holder, at, timeout, reap=reap)
+        drain(holder, at, timeout, reap=reap)
 
 
 def resume_agents() -> None:

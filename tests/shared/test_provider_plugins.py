@@ -243,9 +243,6 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     _reset_loaded_for_tests()
     plugin_loader._STATE.loaded = loader_was_loaded
     _invalidate_known_provider_keys_cache()
-    from shared.env_registry import seed_allowlist
-
-    seed_allowlist.cache_clear()
 
 
 def test_repo_provider_plugins_are_the_exact_default_enabled_set() -> None:

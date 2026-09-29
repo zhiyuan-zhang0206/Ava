@@ -12,13 +12,9 @@ import os
 import sys
 from pathlib import Path
 
-from cli.commands._orphan_reap import _reap_orphan_step
 from cli.commands._pause_resume import exclusive_resources
-from cli.commands._repo import _repo_root, build_services, session_name
-from cli.commands._session_lifecycle import (
-    _stop_sessions,  # re-export: defined with the other lifecycle helpers
-)
-from shared.rollout_telemetry import updater_stage
+from cli.commands._repo import _repo_root, session_name
+from cli.start_runtime import StartRuntime
 
 # The browser service runs a headed Chrome on a persistent login profile. An
 # pause / backend update preserves it by default (keep_browser=True):
@@ -88,19 +84,16 @@ def _compute_stop_scope(
     (keep_infra — the `ava cluster update` / internal-restart path) leaves the instance
     running so the following migrate/start still has DB.
     """
-    from cli.commands import _repo, _session_lifecycle
+    # Dynamic lookup for monkeypatch-aware tests.
+    import cli.commands._repo as _repo_commands
+    import cli.commands.root_driver as _root_driver_commands
 
     if keep_browser:
         preserve_sessions = preserve_sessions | {_BROWSER_SESSION}
 
-    roles = _repo._roles_or_none()
+    roles = _repo_commands._roles_or_none()
     runner_only = roles is not None and "agent-runner" in roles and "gateway" not in roles
-    service_sessions = [
-        session_name(spec.session)
-        for spec in build_services()
-        if spec.session not in preserve_sessions
-        and _session_lifecycle._has_session(session_name(spec.session))
-    ]
+    service_sessions = _root_driver_commands._root_tree_plan(preserve_sessions)
     return service_sessions, runner_only, keep_infra or runner_only
 
 
@@ -113,13 +106,13 @@ def _print_stop_plan(
     keep_infra: bool,
 ) -> None:
     """The "The following will be stopped" block shown before the confirm gate."""
-    from cli.commands._session_lifecycle import _has_session
+    # Dynamic lookup for monkeypatch-aware tests.
 
     print("\nThe following will be stopped:")
     print(f"  service sessions: {', '.join(service_sessions) if service_sessions else '(none)'}")
     if reap_agents:
         print("  persistent terminals: closed")
-    if keep_browser and _has_session(session_name(_BROWSER_SESSION)):
+    if keep_browser:
         print(f"  browser: kept up ({session_name(_BROWSER_SESSION)}, login session preserved)")
     if runner_only:
         print("  infra (pg/redis): skipped (agent-runner uses the central node)")
@@ -146,13 +139,10 @@ def _confirm_stop(*, require_confirmation: bool) -> bool:
 
 def _stop_terminals_force() -> None:
     """Close this unit's persistent shells on an explicit full force stop."""
-    from cli.commands._maintenance_stop import _TERMINAL_NAME
-    from shared.session_backend import WinprocSessionBackend, get_shell_backend
+    from shared.session_backend import get_shell_backend
 
     backend = get_shell_backend()
     names = backend.list_sessions()
-    if isinstance(backend, WinprocSessionBackend):
-        names = [name for name in names if _TERMINAL_NAME.match(name)]
     for name in names:
         ok, _ = backend.kill_session(name, graceful=False)
         if not ok:
@@ -160,7 +150,7 @@ def _stop_terminals_force() -> None:
 
 
 def _force_stop(
-    _repo: Path,  # used by the orphan-listener sweep (step 4); kept for call-site stability
+    _repo: Path,  # retained for the common stop call contract
     *,
     require_confirmation: bool = True,
     keep_infra: bool = False,
@@ -168,7 +158,6 @@ def _force_stop(
     keep_browser: bool = True,
     reap_agents: bool = False,
     announce: bool = False,
-    teardown_extras: bool = False,
 ) -> int:
     """Explicit force-only resource stop; normal commands use _temporary_stop.
 
@@ -181,24 +170,16 @@ def _force_stop(
     # must not inherit it — the "cannot become ambient" boundary (F-s4-7).
     os.environ.pop("AVA_HOME_OVERRIDE", None)
 
-    from cli.commands import _root_driver
+    # Dynamic lookup for monkeypatch-aware tests.
+    import cli.commands.root_driver as _root_driver_commands
 
-    service_sessions, runner_only, skip_infra = _compute_stop_scope(
+    _service_sessions, runner_only, skip_infra = _compute_stop_scope(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
     )
-    # Root-driven hosts stop the tree through ava-root instead of the
-    # per-service sessions; the plan names the units that will actually stop
-    # (preserved ones excluded), plus any legacy session a pre-switch start
-    # left behind.
-    root_driven = _root_driver._root_driven_enabled()
     root_preserve = preserve_sessions | (
         frozenset({_BROWSER_SESSION}) if keep_browser else frozenset[str]()
     )
-    plan_sessions = service_sessions
-    if root_driven:
-        plan_sessions = sorted(
-            set(service_sessions) | set(_root_driver._root_tree_plan(root_preserve))
-        )
+    plan_sessions = _root_driver_commands._root_tree_plan(root_preserve)
     _print_stop_plan(
         plan_sessions,
         reap_agents=reap_agents,
@@ -221,18 +202,7 @@ def _force_stop(
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
     # path does not fabricate drain receipts and remains usable offline.
-    if root_driven:
-        # The tree stop carries the whole roster; any legacy session from a
-        # pre-switch start is still swept by the session leg below.
-        _root_driver._stop_root_service_tree(preserve=root_preserve)
-        if service_sessions:
-            print(
-                f"  (also stopping {len(service_sessions)} service session(s) left by a "
-                "pre-switch start)"
-            )
-            _stop_sessions(service_sessions)
-    else:
-        _stop_sessions(service_sessions)
+    _root_driver_commands._stop_root_service_tree(preserve=root_preserve, force=True)
 
     # 1.4) a teardown that asked for the browser down finishes the job: kill any
     # Chrome still running on THIS cluster's profile. The session kill above
@@ -251,39 +221,6 @@ def _force_stop(
     # 2) stop the data plane (data persists on disk).
     _stop_data_plane(skip_infra=skip_infra, runner_only=runner_only)
 
-    # 3) full-stop extras: tear down what converge registered outside the service roster —
-    # the entry-port gate and the permissions-helper LaunchAgent. After the
-    # sessions are dead nothing can relaunch them (no watchdog survives), so
-    # this is the last step. cmd_update / cmd_restart never come here.
-    if teardown_extras:
-        from cli.commands._stop_extras import (
-            stop_gate_service,
-            stop_lgtm_services,
-            stop_permissions_helper,
-        )
-
-        stop_gate_service(force=True)
-        stop_permissions_helper(force=True)
-        stop_lgtm_services(force=True)
-
-    # 4) orphan-listener sweep (Task #965): a service that escaped its session
-    # (a gateway whose pane died but whose process kept the port, a pidfile
-    # daemon that outlived its stop) is invisible to every leg above and holds
-    # the cluster port against the next start — the new process then dies on
-    # 'address already in use' while the old one keeps serving. Every port this
-    # unit expects to own is scanned; only a listener positively attributable
-    # to this cluster's home is an orphan of this stop and gets a verified kill.
-    # Foreign listeners are identified and left alone. Runs last so it also
-    # catches residuals of the data-plane and extras legs; preserved ports are
-    # skipped.
-    _reap_orphan_step(
-        _repo,
-        keep_browser=keep_browser,
-        keep_infra=keep_infra,
-        preserve_sessions=preserve_sessions,
-        keep_gate=not teardown_extras,
-    )
-
     return 0
 
 
@@ -291,24 +228,17 @@ def _force_stop(
 def _do_stop(
     _repo: Path,
     *,
-    graceful: bool = True,
     require_confirmation: bool = True,
     keep_infra: bool = False,
     preserve_sessions: frozenset[str] = frozenset(),
     keep_browser: bool = True,
     reap_agents: bool = False,
-    force_reap_agents: bool = False,
     announce: bool = False,
     teardown_extras: bool = False,
     force: bool = False,
     timeout: float = 300,
 ) -> int:
-    """Shared pause/stop kernel; only explicit force escalates a service stop.
-
-    Legacy graceful/force_reap_agents arguments remain accepted by an in-flight
-    older updater, but a timeout-derived force_reap flag is not operator consent.
-    """
-    del graceful, force_reap_agents
+    """Shared pause/stop kernel; only explicit force escalates a service stop."""
     if force:
         return _force_stop(
             _repo,
@@ -318,7 +248,6 @@ def _do_stop(
             keep_browser=keep_browser,
             reap_agents=reap_agents,
             announce=announce,
-            teardown_extras=teardown_extras,
         )
     from cli.commands._temporary_stop import stop
 
@@ -454,31 +383,52 @@ def _release_self_heal_pause() -> None:
     if holder is not None:
         print(f"  · leaving this host paused — a cluster update holds the lock ({holder})")
         return
-    from ops.cluster import unpause_local_cluster
+    from ops.cluster_pause import unpause_local_cluster
 
     unpause_local_cluster()
     print("  · unpaused this host (no cluster update owns the pause; nothing was stopped)")
 
 
-def _cmd_restart_body(
-    *, quiesce: bool = False, mode: str = "smooth", force_reap: bool = False
-) -> int:
+def _require_restart_runtime(runtime: StartRuntime, home: Path) -> None:
+    """Recheck the captured runtime and operation gate before disruptive work."""
+    from shared.paths import prod_service_checkout_error
+    from shared.release_operation import require_start_authorized
+
+    require_start_authorized(home)
+    runtime.validate(home)
+    if runtime.release is None and (problem := prod_service_checkout_error(runtime.code_root)):
+        raise ValueError(problem)
+
+
+def _restart_runtime(home: Path) -> StartRuntime:
+    """Admit the currently executing source or image before restart effects."""
+    from cli.start_runtime import admit_loaded_release
+    from shared.release_operation import require_start_authorized
+    from shared.runtime_interpreter import WHEEL_RUNTIME
+
+    require_start_authorized(home)
+    runtime = (
+        admit_loaded_release(home) if WHEEL_RUNTIME else StartRuntime.development(_repo_root())
+    )
+    _require_restart_runtime(runtime, home)
+    return runtime
+
+
+def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     """Stop then start without a stdin confirmation prompt.
 
     Hosted agents drain through the shared pause boundary before service stop.
-    The legacy quiesce/force_reap flags remain accepted by an in-flight older
-    official updater; explicit force authorizes interrupting resource shutdown.
+    Explicit force authorizes interrupting resource shutdown.
     """
-    del quiesce  # Every restart now drains, including an ordinary operator restart.
-    # Lazy imports so tests can monkeypatch each seam at the module that owns it:
-    # `cli.commands._repo._preflight_probes`,
-    # `cli.commands._start_readiness_preflight.preflight_start_readiness`,
-    # `cli.commands.stop._do_stop`, `cli.commands.start._cmd_start_body`.
-    from cli.commands import _repo
-    from cli.commands._start_readiness_preflight import preflight_start_readiness
-    from cli.commands.start import _cmd_start_body
+    from cli.commands import _repo, _start_readiness_preflight, start
     from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from shared.paths import ava_home
     from shared.proc import hosting_exec_domain, hosting_supervised_session
+
+    # Admission precedes even the restart journal: an incompatible caller must
+    # leave the running generation and its maintenance state untouched.
+    home = ava_home()
+    runtime = _restart_runtime(home)
 
     # An exec-domain restart is SIGKILLed by the execute_code call's own
     # teardown — the call's whole process group, as its turn ends (nohup/& do
@@ -514,7 +464,7 @@ def _cmd_restart_body(
         _release_self_heal_pause()  # same decline contract as the preflight refusal below
         return RESTART_DECLINED_EXIT_CODE
 
-    repo = _repo_root()
+    repo = runtime.code_root
     print(f"[ava restart] cwd = {repo}")
     from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
     from shared import lifecycle_status
@@ -534,17 +484,12 @@ def _cmd_restart_body(
         flush=True,
     )
 
-    # Each step below is timed as an `[updater] stage=` line (Task #1820): the
-    # Windows updater ladder runs this command behind a cmd.exe chain whose
-    # own fetch/checkout/uv markers are emitted by `ops.cluster_deploy`, and
-    # `ops.updater_outcome` pairs the two into the per-host stage breakdown the
-    # rollout report shows.
     # Preflight: probe gateway + register machine BEFORE stopping services.
     # A transient gateway outage or network blip would otherwise leave the
     # host in "services dead, can't start" after the stop below.
     # On failure the host keeps serving — abort without stopping.
     print("\n→ preflight probes (validate-before-kill)")
-    with updater_stage("preflight"), lifecycle_status.phase("preflight"):
+    with lifecycle_status.phase("preflight"):
         rc = _repo._preflight_probes()
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
@@ -563,8 +508,10 @@ def _cmd_restart_body(
     # `.venv/bin/ava`; the gate's interpreter check covers the venv seam the
     # session launches actually use.
     print("\n→ start readiness preflight (validate-before-kill, local state)")
-    with updater_stage("readiness"), lifecycle_status.phase("preflight"):
-        rc = preflight_start_readiness(repo, check_launcher=False)
+    with lifecycle_status.phase("preflight"):
+        rc = _start_readiness_preflight.preflight_start_readiness(
+            repo, check_launcher=False, runtime=runtime
+        )
     if rc != 0:
         print(
             "  ✗ refusing restart: start-readiness preflight failed — host still serving; "
@@ -580,15 +527,12 @@ def _cmd_restart_body(
 
     # Every restart uses the shared hosted pause kernel; a timeout never
     # silently authorizes force.
+    _require_restart_runtime(runtime, home)
 
-    # keep_infra=True: an internal restart bounces this host's service sessions,
-    # never this cluster's own pg/redis instance — stopping the data plane mid-orchestration
-    # kills the gateway orchestrator's own DB polling (same failure mode as
-    # the self-update leg; see _run_agent_runner_self_update).
-    with updater_stage("stop"), lifecycle_status.phase("stop"):
+    # Restart retains the private data plane while replacing application services.
+    with lifecycle_status.phase("stop"):
         rc = _do_stop(
             repo,
-            graceful=True,
             require_confirmation=False,
             keep_infra=True,
             force=mode == "force" or force_reap,
@@ -602,16 +546,15 @@ def _cmd_restart_body(
         if owns_journal:
             lifecycle_status.finish(rc, error="stop leg failed")
         return rc
-    # Internal restart: preserve the operator's durable --disable-service marker
-    # (a no-flag operator start would rewrite it to empty and re-enable everything).
-    with updater_stage("start"), lifecycle_status.phase("start"):
-        rc = _cmd_start_body(persist_services=False, updater_telemetry=True)
+    # Keep the captured runtime and the operator's durable selection through
+    # startup; neither is recaptured from a later caller or moving selector.
+    with lifecycle_status.phase("start"):
+        rc = start._cmd_start_body(persist_services=False, runtime=runtime)
     if owns_journal:
         lifecycle_status.finish(rc, error=None if rc == 0 else f"start leg failed with rc={rc}")
     return rc
 
 
-def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool = False) -> int:
-    """Stop then start without a confirmation prompt, timing the full restart."""
-    with updater_stage("restart"):
-        return _cmd_restart_body(quiesce=quiesce, mode=mode, force_reap=force_reap)
+def cmd_restart(*, mode: str = "smooth", force_reap: bool = False) -> int:
+    """Stop then start without a confirmation prompt."""
+    return _cmd_restart_body(mode=mode, force_reap=force_reap)

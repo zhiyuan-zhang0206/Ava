@@ -102,15 +102,12 @@ def fetch_upload_b64(agent_id: int, name: str) -> tuple[str, str]:
         raise ValueError(f"upload {name!r} is not a recognized image type")
     import httpx
 
-    from shared.cluster_auth import bearer_header
-    from shared.config import settings
     from shared.http_dial import get as http_get
-    from shared.machine import gateway_api_base
+    from shared.machine import gateway_api_base, gateway_auth_headers
 
     url = f"{gateway_api_base().rstrip('/')}/api/agents/{agent_id}/uploads/{name}"
-    secret = settings.data_plane.cluster_secret
     try:
-        resp = http_get(url, headers=bearer_header(secret) if secret else {}, timeout=15.0)
+        resp = http_get(url, headers=gateway_auth_headers(), timeout=15.0)
         resp.raise_for_status()
     except httpx.HTTPError as exc:
         raise OSError(f"fetch upload {url!r} failed: {exc}") from exc

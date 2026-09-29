@@ -5,8 +5,7 @@ skills match their sources (design `future/infra/core-package-update-channel.md`
 The engine behind `ava packages refresh`. One code path for manual runs and the
 per-machine OS job (`--from-job` adds the job-only gates). It NEVER writes the
 checkout — the core channel fetches objects only (`git fetch`, FETCH_HEAD +
-object store, never the working tree, the same contract as
-`shared.cluster_drift.prod_source_fetch`) — and content lands only under
+object store, never the working tree) — and content lands only under
 `$AVA_HOME/skills/` via the same staged-swap + preserved-subtree machinery the
 converge path uses. It never restarts anything (activation is the next skill
 scan) and never passes `--accept-risk`: the scan gate refuses, nothing else.

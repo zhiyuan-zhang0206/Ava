@@ -24,7 +24,7 @@ import sys
 import time
 import urllib.request
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import psutil
@@ -74,7 +74,7 @@ class _ServerHandle:
     name: str
     port: int
     serve_dir: str
-    token: str
+    token: str = field(repr=False)
     session_name: str
     last_launch_monotonic: float
 

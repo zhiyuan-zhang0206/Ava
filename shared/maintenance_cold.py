@@ -14,11 +14,10 @@ import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-from shared import exec_request_evidence
+from shared import exec_request_evidence, session_backend
 from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.paths import ava_home
 from shared.runtime_incarnation import RuntimeIncarnation
-from shared.session_backend import get_backend
 
 _CONSUMER_MODULES = frozenset(
     {
@@ -47,7 +46,7 @@ def require_no_consumers(conn: psycopg.Connection[Any], agent_id: int) -> None:
     provably disposable refuses with its file, attribution and disposition
     commands.
     """
-    backend = get_backend()
+    backend = session_backend.get_backend()
     if backend.has_session(f"ava-agent-{agent_id}") or backend.list_sessions(
         prefix=f"ava-boot-{agent_id}-"
     ):

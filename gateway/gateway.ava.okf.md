@@ -13,10 +13,18 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 
 > This is the authoritative terminology for the gateway domain.
 
-- **Gateway** — central gateway process: one FastAPI app, one port. Named gateway but after cutover it is **more than an adapter** — it is both the HTTP surface and the cluster orchestrator (`gateway/routers/cluster.py` — `/api/cluster/*` endpoints; `ops/cluster_rpc.py` — cross-machine RPC via POST to the target's agent-ops `/ops`). **Keeping the old name** because `gateway` is already the established identifier for 170+ files / service session names / Python packages, renaming churn far outweighs the benefit. Three key "not's": gateway **is not the lifecycle owner** (the `agents_meta` table is the truth, agents themselves spawn/terminate/heartbeat via DB + the native supervisor), **does not route inter-agent messages** (the `inbound_messages` table is the bus; gateway sits on the **write** path — `gateway/routers/delivery.py:deliver_chat_inbound` inserts chat inbound for send_message / UI replies — but never routes between agents), **stateless** (restart loses no state). Browser chat writes optionally carry a `client_message_id` committed under a unique constraint with the inbound; `POST .../messages/reconcile` returns the stable `inbound_id` after an ambiguous response and replays the pending wake/exact-trigger resurrection tail, so a gateway death cannot turn an HTTP retry into a duplicate chat.
+- **Gateway** — one FastAPI app, one port; after cutover more than an adapter, also the cluster orchestrator (`gateway/routers/cluster.py`; `ops/cluster_rpc.py` for cross-machine RPC to agent-ops `/ops`). Keeps the old name — `gateway` is the identifier for 170+ files, renaming churn outweighs benefit. Three "not's": **not the lifecycle owner** (`agents_meta` is the truth; agents spawn/terminate/heartbeat via DB + the native supervisor; release decisions run outside the gateway too, a retained native operation), **does not route inter-agent messages** (`inbound_messages` is the bus; gateway writes to it via `gateway/routers/delivery.py:deliver_chat_inbound`, never routes between agents), **stateless** (restart loses no state). Chat writes may carry a `client_message_id` (unique constraint with the inbound); `POST .../messages/reconcile` returns the stable `inbound_id` after an ambiguous response and replays the pending wake/resurrection tail — a gateway death cannot duplicate chat.
 - **Client** — HTTP consumers of the gateway (more than one): Next.js browser frontend + agent SDK on agent-runner, both directly connect to `/api/*` over private network. Client **does not** talk to agents directly — everything goes through gateway HTTP.
 
 ## Core Responsibilities
+
+HTTP admission reads the home's durable maintenance journal on each business
+request. `stopping`, `stopped`, `starting` and `ready` block it; drain phases
+keep SDK dependencies available to the remaining fleet. Atomic resume releases
+this same authority immediately, without a cached database posture delaying it.
+Unreadable or incomplete paused records block business requests. Control-plane
+routes bypass the admission read so health and repair remain reachable. The
+database posture is a status projection, not this gate's authority.
 
 - **Agent lifecycle management**: unified handling of spawn, send_message, terminate, resurrect, restart via `/api/agents/*`
 - **Eval result boundary**: artifact-read endpoints reject eval-isolated callers from their stored per-agent configuration, so bypassing the SDK cannot expose another run's transcript, activity, events, memory search, or task results
@@ -26,7 +34,7 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 - **Failure feedback delivery**: authenticated CI, QA, and merge failure events are deduplicated durably, then delivered to the author through chat auto-resurrection, the nearest live birth ancestor, or a task-registry alert
 - **Schedule keep-alive**: built-in ScheduleManager, keeping schedule resident processes alive in their own sessions (not a timer trigger — timing logic is inside the script, the manager only ensures stay-up)
 - **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
-- **MCP control plane**: revocable scoped tokens guard default-off `/mcp`; cluster-authenticated `/api/mcp/clients` manages them
+- **MCP control plane**: revocable scoped tokens guard default-off `/mcp`; human-credential-only `/api/mcp/clients` manages them
 - **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
 - **Authentication and browser-origin policy**: server-side `web_sessions` + bearer-secret auth, exact-origin CORS checks, and the Secure cookie policy — [[web-sessions.ava.okf.md]].
 - **Inbound provenance**: gateway-created inbounds persist the server-verified credential kind, ingress transport, exact-content SHA-256, and a nullable agent source/token comparison. These are audit facts only and never reject delivery — [[shared/agents/messages/inbound-provenance.ava.okf.md]].

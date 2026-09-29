@@ -399,8 +399,9 @@ through `ServiceSpec`; it publishes shared `plugin_stats` rows even while agents
 are idle or paused. Hosts read their own credentials and never copy tokens into
 agent state or the shared statistics table.
 
-An external plugin may define the watchdog's `main()` in `services.py` and set
+An external plugin may keep its protocol health probes in `services.py` and set
 `healthcheck_module=__name__`. Ops registers that exact module before executing
-it, so the watchdog can import it without an agent having loaded the plugin.
+it, so root health monitoring can import it without an agent having loaded the
+plugin.
 Keep the declaration/healthcheck surface lightweight and load the provider
 collector only inside the separate service process.

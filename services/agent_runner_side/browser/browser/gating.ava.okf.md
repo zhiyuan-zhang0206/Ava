@@ -10,7 +10,7 @@ tags: []
 ## Browser
 
 `browser` requires `AVA_BROWSER_ENABLED` plus `browser_incapability()` (display,
-Chrome, and npx). Fresh-host enroll/install uses the settings-free twin
+Chrome, and npx). The converge browser step uses the settings-free twin
 `browser_deps_incapability()`: the same prongs, order, and reasons, without the
 `AVA_CHROME_BINARY` override because Settings cannot be built on a fresh host.
 The headed browser runs on Windows.

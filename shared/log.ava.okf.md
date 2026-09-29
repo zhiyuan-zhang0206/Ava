@@ -20,22 +20,20 @@ Every log line is also an **event** in the unified event stream (event-system de
 
 ## Core Responsibilities
 
-### Four process entry points
+### Five process entry points
 - `init_agent_process(agent_id)` — kernel: stderr + file `agent-{N}.log` + unified event pipeline (process=`agent-kernel`).
 - `init_subprocess_logger(agent_id)` — exec subprocess: **only** file sink, no stderr (subprocess stderr is captured by the parent and injected as exec_output fed to the LLM; framework logs on stderr would pollute the agent context). Writes the same `agent-{N}.log`.
 - `init_gateway_process(name)` — gateway and every long-running daemon, including agent-host, ops, watchdog, labeler, memory-indexer, heartbeat and maintenance services: stderr + `<name>.log` + unified event pipeline (process=`name`, agent_id NULL on rows); each daemon has its own `<name>.log` for easier postmortem. Also freezes this process's commit — earliest shared seam, see `shared/process_sha.py`.
-- `init_cli_process(name)` — detached CLI subprocess (`spawn_update` / schema reconcile): same sink set as gateway; interactive CLI (TTY) skips.
+- `init_cli_process(name)` — CLI verbs that bring a unit up (`cli-<verb>`), the release executor, the PITR base worker: gateway's sinks, no `service_started` row.
+- `init_restricted_process()` — the PITR restore worker, which runs with no HOME or AVA_HOME: stderr only, plain text, and never builds Settings (every other init does, to resolve `logs_dir()`).
 - All are **idempotent** (`_init_done` process-level guard) — `logger.add` is not idempotent; repeated calls accumulate sinks until fd exhaustion (errno 24); watchdog reusing healthcheck every 60s would hit this, the guard blocks it.
 
 ### Three sink types
-- **stderr**: human-readable colored format `_HUMAN_FORMAT` (`time level a=agent_id message`), aligned with terminal scrollback habits — **not logfmt**.
-- **File**: JSONL (`serialize=True` serializes the entire record as a single JSON line), rotated at 100MB / kept for 7 days (`_add_file_sink`). Without rotation `gateway.log` once grew to ~900MB.
-- **Unified event pipeline**: `_postgres_sink` derives each INFO+ record to an event and enqueues it into `shared/telemetry` (bounded queue + drain thread). The emitter writes each batch to the JSONL mirror + OTLP export (unified schema: `ts / trace_id / span_id / agent_id / machine / cluster / process / category / event_name / level / source / target_agent_id / attributes`), with `trace_id`/`span_id` captured from the active OTel span at enqueue time (turn_span correlation). `event` value priority: `extra["event"]` → `extra["label"]` (backwards-compatible with `[{label}]` old style) → `"log"`. `payload` = extra minus dedicated columns + `msg` (original text); when `logger.opt(exception=True)` is used, automatically merges traceback / exception_type / exception_value into payload (with a guard to distinguish real exceptions from loguru's empty RecordException `NoneType: None`). `source` = `extra["source"]` (default `"system"`).
+stderr, a rotated JSONL file and the unified event pipeline, and how every sink is registered: [[log_sinks.ava.okf.md|log sinks]].
 
 ### Two key mechanisms
 - The seven-day full, 90-day rollup-source and 365-day lineage JSONL mirrors preserve Loki-stable IDs; [[services/gateway_side/events_maintenance/events_maintenance.ava.okf.md|events maintenance]] replays the rollup tier.
 - The emitter's bounded queue + daemon drain thread (`shared/telemetry._EventPipeline`) replaces loguru's `enqueue=True`, which uses `multiprocessing.SimpleQueue` allocating POSIX named semaphores; when an agent is SIGKILLed (routine operation) they leak permanently, eventually hitting `kern.posix.sem.max`, after which new agent startups fail with errno 28. The thread queue uses no kernel resources. A sink failure is contained on the drain thread (`catch=True`); the JSONL file sinks and the emitter's own day-stamped JSONL mirror (`$AVA_HOME/logs/events-YYYYMMDD.jsonl`) serve as durable fallback. Queue loss is an error: local diagnostics and loss summaries bypass the saturated queue, and an independent metric drives the cluster alert. See [[telemetry/otlp/telemetry-otlp/export-backpressure.ava.okf.md|Queue loss]].
-- `_StdlibInterceptHandler`: routes records from stdlib `logging.getLogger(...)` into loguru sinks (many services historically used stdlib logging), otherwise their lines would only appear on stderr and not enter the event stream. Installed on the root logger; `psycopg.pool` recycling noise is gated to ERROR.
 
 ## Two surfaces, and where they diverge
 
@@ -45,12 +43,11 @@ the unified event stream (Loki, which the Stats Dashboard and
 
 - **milvus** has no event pipeline: it is `execvp`ed into a C++ binary that cannot honor
   loguru wiring, so its daemon `dup2`s the log fd over stdout/stderr before exec.
-- **the CLI** initializes only when `AVA_CLI_LOG_NAME` is set —
-  `ops/cluster_deploy.py:spawn_update` exports it for the whole updater child
-  chain, so a **detached** `ava
-  update` child reaches both surfaces, while an interactive `ava status` skips
-  init (no event row per command). The CLI's own `print()` stays stdout/stderr,
-  captured only in the parent's `spawn-update-<ts>.log`.
+- **the CLI** opens sinks only for `cli.main._CLI_LOG_NAMES`; `ava status`
+  opens none. CLI `print()` output remains stdout/stderr and belongs to its
+  launch owner's log.
+- **the PITR restore worker** has stderr only (its operation's `stderr.log`):
+  its environment carries no authority, so no home to hold a file.
 
 **Crash diagnosability**: every daemon wraps `asyncio.run(main())` in a top-level
 `except Exception` that `logger.exception(...)`s before re-raising, so a crash

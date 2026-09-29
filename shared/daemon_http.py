@@ -12,7 +12,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 
-from shared.cluster_auth import verify_bearer
+from shared.cluster_auth import verify_bearer_digest
 
 RouteHandler = Callable[[bytes], Awaitable[tuple[int, bytes, str]]]
 _MAX_BODY_BYTES = 64 * 1024
@@ -66,7 +66,7 @@ async def start_daemon_http(
     port: int,
     health_response: Callable[[], tuple[int, bytes]],
     extra_routes: Mapping[tuple[str, str], RouteHandler] | None = None,
-    auth_token: str | None = None,
+    auth_digests: frozenset[str] | None = None,
 ) -> asyncio.Server:
     """Bind only the explicitly supplied routes and health response."""
     routes = dict(extra_routes) if extra_routes else {}
@@ -110,8 +110,8 @@ async def start_daemon_http(
                         status, healthz_body = health_response()
                         response = _build_response(status, healthz_body, "application/json")
                     elif (method, path) in routes:
-                        if auth_token is not None and not verify_bearer(
-                            _header_value(header_lines, b"authorization"), auth_token
+                        if auth_digests is not None and not verify_bearer_digest(
+                            _header_value(header_lines, b"authorization"), auth_digests
                         ):
                             response = _build_response(
                                 401,

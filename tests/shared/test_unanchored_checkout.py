@@ -220,10 +220,14 @@ def test_prod_source_checkout_still_boots_from_the_default_home(
     assert Path(seen["ava_home"]) == default
     assert seen["bearer"] == _PLANTED_BEARER
     assert seen["uv_index"] == _PLANTED_MIRROR
-    assert seen["dials"] == [f"{gateway}/api/bootstrap?role=runner"]
-    assert [r["authorization"] for r in _RecordingGateway.requests] == [f"Bearer {_PLANTED_BEARER}"]
+    assert seen["dials"] == [f"{gateway}/api/bootstrap"]
+    # A unit presents its capability's machine API token, never the human
+    # cluster secret its `.env` may still carry (none is installed here).
+    assert [r["authorization"] for r in _RecordingGateway.requests] == [""]
     assert (default / "run" / "bootstrap-snapshot.json").exists()
-    assert seen["db_url"] == _RecordingGateway.payload["AVA_DB_URL"]
+    # A runner never takes a database credential from bootstrap: the served
+    # URL arrives credential-free.
+    assert seen["db_url"] == "postgresql://ava_runner@127.0.0.1:5433/ava"
 
 
 @pytest.mark.parametrize("anchor", ["pointer", "env"])
@@ -307,8 +311,8 @@ def test_unanchored_checkout_never_decides_to_fetch_nor_dials(
         dials.append(args)
 
     monkeypatch.setattr(bootstrap, "dial_get", _record)
-    with pytest.raises(bootstrap.BootstrapFetchError, match=r"install\.sh --worktree"):
-        bootstrap.fetch_bootstrap_config("http://gateway.invalid:8000", role="runner")
+    with pytest.raises(bootstrap.BootstrapFetchError, match=r"ava start --worktree"):
+        bootstrap.fetch_bootstrap_config("http://gateway.invalid:8000")
     assert dials == []
 
 
@@ -321,7 +325,7 @@ def test_prod_service_guard_refuses_an_unanchored_checkout(
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "scratch")
     err = paths.prod_service_checkout_error(tmp_path / "worktree")
     assert err is not None
-    assert "install.sh --worktree" in err
+    assert "ava start --worktree" in err
 
 
 def test_settings_free_env_helpers_never_read_the_default_home(
@@ -374,27 +378,56 @@ def test_settings_free_env_helpers_never_create_the_default_home(
     assert not default.exists(), "must never create ~/.ava for an unanchored checkout"
 
 
-def test_enroll_refuses_an_unanchored_checkout_before_fetch_or_write(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_first_start_refuses_an_unanchored_checkout_before_fetch_or_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Enroll writes the unit's `.env`; an unanchored checkout has no unit home,
-    so the credentials would land in a throwaway scratch. Refuse first."""
-    from cli import enroll
+    """First start (a remote unit's join included) writes the unit's home; a
+    checkout that claims none must name one (`AVA_HOME`) or ask for its own
+    (`--worktree`), and refuses before any fetch or write. An AVA_HOME that is
+    an unanchored parent's scratch is no claim either."""
+    from cli import start_intent
 
-    env_path = tmp_path / ".env"
-    monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
-    monkeypatch.setattr(dotenv_boot, "_ANCHORED", False)
+    checkout = tmp_path / "worktree"
+    checkout.mkdir()
+    monkeypatch.setattr(start_intent, "_checkout", lambda: checkout)
+    monkeypatch.delitem(os.environ, "AVA_HOME", raising=False)
     fetched: list[object] = []
 
-    def _no_fetch(*args: object, **_kwargs: object) -> dict[str, str]:
+    def _no_fetch(*args: object, **_kwargs: object) -> None:
         fetched.append(args)
-        raise AssertionError("enroll fetched from an unanchored checkout")
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", _no_fetch)
-    rc = enroll.run_enroll(
-        ["--gateway", "http://127.0.0.1:8000", "--machine-name", "m", "--machine-host", "127.0.0.1"]
-    )
-    assert rc == 1
+    with pytest.raises(ValueError, match="requires AVA_HOME or --worktree"):
+        start_intent._home(worktree=False)
+    scratch = tmp_path / "ava-unanchored-0123456789abcdef"
+    monkeypatch.setitem(os.environ, "AVA_HOME", str(scratch))
+    with pytest.raises(ValueError, match="requires AVA_HOME or --worktree"):
+        start_intent._home(worktree=False)
     assert fetched == []
-    assert not env_path.exists()
-    assert "~/.ava/source" in capsys.readouterr().err
+    assert not scratch.exists()
+
+
+def test_join_fetches_under_the_home_its_start_claims(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A remote unit's first start fetches before it publishes its home; the
+    fetch must already run under that home, or the transport's anchoring gate
+    would take a `--worktree` join for an unanchored checkout."""
+    from cli import start_intent
+
+    home = tmp_path / ".ava-worktree"
+    monkeypatch.delitem(os.environ, "AVA_HOME", raising=False)
+
+    def _credential(*_args: object, **_kwargs: object) -> tuple[None, str]:
+        return None, "token"
+
+    monkeypatch.setattr(start_intent, "_join_credential", _credential)
+    seen: list[str | None] = []
+
+    def fetch(*_a: object, **_k: object) -> dict[str, str]:
+        seen.append(os.environ.get("AVA_HOME"))
+        return {}
+
+    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
+    start_intent._join({"AVA_GATEWAY_URL": "http://127.0.0.1:8000"}, home, None)
+    assert seen == [str(home)]

@@ -1,8 +1,9 @@
 """Current release publication and pending rollout share one evidence field.
 
-Only the existing rollout's verified producers may supply closure/readback facts.
-These storage contracts do not authenticate caller-created Python values, attest
-unregistered credential holders, or activate caller protocol support by themselves.
+Runtime admission reads it (`publication_admission`); no production producer
+writes it, so admission stays protocol zero. These storage contracts do not
+authenticate caller-created Python values, attest unregistered credential
+holders, or activate caller protocol support by themselves.
 """
 
 from __future__ import annotations
@@ -19,8 +20,6 @@ from psycopg.types.json import Jsonb
 from pydantic import AwareDatetime, Field, model_validator
 
 from shared.managed_writer_barrier import (
-    Digest,
-    EvidenceModel,
     ManagedUnit,
     ManagedWriterBarrierError,
     ManagedWriterCollection,
@@ -29,7 +28,7 @@ from shared.managed_writer_barrier import (
     lock_rollout,
     validate_collection_for_write,
 )
-from shared.managed_writer_observation import ExpectedProcess
+from shared.process_evidence import Digest, EvidenceModel, ExpectedProcess
 
 
 @dataclass(frozen=True)
@@ -191,14 +190,13 @@ class PendingPublication(EvidenceModel):
     unit_readbacks: tuple[UnitActivationReadback, ...] = ()
     # The begin execution's durable registration (task #4129 I4, F1): V -- the
     # observation window `begin_valid_until` sealed into the plan -- and the
-    # sealed plan's digest, written by the seat that opens the journal
-    # (`open_pending_publication`). Both optional: a journal written before the
-    # registration existed parses with them unset, and a replacement opened by
-    # checked recovery carries none -- its premise is its fresh closure, not a
-    # sealed-plan execution. The plan digest is audit evidence (the collection
-    # reports it; nothing validates against it), and a same-operation retry
-    # never replaces either value: the registered window cannot slide under a
-    # later execution (design N3).
+    # sealed plan's digest, written when the journal is opened. Both optional:
+    # a journal written before the registration existed parses with them
+    # unset, and a replacement opened by checked recovery carries none -- its
+    # premise is its fresh closure, not a sealed-plan execution. The plan
+    # digest is audit evidence (the collection reports it; nothing validates
+    # against it), and a same-operation retry never replaces either value: the
+    # registered window cannot slide under a later execution (design N3).
     valid_until: AwareDatetime | None = None
     plan_digest: Digest | None = None
 
@@ -331,57 +329,6 @@ def adopt_pending_collection(conn: psycopg.Connection, collection: ManagedWriter
         conn,
         WriterPublication(
             current=state.current, pending=pending.model_copy(update={"collection": collection})
-        ),
-    )
-
-
-def recover_pending_publication(
-    conn: psycopg.Connection,
-    abandoned: RolloutIdentity,
-    replacement: PendingPublication,
-    fresh_collection: ManagedWriterCollection,
-) -> None:
-    """Explicit recovery CAS requires fresh complete closure under the NEW lease.
-
-    TTL expiry alone is not old-holder exit evidence and cannot clear pending.
-    The existing takeover producer must include that holder among managed writers
-    and positively establish its exit before acquiring its replacement lease.
-    Recovery preserves current and keeps births frozen; it does not publish.
-    """
-    if (
-        replacement.collection is not None
-        or replacement.migration is not None
-        or replacement.unit_readbacks
-        or replacement.operation == abandoned
-    ):
-        raise ManagedWriterBarrierError("recovery requires a new operation and fresh collection")
-    lock_rollout(conn, replacement.operation)
-    state = _locked_publication(conn)
-    if state.pending is None or state.pending.operation != abandoned:
-        raise ManagedWriterBarrierError("abandoned pending operation no longer matches")
-    if replacement.challenge == state.pending.challenge:
-        raise ManagedWriterBarrierError("recovery must issue a new observation challenge")
-    prepared = tuple(
-        ManagedUnit(
-            machine=unit.machine,
-            home=unit.home,
-            inventory_digest=unit.prepared_receipt_digest,
-        )
-        for unit in replacement.units
-    )
-    validate_collection_for_write(
-        conn,
-        fresh_collection,
-        operation=replacement.operation,
-        candidate_digest=replacement.candidate_digest,
-        expected_challenge=replacement.challenge,
-        prepared_units=prepared,
-    )
-    _store(
-        conn,
-        WriterPublication(
-            current=state.current,
-            pending=replacement.model_copy(update={"collection": fresh_collection}),
         ),
     )
 

@@ -1,12 +1,20 @@
 """The host's bare `ava`: `scripts/ava-launcher.sh` runs the CLI of the cluster
-`$AVA_HOME` names, with no default and no fallback; `install.sh` points
-`~/.local/bin/ava` at it for the prod install only."""
+`$AVA_HOME` names, with no default and no fallback. A home's first `ava start`
+links the home's own CLI (`$AVA_HOME/ava`) and, for the production home only,
+points `~/.local/bin/ava` at the launcher; until that start has run, its hints
+name the checkout's own CLI."""
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
+
+import cli.commands._setup as _setup_commands
+from cli.commands.converge import _steps
+from cli.commands.converge import host as converge_host
+from shared.paths import repo_root
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LAUNCHER = _REPO_ROOT / "scripts" / "ava-launcher.sh"
@@ -53,93 +61,121 @@ def test_launcher_refuses_a_home_without_its_cli_link(tmp_path: Path) -> None:
     assert f"{tmp_path / 'cluster-home'}/ava does not exist" in proc.stderr
 
 
-def _run_install(
-    tmp_path: Path, *, prod: bool, existing_target: Path | None = None
-) -> tuple[subprocess.CompletedProcess[str], Path]:
-    """Run a scratch gateway install with all host provisioners stubbed."""
-    home = tmp_path / "home"
-    install_home = home / ".ava" if prod else home / ".ava-preview"
-    checkout = install_home / "source"
-    provision = checkout / "scripts" / "provision"
-    provision.mkdir(parents=True)
-    shutil.copy(_REPO_ROOT / "scripts" / "install.sh", checkout / "scripts" / "install.sh")
+# The converge steps through which a first start (`_prepare_cold_start`) wires the
+# CLI, taken from CONVERGE_STEPS with their real host-global gating.
+_CLI_LINK_STEPS = tuple(
+    step
+    for step in converge_host.CONVERGE_STEPS
+    if step.name in {"$AVA_HOME/ava CLI link", "ava launcher on PATH"}
+)
 
-    for name in ("node.sh", "database.sh"):
-        script = provision / name
-        script.write_text("#!/bin/sh\nexit 0\n")
-        script.chmod(0o755)
-    cli_tools = checkout / "scripts" / "install-cli-tools.sh"
-    cli_tools.write_text("#!/bin/sh\nexit 0\n")
-    cli_tools.chmod(0o755)
-    toolchain = provision / "toolchain.sh"
-    toolchain.write_text("#!/bin/sh\nexit 0\n")
-    toolchain.chmod(0o755)
 
-    stub_bin = tmp_path / "stub-bin"
-    stub_bin.mkdir()
-    uv = stub_bin / "uv"
-    uv.write_text("#!/bin/sh\nexit 0\n")
-    uv.chmod(0o755)
-    uname = stub_bin / "uname"
-    uname.write_text("#!/bin/sh\necho Linux\n")
-    uname.chmod(0o755)
-    python = checkout / ".venv" / "bin" / "python"
-    python.parent.mkdir(parents=True)
-    python.write_text("#!/bin/sh\nexit 0\n")
-    python.chmod(0o755)
+def test_home_cli_link_is_the_first_write_step_of_every_cluster() -> None:
+    """Later steps read this home's checkout through prod_source_dir(), which falls
+    back to `$AVA_HOME/ava` when `$AVA_HOME/source` is absent — so every cluster
+    writes the link first, after only the warning-only ownership preflight."""
+    names = [step.name for step in converge_host.CONVERGE_STEPS]
+    assert names[:2] == ["$AVA_HOME ownership preflight", "$AVA_HOME/ava CLI link"]
+    assert not converge_host.CONVERGE_STEPS[1].host_global
 
-    bare_link = home / ".local" / "bin" / "ava"
+
+def test_cli_link_steps_skip_hosts_without_the_launcher_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows has no launcher and no `$AVA_HOME/ava`: both link steps write nothing."""
+
+    class _NoLauncher:
+        def supports_ava_symlink(self) -> bool:
+            return False
+
+    monkeypatch.setattr(_steps, "get_backend", _NoLauncher)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ava_home = tmp_path / "cluster-home"
+    ctx = converge_host.ConvergeCtx(repo=tmp_path / "repo", ava_home=ava_home, roles=None)
+    for step in _CLI_LINK_STEPS:
+        step.apply(ctx)
+    assert not ava_home.exists()
+    assert not (tmp_path / "home").exists()
+
+
+def _first_start_converge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    prod: bool,
+    existing_target: Path | None = None,
+) -> tuple[Path, Path, Path]:
+    """Run a scratch home's first-start CLI wiring; returns (checkout, home, bare link)."""
+    assert len(_CLI_LINK_STEPS) == 2
+    user_home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(user_home))
+    ava_home = user_home / ".ava" if prod else user_home / ".ava-preview"
+    checkout = ava_home / "source"
+    checkout.mkdir(parents=True)
+    bare_link = user_home / ".local" / "bin" / "ava"
     if existing_target is not None:
         bare_link.parent.mkdir(parents=True)
         bare_link.symlink_to(existing_target)
-
-    proc = subprocess.run(
-        ["bash", "scripts/install.sh", "--role", "gateway"],
-        cwd=checkout,
-        env={
-            "AVA_HOME": str(install_home),
-            "AVA_ALLOW_ROOT_INSTALL": "1",
-            "HOME": str(home),
-            "PATH": f"{stub_bin}:/usr/bin:/bin",
-        },
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
+    converge_host.converge_host(
+        checkout,
+        frozenset({"gateway", "agent-runner"}),
+        ava_home=ava_home,
+        steps=_CLI_LINK_STEPS,
+        services=frozenset(),
     )
-    return proc, bare_link
+    return checkout, ava_home, bare_link
 
 
-def test_prod_install_links_bare_ava_to_the_launcher(tmp_path: Path) -> None:
-    proc, bare_link = _run_install(tmp_path, prod=True)
+def test_prod_first_start_links_bare_ava_to_the_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout, ava_home, bare_link = _first_start_converge(tmp_path, monkeypatch, prod=True)
 
-    assert proc.returncode == 0, proc.stderr
-    launcher = bare_link.parents[2] / ".ava" / "source" / "scripts" / "ava-launcher.sh"
-    assert bare_link.readlink() == launcher
-    assert "WARNING" not in proc.stderr
+    assert bare_link.readlink() == checkout / "scripts" / "ava-launcher.sh"
+    assert (ava_home / "ava").readlink() == checkout / ".venv" / "bin" / "ava"
 
 
-def test_prod_install_repoints_a_checkout_link_to_the_launcher(tmp_path: Path) -> None:
+def test_prod_first_start_repoints_a_checkout_link_to_the_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     old_target = tmp_path / "home" / ".ava" / "source" / ".venv" / "bin" / "ava"
-    proc, bare_link = _run_install(tmp_path, prod=True, existing_target=old_target)
+    checkout, _, bare_link = _first_start_converge(
+        tmp_path, monkeypatch, prod=True, existing_target=old_target
+    )
 
-    assert proc.returncode == 0, proc.stderr
-    assert bare_link.readlink().name == "ava-launcher.sh"
+    assert bare_link.readlink() == checkout / "scripts" / "ava-launcher.sh"
 
 
-def test_non_prod_install_leaves_the_host_link_alone(tmp_path: Path) -> None:
+def test_non_prod_first_start_leaves_the_host_link_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     prod_launcher = tmp_path / "prod" / "source" / "scripts" / "ava-launcher.sh"
-    proc, bare_link = _run_install(tmp_path, prod=False, existing_target=prod_launcher)
+    checkout, ava_home, bare_link = _first_start_converge(
+        tmp_path, monkeypatch, prod=False, existing_target=prod_launcher
+    )
 
-    assert proc.returncode == 0, proc.stderr
     assert bare_link.readlink() == prod_launcher
-    assert "WARNING" not in proc.stderr
+    assert (ava_home / "ava").readlink() == checkout / ".venv" / "bin" / "ava"
 
 
-def test_non_prod_install_without_link_notes_the_checkout_cli(tmp_path: Path) -> None:
-    proc, bare_link = _run_install(tmp_path, prod=False)
+def test_non_prod_first_start_creates_no_bare_link_when_none_existed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, bare_link = _first_start_converge(tmp_path, monkeypatch, prod=False)
 
-    assert proc.returncode == 0, proc.stderr
     assert not bare_link.exists()
-    assert "has no bare `ava`" in proc.stderr
-    assert ".venv/bin/ava" in proc.stderr
+    assert not bare_link.is_symlink()
+
+
+def test_missing_setup_error_names_the_checkout_cli(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`_print_missing_setup_error`'s first-time-setup example must name this
+    checkout's own `.venv/bin/ava`, since the host-global `ava` cannot reach a
+    home before its first start has linked `$AVA_HOME/ava`."""
+    missing: list[_setup_commands._SetupField | _setup_commands._Capability] = [
+        c for c in _setup_commands._CAPABILITIES if c.capability != "observability-station"
+    ]
+    _setup_commands._print_missing_setup_error(missing, None)
+    err = capsys.readouterr().err
+    assert f"{repo_root()}/.venv/bin/ava start --machine-name <name>" in err

@@ -119,6 +119,24 @@ class ScheduleManager:
         # backend + _backoff.
         self._lock = threading.Lock()
 
+    async def provision_builtins(self) -> None:
+        """Seed missing schedules when requested; never edit existing workload rows."""
+        if not settings.gateway.provision_builtin_schedules:
+            return
+        from shared.daemon.schedules.builtin_schedules import provision_builtin_schedules
+
+        def provision() -> list[str]:
+            # Pool acquisition and provisioning both block; keep them off the event loop.
+            with self._pool.connection() as conn:
+                return provision_builtin_schedules(conn)
+
+        try:
+            created = await asyncio.to_thread(provision)
+            if created:
+                _log.info("provisioned built-in schedules: %s", ", ".join(created))
+        except Exception:
+            _log.warning("built-in schedule provisioning failed", exc_info=True)
+
     async def start(self) -> None:
         # issue #194: a gateway launched from a foreign checkout (e.g. a dev
         # worktree against the prod home) must not supervise schedules — the

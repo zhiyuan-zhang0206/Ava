@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
 import os
 import signal
 import subprocess
+import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from contextlib import nullcontext
 from pathlib import Path
@@ -18,6 +22,7 @@ import pytest
 
 from shared import pg_foreground, pg_throwaway_base, pg_tools
 from shared.config import settings
+from shared.native_process.ownership import OwnedProcess
 from shared.platform import IS_WINDOWS
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="foreground restore ownership is POSIX")
@@ -150,18 +155,31 @@ def test_readiness_timeout_is_bounded(tmp_path: Path) -> None:
         )
 
 
+@pytest.fixture
+def fake_family(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A mocked postmaster has no native family and never finishes its shutdown."""
+
+    def no_family(_process: subprocess.Popen[bytes]) -> set[OwnedProcess]:
+        return set()
+
+    monkeypatch.setattr(pg_foreground, "postmaster_family", no_family)
+    monkeypatch.setattr(pg_foreground, "POSTMASTER_SHUTDOWN_S", 0.0)
+
+
+@pytest.mark.usefixtures("fake_family")
 def test_stop_escalates_and_reaps_after_immediate_shutdown_times_out() -> None:
     process = MagicMock(spec=subprocess.Popen)
     process.poll.return_value = None
-    process.wait.side_effect = [subprocess.TimeoutExpired("postgres", 3), -signal.SIGKILL]
+    process.wait.return_value = -signal.SIGKILL
 
     pg_foreground.stop_foreground_postgres(process)
 
     process.send_signal.assert_called_once_with(signal.SIGQUIT)
     process.kill.assert_called_once()
-    assert [call.kwargs["timeout"] for call in process.wait.call_args_list] == [3, 2]
+    assert [call.kwargs["timeout"] for call in process.wait.call_args_list] == [2]
 
 
+@pytest.mark.usefixtures("fake_family")
 def test_unreapable_foreground_retains_data_and_registration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -184,6 +202,7 @@ def test_unreapable_foreground_retains_data_and_registration(
     process.kill.assert_called_once()
 
 
+@pytest.mark.usefixtures("fake_family")
 @pytest.mark.parametrize("stop_fails", [False, True])
 def test_startup_timeout_keeps_the_child_handle_for_cleanup(
     foreground_root: Path, monkeypatch: pytest.MonkeyPatch, stop_fails: bool
@@ -241,6 +260,7 @@ def test_startup_timeout_keeps_the_child_handle_for_cleanup(
                 unregister(registration)
 
 
+@pytest.mark.usefixtures("fake_family")
 def test_foreground_start_is_handed_the_built_start_env(
     foreground_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -267,3 +287,89 @@ def test_foreground_start_is_handed_the_built_start_env(
         pytest.fail("readiness never succeeds in this test")
 
     assert spawn.call_args.kwargs["env"] == sentinel
+
+
+def test_stop_kills_the_recorded_family_of_a_postmaster_that_cannot_shut_down(
+    foreground_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every postmaster child setsid()s out of its owner's group. A postmaster
+    that ignores its shutdown and is killed must not orphan them: a busy backend
+    would otherwise run its whole statement against the disposable PGDATA."""
+    data = foreground_root / "data"
+    subprocess.run(  # noqa: S603 -- disposable test cluster
+        [pg_tools.pg_tool("initdb"), "-D", str(data), "-U", "ava", "-A", "trust", "--no-sync"],
+        check=True,
+        capture_output=True,
+    )
+    port = pg_tools._free_port()
+    log = foreground_root / "pg.log"
+    process = pg_foreground.start_foreground_postgres(
+        [
+            str(pg_tools.pg_tool("postgres")),
+            "-D",
+            str(data),
+            "-p",
+            str(port),
+            "-k",
+            str(foreground_root),
+            "-c",
+            "listen_addresses=127.0.0.1",
+        ],
+        log=log,
+    )
+    url = f"postgresql://ava@127.0.0.1:{port}/postgres"
+    busy = "SELECT count(*) FROM generate_series(1, 20000000000)"
+    client: subprocess.Popen[bytes] | None = None
+    family: list[OwnedProcess] = []
+    try:
+        pg_foreground.wait_foreground_postgres(process, log=log, port=port, data=data)
+        client = subprocess.Popen(  # noqa: S603 -- disposable busy client
+            [
+                sys.executable,
+                "-c",
+                "import psycopg,sys; psycopg.connect(sys.argv[1]).execute(sys.argv[2])",
+                url,
+                busy,
+            ]
+        )
+        with psycopg.connect(url, autocommit=True) as probe:
+            while not probe.execute(
+                "SELECT 1 FROM pg_stat_activity WHERE state = 'active' AND query = %s", (busy,)
+            ).fetchone():
+                time.sleep(0.05)
+        family = [
+            OwnedProcess.capture(child)
+            for child in psutil.Process(process.pid).children(recursive=True)
+        ]
+        os.kill(process.pid, signal.SIGSTOP)  # this postmaster never finishes its shutdown
+        monkeypatch.setattr(pg_foreground, "POSTMASTER_SHUTDOWN_S", 0.5, raising=False)
+        pg_foreground.stop_foreground_postgres(process)
+        assert process.returncode is not None
+        assert [member.pid for member in family if member.live()] == []
+    finally:
+        for member in family:
+            with contextlib.suppress(Exception):
+                member.send_signal(signal.SIGKILL)
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        if client is not None:
+            client.kill()
+            client.wait(timeout=5)
+
+
+def test_a_retried_family_closure_keeps_every_earlier_recorded_birth(tmp_path: Path) -> None:
+    """A closure retried after an unresolved attempt still kills and proves the
+    births that attempt persisted, not only what it can record anew."""
+    survivor = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        member = OwnedProcess.capture(psutil.Process(survivor.pid))
+        (tmp_path / pg_foreground.FAMILY_RECORD).write_text(
+            json.dumps({"members": [pg_foreground.birth_value(member)]})
+        )
+        family = pg_foreground.FamilyCustody(tmp_path, os.getpgrp(), None)
+        family.close(time.monotonic() + 5)
+        assert not member.live()
+    finally:
+        survivor.kill()
+        survivor.wait(timeout=10)

@@ -1,35 +1,18 @@
-"""Code-side probe registry — which health probe watches which unit.
+"""One readiness contract per selected root unit.
 
-The K2 unit manifest stays a closed field set (`id` / `exec` / `restart` /
-`attach`): a probe is never declared there. Resolution lives in code instead,
-aligned with the two paths the per-capability watchdog daemons derive today:
-
-- **Spec path** (`register_specs`) — a service whose spec carries a
-  `healthcheck_module` gates into the health roster (the same membership rule
-  the watchdog uses), and its verdict callable is the spec's `identity_probe`:
-  the shared, total probe the operator surfaces already trust, so a second
-  definition of "alive" cannot fork from theirs.
-- **Static path** (`register` / `register_ref`) — units that never had a
-  spec-derived entry (the host-policy / data-plane / native-stack class) are
-  registered directly; `register_ref` takes a `"module:attribute"` string that
-  resolves lazily on first probe, so registration never imports probe code
-  eagerly.
-
-The health runner still guards its boundary: a probe that raises is wrapped
-into a `down` verdict there (fail-closed), never into `alive`.
+Service probes come from the actual manifest roster and must exist. Static
+host diagnostics may register a lazy reference. Probes report observations;
+only the root supervisor owns service mutations.
 """
 
 from __future__ import annotations
 
 import importlib
-import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
 from shared.daemon_health import DaemonProbe
-
-_log = logging.getLogger(__name__)
 
 Probe = Callable[[], DaemonProbe]
 """A total probe: returns a verdict, never raises (the healthcheck contract)."""
@@ -123,24 +106,10 @@ class ProbeRegistry:
         self._entries[unit_id] = _Entry(ref=ref)
 
     def register_specs(self, specs: Iterable[ProbeSource]) -> None:
-        """Register every spec that declares a `healthcheck_module`.
-
-        A spec without one is not health-monitored (the watchdog daemons
-        themselves); a spec whose `identity_probe` is unset has no shared
-        verdict surface yet and is skipped with a debug line — its probe
-        adapter is a wiring-time decision, and inventing one here would fork
-        the verdict contract.
-        """
+        """Register every selected service; missing readiness is a wiring error."""
         for spec in specs:
-            if spec.healthcheck_module is None:
-                continue
             if spec.identity_probe is None:
-                _log.debug(
-                    "[probes] unit %s declares %s but no identity probe; no health entry",
-                    spec.session,
-                    spec.healthcheck_module,
-                )
-                continue
+                raise ProbeError(f"root unit {spec.session!r} has no readiness probe")
             self.register(spec.session, spec.identity_probe)
 
     def unit_ids(self) -> tuple[str, ...]:

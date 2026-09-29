@@ -13,7 +13,7 @@ from shared.agents.messages.delivery_outbox import (
 )
 from shared.api_contracts import contracts
 from shared.api_contracts.contracts import Idempotency
-from shared.cluster_auth import bearer_header
+from shared.cluster_auth import bearer_header, client_bearer
 from shared.config import settings
 
 # Singleton: process-wide shared connection pool. Connect/read timeout is a
@@ -38,18 +38,15 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
 
     global _client  # noqa: PLW0603 — lazy module singleton
     if _client is None:
-        # The gateway requires auth on every API route (always-on cluster
-        # secret). The SDK is a script/agent caller, so it presents the secret
-        # as `Authorization: Bearer <secret>` (the cookie path is the browser's).
-        # settings.data_plane.cluster_secret is sourced from the cluster .env even when the
-        # agent process env lacks it. Empty secret (tests / unprovisioned
-        # checkout) sends no header — matches the gateway's fail-open when its
-        # own secret is unset.
-        headers = (
-            bearer_header(settings.data_plane.cluster_secret)
-            if settings.data_plane.cluster_secret
-            else {}
-        )
+        # The gateway requires auth on every API route of an authenticated
+        # cluster. The SDK is a script/agent caller, so it presents a bearer
+        # (the cookie path is the browser's): the machine API token its launch
+        # environment carries (an agent inherits the agent-host's), else the
+        # human secret (an operator on the gateway home). Neither (the open
+        # posture / an unprovisioned checkout) sends no header — matches the
+        # gateway's fail-open when its own secret is unset.
+        bearer = client_bearer(settings.data_plane.cluster_secret)
+        headers = bearer_header(bearer) if bearer else {}
         _client = httpx.Client(
             base_url=ava.GATEWAY_URL,
             timeout=httpx.Timeout(settings.gateway.gateway_client_http_timeout_seconds),

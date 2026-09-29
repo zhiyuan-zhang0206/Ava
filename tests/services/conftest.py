@@ -31,6 +31,16 @@ if sys.platform == "win32":
     collect_ignore += _AVA_ROOT_TESTS
 
 
+@pytest.fixture(autouse=True)
+def _backup_passphrase_pinned() -> None:
+    """The suite home as a gateway birth leaves it: its logical-backup
+    passphrase pinned (backups never derive a key from the cluster secret)."""
+    from services.gateway_side.backup import passphrase
+    from shared.paths import ava_home
+
+    passphrase.ensure_minted(ava_home())
+
+
 @pytest.fixture
 def short_tmp() -> Iterator[Path]:
     """A short-path scratch directory for unix sockets and process trees."""

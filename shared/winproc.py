@@ -45,7 +45,6 @@ from shared.paths import logs_dir, run_dir
 from shared.platform import IS_WINDOWS
 from shared.session_record import SessionRecord
 from shared.windows_session import current_session_id, process_session_id
-from shared.winjob import in_attached_exec_job
 from shared.winjob_spawn import run_job_process
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
@@ -58,10 +57,8 @@ _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
 # defect that is only ever unit-tested on macOS is how this class of bug
 # survives — a 0 fallback makes both branches indistinguishable in a test.)
 #
-# A persistent session spawned by a one-shot exec must leave that exec's Job
-# Object. The flag is added only in the explicit exec-job context; outside it,
-# an unrelated outer Job may forbid breakaway and reject the launch.
-_BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+# Ordinary agent executions inherit their caller's Job containment. Persistent
+# terminals use the explicit root resource API and never escape from here.
 # The steward needs no console (it only transiently attaches the target's via
 # the helper). ABI fallback, never 0 — see the comment above.
 _DETACHED = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
@@ -274,8 +271,6 @@ def _spawn_steward(
     endpoint_host, endpoint_port = _steward_endpoint()
     nonce = _new_steward_nonce()
     creationflags = _DETACHED
-    if in_attached_exec_job():
-        creationflags |= _BREAKAWAY
     log = logs_dir() / f"{name}.ctrl.log"
     try:
         with log.open("ab") as out:
@@ -353,8 +348,6 @@ def new_session(
         return True
     launch = _plan_launch(cmd, cwd)
     creationflags = launch.creationflags
-    if in_attached_exec_job():
-        creationflags |= _BREAKAWAY
     startup = None
     if sys.platform == "win32":  # narrows Windows-only stdlib types for static checking
         startup = subprocess.STARTUPINFO()

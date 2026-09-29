@@ -19,6 +19,7 @@ class TelegramSettings(EnvSettings):
     telegram_bot_token: str = Field(
         default="",
         alias="AVA_TELEGRAM_BOT_TOKEN",
+        repr=False,
         description="Telegram bot token (from BotFather). Empty = telegram push is unavailable (the skill falls back to a Web UI reply).",
         json_schema_extra={
             "restart_required": "gateway",

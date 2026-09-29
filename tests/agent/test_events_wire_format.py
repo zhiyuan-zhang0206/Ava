@@ -24,7 +24,6 @@ from shared.live_events import (
     Cancelled,
     ChatDelta,
     ChatStart,
-    ClusterUpdateStarted,
     CodeDelta,
     CodeStart,
     CompactDone,
@@ -117,11 +116,6 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
     (NoticeResolved, "notice_resolved", {"notice_id": 7}),
     (TaskCreated, "task_created", {"task_id": 3}),
     (TaskUpdated, "task_updated", {"task_id": 3}),
-    (
-        ClusterUpdateStarted,
-        "cluster_update_started",
-        {"kind": "rollout", "origin": "user"},
-    ),
 ]
 
 
@@ -184,7 +178,6 @@ def test_global_roles_is_low_frequency_subset_of_system_roles():
         "notice_resolved",
         "task_created",
         "task_updated",
-        "cluster_update_started",
     } == GLOBAL_ROLES
 
 

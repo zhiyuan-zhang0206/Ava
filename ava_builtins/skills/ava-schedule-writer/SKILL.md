@@ -181,7 +181,7 @@ body = {
     "command": "python schedule.py",      # default; how the runner runs the script
 }
 r = httpx.post(f"{base}/api/schedules", json=body,
-               headers={"Authorization": f"Bearer {os.environ['AVA_CLUSTER_SECRET']}"})
+               headers={"Authorization": f"Bearer {os.environ.get('AVA_API_TOKEN', '')}"})
 print(r.status_code, r.text)             # 201 on success; 400 = script syntax error; 409 = name taken
 ```
 

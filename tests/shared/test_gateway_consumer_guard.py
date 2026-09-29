@@ -513,20 +513,33 @@ def _closure_domains(closure: set[Path]) -> set[str]:
     return domains
 
 
-def test_agent_host_launches_under_the_agent_profile() -> None:
+def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hosted agent-host daemon consumes the agent domain set (it runs the
     agent kernel in-process, and services/agent_host/ is in the agent kind's
-    roots above). Its healthcheck must therefore launch it with the `agent`
-    profile — a `runner` profile crashed it at import (2026-08-30 soak startup),
-    and a marker-less launch (full construction) would silently mask any future
-    cross-profile read instead of failing fast."""
-    from services.healthchecks.agent_host import _HOST_PROCESS_PROFILE
+    roots above). The root launcher, its only launch path, must therefore
+    start it with the `agent` profile — a `runner` profile crashed it at import
+    (2026-08-30 soak startup), and a marker-less launch (full construction)
+    would silently mask any future cross-profile read instead of failing fast."""
+    from cli.commands import root_driver
+    from ops.roster import build_services
     from shared.config import PROCESS_PROFILES
 
-    assert _HOST_PROCESS_PROFILE in PROCESS_PROFILES, (
-        f"{_HOST_PROCESS_PROFILE} is not a process profile"
-    )
-    assert _HOST_PROCESS_PROFILE == "agent"
+    def delivery(_cls: str) -> dict[str, str]:
+        return {"AVA_DB_URL": "postgresql://ava_g0_runner@fixture/ava"}
+
+    def token_delivery(_cls: str) -> dict[str, str]:
+        return {"AVA_API_TOKEN": "fixture-token"}
+
+    # The launcher binds the database login and API token next to the marker;
+    # neither delivery is under test, so keep them independent of this host's
+    # home (a scratch dir with no installed unit capability, which
+    # api_delivery would otherwise refuse).
+    monkeypatch.setattr("cli.commands.data_plane.bringup.db_delivery", delivery)
+    monkeypatch.setattr("cli.commands.data_plane.bringup.api_delivery", token_delivery)
+    agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
+    profile = root_driver._service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
+    assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"
+    assert profile == "agent"
 
 
 def test_profile_domains_match_consumption_matrix() -> None:

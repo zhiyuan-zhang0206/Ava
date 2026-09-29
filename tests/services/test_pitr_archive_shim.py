@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import ast
 import concurrent.futures
 import os
+import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from services.pitr import archive_shim
+from shared.pg_tools import pg_start_env
 
 
 @pytest.mark.parametrize(
@@ -173,3 +177,71 @@ def test_failed_publish_removes_partial(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(archive_shim.os, "link", fail_link)
     assert archive_shim.archive(source, name, spool, 1024) == archive_shim.EXIT_IO
     assert not list(spool.glob("*.partial"))
+
+
+def _postmaster_run(command: str, *, cwd: Path, **placeholders: str) -> None:
+    """Run a PITR command the way the postmaster does: `/bin/sh -c` in the data
+    directory, placeholders substituted, under the postmaster's environment."""
+    for placeholder, value in placeholders.items():
+        command = command.replace(f"%{placeholder}", value)
+    completed = subprocess.run(  # noqa: S603 — the command under test, fixed shell
+        ["/bin/sh", "-c", command],
+        cwd=cwd,
+        env=pg_start_env(),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_the_postmaster_environment_runs_both_pitr_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The postmaster keeps only the operator's process mechanics
+    (`pg_start_env`). That is enough for the commands it runs: the archive shim
+    finds `python3` through PATH, and the restore drill's command names its
+    interpreter by absolute path. Both take everything else on argv."""
+    from services.pitr.activation_runtime import desired_archive_settings
+    from services.pitr.restore_postgres import _append_recovery_config
+
+    # The raw process environment a spawned child would inherit (Settings is
+    # not involved): what the `ava start` that spawns the postmaster may hold.
+    held = {
+        "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
+        "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
+    }
+    for key, value in held.items():
+        monkeypatch.setenv(key, value)
+    assert not [name for name in pg_start_env() if name.startswith("AVA_")]
+    name = "000000010000000000000001"
+
+    home = tmp_path / "home"
+    shim = home / "runtime" / "pg-archive" / "archive-shim"
+    shim.parent.mkdir(parents=True)
+    shutil.copyfile(Path(archive_shim.__file__), shim)
+    shim.chmod(0o700)
+    spool = home / "physical-backup" / "spool"
+    spool.mkdir(parents=True)
+    live = tmp_path / "live"
+    (live / "pg_wal").mkdir(parents=True)
+    (live / "pg_wal" / name).write_bytes(b"wal")
+    archive_command = desired_archive_settings(home)["archive_command"]
+    _postmaster_run(archive_command, cwd=live, p=f"pg_wal/{name}", f=name)
+    assert (spool / name).read_bytes() == b"wal"
+
+    run_root = tmp_path / "restore"
+    sandbox, archive, socket_dir = run_root / "data", run_root / "archive", run_root / "socket"
+    for directory in (sandbox, archive, socket_dir):
+        directory.mkdir(parents=True)
+    (archive / name).write_bytes(b"wal")
+    _append_recovery_config(sandbox, archive, socket_dir, "0/200", run_root)
+    [line] = [
+        line
+        for line in (sandbox / "postgresql.auto.conf").read_text().splitlines()
+        if line.startswith("restore_command = ")
+    ]
+    restore_command = ast.literal_eval(line.partition(" = ")[2])
+    _postmaster_run(restore_command, cwd=sandbox, f=name, p="pg_wal/RECOVERYXLOG")
+    assert (sandbox / "pg_wal" / "RECOVERYXLOG").read_bytes() == b"wal"

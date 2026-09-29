@@ -71,11 +71,11 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
 
 
 def audit_this_host(roles: frozenset[str]) -> FirewallAudit:
-    """Audit this host's own serving binaries. The one entry point both callers share.
+    """Audit this host's own serving binaries. The one entry point every caller shares.
 
-    Converge calls it to report proactively; the rollout's `OFF_BOX_UNREACHABLE`
-    verdict calls it to explain a failure that already happened. Same detector, so
-    the two can never disagree about whether the firewall is the cause.
+    Converge calls it to report proactively; `ava firewall status` / `sync` call
+    it on demand. Same detector, so they can never disagree about whether the
+    firewall is the cause.
     """
     from shared.machine import reachable_host
 
@@ -155,8 +155,7 @@ def _report_missing(missing: tuple[Path, ...], total: int) -> None:
     """The historical fallback: name the binaries and print the exact commands.
 
     Reached when direct mutation and the older-macOS `sudo -n` fallback both
-    failed. Keeps naming the OFF_BOX_UNREACHABLE verdict so both halves of the
-    diagnosis still point at each other by name.
+    failed.
     """
     print(
         f"  ! firewall: {len(missing)} of {total} managed binaries have no ALF "
@@ -167,8 +166,8 @@ def _report_missing(missing: tuple[Path, ...], total: int) -> None:
     for path in missing:
         print(f"    - no allow rule: {path}", file=sys.stderr)
     print(
-        "    left unfixed, this presents as OFF_BOX_UNREACHABLE on the next "
-        "`ava cluster update` (the gateway serves loopback, no runner can reach it)",
+        "    left unfixed, off-box peers cannot reach these services (the gateway "
+        "serves loopback, no runner can reach it)",
         file=sys.stderr,
     )
     print(

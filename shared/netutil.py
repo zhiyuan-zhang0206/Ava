@@ -1,8 +1,8 @@
 """Config-free networking predicates.
 
 Kept dependency-free (no `shared.config`, which instantiates Settings at import
-and fails on a fresh un-enrolled host) so `cli/enroll.py` — which runs before a
-host has a full config — can import it alongside `shared.machine`.
+and requires configured values) so first-start identity preparation can validate
+network inputs before a host has a full config.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ def is_loopback_host(host: str) -> bool:
 
     A loopback address is only reachable from the same box, so a *remote* node
     that advertises one is misconfigured: the dialer would hit itself instead of
-    the peer. `cli/enroll.py` and the machine-registration path
+    the peer. `cli/start_intent.py` and the machine-registration path
     (`shared.machines.register_self`) use this to refuse a loopback reachable
     address for a host the gateway must reach over the network.
     """

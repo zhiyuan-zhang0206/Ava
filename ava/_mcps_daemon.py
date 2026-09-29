@@ -38,6 +38,7 @@ from typing import Any
 from loguru import logger
 
 from shared.config import settings
+from shared.log_sinks import add_sink
 
 from ._mcp_oauth import _OAUTH_FLOW_TIMEOUT_S
 from .mcp_config import assert_requirements, is_transport_error, load_mcp_config, server_url
@@ -693,7 +694,7 @@ def main() -> None:
         from shared.paths import mcp_daemon_shared_socket
 
         socket_path = mcp_daemon_shared_socket()
-    logger.add(sys.stderr, format="{message}", diagnose=False)
+    add_sink(sys.stderr, format="{message}")
     # Refuse to start over a LIVE socket: unlink+rebind here is what turns the
     # serving daemon into a ghost when a respawn storm races the previous
     # instance's exit (Task #1142). The healthcheck's probe answers a ping, so

@@ -1,5 +1,5 @@
 {
   "complexity": {
-    "services/agent_host/dispatcher.py::InboundWakeDispatcher.scan_once": 21
+    "services/agent_host/dispatcher.py::InboundWakeDispatcher.scan_once": 20
   }
 }

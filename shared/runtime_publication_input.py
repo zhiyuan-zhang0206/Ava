@@ -8,16 +8,16 @@ publication; normal-service readiness and live schema compatibility remain separ
 import hashlib
 import json
 import os
-import platform
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
 from pydantic import Field
 
-from shared.managed_writer_barrier import Digest, EvidenceModel
 from shared.managed_writer_observation import ExcludedRegistration, ExpectedUnitWriters
 from shared.managed_writer_publication import PublishedUnit
+from shared.process_evidence import Digest, EvidenceModel
+from shared.runtime_abi import current_abi
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
 from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release
 from shared.verified_file import regular_bytes
@@ -149,7 +149,7 @@ def resolve_runtime_publication_input() -> RuntimePublicationInput | None:
         store,
         root.name,
         manifest_digest=selector.manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=baseline,
     )
     if image.root != root or image.interpreter.parent.parent != prefix:

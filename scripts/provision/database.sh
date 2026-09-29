@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Postgres 17 + Redis SERVER — the native data plane a gateway owns (and the CI /
 # bench hosts need so the test suite can spin throwaway clusters). One source for
-# install.sh / install-system.sh. Linux: PGDG pg17 + redis-server; macOS: brew;
-# Windows: Docker (see docker-compose.windows.yml).
+# install-system.sh and evaluation images. Linux: PGDG pg17 + redis-server;
+# macOS: brew. Gateway data-plane processes run on POSIX hosts.
 #
 # WSL without sudo: a Linux host that already carries the whole data plane
 # (pg17 binaries under /usr/lib/postgresql/17/bin, redis-server, pgbouncer)
@@ -75,11 +75,11 @@ case "$OS" in
     brew install postgresql@17 redis@8.2 pgbouncer pgvector
     ;;
   windows)
-    # PostgreSQL and Redis are provided via Docker Desktop (WSL2 backend).
-    # Native Windows PG/Redis installation is deferred to Phase 3.
-    # See docker-compose.windows.yml and conventions/windows-setup.md.
-    prov_log "Windows: PostgreSQL + Redis are expected via Docker Desktop (docker-compose.windows.yml)"
-    prov_log "If Docker is not running, start Docker Desktop and run: docker compose -f docker-compose.windows.yml up -d"
+    # A native Windows unit carries agent-runner only and owns no data plane; a
+    # gateway on Windows hardware runs inside WSL2, where the linux branch
+    # applies (conventions/windows-setup.md).
+    prov_log "Windows: no local data plane; run a gateway inside WSL2 through the Linux path"
+    exit 0
     ;;
 esac
 prov_log "postgres 17 + redis + pgbouncer installed"

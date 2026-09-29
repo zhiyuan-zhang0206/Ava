@@ -142,8 +142,8 @@ def health_port(name: str) -> int:
     allowed).
 
     The fallback is deliberate but loud (F-s4-12): the 8100s are a SHARED
-    segment, so a unit that never declared a per-unit block (no enroll
-    ``--health-port-base``, no ``AVA_<NAME>_HEALTH_PORT`` in its own .env)
+    segment, so a unit that never declared a per-unit block (no
+    ``ava start --health-port-base``, no ``AVA_<NAME>_HEALTH_PORT`` in its own .env)
     quietly joins whatever co-located units also fell back — the exact
     2026-07-24/26 incident shape. The first fallback per daemon per process
     logs a warning naming the fix.
@@ -161,7 +161,7 @@ def health_port(name: str) -> int:
                     "health port for %s is not declared in this unit's .env — using the "
                     "shared default %d (the 8100s are a shared segment; a co-located unit "
                     "on this localhost namespace may already hold it). Pin a per-unit port "
-                    "with `ava enroll --health-port-base <block-base>` or set "
+                    "with `ava start --health-port-base <block-base>` or set "
                     "AVA_%s_HEALTH_PORT in this unit's .env",
                     name,
                     port,
@@ -283,7 +283,7 @@ async def start_health_server(
     liveness: Liveness | LivenessGroup | None = None,
     components: list[dict[str, object]] | Callable[[], list[dict[str, object]]] | None = None,
     extra: dict[str, object] | Callable[[], dict[str, object]] | None = None,
-    auth_token: str | None = None,
+    auth_digests: frozenset[str] | None = None,
 ) -> asyncio.Server:
     """Start daemon HTTP server; return server instance (caller is responsible for close).
 
@@ -310,11 +310,13 @@ async def start_health_server(
             sharing mutable response state with this server.
         extra: optional non-component health fields. As with ``components``, a
             callable is evaluated on each request.
-        auth_token: when set, every ``extra_routes`` request must carry
-            ``Authorization: Bearer <auth_token>`` or it gets 401. ``/healthz``
-            stays unauthenticated (the watchdog probes it locally and it leaks
-            no secret). The ops server passes the cluster secret here when
-            multi-host is on, so a LAN peer cannot drive /ops without it.
+        auth_digests: when set, every ``extra_routes`` request must carry
+            ``Authorization: Bearer <token>`` whose SHA-256 is one of
+            ``auth_digests``, or it gets 401. ``/healthz`` stays unauthenticated
+            (the watchdog probes it locally and it leaks no secret). The ops
+            server passes the digests of its write generation's machine API
+            tokens when its API is authenticated, so a LAN peer cannot drive
+            /ops without one; the server compares digests only.
     """
     if port is None:
         port = health_port(name)
@@ -335,7 +337,7 @@ async def start_health_server(
         port=port,
         health_response=health_response,
         extra_routes=extra_routes,
-        auth_token=auth_token,
+        auth_digests=auth_digests,
     )
 
 

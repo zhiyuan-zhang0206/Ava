@@ -12,8 +12,8 @@ import sys
 from ctypes import wintypes
 from typing import BinaryIO
 
-from shared.winjob import WindowsJob, _last_error
-from shared.winjob_spawn import _process_api, _start_in_job
+from shared.winjob import WindowsJob, last_error
+from shared.winjob_spawn import process_api, start_in_job
 
 
 class PipedJobChild:
@@ -35,7 +35,7 @@ class PipedJobChild:
     def wait(self, timeout: float | None = None) -> int:
         if self.returncode is not None:
             return self.returncode
-        api = _process_api()
+        api = process_api()
         waited = api.WaitForSingleObject(
             self._handle, 0xFFFFFFFF if timeout is None else max(0, int(timeout * 1000))
         )
@@ -44,10 +44,10 @@ class PipedJobChild:
                 raise RuntimeError("native infinite wait unexpectedly timed out")
             raise subprocess.TimeoutExpired("owned exec root", timeout)
         if waited != 0:
-            raise _last_error("wait owned Job root")
+            raise last_error("wait owned Job root")
         code = ctypes.c_uint32()
         if not api.GetExitCodeProcess(self._handle, ctypes.byref(code)):
-            raise _last_error("read owned Job root exit")
+            raise last_error("read owned Job root exit")
         self.returncode = int(code.value)
         self._cleanup.close()
         return self.returncode
@@ -62,10 +62,10 @@ class PipedJobChild:
         # Poll before TerminateProcess: an exited handle rejects it with ERROR_ACCESS_DENIED.
         if self.returncode is not None or self.poll() is not None:
             return
-        api = _process_api()
+        api = process_api()
         api.TerminateProcess.argtypes = [wintypes.HANDLE, ctypes.c_uint32]
         if not api.TerminateProcess(self._handle, 1):
-            raise _last_error("terminate owned Job root")
+            raise last_error("terminate owned Job root")
 
 
 def start_piped_job_process(argv: list[str], job: WindowsJob) -> PipedJobChild:
@@ -89,7 +89,7 @@ def start_piped_job_process(argv: list[str], job: WindowsJob) -> PipedJobChild:
             ]
             for handle in set(handles):
                 os.set_handle_inheritable(handle, True)  # noqa: FBT003 -- native API positional argument.
-            process = _start_in_job(_process_api(), job, handles, argv, lifetime)
+            process = start_in_job(process_api(), job, handles, argv, lifetime)
         return PipedJobChild(process.pid, process.process, source, output, lifetime)
     except BaseException:
         lifetime.close()

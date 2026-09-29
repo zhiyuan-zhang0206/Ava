@@ -46,7 +46,7 @@ def private_journal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def _publish(hold: MaintenanceHold) -> None:
-    before = pause_owner.begin_maintenance(HOLDER, WHEN)
+    before = pause_owner.begin_maintenance(HOLDER, WHEN).snapshot
     assert before.maintenance is not None
     pause_owner.change_maintenance(HOLDER, WHEN, before.maintenance, hold)
 
@@ -185,20 +185,26 @@ def test_set_phase_still_refuses_an_unreaped_failure() -> None:
         maintenance.set_phase(HOLDER, WHEN, "drained")
 
 
-def test_resume_refusal_ignores_settled_failures() -> None:
+def test_unpause_releases_a_hold_whose_failures_were_reaped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _publish(
         MaintenanceHold("draining", {1: 11}, reaped={1: REAP}, failures={1: "ImpersonationError"})
     )
+    monkeypatch.setattr("shared.host_deploy_state.set_posture", MagicMock())
+    monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
 
-    assert cluster_pause.local_resume_refusal() is None
+    cluster_pause.unpause_local_cluster()
+
+    assert pause_owner.read().status == "resumed"
 
 
-def test_resume_refusal_still_names_repair_for_unreaped_failures() -> None:
+def test_unpause_still_names_repair_for_unreaped_failures() -> None:
     _publish(MaintenanceHold("draining", {1: 11}, failures={1: "RuntimeError"}))
 
-    refusal = cluster_pause.local_resume_refusal()
-
-    assert refusal is not None and "maintenance repair" in refusal
+    with pytest.raises(RuntimeError, match="maintenance repair"):
+        cluster_pause.unpause_local_cluster()
+    assert pause_owner.read().status == "paused"
 
 
 def test_drain_completes_on_the_draining_incident_shape(
@@ -210,7 +216,7 @@ def test_drain_completes_on_the_draining_incident_shape(
     monkeypatch.setattr(agent_pause, "machine_role", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(agent_pause, "host_running", lambda: False)
 
-    agent_pause._drain(HOLDER, WHEN, 1.0)
+    agent_pause.drain(HOLDER, WHEN, 1.0)
 
     assert _current().phase == "drained"
 
@@ -223,7 +229,7 @@ def test_drain_still_aborts_on_an_unreaped_failure() -> None:
     )
 
     with pytest.raises(RuntimeError, match="continuations failed; hold retained"):
-        agent_pause._drain(HOLDER, WHEN, 1.0)
+        agent_pause.drain(HOLDER, WHEN, 1.0)
 
 
 def test_resume_agents_releases_with_settled_failures(monkeypatch: pytest.MonkeyPatch) -> None:

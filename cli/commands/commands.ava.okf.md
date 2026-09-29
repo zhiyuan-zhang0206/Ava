@@ -1,7 +1,7 @@
 ---
 type: doc
 title: CLI Command Modules
-description: One module per `ava` subcommand, plus `_`-prefixed internal steps that only start / update call. Public modules define `cmd_*` handlers, wired by the argparse tree in `cli/main.py`.
+description: One module per `ava` subcommand, plus `_`-prefixed internal steps used by host lifecycle commands. Public modules define `cmd_*` handlers, wired by the argparse tree in `cli/main.py`.
 tags:
 - cli
 - tool
@@ -28,60 +28,68 @@ subpackages hold the leaf domains, each an independent package door:
 - `management/` — gateway-managed config, presets, schedules
 - `extensions/` — plugins, skills, packages, MCP servers, memory; owns its
   converge steps (`materialize.py`, `skills_sync.py`, `external_skills.py`)
-- `observability/` — native LGTM, the OTel collector, trace shipping, logs;
-  owns its converge steps (`lgtm.py`, `otel_collector.py`)
-- `data_plane/` — per-cluster Postgres/Redis/PgBouncer, their verified
-  maintenance stop, db roles, PITR; owns its converge steps (`pgbouncer.py`,
-  `pitr_foundation.py`)
-- `cluster/` — whole-cluster verbs, the health probe, watchdogs, the registry
+- `observability/` — native LGTM desired state, the OTel collector, trace
+  shipping, logs; owns its converge steps (`lgtm_native.py`, `otel_collector.py`)
+- `data_plane/` — per-cluster Postgres/Redis/PgBouncer bring-up, their verified
+  maintenance stop (`maintenance_stop.py`), a release's write-generation
+  effects (`write_generation.py`), PITR; owns its converge steps
+  (`pgbouncer.py`, `pitr_foundation.py`)
+- `cluster/` — whole-cluster verbs, the health probe, cron, the registry
 - `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
-  and host-wiring steps owned by no other domain (source tree, firewall,
-  Redis bridge, gate, OS jobs).
+  and host-wiring steps owned by no other domain (firewall, Redis bridge, OS
+  jobs).
 
-Cross-version process entry points — run as `python -m cli.commands.X` by the
-ops server against a possibly different checkout — stay at the root and never
-move: `_update_agent_runner`, `_updater_stage`, `_updater_lease`,
-`_update_uv_sync`, `_installed_sha`, `_source_switch_marker`, `_hold_recover`,
-`_update_pitr`. The `_update*` step families, `start.py` / `stop.py` /
-`status.py` / `update.py` / `migrations.py`, and the rest of the not-yet-split
-leaves stay directly under `cli/commands/` for now.
+`start.py` / `stop.py` / `status.py` / `maintenance.py` / `migrations.py` and
+the `_`-prefixed steps host commands call (`_probe`, `_setup`, `_repo`,
+`_start_gui_chain`, `_ownership_preflight`, ...) stay directly under
+`cli/commands/`. `root_driver.py`, `service_stop.py` and `start_generation.py`
+are internal steps under public names because other packages, such as the
+release transition, reach them.
 
-`stop.py` exposes `pause` and `stop` through `_temporary_stop`; update and
-restart reuse its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
-own prepare/drain and runtime capability checks; `_maintenance_stop` and
-`data_plane/maintenance_stop` verify resource exits — the data-plane stop signals
-the pooler with SIGINT (`WAIT_FOR_SERVERS`) and stops Postgres with
-`pg_ctl -m fast`, so neither waits on idle client connections a drained state
+`stop.py` exposes `pause` and `stop` through `_temporary_stop`; restart reuses
+its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
+own prepare/drain and runtime capability checks; `service_stop` and
+`data_plane/maintenance_stop` verify resource exits, and
+`data_plane/write_generation` performs a release's write-generation fence and
+admission. `data_plane/_pooler_stop.OwnedPooler` owns
+ordinary pooler stop admission for maintenance and startup recovery: exact native
+birth and listener proof precede a durable stop intent and the first SIGINT
+(`WAIT_FOR_SERVERS`). Retries and already-closed listeners only wait; PgBouncer
+would interpret another shutdown signal as immediate termination. A birth that
+finishes its drain and exits while its listeners are being scanned is stopped,
+not a foreign listener. An explicit
+force request alone permits a kill, with a separate bounded settle wait when
+the graceful deadline is spent. The data-plane stop requests [owned PostgreSQL](../../shared/cluster/postgres.ava.okf.md) fast shutdown (SIGINT), so neither waits on idle client connections a drained state
 cannot protect (issue #2307). When the data-plane phase still fails after the
 services phase stopped, `_temporary_stop` compensates with a bounded internal
-`ava start` (restoring the services and reviving a half-shut pooler) instead of
+`ava start` (restoring services only when native storage admits startup) instead of
 leaving the unit dark; the stop report and journal record the outcome (issue
-#2307). `_stop_extras` and
-`_stop_supervised` stop home-owned Gate/helper/native LGTM. `_pause_resume`
-releases normal startup admission only after readiness.
+#2307). `_stop_extras` uses the same exact-home helper retirement as destroy:
+native job, executable, socket and stopped-root custody are checked before
+native helper exit and removal of its definition. Start recreates that definition.
+Root owns Gate and native LGTM application services. `_pause_resume`
+releases normal startup admission only after readiness, and never releases the
+fleet cutover's hold (`cli/cutover_hold.py`, deleted with the cutover scripts);
+`ava maintenance resume` and `ava cluster recover` refuse that hold and name its
+one exit, `scripts/cutover_adopt_home.py --resume`.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `cli/commands/maintenance.py` and `_maintenance_probe`.
 They reuse the [durable maintenance journal](../../shared/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
-Gateway data-plane startup passes separate URL identities to `cluster_instance`:
-Postgres db/role comes from `db_identity()`, Redis ACL user from `redis_identity()`.
-`admin_secrets` preserves that distinction during credential splitting.
-Installation supplies the same birth identifier for both before `.env` exists.
-Legacy username backfill adopts its committed Redis URL in the same start
-process, including named `nopass` URLs for no-auth homes.
+Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
+`data_plane/pgbouncer`):
+[[cli/commands/data_plane/data-plane-startup.ava.okf.md|Gateway data-plane startup]].
 
 `cli/commands/migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —
-it runs as a step of `ava start` / `ava update`, so any restart crossing a
+it runs as a step of `ava start`, so any restart crossing a
 schema change catches the DB up on its own.
 
 ## Notes
 
-- The fleet UI gate stays outside service-session teardown. Linux uses a
-  per-home user-systemd unit with crash restart; unchanged active units survive
-  updates, while source-hash changes replace them after a completed stop.
-  Full stop and destroy use that same home identity. See
-  [Linux gate supervision](../../conventions/linux-gate-supervision.md).
+- Gate is an ordinary gateway service selected into the root manifest. Planned
+  root downtime includes its entry port; it has no separate OS job or detached
+  launcher. See [[services/gate/gate.ava.okf.md|Fleet UI Gate]].
 
 - `agents/timeline.py` exposes the existing timeline API as `ava agents timeline`
   and its exact `context` alias. `agents/impersonation.py` manages explicit external
@@ -96,24 +104,16 @@ schema change catches the DB up on its own.
   checkout the running `ava` belongs to — never the current directory.
 - What `ava start` treats as already-up, what it waits for, and when an unready
   service becomes exit code 4 are one subject, in [[start-readiness.ava.okf.md]].
-- The gateway/runner update boundary, readiness proof, Phase-B verdicts, and
-  failed-update recovery are one subject in [[rollout-boundary.ava.okf.md]].
-- The restricted immutable `ava-ops` hop is [[update-bootstrap.ava.okf.md]];
-  its sealed normal-service planning contract and disabled activation boundary are
-  [[normal-release.ava.okf.md]].
-- A full agent-runner update checks out, syncs, and records the installed SHA in
-  its pre-checkout image, then re-execs `_update_agent_runner` with its private
-  post-checkout flags before validation, quiesce, stop, or start. Persistent
-  schedule terminals are retained, including their currently loaded code;
-  an explicit schedule restart or full stop/start adopts new runner code.
+- Prepared release transitions are owned by [[cli/release_transition/release_transition.ava.okf.md]].
+  There are no updater shell chains or bootstrap/continuation commands.
 - Host-level Application Firewall and Redis bridge wiring are one subject:
   [[converge/converge-host-wiring.ava.okf.md]].
-- The prod editable-install assertion and update write window are one lifecycle
-  guard: [[editable-install-guard.ava.okf.md]]; the prod source checkout's
-  integrity (periodic reset + probe detection) is its sibling guard:
-  [[converge/source-tree-guard.ava.okf.md]].
-- `cli/enroll.py` and `cli/preflight.py` are routed **before** settings-gated
-  imports in `main()`, so they work on a host with no usable config yet.
+- Explicit editable-install inspection and write-window primitives are described
+  in [[editable-install-guard.ava.okf.md]]. Ordinary start and converge never
+  repair or reinstall a separate production virtualenv; retained images are
+  verified in place by `StartRuntime`.
+- `cli/start_intent.py` is routed **before** settings-gated imports in `main()`,
+  so first start records complete home identity before runtime configuration loads.
 - `cli/mcp_server.py` is the third top-level module a verb routes to
   (`ava mcp serve`) rather than a `commands/` module: it is a long-running
   stdio server, not a command that renders and exits, and it pulls in the mcp
@@ -125,9 +125,7 @@ schema change catches the DB up on its own.
 
 ## Key Dependencies
 
-- [[cli.ava.okf.md]] — the CLI domain overview: verbs, cluster identity, install-time birth
+- [[cli.ava.okf.md]] — the CLI domain overview: verbs, cluster identity, idempotent first start
 - [[packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` package surface
 - [[start-readiness.ava.okf.md]] — what `ava start` calls up: the launch guard, the
-  readiness wait, and the waiver over its exit code
-- [[rollout-boundary.ava.okf.md]] — rollout child classification, gateway
-  readiness, Phase B, and recovery authentication
+  root-owned readiness wait and failure exit code

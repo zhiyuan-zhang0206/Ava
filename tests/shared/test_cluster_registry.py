@@ -4,6 +4,17 @@ from typing import cast
 import pytest
 
 from shared import cluster, port_preflight
+from shared.platform import LockTimeoutError, file_lock
+
+
+def test_registry_lock_contention_has_a_bounded_wait(tmp_path: Path) -> None:
+    registry = tmp_path / "clusters.json"
+    with (
+        file_lock(registry.with_suffix(".lock"), timeout_s=1),
+        pytest.raises(LockTimeoutError),
+        cluster.registry_lock(path=registry, timeout_s=0.02),
+    ):
+        pytest.fail("A contended registry lock must not be entered")
 
 
 def test_save_and_get_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -191,6 +202,7 @@ def test_expected_cluster_ports_reads_the_full_block_from_record(
                 "im_bridge": 18049,
                 "page_server": 18050,
                 "agent_host": 18051,
+                "coordinator": 18052,
                 "pg_backup": 18053,
                 "pitr_uploader": 18054,
                 "pitr_base_backup": 18055,
@@ -207,6 +219,7 @@ def test_expected_cluster_ports_reads_the_full_block_from_record(
     ports = dict(port_preflight.expected_cluster_ports(home))
     assert ports["gateway"] == 18032 and ports["app"] == 18047
     assert ports["agent_host"] == 18051 and ports["agent_runner_watchdog"] == 18058
+    assert ports["coordinator"] == 18052
 
 
 def test_expected_cluster_ports_missing_key_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -241,7 +254,7 @@ def test_occupied_ports_reports_bound_and_exempts_ours(monkeypatch: pytest.Monke
     def fake_port_free(port: int) -> bool:
         return port not in taken
 
-    monkeypatch.setattr(port_preflight, "_port_free", fake_port_free)
+    monkeypatch.setattr(port_preflight, "port_free", fake_port_free)
     ports = {"gateway": 8000, "frontend": 3000, "postgres": 5433}
 
     assert port_preflight.occupied_ports(ports) == [("gateway", 8000), ("postgres", 5433)]
@@ -353,7 +366,7 @@ def test_registry_disk_form_is_home_keyed(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 def test_unit_port_map_overlays_health_ports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """unit_port_map = the cluster's port block overlaid by this unit's health
-    ports (the per-unit layer `ava enroll --health-port-base` moves). This is
+    ports (the per-unit layer `ava start --health-port-base` moves). This is
     the exact set the start preflight scans and `ava stop`'s orphan sweep
     reaps (Task #965) — one composition, two consumers."""
     import shared.daemon_health as _dh

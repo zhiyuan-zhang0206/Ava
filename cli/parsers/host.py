@@ -13,24 +13,9 @@ import argparse
 
 
 def _h_start(args: argparse.Namespace) -> int:
-    # The installed-home gate already ran in main() (cli.preflight, settings-free,
-    # BEFORE this handler's cli.commands import can trip a generic Settings
-    # validation error on an uninstalled home).
-    from cli.commands.start import cmd_start
+    from cli.start_intent import run_start
 
-    return cmd_start(
-        machine_name=args.machine_name,
-        serve_gateway=args.serve_gateway,
-        serve_agent_runner=args.serve_agent_runner,
-        serve_observability_station=args.serve_observability_station,
-        machine_description=args.machine_description,
-        memory_remote=args.memory_remote,
-        gateway_url=args.gateway_url,
-        disabled_services=tuple(args.disable_service),
-        persist_services=args.persist_services,
-        readiness_gate=not args.no_readiness_gate,
-        updater_telemetry=args.updater_telemetry,
-    )
+    return run_start(args)
 
 
 def _h_stop(args: argparse.Namespace) -> int:
@@ -58,7 +43,6 @@ def _h_restart(args: argparse.Namespace) -> int:
     from cli.commands.stop import cmd_restart
 
     return cmd_restart(
-        quiesce=args.quiesce,
         mode=args.mode,
         force_reap=args.force_reap,
     )
@@ -151,14 +135,15 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         default=None,
         help="usually first-run only: public URL of the gateway. On the gateway this host's own URL; on an agent-runner, the gateway it reaches. env: AVA_GATEWAY_URL",
     )
-    start_p.add_argument(
+    selection = start_p.add_mutually_exclusive_group()
+    selection.add_argument(
         "--disable-service",
         action="append",
         default=[],
         metavar="SERVICE",
         help="durably disable this service session (repeatable; e.g. --disable-service labeler "
-        "--disable-service frontend). Pass the bare service name. The disable is recorded so the "
-        "watchdog leaves it down; re-enable by running `ava start` again without the flag.",
+        "--disable-service frontend). Pass the bare service name. Bare `ava start` preserves "
+        "this selection; use `--all-services` to reset it or `--only-service` to replace it.",
     )
     start_p.add_argument(
         # Internal: an update / recovery / restart forwards its transient disabled set
@@ -169,24 +154,38 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         default=True,
         help=argparse.SUPPRESS,
     )
-    start_p.add_argument(
-        # Internal: a detached updater asks the fresh `ava start` process to emit
-        # migration/readiness timing without changing normal start behavior.
-        "--updater-telemetry",
-        action="store_true",
-        default=False,
-        help=argparse.SUPPRESS,
+    selection.add_argument(
+        "--all-services", action="store_true", help="explicitly select the entire roster"
+    )
+    selection.add_argument(
+        "--only-service",
+        action="append",
+        default=[],
+        metavar="SERVICE",
+        help="run only these services (repeatable; persisted for restart)",
     )
     start_p.add_argument(
-        "--no-readiness-gate",
+        "--config-file", type=str, default=None, help="explicit first-start dotenv configuration"
+    )
+    start_p.add_argument(
+        "--worktree",
         action="store_true",
-        default=False,
-        help="exit 0 even when a launched service never passes its liveness probe "
-        "(default: exit 4 and name it, after the status snapshot). For callers that "
-        "retry without a cap — the OS boot job passes this, because an unbounded "
-        "retry on a permanently-unready service is a host that never finishes "
-        "booting — or that answer readiness themselves, like the rollout's off-box "
-        "gateway gate. The wait and the printed crosses are unaffected.",
+        help="use an isolated checkout home; default to gateway and agent-runner",
+    )
+    start_p.add_argument(
+        "--machine-host", default=None, help="this host's reachable private-network address"
+    )
+    start_p.add_argument(
+        "--health-port-base", type=int, default=None, help="this unit's daemon port-block base"
+    )
+    start_p.add_argument("--ssl-cert-file", default=None, help="CA bundle for gateway verification")
+    start_p.add_argument(
+        "--db-capability",
+        default=None,
+        metavar="BUNDLE",
+        help="agent-runner only: install the database capability bundle the gateway operator "
+        "issued (`ava cluster db-authority issue-unit`); its transport key comes from "
+        "AVA_DB_CAPABILITY_KEY. The bundle file is deleted once installed.",
     )
     start_p.set_defaults(func=_h_start)
 
@@ -257,11 +256,6 @@ def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     restart_p = sub.add_parser(
         "restart",
         help="[host] normal pause then start, retaining persistent terminals",
-    )
-    restart_p.add_argument(
-        "--quiesce",
-        action="store_true",
-        help="compatibility flag; restart always uses the native drain boundary",
     )
     # task #4092 cli-default inventory: "smooth" is the safe default — force
     # must be asked for explicitly.

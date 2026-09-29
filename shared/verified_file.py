@@ -12,8 +12,12 @@ def regular_bytes(path: Path, *, max_bytes: int = 1024 * 1024) -> bytes:
     if max_bytes <= 0:
         raise ValueError("regular-file read budget must be positive")
     info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
-        raise ReleaseRejectedError("inventory member is not a bounded regular file")
+    if not stat.S_ISREG(info.st_mode):
+        raise ReleaseRejectedError(f"{path} is not a regular file")
+    if info.st_size > max_bytes:
+        raise ReleaseRejectedError(
+            f"{path} is {info.st_size} bytes, over its {max_bytes}-byte read limit"
+        )
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     with os.fdopen(os.open(path, flags), "rb") as stream:
         opened = os.fstat(stream.fileno())
@@ -21,7 +25,7 @@ def regular_bytes(path: Path, *, max_bytes: int = 1024 * 1024) -> bytes:
             info.st_dev,
             info.st_ino,
         ):
-            raise ReleaseRejectedError("inventory member changed while opening")
+            raise ReleaseRejectedError(f"{path} changed while opening")
         body = stream.read(max_bytes + 1)
         after = os.fstat(stream.fileno())
     current = path.lstat()
@@ -30,5 +34,5 @@ def regular_bytes(path: Path, *, max_bytes: int = 1024 * 1024) -> bytes:
         or (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
         or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)
     ):
-        raise ReleaseRejectedError("inventory member changed while reading")
+        raise ReleaseRejectedError(f"{path} changed while reading")
     return body

@@ -16,6 +16,8 @@ import pytest
 import shared.log as slog
 from shared.paths import logs_dir
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 @pytest.fixture(autouse=True)
 def reset_init_flag() -> Iterator[None]:
@@ -125,6 +127,24 @@ def test_init_gateway_process_default_name_is_gateway() -> None:
     mock_file_sink.assert_called_once_with(logs_dir() / "gateway.log")
 
 
+def test_init_restricted_process_opens_only_plain_stderr_once() -> None:
+    """The authority-free worker's init: one stderr sink, no file or pipeline sink."""
+    with (
+        patch.object(slog.logger, "add") as mock_add,
+        patch.object(slog, "_add_file_sink") as mock_file_sink,
+        patch.object(slog, "_add_postgres_sink") as mock_pg,
+    ):
+        slog.init_restricted_process()
+        slog.init_restricted_process()
+
+    mock_add.assert_called_once()
+    assert mock_add.call_args.args == (slog.sys.stderr,)
+    assert mock_add.call_args.kwargs["diagnose"] is False
+    assert mock_add.call_args.kwargs["colorize"] is False
+    mock_file_sink.assert_not_called()
+    mock_pg.assert_not_called()
+
+
 def test_init_cli_process_idempotent() -> None:
     """Repeated calls to init_cli_process trigger only one sink chain."""
     with (
@@ -204,6 +224,81 @@ def test_init_gateway_process_emits_service_started() -> None:
     assert kw["host"]  # machine_name() resolves on the test host
 
 
+# ─── records written while an init builds Settings ─────────────────────────
+#
+# `init_cli_process` / `init_gateway_process` resolve `logs_dir()` through
+# `shared.paths`, whose import builds the Settings chain — and a configured
+# runner's Settings build is the gateway fetch, which warns when it continues
+# on a stale config snapshot (`shared/bootstrap.py`). Importing `shared.log`
+# dropped loguru's default handler, so that warning reaches stderr only if the
+# init opened the stderr sink before the import.
+
+_SETTINGS_BUILD_WARNING = r"""
+import sys
+sys.path.insert(0, sys.argv[1])
+import httpx
+from shared import bootstrap
+def unreachable(*_args, **_kwargs):
+    raise httpx.ConnectError("connection refused")
+bootstrap.fetch_bootstrap_config = unreachable
+import shared.log
+assert "shared.config" not in sys.modules
+getattr(shared.log, sys.argv[2])(name="probe")
+"""
+
+
+@pytest.mark.parametrize("init", ["init_cli_process", "init_gateway_process"])
+def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
+    tmp_path: Path, init: str
+) -> None:
+    import json
+    import os
+    import subprocess
+    import sys
+    import time
+
+    from shared import bootstrap
+
+    home = tmp_path / "home"
+    (home / "run").mkdir(parents=True)
+    (home / "machine_name").write_text("probe-host")  # the gateway init names its host
+    gateway = "http://gateway.invalid:8000"
+    # A configured pure runner: its `.env` carries the role and the gateway URL.
+    (home / ".env").write_text(f"AVA_MACHINE_SERVE_AGENT_RUNNER=true\nAVA_GATEWAY_URL={gateway}\n")
+    (home / ".env").chmod(0o600)
+    (home / "run" / "bootstrap-snapshot.json").write_text(
+        json.dumps(
+            {
+                "v": bootstrap._SNAPSHOT_VERSION,
+                "base_url": gateway,
+                "written_at": time.time() - 10_000,
+                "values": {
+                    "AVA_DB_URL": "postgresql://ava@127.0.0.1:1/ava",
+                    "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
+                },
+            }
+        )
+    )
+    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env.update(
+        AVA_HOME=str(home),
+        AVA_HOME_OVERRIDE="1",
+        AVA_CLUSTER_REGISTRY=str(tmp_path / "clusters.json"),
+    )
+    child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
+        [sys.executable, "-I", "-B", "-c", _SETTINGS_BUILD_WARNING, str(_REPO_ROOT), init],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert child.returncode == 0, child.stderr
+    assert "continuing on the last-known cluster config snapshot" in child.stderr
+
+
 # ─── owner-only log files (audit round-2 up-security-trust P1-1) ───────────
 
 
@@ -219,3 +314,46 @@ def test_add_file_sink_tightens_permissions(tmp_path: Path) -> None:
     finally:
         slog.logger.remove(sink_id)
         log_path.unlink()
+
+
+# ─── every loguru sink forces diagnose=False (P1 security fix) ─────────────
+#
+# loguru's own default is `diagnose=True`: on a formatted exception it renders
+# every local variable's value from every frame of the traceback into the
+# sink's output. `shared.log_sinks.add_sink` is the seam every sink goes
+# through, and it forces `diagnose=False`; `scripts/lint/lint_logger_add_diagnose.py`
+# keeps every other `logger.add(...)` call honest.
+
+
+def test_a_password_bearing_dsn_failure_via_logger_exception_never_leaks() -> None:
+    """The second leak path the PR #3479 review confirmed independently of
+    `RoleSecret`: `psycopg.connect(dsn)` against a password-bearing DSN, on
+    connect failure, logged via `logger.exception(...)`. `connect()` itself
+    is a real function in a real file, so diagnose's `linecache`-based
+    per-frame annotation applies to it directly, no subprocess needed —
+    this test's own line (`psycopg.connect(dsn, ...)`) is also a real
+    source line referencing `dsn`, which is exactly the shape that would
+    leak if this sink's `diagnose` were not forced off."""
+    import psycopg
+
+    captured: list[str] = []
+
+    def _capture(message: object) -> None:
+        captured.append(str(message))
+
+    sink_id = slog.add_sink(_capture, level="DEBUG")
+    sentinel = "SENTINEL-DSN-PASSWORD-9876543210"
+    dsn = f"postgresql://u:{sentinel}@127.0.0.1:1/x"
+    try:
+        try:
+            psycopg.connect(dsn, connect_timeout=2)
+        except Exception:
+            slog.logger.exception("db connect failed")
+        else:
+            pytest.fail("connect to an unassigned port must fail")
+    finally:
+        slog.logger.remove(sink_id)
+
+    blob = "\n".join(captured)
+    assert "db connect failed" in blob
+    assert sentinel not in blob

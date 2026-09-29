@@ -72,7 +72,7 @@ For an operator investigating an artifact, the transform it performs is:
 scratch_dir=$(mktemp -d)
 chmod 700 "$scratch_dir"
 key_file="$scratch_dir/backup.key"
-.venv/bin/python -c 'import hashlib; from shared.config import settings; print(hashlib.sha256(settings.data_plane.cluster_secret.encode()).hexdigest())' > "$key_file"
+.venv/bin/python -c 'from services.gateway_side.backup.passphrase import logical_backup_passphrase; print(logical_backup_passphrase())' > "$key_file"
 chmod 600 "$key_file"
 openssl enc -d -aes-256-cbc -pbkdf2 -salt -kfile "$key_file" -in /absolute/path/to/<db>-<utc>.dump.enc -out "$scratch_dir/backup.dump"
 chmod 600 "$scratch_dir/backup.dump"
@@ -80,18 +80,22 @@ chmod 600 "$scratch_dir/backup.dump"
 # gzip --decompress --stdout "$scratch_dir/backup.dump" > "$scratch_dir/backup.dump.raw" && mv "$scratch_dir/backup.dump.raw" "$scratch_dir/backup.dump"
 ```
 
-The key file is the SHA-256 hex digest of the cluster secret. It is private,
-never passed on argv, and must be deleted with the scratch directory after the
-drill. The cluster secret itself lives in the surviving unit's `.env`
-(`$AVA_HOME/.env`, mode 0600) — in a disaster-recovery scenario the secret from
-any surviving runner (or the gateway) is sufficient to decrypt every artifact,
-because the passphrase is derived from the cluster secret alone, not from any
-per-host value. Note: rotating the cluster secret makes artifacts encrypted
-under the previous value unrecoverable — after any rotation, keep the prior
-secret in escrow (or re-run a backup) until the old artifacts have been
-retired. The archive's compression CRC and `pg_restore` failure path detect
-corruption; the artifact is encrypted with AES-256-CBC and inherits the local
-artifact's 0600 threat model.
+The key file holds the logical-backup passphrase from its one resolution
+(`services/gateway_side/backup/passphrase.py`, the same one every backup and
+restore uses): the pinned `$AVA_HOME/backups/logical-backup.passphrase`. A
+gateway birth mints it; a home born earlier pinned `sha256(secret)` in the
+cutover's `api` step. It never changes with the cluster secret and is never
+derived: a home without it refuses. It is private, never passed on argv, and
+must be deleted with the scratch directory after the drill. Only the gateway
+holds it, so disaster recovery needs that file: keep an escrowed copy with the
+gateway's other backup keys. An artifact an empty-secret home wrote before its
+cutover pinned a minted passphrase was encrypted under the public
+`sha256("")`; restore it with
+`.venv/bin/python scripts/restore_drill.py <artifact> --legacy-empty-secret-passphrase`
+(by hand: the key file holds `printf '' | shasum -a 256 | cut -d' ' -f1`).
+The archive's compression CRC and `pg_restore` failure path detect corruption;
+the artifact is encrypted with AES-256-CBC and inherits the local artifact's
+0600 threat model.
 
 To complete a manual investigation, use a scratch Postgres URL only:
 

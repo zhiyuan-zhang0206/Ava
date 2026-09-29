@@ -16,27 +16,35 @@ from shared.incarnation_resources import (
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
+    ResourceShapeError,
     complete_exec,
     decode_resources,
 )
 from shared.paths import exec_run_dir
-from shared.proc_tree import create_time_matches, stable_create_time
 from shared.runtime_incarnation import RuntimeIncarnation
 
 
 def process_ended(identity: ResourceProcess) -> bool:
     try:
-        process = psutil.Process(identity.pid)
+        # Missing native evidence cannot become exit merely because a PID is
+        # absent. Only a complete receipt can establish reuse or another boot.
+        if not identity.in_current_boot():
+            return True
         # PID reuse means the exact old process ended, not permission to signal
         # the replacement. This helper never signals or scans descendants.
-        # Within the create_time tolerance the pid is still the same process
-        # (macOS whole-second moves), so only a reading beyond it proves an end.
-        ended = not create_time_matches(stable_create_time(process), identity.birth)
-        return ended or process.status() in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}
-    except psutil.NoSuchProcess:
-        return True
-    except psutil.AccessDenied:
+        return not identity.as_identity().live()
+    except (psutil.AccessDenied, OSError, RuntimeError, ValueError):
         return False
+
+
+def _recoverable(value: object) -> object:
+    """The decoded set, or None for a retired shape: it has no exact local
+    evidence to recover, and admission and resurrection refuse it until the
+    cutover reconciliation replaces it."""
+    try:
+        return decode_resources(value)
+    except ResourceShapeError:
+        return None
 
 
 def recover_local_resources(agent_id: int, machine: str) -> None:
@@ -47,7 +55,7 @@ def recover_local_resources(agent_id: int, machine: str) -> None:
         ).fetchone()
     if row is None or row[0] is None:
         return
-    state = decode_resources(row[0])
+    state = _recoverable(row[0])
     if not isinstance(state, IncarnationResources) or row[3] != machine:
         return
     target = RuntimeIncarnation(agent_id, state.generation, state.owner)

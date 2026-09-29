@@ -596,6 +596,10 @@ def test_runner_cannot_rewrite_ledgers_or_stamp_without_certification_procedure(
         db_conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(runner)))
         db_conn.execute(sql.SQL("REVOKE {} FROM CURRENT_USER").format(sql.Identifier(runner)))
         db_conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(runner)))
+        # The body committed the role and its grants; an uncommitted drop rolls
+        # back when the fixture closes the connection, leaking both into every
+        # later test on this worker's database (a dump then names the role).
+        db_conn.commit()
 
 
 def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
@@ -639,7 +643,9 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)
     monkeypatch.setattr(outbox, "limits", lambda: snapshot)
     outbox._reset_caches_for_tests()
-    monkeypatch.setattr("shared.proc_tree.process_metadata", lambda: attested_caller(v1_lease))
+    monkeypatch.setattr(
+        "shared.native_process.ownership.process_metadata", lambda: attested_caller(v1_lease)
+    )
 
     def gateway_down(*_args: Any, **_kwargs: Any) -> Any:
         raise httpx.ConnectError("gateway unavailable")

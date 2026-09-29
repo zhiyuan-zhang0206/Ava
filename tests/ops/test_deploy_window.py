@@ -48,7 +48,6 @@ def _runner(head: str, running: str) -> dict[str, object]:
 def _quiet_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     """An idle cluster. Each test re-arms exactly the signal it is about."""
     monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
-    monkeypatch.setattr("ops.cluster.current_orchestration", lambda: None)
     monkeypatch.setattr("shared.machines.list_all", list)
     monkeypatch.setattr("shared.machine_exclusions.list_excluded_machines", list)
     monkeypatch.setattr(dw, "_read_deploy_states", dict)
@@ -98,10 +97,8 @@ def test_lease_outranks_the_other_signals(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_sees_a_lease_less_update_on_another_machine(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The watchdog's pin / code controllers spawn a host-local `ava-updater` without
-    going near the gateway's orchestration, so no lease exists to see. The code
-    controller shipped in #917 means this path gets more traffic, not less. R1
-    (Task #1021): the signal is the machine's `host_deploy_state` posture row."""
+    """Host-local maintenance takes no cluster lease, so no lease exists to see.
+    R1 (Task #1021): the signal is the machine's `host_deploy_state` posture row."""
     from datetime import UTC, datetime
 
     from shared.host_deploy_state import HostDeployState
@@ -311,7 +308,7 @@ def test_settle_hold_is_released_once_every_host_reaches_the_pin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A hold whose hosts converged in the first thirty seconds must not keep the
-    cluster — and auto-rollback — blocked for the rest of its window."""
+    cluster blocked for the rest of its window."""
     monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: _SETTLING)
     monkeypatch.setattr("shared.machines.list_all", lambda: [("win", "http://win:8600")])
     monkeypatch.setattr(dw, "_probe_machines", _probing({"win": _runner(_PIN, _PIN)}))
@@ -474,8 +471,8 @@ def test_an_executing_lease_is_never_convergence_released(
     ],
 )
 def test_never_raises_when_a_signal_is_broken(broken: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Both callers are refusal/suppression paths: a traceback either blocks every
-    deploy or breaks the auto-rollback that catches a bad release."""
+    """Every caller is a refusal/suppression path: a traceback would block every
+    deploy or break the alerting that reads the window."""
 
     def _raise() -> object:
         raise RuntimeError("db gone")

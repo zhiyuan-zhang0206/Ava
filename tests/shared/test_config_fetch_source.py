@@ -160,12 +160,12 @@ def test_enrolled_runner_with_unreachable_gateway_fails_fast(tmp_path: Path) -> 
     """The configured-runner fail-fast: enrolled (flag + URL) but the gateway is
     unreachable — the import raises BootstrapFetchError naming the remedy.
 
-    The runner flag is DECLARED IN THE UNIT'S .env, as `ava enroll` writes it —
+    The runner flag is DECLARED IN THE UNIT'S .env, as its first start writes it —
     a machine-identity key supplied by env alone is now dropped at
     load_ava_env (#771), so an env-only flag no longer configures the fetch."""
     home = tmp_path / "home"
     home.mkdir()
-    # enroll's bootstrap env: the role flag + gateway URL + cluster secret.
+    # A runner's bootstrap env: the role flag + gateway URL + a bearer.
     (home / ".env").write_text(
         "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
         "AVA_GATEWAY_URL=http://127.0.0.1:1\n"  # nothing listens on port 1
@@ -202,8 +202,8 @@ def test_gateway_unit_never_fetches(tmp_path: Path) -> None:
 
 class _BootstrapHandler(BaseHTTPRequestHandler):
     payload: ClassVar[dict[str, str]] = {}
-    # Query strings of every request — the runner fetch must ask for the
-    # least-privilege projection (Task #1236). A list: `self.path = ...` would
+    # Query strings of every request — the runner fetch asks for no projection:
+    # bootstrap serves configuration only. A list: `self.path = ...` would
     # shadow a ClassVar with an instance attribute, so record into a mutable
     # class-level container instead.
     queries: ClassVar[list[str]] = []
@@ -229,8 +229,11 @@ class _BootstrapHandler(BaseHTTPRequestHandler):
 def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> None:
     """The money path: a pure runner's Settings import fetches /api/bootstrap
     and the fetched values are authoritative — including over a stale
-    pre-cutover .env materialization (migration tolerance)."""
+    pre-cutover .env materialization (migration tolerance). A database
+    password in the served URL (an older gateway's runner projection) is never
+    taken: the runner's login comes only from its installed unit capability."""
     handler = _BootstrapHandler
+    handler.queries.clear()
     handler.payload = {
         "AVA_DB_URL": "postgresql://ava_runner:runner-fetched@db:5432/ava",
         "AVA_REDIS_URL": "redis://db:6380/0",
@@ -244,7 +247,7 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
         port = server.server_address[1]
         home = tmp_path / "home"
         home.mkdir()
-        # A pre-cutover enroll left stale cluster facts in the .env — tolerated:
+        # An older join left stale cluster facts in the .env — tolerated:
         # the fetch must override them. (AVA_GATEWAY_URL is in derived_env_keys(),
         # so `_enforce_cluster_env_authority` forces the file value over an
         # inherited env — write the real port into the file.)
@@ -264,12 +267,12 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
         )
         assert result.returncode == 0, result.stderr
         lines = result.stdout.strip().splitlines()
-        # The fetched runner projection wins over the stale owner URL. Settings
-        # leaves ava_runner URLs untouched, preserving its independent password.
-        assert lines[0] == "postgresql://ava_runner:runner-fetched@db:5432/ava", lines
+        # The fetched endpoint wins over the stale owner URL, without the
+        # password an older gateway still projected.
+        assert lines[0] == "postgresql://ava_runner@db:5432/ava", lines
         assert lines[1] == "ava:events", lines
-        # The runner's Settings-build fetch requests the runner projection.
-        assert handler.queries == ["role=runner"], handler.queries
+        # The runner's Settings-build fetch requests no projection.
+        assert handler.queries == [""], handler.queries
     finally:
         server.shutdown()
         server.server_close()
@@ -296,7 +299,7 @@ def test_runner_daemon_boot_from_session_env_handoff(
 
     handler = _BootstrapHandler
     handler.payload = {
-        "AVA_DB_URL": "postgresql://ava_runner:runner-fetched@db:5432/ava",
+        "AVA_DB_URL": "postgresql://ava@db:5432/ava",
         "AVA_REDIS_URL": "redis://db:6380/0",
         "DEEPSEEK_API_KEY": "sk-fetched",
         "AVA_EVENTS_CHANNEL": "ava:events",
@@ -308,7 +311,7 @@ def test_runner_daemon_boot_from_session_env_handoff(
         port = server.server_address[1]
         home = tmp_path / "home"
         home.mkdir()
-        # enroll's bootstrap env: gateway URL + cluster secret + the role flag
+        # A runner's bootstrap env: gateway URL + a bearer + the role flag
         # (the ONLY cluster facts a runner's .env holds since 2026-08-01).
         (home / ".env").write_text(
             "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
@@ -361,9 +364,9 @@ def test_runner_daemon_boot_from_session_env_handoff(
         )
         assert result.returncode == 0, result.stderr
         lines = result.stdout.strip().splitlines()
-        # The fetched runner projection is what the daemon runs with — not the
-        # stale owner URL the spawner froze.
-        assert lines[0] == "postgresql://ava_runner:runner-fetched@db:5432/ava", lines
+        # The fetched endpoint is what the daemon runs with — not the stale
+        # owner URL the spawner froze.
+        assert lines[0] == "postgresql://ava@db:5432/ava", lines
         assert lines[1] == "sk-fetched", lines
         # host-scope facts survived the handoff
         assert lines[2] == str(home), lines

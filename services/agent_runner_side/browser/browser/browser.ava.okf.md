@@ -26,7 +26,7 @@ See [[services/agent_runner_side/browser/browser/gating.ava.okf.md]].
 
 ## Key Dependencies
 - [[ava/mcps.ava.okf.md]] — `chrome-devtools-mcp` is the upstream
-- [[services/watchdog/watchdog.ava.okf.md]] — keeps alive via `healthchecks/browser.py` (identity-verified CDP **and** ava-browser session liveness — CDP alone can tell neither a supervised Chrome from an orphan holding the port, nor ours from another unit's) and `healthchecks/browser_mcp.py` (Unix socket ping)
+- [[services/ava_root_glue/ava_root_glue.ava.okf.md]] — keeps alive via `healthchecks/browser.py` (identity-verified CDP **and** ava-browser session liveness — CDP alone can tell neither a supervised Chrome from an orphan holding the port, nor ours from another unit's) and `healthchecks/browser_mcp.py` (Unix socket ping)
 
 ## Entry Points
 - `services/browser/daemon.py` — Chrome launch (`AVA_BROWSER_ENABLED` **defaults to True**; `browser_incapability()` auto-gates machines lacking display/Chrome/npx)
@@ -44,4 +44,4 @@ See [[services/agent_runner_side/browser/browser/gating.ava.okf.md]].
 - **A teardown reaches Chrome by profile, not by process tree**: killing the `ava-browser` session cannot reach a Chrome that left the tree on a `SingletonLock` handoff, so `ava stop --stop-browser` / `ava cluster destroy` additionally name Chrome by this cluster's own `--user-data-dir` and kill it. Identification, the argument it cannot select the operator's browser, scope and ordering: [[services/agent_runner_side/browser/browser-teardown.ava.okf.md]]
 - `AVA_BROWSER_ENABLED` **defaults to True** (not opt-in) — auto-detects host capability (display + Chrome + npx); if unavailable, `browser_incapability()` automatically skips (`shared/platform_probes.py:123`; applied as a service gate in `ops/spec.py`)
 - Chrome profile is persistent, retaining login state
-- **no data plane**: neither daemon opens a Postgres connection at boot or at runtime (their whole data plane is CDP + the Unix socket), so both specs declare `requires_db=False` and the watchdog keeps reviving them through a DB outage or a schema mismatch — a DB-scoped round block holds back only the DB's users ([[services/watchdog/watchdog.ava.okf.md]])
+- **no data plane**: neither daemon opens a Postgres connection at boot or at runtime (their whole data plane is CDP + the Unix socket), so both specs declare `requires_db=False` and the watchdog keeps reviving them through a DB outage or a schema mismatch — a DB-scoped round block holds back only the DB's users ([[services/ava_root_glue/ava_root_glue.ava.okf.md]])

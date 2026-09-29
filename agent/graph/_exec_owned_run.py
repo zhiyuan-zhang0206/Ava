@@ -34,13 +34,13 @@ from shared.incarnation_resources import (
     ExecAllocation,
     IncarnationResources,
     ResourceEvidenceError,
+    ResourceProcess,
     attach_exec,
     complete_exec,
     decode_resources,
     register_exec,
 )
 from shared.paths import exec_run_dir
-from shared.proc_tree import stable_create_time
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import current_hosted_resources
 
@@ -249,7 +249,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
             close_fds=True,
         )
         native = psutil.Process(proc.pid)
-        birth = stable_create_time(native)
+        launcher = ResourceProcess.capture(native)
         reader = threading.Thread(target=_drain_output, args=(proc, stream), daemon=True)
         reader.start()
         while proc.poll() is None:
@@ -257,7 +257,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
                 ready = OwnerReady.model_validate_json(
                     read_owner_bytes(context_path.with_suffix(".ready"))
                 )
-                validate_native_ready(ready, proc.pid, birth, context_path)
+                validate_native_ready(ready, launcher, context_path)
                 registration = asyncio.create_task(
                     asyncio.to_thread(_register_attached, context, ready),
                     name=f"exec-owner-register-{request_id}",

@@ -27,11 +27,10 @@ from shared.incarnation_resources import (
     ResourceProcess,
     decode_resources,
 )
-from shared.lifecycle_acceptance import terminate_kills_shell_sessions
+from shared.lifecycle_acceptance import RECORD_APPLIED, terminate_kills_shell_sessions
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
 from shared.paths import ava_home
-from shared.proc_tree import stable_create_time
 from shared.resource_admission import admit_resources_async
 from shared.runtime_admission import (
     AdmissionDecision,
@@ -47,14 +46,16 @@ from shared.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
 class _HostedAdmissionRefusedError(Exception):
     """Roll back speculative resource transfer before returning a refusal."""
 
-    def __init__(self, outcome: AdmissionOutcome) -> None:
+    def __init__(self, outcome: AdmissionOutcome, detail: str | None = None) -> None:
         self.outcome = outcome
+        self.detail = detail
 
 
 def _refuse_hosted_admission(
     outcome: AdmissionOutcome = AdmissionOutcome.ADMISSION_GUARD_REFUSED,
+    detail: str | None = None,
 ) -> Never:
-    raise _HostedAdmissionRefusedError(outcome)
+    raise _HostedAdmissionRefusedError(outcome, detail)
 
 
 async def _record_admission_refusal(
@@ -64,8 +65,12 @@ async def _record_admission_refusal(
     expected_from: str,
     attempt_at: datetime,
     outcome: AdmissionOutcome,
+    detail: str | None = None,
 ) -> None:
-    """Keep an older, delayed refusal from replacing a later successful claim."""
+    """Keep an older, delayed refusal from replacing a later successful claim; a
+    detail is durable row state an operator must resolve, so it is logged loudly."""
+    if detail is not None:
+        logger.warning("agent {} admission refused ({}): {}", agent_id, outcome.value, detail)
     async with async_write_transaction(pool) as conn:
         await conn.execute(
             "UPDATE agents_meta SET last_admission_outcome=%s, "
@@ -155,9 +160,7 @@ async def apply_hosted_lifecycle(
             )
         else:
             raise ValueError(f"not an executable lifecycle command: {lifecycle_kind}")
-        await conn.execute(
-            "UPDATE inbound_messages SET applied_at=clock_timestamp() WHERE id=%s", (row[0],)
-        )
+        await conn.execute(RECORD_APPLIED, (row[0],))  # an applied restart is a release
         if lifecycle_kind == "terminate":
             await conn.execute(
                 "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
@@ -388,8 +391,8 @@ async def _dead_predecessor_evidence(
     ):
         # The row lock binds this monotonic exact-process observation to the
         # resource transfer in the same transaction.
-        current_host = ResourceProcess(pid=host.pid, birth=stable_create_time(host))
-        if prior_resources.host_process != current_host:
+        current_host = ResourceProcess.capture(host)
+        if not prior_resources.host_process.same_birth(current_host):
             if not await asyncio.to_thread(process_ended, prior_resources.host_process):
                 _refuse_hosted_admission()
             return prior_resources.host_process, False
@@ -424,7 +427,7 @@ async def admit_hosted_runtime(
 
     await asyncio.to_thread(recover_local_resources, agent_id, machine)
     native = psutil.Process()
-    host_identity = ResourceProcess(pid=native.pid, birth=stable_create_time(native))
+    host_identity = ResourceProcess.capture(native)
     if publication is None:
         publication = await asyncio.to_thread(process_runtime_admission)
     else:
@@ -469,8 +472,8 @@ async def admit_hosted_runtime(
             if publication_decision is not None:
                 try:
                     require_current_for_managed(publication_decision, previous[4])
-                except ResourceEvidenceError:
-                    _refuse_hosted_admission(AdmissionOutcome.RESOURCE_FENCE)
+                except ResourceEvidenceError as exc:
+                    _refuse_hosted_admission(AdmissionOutcome.RESOURCE_FENCE, str(exc))
             generation = (
                 previous[0]
                 if previous[1:3] == (owner, "hosted") and previous[0] is not None
@@ -580,7 +583,7 @@ async def admit_hosted_runtime(
             )
     except _HostedAdmissionRefusedError as exc:
         await _record_admission_refusal(
-            pool, agent_id, machine, expected_from, attempt_at, exc.outcome
+            pool, agent_id, machine, expected_from, attempt_at, exc.outcome, exc.detail
         )
         return None
     logger.info(

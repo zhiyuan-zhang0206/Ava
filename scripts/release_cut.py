@@ -113,9 +113,9 @@ def _staging_gate(target: str) -> None:
 def _latest_dated() -> tuple[str, tuple[int, int, int], date, str | None] | None:
     """Highest dated version: (tag_name, version, calendar_day, hhmm_or_None).
 
-    Selection rule lives in `shared.release_tags.pick_latest_tag` (the update
-    track resolves the same "newest release"): highest version wins; on equal
-    versions the later HHMM wins; a tag without HHMM is earliest on its day.
+    Selection rule lives in `shared.release_tags.pick_latest_tag`: highest
+    version wins; on equal versions the later HHMM wins; a tag without HHMM is
+    earliest on its day.
     """
     tag = pick_latest_tag(_run(["git", "tag", "--list"]).splitlines())
     if tag is None:

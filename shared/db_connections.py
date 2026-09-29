@@ -30,6 +30,16 @@ class UnanchoredHomeError(RuntimeError):
     """
 
 
+class NoDatabaseAuthorityError(RuntimeError):
+    """This process holds no database login for its write-generation home.
+
+    The home's `.env` carries only the credential-free endpoint; logins are
+    delivered by the root launcher, or to an operator process running the
+    home's admitted runtime (`shared.dotenv_boot._deliver_operator_authority`).
+    Raised at the dial instead of an opaque authentication failure.
+    """
+
+
 # TCP keepalive + connect timeout applied to every cluster Postgres connection —
 # the psycopg/libpq mirror of shared/redis_client.py's `RESILIENCE_KWARGS`. A
 # laptop-grade runner that sleeps or changes networks wakes holding dead TCP
@@ -46,9 +56,8 @@ class UnanchoredHomeError(RuntimeError):
 # unbounded connect never errors, so the caller reads as "hung" rather than
 # "failed". This constant is therefore the single definition of that posture:
 # `connect()` / `pool()` / `async_pool()` apply it, and it is exported to the
-# admin-plane dials parameterized on a URL rather than on settings (the boot-time
-# schema assertion in shared/migrations.py, the rollout's local admin schema
-# recovery in cli/commands/_update_git.py). Fail-fast behaviour is pinned by
+# admin-plane dial parameterized on a URL rather than on settings (the boot-time
+# schema assertion in shared/migrations.py). Fail-fast behaviour is pinned by
 # tests/shared/test_connect_fail_fast.py.
 PG_KEEPALIVE_KWARGS: dict[str, Any] = {
     "keepalives": 1,
@@ -70,8 +79,7 @@ PG_KEEPALIVE_KWARGS: dict[str, Any] = {
 # gateway/daemon request for minutes.
 #
 # Deliberately NOT folded into PG_KEEPALIVE_KWARGS: the migration applier
-# (cli/commands/migrations.py + the update/rollback wrappers in
-# cli/commands/_update_git.py) dials `connect(direct=True, unbounded=True)` and
+# (cli/commands/migrations.py) dials `connect(direct=True, unbounded=True)` and
 # its DDL runs may legitimately exceed 60s — the migration applier must stay
 # unbounded. The sanctioned entry points deliver this one ceiling — as `options`
 # on a direct dial, as PG_STATEMENT_TIMEOUT_SET_SQL on a pooled one — so it is
@@ -163,26 +171,81 @@ async def _restore_pooled_session_async(conn: psycopg.AsyncConnection) -> None:
 # this long pass their own — see `pool`'s docstring.
 DEFAULT_POOL_TIMEOUT_S = 30.0
 
+# The administrator URL this process adopted explicitly (`adopt_administrator`);
+# in-process only, so no child inherits it.
+_administrator_url: str | None = None
+
+
+def adopt_administrator(url: str) -> None:
+    """Make `url`, the OS-user administrator over the home's owner-only socket,
+    this process's database authority for `connect()` / `pool()`.
+
+    Only the finite release executor adopts it: it runs the candidate image,
+    which the boot pass never admits to a write generation, and it fences the
+    generation it would otherwise dial. `url` is password-free (`peer`) and
+    names a socket directory; its own startup options (the executor acts as the
+    gateway group through `-c role=...`) survive the statement ceiling. A child
+    process runs its own boot pass and never inherits this authority.
+
+    Raises:
+        ValueError: `url` carries a password or does not name a socket directory.
+    """
+    global _administrator_url  # noqa: PLW0603 — per-process explicit authority
+    from psycopg.conninfo import conninfo_to_dict
+
+    parts = conninfo_to_dict(url)
+    host = parts.get("host")
+    if parts.get("password") or not isinstance(host, str) or not host.startswith("/"):
+        raise ValueError("administrator authority is a password-free owner-only socket URL")
+    _administrator_url = url
+    settings.data_plane.db_url = url
+
+
+def _statement_kwargs(url: str) -> dict[str, Any]:
+    """The statement ceiling, after any startup options `url` carries itself: a
+    psycopg keyword argument would otherwise replace the URL's `options`."""
+    from psycopg.conninfo import conninfo_to_dict
+
+    own = conninfo_to_dict(url).get("options")
+    if not own:
+        return PG_STATEMENT_TIMEOUT_KWARGS
+    return {**PG_STATEMENT_TIMEOUT_KWARGS, "options": f"{own} {PG_STATEMENT_TIMEOUT_OPTIONS}"}
+
 
 def _guard_db_url(url: str) -> str:
-    """Refuse the unanchored sentinel; return the url otherwise. The single point
-    every sanctioned connection passes through, so the prod-DB footgun is caught
-    once here rather than at each call site.
+    """Refuse the unanchored sentinel and an undelivered credential-free endpoint;
+    return the url otherwise. The single point every sanctioned connection passes
+    through, so both footguns are caught once here rather than at each call site.
 
     Raises:
         UnanchoredHomeError: url is the unanchored sentinel.
+        NoDatabaseAuthorityError: this home keeps a write-generation ledger, no
+            login was delivered to this process, url carries no password, and it
+            is not the administrator URL this process adopted.
     """
     if url == UNANCHORED_DB_SENTINEL:
         raise UnanchoredHomeError(
             "refusing to open a DB connection: AVA_DB_URL is the never-dialed "
             "placeholder. Two ways to land here: this checkout resolved no AVA_HOME "
             "(not the prod source, no .ava_home pointer, AVA_HOME unset) — run "
-            "`scripts/install.sh --worktree` from this checkout (births its cluster and "
-            "writes its .ava_home pointer) or export AVA_HOME=<unit home>; or this "
+            "`ava start --worktree` from this checkout (births its cluster and writes "
+            "its .ava_home pointer) or export AVA_HOME=<unit home>; or this "
             "process built settings-lite "
             "(AVA_CONFIG_FETCH=skip, the maintenance verbs' gateway-down mode) and "
             "this operation needs the cluster config a fetch would have provided."
         )
+    from shared import dotenv_boot
+
+    refusal = dotenv_boot.db_authority_refusal()
+    if refusal is not None and url != _administrator_url:
+        try:
+            password = urlsplit(url).password
+        except ValueError:
+            password = None
+        if not password:
+            raise NoDatabaseAuthorityError(
+                f"refusing to dial the credential-free database endpoint: {refusal}"
+            )
     return url
 
 
@@ -307,19 +370,22 @@ def connect(
 
     Raises:
         UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
+        NoDatabaseAuthorityError: this home keeps a write-generation ledger and
+            the resolved db_url is a credential-free endpoint this process was
+            given no login for (see `_guard_db_url`).
     """
     from shared.config.data_plane import sslmode_for_url
 
     dp = settings.data_plane
-    url = dp.db_url if not direct else direct_db_url()
+    url = _guard_db_url(dp.db_url if not direct else direct_db_url())
     sslmode = sslmode_for_url(url, dp.db_sslmode)
     conn = psycopg.connect(
-        _guard_db_url(url),
+        url,
         autocommit=autocommit,
         prepare_threshold=None,
         # sslmode only when the URL is silent (config is the fallback, never an override).
         **({"sslmode": sslmode} if sslmode else {}),
-        **({} if unbounded else PG_STATEMENT_TIMEOUT_KWARGS),
+        **({} if unbounded else _statement_kwargs(url)),
     )
     if not direct and not unbounded:
         # Pooled dial: PgBouncer dropped the `options` startup parameter above
@@ -376,11 +442,14 @@ def pool(
 
     Raises:
         UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
+        NoDatabaseAuthorityError: this home keeps a write-generation ledger and
+            the resolved db_url is a credential-free endpoint this process was
+            given no login for (see `_guard_db_url`).
     """
     from shared.config.data_plane import resolved_pool_size, sslmode_for_url
 
     dp = settings.data_plane
-    url = dp.db_url if not direct else direct_db_url()
+    url = _guard_db_url(dp.db_url if not direct else direct_db_url())
     min_size, max_size = resolved_pool_size(
         min_size, max_size, dp.db_pool_min_size, dp.db_pool_max_size
     )
@@ -388,14 +457,14 @@ def pool(
     connection_kwargs: dict[str, Any] = {
         "prepare_threshold": None,
         **({"sslmode": sslmode} if sslmode else {}),
-        **PG_STATEMENT_TIMEOUT_KWARGS,
+        **_statement_kwargs(url),
     }
     if autocommit:
         connection_kwargs["autocommit"] = True
     if row_factory is not None:
         connection_kwargs["row_factory"] = row_factory
     return ConnectionPool(
-        _guard_db_url(url),
+        url,
         min_size=min_size,
         max_size=max_size,
         open=True,
@@ -449,6 +518,9 @@ def async_pool(
 
     Raises:
         UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
+        NoDatabaseAuthorityError: this home keeps a write-generation ledger and
+            the resolved db_url is a credential-free endpoint this process was
+            given no login for (see `_guard_db_url`).
     """
     from shared.config.data_plane import sslmode_for_url
 

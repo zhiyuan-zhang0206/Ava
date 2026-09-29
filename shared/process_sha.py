@@ -1,16 +1,13 @@
 """Process-commit — the commit a *running process* actually loaded.
 
-The three commit signals that predate this module are all **disk** state:
-``head_sha`` is what the checkout is at right now, ``installed_sha`` what was
-last ``uv sync``'d (`shared.source_integrity`), ``running_sha`` what ``ava
-start`` last started on (`shared.running_sha`). None of them answers "what is
-this daemon executing?" — ``ava start`` is skip-if-running, so it rewrites the
-bookmarks and leaves already-live processes alone. A daemon can therefore sit
-on code from days ago while all three bookmarks read as current, and every
-status surface reports green. That is not hypothetical: on 2026-07-26 a
-Windows unit's ops daemon served a capability set it had cached at boot for two
-days after the file it derives from changed, and three separate signals agreed
-it was aligned.
+The other commit signals are **disk** state: ``head_sha`` is what the
+checkout is at right now, ``running_sha`` what ``ava start`` last started on
+(`shared.running_sha`). Neither answers "what is this daemon executing?" — a
+bookmark can be rewritten while an already-live process keeps its old code, so
+a daemon can sit on code from days ago while every bookmark reads as current.
+That is not hypothetical: on 2026-07-26 a Windows unit's ops daemon served a
+capability set it had cached at boot for two days after the file it derives
+from changed, and three separate signals agreed it was aligned.
 
 This module is **process** state, and it gets that property from two rules:
 

@@ -82,6 +82,7 @@ from shared.events.system import AgentBootFailed as AgentBootFailed
 from shared.events.system import AgentRegistry as AgentRegistry
 from shared.events.system import ArchiveFetchDegraded as ArchiveFetchDegraded
 from shared.events.system import Auth401Rejected as Auth401Rejected
+from shared.events.system import BackupOperationCustody as BackupOperationCustody
 from shared.events.system import CheckpointTableSizes as CheckpointTableSizes
 from shared.events.system import ConvergeFilePreserved as ConvergeFilePreserved
 from shared.events.system import EventClassReopened as EventClassReopened
@@ -111,13 +112,14 @@ from shared.events.system import RecallFilter as RecallFilter
 from shared.events.system import RecoveryDrillFailed as RecoveryDrillFailed
 from shared.events.system import ResolutionStatus as ResolutionStatus
 from shared.events.system import ResolvedMarker as ResolvedMarker
+from shared.events.system import RootHealthExpected as RootHealthExpected
+from shared.events.system import RootHealthTick as RootHealthTick
 from shared.events.system import ScheduleStalled as ScheduleStalled
 from shared.events.system import SseLifecycle as SseLifecycle
 from shared.events.system import StatsDashboardStale as StatsDashboardStale
 from shared.events.system import StatsDashboardStaleReason as StatsDashboardStaleReason
 from shared.events.system import TelemetryReadRecovered as TelemetryReadRecovered
 from shared.events.system import TelemetryReadStale as TelemetryReadStale
-from shared.events.system import WatchdogTick as WatchdogTick
 
 EVENTS: dict[str, EventSpec] = {**_EVENTS_RUNTIME, **_EVENTS_LIFECYCLE, **_EVENTS_OPS}
 

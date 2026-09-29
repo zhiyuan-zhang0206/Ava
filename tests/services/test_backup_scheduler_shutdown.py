@@ -1,5 +1,11 @@
 """Real signal regressions: stopping a scheduler must stop its blocking job.
 
+The scheduler's controller owns one worker process group per job. SIGTERM to
+the scheduler cancels the job: the worker gets a bounded chance to unwind its
+private cleanup, then the controller closes the whole group before the
+scheduler drops its pidfile. With closure proven, the job's controls move into
+quarantine and no plaintext dump material survives, even from a killed worker.
+
 The sweep's bounded-exit regression (task #4224) rides the shared child-process
 harness: production ``main()`` must exit within a small bound of SIGTERM even
 with a default-executor job mid-flight.
@@ -18,17 +24,18 @@ import tempfile
 import time
 from collections.abc import Iterator
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import psutil
 import pytest
 
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
-from services.backup_scheduler import daemon
-from services.backup_scheduler.worker import run_job
+from services.backup_scheduler import daemon, worker
+from shared.config import settings
+from shared.exec_process_domain import ExecProcessDomain
 from tests.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
@@ -63,7 +70,8 @@ def _block(root: Path, mode: str) -> None:
     )
 
 
-def _backup(root: Path, mode: str, now: datetime) -> None:
+def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
+    """Run the real scheduled preparation with one blocking pipeline stage."""
     from services import backup
     from services.pitr import store_factory
 
@@ -80,22 +88,23 @@ def _backup(root: Path, mode: str, now: datetime) -> None:
         path.write_bytes(b"private-key")
         return path
 
-    store = SimpleNamespace(put_base_if_absent=lambda **_kwargs: _block(root, mode))
-    with (
+    def put(**_kwargs: object) -> None:
+        _block(root, mode)
+
+    store = SimpleNamespace(put_base_if_absent=put)
+    group = SimpleNamespace(restartable_streaming_object_store=lambda: store)
+    stack = contextlib.ExitStack()
+    for patcher in (
         patch.object(backup, "backup_dir", return_value=root / "artifacts"),
+        patch.object(backup, "dump_source", return_value="postgresql://ava@127.0.0.1:1/test"),
         patch.object(backup, "pg_tool", return_value=Path("pg_dump")),
         patch.object(backup, "_db_size_breakdown", return_value="test"),
         patch.object(backup, "_run_with_progress", run),
         patch.object(backup, "_key_file", key),
-        patch.object(
-            store_factory,
-            "get_store_group",
-            return_value=SimpleNamespace(restartable_streaming_object_store=lambda: store),
-        ),
+        patch.object(store_factory, "get_store_group", return_value=group),
     ):
-        backup.run_backup(
-            now, db_url="postgresql://ava@127.0.0.1:1/test", publish=mode == "publish"
-        )
+        stack.enter_context(patcher)
+    return stack
 
 
 def _restore(root: Path, mode: str, postgres_base: Path) -> None:
@@ -112,14 +121,42 @@ def _restore(root: Path, mode: str, postgres_base: Path) -> None:
                 data.joinpath("postmaster.pid").read_text().splitlines()[0]
             )
             (root / "pgdata").write_text(str(data))
-        _block(root, mode)
+        if mode != "roundtrip":
+            _block(root, mode)
+
+
+def _exercise_job(root: Path, mode: str, postgres_base: Path) -> None:
+    """The operation worker's real entry, with only its external effects patched."""
+    from scripts import restore_drill
+
+    def restore(*, foreground: bool, scratch_root: Path) -> None:
+        assert foreground
+        (scratch_root / "backup.dump").write_bytes(b"PLAINTEXT")
+        _restore(root, "stubborn" if mode == "restore-stubborn" else mode, postgres_base)
+
+    with _backup_patches(root, mode), patch.object(restore_drill, "run_drill", restore):
+        worker.main()
+
+
+def _launch_harness(root: Path, mode: str, postgres_base: Path):
+    launch = ExecProcessDomain.launch_posix
+
+    def spawn(argv: list[str], **kwargs: Any):
+        code = (
+            "import sys; from pathlib import Path; "
+            "from tests.services.test_backup_scheduler_shutdown import _exercise_job; "
+            f"sys.argv = ['worker', {argv[-2]!r}, {argv[-1]!r}]; "
+            f"_exercise_job(Path({str(root)!r}), {mode!r}, Path({str(postgres_base)!r}))"
+        )
+        return launch([sys.executable, "-I", "-B", "-c", code], **kwargs)
+
+    return spawn
 
 
 def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
     state = daemon._BackupState()
     pidfile = root / "daemon.pid"
     restore_mode = mode.startswith("restore")
-    job = partial(_restore, root, "stubborn" if mode == "restore-stubborn" else mode, postgres_base)
 
     def record_success(_now: datetime) -> None:
         (root / "restore-success").touch()
@@ -137,8 +174,9 @@ def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
         patch.object(daemon, "start_health_server", AsyncMock(return_value=object())),
         patch.object(daemon, "stop_health_server", AsyncMock()),
         patch.object(daemon, "is_due", return_value=True),
-        patch.object(daemon, "run_backup", partial(_backup, root, mode)),
-        patch.object(daemon, "run_local_dump_restore", job),
+        patch.object(worker, "ava_home", return_value=root),
+        patch.object(settings.data_plane, "pg_throwaway_base", str(postgres_base)),
+        patch.object(ExecProcessDomain, "launch_posix", _launch_harness(root, mode, postgres_base)),
         patch.object(daemon, "load_local_dump_restore_success", return_value=None),
         patch.object(daemon, "local_dump_restore_due", return_value=True),
         patch.object(
@@ -195,19 +233,28 @@ def _terminate_and_assert_reaped(tmp_path: Path, process: subprocess.Popen[str])
 
 
 def _assert_backup_artifacts(tmp_path: Path, artifacts: Path, mode: str) -> None:
-    if mode not in {"stubborn", "restore-stubborn"}:
-        assert not list(artifacts.glob("*.partial"))
-        assert not (artifacts / "test.key").exists()
-        assert not list(tmp_path.glob("ava-pg-*"))
-        if (tmp_path / "pgdata").exists():
-            assert not Path((tmp_path / "pgdata").read_text()).exists()
-    if mode == "publish":
-        assert len(list(artifacts.glob("*.dump.enc"))) == 2
+    # A stop with proven closure quarantines the job and never blocks the next
+    # one. Nothing is committed; no plaintext or key survives, even when the
+    # worker was killed after the grace; an upload-interrupted artifact stays.
+    assert not list((tmp_path / "backups" / "operations").glob("*/.operation-*"))
+    restore = mode.startswith("restore")
+    kind = "logical-restore-drill" if restore else "logical-dump"
+    (entry,) = (tmp_path / "backups" / "quarantine" / kind).iterdir()
+    assert json.loads((entry / "request.json").read_text())["kind"] == (
+        "restore" if restore else "dump"
+    )
+    assert (entry / "closure.json").is_file() and not (entry / "result.json").exists()
+    assert [path.name for path in artifacts.iterdir()] == ["retained.dump.enc"]
+    leftovers = [path for path in entry.rglob("*") if path.is_file()]
+    assert not [path for path in leftovers if b"PLAINTEXT" in path.read_bytes()]
+    assert not [path for path in leftovers if path.name.endswith((".partial", ".key", ".dump"))]
+    published = list((entry / "artifact").glob("*.dump.enc"))
+    assert len(published) == (1 if mode == "publish" else 0)
 
 
 def _kill_harness_processes(tmp_path: Path, process: subprocess.Popen[str]) -> None:
-    # Clean only PIDs written by this disposable harness, including on the
-    # negative control where the old scheduler leaves its executor blocked.
+    # Clean only PIDs written by this disposable harness, including on a
+    # negative control where a scheduler leaves its job blocked.
     for name in ("child", "worker", "postgres"):
         path = tmp_path / name
         if path.exists():
@@ -263,74 +310,86 @@ def test_killed_restore_uses_parent_owned_postgres_base(
 ) -> None:
     _assert_sigterm_reaps_job_before_scheduler_exits(tmp_path, "restore-stubborn", postgres_base)
     assert Path((tmp_path / "pgdata").read_text()).is_relative_to(postgres_base)
+    # The killed worker never tore down its throwaway cluster: the drill's
+    # sanitizer reaps the restored database once closure is proven.
+    assert not list(postgres_base.glob("ava-pg-*"))
 
 
-def _write(path: Path) -> None:
-    path.write_text("done")
-
-
-def _postgres_roundtrip(marker: Path, postgres_base: Path) -> None:
-    from shared.pg_tools import throwaway_postgres
-
-    with throwaway_postgres(base=postgres_base, foreground=True):
-        data = next(postgres_base.glob("ava-pg-*/data"))
-        marker.write_text(data.joinpath("postmaster.pid").read_text().splitlines()[0])
-
-
-def _crash() -> None:
-    raise ValueError("job failed")
-
-
-def _exit_without_result() -> None:
-    os._exit(0)
-
-
-def _fail_after_result() -> None:
-    from multiprocessing.util import Finalize
-
-    # Run after multiprocessing flushes its queue feeder, so the parent really
-    # receives success before observing the contradictory nonzero exit status.
-    Finalize(None, os._exit, args=(7,), exitpriority=-20)
-
-
-async def test_worker_requires_successful_result_and_exit(tmp_path: Path) -> None:
-    marker = tmp_path / "done"
-    await run_job(partial(_write, marker))
-    assert marker.read_text() == "done"
-    with pytest.raises(RuntimeError, match="ValueError: job failed"):
-        await run_job(_crash)
-    with pytest.raises(RuntimeError, match="without a result"):
-        await run_job(_exit_without_result)
-    with pytest.raises(RuntimeError, match="exit=7"):
-        await run_job(_fail_after_result)
-
-
-async def test_worker_accepts_clean_native_postgres_exit(
-    tmp_path: Path, postgres_base: Path
+async def test_restore_job_accepts_clean_foreground_postgres_exit(
+    tmp_path: Path, postgres_base: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    marker = tmp_path / "postgres"
-    await run_job(partial(_postgres_roundtrip, marker, postgres_base))
-    assert not _alive(int(marker.read_text()))
+    """A real foreground postmaster that stops cleanly lets the job succeed."""
+    monkeypatch.setattr(worker, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        ExecProcessDomain, "launch_posix", _launch_harness(tmp_path, "roundtrip", postgres_base)
+    )
+    await worker.run_job("restore")
+    assert not _alive(int((tmp_path / "postgres").read_text()))
+    controls = tmp_path / "backups" / "operations" / "restore-drill"
+    assert [path.name for path in controls.iterdir()] == [".lock"]
 
 
-async def test_cancel_before_adoption_cannot_start_job(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from services.backup_scheduler import worker
+def _exercise_close_stop(root: Path) -> None:
+    """The daemon loop, with its stop request landing inside the group close."""
+    from shared.daemon_shutdown import cancel_and_drain
 
-    pids: list[int] = []
+    close = ExecProcessDomain.close_confirmed
+    launch = ExecProcessDomain.launch_posix
+    script = root / "worker.py"
+    script.write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        "Path(sys.argv[2]).write_text(json.dumps({'artifact':'x','sha256':'y'}))\n"
+    )
 
-    def cancel(_message: object, *, expected_pid: int) -> None:
-        pids.append(expected_pid)
-        raise asyncio.CancelledError
+    def close_with_stop(domain: ExecProcessDomain, deadline: float) -> None:
+        os.kill(os.getpid(), signal.SIGTERM)  # `ava stop` arrives mid-close
+        time.sleep(0.2)
+        close(domain, deadline)
 
-    monkeypatch.setattr(worker, "validate_ready_message", cancel)
-    marker = tmp_path / "never-started"
-    with pytest.raises(asyncio.CancelledError):
-        await run_job(partial(_write, marker))
-    assert not marker.exists()
-    assert len(pids) == 1
-    assert not _alive(pids[0])
+    def spawn(argv: list[str], **kwargs: Any):
+        return launch([sys.executable, "-I", "-B", str(script), *argv[-2:]], **kwargs)
+
+    state = daemon._BackupState()
+    outcome = "swallowed"
+    with (
+        patch.object(ExecProcessDomain, "close_confirmed", close_with_stop),
+        patch.object(ExecProcessDomain, "launch_posix", spawn),
+        patch.object(worker, "ava_home", return_value=root),
+        patch.object(daemon, "is_due", return_value=True),
+    ):
+        daemon.install_graceful_shutdown("close-stop-test")
+        runner = asyncio.Runner()
+        try:
+            runner.run(asyncio.wait_for(daemon._backup_loop(state), 10))
+        except KeyboardInterrupt:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            cancel_and_drain(runner)
+            outcome = "stopped"
+        except TimeoutError:
+            pass
+    (root / "outcome.json").write_text(json.dumps({"outcome": outcome, "error": state.last_error}))
+
+
+def test_stop_during_group_close_stops_the_scheduler(tmp_path: Path) -> None:
+    """A stop inside the confirmed close still stops the daemon, and the close
+    it interrupted finishes: the job is quarantined, never falsely unresolved."""
+    code = (
+        "from pathlib import Path; "
+        "from tests.services.test_backup_scheduler_shutdown import _exercise_close_stop; "
+        f"_exercise_close_stop(Path({str(tmp_path)!r}))"
+    )
+    completed = subprocess.run(  # noqa: S603 -- fixed disposable scheduler harness
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads((tmp_path / "outcome.json").read_text()) == {
+        "outcome": "stopped",
+        "error": None,
+    }
+    backups = tmp_path / "backups"
+    assert not list(backups.glob("operations/dump/.operation-*"))
+    (entry,) = (backups / "quarantine" / "logical-dump").iterdir()
+    assert json.loads((entry / "closure.json").read_text())["proven_by"] == "controller"
 
 
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:

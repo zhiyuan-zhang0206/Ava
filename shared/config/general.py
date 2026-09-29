@@ -17,6 +17,19 @@ from shared.config.base import EnvSettings
 
 
 class GeneralSettings(EnvSettings):
+    service_path: str = Field(
+        default="",
+        alias="AVA_SERVICE_PATH",
+        description="Host executable search directories admitted at first start, excluding virtualenv directories. Managed services prepend the current runtime virtualenv. The home declaration overrides inherited values; changing it requires stopping the current generation.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     impersonation_event_manifest_enabled: bool = Field(
         default=False,
         alias="AVA_IMPERSONATION_EVENT_MANIFEST_ENABLED",
@@ -32,6 +45,7 @@ class GeneralSettings(EnvSettings):
     impersonation_event_manifest_certification_secret: str = Field(
         default="",
         alias="AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET",
+        repr=False,
         description="Host-local random secret projected only into the agent-host finalizer to certify manifests for leases on its machine. A one-use finalizer launch ticket retains it at config boot; every non-finalizer boot removes the `.env` value before Settings constructs. It is never returned by the gateway, readable through the runner database role, or forwarded to sessions or model execute_code children. Enabling manifest leases requires a distinct nonempty value on every participating agent-runner. Processes running as the same OS user may read the unit `.env`; this proof is not a security boundary against such code.",
         json_schema_extra={
             "restart_required": "all",
@@ -236,18 +250,6 @@ class GeneralSettings(EnvSettings):
         },
     )
 
-    track_mode: Literal["latest", "releases"] = Field(
-        default="latest",
-        alias="AVA_TRACK_MODE",
-        description="What `ava cluster update` converges to: `latest` = the tip of AVA_TRACK_BRANCH (default main); `releases` = the newest dated release tag (vX.Y.Z-YYYYMMDD[HHMM]) — main merges then deploy only at a release cut (scripts/release_cut.py --push).",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     fetch_via_gateway: bool = Field(
         default=False,
         alias="AVA_FETCH_VIA_GATEWAY",
@@ -266,24 +268,6 @@ class GeneralSettings(EnvSettings):
         description="Whether this process may hand jobs to the platform scheduler (launchd LaunchAgent / crontab line / Task Scheduler task). The test suite turns it off: the scheduler is one namespace per OS user, so a test-scoped $AVA_HOME cannot isolate it. Deregistration is never gated.",
         json_schema_extra={
             "restart_required": "all",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    start_gui_handover: bool = Field(
-        default=True,
-        alias="AVA_START_GUI_HANDOVER",
-        description=(
-            "macOS only: an `ava start` whose own chain runs outside the GUI login session hands "
-            "the bring-up to the cluster's GUI-domain job instead of starting sessions that would "
-            "inherit the wrong launchd domain (operator-shaped starts only; internal restart legs "
-            "never hand over). Off = the old warn-and-continue behavior."
-        ),
-        json_schema_extra={
-            "restart_required": "",
             "writable": False,
             "sensitive": False,
             "scope": "host",

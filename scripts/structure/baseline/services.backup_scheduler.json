@@ -1,5 +1,0 @@
-{
-  "complexity": {
-    "services/backup_scheduler/worker.py::run_job": 15
-  }
-}

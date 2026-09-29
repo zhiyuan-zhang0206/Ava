@@ -32,7 +32,7 @@ import stat
 import urllib.parse
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -111,8 +111,8 @@ def credential_evidence(credentials_file: Path, *, region: str, bucket: str) -> 
 class CosCredentials:
     """Static SecretId/SecretKey pair + the bucket/region identity."""
 
-    secret_id: str
-    secret_key: str
+    secret_id: str = field(repr=False)
+    secret_key: str = field(repr=False)
     region: str
     bucket: str
 
