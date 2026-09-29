@@ -449,7 +449,7 @@ async def test_healthz_body_carries_the_daemons_own_commit(monkeypatch: pytest.M
     daemon still holding pre-rollout code from one that restarted onto it — the
     per-daemon view the machine-level roster row cannot give (it speaks only for
     whichever process answers the status probe)."""
-    monkeypatch.setattr(daemon_health.process_sha, "get", lambda: "c0ffee1234")
+    monkeypatch.setattr(daemon_health.loaded_commit, "get", lambda: "c0ffee1234")
     port = _find_free_port()
     server = await daemon_health.start_health_server("agent_host", port=port)
     try:
@@ -466,7 +466,7 @@ async def test_healthz_reports_an_unfrozen_process_as_unknown(
     """A daemon that froze no commit says so rather than omitting the key — an
     absent field reads to a probe as an old daemon that predates this payload,
     a null reads as "this process cannot vouch for its code"."""
-    monkeypatch.setattr(daemon_health.process_sha, "get", lambda: None)
+    monkeypatch.setattr(daemon_health.loaded_commit, "get", lambda: None)
     port = _find_free_port()
     server = await daemon_health.start_health_server("agent_host", port=port)
     try:
@@ -485,7 +485,7 @@ async def test_probe_reports_the_commit_without_judging_it(
     A daemon on stale code is alive. Failing the probe on a commit mismatch
     would have every watchdog respawn its daemon the moment a rollout advances
     the checkout, racing the orchestrated restart it is supposed to leave alone."""
-    monkeypatch.setattr(daemon_health.process_sha, "get", lambda: "c0ffee1234")
+    monkeypatch.setattr(daemon_health.loaded_commit, "get", lambda: "c0ffee1234")
     port = _find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))

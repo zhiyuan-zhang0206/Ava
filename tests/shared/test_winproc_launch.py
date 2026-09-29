@@ -337,7 +337,7 @@ def test_new_session_spawns_a_control_steward_bound_to_the_record_identity(
     command = call.command
     assert isinstance(command, list)
     assert command[0] == sys.executable and command[1] == "-I"
-    assert command[2].endswith("windows_session_steward.py")
+    assert command[2].endswith("steward.py")
     # record path, pid, create_time, control port, delivery token, session name
     assert len(command) == 9
     rec = winproc._read_record("zz-daemon")
