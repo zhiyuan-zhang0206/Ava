@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 
 from cli import cutover_hold
-from cli.commands._pause_resume import resume_after_start
+from cli.commands.lifecycle._pause_resume import resume_after_start
 from scripts import cutover_adopt_home as adopt
 from tests.lifecycle.cutover.conftest import LegacyHome
 from tests.lifecycle.cutover.test_adopt_home import Make, _hold, _journal, _run
