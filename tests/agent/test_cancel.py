@@ -666,7 +666,7 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A future new LifecycleExit subclass that is not handled in the match ladder
-    → must fallthrough raise TypeError, not silently land on halted=False (CLAUDE.md
+    → must fallthrough raise TypeError, not silently land on halted=False (AGENTS.md
     enumeration dispatch must be exhaustive)."""
     from shared.lifecycle import LifecycleExit
 

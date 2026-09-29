@@ -229,7 +229,7 @@ _BASE_STATE_FIELDS: frozenset[str] = _BASE_FIELDS
 def _validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
     """fail-fast: plugin writing to ava.state_update with illegal keys must raise.
 
-    Two classes of abuse raise — CLAUDE.md "fail-fast / no silent fallback":
+    Two classes of abuse raise — AGENTS.md "fail-fast / no silent fallback":
     1. Base field written but the plugin did not explicitly declare it in
        BaseModel → missing prefix typo
     2. Key not in state schema → LangGraph reducer silently drops outside

@@ -638,7 +638,7 @@ async def test_state_update_multiple_plugins_no_conflict(fake_cancel_event):
 
 async def test_state_update_non_dict_raises_type_error(fake_cancel_event):
     """plugin inside the exec child sets ava.state_update to None / list /
-    str → TypeError, not silent (`or {}` fallback against CLAUDE.md fail-fast)."""
+    str → TypeError, not silent (`or {}` fallback against AGENTS.md fail-fast)."""
 
     state = BaseAgentState(
         messages=[_ai_message_with_code("import ava\nava.state_update = None")],
