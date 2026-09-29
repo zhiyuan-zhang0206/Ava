@@ -110,7 +110,7 @@ _ALLOWED_FILES = frozenset(
         "cli/main.py",  # CLI bootstrap sets config/profile/log routing before importing Settings or command modules.
         "cli/preflight.py",  # Validates explicit home/registry and config inputs before Settings can load a cluster.
         "cli/commands/cluster/registry.py",  # Cross-home child environment projection removes caller credentials before the target's Settings loads.
-        "cli/commands/_temporary_stop.py",  # Clears one-shot home override transport; this is child environment control, not runtime config.
+        "cli/commands/lifecycle/_temporary_stop.py",  # Clears one-shot home override transport; this is child environment control, not runtime config.
         "cli/start_intent.py",  # Identity bootstrap precedes Settings: read and pin the explicit home and birth inputs before config imports.
         "tests/cli/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
         "tests/cli/test_start_repo_guard.py",  # Verifies checkout/home routing before Settings can be constructed.

@@ -309,7 +309,7 @@ def test_complete_phase_with_unresolved_error_does_not_release_startup(
 def test_operation_start_preserves_exact_hold_after_service_result(
     operation_path: Path, monkeypatch: pytest.MonkeyPatch, result: int
 ) -> None:
-    from cli.commands._pause_resume import resume_after_start
+    from cli.commands.lifecycle._pause_resume import resume_after_start
     from shared import maintenance, start_serving
 
     _set_state(operation_path, phase="starting")
@@ -359,7 +359,7 @@ def _hold(path: Path, monkeypatch: pytest.MonkeyPatch, *, kind: str = "exact") -
 def test_operation_start_cannot_bypass_missing_changed_or_unsettled_hold(
     operation_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, ambient_authority: bool
 ) -> None:
-    from cli.commands._pause_resume import resume_after_start
+    from cli.commands.lifecycle._pause_resume import resume_after_start
     from shared import maintenance
 
     _set_state(operation_path, phase="starting")

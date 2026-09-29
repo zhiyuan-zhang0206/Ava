@@ -124,8 +124,8 @@ def _custody(home: Path) -> DataStop:
 def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_drain(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands import root_driver
     from cli.commands.data_plane import maintenance_stop
+    from cli.commands.lifecycle import root_driver
     from shared import maintenance
 
     receipt = _custody(Path(pitr_request.home))
@@ -288,9 +288,9 @@ def test_failed_online_lease_keeps_business_diagnostics_and_operation_authority(
 def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands import maintenance as maintenance_commands
-    from cli.commands import root_driver
     from cli.commands.data_plane import maintenance_stop
+    from cli.commands.lifecycle import maintenance as maintenance_commands
+    from cli.commands.lifecycle import root_driver
     from shared import maintenance
 
     journal.create(pitr_request)

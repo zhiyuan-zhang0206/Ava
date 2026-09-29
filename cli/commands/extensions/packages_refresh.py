@@ -32,6 +32,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -749,6 +750,15 @@ def _skip(reason: str) -> RefreshReport:
     return RefreshReport(ran=False, skip_reason=reason, channel_line=None, items=(), counts={})
 
 
+def _update_in_flight() -> bool:
+    """Whether a live cluster deploy lease is held (a refresh skips then)."""
+    with suppress(Exception):
+        from shared.cluster_lock import update_lock_holder
+
+        return update_lock_holder() is not None
+    return False
+
+
 def run_refresh(
     *,
     check_only: bool = False,
@@ -769,8 +779,6 @@ def run_refresh(
         return _skip("OS jobs disabled (AVA_OS_JOBS_ENABLED=false)")
     if from_job and not settings.packages.refresh_enabled:
         return _skip("refresh disabled (AVA_PACKAGES_REFRESH_ENABLED=false)")
-    from cli.commands.status import _update_in_flight
-
     lock_path = paths.ava_home() / "packages-refresh.lock"
     try:
         with file_lock(lock_path, timeout_s=_QUEUE_LOCK_TIMEOUT_S):

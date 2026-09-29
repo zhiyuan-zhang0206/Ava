@@ -11,8 +11,8 @@ from typing import Any, cast
 
 import pytest
 
-from cli.commands import root_driver as driver
 from cli.commands._repo import ServiceSpec
+from cli.commands.lifecycle import root_driver as driver
 from shared.daemon_health import DaemonProbe
 
 # The repo-wide readiness guard replaces `_wait_for_root_services_ready` itself;
@@ -333,7 +333,7 @@ def test_linux_root_launch_never_consults_a_helper(
 def test_selected_stop_preserves_exact_home_qualified_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands.service_stop import stop_services
+    from cli.commands.lifecycle.service_stop import stop_services
 
     captured: list[frozenset[str]] = []
 
@@ -393,7 +393,7 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     def source_identity(_repo: Path) -> str:
         return "a" * 64
 
-    monkeypatch.setattr("cli.commands.start_generation.source_digest", source_identity)
+    monkeypatch.setattr("cli.commands.lifecycle.start_generation.source_digest", source_identity)
     monkeypatch.setattr(driver, "root_child_env", dict)
     monkeypatch.setattr(driver, "tree_manifest", tree)
     monkeypatch.setattr(driver, "_root_client", object)
@@ -487,7 +487,7 @@ def test_root_launch_digest_ignores_service_manager_injections(
     of its own; the observer runs with the fixed stage environment only. Both
     sides must still name the same immutable generation.
     """
-    from cli.commands import start_generation
+    from cli.commands.lifecycle import start_generation
 
     monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
 

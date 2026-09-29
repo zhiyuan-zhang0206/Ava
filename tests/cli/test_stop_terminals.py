@@ -40,11 +40,11 @@ from typing import Any
 import psutil
 import pytest
 
-from cli.commands import _temporary_stop as command
-from cli.commands import service_stop as strict
-from cli.commands import stop as entry
-from cli.commands._maintenance_stop_report import StopIncompleteError
-from cli.commands.service_stop import OwnedProcess
+from cli.commands.lifecycle import _temporary_stop as command
+from cli.commands.lifecycle import service_stop as strict
+from cli.commands.lifecycle import stop as entry
+from cli.commands.lifecycle._maintenance_stop_report import StopIncompleteError
+from cli.commands.lifecycle.service_stop import OwnedProcess
 from ops import pty_close_notices
 from shared import maintenance
 from shared.session_backend import PtySessionBackend
@@ -181,7 +181,7 @@ def _stop_env(monkeypatch: pytest.MonkeyPatch, home: Path, terminal: PtySessionB
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)
     for name in ("stop_permissions_helper",):
-        monkeypatch.setattr(f"cli.commands._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(f"cli.commands.lifecycle._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
 
 

@@ -59,7 +59,7 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 | Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `shared/plugin_manifest.py`, `conventions/plugin-spec-v2.md` |
 | Per-machine OS jobs | launchd / crontab / schtasks registrars, idempotent, converge-registered (health probe, watchdog, autostart, logs), test switch `AVA_OS_JOBS_ENABLED=false` | `shared/os_*.py`, `cli/commands/converge/_os_jobs.py` |
 | Cluster extension registry (S2, in progress) | `extensions` / `extension_blobs` tables; install writes row+blob; converge/boot materialize; adoption sweep; content-addressed by tree hash; trust rises only | `shared/extension_registry.py`, `shared/extension_materialize.py` |
-| Update coordination | cluster-wide DB update lock + in-flight detection; source-tree tamper detection (health-probe check 8, alert-only) | `shared/cluster_lock.py`, `cli/commands/status.py:_update_in_flight`, `shared/source_tree_guard.py` |
+| Update coordination | cluster-wide DB update lock + in-flight detection; source-tree tamper detection (health-probe check 8, alert-only) | `shared/cluster_lock.py`, `cli/commands/extensions/packages_refresh.py:_update_in_flight`, `shared/source_tree_guard.py` |
 | Existing boundaries | four-layer modification model; extension ownership (cluster/machine/agent); CLI scope convention; CLI-only updates | `decisions/2026-08-19-four-layer-modification-model.md`, `decisions/2026-08-21-extension-ownership-three-tiers.md`, `2026-08-02-cli-scope-convention.md`, `2026-08-05-cli-only-updates.md` |
 
 ## 3. Constraints the design must respect (hard facts)
@@ -402,7 +402,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Plugin discovery + loaders: `shared/plugins_config.py:discover_plugins`, `agent/extensions.py:load_extensions`, `shared/lm/plugin_providers.py`; roots: `shared/paths.py:repo_plugins_dir/plugins_dir`, `shared/runtime_interpreter.py:external_plugin_read_root`.
 - Manifest/engines gate: `shared/plugin_manifest.py` (`host_version_from_repo`, `check_host_engine`), `conventions/plugin-spec-v2.md`.
 - OS jobs: `shared/os_cron.py` (5-min health tick as the registrar template), `cli/commands/converge/_os_jobs.py`, `AVA_OS_JOBS_ENABLED`.
-- Update coordination: `shared/cluster_lock.py`, `cli/commands/status.py:_update_in_flight`, `shared/source_tree_guard.py` (tamper detection, alert-only); objects-only fetch: `cli/commands/extensions/packages_refresh.py`.
+- Update coordination: `shared/cluster_lock.py`, `cli/commands/extensions/packages_refresh.py:_update_in_flight`, `shared/source_tree_guard.py` (tamper detection, alert-only); objects-only fetch: `cli/commands/extensions/packages_refresh.py`.
 - Extension ownership S1/S2: `decisions/2026-08-21-extension-ownership-three-tiers.md`, `future/infra/extension-ownership.md`, `shared/extension_registry.py`, `shared/extension_materialize.py`.
 - Four-layer model / builtin-plugin ruling: `decisions/2026-08-19-four-layer-modification-model.md` (revised in part: builtin plugins stay *authored* in the kernel but are *delivered* via the content channel).
 - Historical incident class: skill edit merged to main, runtime stale for two days (2026-08-27). R5 background: task #1013.

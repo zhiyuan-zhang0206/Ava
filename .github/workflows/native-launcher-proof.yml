@@ -12,8 +12,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'shared/os_boot_unit.py'
-      - 'cli/commands/root_driver.py'
-      - 'cli/commands/start.py'
+      - 'cli/commands/lifecycle/root_driver.py'
+      - 'cli/commands/lifecycle/start.py'
       - 'services/ava_root/**'
       - 'services/ava_root_glue/**'
       - 'shared/winjob*.py'
@@ -22,9 +22,9 @@ on:
       - 'shared/session_backend.py'
       - 'shared/windows_terminal/**'
       - 'shared/root_control/**'
-      - 'cli/commands/_temporary_stop.py'
-      - 'cli/commands/service_stop.py'
-      - 'cli/commands/stop.py'
+      - 'cli/commands/lifecycle/_temporary_stop.py'
+      - 'cli/commands/lifecycle/service_stop.py'
+      - 'cli/commands/lifecycle/stop.py'
       - 'tests/lifecycle/native_root/**'
       - 'tests/services/test_ava_root_daemon.py'
       - 'shared/native_job_observation.py'

@@ -568,7 +568,7 @@ def test_the_release_fence_revokes_only_after_root_and_its_services_are_gone(
 ) -> None:
     """`require_root_absent` proves root down and every service it birthed (the
     ops daemon included) positively cleaned up; the fence revokes nothing before."""
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import root_driver
     from cli.release_transition import authority as release_authority
     from cli.release_transition.local import LocalTransition
 

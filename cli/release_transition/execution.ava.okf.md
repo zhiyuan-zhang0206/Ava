@@ -47,7 +47,7 @@ a release ([decision](../../decisions/2026-09-27-fleet-release-and-cutover-polic
 item 2). While root still serves them, the phase waits the captured policy's
 `close_s` for their jobs to finish, signalling nothing. It then stops root, keeping
 terminals, so no reconciler re-arms a session. `close_release_terminals`
-(`cli/commands/service_stop.py`) captures every recorded shell, every other
+(`cli/commands/lifecycle/service_stop.py`) captures every recorded shell, every other
 member of its session (`shared/sessions/pty/session_tree.py`: descendants and
 POSIX session, a double-forked job included) and each PTY host birth, records
 the `ava stop` closure notice for each busy session's owner (naming the

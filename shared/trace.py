@@ -88,10 +88,8 @@ from shared.trace_mirror import (
     _disk_watermark_exceeded,
     _enforce_dir_cap,
     _gzip_old_mirror,
-    _mirror_day,
     _mirror_epoch,
     _mirror_size,
-    _mirror_sort_key,
     _prune_old_mirror,
 )
 
@@ -103,10 +101,8 @@ __all__ = [
     "_disk_watermark_exceeded",
     "_enforce_dir_cap",
     "_gzip_old_mirror",
-    "_mirror_day",
     "_mirror_epoch",
     "_mirror_size",
-    "_mirror_sort_key",
     "_prune_old_mirror",
     "claim_idle_wait_span",
     "ensure_init_resolved",

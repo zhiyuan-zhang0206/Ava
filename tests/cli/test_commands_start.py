@@ -8,8 +8,8 @@ import pytest
 
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
-import cli.commands.root_driver as _root_driver_commands
-import cli.commands.start as _start_commands
+import cli.commands.lifecycle.root_driver as _root_driver_commands
+import cli.commands.lifecycle.start as _start_commands
 from cli.commands._setup import _collect_setup_values as _real_collect_setup_values
 from shared.config import settings
 from tests.cli._commands_helpers import _FakeResult, _git_aware

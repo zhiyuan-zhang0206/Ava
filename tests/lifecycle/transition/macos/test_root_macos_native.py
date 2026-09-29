@@ -37,7 +37,7 @@ from uuid import uuid4
 import psutil
 import pytest
 
-from cli.commands import root_driver
+from cli.commands.lifecycle import root_driver
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, root_macos, root_service
 from cli.release_transition import launcher_macos as macos

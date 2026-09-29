@@ -18,7 +18,7 @@ Hard checks (exit 1):
 Audit (report-only, exit 0): every OTHER tracked manifest in the tree is
 reported with its ranges judged against the derived host version AND the
 legacy pyproject version, so the derived-version switch in the shared install
-gate (`cli/commands/_manifest_gate.py`) is auditable per PR: an old-style
+gate (`cli/commands/extensions/_manifest_gate.py`) is auditable per PR: an old-style
 min-only range keeps passing, and a legacy fixture that would be refused is
 visible in the log instead of surfacing as a surprise later. `--audit-dir`
 extends the audit to machine-local manifests (evidence runs; not used by CI).

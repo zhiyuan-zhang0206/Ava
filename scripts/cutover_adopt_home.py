@@ -508,7 +508,7 @@ def release(home: Path) -> int:
     the hold, so the smoke agent follows each release, gateway first, before the
     next unit is released (conventions/cutover-home-adoption.md).
     """
-    from cli.commands.maintenance import resume
+    from cli.commands.lifecycle.maintenance import resume
     from shared import pause_owner
     from shared.paths import ava_home
     from shared.release_operation import require_start_authorized

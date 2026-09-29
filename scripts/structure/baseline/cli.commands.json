@@ -1,6 +1,5 @@
 {
   "complexity": {
-    "cli/commands/_temporary_stop.py::stop": 22,
     "cli/commands/agents/control.py::send_agent_message": 15,
     "cli/commands/agents/impersonation_relay.py::relay_inbox": 22,
     "cli/commands/agents/notices.py::cmd_notices_clear": 20,
@@ -25,26 +24,21 @@
     "cli/commands/extensions/skill.py::_update_one": 20,
     "cli/commands/extensions/skill.py::cmd_skill_update": 16,
     "cli/commands/extensions/skills_sync.py::_sync_one": 23,
+    "cli/commands/lifecycle/_temporary_stop.py::stop": 22,
+    "cli/commands/lifecycle/start.py::_cmd_start_body": 34,
     "cli/commands/observability/logs.py::cmd_logs_retention": 23,
     "cli/commands/release_inventory.py::_launchd": 17,
-    "cli/commands/release_inventory.py::collect_inventory": 15,
-    "cli/commands/start.py::_cmd_start_body": 34
-  },
-  "directories": {
-    "cli/commands": 35
+    "cli/commands/release_inventory.py::collect_inventory": 15
   },
   "nesting": {
     "cli/commands/observability/trace.py::_post_line": 6
   },
   "owner_bypasses": {
-    "cli/commands/_health_preflight.py::postgres-dial": 1,
+    "cli/commands/converge/health_preflight.py::postgres-dial": 1,
     "cli/commands/data_plane/pgbouncer.py::postgres-dial": 1,
     "cli/commands/data_plane/pitr_activation.py::postgres-dial": 1
   },
   "private_imports": {
-    "cli/commands/_release_plugin_probe.py::ops.spec._plugin_services": 1,
-    "cli/commands/maintenance.py::ops.agent_pause._hold": 1,
-    "cli/commands/observability/trace.py::shared.trace._mirror_day": 1,
-    "cli/commands/observability/trace.py::shared.trace._mirror_sort_key": 1
+    "cli/commands/_release_plugin_probe.py::ops.spec._plugin_services": 1
   }
 }

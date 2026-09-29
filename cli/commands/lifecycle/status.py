@@ -13,7 +13,6 @@ additionally — rather than delegating wholesale.
 
 from __future__ import annotations
 
-from contextlib import suppress
 from pathlib import Path
 
 from cli.commands._probe import (
@@ -33,19 +32,9 @@ from shared import service_selection
 from shared.machine import MachineRoles
 
 
-def _update_in_flight() -> bool:
-    """Whether a live cluster deploy lease is held (package refresh skips then)."""
-    with suppress(Exception):
-        from shared.cluster_lock import update_lock_holder
-
-        if update_lock_holder() is not None:
-            return True
-    return False
-
-
 def _root_tree_units() -> dict[str, dict[str, object]]:
     """Read one root snapshot; an unreachable root claims no running services."""
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import root_driver
 
     status = root_driver._root_status(root_driver._root_client())
     if status is None:

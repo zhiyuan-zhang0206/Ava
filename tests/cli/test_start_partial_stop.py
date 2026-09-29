@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _temporary_stop as stop
+from cli.commands.lifecycle import _temporary_stop as stop
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
 from shared import cluster, paths, start_serving
 from shared.hold_driver import HoldDriver
@@ -31,7 +31,7 @@ def partial_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             {"AVA_MACHINE_NAME": "partial"},
         )
     )
-    monkeypatch.setattr("cli.commands.service_stop.require_no_terminals", lambda: None)
+    monkeypatch.setattr("cli.commands.lifecycle.service_stop.require_no_terminals", lambda: None)
     return home
 
 

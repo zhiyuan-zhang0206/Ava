@@ -18,11 +18,11 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
-import cli.commands.root_driver as _root_driver_commands
-from cli.commands import root_driver
-from cli.commands import service_stop as stop
+import cli.commands.lifecycle.root_driver as _root_driver_commands
 from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane import pgbouncer as pb
+from cli.commands.lifecycle import root_driver
+from cli.commands.lifecycle import service_stop as stop
 from shared.config import settings
 from shared.native_process import pid_starttime_ticks
 from shared.session_backend import PosixProcSessionBackend, PtySessionBackend

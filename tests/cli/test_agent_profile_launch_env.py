@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import root_driver
+from cli.commands.lifecycle import root_driver
 from ops.service_spec import _AGENT_RUNNER, ServiceSpec
 from services.ava_root.manifest import load_manifests
 from services.ava_root_glue.manifests import generate

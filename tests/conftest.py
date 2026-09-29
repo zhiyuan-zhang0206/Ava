@@ -1513,7 +1513,7 @@ def _guard_schedule_manager(monkeypatch: pytest.MonkeyPatch) -> None:
 def _guard_service_readiness(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Autouse safety net: `cli.commands.root_driver.wait_for_service_tree` reports every
+    """Autouse safety net: `cli.commands.lifecycle.root_driver.wait_for_service_tree` reports every
     service ready without polling anything.
 
     The start path's readiness wait is bounded by `SERVICE_READY_TIMEOUT_S` (180 s),
@@ -1531,14 +1531,14 @@ def _guard_service_readiness(
 
     ready = ReadinessWait((), 0.0, sessions_gone=False)
     monkeypatch.setattr(
-        "cli.commands.root_driver.wait_for_service_tree",
+        "cli.commands.lifecycle.root_driver.wait_for_service_tree",
         lambda *_a, **_kw: ready,
     )
     # The root-driven path's wait has the same bound and the same reason to be
     # stubbed for tests that are not about it (tests/cli/test_root_driver.py opts
     # out with a module-level `real_service_readiness_gate` marker).
     monkeypatch.setattr(
-        "cli.commands.root_driver._wait_for_root_services_ready",
+        "cli.commands.lifecycle.root_driver._wait_for_root_services_ready",
         lambda *_a, **_kw: ready,
     )
 

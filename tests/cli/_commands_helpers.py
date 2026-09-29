@@ -11,7 +11,7 @@ import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
 import cli.commands.converge.host as converge_host
-import cli.commands.root_driver as _root_driver_commands
+import cli.commands.lifecycle.root_driver as _root_driver_commands
 from shared.start_serving import RootBirth
 
 # Explicit shared surface: every name the split test modules import from here.
@@ -179,7 +179,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     # native instance under $AVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
     # the dev host's pg/redis.
-    from cli.commands import start as _start_mod
+    from cli.commands.lifecycle import start as _start_mod
 
     monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
     monkeypatch.setattr("cli.commands.data_plane.bringup.prepare_gateway_schema", lambda: None)
@@ -187,7 +187,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
         "cli.commands.data_plane.bringup.complete_gateway_data_plane",
         lambda **_kw: None,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
-    from cli.commands.root_driver import LaunchOutcome
+    from cli.commands.lifecycle.root_driver import LaunchOutcome
 
     monkeypatch.setattr(
         _root_driver_commands,
@@ -216,7 +216,8 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     # _assert_schema_current_or_die truly calls DB; tests don't need real schema query, directly patch.
     monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 0)
     # Root service preparation must not install frontend dependencies in unit tests.
-    from cli.commands import _repo, root_driver
+    from cli.commands import _repo
+    from cli.commands.lifecycle import root_driver
 
     monkeypatch.setattr(_repo, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
 

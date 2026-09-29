@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands._stop_extras import stop_permissions_helper
+from cli.commands.lifecycle._stop_extras import stop_permissions_helper
 
 
 def _home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:

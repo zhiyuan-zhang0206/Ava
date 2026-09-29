@@ -2,7 +2,7 @@
 
 A converge-managed destination whose current content no longer matches the
 recorded render was hand-edited: the renderers warn and preserve it instead of
-overwriting — see cli/commands/_rendered_file.py (LGTM provisioning +
+overwriting — see cli/commands/converge/rendered_file.py (LGTM provisioning +
 otel-collector config), cli/commands/extensions/skills_sync.py and
 cli/commands/extensions/materialize.py. Before this
 reporter those warnings lived only in converge output, and a frozen LGTM

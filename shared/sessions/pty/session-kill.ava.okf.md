@@ -114,7 +114,7 @@ orphan-host reaper and a failed spawn's abort.
 `kill_all_shell_sessions`, and a force stop reach the host op through the
 session backend.
 
-The persistent-terminal closure (`cli/commands/service_stop.py`) — a normal
+The persistent-terminal closure (`cli/commands/lifecycle/service_stop.py`) — a normal
 `ava stop` (`close_terminals`), a release's stop phase and a PITR activation
 (`close_release_terminals`) — captures each shell's session with
 `capture_session` before any signal, HUPs the shells and TERMs the rest. Each

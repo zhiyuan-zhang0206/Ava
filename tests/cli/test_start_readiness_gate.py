@@ -11,11 +11,11 @@ import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
 import cli.commands.converge.host as converge_host
-import cli.commands.root_driver as _root_driver_commands
-import cli.commands.start as _start_commands
-from cli.commands import start
+import cli.commands.lifecycle.root_driver as _root_driver_commands
+import cli.commands.lifecycle.start as _start_commands
 from cli.commands._repo import ServiceSpec
-from cli.commands.root_driver import LaunchOutcome
+from cli.commands.lifecycle import start
+from cli.commands.lifecycle.root_driver import LaunchOutcome
 from ops.service_spec import _GATEWAY
 from shared import start_serving
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
@@ -242,7 +242,7 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
 
 def test_failed_launch_never_becomes_serving(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "cli.commands.root_driver.complete_boot_start",
+        "cli.commands.lifecycle.root_driver.complete_boot_start",
         lambda: pytest.fail("not ready for boot handoff"),
     )
 
@@ -333,7 +333,7 @@ def test_storage_schema_migration_grants_pooler_precede_application(
 def test_internal_start_leaves_boot_publication_to_public_dispatch(
     monkeypatch: pytest.MonkeyPatch, ready: bool
 ) -> None:
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import root_driver
 
     _roster(monkeypatch, (("frontend", None),))
     monkeypatch.setattr(

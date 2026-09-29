@@ -34,7 +34,7 @@ from redis.exceptions import RedisError
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler
-from cli.commands.service_stop import (
+from cli.commands.lifecycle.service_stop import (
     OwnedProcess,
     capture_tree,
     deadline_after,

@@ -174,11 +174,11 @@ def prepared(*args):
     prepare(*args)
 start_intent._prepare_start_locked = prepared
 main._init_cli_logging = lambda _args: None
-commands = types.ModuleType("cli.commands.start")
-sys.modules["cli.commands.start"] = commands
+commands = types.ModuleType("cli.commands.lifecycle.start")
+sys.modules["cli.commands.lifecycle.start"] = commands
 calls = []
 def effects(**kwargs):
-    from cli.commands._pause_resume import resume_after_start
+    from cli.commands.lifecycle._pause_resume import resume_after_start
     from shared import maintenance, start_serving
     from shared.config import get_field
     from dotenv import dotenv_values
@@ -196,7 +196,7 @@ def effects(**kwargs):
     start_serving.is_serving = lambda: True
     return start()
 commands.cmd_start = effects
-sys.modules["cli.commands.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
+sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
 assert stage.start_operation(request.path) == 0
 assert calls == ["start"]
 assert json.loads(pause.read_text())["state"] == "paused"
@@ -294,7 +294,7 @@ def test_status_handler_body_forwards_the_parsed_namespace(
     AttributeErrors on the first real `ava status`. Stub one level lower instead:
     `cmd_status`, which `_h_status` lazy-imports, so the real body executes against
     the real Namespace."""
-    import cli.commands.status as _status_commands
+    import cli.commands.lifecycle.status as _status_commands
 
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(_status_commands, "cmd_status", lambda **kwargs: calls.append(kwargs) or 0)  # pyright: ignore[reportUnknownArgumentType]
@@ -672,8 +672,8 @@ def start(**kwargs):
     configured()
     calls.append("runtime")
     return 0
-sys.modules["cli.commands.start"] = types.SimpleNamespace(cmd_start=start)
-sys.modules["cli.commands.root_driver"] = types.SimpleNamespace(
+sys.modules["cli.commands.lifecycle.start"] = types.SimpleNamespace(cmd_start=start)
+sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(
     complete_boot_start=lambda: calls.append("boot-complete")
 )
 sys.modules["shared.start_serving"] = types.SimpleNamespace(

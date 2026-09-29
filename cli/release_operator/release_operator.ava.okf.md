@@ -91,7 +91,7 @@ release before: `activate_release(expected_current=None)` plus
 `scripts/preview/release_cycle_runtime.py::initial` already performs for the
 preview's own captured bundle, generalized to a real home/registry and a
 real `PreparationReceipt` file. Requires a stopped root
-(`cli.commands.root_driver.require_root_absent`) and refuses if another
+(`cli.commands.lifecycle.root_driver.require_root_absent`) and refuses if another
 release is already selected (that is `request` + `ava cluster update`'s job).
 The selection commits before the boot action installs; if the install fails
 (`sudo -n` wanting a password) or the process dies in between, re-running

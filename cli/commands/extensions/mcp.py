@@ -622,7 +622,7 @@ def cmd_mcp_install(
             )
             return 1
 
-        from cli.commands._manifest_gate import gate_refuses
+        from cli.commands.extensions._manifest_gate import gate_refuses
 
         if gate_refuses(pkg_dir, command="mcp install", mirror_pyproject=True):
             return 1
@@ -724,7 +724,7 @@ def cmd_mcp_upgrade(name: str, *, force: bool = False) -> int:
             )
             return 1
 
-        from cli.commands._manifest_gate import gate_refuses
+        from cli.commands.extensions._manifest_gate import gate_refuses
 
         if gate_refuses(pkg_dir, command="mcp upgrade", mirror_pyproject=True):
             return 1

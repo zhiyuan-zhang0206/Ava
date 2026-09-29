@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cli.commands import maintenance as maintenance_command
+from cli.commands.lifecycle import maintenance as maintenance_command
 from ops import cluster_pause
 from scripts import cutover_adopt_home as adopt
 from scripts import cutover_db_records as records

@@ -256,7 +256,7 @@ def test_start_path_reaches_unpause_with_settled_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`ava start` no longer refuses the incident journal."""
-    from cli.commands._pause_resume import resume_after_start
+    from cli.commands.lifecycle._pause_resume import resume_after_start
 
     _publish(
         MaintenanceHold("draining", {1: 11}, reaped={1: REAP}, failures={1: "ImpersonationError"})
@@ -275,7 +275,7 @@ def test_start_path_reaches_unpause_with_settled_failures(
 
 
 def test_start_path_still_refuses_unreaped_failures() -> None:
-    from cli.commands._pause_resume import resume_after_start
+    from cli.commands.lifecycle._pause_resume import resume_after_start
 
     _publish(MaintenanceHold("draining", {1: 11}, failures={1: "RuntimeError"}))
 

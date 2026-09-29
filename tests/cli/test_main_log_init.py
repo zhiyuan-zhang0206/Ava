@@ -49,8 +49,8 @@ def start(**kwargs):
         "ava", base_admin_url="postgresql://probe@127.0.0.1:1/postgres?connect_timeout=5"
     )
     return 0
-sys.modules["cli.commands.start"] = types.SimpleNamespace(cmd_start=start)
-sys.modules["cli.commands.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
+sys.modules["cli.commands.lifecycle.start"] = types.SimpleNamespace(cmd_start=start)
+sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
 raise SystemExit(main.main(["start", "--worktree"]))
 """
 

@@ -29,7 +29,7 @@ from psycopg import sql
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
-from cli.commands.migrations import cmd_migrations_apply
+from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from scripts import cutover_db_authority as cutover
 from shared import cluster
 from shared.cluster import authority, ownership

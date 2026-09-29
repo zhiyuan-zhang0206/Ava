@@ -112,7 +112,7 @@ GATEWAY_PREFLIGHT_BUDGET_S = 30.0
 
 # How long `ava start` waits for the services it just launched to pass their
 # liveness probes before it reports them unready and exits
-# `SERVICES_NOT_READY_EXIT_CODE` (`cli.commands.start`; the root glue applies the
+# `SERVICES_NOT_READY_EXIT_CODE` (`cli.commands.lifecycle.start`; the root glue applies the
 # same critical-tier bound).
 #
 # Nothing healthy waits: the poll returns the instant every probe passes, and a

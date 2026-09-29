@@ -520,7 +520,7 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     start it with the `agent` profile — a `runner` profile crashed it at import
     (2026-08-30 soak startup), and a marker-less launch (full construction)
     would silently mask any future cross-profile read instead of failing fast."""
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import root_driver
     from ops.roster import build_services
     from shared.config import PROCESS_PROFILES
 

@@ -9,11 +9,11 @@ from unittest.mock import MagicMock
 import pytest
 
 import cli.commands._repo as _repo_commands
-import cli.commands._start_readiness_preflight as _start_readiness_preflight_commands
-import cli.commands.root_driver as _root_driver_commands
-import cli.commands.start as _start_commands
-import cli.commands.stop as _stop_commands
-from cli.commands.stop import _force_stop
+import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_preflight_commands
+import cli.commands.lifecycle.root_driver as _root_driver_commands
+import cli.commands.lifecycle.start as _start_commands
+import cli.commands.lifecycle.stop as _stop_commands
+from cli.commands.lifecycle.stop import _force_stop
 from shared.start_serving import RootBirth
 from tests.cli._commands_helpers import (
     _FakeResponse,
@@ -33,7 +33,7 @@ def _root_stop_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: None)
-    monkeypatch.setattr("cli.commands.stop._stop_terminals_force", lambda: None)
+    monkeypatch.setattr("cli.commands.lifecycle.stop._stop_terminals_force", lambda: None)
 
 
 # ─── restart ─────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ def test_cmd_restart_succeeds_non_interactively(monkeypatch: pytest.MonkeyPatch)
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_stop_commands, "_do_stop", MagicMock(return_value=0))
-    monkeypatch.setattr("cli.commands.start.cmd_migrations_apply", list[str])
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_migrations_apply", list[str])
     monkeypatch.setattr(
         _start_readiness_preflight_commands,
         "preflight_start_readiness",
@@ -339,7 +339,7 @@ def test_cmd_stop_stop_browser_flag_threads_through(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """`cmd_stop(stop_browser=...)` maps to `_do_stop(keep_browser=not stop_browser)`."""
-    from cli.commands import stop as _stop_mod
+    from cli.commands.lifecycle import stop as _stop_mod
 
     seen: dict[str, object] = {}
 
@@ -362,7 +362,7 @@ def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> 
     monkeypatch.setattr(
         _repo_commands, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"})
     )
-    monkeypatch.setattr("cli.commands.stop._repo_root", lambda: Path("/repo"))
+    monkeypatch.setattr("cli.commands.lifecycle.stop._repo_root", lambda: Path("/repo"))
     monkeypatch.setattr(
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
         lambda: events.append("infra") or 0,

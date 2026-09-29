@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cli.commands import _start_readiness_preflight as preflight
+from cli.commands.lifecycle import _start_readiness_preflight as preflight
 
 
 class _Backend:
@@ -42,9 +42,12 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         (home / name).mkdir(parents=True)
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.setattr("cli.commands._repo._roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr("cli.commands.root_driver._root_tree_roster", lambda *_a, **_k: ())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        "cli.commands._port_preflight.collect_port_conflicts",
+        "cli.commands.lifecycle.root_driver._root_tree_roster",
+        lambda *_a, **_k: (),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        "cli.commands.converge.port_preflight.collect_port_conflicts",
         lambda _ctx: [],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr("shared.migrations.unreadable_migration_files", list)

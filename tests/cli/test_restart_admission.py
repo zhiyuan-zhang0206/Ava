@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 import cli.commands._repo as _repo_commands
-import cli.commands._start_readiness_preflight as _start_readiness_preflight_commands
-import cli.commands.start as _start_commands
-import cli.commands.stop as _stop_commands
-from cli.commands import _start_readiness_preflight, stop
+import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_preflight_commands
+import cli.commands.lifecycle.start as _start_commands
+import cli.commands.lifecycle.stop as _stop_commands
+from cli.commands.lifecycle import _start_readiness_preflight, stop
 from cli.start_runtime import StartRuntime, admit_loaded_release
 from shared import lifecycle_status, release_operation, runtime_interpreter
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease

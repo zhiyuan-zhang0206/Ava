@@ -12,8 +12,8 @@ import os
 import sys
 from pathlib import Path
 
-from cli.commands._pause_resume import exclusive_resources
 from cli.commands._repo import _repo_root, session_name
+from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.start_runtime import StartRuntime
 
 # The browser service runs a headed Chrome on a persistent login profile. An
@@ -86,7 +86,7 @@ def _compute_stop_scope(
     """
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands._repo as _repo_commands
-    import cli.commands.root_driver as _root_driver_commands
+    import cli.commands.lifecycle.root_driver as _root_driver_commands
 
     if keep_browser:
         preserve_sessions = preserve_sessions | {_BROWSER_SESSION}
@@ -171,7 +171,7 @@ def _force_stop(
     os.environ.pop("AVA_HOME_OVERRIDE", None)
 
     # Dynamic lookup for monkeypatch-aware tests.
-    import cli.commands.root_driver as _root_driver_commands
+    import cli.commands.lifecycle.root_driver as _root_driver_commands
 
     _service_sessions, runner_only, skip_infra = _compute_stop_scope(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
@@ -249,7 +249,7 @@ def _do_stop(
             reap_agents=reap_agents,
             announce=announce,
         )
-    from cli.commands._temporary_stop import stop
+    from cli.commands.lifecycle._temporary_stop import stop
 
     return stop(
         require_confirmation=require_confirmation,
@@ -420,7 +420,8 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     Hosted agents drain through the shared pause boundary before service stop.
     Explicit force authorizes interrupting resource shutdown.
     """
-    from cli.commands import _repo, _start_readiness_preflight, start
+    from cli.commands import _repo
+    from cli.commands.lifecycle import _start_readiness_preflight, start
     from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
     from shared.paths import ava_home
     from shared.proc import hosting_exec_domain, hosting_supervised_session

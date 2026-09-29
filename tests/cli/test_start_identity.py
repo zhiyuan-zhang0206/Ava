@@ -653,7 +653,7 @@ def test_public_start_holds_home_lock_through_runtime_start(
             pytest.fail("another lifecycle operation entered during start")
         return 0
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", runtime)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     assert start_intent.run_start(_args("--worktree")) == 0
 
 
@@ -668,7 +668,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, result: int
 ) -> None:
 
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import root_driver
 
     calls: list[str] = []
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
@@ -679,7 +679,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
         calls.append("complete wrapped start")
         return result
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", runtime)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     monkeypatch.setattr(root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
     assert start_intent.run_start(_args("--worktree")) == result
     assert calls == ["complete wrapped start"] + (["publish PID"] if result == 0 else [])
@@ -689,7 +689,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import root_driver
     from shared import start_serving
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
@@ -700,7 +700,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     def ready(**_kw: object) -> int:
         return 0
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", ready)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", ready)
     monkeypatch.setattr(start_serving, "clear_serving", lambda: calls.append("cleared"))
 
     def fail() -> None:

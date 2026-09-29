@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from cli.commands._maintenance_probe import host_identity
+from ops.agent_pause_probe import host_identity
 from services.agent_host.daemon import _stats_route
 from shared.config import settings
 from shared.daemon_health import start_health_server, stop_health_server

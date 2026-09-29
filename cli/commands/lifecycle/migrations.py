@@ -1,7 +1,7 @@
 """Pending-migration applier — a step of `ava start`, not a standalone command.
 
 There is no `ava migrations` CLI surface. `cmd_migrations_apply` is called by
-`cli/commands/start.py` early in boot (after pg is up, before the schema-current
+`cli/commands/lifecycle/start.py` early in boot (after pg is up, before the schema-current
 assertion); long-running daemons additionally call `assert_schema_current` on
 their own entry points.
 """

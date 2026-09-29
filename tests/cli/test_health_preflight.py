@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _health_preflight as _hp
+from cli.commands.converge import health_preflight as _hp
 from cli.commands.converge.spec import ConvergeCtx
 
 

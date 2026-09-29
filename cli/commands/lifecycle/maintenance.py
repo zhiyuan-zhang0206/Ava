@@ -13,9 +13,8 @@ import os
 import sys
 from datetime import UTC, datetime
 
-from cli.commands._maintenance_probe import host_identity_or_none, ops_quiescent
-from cli.commands._pause_resume import exclusive_resources
-from cli.commands.service_stop import (
+from cli.commands.lifecycle._pause_resume import exclusive_resources
+from cli.commands.lifecycle.service_stop import (
     deadline_after,
     remaining,
     require_no_terminals,
@@ -23,11 +22,20 @@ from cli.commands.service_stop import (
     stop_services,
 )
 from cli.cutover_hold import resume_refusal, start_refusal
-from ops.agent_pause import _hold, drain, prepare
+from ops.agent_pause import drain, prepare
+from ops.agent_pause_probe import host_identity_or_none, ops_quiescent
 from shared import hold_driver, maintenance, maintenance_cohort, pause_owner, start_serving
 from shared.db import connect
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.machine import machine_name, machine_role
+from shared.maintenance_state import MaintenanceHold
+
+
+def _hold(holder: str, at: datetime) -> MaintenanceHold:
+    """This generation's hold, read through the maintenance journal's own door."""
+    current = maintenance.require_operation(holder, at)
+    assert current.maintenance is not None  # noqa: S101
+    return current.maintenance
 
 
 def _gateway_last(*, confirmed: bool) -> None:
@@ -69,7 +77,7 @@ def stop(
 
 
 def _start(holder: str, at: datetime) -> int:
-    from cli.commands.start import cmd_start
+    from cli.commands.lifecycle.start import cmd_start
     from shared.paths import ava_home
 
     hold = _hold(holder, at)
@@ -223,7 +231,7 @@ def _driver_ref(ref: hold_driver.ProcessRef | None) -> dict[str, object] | None:
 def _stop_data(
     holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
 ) -> None:
-    from cli.commands.root_driver import require_root_absent
+    from cli.commands.lifecycle.root_driver import require_root_absent
 
     _gateway_last(confirmed=gateway_last)
     if "gateway" not in machine_role() or _hold(holder, at).phase != "stopped":
