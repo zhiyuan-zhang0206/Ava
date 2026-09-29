@@ -13,7 +13,7 @@ that would `NameError` on a TYPE_CHECKING-only import.
 
 Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
 `_TYPE_CHECKING_ALLOWED` with a reason. This rule is lint-enforced by
-`scripts/lint/lint_code_structure.py`.
+`scripts/lint/code_structure.py`.
 
 ## Per-file line budget: 800 lines
 
@@ -38,7 +38,7 @@ the gate. New violations and growth above a frozen value fail the gate. The base
 shrink-only: a guard compares it with the base revision described below and
 rejects added file entries or raised values. After splitting a file, lower
 its baseline value by hand to its current line count, or remove its entry
-once it is within budget. Enforced by `scripts/lint/lint_code_structure.py`.
+once it is within budget. Enforced by `scripts/lint/code_structure.py`.
 
 ## Directory budget: ≤20 direct entries
 
@@ -64,7 +64,7 @@ baseline guard runs in both modes.
 Two AST rules keep a change, or a reader tracing one, inside one package plus
 its neighbors' public doors. The authoritative rule text — what counts as
 private, what a bypass is, today's single-owner decision — lives in the
-`scripts/lint/lint_code_structure.py` module docstring (Rules 4 and 5); this
+`scripts/lint/code_structure.py` module docstring (Rules 4 and 5); this
 section covers fixing a violation and maintaining its baseline.
 
 - **Rule 4 — package doors.** Reaching a `_`-prefixed module or name from
@@ -213,7 +213,7 @@ in-between shrink as a phantom raise (task #4597). The guard runs for full
 and explicit-target scans alike, while quality checks only inspect the
 selected scope.
 
-Run `.venv/bin/python scripts/lint/lint_code_structure.py` for the full gate.
+Run `.venv/bin/python scripts/lint/code_structure.py` for the full gate.
 Complexity warnings go to stderr as a total function/file count and up to
 30 per-file counts, sorted by count descending then path ascending; remaining
 files and functions are summarized in a `rest:` line. Add
@@ -231,7 +231,7 @@ One-off legitimate cases use inline `# noqa: T201` with a reason.
 ## No decorative emoji in core Python
 
 Agent + backend code stays glyph-free. Enforced by
-`scripts/lint/lint_no_emoji.py` (hook `lint-no-emoji`). Exempt: `cli/` and `ui/`
+`scripts/lint/no_emoji.py` (hook `lint-no-emoji`). Exempt: `cli/` and `ui/`
 (deliberate-UX surfaces), prose/content (`skills/`, the doc axes, `ui/web/`).
 Plain text marks (✓ ✗) are allowed. A line that genuinely needs the character
 uses inline `# emoji-ok: <reason>`.

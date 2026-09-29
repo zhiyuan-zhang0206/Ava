@@ -94,7 +94,7 @@ def test_gitignored_paths_are_not_violations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Gitignored runtime paths need no whitelist entry: the detector never
-    sees them (the documented contract — e.g. the ci_accounting ledger at
+    sees them (the documented contract — e.g. the accounting ledger at
     ``scripts/ci/ci_usage/``)."""
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")

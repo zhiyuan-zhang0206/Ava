@@ -9,7 +9,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser
 
-from scripts.post_deploy_visual.post_deploy_visual_check import _expected_capture_names
+from scripts.post_deploy_visual.check import _expected_capture_names
 from tests.e2e.test_preview_visual_gate import (
     _crop_results,
     _mint_goldens,

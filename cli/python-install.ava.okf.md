@@ -25,7 +25,7 @@ Additional/explicit-only indexes fail rather than silently losing their source p
 
 The lock-source lint runs before installation. Its stdlib implementation lives in
 `shared/python_lock.py`, included in the runtime wheel; the checkout-only
-`scripts/lint/lint_python_lock.py` is a thin CLI entry point. Both transports first run
+`scripts/lint/python_lock.py` is a thin CLI entry point. Both transports first run
 offline, freshness-checked uv export to temporary hashed requirements, before
 any uv command can create or recreate the target environment. This also protects
 an existing environment whose managed interpreter now differs from the patch

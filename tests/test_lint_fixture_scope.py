@@ -1,4 +1,4 @@
-"""`scripts/lint/lint_fixture_scope.py` — a fixture's scope versus the blast radius of
+"""`scripts/lint/fixture_scope.py` — a fixture's scope versus the blast radius of
 what it mutates.
 
 The two rules, both directions each, plus the three checks that make the whole thing
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.lint_fixture_scope")
+_lint = importlib.import_module("scripts.lint.fixture_scope")
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _E2E_CONFTEST = _REPO_ROOT / "tests" / "e2e" / "conftest.py"

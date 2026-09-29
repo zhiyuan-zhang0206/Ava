@@ -48,7 +48,7 @@ _CASES: dict[tuple[str, str], set[str]] = {
     ("agents_meta", "status"): {s.value for s in AgentStatus},
     # The stamped-by-every-terminated-write source. A value in the enum but not the
     # CHECK is a CheckViolation at the write site; a value in the CHECK but not the
-    # enum is one scripts/lint/lint_termination_source.py would reject as unknown.
+    # enum is one scripts/lint/termination_source.py would reject as unknown.
     ("agents_meta", "termination_source"): {s.value for s in TerminationSource},
     ("inbound_messages", "kind"): {s.value for s in InboundKind},
     ("machines", "role"): set(get_args(MachineRole)),

@@ -57,7 +57,7 @@ executed. Future effective windows are copied into the PR body for review.
 ## `workflows/audit-branch-protection.yml`
 
 A weekly schedule (plus manual dispatch) runs
-`scripts/audit/audit_branch_protection.py` with read access to GitHub's live branch
+`scripts/audit/branch_protection.py` with read access to GitHub's live branch
 protection and workflow registry. The script derives the expected checks from
 `.trunk/trunk.yaml`, then verifies exact required contexts, non-strict update
 policy, admin enforcement, and active `ci.yml` / `ci-rerun.yml` workflows.

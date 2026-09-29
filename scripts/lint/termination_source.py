@@ -1,7 +1,7 @@
 """Forbid an UPDATE that sets agents_meta.status='terminated' without stamping
 termination_source in the SAME statement.
 
-Run: `.venv/bin/python scripts/lint/lint_termination_source.py [path ...]` (defaults to
+Run: `.venv/bin/python scripts/lint/termination_source.py [path ...]` (defaults to
 scanning the non-test source dirs; an explicit path that does not exist is an
 error (stderr + exit 1) rather than a silent no-op). Also run automatically via
 pre-commit hook.
@@ -282,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     if total:
         print(
             f"\n{total} violation(s). See the docstring at the top of "
-            "scripts/lint/lint_termination_source.py for why this invariant is enforced in "
+            "scripts/lint/termination_source.py for why this invariant is enforced in "
             "code rather than as a DB constraint.",
             file=sys.stderr,
         )

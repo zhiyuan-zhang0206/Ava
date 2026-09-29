@@ -111,6 +111,6 @@ def test_report_failure_uses_exact_label_and_existing_message(
     send.assert_called_once_with(
         17,
         "Dev/CI metrics collection failed:\nexporter failed\n"
-        "Check the schedule log; backfill with `scripts/ci/ci_runs_export.py --repo "
+        "Check the schedule log; backfill with `scripts/ci/runs_export.py --repo "
         "zhiyuan-zhang0206/Ava --print-snapshot`.",
     )

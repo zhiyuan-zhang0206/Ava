@@ -130,7 +130,7 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
     """Return [(lineno, message), ...] for pool constructions missing keepalives.
 
     Takes source rather than a path so the lint's own tests can drive it with
-    literal snippets (same shape as scripts/lint/lint_termination_source.py).
+    literal snippets (same shape as scripts/lint/termination_source.py).
     """
     try:
         tree = ast.parse(src, filename=filename)

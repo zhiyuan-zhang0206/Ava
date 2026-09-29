@@ -3,7 +3,7 @@
 Goal: **local reasoning** — a correct change needs only the package being changed
 plus the public doors of its neighbors. The mechanism that enforces the first
 two legs (package doors, single decision owners) is the structure gate's Rules 4
-and 5 (`scripts/lint/lint_code_structure.py`, `scripts/structure/locality.py`); how to
+and 5 (`scripts/lint/code_structure.py`, `scripts/structure/locality.py`); how to
 work with them is in [python-conventions](../../conventions/python-conventions.md).
 The principle itself lives in the serious-engineering skill
 (`principles/complexity-management`, "Locality is information hiding made
@@ -58,7 +58,7 @@ lifecycle; those items wait for it to land and are then designed on its code.
    (3 each) — each gets a verdict: contract (export it) or internal (route
    callers through a door). `ava` carries no frozen reach-ins: agent
    visibility there is the `__all_for_ava__` whitelist (which
-   `lint_agent_docstrings` keys on too), not the underscore, so every
+   `agent_docstrings` keys on too), not the underscore, so every
    framework module or name another package needs took a public name without
    entering the agent's view.
 3. **Directory budgets.** `cli/commands` is down to 86 entries: an empty

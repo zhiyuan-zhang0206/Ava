@@ -53,7 +53,7 @@ comments. False positives in config-defaults and external boundaries are
 expected — flag candidates, the human decides.
 
 `except ...: pass` silent swallows are now enforced mechanically by
-`scripts/lint/lint_fail_fast.py` in pre-commit — do not re-flag them here.
+`scripts/lint/fail_fast.py` in pre-commit — do not re-flag them here.
 
 ### 4. inline-marker (whole-repo)
 
@@ -153,7 +153,7 @@ targets in `ava_builtins/plugins/*/plugin.py`):
 python - <<'PY'
 import ast
 from pathlib import Path
-from scripts.lint.lint_agent_docstrings import (
+from scripts.lint.agent_docstrings import (
     _discover_agent_surface_modules, _discover_plugin_namespace_modules, _is_in_scope,
     _agent_visible_names, _wrap_targets, _is_visible,
 )

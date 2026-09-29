@@ -1,4 +1,4 @@
-"""`scripts/lint/lint_turn_scoped_config.py` — a typo'd explicit target must fail the gate.
+"""`scripts/lint/turn_scoped_config.py` — a typo'd explicit target must fail the gate.
 
 An explicit path argument that does not exist used to scan nothing and exit 0;
 it must now report the missing target on stderr and exit 1.
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.lint import lint_turn_scoped_config as gate
+from scripts.lint import turn_scoped_config as gate
 
 
 def test_explicit_missing_target_is_an_error(

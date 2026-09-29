@@ -1,6 +1,6 @@
 """Forbid bare monkey-patching of `ava.*` in plugins — wraps must go through `ava.extend.wrap`.
 
-Run: `.venv/bin/python scripts/lint/lint_no_plugin_wrap.py [path ...]` (defaults to scanning `plugins/`;
+Run: `.venv/bin/python scripts/lint/no_plugin_wrap.py [path ...]` (defaults to scanning `plugins/`;
 an explicit path that does not exist is an error (stderr + exit 1) rather than a
 silent no-op). Also run automatically via pre-commit hook before commit.
 
@@ -183,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     if total:
         print(
             f"\n{total} bare-wrap violation(s). Route SDK wraps through "
-            "`ava.extend.wrap`; see scripts/lint/lint_no_plugin_wrap.py for the "
+            "`ava.extend.wrap`; see scripts/lint/no_plugin_wrap.py for the "
             "`# wrap-ok:` exemption.",
             file=sys.stderr,
         )

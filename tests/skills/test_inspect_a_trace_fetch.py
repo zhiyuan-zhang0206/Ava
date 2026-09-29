@@ -17,7 +17,7 @@ AVA_CLUSTER_SECRET is also a `shared.config.Settings` field alias, but
 `read_trace.py` reads it straight from `os.environ` by design (the same
 Settings-free stance as the rest of this skill script) — `monkeypatch.
 setitem(os.environ, ...)` is used below instead of `monkeypatch.setenv` /
-`delenv` so `lint_no_os_environ.py`'s real Settings-singleton-no-op check
+`delenv` so `no_os_environ.py`'s real Settings-singleton-no-op check
 stays meaningful for tests that DO exercise Settings.
 
 `_common.py::source_root` tests (2026-09-28 fix, PR #3550 follow-up P2-2):

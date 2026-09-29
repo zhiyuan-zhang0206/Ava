@@ -98,7 +98,7 @@ Turn-scoped code (`agent/`, `ava/`, `ava_builtins/`, `shared/lm/`) reads
 (`shared/config/turn_view.py`) — never the bare singleton. The view resolves
 the agent's contextvar-bound pins while the singleton holds the cluster
 default. Outside an agent turn the view reads that live default.
-Enforced by `scripts/lint/lint_turn_scoped_config.py`.
+Enforced by `scripts/lint/turn_scoped_config.py`.
 """
 
 from __future__ import annotations
@@ -186,7 +186,7 @@ if TYPE_CHECKING:
     # Heavy dependencies used ONLY as types: the aggregate and the per-domain
     # sub-models live in shared/config/_full.py (importing them would construct
     # the eager chain this module defers). See _TYPE_CHECKING_ALLOWED in
-    # scripts/lint/lint_code_structure.py. None of these imports run at runtime.
+    # scripts/lint/code_structure.py. None of these imports run at runtime.
     from shared.config._full import (
         DataPlaneSettings as DataPlaneSettings,
     )

@@ -224,10 +224,10 @@ jobs:
         run: python3 scripts/content_lint/lint_no_tailnet.py
 
       - name: Scan the root supervisor for permission-domain symbols
-        run: python3 scripts/lint/lint_ava_root_scope.py
+        run: python3 scripts/lint/ava_root_scope.py
 
       - name: Check canonical Python lock sources (stdlib only)
-        run: python3 scripts/lint/lint_python_lock.py
+        run: python3 scripts/lint/python_lock.py
 
   core-content-manifests:
     # The content-channel gate (tasks #2915/#3267): core manifests' declared
@@ -418,7 +418,7 @@ jobs:
       - name: Lint migrations
         run: uv run python scripts/content_lint/lint_migrations.py
       - name: Lint clock lattice
-        run: uv run python scripts/lint/lint_clock_lattice.py
+        run: uv run python scripts/lint/clock_lattice.py
       - name: Apply migrations to fresh DB + trigger smoke
         run: uv run python scripts/ci/migration_smoke.py
       - name: Run pyright

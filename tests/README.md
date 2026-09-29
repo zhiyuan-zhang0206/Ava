@@ -195,7 +195,7 @@ reassigns stays reassigned until then. So a session-scoped fixture that layers e
 onto the process and restores it in a `finally` restores nothing on behalf of the
 tests that follow it: everything collected after its directory, in the same process,
 keeps running with the layered values. Enforced by
-`scripts/lint/lint_fixture_scope.py` (hook `lint-fixture-scope`), two rules:
+`scripts/lint/fixture_scope.py` (hook `lint-fixture-scope`), two rules:
 
 1. **`scope="session"` outside `tests/conftest.py` may not mutate a process global**
    (`os.environ`, a `settings` field, a module global). The root conftest is the one

@@ -208,7 +208,7 @@ def main() -> int:
     if stale:
         for name in stale:
             print(
-                f"scripts/lint/lint_async_no_sync_blocking.py: stale _REPO_BLOCKING_HELPERS "
+                f"scripts/lint/async_no_sync_blocking.py: stale _REPO_BLOCKING_HELPERS "
                 f"entry {name!r} — no `def {name}` exists in the source tree any more; "
                 "drop it"
             )

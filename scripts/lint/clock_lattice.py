@@ -1,6 +1,6 @@
 """Forbid lattice-vocabulary timing constants outside the clock-lattice modules.
 
-Run: `.venv/bin/python scripts/lint/lint_clock_lattice.py [path ...]` (defaults to
+Run: `.venv/bin/python scripts/lint/clock_lattice.py [path ...]` (defaults to
 scanning the non-test source dirs; an explicit path that does not exist is an
 error (stderr + exit 1) rather than a bare traceback). Also run automatically
 via pre-commit hook.

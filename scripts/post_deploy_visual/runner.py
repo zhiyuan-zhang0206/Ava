@@ -10,13 +10,13 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, sync_playwright
 
-from scripts.post_deploy_visual.post_deploy_visual_matrix import (
+from scripts.post_deploy_visual.matrix import (
     guard_requests,
     load_ignore_registry,
     new_matrix_context,
     run_matrix,
 )
-from scripts.post_deploy_visual.post_deploy_visual_policy import (
+from scripts.post_deploy_visual.policy import (
     P0_EXIT_CODE,
     P2_EXIT_CODE,
     STRUCTURAL_SPECS,

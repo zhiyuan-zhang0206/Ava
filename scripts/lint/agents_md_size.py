@@ -1,6 +1,6 @@
 """Enforce an AGENTS.md line-count ceiling to prevent progressive bloat.
 
-Run: `.venv/bin/python scripts/lint/lint_agents_md_size.py`. Also run automatically via
+Run: `.venv/bin/python scripts/lint/agents_md_size.py`. Also run automatically via
 pre-commit hook on any change to AGENTS.md.
 
 ## Why
@@ -57,7 +57,7 @@ def main(_argv: list[str] | None = None) -> int:
             f"AGENTS.md:{n_lines}: error: {n_lines} lines exceeds the "
             f"{_HARD_CEILING}-line hard ceiling — trim or move content to "
             f"conventions/. If the ceiling genuinely needs to move, bump "
-            f"_HARD_CEILING in scripts/lint/lint_agents_md_size.py in the same PR "
+            f"_HARD_CEILING in scripts/lint/agents_md_size.py in the same PR "
             f"and justify it in the commit message.",
         )
         exit_code = 1

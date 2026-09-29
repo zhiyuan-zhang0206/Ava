@@ -182,7 +182,7 @@ Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blas
 ### Prefer a mechanical guard where the boundary is nameable
 
 A rule someone has to remember loses to a hook that fails with a clear message.
-`scripts/lint/lint_note_tags.py` turns one arm of the enum blast-radius class into a
+`scripts/lint/note_tags.py` turns one arm of the enum blast-radius class into a
 pre-commit failure; derived sets (`agent/state.py:_BASE_STATE_FIELDS`, from
 `model_fields`) need no guard at all because they cannot go stale. Reach for the
 written rule only where the boundary genuinely resists naming.

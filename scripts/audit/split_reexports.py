@@ -1,9 +1,9 @@
 """Audit module-split re-exports across the whole repo (task #2498 W-series).
 
-Run: `.venv/bin/python scripts/audit/audit_split_reexports.py <module> [<module> ...]`
+Run: `.venv/bin/python scripts/audit/split_reexports.py <module> [<module> ...]`
 from the repo root, e.g. the W3 split surface:
 
-    .venv/bin/python scripts/audit/audit_split_reexports.py shared.events.contract shared.migrations
+    .venv/bin/python scripts/audit/split_reexports.py shared.events.contract shared.migrations
 
 ## Why
 

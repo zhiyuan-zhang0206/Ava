@@ -1,4 +1,4 @@
-"""`scripts/lint/lint_time_bomb.py` — the fixed-instant / real-clock test invariant.
+"""`scripts/lint/time_bomb.py` — the fixed-instant / real-clock test invariant.
 
 A test that asserts an exact equality on a value derived from a repo fixed
 instant while the derivation can reach the real clock is correct only while
@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.lint_time_bomb")
+_lint = importlib.import_module("scripts.lint.time_bomb")
 
 
 @pytest.fixture()

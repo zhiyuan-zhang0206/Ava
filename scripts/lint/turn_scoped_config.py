@@ -1,6 +1,6 @@
 """Forbid reading per-agent config through a process-global in turn-scoped code.
 
-Run: `.venv/bin/python scripts/lint/lint_turn_scoped_config.py [path ...]` (defaults
+Run: `.venv/bin/python scripts/lint/turn_scoped_config.py [path ...]` (defaults
 to the turn-scoped packages; an explicit path that does not exist is an error
 (stderr + exit 1) rather than a silent no-op). Also runs automatically via
 pre-commit.

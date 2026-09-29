@@ -1,7 +1,7 @@
 """Structural lints that keep the codebase legible to agents: no `TYPE_CHECKING`
 import-folding, role-call allowlisting, and frozen structure/function budgets.
 
-Run: `.venv/bin/python scripts/lint/lint_code_structure.py [path ...]` (defaults to the
+Run: `.venv/bin/python scripts/lint/code_structure.py [path ...]` (defaults to the
 whole repo; an explicit path that does not exist is an error (stderr + exit 1)
 rather than a silent no-op). Also run automatically via pre-commit hook before
 commit.
@@ -287,7 +287,7 @@ def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> lis
                     "App deps are always on the runtime path and LangGraph/Pydantic "
                     "introspect type hints at runtime (deferred imports NameError). "
                     "Real circular-import / heavy-dep cases: refactor, or add this file "
-                    "to _TYPE_CHECKING_ALLOWED in scripts/lint/lint_code_structure.py with a reason.",
+                    "to _TYPE_CHECKING_ALLOWED in scripts/lint/code_structure.py with a reason.",
                 )
             )
 
@@ -299,7 +299,7 @@ def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> lis
                     1,
                     f"stale machine_role() allowlist entry — {rel_path} no longer calls "
                     "machine_role(); remove it from _MACHINE_ROLE_ALLOWED in "
-                    "scripts/lint/lint_code_structure.py (the list must match reality, "
+                    "scripts/lint/code_structure.py (the list must match reality, "
                     "issue #216).",
                 )
             )
@@ -309,7 +309,7 @@ def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> lis
                 (
                     lineno,
                     "machine_role() may only be called from modules in "
-                    "_MACHINE_ROLE_ALLOWED (scripts/lint/lint_code_structure.py) — the "
+                    "_MACHINE_ROLE_ALLOWED (scripts/lint/code_structure.py) — the "
                     "gateway is the single routing point and no operation may branch "
                     "on role (user ruling 2026-08-21, issue #216). Add the module "
                     "deliberately with the question the call answers, or route the "
@@ -715,7 +715,7 @@ def main(argv: list[str] | None = None) -> int:
         print(error)
     if errors:
         print(
-            f"\n{len(errors)} hard violations. See scripts/lint/lint_code_structure.py for the rules.",
+            f"\n{len(errors)} hard violations. See scripts/lint/code_structure.py for the rules.",
             file=sys.stderr,
         )
         return 1

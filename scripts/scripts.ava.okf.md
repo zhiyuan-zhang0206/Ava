@@ -20,19 +20,19 @@ tags:
 Split by kind: code/AST/Python-convention guards in [[scripts/lint/lint.ava.okf.md]]; document/OKF/skill/migration-format guards in [[scripts/content_lint/content_lint.ava.okf.md]].
 
 ### `audit/` — read-only drift audits
-`audit_branch_protection.py` (live GitHub branch protection vs. `.trunk/trunk.yaml`), `audit_module_moves.py`, `audit_split_reexports.py` (package-door split/re-export shape checks, also called by the structure gate).
+`branch_protection.py` (live GitHub branch protection vs. `.trunk/trunk.yaml`), `module_moves.py`, `split_reexports.py` (package-door split/re-export shape checks, also called by the structure gate).
 
 ### `codegen/` — derived-artifact generation and OKF tooling
 `build_okf_data.py` (bundle → `graph_data.json`), `serve_okf_viz.py` (local viewer, `okf-d3-template.html` — also read by `gateway/routers/okf_graph.py`'s `/api/okf/graph`), `fix_okf.py`, `migrate_okf.py`, `fix_frontmatter.py` — OKF tooling. `build_app_update_manifest.py` (Tauri archives → `latest.json`), `build_hierarchy_once.py`, `dump_event_fixtures.py`, `dump_frontend_constants.py`, `dump_openapi.py`, `gen_config_lite_table.py`, `gen_event_registry.py`, `generate-ui-page.py` — one generator per artifact, each with a matching `check-*-fresh.sh` or pre-commit drift gate.
 
 ### `ci/` — CI job / test / release-cut infrastructure
-`ci_accounting.py`, `ci_job_rerun.py`, `ci_runs_export.py` — CI-minute attribution and job/workflow tooling; `coverage_gates.py` — backend coverage gates; `qa_gate.py` + `qa_receipt.py` — exact-head QA evidence evaluation (see [receipt contract](../conventions/qa-approval-receipt.md)); `test_selector.py` — static-import PR test selection feeding `ci.yml`; `refresh_test_durations.py` — `.test_durations` refresh; `migration_smoke.py`, `pgvector_runtime_smoke.py`, `two_section_chain_smoke.py`, `verify_runtime_wheel.py` — smoke/verification gates; `release_cut.py`, `tag_latest.py` — dated release tagging.
+`accounting.py`, `job_rerun.py`, `runs_export.py` — CI-minute attribution and job/workflow tooling; `coverage_gates.py` — backend coverage gates; `qa_gate.py` + `qa_receipt.py` — exact-head QA evidence evaluation (see [receipt contract](../conventions/qa-approval-receipt.md)); `test_selector.py` — static-import PR test selection feeding `ci.yml`; `refresh_test_durations.py` — `.test_durations` refresh; `migration_smoke.py`, `pgvector_runtime_smoke.py`, `two_section_chain_smoke.py`, `verify_runtime_wheel.py` — smoke/verification gates; `release_cut.py`, `tag_latest.py` — dated release tagging.
 
 ### `release_proofs/` — release-prepare / retained-image verification (CI-only)
 `prepare_plugin_fixture.py` plus the `prove_runtime_*` / `prove_release_inventory.py` / `prove_exec_owner_installed.py` / `prove_native_launcher_reads.py` family: each is copied into an isolated scratch interpreter (`-I`, no checkout visible) to prove a captured release image is self-contained. Invoked from `.github/workflows/runtime-*.yml`.
 
 ### `post_deploy_visual/` — production visual regression gate
-`post_deploy_visual_check.py` — read-only five-surface production visual gate; a `started_at` change distinguishes deployment waves from daily sentinels, and stable two-frame pixel drift is attributed to the golden-to-wave diff (audited `--accept-wave` updates the golden). `post_deploy_visual_matrix.py` (capture matrix, shared with the blocking CI preview gate `tests/e2e/test_preview_visual_gate.py`), `_browser_js.py`, `_fixtures.py`, `_policy.py`, `_runner.py`, `refresh_visual_baselines.py`. Details + cron example: `README.md` here.
+`check.py` — read-only five-surface production visual gate; a `started_at` change distinguishes deployment waves from daily sentinels, and stable two-frame pixel drift is attributed to the golden-to-wave diff (audited `--accept-wave` updates the golden). `matrix.py` (capture matrix, shared with the blocking CI preview gate `tests/e2e/test_preview_visual_gate.py`), `_browser_js.py`, `_fixtures.py`, `_policy.py`, `_runner.py`, `refresh_visual_baselines.py`. Details + cron example: `README.md` here.
 
 ### `model_registry/` — provider model / pricing sync
 `check_model_updates.py` — daily comparison of official provider models against Ava's registry; `update_model_pricing.py` + `plugin_price_sync.py` — price checks and archive-to-plugin rate sync.

@@ -52,7 +52,7 @@ def test_offset_is_rendered_from_the_setting(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_carries_the_timezone_note_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tag drives the UI chip; an unmapped one renders as a loud alarm
-    (`scripts/lint/lint_note_tags.py` enforces the frontend half)."""
+    (`scripts/lint/note_tags.py` enforces the frontend half)."""
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     note = timezone_note()
     assert note is not None

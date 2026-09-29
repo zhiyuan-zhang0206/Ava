@@ -1,4 +1,4 @@
-"""`scripts/lint/lint_termination_source.py` — the terminated-write stamping invariant.
+"""`scripts/lint/termination_source.py` — the terminated-write stamping invariant.
 
 A NULL `termination_source` is permanently unresurrectable (the
 CrashResurrectController claim filters on it), so a write site that forgets to
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.lint_termination_source")
+_lint = importlib.import_module("scripts.lint.termination_source")
 
 _SOURCES = frozenset({"user", "exit", "reaper", "launch-confirm", "integrity"})
 

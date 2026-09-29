@@ -47,7 +47,7 @@ the ``except`` line or the ``pass`` line (mirrors ``# emoji-ok`` / ``# env-ok``
 
 Scope: every ``*.py`` under the 7 framework dirs
 ``ava/ plugins/ agent/ gateway/ cli/ services/ shared/``. Run it standalone
-(`.venv/bin/python scripts/lint/lint_fail_fast.py`); fail -> exit 1. Also wired as the
+(`.venv/bin/python scripts/lint/fail_fast.py`); fail -> exit 1. Also wired as the
 `lint-fail-fast` pre-commit hook.
 """
 

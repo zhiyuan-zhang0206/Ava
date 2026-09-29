@@ -1,6 +1,6 @@
 # Post-deploy visual gate
 
-`scripts/post_deploy_visual/post_deploy_visual_check.py` is the read-only, non-blocking visual
+`scripts/post_deploy_visual/check.py` is the read-only, non-blocking visual
 regression gate that runs against the production frontend after a deployment
 wave. It writes artifacts and exit codes only; the invoking agent routes
 notifications (P0 -> `send_message` to #3242 and #405, P2 -> `notify` queue).
@@ -93,7 +93,7 @@ formats; a storage-state JSON export must be revoked from the logged-in UI.
 ## Daily schedule
 
 ```
-30 7 * * * AVA_VISUAL_GATE_COOKIE_FILE=/secure/ava-visual-cookies.txt /path/to/Ava/.venv/bin/python /path/to/Ava/scripts/post_deploy_visual/post_deploy_visual_check.py --check --base-url https://gateway.example
+30 7 * * * AVA_VISUAL_GATE_COOKIE_FILE=/secure/ava-visual-cookies.txt /path/to/Ava/.venv/bin/python /path/to/Ava/scripts/post_deploy_visual/check.py --check --base-url https://gateway.example
 ```
 
 

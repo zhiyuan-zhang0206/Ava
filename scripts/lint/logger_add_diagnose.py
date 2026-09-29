@@ -1,12 +1,12 @@
 """Forbid a `logger.add(...)` sink that does not explicitly pass `diagnose=False`.
 
-Run: `.venv/bin/python scripts/lint/lint_logger_add_diagnose.py [path ...]` (defaults
+Run: `.venv/bin/python scripts/lint/logger_add_diagnose.py [path ...]` (defaults
 to scanning the whole repo; an explicit path that does not exist is an error
 (stderr + exit 1) rather than a silent no-op). Also run automatically via
 pre-commit hook.
 
 Lives under `scripts/lint/` rather than directly under `scripts/`, alongside
-`lint_async_no_sync_blocking.py` — `scripts/` sits at its frozen 20+-entry
+`async_no_sync_blocking.py` — `scripts/` sits at its frozen 20+-entry
 directory-budget ceiling (`scripts/structure/baseline/scripts.json`), so adding this
 file directly there needed a same-PR relocation to net to zero. Not (yet) a
 wholesale move of every `scripts/lint_*.py`.
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     if total:
         print(
             f"\n{total} logger.add(...) call(s) without diagnose=False. See the "
-            "docstring at the top of scripts/lint/lint_logger_add_diagnose.py.",
+            "docstring at the top of scripts/lint/logger_add_diagnose.py.",
             file=sys.stderr,
         )
         return 1

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Forbid permission-domain and macOS-specific symbols in the root supervisor.
 
-Run: `.venv/bin/python scripts/lint/lint_ava_root_scope.py [path ...]` — no paths
+Run: `.venv/bin/python scripts/lint/ava_root_scope.py [path ...]` — no paths
 scans `services/ava_root/` (the root supervisor's own code); explicit paths
 scan exactly those files/directories, and an explicit path that does not
 exist is an error (stderr + exit 1) rather than a silent no-op. Also run
@@ -46,7 +46,7 @@ this lint's review surface.
 A line that genuinely must carry one of these names opts out inline with
 `# ava-root-scope-ok: <reason>` (same convention as the other repo lints).
 The marker is matched against real comment tokens only (the token semantics
-of `lint_no_emoji.py`), so the same text inside a string literal does not
+of `no_emoji.py`), so the same text inside a string literal does not
 exempt. The marker exempts only its own line.
 
 Error format `file:line: <symbol> | <line content>` + non-zero exit.
@@ -166,7 +166,7 @@ def _exempt_lines(text: str) -> set[int]:
     """Line numbers whose *comment* carries the opt-out marker.
 
     Tokenizing distinguishes a real comment from the same characters appearing
-    inside a string literal (lint_no_emoji.py's semantics). Unparseable text
+    inside a string literal (no_emoji.py's semantics). Unparseable text
     falls back to a permissive per-line substring match.
     """
     try:
@@ -258,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
             "platform-specific names — keep the coupling at the OS edge, or, "
             "when a line genuinely must carry a name, annotate it with "
             "`# ava-root-scope-ok: <reason>`. See the docstring at the top of "
-            "scripts/lint/lint_ava_root_scope.py.",
+            "scripts/lint/ava_root_scope.py.",
             file=sys.stderr,
         )
         return 1

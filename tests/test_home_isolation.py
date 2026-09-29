@@ -192,7 +192,7 @@ def test_the_e2e_fixture_restores_every_env_key_it_assigns() -> None:
     drifted once. Setup assignments only — the writes after the `yield` are the
     restore itself.
     """
-    lint = importlib.import_module("scripts.lint.lint_fixture_scope")
+    lint = importlib.import_module("scripts.lint.fixture_scope")
     assigned, dynamic = lint.setup_env_keys(
         _E2E_CONFTEST.read_text(encoding="utf-8"), "_e2e_process_env"
     )
@@ -238,5 +238,5 @@ def test_no_e2e_value_for_a_restored_key_survives_into_this_file(
             "session started with. Something with a scope broader than the directory it "
             "was written for assigned it and did not put it back before pytest got here "
             "— see tests/e2e/conftest.py:_e2e_process_env for the shape, and "
-            "scripts/lint/lint_fixture_scope.py for the lint that is supposed to prevent it."
+            "scripts/lint/fixture_scope.py for the lint that is supposed to prevent it."
         )

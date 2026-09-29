@@ -1,4 +1,4 @@
-"""`scripts/lint/lint_clock_lattice.py` — the lattice-vocabulary placement invariant.
+"""`scripts/lint/clock_lattice.py` — the lattice-vocabulary placement invariant.
 
 A module-level constant whose name carries lattice vocabulary (STALL / GRACE /
 REAP / BUDGET / WEDGED / NO_PROGRESS / LOCK_TTL / UPDATER_LEASE / SETTLE_TTL /
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.lint_clock_lattice")
+_lint = importlib.import_module("scripts.lint.clock_lattice")
 
 
 @pytest.fixture()

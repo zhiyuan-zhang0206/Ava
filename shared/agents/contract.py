@@ -46,7 +46,7 @@ class TerminationSource(StrEnum):
     and source in ONE statement, so the pair can never come apart); this enum is
     the value-set source of truth, locked to the column's CHECK by
     `tests/test_db_check_enum_sync.py` and to the literals by
-    `scripts/lint/lint_termination_source.py`.
+    `scripts/lint/termination_source.py`.
 
     Resurrect policy — INVOLUNTARY deaths come back, intentional ones stay dead:
     `ops/controllers/resurrect.py` allowlists exactly `RESURRECTABLE`.

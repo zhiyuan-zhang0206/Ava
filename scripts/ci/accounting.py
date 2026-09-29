@@ -12,12 +12,12 @@ Scope: the `CI` workflow only (the cost driver — a full run is ~110 billable
 minutes across shards; auxiliary workflows are seconds each).
 
 Usage:
-    .venv/bin/python scripts/ci/ci_accounting.py --since 2026-09-05T16:00Z \
+    .venv/bin/python scripts/ci/accounting.py --since 2026-09-05T16:00Z \
         --until 2026-09-06T16:00Z [--repo owner/repo] [--json]
 
-    .venv/bin/python scripts/ci/ci_accounting.py --since ... --until ... \
+    .venv/bin/python scripts/ci/accounting.py --since ... --until ... \
         --append-ledger scripts/ci/ci_usage/ledger.jsonl
-    .venv/bin/python scripts/ci/ci_accounting.py --report [--days N] [--json]
+    .venv/bin/python scripts/ci/accounting.py --report [--days N] [--json]
 
     Default: print one attribution entry per CI run in the window. With
     `--append-ledger PATH` the entries are appended idempotently (keyed by

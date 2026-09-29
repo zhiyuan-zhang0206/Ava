@@ -72,7 +72,7 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 # NOTE: shared/bootstrap.py reads os.environ directly (it must run BEFORE
 # Settings is built — Settings imports require these values to be present).
 # So tests against it use monkeypatch.setitem(os.environ, ...) — equivalent to
-# setenv, but bypasses the lint_no_os_environ Rule 2 ban on monkeypatch.setenv
+# setenv, but bypasses the no_os_environ Rule 2 ban on monkeypatch.setenv
 # of Settings-managed aliases (which is the right ban for code that reads
 # settings.X, the wrong one for code that reads os.environ).
 def test_inject_config_updates_environ(

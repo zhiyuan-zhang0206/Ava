@@ -94,7 +94,7 @@ inside inline-code spans / fenced blocks (prose is never flagged), hostnames
 (`ava.host.com`) and the metasyntactic `ava.X` placeholder are excluded, and
 the valid set is built live from `ava.__all_for_ava__` + real submodules + module attrs
 + plugin-registered namespaces (reusing the same plugin scan
-`lint_agent_docstrings.py` uses, so the two stay coupled).
+`agent_docstrings.py` uses, so the two stay coupled).
 
 ## Worked example: `skill-desc`
 

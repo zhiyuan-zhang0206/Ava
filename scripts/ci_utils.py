@@ -85,8 +85,8 @@ from typing import Any, TypedDict
 # sibling module; under pytest pythonpath=["."] this is a redundant no-op.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.ci.ci_accounting import DEFAULT_LEDGER, load_ledger, report_rows
-from scripts.ci.ci_job_rerun import CiJobRerunError, list_failed_jobs, rerun_failed_jobs
+from scripts.ci.accounting import DEFAULT_LEDGER, load_ledger, report_rows
+from scripts.ci.job_rerun import CiJobRerunError, list_failed_jobs, rerun_failed_jobs
 
 # The Ava checkout root this script ships in — anchors base-freshness git reads
 # against THIS repo's origin regardless of the caller's cwd (task #2496).
@@ -1166,7 +1166,7 @@ def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentPar
 
 def _ci_usage_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
     """Dispatch --ci-usage when set; None when not set.
-    Reads the repo ledger (scripts/ci/ci_usage/ledger.jsonl, produced by scripts/ci/ci_accounting.py
+    Reads the repo ledger (scripts/ci/ci_usage/ledger.jsonl, produced by scripts/ci/accounting.py
     --append-ledger) and prints per-agent rollups — the read side of the CI cost attribution
     pipeline (task #2575).
     """

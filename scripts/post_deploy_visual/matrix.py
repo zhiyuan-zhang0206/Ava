@@ -19,13 +19,13 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Page, Route
 
-from scripts.post_deploy_visual.post_deploy_visual_browser_js import OVERLAY, PIXEL_DIFF
-from scripts.post_deploy_visual.post_deploy_visual_fixtures import (
+from scripts.post_deploy_visual.browser_js import OVERLAY, PIXEL_DIFF
+from scripts.post_deploy_visual.fixtures import (
     FIXTURES,
     INERT_EVENT_SOURCE,
     RUN_TIMELINE,
 )
-from scripts.post_deploy_visual.post_deploy_visual_policy import (
+from scripts.post_deploy_visual.policy import (
     CHANNEL_DELTA_THRESHOLD,
     STRUCTURAL_SPECS,
     THEMES,
@@ -45,7 +45,7 @@ from tests.e2e._layout_assertions import (
 class VisualGateBudgetExceeded(RuntimeError):  # noqa: N818 - reads as the outcome, not an error kind
     """The host's 28-minute wave budget expired mid-matrix.
 
-    Raised from the SIGALRM handler in post_deploy_visual_check. It is a
+    Raised from the SIGALRM handler in check. It is a
     whole-wave abort, not a per-surface failure: run_matrix lets it escape
     untouched so the consumer's finally chain (browser.close(), alarm
     teardown) still runs and the hard-exit grace is not wasted on the

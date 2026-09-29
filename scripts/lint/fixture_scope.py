@@ -1,7 +1,7 @@
 """Forbid a pytest fixture whose scope outlives the blast radius of the process
 global it mutates.
 
-Run: `.venv/bin/python scripts/lint/lint_fixture_scope.py [path ...]` (defaults to
+Run: `.venv/bin/python scripts/lint/fixture_scope.py [path ...]` (defaults to
 scanning `tests/`; an explicit path that does not exist is an error (stderr +
 exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
 
@@ -83,7 +83,7 @@ mutations and separating them from the ordinary `shutil.rmtree(...)` /
 `subprocess.run(...)` calls a fixture body is full of would take a deny-list of
 method names, which is the polarity this file argues against. The surface covered is
 the one this repo has declared its runtime-config surface — env vars and
-`shared.config.settings` fields (see `scripts/lint/lint_no_os_environ.py`) — plus every
+`shared.config.settings` fields (see `scripts/lint/no_os_environ.py`) — plus every
 `Store` / `Del` target and `global` declaration, which is exhaustive over the
 syntactic forms.
 
@@ -431,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     if total:
         print(
             f"\n{total} fixture-scope violations. See the docstring at the top of "
-            "scripts/lint/lint_fixture_scope.py for the two rules and why session scope is "
+            "scripts/lint/fixture_scope.py for the two rules and why session scope is "
             "exempt only in the root conftest.",
             file=sys.stderr,
         )

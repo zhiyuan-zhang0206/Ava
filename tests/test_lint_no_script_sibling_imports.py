@@ -1,4 +1,4 @@
-"""`scripts/lint/lint_no_script_sibling_imports.py` — the PYTHONSAFEPATH sibling-import guard.
+"""`scripts/lint/no_script_sibling_imports.py` — the PYTHONSAFEPATH sibling-import guard.
 
 A script-mode file (main block or python/uv shebang) may not import a
 same-directory sibling unless a `sys.path.insert` / `sys.path.append` call
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.lint_no_script_sibling_imports")
+_lint = importlib.import_module("scripts.lint.no_script_sibling_imports")
 
 
 @pytest.fixture()

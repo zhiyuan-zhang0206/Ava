@@ -5,7 +5,7 @@ a module from a file (`importlib.util.spec_from_file_location`,
 `importlib.machinery.SourceFileLoader`, `runpy.run_path`) turns its directory into
 an unreviewed code package that sidesteps the package doors, budgets and locality
 rules. Shared code belongs in a governed package the script imports normally, and
-the script stays a thin entry point. Rule 6 in scripts/lint/lint_code_structure.py; the
+the script stays a thin entry point. Rule 6 in scripts/lint/code_structure.py; the
 frozen sites live in the `path_imports` section of the scripts/structure/baseline/ shards
 as `path::target -> site count`, matched exactly like the locality sections.
 """

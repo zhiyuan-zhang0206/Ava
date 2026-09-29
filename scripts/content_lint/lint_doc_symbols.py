@@ -22,7 +22,7 @@ references go stale here:
   4. plugin-registered namespace names — the strings in `ava.register_namespace("X", ...)`
      calls across `plugins/*/plugin.py` (e.g. `cwd` from `ava_code`). These are real
      `ava.*` surface at agent runtime but invisible to a bare `import ava`, so they are
-     discovered by the same AST scan `lint_agent_docstrings.py` uses — the two lints stay
+     discovered by the same AST scan `agent_docstrings.py` uses — the two lints stay
      coupled to one definition of "what a plugin registers".
 
 Only the FIRST segment is validated: `ava.shell.list` -> check `shell`;
@@ -118,7 +118,7 @@ def _plugin_namespace_names() -> set[str]:
 
     These are real `ava.X` surface at agent runtime (e.g. `cwd` from `ava_code`) but
     are not present on a bare `import ava`, so the docs may legitimately cite them.
-    Discovered by the same AST scan `lint_agent_docstrings.py` uses, keeping the two
+    Discovered by the same AST scan `agent_docstrings.py` uses, keeping the two
     lints coupled to one notion of "what a plugin registers".
     """
     names: set[str] = set()

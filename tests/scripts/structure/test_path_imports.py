@@ -14,7 +14,7 @@ import subprocess
 
 import pytest
 
-from scripts.lint import lint_code_structure as lcs
+from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards, path_imports
 
 _SKILL = "ava_builtins/skills/demo/reference/run.py"

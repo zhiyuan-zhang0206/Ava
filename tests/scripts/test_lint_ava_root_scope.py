@@ -1,4 +1,4 @@
-"""scripts/lint/lint_ava_root_scope.py: the root supervisor's scope gate.
+"""scripts/lint/ava_root_scope.py: the root supervisor's scope gate.
 
 The gate keeps services/ava_root/ free of permission-domain and
 platform-specific names (ruling 2026-09-12: the privileged helper program is a
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.lint import lint_ava_root_scope as gate
+from scripts.lint import ava_root_scope as gate
 
 
 def _write(base: Path, rel: str, content: str) -> Path:
@@ -146,7 +146,7 @@ def test_inline_marker_in_string_literal_does_not_exempt(tmp_path: Path) -> None
 
 def test_unparseable_text_falls_back_to_substring_marker(tmp_path: Path) -> None:
     """Tokenizing failure falls back to a per-line substring match, mirroring
-    lint_no_emoji.py's permissive fallback."""
+    no_emoji.py's permissive fallback."""
     path = _write(
         tmp_path,
         "mod.py",

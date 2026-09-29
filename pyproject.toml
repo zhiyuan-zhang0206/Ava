@@ -416,7 +416,7 @@ ignore = [
 # and carries Chinese notes from data analysis of real error corpora.
 "ava_builtins/plugins/ava_syntax_fix/*" = ["RUF001", "RUF002", "RUF003"]
 # CJK regex explanation comment — legitimate.
-"scripts/lint/lint_agent_docstrings.py" = ["RUF003"]
+"scripts/lint/agent_docstrings.py" = ["RUF003"]
 
 # contextvar mechanism owners — the only files allowed to import contextvars
 # (allowlist lock, user ruling 2026-08-27, audit #3607). New use points must be

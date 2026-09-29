@@ -1,5 +1,5 @@
 """Unit tests for the 2026-06-10 prompt-slim additions to
-scripts/lint/lint_agent_docstrings.py: module-docstring child-name restating,
+scripts/lint/agent_docstrings.py: module-docstring child-name restating,
 SDK<->skill coupling, and the new impl/reverse-reference keywords. The
 pre-existing CJK / keyword machinery is exercised implicitly (same code path).
 """
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.lint.lint_agent_docstrings import (
+from scripts.lint.agent_docstrings import (
     _SKILL_REF_RE,
     _discover_agent_surface_modules,
     _docstring_violations,

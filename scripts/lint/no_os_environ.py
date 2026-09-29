@@ -1,6 +1,6 @@
 """Forbid bare os.environ / os.getenv — runtime config must go through shared.config.Settings.
 
-Run: `.venv/bin/python scripts/lint/lint_no_os_environ.py [path ...]` (defaults to scanning the whole repo;
+Run: `.venv/bin/python scripts/lint/no_os_environ.py [path ...]` (defaults to scanning the whole repo;
 an explicit path that does not exist is an error (stderr + exit 1) rather than a
 silent no-op). Also run automatically via pre-commit hook before commit.
 
@@ -127,7 +127,7 @@ _ALLOWED_FILES = frozenset(
         "services/page_server/daemon.py",  # spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as shared/session_env
         "shared/cluster_auth.py",  # delivered_token reads the per-launch AVA_API_TOKEN the root launcher (or the boot pass) sets for this process — a write generation's machine credential handoff, never persisted config; it is read during the Settings import (bootstrap fetch), same class as PAGE_SERVER_TOKEN
         "services/page_server/server.py",  # reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it
-        "scripts/lint/lint_no_os_environ.py",  # this script itself has "os.environ" in strings
+        "scripts/lint/no_os_environ.py",  # this script itself has "os.environ" in strings
         "scripts/release_proofs/prove_runtime_prepare.py",  # CI scratch/checkout guards and sanitized child environments must be read before installed Settings exists.
         "scripts/release_proofs/prove_runtime_consumer.py",  # CI-only isolated child environment and missing-home negative control, not runtime configuration.
         "scripts/release_proofs/prove_runtime_migration.py",  # CI-only runner scratch guard must not become an application setting.
@@ -136,7 +136,7 @@ _ALLOWED_FILES = frozenset(
         "scripts/release_proofs/prove_exec_owner_installed.py",  # CI-only scratch child projection for source-absent proof.
         "scripts/release_proofs/prove_release_inventory.py",  # CI-only native PG and private unit projection for source-absent proof.
         "scripts/model_registry/check_model_updates.py",  # tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback
-        "scripts/lint/lint_fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body
+        "scripts/lint/fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body
         "shared/session_env.py",  # forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded
         "shared/editable_install.py",  # editable_import_gate starts an isolated venv subprocess from the live inherited environment while removing VIRTUAL_ENV/PYTHONPATH; this process-boundary sanitation cannot use Settings' startup snapshot
         "shared/sessions/pty/host.py",  # the pty child (post-fork, pre-exec) builds its environment from the 0600 envfile dict overlaid on the host's inherited env — the same whole-environment child handoff as shared.session_env / shared.env_registry; Settings cannot enumerate non-modeled keys and the overlay must reflect the parent's live env
@@ -151,7 +151,7 @@ _ALLOWED_FILES = frozenset(
         "scripts/preview/linux_cycle.py",  # the os.environ token is inside a `-c` script string handed to a spawned child interpreter to exercise the persistent-terminal fixture; this driving process never reads the raw environment itself
         "scripts/preview/linux_observer.py",  # _require_context validates AVA_HOME/AVA_CLUSTER_REGISTRY name this preview's own home before importing Settings or touching storage — the same pre-Settings guard class as cli/preflight.py
         "scripts/preview/local.py",  # clean_env() builds a disposable preview subprocess's child environment from a fixed allowlist of raw OS vars (HOME/USER/PATH/...) merged with a hardcoded profile — a preview driver constructing a child environment, the documented exemption class
-        "scripts/lint/lint_code_structure.py",  # LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings.
+        "scripts/lint/code_structure.py",  # LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings.
         "scripts/ci/coverage_gates.py",  # BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing shared.config would drag the settings singleton into a pure CI report parser
         "scripts/ci_utils.py",  # CI_QUEUE and TRUNK_API_TOKEN are per-invocation CI-orchestration inputs; Settings models deployment config, and its singleton cannot preserve the required live environment read for this standalone merge watcher
         "shared/platform.py",  # process-platform plumbing that Settings cannot model: ensure_utf8_stdio sets Python runtime encoding knobs for child interpreters; launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity
@@ -326,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
     if total_violations:
         print(
             f"\n{total_violations} violations total. See the docstring at the top of "
-            "scripts/lint/lint_no_os_environ.py for the exemption procedure and the rationale "
+            "scripts/lint/no_os_environ.py for the exemption procedure and the rationale "
             "for using setattr in tests.",
             file=sys.stderr,
         )

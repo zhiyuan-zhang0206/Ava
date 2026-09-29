@@ -1,6 +1,6 @@
 """Audit module moves without compatibility shims across repository content.
 
-Run: `.venv/bin/python scripts/audit/audit_module_moves.py OLD=NEW [OLD=NEW ...]`
+Run: `.venv/bin/python scripts/audit/module_moves.py OLD=NEW [OLD=NEW ...]`
 
 ## Why
 

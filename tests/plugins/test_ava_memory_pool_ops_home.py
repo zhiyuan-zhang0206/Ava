@@ -17,7 +17,7 @@ happens to run this.
 Runs `pool_ops.py` in a subprocess with a from-scratch environment (like
 `test_ava_memory_steward_guard.py`'s `env = os.environ.copy()` pattern)
 rather than `monkeypatch.setenv`/`delenv` on `AVA_HOME` — `AVA_HOME` is also
-a `shared.config.Settings` field alias, and `lint_no_os_environ.py` (Rule 2)
+a `shared.config.Settings` field alias, and `no_os_environ.py` (Rule 2)
 correctly flags `monkeypatch.setenv` on it as a Settings-singleton no-op
 footgun everywhere else in the suite; `pool_ops.py` reads raw `os.environ` by
 design, so a real subprocess environment is the actual seam here, not a

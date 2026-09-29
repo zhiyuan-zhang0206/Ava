@@ -30,15 +30,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.post_deploy_visual.post_deploy_visual_matrix import (  # noqa: E402
+from scripts.post_deploy_visual.matrix import (  # noqa: E402
     VisualGateBudgetExceeded,
 )
-from scripts.post_deploy_visual.post_deploy_visual_policy import (  # noqa: E402
+from scripts.post_deploy_visual.policy import (  # noqa: E402
     extract_gateway_sha,
     extract_gateway_started_at,
     validate_wave_id,
 )
-from scripts.post_deploy_visual.post_deploy_visual_runner import run_browser_gate  # noqa: E402
+from scripts.post_deploy_visual.runner import run_browser_gate  # noqa: E402
 from shared.process_env import inherited_process_env  # noqa: E402
 
 DEFAULT_OUTPUT_ROOT = Path.home() / "post-deploy-visual"

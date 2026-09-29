@@ -7,7 +7,7 @@ this landed originally) so there is exactly one place that resolves this
 chicken-and-egg step: `resolve_ava_home` cannot run until `shared` is on
 `sys.path`, and `shared` cannot be located without first deciding where to
 look. A script-mode sibling import needs its own guard under
-`PYTHONSAFEPATH=1` (see `scripts/lint/lint_no_script_sibling_imports.py`) — both
+`PYTHONSAFEPATH=1` (see `scripts/lint/no_script_sibling_imports.py`) — both
 callers insert their own directory onto `sys.path` before importing this
 module.
 """

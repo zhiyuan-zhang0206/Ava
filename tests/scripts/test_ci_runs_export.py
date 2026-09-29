@@ -14,11 +14,11 @@ from zoneinfo import ZoneInfo
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "ci_runs_export.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "runs_export.py"
 
 
 def _load_script() -> Any:
-    spec = importlib.util.spec_from_file_location("ci_runs_export", _SCRIPT)
+    spec = importlib.util.spec_from_file_location("runs_export", _SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -26,7 +26,7 @@ def _load_script() -> Any:
     return module
 
 
-ci_runs_export = _load_script()
+runs_export = _load_script()
 
 
 def _run(**overrides: object) -> dict[str, Any]:
@@ -63,7 +63,7 @@ def _pr(**overrides: object) -> dict[str, Any]:
 
 
 def _gh_queue(responses: list[tuple[str, str, int]]) -> Any:
-    """Return the first matching command response, as ci_accounting does."""
+    """Return the first matching command response, as accounting does."""
 
     def run(command: list[str], *_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
         joined = " ".join(command)
@@ -77,7 +77,7 @@ def _gh_queue(responses: list[tuple[str, str, int]]) -> Any:
 
 
 def test_created_cursor_walk_deduplicates_run_ids(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = ci_runs_export
+    module = runs_export
     monkeypatch.setattr(module, "_MAX_RUN_PAGES_PER_CURSOR", 1)
     page = [_run(id=9, created_at="2026-09-02T00:00:00Z")] * 100
     commands: list[str] = []
@@ -101,7 +101,7 @@ def test_created_cursor_walk_deduplicates_run_ids(monkeypatch: pytest.MonkeyPatc
 
 
 def test_classification_rules_cover_noise_white_retry_and_trunk_mapping() -> None:
-    module = ci_runs_export
+    module = runs_export
     instant = _run(conclusion="skipped", updated_at="2026-09-02T10:00:02Z")
     cancelled = _run(id=2, conclusion="cancelled", updated_at="2026-09-02T10:00:10Z")
     replacement = _run(id=3, created_at="2026-09-02T10:00:05Z")
@@ -122,7 +122,7 @@ def test_classification_rules_cover_noise_white_retry_and_trunk_mapping() -> Non
 
 
 def test_attribute_runs_respects_pr_life_and_synthetic_trunk_branch() -> None:
-    module = ci_runs_export
+    module = runs_export
     pull = _pr(number=42, head_ref="feature", created_at="2026-09-02T08:00:00Z")
     matched = _run(id=1, head_branch="feature", created_at="2026-09-02T07:00:00Z")
     early = _run(id=2, head_branch="feature", created_at="2026-09-02T05:59:59Z")
@@ -132,7 +132,7 @@ def test_attribute_runs_respects_pr_life_and_synthetic_trunk_branch() -> None:
 
 
 def test_daily_aggregates_deduplicate_white_runs_and_pin_first_pass() -> None:
-    module = ci_runs_export
+    module = runs_export
     day = date(2026, 9, 2)  # time-bomb-ok: fixture pins one complete cluster-tz day.
     runs = [
         _run(id=1, conclusion="skipped", updated_at="2026-09-02T10:00:02Z"),
@@ -171,7 +171,7 @@ def test_daily_aggregates_deduplicate_white_runs_and_pin_first_pass() -> None:
 
 
 def test_workflow_window_uses_non_zombie_execution_and_pr_appearance() -> None:
-    module = ci_runs_export
+    module = runs_export
     runs = [
         _run(id=1, updated_at="2026-09-02T10:00:04Z"),
         _run(id=2, updated_at="2026-09-02T16:00:01Z"),
@@ -189,7 +189,7 @@ def test_workflow_window_uses_non_zombie_execution_and_pr_appearance() -> None:
 
 
 def test_cache_merge_is_idempotent_prunes_old_records_and_moves_watermark() -> None:
-    module = ci_runs_export
+    module = runs_export
     fresh = _run(id=1, updated_at="2026-09-02T11:00:00Z")
     old = _run(id=2, created_at="2026-08-01T10:00:00Z")
     cache = {"runs": {"1": _run(id=1), "2": old}, "prs": {"1": _pr()}, "last_fetch_end": None}
@@ -210,7 +210,7 @@ def test_cache_merge_is_idempotent_prunes_old_records_and_moves_watermark() -> N
 def test_dry_run_prints_snapshot_without_writes_or_emission(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    module = ci_runs_export
+    module = runs_export
     collection = module.RepoCollection(
         repo="owner/repo",
         cache={"runs": {}, "prs": {}, "last_fetch_end": None},
@@ -233,7 +233,7 @@ def test_dry_run_prints_snapshot_without_writes_or_emission(
 def test_failed_authoritative_pr_walk_aborts_before_emission(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    module = ci_runs_export
+    module = runs_export
     monkeypatch.setattr(module, "fetch_runs", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         module,

@@ -1,6 +1,6 @@
 """Require a sys.path guard before sibling imports in script-mode Python files.
 
-Run: `.venv/bin/python scripts/lint/lint_no_script_sibling_imports.py [path ...]`
+Run: `.venv/bin/python scripts/lint/no_script_sibling_imports.py [path ...]`
 (defaults to scanning the whole repo; an explicit path that does not exist is an
 error (stderr + exit 1) rather than a silent no-op). Also run automatically via
 pre-commit.
@@ -284,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
             print(violation)
     if total:
         print(
-            f"\n{total} violation(s). See the header of scripts/lint/lint_no_script_sibling_imports.py "
+            f"\n{total} violation(s). See the header of scripts/lint/no_script_sibling_imports.py "
             "for the guard pattern.",
             file=sys.stderr,
         )
