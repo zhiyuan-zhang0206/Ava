@@ -25,7 +25,7 @@ Scope: framework `Settings` fields only. Plugin-scope config
 with the same problem, scoped the same way by its own view —
 `shared/plugin_config_view.py`.
 
-Enforcement: `scripts/lint_turn_scoped_config.py` forbids reading a
+Enforcement: `scripts/lint/lint_turn_scoped_config.py` forbids reading a
 `per_agent` field through the bare singleton from turn-scoped packages —
 those reads must come through `turn_settings`.
 """

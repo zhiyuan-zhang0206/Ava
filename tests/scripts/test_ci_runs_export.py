@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "ci_runs_export.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "ci_runs_export.py"
 
 
 def _load_script() -> Any:

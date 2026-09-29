@@ -40,7 +40,7 @@ generation: its bearer is `telemetry_token(secret)` (HMAC-SHA256 under the
 human secret), so it changes only when that secret rotates; remote units
 receive it in their capability.
 
-The human-bearer rotation (`scripts/rotate_cluster_secret.py`, and once at the
+The human-bearer rotation (`scripts/data_plane_ops/rotate_cluster_secret.py`, and once at the
 fleet cutover, step `api` of `scripts/cutover_db_authority.py`) keeps the
 logical-backup passphrase pinned (`services/gateway_side/backup/passphrase.py`:
 minted at birth, `sha256(secret)` for a home the cutover converts), then

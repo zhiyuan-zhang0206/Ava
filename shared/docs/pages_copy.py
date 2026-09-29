@@ -4,7 +4,7 @@ The page-expired response the gateway serves when a page TTL elapsed is
 user-visible copy; its language follows `user_settings` ``display.language``
 (user ruling 2026-08-13: one language source, no separate field), the same
 mechanism as the IM alert copy (``shared/alerts_copy.py``). This module is
-exempt from the repo-wide no-CJK gate (scripts/lint_no_cjk.py
+exempt from the repo-wide no-CJK gate (scripts/content_lint/lint_no_cjk.py
 ``_LOCALE_PY_FILES``): raw CJK here is locale data, like the next-intl
 message catalogs. Only template copy is translated — the page name and agent
 id pass through untranslated.

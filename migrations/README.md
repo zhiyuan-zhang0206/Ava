@@ -22,7 +22,7 @@ YYYYMMDDTHHMMSS_<kebab-name>.down.sql   -- reverse (mandatory)
   a value-destroying down may be deliberately best-effort or refused.
 - **`.down.sql` is mandatory** for every file here — the baseline is the
   rollback floor, so everything above it must be reversible (enforced by
-  `scripts/lint_migrations.py`).
+  `scripts/content_lint/lint_migrations.py`).
 - The current full schema lives in **`db/schema.sql`** (the squashed baseline a
   fresh DB bootstraps from); a new migration must also reflect its change there.
 

@@ -335,5 +335,5 @@ def test_report_failure_uses_exact_label_and_existing_message(
         17,
         "C9 daily reconciliation failed:\ncollector failed\n"
         "Check the schedule log; backfill the missed window manually with "
-        "`scripts/ci_accounting.py --since ... --until ... --append-ledger`.",
+        "`scripts/ci/ci_accounting.py --since ... --until ... --append-ledger`.",
     )

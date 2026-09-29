@@ -15,7 +15,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser
 
-from scripts.post_deploy_visual_check import (
+from scripts.post_deploy_visual.post_deploy_visual_check import (
     REPO_ROOT,
     _accept_wave,
     _assert_gate_origin,
@@ -23,7 +23,7 @@ from scripts.post_deploy_visual_check import (
     _expected_capture_names,
     _validate_demo_target,
 )
-from scripts.post_deploy_visual_policy import (
+from scripts.post_deploy_visual.post_deploy_visual_policy import (
     STRUCTURAL_SPECS,
     SURFACE_ROUTES,
     THEMES,
@@ -203,7 +203,7 @@ def test_base_url_serving_the_gate_is_accepted(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_health_url_defaults_to_base_url_api_health() -> None:
-    from scripts.post_deploy_visual_check import _parser
+    from scripts.post_deploy_visual.post_deploy_visual_check import _parser
 
     args = _parser().parse_args(["--base-url", "http://gate.example:3000"])
     assert args.health_url is None
@@ -238,7 +238,7 @@ def test_cookie_file_requires_a_regular_0600_file(tmp_path: Path) -> None:
 
 
 def test_ignore_registry_requires_version_one(tmp_path: Path) -> None:
-    from scripts.post_deploy_visual_matrix import load_ignore_registry
+    from scripts.post_deploy_visual.post_deploy_visual_matrix import load_ignore_registry
 
     registry = tmp_path / "known-ignores.json"
     registry.write_text(json.dumps({"version": 2}))
@@ -249,11 +249,13 @@ def test_ignore_registry_requires_version_one(tmp_path: Path) -> None:
 def test_host_run_requires_the_cookie_env_var(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from scripts.post_deploy_visual_check import _run_host
+    from scripts.post_deploy_visual.post_deploy_visual_check import _run_host
 
-    monkeypatch.setattr("scripts.post_deploy_visual_check._assert_gate_origin", lambda _url: None)
     monkeypatch.setattr(
-        "scripts.post_deploy_visual_check.inherited_process_env",
+        "scripts.post_deploy_visual.post_deploy_visual_check._assert_gate_origin", lambda _url: None
+    )
+    monkeypatch.setattr(
+        "scripts.post_deploy_visual.post_deploy_visual_check.inherited_process_env",
         dict,
     )
     args = argparse.Namespace(
@@ -308,7 +310,7 @@ def test_budget_hard_exits_after_a_short_grace_when_the_unwind_hangs() -> None:
     script = (
         "import signal, sys, time\n"
         f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
-        "from scripts import post_deploy_visual_check as module\n"
+        "from scripts.post_deploy_visual import post_deploy_visual_check as module\n"
         "module.HARD_EXIT_DELAY_SECONDS = 1\n"
         "signal.signal(signal.SIGALRM, module._budget_expired)\n"
         "signal.alarm(1)\n"
@@ -331,8 +333,8 @@ def test_run_matrix_lets_the_budget_exception_escape(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A budget expiry mid-combination is a whole-wave abort, not a runner-error."""
-    from scripts import post_deploy_visual_matrix as matrix_module
-    from scripts.post_deploy_visual_matrix import VisualGateBudgetExceeded
+    from scripts.post_deploy_visual import post_deploy_visual_matrix as matrix_module
+    from scripts.post_deploy_visual.post_deploy_visual_matrix import VisualGateBudgetExceeded
 
     def budget(_browser: Browser, **_: object) -> dict[str, object]:
         raise VisualGateBudgetExceeded("visual gate exceeded its 28-minute budget")
@@ -353,7 +355,7 @@ def test_run_matrix_still_records_ordinary_failures_as_runner_errors(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The budget escape must not swallow the per-surface failure contract."""
-    from scripts import post_deploy_visual_matrix as matrix_module
+    from scripts.post_deploy_visual import post_deploy_visual_matrix as matrix_module
 
     def explode(_browser: Browser, **_: object) -> dict[str, object]:
         raise ValueError("surface exploded")
@@ -396,7 +398,7 @@ def test_kill_descendants_reaps_the_whole_process_tree(tmp_path: Path) -> None:
         "import subprocess, sys, time\n"
         "from pathlib import Path\n"
         f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
-        "from scripts.post_deploy_visual_check import _kill_descendants\n"
+        "from scripts.post_deploy_visual.post_deploy_visual_check import _kill_descendants\n"
         f"driver = subprocess.Popen([sys.executable, '-c', {driver_code!r}])\n"
         "deadline = time.monotonic() + 10\n"
         f"while not Path({str(pidfile)!r}).exists() and time.monotonic() < deadline:\n"

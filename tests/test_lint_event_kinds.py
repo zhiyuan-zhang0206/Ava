@@ -60,9 +60,9 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "debt_sweep_daily",  # schedules/debt-sweep-daily-schedule.py:_fire (positional emit)
         "pr_flow_daily",  # scripts/pr_flow_export.py:_emit_events (positional emit)
         "pr_flow_run",  # scripts/pr_flow_export.py:_emit_events (positional emit)
-        "ci_runs_daily",  # scripts/ci_runs_export.py:emit_snapshot (positional emit)
-        "ci_workflow_window",  # scripts/ci_runs_export.py:emit_snapshot (positional emit)
-        "ci_runs_run",  # scripts/ci_runs_export.py:emit_snapshot (positional emit)
+        "ci_runs_daily",  # scripts/ci/ci_runs_export.py:emit_snapshot (positional emit)
+        "ci_workflow_window",  # scripts/ci/ci_runs_export.py:emit_snapshot (positional emit)
+        "ci_runs_run",  # scripts/ci/ci_runs_export.py:emit_snapshot (positional emit)
         # Dynamic emit: positional-argument form, no `event=` literal.
         "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
         "task_escalation",  # task_maintenance/daemon.py:_run_escalate
@@ -218,15 +218,15 @@ def test_registered_telemetry_events_have_producers() -> None:
 def test_registry_doc_matches_generated() -> None:
     """shared/events/registry.md is a generated artifact (R2-C): it must equal
     the generator's output byte-for-byte. A registry change without running
-    `scripts/gen_event_registry.py` fails here (and in the pre-commit
+    `scripts/codegen/gen_event_registry.py` fails here (and in the pre-commit
     `events-registry-fresh` hook)."""
-    from scripts.gen_event_registry import render  # namespace package
+    from scripts.codegen.gen_event_registry import render  # namespace package
 
     generated = render()
     current = _REGISTRY.read_text(encoding="utf-8")
     assert current == generated, (
         "shared/events/registry.md is out of sync with the EVENTS registry — "
-        "run .venv/bin/python scripts/gen_event_registry.py and commit the "
+        "run .venv/bin/python scripts/codegen/gen_event_registry.py and commit the "
         "regenerated doc in the same PR."
     )
 

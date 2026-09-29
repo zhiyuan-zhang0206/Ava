@@ -12,7 +12,7 @@ detection needs a rolling window of history and the fix needs judgement, so
 neither half of the lint test holds. It always exits 0 on a successful scan
 (an index, not a wall) and reuses `scripts.structure.locality._package_of`
 for Python package resolution, so "package" here means exactly what Rule 4
-(package doors, `scripts/lint_code_structure.py`) means by it.
+(package doors, `scripts/lint/lint_code_structure.py`) means by it.
 
 Metric A (spread): per commit, the number of distinct packages among its
 tracked source files, reported as p50/p90 by conventional-commit type

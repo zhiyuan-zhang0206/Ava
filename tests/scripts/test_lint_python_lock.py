@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import lint_python_lock as gate
+from scripts.lint import lint_python_lock as gate
 
 
 def _lock(path: Path, *, index: str, wheel: str, sdist: str) -> Path:

@@ -734,7 +734,7 @@ def test_networked_cutover_rotates_the_bearer_once_before_issuing_bundles(
     """Step `api`: the human secret every runner held rotates once, after the
     logical-backup passphrase is pinned; the bundles issued afterwards carry the
     rotated telemetry token and the generation's API admission."""
-    from scripts import rotate_cluster_secret as bearer
+    from scripts.data_plane_ops import rotate_cluster_secret as bearer
     from services.gateway_side.backup import passphrase
     from shared.cluster.authority.api import telemetry_token
     from shared.envfile import upsert_env

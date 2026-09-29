@@ -110,7 +110,7 @@ def _assert_owner_dial(conninfo: str) -> None:
 def test_scheduled_backup_dumps_as_the_owner_and_restores(
     maintenance: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts import restore_drill
+    from scripts.data_plane_ops import restore_drill
     from services.backup_scheduler import worker
 
     agent_id = _seed_conversation(maintenance)

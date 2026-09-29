@@ -144,7 +144,7 @@ def logical_backup_passphrase() -> str:
 
 LEGACY_RESTORE_HINT = (
     "an artifact an empty-secret home wrote before its cutover pinned a minted passphrase "
-    "decrypts only with the explicit --legacy-empty-secret-passphrase of scripts/restore_drill.py"
+    "decrypts only with the explicit --legacy-empty-secret-passphrase of scripts/data_plane_ops/restore_drill.py"
 )
 
 

@@ -19,7 +19,7 @@ bulk — the gateway's skills-toggle handler, `ava skill update`, skills
 converge, and `ava packages refresh` — open it directly. (The refresh pass
 stages its per-package deltas during the pass and lands them in ONE cycle at
 the end, applied per name against the freshly-read registry — never a stale
-full save.) `scripts/migrate_skill_identity.py --apply` cannot
+full save.) `scripts/data_repair/migrate_skill_identity.py --apply` cannot
 use `mutate` (it rewrites a registry under an arbitrary `--ava-home`), so it
 takes `registry_lock` explicitly; that is the only writer outside this module.
 

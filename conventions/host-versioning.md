@@ -55,12 +55,12 @@ There is deliberately **no** "bump a version on content-facing merges" rule —
 that was the rejected v2 proposal (a number nothing else maintains, enforced
 by CI bookkeeping). The derived date advances by itself, and a first-class
 human version exists only if the dormant dated-release pipeline
-(`scripts/release_cut.py`) is revived — a separate call, not a dependency of
+(`scripts/ci/release_cut.py`) is revived — a separate call, not a dependency of
 this policy.
 
 ## CI
 
-`scripts/lint_core_content_manifests.py` (CI job `core-content manifests`,
+`scripts/content_lint/lint_core_content_manifests.py` (CI job `core-content manifests`,
 pre-commit `lint-core-content-manifests`) keeps core content honest:
 
 - every manifest under `ava_builtins/` validates, its `engines` ranges admit

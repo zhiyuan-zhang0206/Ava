@@ -57,7 +57,7 @@ every test double that models that probe contract.
 
 **Lintability — lintable with new rule.** An AST heuristic can flag
 `pid_exists`-style assertions in tests, following the AST approach used by the
-[fixture-scope lint](../scripts/lint_fixture_scope.py); zombie semantics still
+[fixture-scope lint](../scripts/lint/lint_fixture_scope.py); zombie semantics still
 need human review.
 
 ## 2. The same point twice is a regression
@@ -113,7 +113,7 @@ cannot be redirected: keep `AVA_OS_JOBS_ENABLED=false`, and never run a
 non-pytest script that imports `gateway.app` from a worktree.
 
 **Lintability — lintable now.** The
-[fixture-scope lint](../scripts/lint_fixture_scope.py) rejects session-scoped
+[fixture-scope lint](../scripts/lint/lint_fixture_scope.py) rejects session-scoped
 process-global mutation outside root `tests/conftest.py`, and the existing
 `lint_no_os_environ.py` catches source-side environment writes. Hermetic
 durable-marker reads remain a review heuristic and new-rule candidate; see
@@ -240,7 +240,7 @@ time deterministically with fake timers; never assume a machine will reach a
 state by a fixed wall-clock instant.
 
 **Lintability — lintable now.** The
-[clock-lattice lint](../scripts/lint_clock_lattice.py) rejects
+[clock-lattice lint](../scripts/lint/lint_clock_lattice.py) rejects
 lattice-vocabulary constants outside approved lattice modules, while
 `tests/shared/test_timing_topology.py` verifies the declared relations.
 Pinned-count gates remain a review heuristic.

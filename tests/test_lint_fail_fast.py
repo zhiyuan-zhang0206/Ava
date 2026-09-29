@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 
-_lint = importlib.import_module("scripts.lint_fail_fast")
+_lint = importlib.import_module("scripts.lint.lint_fail_fast")
 
 
 def _violations(src: str) -> list[tuple[str, int, str]]:

@@ -16,7 +16,7 @@ Each pair below asserts the Python source-of-truth set EQUALS the schema.sql
 CHECK set. A new value on either side without the other fails here. Adding a
 value: (1) add it to the Python enum/Literal, (2) add it to `db/schema.sql`'s
 CHECK, (3) ship a migration ALTERing the live constraint. This test verifies (1)
-and (2) are in sync; the migration + `scripts/lint_migrations.py` cover (3).
+and (2) are in sync; the migration + `scripts/content_lint/lint_migrations.py` cover (3).
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ _CASES: dict[tuple[str, str], set[str]] = {
     ("agents_meta", "status"): {s.value for s in AgentStatus},
     # The stamped-by-every-terminated-write source. A value in the enum but not the
     # CHECK is a CheckViolation at the write site; a value in the CHECK but not the
-    # enum is one scripts/lint_termination_source.py would reject as unknown.
+    # enum is one scripts/lint/lint_termination_source.py would reject as unknown.
     ("agents_meta", "termination_source"): {s.value for s in TerminationSource},
     ("inbound_messages", "kind"): {s.value for s in InboundKind},
     ("machines", "role"): set(get_args(MachineRole)),

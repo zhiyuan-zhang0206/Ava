@@ -34,7 +34,7 @@ def lint(monkeypatch, tmp_path):
     anchors at. Leaving it pointed at the real repo would make every assertion
     here depend on whatever `shared/` happens to define today.
     """
-    mod = importlib.import_module("scripts.lint_doc_anchors")
+    mod = importlib.import_module("scripts.content_lint.lint_doc_anchors")
     docs = tmp_path / "conventions"
     docs.mkdir(parents=True)
     skills = tmp_path / ".agents" / "skills"
@@ -264,5 +264,5 @@ def test_okf_doc_under_a_procedural_root_is_scanned_once(lint, tmp_path, capsys)
 
 def test_repo_tree_has_no_dangling_anchors():
     """The real scan, unpatched — the tree this lint gates must start green."""
-    mod = importlib.import_module("scripts.lint_doc_anchors")
+    mod = importlib.import_module("scripts.content_lint.lint_doc_anchors")
     assert mod.check() == 0

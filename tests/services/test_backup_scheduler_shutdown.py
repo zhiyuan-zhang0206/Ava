@@ -127,7 +127,7 @@ def _restore(root: Path, mode: str, postgres_base: Path) -> None:
 
 def _exercise_job(root: Path, mode: str, postgres_base: Path) -> None:
     """The operation worker's real entry, with only its external effects patched."""
-    from scripts import restore_drill
+    from scripts.data_plane_ops import restore_drill
 
     def restore(*, foreground: bool, scratch_root: Path) -> None:
         assert foreground

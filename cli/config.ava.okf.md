@@ -28,7 +28,7 @@ the gateway.
 Keys that decide who authenticates to the cluster, or whether it authenticates
 at all, are read-only on every config write path (the API, the ops op and
 `--local`): `AVA_CLUSTER_SECRET` rotates only through
-`scripts/rotate_cluster_secret.py`, and `AVA_AUTH_MIDDLEWARE_ENABLED` /
+`scripts/data_plane_ops/rotate_cluster_secret.py`, and `AVA_AUTH_MIDDLEWARE_ENABLED` /
 `AVA_ALERTS_WEBHOOK_TOKEN` / `AVA_MCP_ENDPOINT_ENABLED` (it opens `/mcp`, where
 generation-independent MCP client tokens authenticate) change only by editing
 the gateway `.env` on its host. Otherwise any authenticated caller, a machine token included, could pick

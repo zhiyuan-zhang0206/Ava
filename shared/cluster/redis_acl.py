@@ -28,7 +28,7 @@ def ensure_cluster_redis_acl(
     default (`>password` ADDS a valid password rather than replacing the set), so
     without it a runtime-password rotation would leave the previous password still
     authenticating this user indefinitely — confirmed empirically while building
-    `scripts/rotate_cluster_secret.py`. `resetpass` clears the password list first,
+    `scripts/data_plane_ops/rotate_cluster_secret.py`. `resetpass` clears the password list first,
     so re-affirming with an unchanged secret still ends at exactly one valid
     password (this call is idempotent either way), and re-affirming with a
     rotated one actually invalidates the old one.

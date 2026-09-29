@@ -1,4 +1,4 @@
-"""Tests for scripts/ci_accounting.py — per-agent CI minute attribution."""
+"""Tests for scripts/ci/ci_accounting.py — per-agent CI minute attribution."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "ci_accounting.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "ci_accounting.py"
 
 
 def _load_script():

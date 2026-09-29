@@ -1,4 +1,4 @@
-"""scripts/lint_no_cjk.py: the repo-wide no-CJK gate.
+"""scripts/content_lint/lint_no_cjk.py: the repo-wide no-CJK gate.
 
 User ruling 2026-08-27 (tightening the 2026-08-06 English-primary rule): raw
 CJK characters are banned everywhere in the repo; the only exemption is i18n /
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import lint_no_cjk as gate
+from scripts.content_lint import lint_no_cjk as gate
 
 
 @pytest.fixture

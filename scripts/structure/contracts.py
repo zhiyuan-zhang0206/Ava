@@ -1,6 +1,6 @@
 """Public API contract snapshots for the core package doors.
 
-A door's contract is its **public** surface (Rule 4 in `scripts/lint_code_structure.py`:
+A door's contract is its **public** surface (Rule 4 in `scripts/lint/lint_code_structure.py`:
 nothing outside a package may import its `_`-private modules or names). This tool
 renders that public surface as a human-readable snapshot file next to the door's
 code, so a PR that changes a contract shows an explicit snapshot diff — the same

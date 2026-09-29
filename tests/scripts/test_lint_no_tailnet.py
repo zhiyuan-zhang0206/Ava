@@ -1,4 +1,4 @@
-"""scripts/lint_no_tailnet.py: the repo-wide tailnet IP literal gate.
+"""scripts/content_lint/lint_no_tailnet.py: the repo-wide tailnet IP literal gate.
 
 Rules (2026-08-03/04 Gateway-URL ruling + 2026-08-20 public-repo contribution
 ruling): the repo must not carry a deployment's private overlay addresses as
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import lint_no_tailnet as gate
+from scripts.content_lint import lint_no_tailnet as gate
 
 
 @pytest.fixture

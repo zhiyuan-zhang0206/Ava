@@ -64,7 +64,7 @@ $distribution = 'Ubuntu-24.04'
 $linuxUser = 'linux-owner'
 $windowsUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $wslExecutable = Join-Path $env:SystemRoot 'System32\wsl.exe'
-$xml = (python scripts/render_wsl_boot_task.py `
+$xml = (python scripts/host_ops/render_wsl_boot_task.py `
     --distribution $distribution --linux-user $linuxUser `
     --windows-user $windowsUser --wsl-executable $wslExecutable | Out-String)
 if ($LASTEXITCODE -ne 0) { throw 'WSL task rendering failed' }

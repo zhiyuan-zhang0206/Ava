@@ -56,8 +56,8 @@ bundle. Rotate the write generation (a release transition revokes the old
 generation's logins and tokens everywhere), then issue every unit a new
 bundle, and revoke the lost unit's enrollment. What the bundle reached beyond
 the generation rotates separately: the telemetry token with the human secret
-(`scripts/rotate_cluster_secret.py`), the Redis runtime password bootstrap
-served with `scripts/rotate_data_plane_secrets.py --scope runner`, and the
+(`scripts/data_plane_ops/rotate_cluster_secret.py`), the Redis runtime password bootstrap
+served with `scripts/data_plane_ops/rotate_data_plane_secrets.py --scope runner`, and the
 provider keys at each provider. A networked home cannot run a release
 transition yet (`NETWORKED_REFUSAL`, slices dbgen-8 and FC-9), so until those
 land it has no in-band way to rotate its write generation.

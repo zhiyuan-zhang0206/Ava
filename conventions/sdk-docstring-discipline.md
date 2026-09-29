@@ -3,7 +3,7 @@
 Three hard rules: all English, no impl-detail leak, no Markdown wrapping. This
 doc is the full spec: coverage scope, what counts as an impl-detail leak, the
 `help()` rendering model, and the per-section writing rules. Enforced by
-`scripts/lint_agent_docstrings.py` in pre-commit.
+`scripts/lint/lint_agent_docstrings.py` in pre-commit.
 
 **Scope in one sentence**: any text the agent can see falls under this section.
 What the agent can't see, write however you want.
@@ -68,7 +68,7 @@ not in the docstring.
 
 Writing rules alone doesn't work; rely on mechanism:
 
-- `scripts/lint_agent_docstrings.py` runs in pre-commit — scans
+- `scripts/lint/lint_agent_docstrings.py` runs in pre-commit — scans
   `ava/*.py` and `plugins/*/*.py` for module / public function /
   `register_namespace`-bound module / `register_system_prompt_section`-
   return-string-producer; matching CJK characters (`[\u4e00-\u9fff]`) or known impl-detail

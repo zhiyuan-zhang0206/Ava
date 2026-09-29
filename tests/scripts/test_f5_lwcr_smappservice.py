@@ -1,4 +1,4 @@
-"""Unit tests for the inject-window classifier in scripts/f5_lwcr_smappservice.py.
+"""Unit tests for the inject-window classifier in scripts/host_ops/f5_lwcr_smappservice.py.
 
 `_classify_inject` is the repro/no-repro gate of the F5 conclusion (task
 #3384): it decides whether a window of `launchctl print` samples proves the
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "f5_lwcr_smappservice.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "host_ops" / "f5_lwcr_smappservice.py"
 
 
 def _load_script():

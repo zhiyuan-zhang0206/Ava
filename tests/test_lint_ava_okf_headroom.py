@@ -1,4 +1,4 @@
-"""`scripts/lint_ava_okf.py` — the W010 headroom warning (rule 10).
+"""`scripts/content_lint/lint_ava_okf.py` — the W010 headroom warning (rule 10).
 
 Drives `main()` against a tmp tree used as the linter's repo root, so nothing
 escapes into the real doc graph. The assertions cover the property that makes
@@ -22,7 +22,7 @@ import pytest
 # The linter imports build_okf_data as a top-level module — running it by path
 # puts scripts/ on sys.path[0], so importing it here has to do the same.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-_lint = importlib.import_module("scripts.lint_ava_okf")
+_lint = importlib.import_module("scripts.content_lint.lint_ava_okf")
 
 MAX_CHARS: int = _lint.MAX_CHARS
 WARN_MARGIN: int = _lint.WARN_MARGIN

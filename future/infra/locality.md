@@ -3,7 +3,7 @@
 Goal: **local reasoning** — a correct change needs only the package being changed
 plus the public doors of its neighbors. The mechanism that enforces the first
 two legs (package doors, single decision owners) is the structure gate's Rules 4
-and 5 (`scripts/lint_code_structure.py`, `scripts/structure/locality.py`); how to
+and 5 (`scripts/lint/lint_code_structure.py`, `scripts/structure/locality.py`); how to
 work with them is in [python-conventions](../../conventions/python-conventions.md).
 The principle itself lives in the serious-engineering skill
 (`principles/complexity-management`, "Locality is information hiding made

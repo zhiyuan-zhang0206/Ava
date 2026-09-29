@@ -95,7 +95,7 @@ def _env_text(runtime_password: str) -> str:
 def test_refresh_picks_up_rotated_redis_password(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A Redis credential rotation on disk (scripts/rotate_data_plane_secrets.py)
+    """A Redis credential rotation on disk (scripts/data_plane_ops/rotate_data_plane_secrets.py)
     is visible to the process after refresh: the in-memory redis_url carries the
     new runtime password, and the old one is gone."""
     _point_env_at(monkeypatch, _env_text("first-pass"), tmp_path)

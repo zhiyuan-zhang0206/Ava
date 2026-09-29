@@ -72,7 +72,7 @@ env-authority pass DELETES it from `os.environ` at import unless this unit's own
 reading `settings.lm.dashscope_api_key` is therefore permanently False. The
 opt-in variable is deliberately NOT a Settings alias so it survives both, and the
 fixture injects it with `monkeypatch.setattr`, which is the pattern
-`scripts/lint_no_os_environ.py` Rule 2 prescribes for exactly this reason.
+`scripts/lint/lint_no_os_environ.py` Rule 2 prescribes for exactly this reason.
 """
 
 from __future__ import annotations

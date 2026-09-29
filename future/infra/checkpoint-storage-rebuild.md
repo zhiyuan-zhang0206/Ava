@@ -370,7 +370,7 @@ throughout):
    `get_tuple`/`aget_tuple` (folded values injected); `shared/agents/history/checkpoint.py` readers
    (messages / count with reconstruct fallback / segment / full / by-trace);
    `ava/external_state.load_snapshot`; fork chain copy (`_copy_checkpoint_chain`, writes
-   chain included); `agent/startup/__init__.py` inbound reconciliation; `scripts/restore_drill.py`;
+   chain included); `agent/startup/__init__.py` inbound reconciliation; `scripts/data_plane_ops/restore_drill.py`;
    the self-evolution recorder. Vanilla data passes through unchanged — verified inert on
    real production read paths (production-clone subset, wrapped == native x5). Deployed to
    every machine 2026-09-13 (`30df11a83`).

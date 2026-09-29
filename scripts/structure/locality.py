@@ -3,7 +3,7 @@
 Both rules measure `path::target -> [line, ...]` sites per module; the frozen
 counts live in the `private_imports` / `owner_bypasses` sections of
 scripts/structure/baseline/*.json shards, and the rules themselves are documented in the
-scripts/lint_code_structure.py header (Rules 4 and 5).
+scripts/lint/lint_code_structure.py header (Rules 4 and 5).
 """
 
 from __future__ import annotations

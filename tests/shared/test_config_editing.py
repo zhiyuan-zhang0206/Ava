@@ -307,7 +307,7 @@ def test_manifest_certification_secret_stays_locally_provisionable() -> None:
 # Keys that decide who authenticates to this cluster, or whether it
 # authenticates at all. An authenticated caller (any machine token included)
 # must never choose them through a config write: the human bearer rotates only
-# through scripts/rotate_cluster_secret.py, the others by editing the gateway
+# through scripts/data_plane_ops/rotate_cluster_secret.py, the others by editing the gateway
 # `.env` on its host.
 _AUTHORITY_KEYS = {
     "cluster_secret": "AVA_CLUSTER_SECRET",

@@ -16,7 +16,7 @@ on:
       - 'gateway/schemas/**'
       - 'gateway/app.py'
       - 'scripts/codegen-types.sh'
-      - 'scripts/dump_openapi.py'
+      - 'scripts/codegen/dump_openapi.py'
       - 'tests/shared/test_agent_observation.py'
       - 'tests/shared/test_live_announce.py'
       - 'tests/shared/test_agent_snapshot_scope.py'

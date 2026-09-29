@@ -127,7 +127,7 @@ def run_tracker() -> None:
         result = subprocess.run(
             [
                 sys.executable,
-                str(root / "scripts" / "check_model_updates.py"),
+                str(root / "scripts" / "model_registry" / "check_model_updates.py"),
                 "--write-report",
                 str(report_dir),
             ],

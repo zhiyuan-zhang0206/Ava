@@ -13,11 +13,11 @@ trap "rm -rf $TMPDIR" EXIT
 
 cd "$(dirname "$0")/.."  # repo root
 
-.venv/bin/python scripts/gen_event_registry.py "$TMPDIR/registry.md" >/dev/null
+.venv/bin/python scripts/codegen/gen_event_registry.py "$TMPDIR/registry.md" >/dev/null
 
 if ! diff -q shared/events/registry.md "$TMPDIR/registry.md" >/dev/null; then
     echo "ERROR: shared/events/registry.md is out of sync with the event contract registry"
-    echo "   run .venv/bin/python scripts/gen_event_registry.py to regenerate"
+    echo "   run .venv/bin/python scripts/codegen/gen_event_registry.py to regenerate"
     diff shared/events/registry.md "$TMPDIR/registry.md" | head -30
     exit 1
 fi

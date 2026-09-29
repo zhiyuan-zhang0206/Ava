@@ -1,4 +1,4 @@
-"""scripts/migrate_skill_identity.py — the R2-B legacy-data migration tool.
+"""scripts/data_repair/migrate_skill_identity.py — the R2-B legacy-data migration tool.
 
 Check (default, read-only) and apply (fix, dir name authoritative) over the
 three identity surfaces: frontmatter-vs-dir mismatches in the skills load dir,
@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from scripts import migrate_skill_identity as mig
+from scripts.data_repair import migrate_skill_identity as mig
 
 
 @pytest.fixture

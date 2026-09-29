@@ -31,5 +31,5 @@ registration lives in deployment wiring.
 
 The [[services/healthchecks/check-roster/check-roster.ava.okf.md|module roster]]
 is checked against this directory, service metadata, and diagnostic imports by
-`scripts/lint_doc_roster.py`. Plugins can declare probes in their own namespaces;
+`scripts/content_lint/lint_doc_roster.py`. Plugins can declare probes in their own namespaces;
 adding a file here by itself does not register a root observer.

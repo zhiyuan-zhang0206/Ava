@@ -30,8 +30,8 @@ Never restore an artifact into the live database.
 From the checkout that owns the backup cluster, run either command:
 
 ```bash
-.venv/bin/python scripts/restore_drill.py
-.venv/bin/python scripts/restore_drill.py /absolute/path/to/<db>-<utc>.dump.enc
+.venv/bin/python scripts/data_plane_ops/restore_drill.py
+.venv/bin/python scripts/data_plane_ops/restore_drill.py /absolute/path/to/<db>-<utc>.dump.enc
 ```
 
 The first command selects the newest managed local artifact. The script creates
@@ -91,7 +91,7 @@ holds it, so disaster recovery needs that file: keep an escrowed copy with the
 gateway's other backup keys. An artifact an empty-secret home wrote before its
 cutover pinned a minted passphrase was encrypted under the public
 `sha256("")`; restore it with
-`.venv/bin/python scripts/restore_drill.py <artifact> --legacy-empty-secret-passphrase`
+`.venv/bin/python scripts/data_plane_ops/restore_drill.py <artifact> --legacy-empty-secret-passphrase`
 (by hand: the key file holds `printf '' | shasum -a 256 | cut -d' ' -f1`).
 The archive's compression CRC and `pg_restore` failure path detect corruption;
 the artifact is encrypted with AES-256-CBC and inherits the local artifact's

@@ -304,7 +304,7 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "ui/web/src/lib/types-generated.ts",
         "ui/web/openapi.json",
         "shared/live_events.py",
-        "scripts/dump_frontend_constants.py",
+        "scripts/codegen/dump_frontend_constants.py",
         "ui/web/src/lib/constants-generated.ts",
         "shared/events/contract.py",
         "shared/events/registry.py",
@@ -312,11 +312,11 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "shared/events/payloads.py",
         "shared/events/registry_lifecycle.py",
         "shared/events/system.py",
-        "scripts/gen_event_registry.py",
+        "scripts/codegen/gen_event_registry.py",
         "shared/events/registry.md",
         "shared/config_registry.py",
         "shared/config/agent.py",
-        "scripts/gen_config_lite_table.py",
+        "scripts/codegen/gen_config_lite_table.py",
         "shared/config_lite_table.json",
     )
     for path in paths:

@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts import lint_code_structure as lcs
+from scripts.lint import lint_code_structure as lcs
 from scripts.structure import baseline_shards
 from scripts.structure import quality_budget as quality
 

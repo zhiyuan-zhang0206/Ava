@@ -1,4 +1,4 @@
-"""Tests for scripts/check_cross_branch_migrations.py — the single-branch tripwire.
+"""Tests for scripts/content_lint/check_cross_branch_migrations.py — the single-branch tripwire.
 
 The previous version of this file asserted `main() == 0` unconditionally and that
 the script "never touches git". That was an accurate test of a pass-through that
@@ -12,7 +12,7 @@ import importlib
 
 import pytest
 
-_MOD = "scripts.check_cross_branch_migrations"
+_MOD = "scripts.content_lint.check_cross_branch_migrations"
 
 
 def _mod():

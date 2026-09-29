@@ -182,7 +182,7 @@ Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blas
 ### Prefer a mechanical guard where the boundary is nameable
 
 A rule someone has to remember loses to a hook that fails with a clear message.
-`scripts/lint_note_tags.py` turns one arm of the enum blast-radius class into a
+`scripts/lint/lint_note_tags.py` turns one arm of the enum blast-radius class into a
 pre-commit failure; derived sets (`agent/state.py:_BASE_STATE_FIELDS`, from
 `model_fields`) need no guard at all because they cannot go stale. Reach for the
 written rule only where the boundary genuinely resists naming.
@@ -237,7 +237,7 @@ plus a `Liveness` beat that certifies the work loop is still ticking, not that
 the subsystem's work succeeds. The audit found one violation (`milvus`'s bare
 TCP connect, now a real `list_collections` RPC); the roster carries a
 "what it certifies" column per check (`services/healthchecks/check-roster/check-roster.ava.okf.md`)
-and `scripts/lint_doc_roster.py` pins roster, module directory, and ServiceSpec
+and `scripts/content_lint/lint_doc_roster.py` pins roster, module directory, and ServiceSpec
 registrations together so the drift the audit found cannot silently return.
 
 ### A guard that shares a mechanism with the failure cannot catch it

@@ -1,6 +1,6 @@
 """Vendored relocatable Postgres resolution and hermetic extraction.
 
-The real downloadable artifact is covered by ``scripts/pgvector_runtime_smoke.py``
+The real downloadable artifact is covered by ``scripts/ci/pgvector_runtime_smoke.py``
 in the ``backend-pgvector-smoke`` CI job. This unit suite stays offline while
 covering the checksum, extraction, executable, and idempotence contracts that
 ``ava start`` depends on for a brew-free machine.
@@ -230,7 +230,7 @@ def test_ensure_pg_binaries_hermetic_fixture(
 
 
 # ── pgvector injection unit coverage ───────────────────────────────────────
-# The real artifacts are covered by scripts/pgvector_runtime_smoke.py (the CI
+# The real artifacts are covered by scripts/ci/pgvector_runtime_smoke.py (the CI
 # gate); these pin the extraction/injection mechanics with synthetic archives.
 
 

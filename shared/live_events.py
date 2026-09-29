@@ -16,7 +16,7 @@ frontend can render streaming events. The agent's event publisher coalesces
 emitted deltas / exec chunks into this window (one event per window), and the
 frontend throttles its stream re-parse to the same window, so producer and
 consumer stay aligned at ~25 FPS. Regenerate the frontend copy via
-`scripts/dump_frontend_constants.py` (pre-commit drift-checks it).
+`scripts/codegen/dump_frontend_constants.py` (pre-commit drift-checks it).
 
 
 SDK (ava/) and agent / UI (agent/, ui/) both publish / subscribe to

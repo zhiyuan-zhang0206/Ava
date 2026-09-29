@@ -1,0 +1,9 @@
+{
+  "complexity": {
+    "scripts/codegen/fix_frontmatter.py::parse_frontmatter_manual": 20,
+    "scripts/codegen/gen_config_lite_table.py::_collect": 16,
+    "scripts/codegen/gen_config_lite_table.py::_default": 17,
+    "scripts/codegen/gen_event_registry.py::render": 16,
+    "scripts/codegen/migrate_okf.py::build_frontmatter": 20
+  }
+}

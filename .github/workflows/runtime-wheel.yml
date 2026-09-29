@@ -5,7 +5,7 @@ on:
     paths:
       - 'pyproject.toml'
       - 'uv.lock'
-      - 'scripts/verify_runtime_wheel.py'
+      - 'scripts/ci/verify_runtime_wheel.py'
       - '.github/workflows/runtime-wheel.yml'
   workflow_dispatch:
 
@@ -43,7 +43,7 @@ jobs:
               for member in source.infolist():
                   if member.filename != 'agent/exec_child.py':
                       target.writestr(member, source.read(member))
-          result = subprocess.run(['python3', 'scripts/verify_runtime_wheel.py', str(broken)], capture_output=True, text=True)
+          result = subprocess.run(['python3', 'scripts/ci/verify_runtime_wheel.py', str(broken)], capture_output=True, text=True)
           assert result.returncode != 0, result.stdout
           assert "runtime wheel missing members: ['agent/exec_child.py']" in result.stderr, result.stderr
           print('negative control rejected missing exec child')
@@ -57,5 +57,5 @@ jobs:
         run: |
           export AVA_HOME="$RUNNER_TEMP/wheel-home"
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/runtime-venv/bin/python" -I "$GITHUB_WORKSPACE/scripts/verify_runtime_wheel.py" "$RUNNER_TEMP"/wheels/*.whl --checkout "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/runtime-venv/bin/python" -I "$GITHUB_WORKSPACE/scripts/ci/verify_runtime_wheel.py" "$RUNNER_TEMP"/wheels/*.whl --checkout "$GITHUB_WORKSPACE"
           "$RUNNER_TEMP/runtime-venv/bin/ava" --help

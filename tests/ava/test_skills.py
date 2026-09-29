@@ -112,7 +112,7 @@ def test_names_sorted_by_attr(fake_skills_dir: Path) -> None:
 
 def test_names_returns_full_description_untruncated(fake_skills_dir: Path) -> None:
     """names() returns the description verbatim — length is governed at the
-    source by scripts/lint_skill_descriptions.py, not truncated at read time."""
+    source by scripts/content_lint/lint_skill_descriptions.py, not truncated at read time."""
     long_desc = "x" * 500
     _write_skill(fake_skills_dir, "long", f"name: long\ndescription: {long_desc}")
     out = skills_mod.names()

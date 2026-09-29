@@ -23,7 +23,7 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
 
-# Mirrors scripts/lint_termination_source.py's scope: production trees only.
+# Mirrors scripts/lint/lint_termination_source.py's scope: production trees only.
 _SCAN_DIRS = ("agent", "ava", "ava_builtins", "cli", "gateway", "ops", "services", "shared")
 
 _REAPER_STAMP = re.compile(r"termination_source\s*=\s*'reaper'")

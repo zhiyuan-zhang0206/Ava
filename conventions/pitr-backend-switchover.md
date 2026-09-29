@@ -40,7 +40,7 @@ written while records are being rewritten.
 ### 3. Snapshot + migrate
 
 ```
-python scripts/pitr_migrate_gcs_to_baidu.py \
+python scripts/data_plane_ops/pitr_migrate_gcs_to_baidu.py \
     --gcs-project <project> --gcs-bucket <bucket> --gcs-prefix ava-pitr \
     --gcs-credentials <viewer-credentials>.json \
     --baidu-app-root <app-root> \
@@ -80,7 +80,7 @@ settings path (never edit `.env` manually), then restart the gateway unit.
 - One base-candidate cycle.
 - Restore drill on Baidu (mandatory): `prove_candidate` for the migrated
   newest chain and the fresh chain.
-- Throughput baseline: `scripts/pitr_baidu_speedtest.py`.
+- Throughput baseline: `scripts/data_plane_ops/pitr_baidu_speedtest.py`.
 
 ### 6. GCS read-only retention
 

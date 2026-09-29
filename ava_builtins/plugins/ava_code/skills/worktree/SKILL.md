@@ -34,7 +34,7 @@ first commit (never symlink one; the why is the "Worktree uv iron rule" in
 `conventions/runbook.md`):
 
 ```bash
-env -u VIRTUAL_ENV python scripts/guard_editable_venv.py . \
+env -u VIRTUAL_ENV python scripts/host_ops/guard_editable_venv.py . \
   && env -u VIRTUAL_ENV uv sync && env -u VIRTUAL_ENV uv pip install -e .
 ```
 

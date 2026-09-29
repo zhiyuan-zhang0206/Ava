@@ -80,13 +80,13 @@ jobs:
               exit 1
               ;;
           esac
-          uv run python scripts/update_model_pricing.py --catalog "$ARCHIVE" --write
+          uv run python scripts/model_registry/update_model_pricing.py --catalog "$ARCHIVE" --write
 
       - name: Sync plugin runtime prices
         env:
           CANDIDATE: ${{ steps.candidate.outputs.path }}
         run: |
-          uv run python scripts/update_model_pricing.py --sync-plugins --write --repo-root "$CANDIDATE" \
+          uv run python scripts/model_registry/update_model_pricing.py --sync-plugins --write --repo-root "$CANDIDATE" \
             2> >(tee "$RUNNER_TEMP/model-pricing-future-windows.md" >&2)
 
       - name: Detect a pricing change

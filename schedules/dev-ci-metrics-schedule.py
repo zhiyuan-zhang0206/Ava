@@ -33,7 +33,7 @@ def _report_agent() -> int:
 def _report_failure(detail: str) -> None:
     message = (
         f"Dev/CI metrics collection failed:\n{detail[-1000:]}\n"
-        "Check the schedule log; backfill with `scripts/ci_runs_export.py --repo "
+        "Check the schedule log; backfill with `scripts/ci/ci_runs_export.py --repo "
         "zhiyuan-zhang0206/Ava --print-snapshot`."
     )
     try:

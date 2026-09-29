@@ -49,7 +49,7 @@ The dsh evidence is that deep customizers build against the host protocol no
 matter what the host offers. Fighting that is waste; blessing it is cheap,
 because the contract already exists:
 
-- `scripts/dump_openapi.py` dumps the FastAPI app's OpenAPI spec and is already
+- `scripts/codegen/dump_openapi.py` dumps the FastAPI app's OpenAPI spec and is already
   the single source of truth for the frontend's own generated types
   (`openapi-typescript` codegen, drift-gated by the `types-codegen-fresh`
   pre-commit hook). `ui/web` is, mechanically, already an API client with no

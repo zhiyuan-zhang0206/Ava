@@ -9,7 +9,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from scripts import backfill_llm_usage_hourly as backfill
+from scripts.data_repair import backfill_llm_usage_hourly as backfill
 from shared.config import settings
 
 

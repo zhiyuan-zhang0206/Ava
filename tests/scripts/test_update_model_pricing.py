@@ -10,10 +10,10 @@ from typing import Any
 
 import pytest
 
-from scripts import plugin_price_sync
+from scripts.model_registry import plugin_price_sync
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "update_model_pricing.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "model_registry" / "update_model_pricing.py"
 
 
 def _load_script():
@@ -607,8 +607,13 @@ def test_workflow_runs_only_trusted_main_code_with_write_permissions() -> None:
     assert '[ -L "$ARCHIVE" ]' in workflow
     assert 'ARCHIVE_REAL="$(realpath "$ARCHIVE")"' in workflow
     assert '"$CANDIDATE_REAL"/*' in workflow
-    assert 'python scripts/update_model_pricing.py --catalog "$ARCHIVE" --write' in workflow
-    assert "python scripts/update_model_pricing.py --sync-plugins --write" in workflow
+    assert (
+        'python scripts/model_registry/update_model_pricing.py --catalog "$ARCHIVE" --write'
+        in workflow
+    )
+    assert (
+        "python scripts/model_registry/update_model_pricing.py --sync-plugins --write" in workflow
+    )
     assert "ava_builtins/plugins/lm_*/provider.py" in workflow
     assert "bot sync → human review of the PR" in workflow
     assert "model-pricing-future-windows.md" in workflow

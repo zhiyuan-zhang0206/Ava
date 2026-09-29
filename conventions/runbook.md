@@ -202,7 +202,7 @@ inherited `VIRTUAL_ENV` first — for the preflight too, since the guard refuses
 leaked environment before it checks anything else:
 
 ```bash
-env -u VIRTUAL_ENV python scripts/guard_editable_venv.py .
+env -u VIRTUAL_ENV python scripts/host_ops/guard_editable_venv.py .
 env -u VIRTUAL_ENV uv sync
 env -u VIRTUAL_ENV uv pip install -e .
 ```
@@ -1244,7 +1244,7 @@ which is linear in fleet size regardless of any of the above.
 
 On the macmini runtime host, export `AVA_VISUAL_GATE_COOKIE_FILE` as a 0600
 Playwright storage-state JSON, Netscape cookie jar, or single `name=value` file,
-then run `scripts/post_deploy_visual_check.py --check --base-url <production-gate>
+then run `scripts/post_deploy_visual/post_deploy_visual_check.py --check --base-url <production-gate>
 --health-url <gateway-origin>` (the gate serves the SPA wall for
 unauthenticated /api, so the health probe must target the gateway origin
 explicitly; the script appends `/api/health`).
@@ -1258,13 +1258,13 @@ agent sends a P0 result to #3242 and #405 with `send_message`, or queues P2 with
 exit 10 is P2, and exit 0 is green or expected drift.
 The daily 07:30 invocation and a same-process-start run are sentinels and do not
 advance the two-deployment-wave escalation counter. A concrete first-wave
-invocation: `scripts/post_deploy_visual_check.py --check --base-url
+invocation: `scripts/post_deploy_visual/post_deploy_visual_check.py --check --base-url
 <gate-entry-url> --health-url <gateway-origin-url>` — the base URL is the
 gate (frontend entry), never the gateway API origin, and the script refuses a
 base URL that answers the gateway health JSON up front.
 
 No command updates a golden implicitly. After QA or #405 confirms a report,
-roll it forward with `scripts/post_deploy_visual_check.py --accept-wave <sha>
+roll it forward with `scripts/post_deploy_visual/post_deploy_visual_check.py --accept-wave <sha>
 --accepted-by <reviewer>`; this appends the reviewer, UTC timestamp, SHA, and
 capture list to the 0600 `acceptance-audit.jsonl`. If the exported cookie leaks,
 revoke it immediately with `curl --fail-with-body -X POST --cookie
@@ -1592,7 +1592,7 @@ loopback.
 remote unit holds it, and machine API tokens rotate with every write
 generation. The fleet cutover rotates it once (`scripts/cutover_db_authority.py`,
 step `api`); otherwise run
-[`scripts/rotate_cluster_secret.py`](../scripts/rotate_cluster_secret.py)
+[`scripts/data_plane_ops/rotate_cluster_secret.py`](../scripts/data_plane_ops/rotate_cluster_secret.py)
 (`--execute`) only after a bearer leak. Rotating the secret never touches the
 logical-backup passphrase `$AVA_HOME/backups/logical-backup.passphrase`: a gateway
 home's birth mints and pins it, independent of the secret; a home born earlier pins
@@ -1608,12 +1608,12 @@ gateway, then issue every remote unit a new capability bundle (its telemetry tok
 derives from the secret). It does not change Postgres, Redis, ACLs, or PgBouncer.
 
 Routine data-plane rotation is independent and uses
-[`scripts/rotate_data_plane_secrets.py`](../scripts/rotate_data_plane_secrets.py):
+[`scripts/data_plane_ops/rotate_data_plane_secrets.py`](../scripts/data_plane_ops/rotate_data_plane_secrets.py):
 
 ```bash
-.venv/bin/python scripts/rotate_data_plane_secrets.py                 # dry-run, both scopes
-.venv/bin/python scripts/rotate_data_plane_secrets.py --scope admin --execute
-.venv/bin/python scripts/rotate_data_plane_secrets.py --scope runner --execute
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py                 # dry-run, both scopes
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py --scope admin --execute
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py --scope runner --execute
 ```
 
 Run this script in a gateway context, not an agent shell: agent contexts see the

@@ -235,7 +235,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
 // buckets today:
 //   - AVA_CLUSTER_SECRET: the gateway's human bearer. The backend serves it
 //     read-only (no config write may choose it); it rotates only through
-//     scripts/rotate_cluster_secret.py, which re-issues every remote unit's
+//     scripts/data_plane_ops/rotate_cluster_secret.py, which re-issues every remote unit's
 //     bundle, so the panel has nothing to show for it.
 //   - AVA_GATEWAY_MAX_RETRIES / AVA_GATEWAY_RETRY_DELAY_SECONDS: SDK→gateway
 //     transport micro-tuning with no operator-facing consequence. For a genuine

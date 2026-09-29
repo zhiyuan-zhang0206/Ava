@@ -1,4 +1,4 @@
-"""scripts/lint_ava_root_scope.py: the root supervisor's scope gate.
+"""scripts/lint/lint_ava_root_scope.py: the root supervisor's scope gate.
 
 The gate keeps services/ava_root/ free of permission-domain and
 platform-specific names (ruling 2026-09-12: the privileged helper program is a
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import lint_ava_root_scope as gate
+from scripts.lint import lint_ava_root_scope as gate
 
 
 def _write(base: Path, rel: str, content: str) -> Path:
