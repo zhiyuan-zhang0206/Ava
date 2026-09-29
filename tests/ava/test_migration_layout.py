@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from shared.deploy.schema.migrations import (
+    MIGRATIONS_DIR,
     MigrationLayoutError,
     _list_migration_files,
     validate_migration_layout,
@@ -21,6 +22,15 @@ from tests.ava.migration_support import (
 from tests.ava.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
 )
+
+
+def test_migrations_dir_resolves_beside_the_checkout_root() -> None:
+    """`MIGRATIONS_DIR` is re-anchored from `shared/deploy/schema/migrations.py`
+    (four levels below the checkout root, not two) — a regression here would
+    make every unmocked migration lookup silently see an empty/missing dir."""
+    repo_root = Path(__file__).resolve().parents[2]
+    assert repo_root / "migrations" == MIGRATIONS_DIR
+    assert MIGRATIONS_DIR.is_dir()
 
 
 class TestLayoutValidation:

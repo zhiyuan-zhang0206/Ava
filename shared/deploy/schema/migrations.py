@@ -123,8 +123,8 @@ from shared.host.env.dotenv_boot import checkout_anchored_home
 from shared.log import logger
 from shared.native_process.os_platform import CREATE_NO_WINDOW as CREATE_NO_WINDOW
 
-# Repo root = shared/.. = `<root>/`; migrations dir is under repo root.
-MIGRATIONS_DIR: Path = Path(__file__).resolve().parent.parent / "migrations"
+# Repo root = shared/deploy/schema/../../.. = `<root>/`; migrations dir is under repo root.
+MIGRATIONS_DIR: Path = Path(__file__).resolve().parents[3] / "migrations"
 
 # Fixed key for the Postgres advisory lock that serializes the whole apply loop
 # (see `_schema_mutation_lock`). Arbitrary but stable cluster-wide; ASCII "AVMI".
