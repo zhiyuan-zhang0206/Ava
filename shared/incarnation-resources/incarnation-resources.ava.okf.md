@@ -42,9 +42,9 @@ evidence alone never authorizes takeover. No spawn stamps the birth marker:
 enabling new births still requires the publication/all-writer boundary, never an
 environment flag or an installed revision.
 
-Values the current model cannot decode, their one-time conversion, drained
+Values the current model cannot decode, the closed-predecessor form, drained
 sets and never-admitted resurrection:
-[[cutover-closure.ava.okf.md|closed predecessor]].
+[[closed-predecessor.ava.okf.md|closed predecessor]].
 
 Hosted admission resolves the loaded image once per host process and rechecks
 its cheap immutable binding without traversing the image on each turn. The

@@ -128,8 +128,8 @@ def build_state(scope: str = "both") -> RotationState:
     old_runtime = (values.get(REDIS_PASSWORD_ENV) or "").strip()
     if not (old_admin and old_runtime):
         raise RuntimeError(
-            "this home records no Redis credentials; convert it first with "
-            "scripts/cutover_db_authority.py"
+            "this home records no Redis credentials: it was born before Redis always "
+            "authenticated and no conversion exists; re-birth it as a new home"
         )
     return RotationState(
         scope=scope,

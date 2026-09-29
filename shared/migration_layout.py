@@ -284,19 +284,6 @@ def validate_migrations_at_ref(ref: str, *, repo_root: Path | None = None) -> No
     validate_migration_layout(names)
 
 
-def required_migration_set_at_ref(ref: str, *, repo_root: Path | None = None) -> set[str]:
-    """Read the pinned commit's required names without changing the checkout."""
-    root = repo_root if repo_root is not None else _migrations_dir().parent
-    result = _git_probe(["ls-tree", "-r", "--name-only", "-z", ref, "--", "migrations"], cwd=root)
-    if result.returncode != 0:
-        raise MigrationLayoutError(
-            f"cannot read migrations/ at git ref {ref!r}: "
-            f"{result.stderr.strip() or 'git ls-tree failed'}"
-        )
-    names = [entry.rsplit("/", 1)[-1] for entry in result.stdout.split("\0") if entry.strip()]
-    return required_migration_set_from_names(names)
-
-
 def required_migration_set_from_names(names: Iterable[str]) -> set[str]:
     """Derive the required set from one already captured source inventory."""
     names = tuple(names)

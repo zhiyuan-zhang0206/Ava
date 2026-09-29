@@ -65,11 +65,6 @@ class BirthAuthority:
 
 
 @dataclass(frozen=True)
-class CutoverAuthority:
-    """Granted by the one-time explicit cutover of an existing home."""
-
-
-@dataclass(frozen=True)
 class OperationAuthority:
     """Granted by the home's active finite operation under its operation lock."""
 
@@ -77,7 +72,7 @@ class OperationAuthority:
     direction: Direction
 
 
-MintAuthority = BirthAuthority | CutoverAuthority | OperationAuthority
+MintAuthority = BirthAuthority | OperationAuthority
 
 
 class _Record(BaseModel):
@@ -99,6 +94,8 @@ class Groups(_Record):
 
 
 class Origin(_Record):
+    # `cutover`: generation 0 of a home born before this ledger existed, minted
+    # by its one-time conversion. Nothing mints it now; recorded ledgers keep it.
     kind: Literal["birth", "cutover", "operation"]
     operation: str | None = None
     direction: Direction | None = None
@@ -118,8 +115,6 @@ def origin_of(authority: MintAuthority) -> Origin:
     """The ledger origin recorded for a mint under ``authority``."""
     if isinstance(authority, BirthAuthority):
         return Origin(kind="birth")
-    if isinstance(authority, CutoverAuthority):
-        return Origin(kind="cutover")
     return Origin(
         kind="operation", operation=str(authority.operation), direction=authority.direction
     )

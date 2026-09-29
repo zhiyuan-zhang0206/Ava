@@ -15,7 +15,6 @@ from shared.cluster.authority import ledger as store
 from shared.cluster.authority.model import (
     BirthAuthority,
     ClosureEvidence,
-    CutoverAuthority,
     Generation,
     Groups,
     Ledger,
@@ -139,23 +138,30 @@ def test_mint_refuses_while_a_generation_is_active_or_unclosed(home: Path) -> No
         store.begin_mint(home, authority, encrypt=_Encrypt())
 
 
-def test_birth_and_cutover_mint_only_generation_zero(home: Path) -> None:
+def test_birth_mints_only_generation_zero(home: Path) -> None:
     _born(home)
     _rotate(home, _op())
-    for authority in (BirthAuthority(), CutoverAuthority()):
-        with pytest.raises(LedgerRefusedError, match="mint only generation 0"):
-            store.begin_mint(home, authority, encrypt=_Encrypt())
+    with pytest.raises(LedgerRefusedError, match="mints only generation 0"):
+        store.begin_mint(home, BirthAuthority(), encrypt=_Encrypt())
+
+
+def test_a_recorded_cutover_origin_still_loads_and_rotates(home: Path) -> None:
+    """Generation 0 of a home converted before births minted the ledger records
+    origin `cutover`. Nothing mints it now, but such a ledger still loads and
+    the next operation rotates past it."""
+    _born(home)
+    path = home / "db-authority" / "ledger.json"
+    recorded = json.loads(path.read_text())
+    recorded["active"]["origin"]["kind"] = "cutover"
+    path.write_text(json.dumps(recorded))
+    active = store.require_ledger(home).active
+    assert active is not None and active.origin == Origin(kind="cutover")
+    assert _rotate(home, _op()).number == 1
 
 
 def test_operation_authority_cannot_birth_a_home(home: Path) -> None:
     with pytest.raises(LedgerRefusedError, match="after the home's first generation"):
         store.begin_mint(home, _op(), encrypt=_Encrypt())
-
-
-def test_birth_and_cutover_do_not_adopt_each_other(home: Path) -> None:
-    store.begin_mint(home, BirthAuthority(), encrypt=_Encrypt())
-    with pytest.raises(LedgerRefusedError, match="generation 0"):
-        store.begin_mint(home, CutoverAuthority(), encrypt=_Encrypt())
 
 
 def test_a_foreign_pending_generation_is_neither_adopted_nor_activated(home: Path) -> None:
@@ -322,10 +328,10 @@ def test_an_unexplained_secret_refuses_the_next_mint(home: Path) -> None:
 
 def test_create_ledger_keeps_an_identical_ledger_and_refuses_another(home: Path) -> None:
     before = (home / "db-authority" / "ledger.json").read_bytes()
-    store.create_ledger(home, owner="ava", groups=_GROUPS, authority=CutoverAuthority())
+    store.create_ledger(home, owner="ava", groups=_GROUPS, authority=BirthAuthority())
     assert (home / "db-authority" / "ledger.json").read_bytes() == before
     with pytest.raises(LedgerRefusedError, match="another owner"):
-        store.create_ledger(home, owner="ava_main", groups=_GROUPS, authority=CutoverAuthority())
+        store.create_ledger(home, owner="ava_main", groups=_GROUPS, authority=BirthAuthority())
 
 
 def test_an_absent_store_reads_as_no_ledger(tmp_path: Path) -> None:

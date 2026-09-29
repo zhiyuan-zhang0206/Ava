@@ -24,11 +24,10 @@ from shared.config import settings
 from shared.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceBirth, decode_resources
 from shared.machine import machine_name
-from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.straggler_reap import settle_stranded_reaps
 from shared.turn_identity import bind_turn_identity
-from tests.shared.test_predecessor_closure import _retired
+from tests.shared.test_predecessor_closure import _closed_form, _retired
 
 
 @pytest.fixture(autouse=True)
@@ -151,7 +150,7 @@ def test_retired_resources_require_cutover_before_resurrection(
     assert wakes == []
 
 
-async def test_converted_terminated_row_resurrects_through_its_terminate_receipt(
+async def test_closed_form_terminated_row_resurrects_through_its_terminate_receipt(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, wakes: list[tuple[int, str]]
 ) -> None:
     generation, owner = uuid4(), uuid4()
@@ -170,13 +169,7 @@ async def test_converted_terminated_row_resurrects_through_its_terminate_receipt
         (generation, owner, aid),
     )
     db_conn.commit()
-    evidence = ClosureEvidence(
-        machine=machine_name(), attestation_sha256="c" * 64, operator="op", reason="FC-4"
-    )
-    with db_conn.transaction():
-        close_retired_predecessor(
-            db_conn, aid, before=before, receipt=receipt[0], evidence=evidence
-        )
+    _closed_form(db_conn, aid, before)
 
     agent_wake.resurrect_agent(aid, resurrected_by="user")
     successor = await admit_hosted_runtime(

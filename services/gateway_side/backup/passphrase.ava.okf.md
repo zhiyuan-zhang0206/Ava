@@ -17,20 +17,19 @@ key, so a home without the file refuses to back up or restore
 - **Birth**: a gateway claim mints and pins it (`ensure_minted`) before it
   publishes `.env`, whatever the cluster secret, so an empty-secret single box
   encrypts for real.
-- **Homes born earlier**: the cutover's `api` step pins what the home has
-  encrypted under so far, `sha256(secret)` (`pin_existing_home`). An empty
-  secret's derivation is the public `LEGACY_EMPTY_SECRET_PASSPHRASE`, so such a
-  home pins a minted passphrase; its pre-cutover artifacts restore only with the
-  explicit `scripts/restore_drill.py --legacy-empty-secret-passphrase`, which is
-  never tried as a fallback. A failed decryption names that option.
+- **Homes born earlier** carry the passphrase they had encrypted under,
+  `sha256(secret)`, pinned once at their conversion. An empty secret's
+  derivation is the public `LEGACY_EMPTY_SECRET_PASSPHRASE`, so such a home
+  carries a minted passphrase; its artifacts from before the pin restore only
+  with the explicit `scripts/restore_drill.py --legacy-empty-secret-passphrase`,
+  which is never tried as a fallback. A failed decryption names that option.
 - **Secret rotation** (`scripts/rotate_cluster_secret.py`) never touches it.
 
 ## Escrow
 
 Losing the file makes every logical backup of the home unreadable, local and
-off-site alike; nothing can re-derive it. Export it once after birth (or after
-the cutover's `api` step) and keep the copy with the gateway's other backup
-keys, off the gateway host:
+off-site alike; nothing can re-derive it. Export it once after birth and keep
+the copy with the gateway's other backup keys, off the gateway host:
 
 ```bash
 install -m 600 "$AVA_HOME/backups/logical-backup.passphrase" /secure/escrow/<home>-logical-backup.passphrase

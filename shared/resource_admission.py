@@ -3,8 +3,9 @@
 NULL stays legacy protocol zero, not a known empty set. No producer in this
 module creates a birth marker or enables managed mode on an existing row.
 A successor replaces another incarnation's set only through the predecessor
-receipt rule; the cutover's closed-predecessor form (`shared.predecessor_closure`)
-is admitted by that same rule, with no other acceptance path.
+receipt rule; the closed-predecessor form (the recorded incarnation with no
+host identity and an empty set) is admitted by that same rule, with no other
+acceptance path.
 """
 
 from typing import Any

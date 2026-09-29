@@ -29,8 +29,8 @@ Committed state outlives its originating lease; it is not liveness evidence.
 from locked pending state, validates live operation/fresh observations/all units,
 and preserves current without allowing admission. Cached or mismatched
 acknowledgements cannot replace pending or authorize rollback. No command clears
-a recorded pending publication; the one-time cutover database-records repair
-removes exactly the recorded value. These transaction fences remain consumed by
+a recorded pending publication; only a manual database repair removes exactly
+the recorded value. These transaction fences remain consumed by
 runtime admission until the database-authority replacement; generic recovery
 must not erase a pending operation.
 

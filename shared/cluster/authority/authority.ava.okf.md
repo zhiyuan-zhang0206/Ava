@@ -51,10 +51,11 @@ atomically with file and directory fsync; reads refuse symlinks, loose modes
 and foreign owners. Every number `0..counter` is exactly one of active,
 pending or revoked, so `counter` never decreases.
 
-Mutations take a typed token: `BirthAuthority` and `CutoverAuthority` mint only
-generation 0; `OperationAuthority(operation, direction)` mints later numbers,
-revokes, closes and records drops. The caller holds the matching lock
-(start intent, cutover, or the operation lock).
+Mutations take a typed token: `BirthAuthority` mints only generation 0;
+`OperationAuthority(operation, direction)` mints later numbers, revokes, closes
+and records drops. The caller holds the matching lock (start intent or the
+operation lock). A recorded origin may also read `cutover`: generation 0 of a
+home converted before births minted the ledger, which nothing mints now.
 
 | Step | Durable effect |
 |---|---|
@@ -85,9 +86,7 @@ role can no longer log in, and sessions of dropped roles, because PostgreSQL
 lets `DROP ROLE` succeed under a live session. Any prepared transaction holds.
 A generation backend that authenticated just before its role lost LOGIN may
 appear after the census; its only capability, membership, was revoked in the
-same transaction. A legacy owner racing the cutover is excluded by the
-cutover's precondition (application root absent). The caller stops the owned
-pooler first. `stale_sessions` is the same census without termination.
+same transaction. The caller stops the owned pooler first. `stale_sessions` is the same census without termination.
 
 ## Invariant
 
@@ -109,23 +108,22 @@ sessions.
 How the active generation reaches the pooler, launched services, operator
 processes and remote agent-runner units (`unit`: a sealed bundle issued per unit,
 whose login and tokens every runner unit shares), and
-where birth, ordinary start and the cutover call this library (API tokens:
+where birth and ordinary start call this library (API tokens:
 [[shared/cluster/authority/api-tokens.ava.okf.md|machine API tokens]]):
 [[shared/cluster/authority/wiring.ava.okf.md|Write-generation delivery and wiring]].
 
 ## Tests
 
 `tests/lifecycle/db_authority/` runs on real PostgreSQL 17 through
-`authority_postgres`; `test_single_box.py` and `test_cutover.py` drive the real
-start steps and the cutover against a home-owned PostgreSQL, PgBouncer and
-Redis (including the collector's monitoring dial across a rollover), and
+`authority_postgres`; `test_single_box.py` drives the real start steps
+against a home-owned PostgreSQL, PgBouncer and Redis (including the collector's monitoring dial across a rollover), and
 `test_delivery.py` covers delivery and the boot pass without a database;
 `test_api_tokens.py` is the API token acceptance matrix (gateway, bootstrap,
 login, webhooks, `/ops`, launch delivery, clients);
 `test_unit_capability.py` covers the remote-unit bundle (sealing, binding,
 install, the runner's boot pass and launcher) and, on the real gateway plane,
-issue -> runner start -> generation login, the credential-free bootstrap, a
-revoked generation's bundle and the networked cutover step. It
+issue -> runner start -> generation login, the credential-free bootstrap and a
+revoked generation's bundle. It
 uses a throwaway instance with peer-only admin and SCRAM for every other role,
 plus a template built by the superuser acting as the owner. Crash injection
 covers each durable boundary. A mutation of every guard turns at least one test
