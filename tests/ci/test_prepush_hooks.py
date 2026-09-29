@@ -3,14 +3,15 @@
 # ruff: noqa: S603 — subprocess commands use only test-owned paths and fixture literals.
 
 import fcntl
+import json
 import os
 import re
 import selectors
 import shlex
-import shutil
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -22,8 +23,8 @@ GUARD = ROOT / "scripts/prepush-guard.sh"
 CHECK = ROOT / "scripts/provision/check_git_hooks.py"
 BRANCH_LINT = ROOT / "scripts/prepush-branch-lint.sh"
 ARTIFACT_FRESHNESS = ROOT / "scripts/prepush-artifact-freshness.sh"
+PYRIGHT_FILES = ROOT / "scripts/prepush-pyright-files.sh"
 INSTALL = ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push"
-requires_flock = pytest.mark.skipif(shutil.which("flock") is None, reason="flock is not installed")
 
 
 @pytest.fixture
@@ -88,7 +89,7 @@ def test_stage_contract() -> None:
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
     assert config["default_install_hook_types"] == ["pre-commit", "pre-push"]
     hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
-    for name in ("pyright", "frontend-tsc", "frontend-eslint", "frontend-vitest"):
+    for name in ("frontend-tsc", "frontend-eslint", "frontend-vitest"):
         hook = hooks[name]
         assert hook["stages"] == ["pre-push"]
         assert hook["verbose"] is True  # pre-commit hides output on PASS otherwise.
@@ -103,6 +104,21 @@ def test_stage_contract() -> None:
     assert check["stages"] == ["pre-commit"]
     assert check["always_run"] is True
     assert check["verbose"] is True
+
+
+def test_pyright_hook_scoped_to_branch_diff() -> None:
+    # pyright is scoped to the branch's own changed .py files (user ruling
+    # 2026-09-22: no full-repo runs locally), so its entry is one level
+    # removed from prepush-guard.sh -- the wrapper script computes the file
+    # list itself and then delegates to prepush-guard.sh internally.
+    config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
+    hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
+    pyright = hooks["pyright"]
+    assert pyright["stages"] == ["pre-push"]
+    assert pyright["verbose"] is True
+    assert pyright["always_run"] is True
+    assert pyright["pass_filenames"] is False
+    assert pyright["entry"] == "bash scripts/prepush-pyright-files.sh"
 
 
 def test_prepush_parity_hooks_configured() -> None:
@@ -176,31 +192,10 @@ def test_branch_lint_skips_without_origin_main(checkout: Path) -> None:
     assert "PRE-PUSH SKIPPED [branch-lint]: origin/main is not resolvable locally" in result.stderr
 
 
-def test_branch_lint_guard_missing_flock_skips(
-    checkout: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Same PATH-shimming technique as test_missing_flock_skips below, applied
-    # to the new "branch-lint" tool so this passes on any host regardless of
-    # whether flock is actually installed here.
-    shim_dir = checkout / "no-flock"
-    shim_dir.mkdir()
-    bash = shutil.which("bash")
-    assert bash is not None
-    (shim_dir / "bash").symlink_to(bash)
-    monkeypatch.setenv("PATH", str(shim_dir))
-    result = run_guard(checkout, "branch-lint")
-    assert result.returncode == 0
-    assert "PRE-PUSH SKIPPED [branch-lint]: flock is not installed" in result.stderr
-    assert "executed" not in result.stdout
-
-
-@requires_flock
 def test_branch_lint_guard_preflight_missing_precommit(checkout: Path) -> None:
     # scripts/prepush-branch-lint.sh delegates its lock/load handling to
     # prepush-guard.sh's "branch-lint" tool; exercise that preflight directly
-    # the same way the existing pyright/tsc/eslint/vitest tests do. Needs a
-    # real flock to get past the earlier check, like the other @requires_flock
-    # preflight tests in this file.
+    # the same way the existing pyright/tsc/eslint/vitest tests do.
     result = run_guard(checkout, "branch-lint")
     assert result.returncode == 0
     assert "PRE-PUSH SKIPPED [branch-lint]: missing .venv/bin/pre-commit" in result.stderr
@@ -211,6 +206,111 @@ def _init_probe_repo(path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(path)], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.email", "t@example.com"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], check=True)
+
+
+def _init_repo_with_origin_main(path: Path) -> str:
+    """A repo with a local `origin/main` ref pointing at HEAD. No real remote
+    is configured or needed: `git merge-base origin/main HEAD` only needs the
+    ref to resolve. Returns that commit's sha.
+    """
+    _init_probe_repo(path)
+    (path / "README.md").write_text("x\n")
+    subprocess.run(["git", "-C", str(path), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(path), "commit", "-q", "-m", "base"], check=True)
+    base_sha = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(path), "update-ref", "refs/remotes/origin/main", base_sha], check=True
+    )
+    return base_sha
+
+
+def test_pyright_files_skips_without_origin_main(checkout: Path) -> None:
+    result = subprocess.run(
+        ["bash", str(PYRIGHT_FILES)],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "PRE-PUSH SKIPPED [pyright]: origin/main is not resolvable locally" in result.stderr
+
+
+def test_pyright_files_skips_when_no_python_files_changed(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo_with_origin_main(repo)
+    (repo / "README.md").write_text("x\nchanged\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "docs only"], check=True)
+
+    result = subprocess.run(
+        ["bash", str(PYRIGHT_FILES)],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "no changed .py files" in result.stdout
+    assert "SKIPPED" not in result.stderr  # a clean pass, not a skip-with-warning
+
+
+def test_pyright_files_scopes_to_changed_existing_python_files(tmp_path: Path) -> None:
+    """Only Added/Copied/Modified/Renamed .py files that still exist on HEAD
+    are handed to pyright -- a deleted .py file is excluded the same way
+    scripts/prepush-branch-lint.sh's range is (pre-commit's own ACMR
+    diff-filter), and an untouched .py file is never included.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "kept.py").write_text("x = 1\n")
+    (repo / "deleted.py").write_text("y = 2\n")
+    _init_repo_with_origin_main(repo)
+
+    (repo / "kept.py").write_text("x = 2  # changed\n")
+    (repo / "changed.py").write_text("z = 3\n")
+    subprocess.run(["git", "-C", str(repo), "rm", "-q", "deleted.py"], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "branch changes"], check=True)
+
+    # scripts/prepush-pyright-files.sh execs `scripts/prepush-guard.sh` by a
+    # RELATIVE path, so the fake repo needs one; symlink the real one in.
+    (repo / "scripts").mkdir()
+    (repo / "scripts/prepush-guard.sh").symlink_to(GUARD)
+    pyright_bin = repo / ".venv/bin/pyright"
+    pyright_bin.parent.mkdir(parents=True)
+    argv_log = repo / "pyright-argv.json"
+    pyright_bin.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        f"json.dump(sys.argv[1:], open({str(argv_log)!r}, 'w'))\n"
+    )
+    pyright_bin.chmod(0o755)
+
+    env = {
+        **os.environ,
+        "AVA_PREPUSH_LOCK_DIR": str(tmp_path / "locks"),
+        "AVA_PREPUSH_MAX_LOAD_PER_CORE": "1000000",
+        "AVA_PREPUSH_LOCK_WAIT_SECONDS": "2",
+    }
+    result = subprocess.run(
+        ["bash", str(PYRIGHT_FILES)],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "SKIPPED" not in result.stderr
+    invoked = json.loads(argv_log.read_text())
+    assert sorted(invoked) == ["changed.py", "kept.py"]
 
 
 def test_delete_only_diff_skips_filtered_hook_but_always_run_catches_it(tmp_path: Path) -> None:
@@ -249,14 +349,15 @@ def test_delete_only_diff_skips_filtered_hook_but_always_run_catches_it(tmp_path
     (repo / "foo").mkdir()
     (repo / "foo/bar.py").write_text("print(1)\n")
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "--no-verify", "-m", "c1"], check=True)
+    # No `pre-commit install` ran in this throwaway repo, so `.git/hooks/pre-commit`
+    # is never anything but git's own inert `.sample` file -- a plain `git commit`
+    # here already cannot invoke any hook, real or otherwise.
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "c1"], check=True)
     base_sha = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
     ).stdout.strip()
     subprocess.run(["git", "-C", str(repo), "rm", "-q", "foo/bar.py"], check=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "commit", "-q", "--no-verify", "-m", "c2: delete only"], check=True
-    )
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "c2: delete only"], check=True)
 
     def run_pre_commit(*args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -291,21 +392,68 @@ def test_delete_only_diff_skips_filtered_hook_but_always_run_catches_it(tmp_path
     assert log.read_text().count("RAN") == 1
 
 
-def test_missing_flock_skips(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    shim_dir = checkout / "no-flock"
-    shim_dir.mkdir()
-    bash = shutil.which("bash")
-    assert bash is not None
-    (shim_dir / "bash").symlink_to(bash)
-    monkeypatch.setenv("PATH", str(shim_dir))
-    marker = checkout / "executed"
-    result = run_guard(checkout, code=f"from pathlib import Path; Path({str(marker)!r}).touch()")
-    assert result.returncode == 0
-    assert "PRE-PUSH SKIPPED [pyright]: flock is not installed" in result.stderr
-    assert not marker.exists()
+def test_concurrent_guards_serialize_never_run_in_parallel(checkout: Path, tmp_path: Path) -> None:
+    """Two real prepush-guard.sh processes contending for the same lock: the
+    second must wait its turn or time out and skip -- it must never execute
+    its payload while the first's payload is still running. This is the
+    end-to-end proof for the fcntl.flock(2)-on-inherited-fd mechanism that
+    replaced the `flock(1)` binary (not available on stock macOS): a fresh
+    python3 subprocess is spawned per lock attempt, but the lock it takes is
+    bound to the OPEN FILE DESCRIPTION behind bash's own fd 9, so it is still
+    held after that python3 process exits and until the guarded command
+    (exec'd in the SAME process as the shell that opened fd 9) finishes.
+    """
+    events = tmp_path / "events.log"
+    # Each payload logs its own start/end around a fixed sleep, long enough
+    # that an accidental overlap (the lock failing to serialize them) would
+    # be visible in the interleaving, but short enough the test stays fast.
+    code = (
+        "import sys, time\n"
+        f"path = {str(events)!r}\n"
+        "label = sys.argv[1]\n"
+        "open(path, 'a').write(label + ' start\\n')\n"
+        "time.sleep(0.4)\n"
+        "open(path, 'a').write(label + ' end\\n')\n"
+    )
+
+    def launch(label: str) -> subprocess.Popen[str]:
+        return subprocess.Popen(
+            ["bash", str(GUARD), "pyright", "--", sys.executable, "-c", code, label],
+            cwd=checkout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    first = launch("A")
+    time.sleep(0.15)  # let A acquire the lock first, deterministically
+    second = launch("B")
+    try:
+        _, err_a = first.communicate(timeout=10)
+        _, err_b = second.communicate(timeout=10)
+    finally:
+        for process in (first, second):
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
+    assert first.returncode == 0, err_a
+    lines = events.read_text().splitlines() if events.exists() else []
+    assert lines[:2] == ["A start", "A end"], f"A's own critical section is not intact: {lines}"
+    if "B start" in lines:
+        # B waited its turn: it must never have started before A finished.
+        assert lines.index("B start") > lines.index("A end"), (
+            f"B started before A finished -- the lock did not serialize them: {lines}"
+        )
+        assert second.returncode == 0
+        assert "SKIPPED" not in err_b
+    else:
+        # B never got the lock within AVA_PREPUSH_LOCK_WAIT_SECONDS: a clean
+        # skip is correct too (never a silent pass, never a parallel run).
+        assert second.returncode == 0
+        assert "PRE-PUSH SKIPPED [pyright]: lock wait timed out" in err_b
 
 
-@requires_flock
 def test_load_skip(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Fix the measured load in the probe, then force its threshold via env.
     probe_dir = checkout / "probe"
@@ -325,7 +473,6 @@ def test_load_skip(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert "executed" not in result.stdout
 
 
-@requires_flock
 def test_lock_wait_proceeds(checkout: Path, tmp_path: Path) -> None:
     lock_dir = tmp_path / "locks"
     lock_dir.mkdir()
@@ -355,7 +502,6 @@ def test_lock_wait_proceeds(checkout: Path, tmp_path: Path) -> None:
                     process.wait(timeout=5)
 
 
-@requires_flock
 def test_lock_timeout(checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AVA_PREPUSH_LOCK_WAIT_SECONDS", "0.01")
     lock_dir = tmp_path / "locks"
@@ -370,7 +516,6 @@ def test_lock_timeout(checkout: Path, tmp_path: Path, monkeypatch: pytest.Monkey
 
 
 @pytest.mark.parametrize("tool", ["tsc", "eslint", "vitest"])
-@requires_flock
 def test_missing_frontend_env(checkout: Path, tool: str) -> None:
     result = run_guard(checkout, tool)
     assert result.returncode == 0
@@ -380,7 +525,6 @@ def test_missing_frontend_env(checkout: Path, tool: str) -> None:
 
 
 @pytest.mark.parametrize("status", [0, 1, 7])
-@requires_flock
 def test_vitest_binary_and_command_status(
     checkout: Path, monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
@@ -401,7 +545,6 @@ def test_vitest_binary_and_command_status(
     assert "SKIPPED" not in result.stderr
 
 
-@requires_flock
 def test_missing_python_env(checkout: Path) -> None:
     (checkout / ".venv/bin/pyright").unlink()
     result = run_guard(checkout)
@@ -411,7 +554,6 @@ def test_missing_python_env(checkout: Path) -> None:
 
 
 @pytest.mark.parametrize("status", [0, 1, 7])
-@requires_flock
 def test_real_command_status_propagates(checkout: Path, status: int) -> None:
     result = run_guard(checkout, code=f"print('executed'); raise SystemExit({status})")
     assert result.returncode == status
