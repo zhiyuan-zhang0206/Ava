@@ -39,7 +39,7 @@ On exclusive agent-host boot, an applied force left by the dead host is observed
 only when no persistent `req-*.json` envelope that could still belong to a live
 exec domain remains for that agent. The envelope is created before a disposable
 exec child and removed after close, root reap, and reader completion, so it is
-the durable resource witness. `shared/exec_request_evidence.py` classifies each
+the durable resource witness. `shared/agents/incarnation/exec_request_evidence.py` classifies each
 leftover envelope against the incarnation that wrote it and against live process
 proof. It quarantine-moves — never deletes — an envelope only when it parses
 with its exact incarnation attribution, no live process references it (the

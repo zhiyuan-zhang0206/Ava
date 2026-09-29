@@ -8,13 +8,13 @@ UI update, never the durable op that triggered it.
 from __future__ import annotations
 
 from shared.config import settings
-from shared.live_events import (
+from shared.events.live.projection import (
     InboundArrived,
     NoticePosted,
     NoticeResolved,
     PageClosed,
 )
-from shared.redis_client import publish_best_effort
+from shared.events.live.redis_client import publish_best_effort
 
 
 async def publish_inbound_arrived(

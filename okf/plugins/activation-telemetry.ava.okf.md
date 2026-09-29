@@ -10,7 +10,7 @@ tags:
 # Plugin Activation Telemetry
 
 ## What It Records
-The ledger records what was registered; `shared/plugin_activation.py` records
+The ledger records what was registered; `shared/packages/plugins/activation.py` records
 what fired. Three surfaces emit one `plugin_activation` event per firing, keyed
 by the ledger's own `(plugin, surface, identifier)` triple plus the model in
 force: a **hook** that returns a non-empty state update (naming the keys it

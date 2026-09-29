@@ -8,7 +8,7 @@ v3 — the hand-maintained `[project].version` was rejected as the gate source;
 it survives only as the checkout-less fallback).
 
 The gates compare against the bare `YYYY.M.D` string — `engines.ava` ranges
-via `shared.plugin_manifest.range_allows` plus the `requires_commit` ancestor
+via `shared.packages.plugins.manifest.range_allows` plus the `requires_commit` ancestor
 check. Prefer the display form only where a human reads it (status output,
 log lines).
 
@@ -66,11 +66,11 @@ def host_version(repo: Path | None = None) -> str:
     derived = _derived(repo)
     if derived is not None:
         return derived[0]
-    from shared import plugin_manifest
+    from shared.packages.plugins import manifest
 
     try:
-        return plugin_manifest.host_version_from_repo(repo)
-    except plugin_manifest.ManifestError as e:
+        return manifest.host_version_from_repo(repo)
+    except manifest.ManifestError as e:
         raise HostVersionError(str(e)) from e
 
 

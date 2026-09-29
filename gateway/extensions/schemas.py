@@ -8,7 +8,7 @@ per-machine (the registry is machine-local; there is no cluster-shared row), so
 unlike the cross-machine plugin/MCP inventory this is not a `?machine=` matrix.
 
 The contribution aggregate is the wire form of what the cluster's enabled
-plugins declare under `contributions.ui` (`shared/plugin_ui_contributions.py`).
+plugins declare under `contributions.ui` (`shared/packages/plugins/ui_contributions.py`).
 Every entry is name-attributed: the console labels provenance, and an operator
 tracing a surface back to the plugin that put it there reads one field. Themes,
 nav entries, and statistics-panel cards today — the slice that carries

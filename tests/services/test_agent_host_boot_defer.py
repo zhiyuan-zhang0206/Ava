@@ -17,7 +17,7 @@ import pytest
 from loguru import logger
 
 from services.agent_host import boot_defer, daemon
-from shared.exec_request_evidence import RequestEvidence, Verdict
+from shared.agents.incarnation.exec_request_evidence import RequestEvidence, Verdict
 
 _AGENT = 4242
 

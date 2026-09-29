@@ -47,9 +47,9 @@ from agent.nodes import (
     NodeName,
 )
 from agent.state import BaseAgentState, build_agent_state
+from shared.agents.context import AvaContext
 from shared.config import settings
 from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
 
 from ._init_context import init_context_node
 from .claim.node import claim_node

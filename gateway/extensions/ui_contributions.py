@@ -31,16 +31,16 @@ from gateway.extensions.schemas import (
     UiStatContribution,
     UiThemeContribution,
 )
-from shared import plugins_config
-from shared.plugin_manifest import ManifestError, load_manifest
+from shared.packages.plugins import enable_config
+from shared.packages.plugins.manifest import ManifestError, load_manifest
 
 router = APIRouter()
 
 
 def _enabled_ui_declarations() -> list[tuple[str, dict[str, Any]]]:
     """`(plugin, contributions.ui)` for every enabled plugin that declares one."""
-    installed = plugins_config.installed_plugin_dirs()
-    config = plugins_config.load_for_runtime(set(installed))
+    installed = enable_config.installed_plugin_dirs()
+    config = enable_config.load_for_runtime(set(installed))
     declarations: list[tuple[str, dict[str, Any]]] = []
     for name in sorted(installed):
         entry = config.plugins.get(name)

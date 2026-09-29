@@ -27,9 +27,9 @@ from agent.hooks import Hook, register_before_llm
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState
+from shared.agents.context import AvaContext
 from shared.config import settings
 from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
 from shared.log import logger
 
 from .inherit import inherited_memory_note

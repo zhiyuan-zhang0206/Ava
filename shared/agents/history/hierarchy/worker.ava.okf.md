@@ -69,7 +69,7 @@ shipped off) gates both the enqueue and the tick.
   master switch and reconcile cadence, the regen alert / halt / daily-budget
   thresholds and the low-reuse ratio (task #4674), and the child-kill /
   stale-row graces; the generation model is the target agent's own effective
-  model (`shared.agent_snapshot.agent_effective_model` — overlay preferred,
+  model (`shared.agents.observation.snapshot.agent_effective_model` — overlay preferred,
   fleet default else), with `settings.lm.hierarchy_model` as the last-resort
   fallback.
 - **Cost observability**: each job row records the run's scope (stretches,

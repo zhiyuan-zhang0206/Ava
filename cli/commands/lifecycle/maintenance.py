@@ -24,12 +24,12 @@ from cli.commands.lifecycle.service_stop import (
 from cli.cutover_hold import resume_refusal, start_refusal
 from ops.agent_pause import drain, prepare
 from ops.agent_pause.probe import host_identity_or_none, ops_quiescent
+from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.cluster.machine import machine_name, machine_role
 from shared.db import connect
 from shared.deploy.lifecycle import start_serving
 from shared.deploy.maintenance import admission, cohort, hold_driver, pause_owner
 from shared.deploy.maintenance.state import MaintenanceHold
-from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 
 
 def _hold(holder: str, at: datetime) -> MaintenanceHold:

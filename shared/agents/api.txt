@@ -29,6 +29,24 @@ TerminateResult  (re-export of shared.agents.contract.TerminateResult)
 TerminationSource  (re-export of shared.agents.contract.TerminationSource)
 history  (re-export of shared.agents.history)
 
+## shared.agents.birth_config
+def cluster_default_model(cur: psycopg.Cursor) -> str | None
+def resolve_birth_config(cur: psycopg.Cursor, overlay: Mapping[str, object] | None=None, *, inherited: Mapping[str, object] | None=None) -> dict[str, Any]
+def set_cluster_default_model(cur: psycopg.Cursor, model: str, *, updated_by: str) -> None
+
+## shared.agents.context
+@dataclass(frozen=True)
+class AvaContext
+  ava_home: Path = ...
+  db_url: str = ...
+  event_publisher: AgentEventPublisher | None = None
+  events_channel: str = ...
+  llm: BaseChatModel | None = None
+  ops_pool: AsyncConnectionPool | None = None
+  redis_sync: _redis_sync.Redis | None = None
+  redis_url: str = ...
+def agent_id_from_config(config: RunnableConfig) -> int
+
 ## shared.agents.contract
 class AgentLaunchFailed(AvaAgentError)
   def __init__(self, detail: str, *, agent_id: int | None=None, state: dict[str, object] | None=None, retry_launch_path: str | None=None) -> None
@@ -114,6 +132,12 @@ class TerminationSource(StrEnum)
   @classmethod
   def resurrectable(cls) -> tuple[TerminationSource, ...]
 
+## shared.agents.exit_codes
+IDLE_EXIT_CODE = 42
+RESTART_DECLINED_EXIT_CODE = 3
+SERVICES_NOT_READY_EXIT_CODE = 4
+SYSTEM_HALT_EXIT_CODE = 43
+
 ## shared.agents.history
 
 ## shared.agents.history.checkpoint
@@ -137,6 +161,9 @@ async def mark_compact_boundary(pool: AsyncConnectionPool, thread_id: str, *, ch
 def mark_compact_boundary_sync(pool: ConnectionPool, thread_id: str, *, checkpoint_ns: str='') -> None
 async def trim_checkpoints(pool: AsyncConnectionPool, thread_id: str, *, keep: int=5, checkpoint_ns: str='', batch: int=_TRIM_BATCH, preserve_checkpoint_ids: Collection[str]=()) -> TrimCounts
 def trim_checkpoints_sync(pool: ConnectionPool, thread_id: str, *, keep: int=5, checkpoint_ns: str='', batch: int=_TRIM_BATCH, preserve_checkpoint_ids: Collection[str]=()) -> TrimCounts
+
+## shared.agents.history.checkpoint_postgres_walks
+def install_checkpoint_postgres_walk_patch() -> None
 
 ## shared.agents.history.checkpoint_serde
 STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = ...
@@ -383,8 +410,8 @@ class TimelineItem(BaseModel)
   source: str | None = None
 
 ## shared.agents.impersonation
-ImpersonationError  (re-export of shared.agents.impersonation._impersonation_store.ImpersonationError)
-OPEN  (re-export of shared.agents.impersonation._impersonation_store.OPEN)
+ImpersonationError  (re-export of shared.agents.impersonation._store.ImpersonationError)
+OPEN  (re-export of shared.agents.impersonation._store.OPEN)
 RELAY_HEARTBEAT_SECONDS  (re-export of shared.agents.impersonation.relay.RELAY_HEARTBEAT_SECONDS)
 RELAY_HEARTBEAT_STALE_SECONDS  (re-export of shared.agents.impersonation.relay.RELAY_HEARTBEAT_STALE_SECONDS)
 abort_lease  (re-export of shared.agents.impersonation.relay.abort_lease)
@@ -395,11 +422,11 @@ def activate(lease_id: str, incarnation: RuntimeIncarnation) -> dict[str, Any]
 fail_acceptance  (re-export of shared.agents.impersonation.relay.fail_acceptance)
 def get(lease_id: str, caller: object) -> dict[str, Any]
 def inbox(lease_id: str, caller: object, *, limit: int=100) -> list[dict[str, Any]]
-lock_lease  (re-export of shared.agents.impersonation._impersonation_store.lock_lease)
+lock_lease  (re-export of shared.agents.impersonation._store.lock_lease)
 def mark_plugin_applied(lease_id: str, version: int, incarnation: RuntimeIncarnation) -> None
 def merge_plugin_delta(lease_id: str, caller: object, delta: dict[str, Any], *, expected_version: int) -> None
 def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, Any] | None
-provider_anchor_states  (re-export of shared.agents.impersonation._impersonation_store.provider_anchor_states)
+provider_anchor_states  (re-export of shared.agents.impersonation._store.provider_anchor_states)
 provision_relay  (re-export of shared.agents.impersonation.relay.provision_relay)
 record_relay_failure  (re-export of shared.agents.impersonation.relay.record_relay_failure)
 def reject(lease_id: str, agent_id: int, incarnation: RuntimeIncarnation, reason: str='') -> dict[str, Any]
@@ -411,15 +438,15 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]
 def renew(lease_id: str, caller: object, *, ttl_seconds: int | None=None) -> dict[str, Any]
 def request(agent_id: int, *, caller: CallerIdentity, ttl_seconds: int=3600, reason: str='', relay_provider: str, relay_thread_id: str | None=None, relay_codex_remote: str | None=None, relay_batch_window_seconds: int=0, name: str='', executor_name: str='', process_metadata: dict[str, Any] | None=None, automatic: bool=False) -> dict[str, Any]
 def require_active(lease_id: str, caller: object) -> dict[str, Any]
-require_native  (re-export of shared.agents.impersonation._impersonation_store.require_native)
+require_native  (re-export of shared.agents.impersonation._store.require_native)
 
-## shared.agents.impersonation.impersonation_delivery
+## shared.agents.impersonation.delivery
 def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) -> frozenset[int]
 
-## shared.agents.impersonation.impersonation_events
+## shared.agents.impersonation.events
 def consume_events(agent_id: int, session_id: int, events: Iterable[dict[str, Any]]) -> int
 
-## shared.agents.impersonation.impersonation_history
+## shared.agents.impersonation.history
 class ImpersonationMetadata(BaseModel)
   agent_id: int
   anchor_item_id: str | None = None
@@ -440,19 +467,11 @@ def resolve(agent_id: int, session_id: int) -> dict[str, Any]
 def say(lease_id: str, caller: object, content: str, *, phase: str='commentary', message_key: str) -> int
 def set_actor(conn: psycopg.Connection, actor: str) -> None
 
-## shared.agents.impersonation.impersonation_maintenance
+## shared.agents.impersonation.maintenance
 REMINDER_WINDOW_SECONDS = 300.0
 def force_expire_impersonation(pool: ConnectionPool, agent_id: int, session_id: int, actor: str) -> Literal['expired', 'not_open']
 def reap_impersonations(pool: ConnectionPool, *, limit: int=_PASS_BATCH) -> int
 def remind_expiring_impersonations(pool: ConnectionPool, *, window_seconds: float=REMINDER_WINDOW_SECONDS) -> int
-
-## shared.agents.impersonation.impersonation_sessions
-def list_sessions(agent_id: int, *, before: int | None=None, limit: int=100) -> list[dict[str, Any]]
-def private_id(agent_id: int, session_id: int) -> str
-def request(agent_id: int, *, name: str, executor_name: str, provider: str, process_metadata: dict[str, Any], ttl_seconds: int=3600, reason: str='', thread_id: str | None=None, codex_remote: str | None=None, batch_window_seconds: int=0) -> dict[str, Any]
-
-## shared.agents.impersonation.impersonation_timeline
-def hydrate(items: list[TimelineItem], agent_id: int, *, limit: int, before: str | None=None) -> list[TimelineItem]
 
 ## shared.agents.impersonation.relay
 RELAY_HEARTBEAT_SECONDS = 10.0
@@ -465,6 +484,14 @@ def record_relay_failure(lease_id: str, incarnation: RuntimeIncarnation) -> bool
 def relay_get(lease_id: str, relay_token: str) -> dict[str, Any]
 def relay_heartbeat(lease_id: str, relay_token: str) -> None
 def relay_inbox(lease_id: str, relay_token: str, *, limit: int=100) -> list[dict[str, Any]]
+
+## shared.agents.impersonation.sessions
+def list_sessions(agent_id: int, *, before: int | None=None, limit: int=100) -> list[dict[str, Any]]
+def private_id(agent_id: int, session_id: int) -> str
+def request(agent_id: int, *, name: str, executor_name: str, provider: str, process_metadata: dict[str, Any], ttl_seconds: int=3600, reason: str='', thread_id: str | None=None, codex_remote: str | None=None, batch_window_seconds: int=0) -> dict[str, Any]
+
+## shared.agents.impersonation.timeline
+def hydrate(items: list[TimelineItem], agent_id: int, *, limit: int, before: str | None=None) -> list[TimelineItem]
 
 ## shared.agents.impersonation_manifest
 @dataclass(frozen=True)
@@ -506,7 +533,260 @@ def unbind_local_participant(participant: LocalParticipant) -> None
 ## shared.agents.impersonation_manifest_grants
 def grant_manifest_runner_access(conn: psycopg.Connection, runner_role: str) -> None
 
+## shared.agents.incarnation
+
+## shared.agents.incarnation.exec_owner_protocol
+MAX_OWNER_MESSAGE = ...
+class OwnerClosed(BaseModel)
+  allocation: ExecAllocation
+  model_config = ...
+  observed_at: datetime
+  reason: Literal['completed', 'host_eof', 'cancel', 'timeout']
+  root_exit_code: int
+  version: Literal[1] = 1
+class OwnerContext(BaseModel)
+  agent_id: int = ...
+  allocation: ExecAllocation
+  generation: UUID
+  model_config = ...
+  request_path: Path
+  @model_validator(mode='after')
+  def require_canonical_request(self) -> 'OwnerContext'
+  result_path: Path
+  runtime_owner: UUID
+  version: Literal[1] = 1
+class OwnerControl(BaseModel)
+  action: Literal['permit', 'cancel']
+  domain: UUID
+  model_config = ...
+  request: UUID
+  version: Literal[1] = 1
+class OwnerReady(BaseModel)
+  allocation: ExecAllocation
+  model_config = ...
+  version: Literal[1] = 1
+def publish_owner_message(path: Path, message: OwnerReady | OwnerClosed | OwnerContext) -> None
+def read_owner_bytes(path: Path, limit: int=MAX_OWNER_MESSAGE) -> bytes
+def read_owner_context(path: Path) -> OwnerContext
+def validate_native_ready(ready: OwnerReady, launcher_identity: ResourceProcess, context_path: Path) -> None
+
+## shared.agents.incarnation.exec_owner_recovery
+def process_ended(identity: ResourceProcess) -> bool
+def recover_local_resources(agent_id: int, machine: str) -> None
+
+## shared.agents.incarnation.exec_request_evidence
+@dataclass(frozen=True)
+class HostEvidence
+  detail: str
+  state: HostState
+class HostState(StrEnum)
+  ABSENT = 'absent'
+  ALIVE = 'alive'
+  ENDED = 'ended'
+  UNREADABLE = 'unreadable'
+@dataclass(frozen=True)
+class QuarantineReport
+  agent_id: int
+  event_dir: Path | None
+  quarantined: tuple[QuarantinedEvidence, ...]
+  retained: tuple[RequestEvidence, ...]
+@dataclass(frozen=True)
+class QuarantinedEvidence
+  destination: Path
+  entry: RequestEvidence
+@dataclass(frozen=True)
+class RequestEvidence
+  agent_id: int
+  def describe(self) -> str
+  detail: str
+  incarnation: RuntimeIncarnation | None
+  live_pids: tuple[int, ...]
+  mtime: float
+  path: Path
+  @property
+  def retained(self) -> bool
+  verdict: Verdict
+class Verdict(StrEnum)
+  DISPOSABLE = 'disposable'
+  LIVE = 'live'
+  STALE = 'stale'
+  UNKNOWN = 'unknown'
+def classify_request(path: Path, *, agent_id: int, incumbent: RuntimeIncarnation | None, host: HostEvidence) -> RequestEvidence
+def disposition_hint(agent_id: int) -> str
+def live_domain_pids(path: Path, *, born_from: float, born_before: float) -> tuple[int, ...]
+def main(argv: Sequence[str] | None=None) -> int
+def quarantine_stale(agent_id: int, *, incumbent: RuntimeIncarnation | None, resources: object, reason: str) -> QuarantineReport
+def request_paths(agent_id: int) -> tuple[Path, ...]
+def stored_host(resources: object) -> HostEvidence
+def survey(agent_id: int, *, incumbent: RuntimeIncarnation | None, resources: object) -> tuple[RequestEvidence, ...]
+
+## shared.agents.incarnation.host_process_evidence
+@dataclass(frozen=True)
+class LocalHostEvidence
+  def blocking_reasons(self) -> list[str]
+  @property
+  def clean(self) -> bool
+  live_exec_children: tuple[int, ...] = ()
+  live_hosts: tuple[int, ...] = ()
+  scanned: int = 0
+  unreadable: tuple[str, ...] = ()
+def local_host_evidence(agent_id: int, home: Path, *, exclude_pid: int) -> LocalHostEvidence
+
+## shared.agents.incarnation.hosted_force
+def install_hosted_force(conn: psycopg.Connection, agent_id: int, command_id: int) -> None
+async def original_host_force(pool: AsyncConnectionPool, agent_id: int, owner: UUID, machine: str, *, command_id: int | None=None, quiescent: bool=False, kill_shell_sessions: Callable[[int], None] | None=None) -> bool
+async def recover_orphaned_hosted_forces(pool: AsyncConnectionPool, machine: str, *, kill_shell_sessions: Callable[[int], None] | None=None) -> tuple[list[int], dict[int, tuple[RequestEvidence, ...]]]
+
+## shared.agents.incarnation.lifecycle_acceptance
+COMMAND_KILLS_SHELL_SESSIONS: LiteralString = "COALESCE((payload -> 'kill_all_shell_sessions') = 'true'::jsonb, false)"
+FAILED_RESTART_FOR_CURRENT_TARGET: LiteralString = ...
+HOSTED_TURN_RECOVERY_MARKER = 'hosted_turn_recovery'
+KILL_ALL_SHELL_SESSIONS = 'kill_all_shell_sessions'
+LIFECYCLE_RELEASE = 'lifecycle_release'
+@dataclass(frozen=True)
+class LifecycleIntent
+  accepted_at: datetime
+  agent_id: int
+  generation: UUID
+  id: int
+  kind: str
+  owner: UUID
+RECORD_APPLIED: LiteralString = ...
+SYSTEM_NOTICE_SOURCE: LiteralString = ...
+SYSTEM_REAPED_CRASH_ROW: LiteralString = "(agents_meta.termination_source = 'reaper' AND agents_meta.last_turn_fatal_at IS NOT NULL)"
+TERMINATE_KILLS_SHELL_SESSIONS: LiteralString = ...
+UNOWNED_TERMINATION = 'unowned_termination'
+UNOWNED_TERMINATION_ID: LiteralString = ...
+UNOWNED_TERMINATION_RECORDED: LiteralString = ...
+def accept_lifecycle_command(conn: psycopg.Connection, target: RuntimeIncarnation) -> LifecycleIntent | None
+async def accept_lifecycle_command_async(conn: psycopg.AsyncConnection, target: RuntimeIncarnation) -> LifecycleIntent | None
+def is_system_notice_source(source: str, payload: Mapping[str, object] | None) -> bool
+def record_unowned_termination(conn: psycopg.Connection, agent_id: int, force_id: int) -> bool
+def supersede_lifecycle_for_force(conn: psycopg.Connection, agent_id: int, force_id: int) -> None
+def supersede_lifecycle_for_resurrect(conn: psycopg.Connection, agent_id: int, resurrect_id: int) -> None
+async def terminate_kills_shell_sessions(conn: psycopg.AsyncConnection, agent_id: int) -> bool
+
+## shared.agents.incarnation.predecessor_closure
+class ClosureEvidence(BaseModel)
+  attestation_sha256: str = ...
+  machine: str = ...
+  model_config = ...
+  operator: str = ...
+  reason: str = ...
+@dataclass(frozen=True)
+class PredecessorClosure
+  after: IncarnationResources
+  agent_id: int
+  before: object
+  receipt: int
+@dataclass(frozen=True)
+class Refusal
+  reason: str
+  verdict: Literal['inadmissible', 'unconvertible']
+SUCCESSOR_COLUMNS: LiteralString = ...
+@dataclass(frozen=True)
+class SettledReceipt
+  closed_already: bool
+  id: int
+  kind: Literal['restart', 'terminate']
+@dataclass(frozen=True)
+class SuccessorRow
+  lease_free: bool
+  lifecycle_command_id: int | None
+  pid: int | None
+  runtime_generation: UUID | None
+  runtime_kind: str | None
+  runtime_owner: UUID | None
+  status: str
+def close_retired_predecessor(conn: psycopg.Connection, agent_id: int, *, before: object, receipt: int, evidence: ClosureEvidence) -> PredecessorClosure
+def successor_refusal(row: SuccessorRow, closed: tuple[UUID, UUID], receipt: SettledReceipt | None) -> Refusal | None
+
+## shared.agents.incarnation.resource_admission
+DRAINED_RESOURCES = ...
+PREDECESSOR_RECEIPT = ...
+def admit_resources(conn: psycopg.Connection, target: RuntimeIncarnation, host: ResourceProcess) -> None
+async def admit_resources_async(conn: psycopg.AsyncConnection, target: RuntimeIncarnation, host: ResourceProcess, *, exited_predecessor: ResourceProcess | None=None) -> None
+async def require_resources_closed_async(conn: psycopg.AsyncConnection, agent_id: int) -> None
+
+## shared.agents.incarnation.resources
+class ExecAllocation(_StrictEvidence)
+  deadline: datetime
+  domain: UUID
+  owner_process: ResourceProcess | None = None
+  request: UUID
+  request_digest: str = ...
+  @model_validator(mode='after')
+  def require_complete_identity(self) -> 'ExecAllocation'
+  root_process: ResourceProcess | None = None
+class IncarnationResources(_StrictEvidence)
+  frozen_by: int | None = ...
+  generation: UUID
+  host_process: ResourceProcess | None = None
+  owner: UUID
+  requests: dict[str, ExecAllocation]
+  @model_validator(mode='after')
+  def require_exact_keys(self) -> 'IncarnationResources'
+  state: Literal['admitted'] = 'admitted'
+  version: Literal[1] = 1
+class ResourceBirth(_StrictEvidence)
+  birth: UUID
+  state: Literal['unadmitted'] = 'unadmitted'
+  version: Literal[1] = 1
+class ResourceEvidenceError(RuntimeError)
+class ResourceProcess(_StrictEvidence)
+  def as_identity(self) -> proc_tree.OwnedProcess
+  birth: float = ...
+  boot_id: str | None
+  @field_validator('boot_id')
+  @classmethod
+  def canonical_boot(cls, value: str | None) -> str | None
+  @classmethod
+  def capture(cls, process: psutil.Process) -> 'ResourceProcess'
+  def in_current_boot(self) -> bool
+  pid: int = ...
+  def same_birth(self, other: 'ResourceProcess') -> bool
+  starttime: int | None = ...
+class ResourceShapeError(ResourceEvidenceError, ValueError)
+ResourceState = Annotated[ResourceBirth | IncarnationResources, Field(discriminator='state')]
+def admit_first_resources(conn: psycopg.Connection, target: RuntimeIncarnation, birth: UUID) -> None
+def attach_exec(conn: psycopg.Connection, target: RuntimeIncarnation, reserved: ExecAllocation, attached: ExecAllocation) -> None
+def complete_exec(conn: psycopg.Connection, target: RuntimeIncarnation, entry: ExecAllocation) -> None
+def decode_resources(value: object) -> ResourceBirth | IncarnationResources
+def freeze_resources(conn: psycopg.Connection, target: RuntimeIncarnation, command_id: int) -> None
+def register_exec(conn: psycopg.Connection, target: RuntimeIncarnation, entry: ExecAllocation) -> None
+
+## shared.agents.labels
+async def publish_label_updated(agent_id: int, label: str | None) -> None
+def spawn_prompt_with_label(prompt: str, label: str | None) -> str
+
+## shared.agents.lifecycle
+class AgentImpersonation(LifecycleExit)
+  def __init__(self) -> None
+class AgentRestart(LifecycleExit)
+  def __init__(self) -> None
+class AgentTermination(LifecycleExit)
+  def __init__(self) -> None
+class LifecycleExit(SystemExit)
+class SystemHalt(LifecycleExit)
+  def __init__(self) -> None
+
 ## shared.agents.messages
+
+## shared.agents.messages.caller_identity
+class CallerIdentity(BaseModel)
+  @classmethod
+  def from_source(cls, source: str) -> CallerIdentity
+  instance: str | None = ...
+  kind: Literal['external_agent', 'unknown']
+  model_config = ...
+  def source(self) -> str
+  subject: str = ...
+PREFIXES = ('external_agent:', 'unknown:')
+def caller_payload(source: str, payload: Mapping[str, object] | None) -> dict[str, object] | None
+
+## shared.agents.messages.caller_protocol
+class CallerProtocolUnavailableError(ValueError)
+def require_caller_protocol(conn: psycopg.Connection, agent_id: int, source: str) -> RuntimeIncarnation | None
 
 ## shared.agents.messages.chat_delivery
 @dataclass(frozen=True, slots=True)
@@ -583,6 +863,11 @@ def validate_source(source: str) -> None
 def validate_writable_source(source: str) -> None
 def wrap_inbound(content: str, source: str, *, created_at: datetime | None=None) -> str
 
+## shared.agents.messages.external_caller
+def explicit_caller_source(source: str | None=None) -> str | None
+def external_caller() -> CallerIdentity | None
+def launch_caller_assignment(tool: str, instance: str | None) -> str
+
 ## shared.agents.messages.inbound
 class InboundKind(StrEnum)
   CANCEL = 'cancel'
@@ -614,3 +899,278 @@ SOURCE_TRANSPORT_MAX_LENGTH = 80
 SOURCE_VERIFIED_BY_MAX_LENGTH = 120
 def content_sha256(content: str) -> str
 def source_assertion_match(source: str, provenance: InboundProvenance) -> bool | None
+
+## shared.agents.messages.kwargs
+class AvaMessageKwargs(TypedDict, total=False)
+  ava_cancelled: bool
+  ava_code_ms_by_block: dict[str, int]
+  ava_compact_id: str
+  ava_created_at: str
+  ava_exec_ms: int | None
+  ava_exit_code: int
+  ava_image_urls: list[str]
+  ava_impersonation: dict[str, Any]
+  ava_inbound_id: int
+  ava_msg_type: str
+  ava_note_tag: str
+  ava_reasoning_ms: int
+  ava_reasoning_ms_by_block: dict[str, int]
+  ava_source: str
+  ava_task_id: int
+  ava_timed_out: bool
+  sdk_calls: list[dict[str, Any]] | None
+class AvaMsgType(StrEnum)
+  ATTACH = 'attach'
+  COMPACT_REQUEST = 'compact_request'
+  COMPACT_SUMMARY = 'compact_summary'
+  EXEC_OUTPUT = 'exec_output'
+  INBOUND = 'inbound'
+  SYSTEM_NOTE = 'system_note'
+class NoteTag(StrEnum)
+  AGENT_ID = 'agent_id'
+  AGENT_MEMORY = 'agent_memory'
+  AGENT_REPLY = 'agent_reply'
+  COMPACT_REMINDER = 'compact_reminder'
+  CONTEXT = 'context'
+  EXEC_TIMEOUT = 'exec_timeout'
+  HEARTBEAT = 'heartbeat'
+  HEARTBEAT_PAUSE = 'heartbeat_pause'
+  HISTORY_DUMP = 'history_dump'
+  IMPERSONATION = 'impersonation'
+  INHERITED_MEMORY = 'inherited_memory'
+  LIFECYCLE_FORK = 'lifecycle_fork'
+  LIFECYCLE_RESTART = 'lifecycle_restart'
+  LIFECYCLE_RESURRECT = 'lifecycle_resurrect'
+  LIFECYCLE_TERMINATE = 'lifecycle_terminate'
+  MEMORY = 'memory'
+  NEW_SKILLS = 'new_skills'
+  PRELOADED_SKILLS = 'preloaded_skills'
+  PROJECT_SKILLS = 'project_skills'
+  SDK_HINT = 'sdk_hint'
+  SECURITY = 'security'
+  SILENT_IDLE_CONTINUE = 'silent_idle_continue'
+  TASK = 'task'
+  TIMEZONE = 'timezone'
+def message_addl_kwargs(msg: BaseMessage) -> dict[str, Any]
+def message_content(msg: BaseMessage) -> str | list[str | dict[str, Any]]
+def message_response_metadata(msg: BaseMessage) -> dict[str, Any]
+def read_ava_kwargs(msg: BaseMessage) -> AvaMessageKwargs
+
+## shared.agents.observation
+
+## shared.agents.observation.db_wait
+DB_WAIT_PROOF_TTL_SECONDS = 280.0
+@dataclass
+class DatabaseWait
+  def complete(self) -> None
+  deadline: float = 0.0
+  expires_at: float = 0.0
+  handoff_at: float | None = None
+  incarnation: RuntimeIncarnation
+  observed_at: float = 0.0
+  def renew(self) -> None
+  task: asyncio.Task[Any]
+class DatabaseWaitProof(TypedDict)
+  expires_at: float
+  generation: str
+  observed_at: float
+  owner: str
+@contextmanager
+def database_wait(incarnation: RuntimeIncarnation) -> Generator[DatabaseWait]
+def database_wait_matches(proof: object, generation: UUID | None, owner: UUID | None) -> bool
+def database_wait_snapshot(agent_id: int, *, last_progress: float | None=None) -> DatabaseWaitProof | None
+
+## shared.agents.observation.evidence
+ADMISSION_FRESH_FOR = ...
+class AdmissionOutcome(StrEnum)
+  ADMISSION_GUARD_REFUSED = 'admission_guard_refused'
+  ADMITTED = 'admitted'
+  MAINTENANCE_HOLD = 'maintenance_hold'
+  PUBLICATION_DEFERRED = 'publication_deferred'
+  RESOURCE_FENCE = 'resource_fence'
+class AgentAvailability(BaseModel)
+  admission_outcome: AdmissionOutcome | None = None
+  evidence_at: datetime | None = None
+  observed_at: datetime
+  reason: AvailabilityReason
+class AgentObservation(BaseModel)
+  machine_probe_at: datetime | None = None
+  machine_probe_valid_until: datetime | None = None
+  runtime_lease_expires_at: datetime | None = None
+  runtime_owner: Literal['unknown'] = 'unknown'
+class AvailabilityReason(StrEnum)
+  ADMISSION_REFUSED = 'admission_refused'
+  ADMITTED = 'admitted'
+  AWAITING_ADMISSION = 'awaiting_admission'
+  HOST_UNAVAILABLE = 'host_unavailable'
+  LAUNCH_REJECTED = 'launch_rejected'
+  LAUNCH_UNKNOWN = 'launch_unknown'
+  LAUNCH_UNREACHABLE = 'launch_unreachable'
+  UNKNOWN = 'unknown'
+LIVENESS_PASS_INTERVAL_S = 60.0
+MACHINE_OFFLINE_AFTER_FAILURES = 2
+PROBE_FRESH_FOR = ...
+def availability(*, status: str, host_online: bool | None, probe_at: datetime | None, admission_outcome: str | None, admission_at: datetime | None, launch_failure_reason: str | None=None, launch_failure_at: datetime | None=None, now: datetime | None=None) -> AgentAvailability
+def observation(machine_probe_at: datetime | None, lease_expires_at: datetime | None) -> AgentObservation
+
+## shared.agents.observation.roster
+class AgentCard(AgentLineage)
+  availability: AgentAvailability | None = None
+  awaiting_response_count: int
+  heartbeat_paused_until: datetime | None
+  highest_notice_priority: Priority | None
+  label: str | None
+  last_active_at: datetime
+  last_inbound_at: datetime
+  liveness_state: Literal['online', 'offline', 'unknown']
+  machine: str
+  observation: AgentObservation
+  open_impersonation_session_id: int | None
+  open_impersonation_status: Literal['requested', 'accepted', 'active'] | None
+  pid: int | None
+  spawned_at: datetime
+  started_at: datetime | None
+  status: AgentStatus
+  supports_vision: bool
+  unread_notice_count: int
+class AgentDirectoryPage(BaseModel)
+  agents: list[AgentCard]
+  next_cursor: int | None
+AgentDirectoryScope = Literal['live', 'terminated', 'all']
+class AgentLineage(BaseModel)
+  agent_id: int
+  fork_source_agent_id: int | None
+  spawner: str
+class AgentRoster(BaseModel)
+  agents: list[AgentCard]
+  ancestors: list[AgentLineage]
+def list_directory(conn: psycopg.Connection[Any], *, scope: AgentDirectoryScope='live', query: str='', before_id: int | None=None, limit: int=100) -> AgentDirectoryPage
+def select_roster(conn: psycopg.Connection[Any]) -> AgentRoster
+
+## shared.agents.observation.snapshot
+class ActivityEntry(BaseModel)
+  created_at: datetime
+  text: str
+class AgentSnapshot(BaseModel)
+  agent_id: int
+  availability: AgentAvailability | None = None
+  fork_source_agent_id: int | None
+  fork_source_checkpoint_id: str | None
+  heartbeat_paused_until: datetime | None
+  label: str | None
+  last_active_at: datetime
+  last_inbound_at: datetime
+  last_probe_at: datetime | None
+  liveness_state: Literal['online', 'offline', 'unknown']
+  machine: str
+  notices_awaiting_response: list[OpenNotice]
+  observation: AgentObservation | None = None
+  pid: int | None
+  spawned_at: datetime
+  spawner: str
+  started_at: datetime | None
+  status: AgentStatus
+  supports_vision: bool
+  unread_notice_count: int
+class OpenNotice(BaseModel)
+  blocking: bool
+  content: str | None
+  created_at: datetime
+  expire_at: datetime | None = None
+  id: int
+  priority: Priority
+  require_response: bool = ...
+  task_id: int | None = None
+  title: str
+def agent_effective_model(agent_id: int, *, fallback: str) -> str
+def select_activity_trail(conn: psycopg.Connection, agent_id: int) -> list[ActivityEntry]
+def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None
+
+## shared.agents.recovery_breaker
+HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS = 2
+HALT_SUPPRESSION_WINDOW_S = ...
+PERMANENT_REJECT_REASON_BILLING: Final = 'billing'
+RECOVERY_BREAKER_CLEAR: LiteralString = 'permanent_reject_streak < 2'
+SUPPRESS_REASON_PERMANENT_REJECT = 'permanent_provider_reject'
+async def halt_automatic_recovery(pool: AsyncConnectionPool, agent_id: int) -> bool
+async def record_permanent_reject_turn(pool: AsyncConnectionPool, agent_id: int, reason: str) -> int
+
+## shared.agents.sdk
+
+## shared.agents.sdk.call_policy
+class SamplingPolicy(BaseModel)
+  sample_every: int = ...
+  sampling_enabled: bool = False
+def policy() -> SamplingPolicy
+
+## shared.agents.sdk.telemetry
+SDK_CALL_EVENT = 'sdk_call'
+class SdkCall(BaseModel)
+  count: int
+  method: str
+def annotate(**detail: Any) -> None
+def emit(fn: str, detail: Mapping[str, Any] | None=None, duration: float | None=None) -> None
+@contextlib.contextmanager
+def recording() -> Generator[dict[str, int], None, None]
+def reset_identity(token: Token[dict[str, Any] | None]) -> None
+def run_metered(fn: str, original: Callable[..., Any], args: Any, kwargs: Any) -> Any
+async def run_metered_async(fn: str, original: Callable[..., Awaitable[Any]], args: Any, kwargs: Any) -> Any
+def sdk_calls_by_tool_call_id(messages: Sequence[BaseMessage], start: int=0) -> dict[str, list[SdkCall]]
+def set_identity(identity: dict[str, Any] | None) -> Token[dict[str, Any] | None]
+def tally_entries(tally: Mapping[str, int]) -> list[dict[str, Any]]
+
+## shared.agents.tasks
+
+## shared.agents.tasks.notes
+def task_note_line(note: str) -> str
+
+## shared.agents.tasks.owner_notifications
+@dataclass(frozen=True)
+class TaskOwnerNotification
+  agent_id: int
+  content: str
+  resurrect: bool
+def owner_change_notifications(task_id: int, title: str, previous_owner: int | None, new_owner: int | None, *, actor: int | None, previous_owner_terminated: bool, description: str | None=None, changes: Sequence[str] | None=None) -> list[TaskOwnerNotification]
+
+## shared.agents.tasks.priority
+DEFAULT_REMIND_INTERVAL_SECONDS: dict[Priority, int] = ...
+class Priority(StrEnum)
+  P0 = 'P0'
+  P1 = 'P1'
+  P2 = 'P2'
+  P3 = 'P3'
+def validate_priority(priority: str) -> None
+
+## shared.agents.tasks.reparent
+def resolve_reparent(cur: psycopg.Cursor, task_id: int, parent_id: int | None) -> int | None
+def system_root_id(cur: psycopg.Cursor) -> int | None
+
+## shared.agents.tasks.rules
+CLOSED_STATUSES: frozenset[TaskStatus] = ...
+def first_open_child(cur: psycopg.Cursor, task_id: int) -> tuple[int, int] | None
+def is_closed(status: str | None) -> bool
+def open_title_holder(cur: psycopg.Cursor, title: str, *, exclude_id: int | None=None) -> tuple[int, str] | None
+
+## shared.agents.tasks.status
+class TaskStatus(StrEnum)
+  CANCELLED = 'cancelled'
+  DONE = 'done'
+  IN_PROGRESS = 'in_progress'
+
+## shared.agents.tasks.timestamps
+def render_task_timestamps(row: tuple[Any, ...], col_names: str) -> tuple[Any, ...]
+
+## shared.agents.uploads
+IMAGE_MIME: dict[str, str] = ...
+MAX_AGENT_UPLOAD_BYTES = ...
+MAX_AGENT_UPLOAD_FILES = 1000
+MAX_UPLOAD_BYTES = ...
+def agent_upload_dir(agent_id: int) -> Path
+def fetch_upload_b64(agent_id: int, name: str) -> tuple[str, str]
+def image_mime_for(name: str) -> str | None
+def parse_upload_url(url: str) -> tuple[int, str] | None
+def render_safe_headers(name: str) -> dict[str, str]
+def resolve_upload_path(agent_id: int, name: str) -> Path
+def sanitize_upload_name(filename: str) -> str
+def upload_quota_used(agent_dir: Path) -> tuple[int, int]
+def upload_url(agent_id: int, name: str) -> str

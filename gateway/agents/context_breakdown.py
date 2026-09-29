@@ -36,8 +36,8 @@ from langchain_core.messages import (
 )
 
 from agent.messages import COMPACT_SUMMARY_HEADER
+from shared.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 from shared.lm.content import content_blocks
-from shared.message_kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 
 # Bucket kinds — the canonical enumeration, and the stable tie-break order when
 # two categories share the same token count (the frontend legend renders them

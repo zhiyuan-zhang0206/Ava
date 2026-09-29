@@ -2,18 +2,11 @@
   "complexity": {
     "shared/config_registry.py::_build_registry": 19,
     "shared/db.py::insert_inbound_message": 21,
-    "shared/exec_owner_recovery.py::recover_local_resources": 27,
-    "shared/host_process_evidence.py::local_host_evidence": 15,
     "shared/migrations.py::apply_pending_migrations": 15,
-    "shared/plugin_manifest.py::_validate_contributions": 17,
-    "shared/plugins_config.py::update_all_disk_images": 16,
-    "shared/pyproject_mirror.py::_parse_py_spec": 18,
-    "shared/pyproject_mirror.py::_pick_bound": 16,
-    "shared/pyproject_mirror.py::pyproject_dependency_specs": 15,
     "shared/runtime_migration.py::ReleaseMigrationContext.validate": 15,
     "shared/runtime_plugins.py::verify_plugin_dependencies": 15
   },
   "directories": {
-    "shared": 162
+    "shared": 202
   }
 }

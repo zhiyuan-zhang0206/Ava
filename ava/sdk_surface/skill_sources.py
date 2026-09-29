@@ -30,9 +30,9 @@ def register(provider: Callable[[], list[Path]]) -> None:
     # Attribution for `ava plugins inspect`; lazy import keeps this leaf free of
     # an ava -> shared load-order dependency, and it is a no-op outside a plugin
     # import.
-    from shared import plugin_contributions
+    from shared.packages.plugins import contributions
 
-    plugin_contributions.record(
+    contributions.record(
         "skillSources",
         getattr(provider, "__name__", repr(provider)),
         detail=getattr(provider, "__module__", "?"),

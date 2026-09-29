@@ -44,8 +44,8 @@ from typing import Any
 from gateway.lgtm import loki_events
 from gateway.lgtm.edge_stream import EDGE_EVENT_NAMES, LINEAGE_EVENT_NAMES, LOKI_EDGE_LIMIT
 from shared import telemetry
+from shared.events.live.redis_client import sync_redis
 from shared.log import logger
-from shared.redis_client import sync_redis
 from shared.telemetry.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT
 
 # Frozen-source cache (mirrors gateway/routers/fleet_graph.py): the archive

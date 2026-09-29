@@ -17,9 +17,9 @@ from langchain_core.messages import AIMessage
 import services.labeler.labeler as labels_module
 from gateway.app import app
 from services.labeler.labeler import _normalize, generate_label_async
+from shared.agents.labels import publish_label_updated
 from shared.config import settings
 from shared.db import create_agent
-from shared.labels import publish_label_updated
 
 
 def _label_of(conn: psycopg.Connection, agent_id: int) -> str | None:

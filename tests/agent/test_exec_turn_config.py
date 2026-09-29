@@ -12,11 +12,11 @@ from agent.graph.exec._result import _ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import _run_agent_code
 from agent.state import AgentState
+from shared.agents.context import AvaContext
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
-from shared.context import AvaContext
 from shared.native_process.turn_identity import bind_turn_identity
-from shared.plugin_config_view import bind_agent_plugin_config
+from shared.packages.plugins.config_view import bind_agent_plugin_config
 
 
 def _plugin(unit_home: Path) -> None:

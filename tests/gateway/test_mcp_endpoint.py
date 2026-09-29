@@ -211,7 +211,7 @@ async def test_gateway_contract_matches_pre_extraction_golden() -> None:
 
 def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -> None:
     from gateway.mcp_server import endpoint
-    from shared.agent_roster import AgentCard, AgentDirectoryPage
+    from shared.agents.observation.roster import AgentCard, AgentDirectoryPage
 
     seen: dict[str, Any] = {}
     card = AgentCard.model_validate(
@@ -244,7 +244,7 @@ def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -
         seen.update(kwargs)
         return page
 
-    monkeypatch.setattr(endpoint.agent_roster, "list_directory", fake_list_directory)
+    monkeypatch.setattr(endpoint.roster, "list_directory", fake_list_directory)
     with TestClient(app) as client:
         token = _create_token(client)
         result = _tool_call(
@@ -317,7 +317,7 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
     from gateway.agents import router as route
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agent_observation import AvailabilityReason
+    from shared.agents.observation.evidence import AvailabilityReason
 
     async def _fail(_target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")

@@ -31,8 +31,8 @@ from ops.lifecycle.billing_recovery import (
 )
 from ops.rpc_schemas import BillingBalanceReport
 from shared.agents import ResurrectRefused
+from shared.agents.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
 from shared.db import create_agent
-from shared.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
 from shared.telemetry import Event
 
 

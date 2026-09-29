@@ -22,13 +22,13 @@ from pydantic import ValidationError
 
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, OpFailure, SpawnedAgent
-from shared.agent_observation import AvailabilityReason
 from shared.agents import (
     EXCEPTION_BY_REASON,
     AgentNotFound,
     CrossMachineGatewayUnavailable,
     ErrorReason,
 )
+from shared.agents.observation.evidence import AvailabilityReason
 
 # Browser clients and the agent UI give lifecycle requests a short response
 # window. The generic cluster-RPC policy is intentionally more patient for

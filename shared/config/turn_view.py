@@ -23,7 +23,7 @@ and reading the stored value must not silently coerce it a second time.
 Scope: framework `Settings` fields only. Plugin-scope config
 (`shared/plugin_config_registry._PLUGIN_CONFIGS`) is a separate process-global
 with the same problem, scoped the same way by its own view —
-`shared/plugin_config_view.py`.
+`shared/packages/plugins/config_view.py`.
 
 Enforcement: `scripts/lint/turn_scoped_config.py` forbids reading a
 `per_agent` field through the bare singleton from turn-scoped packages —

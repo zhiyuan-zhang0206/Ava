@@ -594,7 +594,7 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     """The loader imports every shipped plugin metrics.py under its plugin
     context plus the core definition modules — plugin metrics first, then
     core, the old snapshot's two-section order. No file involved."""
-    from shared.plugin_context import PluginContext
+    from shared.packages.plugins.context import PluginContext
     from shared.telemetry.metrics.core import catalog
     from shared.telemetry.metrics.plugin_metrics import clear_registry
 

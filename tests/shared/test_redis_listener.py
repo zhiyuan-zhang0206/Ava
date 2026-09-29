@@ -24,12 +24,12 @@ from redis.exceptions import NoPermissionError
 
 from shared.cluster import inbound_channel, redis_channel_prefix
 from shared.config import settings
-from shared.redis_listener import RedisInboundListener, WakeFailure, WakeState
+from shared.events.live.redis_listener import RedisInboundListener, WakeFailure, WakeState
 
 
 async def _publish_inbound(agent_id: int, inbound_id: int = 42) -> None:
     """Publish a wake-up to the agent's (cluster-scoped) Redis channel."""
-    from shared.redis_client import sync_redis
+    from shared.events.live.redis_client import sync_redis
 
     r = sync_redis()
     try:
@@ -315,7 +315,7 @@ class TestWakeHealth:
 
     async def _set_wake_key(self, agent_id: int, payload: str = "42") -> None:
         from shared.cluster import WAKE_KEY_TTL_S, wake_key
-        from shared.redis_client import sync_redis
+        from shared.events.live.redis_client import sync_redis
 
         r = sync_redis()
         try:
@@ -486,7 +486,7 @@ def _make_scoped_user(user: str, channel_grant: str) -> None:
     full key + command access, password == username. `resetchannels` clears the
     default channel grant first, so the user reaches ONLY the granted pattern,
     modelling `ensure_cluster_redis_acl`'s `resetchannels &<prefix>:*`."""
-    from shared.redis_client import sync_redis
+    from shared.events.live.redis_client import sync_redis
 
     r = sync_redis()
     try:
@@ -597,7 +597,7 @@ class TestWakeKeyBreadcrumb:
 
     async def _set_wake_key(self, agent_id: int, payload: str = "42") -> None:
         from shared.cluster import WAKE_KEY_TTL_S, wake_key
-        from shared.redis_client import sync_redis
+        from shared.events.live.redis_client import sync_redis
 
         r = sync_redis()
         try:
@@ -607,7 +607,7 @@ class TestWakeKeyBreadcrumb:
 
     async def _get_wake_key(self, agent_id: int) -> str | None:
         from shared.cluster import wake_key
-        from shared.redis_client import sync_redis
+        from shared.events.live.redis_client import sync_redis
 
         r = sync_redis(decode_responses=True)
         try:
@@ -682,7 +682,7 @@ class TestWakeKeyBreadcrumb:
         )
         # cleanup
         from shared.cluster import wake_key
-        from shared.redis_client import sync_redis
+        from shared.events.live.redis_client import sync_redis
 
         r = sync_redis()
         try:

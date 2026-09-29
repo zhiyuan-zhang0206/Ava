@@ -85,7 +85,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             # agent closure (via the fleet plugin); only gateway/runner
             # processes read the domain at runtime.
             "physical_backup",
-            # ava/skills.py imports shared.install_registry, whose
+            # ava/skills.py imports shared.packages.extensions.install_registry, whose
             # resolved_policy() resolves per-package update defaults from
             # settings.packages (#3267).
             "packages",
@@ -114,7 +114,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "display",
             # ops/spec.py gates the pitr-uploader roster entry on AVA_PITR_ENABLED.
             "physical_backup",
-            # shared.install_registry.resolved_policy() is reachable from the
+            # shared.packages.extensions.install_registry.resolved_policy() is reachable from the
             # runner closure and resolves per-package update defaults from
             # settings.packages (#3267).
             "packages",

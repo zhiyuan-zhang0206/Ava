@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     # child boots through (task #3633; `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.messages import AIMessage
 
-from shared.message_kwargs import message_response_metadata
+from shared.agents.messages.kwargs import message_response_metadata
 
 
 class StopCategory(enum.Enum):

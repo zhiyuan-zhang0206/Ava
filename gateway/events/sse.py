@@ -36,8 +36,8 @@ from redis.exceptions import AuthenticationError, NoPermissionError
 
 from gateway.middleware import runtime_metrics
 from shared.config import settings
-from shared.live_events import EVENT_ADAPTER, Error
-from shared.redis_client import open_async_redis, retry_auth_failures_async
+from shared.events.live.projection import EVENT_ADAPTER, Error
+from shared.events.live.redis_client import open_async_redis, retry_auth_failures_async
 
 _log = logging.getLogger(__name__)
 

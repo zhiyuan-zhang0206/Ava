@@ -8,7 +8,7 @@ Two halves, deliberately different in kind:
   rendered from the live `register_*` object at call time, so a changed
   parameter list shows up in the catalog without anyone editing it.
 - **Contributions** — what the plugins on THIS machine registered, read off the
-  attribution ledger (`shared.plugin_contributions`) that every `register_*`
+  attribution ledger (`shared.packages.plugins.contributions`) that every `register_*`
   entry point writes to. Facts, not documentation: a plugin appears here because
   its import called the entry point, not because someone wrote it down.
 
@@ -36,10 +36,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from shared import plugin_contributions, plugins_config
-from shared.packages.skills import skill_names
-from shared.plugin_contributions import Contribution
-from shared.plugin_manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
+from shared.packages.plugins import contributions as contribution_ledger
+from shared.packages.plugins import enable_config
+from shared.packages.plugins.contributions import Contribution
+from shared.packages.plugins.manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
+from shared.packages.skills import names
 
 # ── surfaces ────────────────────────────────────────────────────────────
 
@@ -290,7 +291,7 @@ class Catalog:
             UnknownPlugin: no plugin of that name is installed on this machine.
         """
         known = {p.name for p in self.plugins}
-        resolved = skill_names.find(name, known) or name
+        resolved = names.find(name, known) or name
         for view in self.plugins:
             if view.name == resolved:
                 return view
@@ -300,7 +301,7 @@ class Catalog:
         )
 
 
-class UnknownPlugin(Exception):  # noqa: N818 — named like its siblings in shared.plugins_config (DanglingPlugin / DuplicatePlugin), which describe the plugin condition rather than carry an Error suffix
+class UnknownPlugin(Exception):  # noqa: N818 — named like its siblings in shared.packages.plugins.enable_config (DanglingPlugin / DuplicatePlugin), which describe the plugin condition rather than carry an Error suffix
     """`ava plugins inspect <name>` named a plugin that is not installed here."""
 
 
@@ -316,7 +317,7 @@ def build_catalog() -> Catalog:
     from agent.extensions import load_extensions
 
     config = load_extensions()
-    discovered = plugins_config.installed_plugin_dirs()
+    discovered = enable_config.installed_plugin_dirs()
     repo_plugins = _repo_plugins_dir()
 
     views: list[PluginView] = []
@@ -332,8 +333,8 @@ def build_catalog() -> Catalog:
                 enabled=entry is not None and entry.enabled,
                 builtin=directory.is_relative_to(repo_plugins),
                 directory=directory,
-                description=plugins_config.parse_description(directory / "plugin.py"),
-                contributions=plugin_contributions.contributions_of(name),
+                description=enable_config.parse_description(directory / "plugin.py"),
+                contributions=contribution_ledger.contributions_of(name),
                 manifest=load_manifest(directory),
             )
         )

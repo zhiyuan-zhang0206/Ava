@@ -176,7 +176,7 @@ def publish_inbound_wake(agent_id: int, payload: str) -> bool:
     # lazy-imported to keep this module importable without the lease layer.
     from shared.agents.impersonation import relay_liveness_alert
     from shared.cluster import WAKE_KEY_TTL_S, inbound_channel, wake_key
-    from shared.redis_client import sync_redis
+    from shared.events.live.redis_client import sync_redis
 
     relay_liveness_alert(agent_id)
     channel = inbound_channel(agent_id)
@@ -257,8 +257,8 @@ def insert_inbound_message(
         {"resurrection_launch", "resurrection_launch_attempts"} & payload.keys()
     ):
         raise ValueError("resurrection launch evidence is reserved for the lifecycle owner")
+    from shared.agents.messages.caller_identity import caller_payload
     from shared.agents.messages.envelope import reject_unnegotiated_caller
-    from shared.caller_identity import caller_payload
 
     reject_unnegotiated_caller(source)
     payload = caller_payload(source, payload)
@@ -357,8 +357,8 @@ def insert_spawn_prompt_in_transaction(
     lost announcement. Spawn prompts have no multimodal payload or transport
     provenance; caller identity still follows the ordinary inbound rules.
     """
+    from shared.agents.messages.caller_identity import caller_payload
     from shared.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
-    from shared.caller_identity import caller_payload
 
     validate_writable_source(source)
     reject_unnegotiated_caller(source)

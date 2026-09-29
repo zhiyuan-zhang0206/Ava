@@ -24,11 +24,11 @@ from cli.commands.lifecycle.service_stop import (
 )
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause.probe import ops_quiescent
+from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.cluster.machine import MachineRoles, machine_role
 from shared.deploy.lifecycle import start_serving
 from shared.deploy.lifecycle.status_journal import begin, finish, phase, status_path
 from shared.deploy.maintenance import admission
-from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.native_process.ownership import retain_processes
 
 

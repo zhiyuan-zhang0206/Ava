@@ -5,7 +5,7 @@ from typing import Any
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from shared.agents.impersonation._impersonation_store import (
+from shared.agents.impersonation._store import (
     OPEN,
     ImpersonationError,
     authenticate_relay,
@@ -18,7 +18,7 @@ from shared.agents.impersonation._impersonation_store import (
     require_relay_active_locked,
     token_hash,
 )
-from shared.caller_identity import caller_payload
+from shared.agents.messages.caller_identity import caller_payload
 from shared.db_transaction import write_transaction
 from shared.log import logger
 from shared.native_process.runtime_incarnation import RuntimeIncarnation

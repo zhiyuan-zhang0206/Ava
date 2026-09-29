@@ -1,4 +1,4 @@
-"""Per-turn plugin-config view (shared/plugin_config_view.py) — the plugin-scope
+"""Per-turn plugin-config view (shared/packages/plugins/config_view.py) — the plugin-scope
 half of agent scoping for the hosted runner
 (future/infra/agent-runner-as-server.md, work item b).
 
@@ -23,17 +23,17 @@ import asyncio
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from shared.packages.plugins.config_view import (
+    bind_agent_plugin_config,
+    current_plugin_config_view,
+    resolve_agent_plugin_pins,
+)
 from shared.plugin_config_registry import (
     _PLUGIN_CONFIG_CLASSES,
     _PLUGIN_CONFIGS,
     all_plugin_configs,
     clear_plugin_configs,
     get_plugin_config,
-)
-from shared.plugin_config_view import (
-    bind_agent_plugin_config,
-    current_plugin_config_view,
-    resolve_agent_plugin_pins,
 )
 
 

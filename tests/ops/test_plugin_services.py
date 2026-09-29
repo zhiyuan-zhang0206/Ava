@@ -2,7 +2,7 @@
 
 A plugin ships a `services.py` exposing `services() -> tuple[ServiceSpec, ...]`;
 `ops.spec.plugin_services()` discovers the INSTALLED plugins (by code presence,
-via `shared.plugins_config`) and folds their specs onto `build_services()` so the
+via `shared.packages.plugins.enable_config`) and folds their specs onto `build_services()` so the
 roster stays single-source. These lock the load-bearing invariants:
 - the real ava_fleet plugin registers task-maintenance (venv-direct cmd +
   healthcheck_module point at the plugin namespace, not core `services.*`);
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-import shared.plugins_config as pc
+import shared.packages.plugins.enable_config as pc
 from ops import roster, spec
 from ops.roster import service_spec
 
@@ -62,7 +62,7 @@ def test_discovery_ignores_agent_enable_state(monkeypatch: pytest.MonkeyPatch) -
     agent-plugin-registration plane. Its cluster-level on/off is the explicit
     `AVA_TASK_MAINTENANCE_ENABLED` gate, exercised in
     `test_plugin_gate_flows_through_annotation`."""
-    from shared.plugins_config import PluginEntry, PluginsConfig
+    from shared.packages.plugins.enable_config import PluginEntry, PluginsConfig
 
     monkeypatch.setattr(
         pc,

@@ -52,8 +52,8 @@ Native vs installed (mirroring skills), the relative-path `.mcp.json` startup fo
 - `agent/mcp_daemon.py` — **no-op daemon handle** kept for boot-path compatibility (the daemon is now a supervised cluster service, never a per-agent child)
 - `cli/commands/extensions/mcp.py` — `ava mcp install/uninstall/upgrade/ls/add/remove/enable/disable`
 - `cli/commands/extensions/_pkg_source.py` — install source fetching (git URL / local path), shared with `ava plugins install`
-- `shared/install_registry.py` — install registry (`type="mcp"` rows = installed MCPs)
-- `shared/mcp_enabled.py` — enable/disable configuration management
+- `shared/packages/extensions/install_registry.py` — install registry (`type="mcp"` rows = installed MCPs)
+- `shared/packages/plugins/mcp_enabled.py` — enable/disable configuration management
 - `ava_builtins/mcps/chrome/.mcp.json` — chrome server definition (`"shared": "browser"` — the daemon dials the browser-mcp service directly; the `services.browser.mcp_wrapper` stdio bridge is retained only as the declared command for hosts running older daemons); scanned by `ava/mcp_config.py:builtin_mcp_paths()`
 
 ## Current MCP Servers

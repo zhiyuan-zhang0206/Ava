@@ -6,9 +6,9 @@ from typing import NoReturn
 import ava
 from ava.attachment_transport import attach as attach
 from ava.sdk_surface.validation import coerce_str, coerce_typed
+from shared.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from shared.config import settings
 from shared.config.turn_view import turn_settings
-from shared.lifecycle import AgentRestart, AgentTermination, SystemHalt
 
 # Deliberately NOT in __all_for_ava__ (importable, but out of the rendered SDK
 # docs): AgentRestart / AgentTermination are framework control-flow exceptions
@@ -317,8 +317,8 @@ def compact(summary: str) -> NoReturn:
     # never-raise primitive so redis can never interrupt this lifecycle exit.
     # Imported here, not at module scope: `import ava` must not pull the redis /
     # live-events stacks into every exec child (startup-path laziness, task #3816).
-    from shared.live_events import CompactRequest
-    from shared.redis_client import publish_best_effort_sync
+    from shared.events.live.projection import CompactRequest
+    from shared.events.live.redis_client import publish_best_effort_sync
 
     publish_best_effort_sync(
         settings.data_plane.events_channel,

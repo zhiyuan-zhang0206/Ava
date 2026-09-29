@@ -7,7 +7,7 @@ the tag falls through to ``UnknownMarkerChip``. Conversely, every string in
 NoteTag value; otherwise a removed or renamed backend tag leaves stale frontend
 behaviour. Both directions fail the hook with a clear message.
 
-Trigger: runs on either ``shared/message_kwargs.py`` or ``markers.tsx``
+Trigger: runs on either ``shared/agents/messages/kwargs.py`` or ``markers.tsx``
 changes (see ``.pre-commit-config.yaml``). No filenames passed; the script
 reads both files at their canonical paths from the repo root.
 """
@@ -20,7 +20,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-PYTHON_SRC = REPO_ROOT / "shared" / "message_kwargs.py"
+PYTHON_SRC = REPO_ROOT / "shared" / "agents" / "messages" / "kwargs.py"
 TS_SRC = REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "markers.tsx"
 
 
@@ -110,7 +110,7 @@ def main() -> None:
         for tag in missing:
             print(f"  - {tag}", file=sys.stderr)
         print(
-            "\nEach NoteTag added to shared/message_kwargs.py must have a matching branch in",
+            "\nEach NoteTag added to shared/agents/messages/kwargs.py must have a matching branch in",
             file=sys.stderr,
         )
         print(

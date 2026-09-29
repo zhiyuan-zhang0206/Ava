@@ -9,9 +9,10 @@ import psutil
 import pytest
 from pydantic import ValidationError
 
-from shared import exec_owner_recovery, native_process
-from shared.exec_owner_recovery import process_ended
-from shared.incarnation_resources import (
+from shared import native_process
+from shared.agents.incarnation import exec_owner_recovery
+from shared.agents.incarnation.exec_owner_recovery import process_ended
+from shared.agents.incarnation.resources import (
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
@@ -138,8 +139,8 @@ def test_wire_receipt_requires_explicit_native_fields() -> None:
 def test_same_host_admission_keeps_original_receipt_after_clock_movement(
     linux_birth: dict[str, float | int],
 ) -> None:
+    from shared.agents.incarnation.resource_admission import _next
     from shared.native_process.runtime_incarnation import RuntimeIncarnation
-    from shared.resource_admission import _next
 
     original = ResourceProcess.capture(psutil.Process())
     target = RuntimeIncarnation(1, uuid4(), uuid4())
@@ -166,9 +167,9 @@ def test_ready_handshake_uses_retained_native_launcher_and_child(
 ) -> None:
     from datetime import UTC, datetime, timedelta
 
-    from shared import exec_owner_protocol
-    from shared.exec_owner_protocol import OwnerReady, validate_native_ready
-    from shared.incarnation_resources import ExecAllocation
+    from shared.agents.incarnation import exec_owner_protocol
+    from shared.agents.incarnation.exec_owner_protocol import OwnerReady, validate_native_ready
+    from shared.agents.incarnation.resources import ExecAllocation
 
     owner = ResourceProcess(pid=41, birth=100.0, starttime=70, boot_id=_BOOT)
     child = ResourceProcess(pid=42, birth=100.0, starttime=71, boot_id=_BOOT)
@@ -218,9 +219,9 @@ def test_windows_redirector_still_requires_exact_owner_ancestry(
     from datetime import UTC, datetime, timedelta
     from pathlib import Path
 
-    from shared import exec_owner_protocol
-    from shared.exec_owner_protocol import OwnerReady, validate_native_ready
-    from shared.incarnation_resources import ExecAllocation
+    from shared.agents.incarnation import exec_owner_protocol
+    from shared.agents.incarnation.exec_owner_protocol import OwnerReady, validate_native_ready
+    from shared.agents.incarnation.resources import ExecAllocation
 
     monkeypatch.setattr(proc_tree.sys, "platform", "win32")
     identities = {

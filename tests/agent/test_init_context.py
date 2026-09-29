@@ -19,8 +19,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._init_context import init_context_node
 from agent.state import AgentState, ContextReset
+from shared.agents.context import AvaContext
 from shared.config import settings
-from shared.context import AvaContext
 from shared.db import create_agent
 
 
@@ -203,7 +203,9 @@ async def test_established_head_records_what_the_capability_index_lists(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
     )
     monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"alpha"})
+    monkeypatch.setattr(
+        "shared.packages.extensions.install_registry.loadable_skill_names", lambda: {"alpha"}
+    )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     tid = create_agent(db_conn)
     _fake_notes(monkeypatch, "memory")
@@ -239,7 +241,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     )
     monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
-        "shared.install_registry.loadable_skill_names",
+        "shared.packages.extensions.install_registry.loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
@@ -294,7 +296,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     )
     monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
-        "shared.install_registry.loadable_skill_names",
+        "shared.packages.extensions.install_registry.loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])

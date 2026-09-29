@@ -199,7 +199,7 @@ closed-predecessor form, `IncarnationResources(G, O, host_process=null,
 requests={})` for the incarnation the retired value names, backed by that
 incarnation's existing predecessor receipt (the old drain's applied restart,
 or an observed terminate) and the machine's closure attestation recorded on
-the receipt. `shared.predecessor_closure.close_retired_predecessor` is the
+the receipt. `shared.agents.incarnation.predecessor_closure.close_retired_predecessor` is the
 one-time library `scripts/cutover_db_records.py` calls, with one closure
 attestation per machine (`scripts/cutover_inventory.py --attest`: recorded
 identities gone and the home census empty); admission keeps

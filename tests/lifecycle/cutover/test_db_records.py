@@ -27,9 +27,13 @@ from scripts import cutover_db_records as records
 from scripts import cutover_db_survey as survey_module
 from scripts import cutover_inventory as inventory
 from scripts.cutover_db_survey import FREE_LEASE, Inputs, RetiredUnit, export_rows, survey
+from shared.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceBirth,
+    decode_resources,
+)
 from shared.cluster.machine import machine_name
 from shared.config import settings
-from shared.incarnation_resources import IncarnationResources, ResourceBirth, decode_resources
 
 GATEWAY, PAUSED, GONE = "gw-box", "win-box", "gone-box"
 _DRAIN = {"maintenance": {"holder": "legacy:pid41", "acquired_at": "2026-09-27T01:00:00+00:00"}}

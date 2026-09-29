@@ -13,10 +13,9 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from shared.deploy.writers.publication import AdmissionDecision, CurrentAdmission
-from shared.deploy.writers.runtime_admission import RuntimeAdmission
-from shared.exec_owner_protocol import OwnerClosed, OwnerContext, OwnerReady
-from shared.incarnation_resources import (
+from shared.agents.incarnation.exec_owner_protocol import OwnerClosed, OwnerContext, OwnerReady
+from shared.agents.incarnation.resource_admission import admit_resources
+from shared.agents.incarnation.resources import (
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
@@ -25,9 +24,10 @@ from shared.incarnation_resources import (
     decode_resources,
     register_exec,
 )
+from shared.deploy.writers.publication import AdmissionDecision, CurrentAdmission
+from shared.deploy.writers.runtime_admission import RuntimeAdmission
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.resource_admission import admit_resources
-from tests.agent.test_incarnation_resources import _admitted, _entry, _force, _process
+from tests.agent.test_resources import _admitted, _entry, _force, _process
 
 
 class _CurrentRuntimeAdmission(RuntimeAdmission):
@@ -73,7 +73,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
     from agent.graph.exec._result import _ExecCrashed
     from agent.graph.exec._subprocess import _run_in_subprocess
     from agent.ownership.hosted import admit_hosted_runtime
-    from shared.hosted_force import original_host_force
+    from shared.agents.incarnation.hosted_force import original_host_force
 
     target = _admitted(db_conn)
     marker = tmp_path / "must-not-run"
@@ -384,7 +384,7 @@ def test_malformed_never_downgrades_to_legacy(db_conn: psycopg.Connection) -> No
 def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import exec_owner_recovery
+    from shared.agents.incarnation import exec_owner_recovery
     from tests.agent.test_exec_owner_entry import _context, _ready, _start
 
     target = _admitted(db_conn)

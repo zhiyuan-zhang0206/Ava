@@ -287,25 +287,25 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "gateway/agents/router.py",
         "shared/agents/contract.py",
         "shared/api_contracts/contracts.py",
-        "shared/tasks/priority.py",
-        "shared/tasks/task_status.py",
+        "shared/agents/tasks/priority.py",
+        "shared/agents/tasks/status.py",
         "shared/agents/history/timeline.py",
-        "shared/agent_roster.py",
-        "shared/agent_observation.py",
+        "shared/agents/observation/roster.py",
+        "shared/agents/observation/evidence.py",
         "shared/agents/history/timeline_item.py",
         "ops/rpc_schemas/messages.py",
         "ops/rpc_schemas/completion.py",
         "ops/rpc_schemas/billing_recovery.py",
         "ops/cluster_status/__init__.py",
-        "shared/agents/impersonation/impersonation_history.py",
-        "shared/sdk_telemetry.py",
-        "shared/agent_snapshot.py",
+        "shared/agents/impersonation/history.py",
+        "shared/agents/sdk/telemetry.py",
+        "shared/agents/observation/snapshot.py",
         "shared/host/resource_sample.py",
         "ops/rpc_schemas/__init__.py",
         "ops/rpc_schemas/terminate.py",
         "ui/web/src/lib/types-generated.ts",
         "ui/web/openapi.json",
-        "shared/live_events.py",
+        "shared/events/live/projection.py",
         "scripts/codegen/dump_frontend_constants.py",
         "ui/web/src/lib/constants-generated.ts",
         "shared/events/contract.py",
@@ -381,7 +381,7 @@ def test_selector_config_and_runtime_failures_run_freshness() -> None:
     ):
         output, log, _ = select(
             "pull_request",
-            ("shared/agent_roster.py",),
+            ("shared/agents/observation/roster.py",),
             selector_patch=patch(target, side_effect=error),
         )
         assert output == "run=true\n"
@@ -391,7 +391,7 @@ def test_selector_config_and_runtime_failures_run_freshness() -> None:
 
 def test_missing_hook_defaults_to_run() -> None:
     with patch("yaml.safe_load", return_value={"repos": []}):
-        output, log, _ = select("pull_request", ("shared/agent_roster.py",))
+        output, log, _ = select("pull_request", ("shared/agents/observation/roster.py",))
     assert output == "run=true\n"
     assert "::warning::Codegen selector failed (KeyError)" in log
 
@@ -429,7 +429,7 @@ def test_selector_import_failure_defaults_to_run() -> None:
         return original(name, *args, **kwargs)
 
     with patch("builtins.__import__", side_effect=importing):
-        output, log, _ = select("pull_request", ("shared/agent_roster.py",))
+        output, log, _ = select("pull_request", ("shared/agents/observation/roster.py",))
     assert output == "run=true\n"
     assert "::warning::Codegen selector failed (ImportError)" in log
 

@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from shared.packages.plugins.context import PluginContext
 from shared.plugin_config_registry import (
     _PLUGIN_CONFIG_CLASSES,
     _PLUGIN_CONFIGS,
@@ -37,7 +38,6 @@ from shared.plugin_config_registry import (
     validate_config_overlay,
     write_default_disk_image,
 )
-from shared.plugin_context import PluginContext
 
 
 class _FixtureConfig(BaseModel):

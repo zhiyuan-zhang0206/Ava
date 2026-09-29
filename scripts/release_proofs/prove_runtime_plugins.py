@@ -11,8 +11,9 @@ from pathlib import Path
 from agent.extensions import load_extensions
 from ops.spec import plugin_services
 from services.agent_host.daemon import _plugins_fingerprint
-from shared import paths, plugins_config
+from shared import paths
 from shared.deploy.release.runtime_interpreter import runtime_plugins_dir
+from shared.packages.plugins import enable_config
 
 
 def require(value: bool, message: str) -> None:  # noqa: FBT001 — assertion predicate.
@@ -24,12 +25,12 @@ def main() -> None:
     require(os.environ["GITHUB_ACTIONS"] == "true", "CI-only proof")
     home = Path(os.environ["AVA_HOME"])
     home.mkdir(parents=True, exist_ok=True)
-    known = plugins_config.installed_plugin_dirs()
+    known = enable_config.installed_plugin_dirs()
     retained = runtime_plugins_dir() / "runtime_fixture"
     require(known["runtime_fixture"] == retained, "discovery escaped image")
     try:
         config = {"plugins": {name: {"enabled": name == "runtime_fixture"} for name in known}}
-        plugins_config.local_config_path().write_text(json.dumps(config))
+        enable_config.local_config_path().write_text(json.dumps(config))
         load_extensions()
         module = sys.modules["plugins.runtime_fixture.plugin"]
         require(module.VALUE == "retained-resource", "agent plugin did not import resource")
@@ -51,7 +52,7 @@ def main() -> None:
         )
         # Machine services depend on presence, not agent-facing enable-state.
         config["plugins"]["runtime_fixture"]["enabled"] = False
-        plugins_config.local_config_path().write_text(json.dumps(config))
+        enable_config.local_config_path().write_text(json.dumps(config))
         require(
             any(spec.session == "runtime-fixture" for spec in plugin_services()),
             "disabled agent plugin lost its installed machine service",
@@ -71,7 +72,7 @@ def main() -> None:
             + "\n"
         )
     finally:
-        plugins_config.local_config_path().unlink(missing_ok=True)
+        enable_config.local_config_path().unlink(missing_ok=True)
         shutil.rmtree(paths.plugins_dir() / "runtime_fixture", ignore_errors=True)
 
 

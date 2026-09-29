@@ -113,7 +113,7 @@ Example (the shape `ava_code` would declare):
 
 | Field | Meaning | Closes |
 |---|---|---|
-| `name` | Unique identity; dash/underscore-folded to the directory name (registry already folds via `shared.packages.skills.skill_names.match_key`) | duplicate rows / name collisions |
+| `name` | Unique identity; dash/underscore-folded to the directory name (registry already folds via `shared.packages.skills.names.match_key`) | duplicate rows / name collisions |
 | `version` (semver) | Package version; recorded beside `installed_hash` as `installed_version` when the registry schema v2 fields land (S3) | no version awareness (A1) |
 | `engines.ava` (semver range) | Host compatibility interval (npm `engines` / VS Code `engines.vscode` shape); compared against the **derived host version** (`YYYY.M.D` from the checkout's commit date — [`host-versioning.md`](host-versioning.md)), checked at install/upgrade, at content-channel refresh landing, and at load. Required **unless** `requires_commit` is present | framework evolution silently breaking plugins (A3) |
 | `requires_commit` (commit SHA) | The host must *contain* this commit (`git merge-base --is-ancestor`) — the exactness layer beside the date axis, for content that needs a fresh kernel capability. Same enforcement points as `engines.ava` | content riding ahead of the code it needs, without a bump discipline |
@@ -121,7 +121,7 @@ Example (the shape `ava_code` would declare):
 | `dependencies.pythonPackages` | The Python dependency ranges this package is known to work with. For MCP packages this is the **mirror / validation anchor** of `pyproject.toml` dependencies. **Hard enforcement** (user ruling 2026-08-13): a declared range without an upper bound is a validator error, and an install/upgrade whose pyproject range falls outside the declared range is refused | **#1198, permanently**: unbounded or drifting pyproject ranges are stopped at install time |
 | `dependencies.hostCapabilities` | Host capability declarations — `db: none|ro|rw`, `network: none|local|any`, `shell: none|any`, `display: none|required`, `unixSocket: none|required`. **Two kinds of claim in one object** (S5): `display` / `unixSocket` are HOST REQUIREMENTS matched against the machine's capability set to decide placement, while `db` / `network` / `shell` are RESOURCE ACCESS gated by the context at injection time. The execution side of both lands with the context model (S5); today the manifest only declares, and MCP runtime keeps its existing `requires` check | context/capability declarations unified (D12/D13); generalizes the MCP `requires` keys |
 | `contributions.*` | Declared contribution surfaces (VS Code `contributes` analog). **The declaration is documentation; registration is fact.** The diff between the two is already computed and readable — `ava plugins inspect <name>` reports it (`agent/extensions/catalog.py:declared_vs_registered`, over the attribution ledger every `register_*` writes); S3 turns that same computation into the load-time gate (declared-but-not-registered = warning, registered-but-not-declared = fail-fast) | surfaces pre-checkable, listable, auditable |
-| `contributions.ui` | The console surfaces this package contributes, as data: `agentInspect` sections, `nav` entries, `stats` cards, `themes` token packs. Closed type set, closed icon vocabulary, and a theme token vocabulary that is the console's own `:root` custom properties — validated by `shared/plugin_ui_contributions.py`. No registration side: the console reads the declaration itself (a `stats` card's label is declaration; its value is runtime data in `plugin_stats`, written by the plugin's own code). Design + the runtime slices: [`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md) | a plugin can put a panel, a page, a live card, or a skin in front of the user without a frontend fork |
+| `contributions.ui` | The console surfaces this package contributes, as data: `agentInspect` sections, `nav` entries, `stats` cards, `themes` token packs. Closed type set, closed icon vocabulary, and a theme token vocabulary that is the console's own `:root` custom properties — validated by `shared/packages/plugins/ui_contributions.py`. No registration side: the console reads the declaration itself (a `stats` card's label is declaration; its value is runtime data in `plugin_stats`, written by the plugin's own code). Design + the runtime slices: [`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md) | a plugin can put a panel, a page, a live card, or a skin in front of the user without a frontend fork |
 | `config.schema` / `config.perAgentFields` | Pointer to the config schema (the Pydantic model, or a declarative schema) + which fields per-agent overlays may override | PR-E; pre-install config validation without importing plugin code |
 | `lifecycle.*` | See the lifecycle section | dispose contract (C9/C10) |
 
@@ -130,7 +130,7 @@ Example (the shape `ava_code` would declare):
 | Lane | Mechanism | For |
 |---|---|---|
 | Declarative | `contributions.ui` in the manifest (`agentInspect` proxied sections, `nav`, `themes`) — data the console reads itself; there is no registration side | plugin-*served* content, links, skins |
-| Runtime registry | `register_inspect_widget()` at `inspector.py` import (`shared/plugin_inspector.py`) — the gateway imports each ENABLED builtin plugin's `inspector.py` under its `PluginContext` and serves `GET /api/agents/{id}/inspect/widgets`; the console renders closed-set widget kinds from the resolved payload | host-rendered widgets whose payload is per-agent data (an agent's active tasks), where no static declaration can name the rows |
+| Runtime registry | `register_inspect_widget()` at `inspector.py` import (`shared/packages/plugins/inspector.py`) — the gateway imports each ENABLED builtin plugin's `inspector.py` under its `PluginContext` and serves `GET /api/agents/{id}/inspect/widgets`; the console renders closed-set widget kinds from the resolved payload | host-rendered widgets whose payload is per-agent data (an agent's active tasks), where no static declaration can name the rows |
 
 The inspector-widget registry resolves each widget's payload server-side —
 the console never receives a row it cannot address — and a widget with no
@@ -173,9 +173,9 @@ hard validator requirement for `dependencies.pythonPackages` entries** — the
 
 ## Implemented today (S0–S2)
 
-The validator lives in `shared/plugin_manifest.py` (parse + validate +
+The validator lives in `shared/packages/plugins/manifest.py` (parse + validate +
 range algebra + the pyproject mirror check), with the `contributions.ui`
-schema in `shared/plugin_ui_contributions.py`. Enforcement points:
+schema in `shared/packages/plugins/ui_contributions.py`. Enforcement points:
 
 | Surface | What runs | When |
 |---|---|---|

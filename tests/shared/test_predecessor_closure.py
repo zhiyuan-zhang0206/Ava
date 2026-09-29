@@ -15,20 +15,20 @@ from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from ops.agents.spawn import create_agent_row
 from services.agent_host.maintenance import record_drained
-from shared.cluster.machine import machine_name
-from shared.db import insert_inbound_message
-from shared.deploy.maintenance import admission
-from shared.deploy.maintenance.cohort import _applied_capture, verify_drained
-from shared.deploy.maintenance.state import MaintenanceHold
-from shared.incarnation_resources import (
+from shared.agents.incarnation.predecessor_closure import ClosureEvidence, close_retired_predecessor
+from shared.agents.incarnation.resources import (
     IncarnationResources,
     ResourceEvidenceError,
     ResourceShapeError,
     decode_resources,
 )
+from shared.cluster.machine import machine_name
+from shared.db import insert_inbound_message
+from shared.deploy.maintenance import admission
+from shared.deploy.maintenance.cohort import _applied_capture, verify_drained
+from shared.deploy.maintenance.state import MaintenanceHold
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.native_process.turn_identity import bind_turn_identity
-from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
 
 _DRAIN = {
     "maintenance": {"holder": "legacy-host:pid41", "acquired_at": "2026-09-27T01:00:00+00:00"}

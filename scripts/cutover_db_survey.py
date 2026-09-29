@@ -9,7 +9,7 @@ the retired writer's shapes on purpose; the runtime keeps no parser for them.
 It is deleted after the cutover with the other `scripts/cutover_*` scripts.
 
 A retired-shape row is classified with the conversion's own rule
-(`shared.predecessor_closure.successor_refusal`), read only: `convertible` (a
+(`shared.agents.incarnation.predecessor_closure.successor_refusal`), read only: `convertible` (a
 named incarnation, a row its successor would take once converted, a settled
 lifecycle receipt, a machine attestation proving every recorded identity gone),
 `awaiting` (everything but the attestation), `inadmissible` with the reason (a
@@ -49,14 +49,14 @@ from psycopg.rows import dict_row
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from scripts.cutover_inventory import Attestation, own_checkout
-from shared.incarnation_resources import ResourceShapeError, decode_resources
-from shared.predecessor_closure import (
+from shared.agents.incarnation.predecessor_closure import (
     SUCCESSOR_COLUMNS,
     SettledReceipt,
     SuccessorRow,
     successor_refusal,
 )
-from shared.resource_admission import PREDECESSOR_RECEIPT
+from shared.agents.incarnation.resource_admission import PREDECESSOR_RECEIPT
+from shared.agents.incarnation.resources import ResourceShapeError, decode_resources
 
 LEASE_COLUMNS = (
     "phase",

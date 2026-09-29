@@ -4,7 +4,7 @@ ToolMessage with `additional_kwargs` metadata.
 The read side (timeline endpoint / hooks etc.) uniformly classifies via
 `read_ava_kwargs(msg).get("ava_msg_type")` — **not isinstance**, so no need to
 subclass. The metadata keys + the `ava_msg_type` / `ava_note_tag` value sets are
-the typed contract in `shared/message_kwargs.py` (`AvaMessageKwargs` TypedDict +
+the typed contract in `shared/agents/messages/kwargs.py` (`AvaMessageKwargs` TypedDict +
 `AvaMsgType` / `NoteTag` StrEnums); these helpers centralize the writes.
 
 Convention for adding a new metadata type:
@@ -38,7 +38,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from shared.message_kwargs import AvaMsgType, NoteTag, read_ava_kwargs
+from shared.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 
 # The header prepended to every replacement compact summary (forced / command /
 # spontaneous) — written by `agent.hooks.compact.compose_summary_message`, and

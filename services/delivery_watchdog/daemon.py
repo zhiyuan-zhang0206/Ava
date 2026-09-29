@@ -196,12 +196,12 @@ def select_terminated_owners_with_pending(
     `dead_letter_stale_pending_chats` closes — and with it the trigger, so no
     unbounded retry can resurrect-suicide the agent forever.
     """
-    from shared.lifecycle_acceptance import (
+    from shared.agents.incarnation.lifecycle_acceptance import (
         FAILED_RESTART_FOR_CURRENT_TARGET,
         SYSTEM_NOTICE_SOURCE,
         SYSTEM_REAPED_CRASH_ROW,
     )
-    from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
+    from shared.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

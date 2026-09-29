@@ -12,7 +12,7 @@ the first signal anyone acted on was the owner waking up.
    pre-arrears signal.
 10. **Blocked agents** — fails while at least N agents are halted by
     permanent provider rejections (`agents_meta.permanent_reject_streak >= 2`,
-    the durable recovery-breaker halt in `shared/recovery_breaker.py`). The
+    the durable recovery-breaker halt in `shared/agents/recovery_breaker.py`). The
     Grafana rule covers billing rejections as events and resolves 15 minutes
     after the last one; this check covers every permanent class (auth /
     forbidden / model-not-found included) as a *state* — it fires while the
@@ -45,8 +45,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
+from shared.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 from shared.config import settings
-from shared.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 
 
 class BalanceReadError(RuntimeError):

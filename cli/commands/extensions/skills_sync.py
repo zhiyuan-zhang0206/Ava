@@ -13,7 +13,7 @@ converge source: it reaches agents through the project-local mount instead
 (issue #146).
 
 Each synced top-level dir is tracked in the install registry
-(`shared/install_registry.py`); the scanner loads only enabled entries. An
+(`shared/packages/extensions/install_registry.py`); the scanner loads only enabled entries. An
 installed plugin's skills gate on the plugin's own registry entry — no
 duplicate `type="skill"` row is created for it.
 
@@ -44,17 +44,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cli.commands.extensions.skill_package import contains_skill_md
-from shared import install_registry, paths
+from shared import paths
 from shared.cluster import is_default_home
 from shared.host.converge.preserve_report import report_converge_preserve
-from shared.install_registry import (
+from shared.packages.extensions import install_registry
+from shared.packages.extensions.install_registry import (
     IGNORED_NAMES,
     InstalledPackage,
     PackageOrigin,
     TrustTier,
     tree_hash,
 )
-from shared.packages.skills.skill_names import SkillIdentity, match_key
+from shared.packages.skills.names import SkillIdentity, match_key
 
 # A git worktree checkout's sources are branch work-in-progress. converge and
 # `ava skill update` take their sources from the checkout the CLI runs from

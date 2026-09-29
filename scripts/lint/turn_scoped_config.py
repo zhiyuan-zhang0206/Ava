@@ -36,7 +36,7 @@ auto-extends the ban with no manual list to maintain.
 (`shared/plugin_config_registry.py`) is a process-global `plugin -> instance`
 map that boot rebuilds from the agent's overlay, so subscripting it in turn
 code returns whichever agent booted the process. Reads go through
-`shared/plugin_config_view.py:turn_plugin_config` (which
+`shared/packages/plugins/config_view.py:turn_plugin_config` (which
 `get_plugin_config` / `ava._settings.plugins` already do). Membership tests
 (`name in _PLUGIN_CONFIGS`) are untouched — they ask whether a plugin is
 registered, which is not per-agent.
@@ -71,7 +71,7 @@ _SCAN_DIRS = (
 )
 
 # Turn-adjacent shared modules that execute inside agent turns.
-_EXTRA_FILES = ("shared/plugin_activation.py",)
+_EXTRA_FILES = ("shared/packages/plugins/activation.py",)
 
 _ALLOWED_FILES = frozenset(
     {
@@ -85,7 +85,7 @@ _ALLOWED_FILES = frozenset(
 _PLUGIN_MECHANISM_FILES = frozenset(
     {
         "shared/plugin_config_registry.py",
-        "shared/plugin_config_view.py",
+        "shared/packages/plugins/config_view.py",
     }
 )
 
@@ -140,7 +140,7 @@ def main(argv: list[str]) -> int:
         print(
             "plugin config read straight out of the process-global "
             "_PLUGIN_CONFIGS in turn-scoped code — use "
-            "`shared.plugin_config_view.turn_plugin_config(<plugin>)` (or "
+            "`shared.packages.plugins.config_view.turn_plugin_config(<plugin>)` (or "
             "`get_plugin_config`, which routes through it); in hosted mode the "
             "map holds whichever agent booted the process:\n",
             file=sys.stderr,

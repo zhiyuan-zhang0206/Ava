@@ -10,7 +10,10 @@ import pytest
 
 from shared.config import settings
 from shared.db import publish_inbound_wake
-from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
+from shared.events.live.announce import (
+    publish_agent_updated_sync,
+    publish_impersonation_changed_sync,
+)
 from tests.e2e._env import E2EEnv
 from tests.e2e.fakes.scenarios.force_expire import FIRST_REPLY, RESUMED_REPLY
 from tests.shared.poll_until import poll_until

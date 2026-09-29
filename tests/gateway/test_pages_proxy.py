@@ -31,7 +31,7 @@ from gateway.app import app
 from gateway.routers import pages as pages_router
 from shared import config
 from shared.db import create_agent
-from shared.docs.pages_copy import (
+from shared.packages.docs.pages_copy import (
     PAGE_LANGUAGE_DEFAULT,
     PAGE_SERVER_DOWN_BODY,
     PAGE_SERVER_TIMEOUT_BODY,

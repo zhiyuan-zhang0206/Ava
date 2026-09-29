@@ -758,7 +758,7 @@ def certify(lease_id: str) -> bool:
     """Invoke certification with this host's non-exported runner proof."""
     from psycopg.types.json import Jsonb
 
-    from shared.agents.impersonation.impersonation_history import export_handoff
+    from shared.agents.impersonation.history import export_handoff
 
     with write_transaction() as conn:
         row = conn.execute(

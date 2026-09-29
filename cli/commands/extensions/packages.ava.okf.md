@@ -49,7 +49,7 @@ diffs those against its `ava-plugin.json` declarations when it ships one.
 It answers two questions nothing else could: *what can a plugin extend* (for an
 agent writing one, which otherwise means reading framework source) and *what is
 this machine's agent actually composed of*. Both halves read the attribution
-ledger (`shared/plugin_contributions.py`) that every `register_*` entry point
+ledger (`shared/packages/plugins/contributions.py`) that every `register_*` entry point
 writes, so nothing here is transcribed. [[okf/plugins/plugins.ava.okf.md|Detail]].
 Building the catalog means importing the plugins, so it can only report what was
 REGISTERED; how often each row actually FIRED is a `note` line pointing at the
@@ -71,7 +71,7 @@ full per-package state lives in `status --json`:
 
 ## The install gate
 
-Every ingestion path above runs `shared/packages/skills/skill_scan.py` over the package before
+Every ingestion path above runs `shared/packages/skills/scan.py` over the package before
 the first byte is copied, and **refuses on a critical finding** — the load dir is
 left untouched and the report names file, line and matched text. `--accept-risk`
 is the override; it installs and records the waived rule ids, and it never

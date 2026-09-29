@@ -99,7 +99,7 @@ def test_start_flags_are_forwarded(monkeypatch: pytest.MonkeyPatch, runs: list[l
 def test_unready_start_is_retried_until_ready(
     monkeypatch: pytest.MonkeyPatch, runs: list[list[str]]
 ) -> None:
-    from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+    from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 
     slept = _stub_returncodes(monkeypatch, runs, [SERVICES_NOT_READY_EXIT_CODE, 0])
     assert boot_retry.run_boot([]) == 0

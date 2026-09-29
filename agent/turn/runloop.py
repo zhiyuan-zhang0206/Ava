@@ -22,9 +22,9 @@ from agent.state_channels import (
     CIRCUIT_REASON_SCHEMA,
     CircuitState,
 )
+from shared.agents.context import AvaContext
 from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
-from shared.live_events import Error
+from shared.events.live.projection import Error
 from shared.log import logger
 from shared.telemetry.audit_events import insert_event_log_async
 
@@ -130,7 +130,7 @@ async def _record_permanent_reject_outcome(
 ) -> None:
     """Count one permanent-class rejection; at the halt threshold trip the breaker.
 
-    `shared/recovery_breaker.py` owns the semantics: two consecutive permanent
+    `shared/agents/recovery_breaker.py` owns the semantics: two consecutive permanent
     rejections with no successful turn between them halt every automatic
     recovery path until a turn succeeds (task #3617, design #3610 section 12).
     Every halted rejection re-runs the escalation — with automatic recovery
@@ -139,7 +139,7 @@ async def _record_permanent_reject_outcome(
     idempotent. All of it is best-effort: none may mask the provider rejection
     that aborted the turn.
     """
-    from shared.recovery_breaker import (
+    from shared.agents.recovery_breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         SUPPRESS_REASON_PERMANENT_REJECT,
         halt_automatic_recovery,

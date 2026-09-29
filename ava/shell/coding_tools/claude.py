@@ -62,7 +62,7 @@ def _claude_command(
     launch can print it; with ``resume`` the same id reopens that recorded
     session (``--resume``) instead.
     """
-    from shared.external_caller import launch_caller_assignment
+    from shared.agents.messages.external_caller import launch_caller_assignment
 
     resident = ""
     plugin_flag = ""
@@ -336,7 +336,7 @@ def launch(
     ``claude_session``; ``resume`` reopens that recorded session instead of
     starting a new one. Prints one ``key=value`` per line and returns the exit code.
     """
-    from shared.external_caller import launch_caller_assignment
+    from shared.agents.messages.external_caller import launch_caller_assignment
 
     takeover_name: str | None = impersonation_name
     takeover_brief = ""

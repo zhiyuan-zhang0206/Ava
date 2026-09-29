@@ -155,7 +155,7 @@ def test_cmd_restart_aborts_when_preflight_fails(monkeypatch: pytest.MonkeyPatch
     """When preflight probes fail, cmd_restart aborts without stopping — and says so
     with its OWN exit code, since "nothing was stopped, host still serving" is what
     the detached updater must not run `ava start` over."""
-    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from shared.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     stopped: list[bool] = []
     start_called: list[bool] = []
@@ -181,7 +181,7 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
     probes gate, with stop and start neither run. The gate is called with
     `check_launcher=False`: this start is in-process and never execs
     `.venv/bin/ava`."""
-    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from shared.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     stopped: list[bool] = []
     start_called: list[bool] = []

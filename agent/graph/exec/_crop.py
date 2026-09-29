@@ -14,9 +14,9 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage
 
+from shared.agents.messages.kwargs import message_addl_kwargs, message_content
 from shared.lm.content import content_blocks
 from shared.log import logger
-from shared.message_kwargs import message_addl_kwargs, message_content
 
 
 class _CropConfig(Protocol):

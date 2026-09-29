@@ -15,7 +15,10 @@ from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
 from agent.ownership.inbound import lock_inbound_owner
-from shared.lifecycle_acceptance import LifecycleIntent, accept_lifecycle_command_async
+from shared.agents.incarnation.lifecycle_acceptance import (
+    LifecycleIntent,
+    accept_lifecycle_command_async,
+)
 from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 _OBSERVE_RESTART = (

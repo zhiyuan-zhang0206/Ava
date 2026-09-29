@@ -25,8 +25,8 @@ Ava agent's dependency injection container. `AvaContext` is a dataclass that car
 
 ## Entry Points
 
-- `shared/context.py:AvaContext` — Dataclass definition (canonical location)
+- `shared/agents/context.py:AvaContext` — Dataclass definition (canonical location)
 
 ## Notes
 
-- `shared/context.py` is the canonical home: non-graph entry points (gateway lifespan, daemon, CLI, eval driver) also build AvaContext
+- `shared/agents/context.py` is the canonical home: non-graph entry points (gateway lifespan, daemon, CLI, eval driver) also build AvaContext

@@ -124,7 +124,7 @@ def prepare_event_log(
     :func:`telemetry.emit_prepared`. Ordinary audit roots retain the convenient
     immediate :func:`insert_event_log` wrapper above.
     """
-    from shared.caller_identity import caller_payload
+    from shared.agents.messages.caller_identity import caller_payload
 
     return telemetry.prepare_event(
         "audit",

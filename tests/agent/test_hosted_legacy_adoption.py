@@ -32,10 +32,10 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
+from shared.agents.incarnation.host_process_evidence import LocalHostEvidence, local_host_evidence
 from shared.db import create_agent
 from shared.deploy.writers.publication import AdmissionDecision, LegacyProtocolZero
 from shared.deploy.writers.runtime_admission import RuntimeAdmission
-from shared.host_process_evidence import LocalHostEvidence, local_host_evidence
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.paths import ava_home, exec_run_dir
 

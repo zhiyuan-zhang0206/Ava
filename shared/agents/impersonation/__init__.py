@@ -7,11 +7,10 @@ from uuid import uuid4
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from shared import redis_client
-from shared.agents.impersonation._impersonation_store import (
+from shared.agents.impersonation._store import (
     OPEN as OPEN,
 )
-from shared.agents.impersonation._impersonation_store import (
+from shared.agents.impersonation._store import (
     SESSION_RELAY_PROVIDERS,
     authenticate,
     dismiss_reminders,
@@ -25,27 +24,31 @@ from shared.agents.impersonation._impersonation_store import (
     validate_active,
     validate_relay_spec,
 )
-from shared.agents.impersonation._impersonation_store import (
+from shared.agents.impersonation._store import (
     ImpersonationError as ImpersonationError,
 )
-from shared.agents.impersonation._impersonation_store import (
+from shared.agents.impersonation._store import (
     lock_lease as lock_lease,
 )
-from shared.agents.impersonation._impersonation_store import (
+from shared.agents.impersonation._store import (
     provider_anchor_states as provider_anchor_states,
 )
-from shared.agents.impersonation._impersonation_store import (
+from shared.agents.impersonation._store import (
     require_native as require_native,
 )
-from shared.agents.impersonation.impersonation_history import append, capture_pending, set_actor
-from shared.caller_identity import CallerIdentity
+from shared.agents.impersonation.history import append, capture_pending, set_actor
+from shared.agents.messages.caller_identity import CallerIdentity
 from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.config.service_read import current_field_values
 from shared.db import connect, publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
-from shared.live_events import Cancelled
+from shared.events.live import redis_client
+from shared.events.live.announce import (
+    publish_agent_updated_sync,
+    publish_impersonation_changed_sync,
+)
+from shared.events.live.projection import Cancelled
 from shared.log import logger
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -273,7 +276,7 @@ def reject(
 
 def activate(lease_id: str, incarnation: RuntimeIncarnation) -> dict[str, Any]:
     """Called only after native exec drains AND its checkpoint flush completes."""
-    from shared.incarnation_resources import IncarnationResources, decode_resources
+    from shared.agents.incarnation.resources import IncarnationResources, decode_resources
 
     with write_transaction() as conn:
         meta = require_native(conn, incarnation)

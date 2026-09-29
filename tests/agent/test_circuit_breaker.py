@@ -36,9 +36,9 @@ from agent.hooks.compact import (
 )
 from agent.state import AgentState, CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
+from shared.agents.context import AvaContext
 from shared.config import settings
-from shared.context import AvaContext
-from shared.event_publisher import AgentEventPublisher
+from shared.events.live.publisher import AgentEventPublisher
 from tests.agent.test_claim import (
     _compact_tail,
     _config,

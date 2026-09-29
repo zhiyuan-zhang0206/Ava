@@ -114,7 +114,7 @@ class GenParams:
 
     These are engine-calibration constants with written reasons, the same
     shape as `seal.SealParams`; which model a run uses is resolved per target
-    agent (`shared.agent_snapshot.agent_effective_model` — overlay preferred,
+    agent (`shared.agents.observation.snapshot.agent_effective_model` — overlay preferred,
     fleet default else), with `settings.lm.hierarchy_model` as the last-resort
     fallback.
     """

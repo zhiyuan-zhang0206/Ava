@@ -14,7 +14,7 @@ from langgraph.runtime import Runtime
 
 from agent.hooks import Hook
 from agent.state import AgentState
-from shared.context import AvaContext
+from shared.agents.context import AvaContext
 from tests.agent._fakes import make_fake_ops_pool
 
 

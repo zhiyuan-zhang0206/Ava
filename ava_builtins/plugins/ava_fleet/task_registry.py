@@ -13,10 +13,10 @@ import ava
 import ava.agent_identity
 import ava.agents
 from ava.sdk_surface.validation import coerce_str, coerce_typed
-from shared.tasks.task_owner_notifications import owner_change_notifications
-from shared.tasks.task_reparent import resolve_reparent
-from shared.tasks.task_rules import is_closed, open_title_holder
-from shared.tasks.task_timestamps import render_task_timestamps
+from shared.agents.tasks.owner_notifications import owner_change_notifications
+from shared.agents.tasks.reparent import resolve_reparent
+from shared.agents.tasks.rules import is_closed, open_title_holder
+from shared.agents.tasks.timestamps import render_task_timestamps
 
 if TYPE_CHECKING:
     # Annotation-only here (cursor params); the runtime import sits at the raise
@@ -308,7 +308,7 @@ def create(
         _notify_owner_change(task.id, title, None, owner, actor, description=description)
 
     # Live-refresh every open task board (fleet-wide invalidate + refetch).
-    from shared.live_announce import publish_task_created_sync  # deferred (task #3816)
+    from shared.events.live.announce import publish_task_created_sync  # deferred (task #3816)
 
     publish_task_created_sync(actor, task.id)
     return task
@@ -493,7 +493,7 @@ def update(
             changes,
             parent_only,
         )
-        from shared.live_announce import publish_task_updated_sync  # deferred (task #3816)
+        from shared.events.live.announce import publish_task_updated_sync  # deferred (task #3816)
 
         publish_task_updated_sync(actor, task_id)
 

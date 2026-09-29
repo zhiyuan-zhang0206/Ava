@@ -1,8 +1,8 @@
-"""shared.docs.frontmatter — the minimal `---` parser shared by skills + commands."""
+"""shared.packages.docs.frontmatter — the minimal `---` parser shared by skills + commands."""
 
 import pytest
 
-from shared.docs.frontmatter import FrontmatterError, parse_frontmatter
+from shared.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
 
 
 def test_parses_fields_and_body():

@@ -19,17 +19,17 @@ from pydantic import (
 )
 
 from ops.rpc_schemas.content import UserContent
-from shared.agent_snapshot import AgentSnapshot
 from shared.agents import AgentStatus
 from shared.agents.messages.envelope import validate_writable_source
-from shared.message_kwargs import NoteTag
-from shared.tasks.priority import Priority
+from shared.agents.messages.kwargs import NoteTag
+from shared.agents.observation.snapshot import AgentSnapshot
+from shared.agents.tasks.priority import Priority
 
 
 class AgentRow(AgentSnapshot):
     """GET /api/agents/{id} detail, including response-required notice bodies.
 
-    The directory and live roster use bounded cards from shared.agent_roster.
+    The directory and live roster use bounded cards from shared.agents.observation.roster.
     last_active_at is the real-activity clock; last_inbound_at is the latest
     inbound message clock.
     """

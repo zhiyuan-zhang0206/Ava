@@ -17,8 +17,8 @@ from psycopg import sql
 
 from gateway.alerts import router as alerts_router
 from shared.agents import impersonation as leases
-from shared.agents.impersonation import impersonation_history as history
-from shared.agents.impersonation.impersonation_events import _validate_event
+from shared.agents.impersonation import history as history
+from shared.agents.impersonation.events import _validate_event
 from shared.agents.impersonation_manifest import (
     LocalParticipant,
     alert_if_participant_still_open,
@@ -33,7 +33,7 @@ from shared.agents.impersonation_manifest import (
     stage_central_expected_event,
     unbind_local_participant,
 )
-from shared.caller_identity import CallerIdentity
+from shared.agents.messages.caller_identity import CallerIdentity
 from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import create_agent
@@ -41,7 +41,7 @@ from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
 from shared.telemetry.audit_events import prepare_event_log
 from tests.impersonation_support import attested_caller, recorded_tree
-from tests.shared import test_impersonation_history as history_cases
+from tests.shared import test_history as history_cases
 
 _CERTIFICATION_SECRET = "test-manifest-certification-secret-000001"  # noqa: S105 -- test proof
 
@@ -238,7 +238,7 @@ def test_manual_is_pending_manual_while_nonempty_legacy_never_certifies(
         "source": f"agent:{owner.agent_id}",
         "attributes": {"fn": "ava.agents.send_message", "duration": 0.1},
     }
-    from shared.agents.impersonation.impersonation_events import consume_events
+    from shared.agents.impersonation.events import consume_events
 
     assert consume_events(owner.agent_id, 1, [event]) == 1
     leases.release(str(legacy["id"]), attested_caller(legacy), "Legacy work completed")

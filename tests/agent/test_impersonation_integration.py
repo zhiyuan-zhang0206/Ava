@@ -24,14 +24,14 @@ from agent.ownership.hosted import admit_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from ava.external.state import encode_plugin_delta
 from shared.agents import impersonation as leases
+from shared.agents.context import AvaContext
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from shared.caller_identity import CallerIdentity
+from shared.agents.messages.caller_identity import CallerIdentity
 from shared.cluster.machine import machine_name
-from shared.context import AvaContext
 from shared.db import create_agent, insert_inbound_message
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.native_process.turn_identity import bind_turn_identity
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -364,7 +364,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     import json
     from pathlib import Path
 
-    from shared.agents.impersonation import impersonation_history as history
+    from shared.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn,
@@ -459,7 +459,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     tmp_path: Path,
 ) -> None:
     from agent.impersonation_handoff import deliver_handoff
-    from shared.agents.impersonation import impersonation_history as history
+    from shared.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, calls = await _prepare_graph(
         db_conn,
@@ -519,7 +519,7 @@ async def test_handoff_leaves_replay_pending_until_runner_reconcile_completes(
     from agent.impersonation_handoff import deliver_handoff
     from ava.impersonation import replay as recorded
     from services.agent_host.impersonation_events import reconcile_one
-    from shared.agents.impersonation import impersonation_history as history
+    from shared.agents.impersonation import history as history
     from shared.config import settings
 
     monkeypatch.setattr(settings.general, "impersonation_event_manifest_enabled", True)
@@ -601,7 +601,7 @@ async def test_end_note_resumes_an_empty_queue(
     idled out with the note unprocessed. The note is the resumed input: the claim
     runs before_llm with an empty queue, and delivery publishes a wake.
     """
-    from shared.agents.impersonation import impersonation_history as history
+    from shared.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn, aops_pool, monkeypatch, automatic=True
@@ -653,7 +653,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
     """Task #3998 end to end: the supervisor stops an automatic takeover whose
     relay handle vanished outside the fresh-start window, and the resume chain
     delivers the end note naming the death cause; the note's first turn runs."""
-    from shared.agents.impersonation import impersonation_history as history
+    from shared.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn, aops_pool, monkeypatch, automatic=True

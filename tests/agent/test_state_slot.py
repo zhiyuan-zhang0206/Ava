@@ -52,9 +52,9 @@ from agent.state import (
     clear_plugin_registrations,
     register_plugin_state,
 )
+from shared.agents.context import AvaContext
 from shared.config.turn_view import bind_agent_config
-from shared.context import AvaContext
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 
 assert (
     asyncio
@@ -856,7 +856,7 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
     HumanMessage and a cleared attach channel — not parked pending entries
     for the claim boundary.
     """
-    from shared.message_kwargs import AvaMsgType
+    from shared.agents.messages.kwargs import AvaMsgType
 
     # The real exec child rejects attach for a text-only model (user ruling
     # 2026-08-28) — boot it with a media-capable model via the per-agent
@@ -911,7 +911,7 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(
         "from langchain_core.messages import HumanMessage\n"
         "ava.state_update['messages'] = [HumanMessage(content='x')]\n"
         f"ava.self.attach({str(image)!r})\n"
-        "from shared.lifecycle import SystemHalt\n"
+        "from shared.agents.lifecycle import SystemHalt\n"
         "raise SystemHalt()\n"
     )
     state = BaseAgentState(

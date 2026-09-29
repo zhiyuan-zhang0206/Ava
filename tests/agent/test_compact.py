@@ -46,7 +46,7 @@ from agent.hooks.compact import (
 from agent.llm import execute_code
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
-from shared.context import AvaContext
+from shared.agents.context import AvaContext
 from shared.lm.context_budget import ContextBudget
 from tests.conftest import spawn_agent
 

@@ -46,7 +46,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from shared.plugin_context import current_plugin_name
+from shared.packages.plugins.context import current_plugin_name
 from shared.telemetry.metrics.plugin_metrics_sql import (
     _DOUBLE_QUOTED_OK,
     _QUOTED_RE,

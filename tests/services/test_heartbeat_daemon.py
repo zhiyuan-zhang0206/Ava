@@ -28,7 +28,7 @@ from services.heartbeat.daemon import (
 )
 from shared import telemetry
 from shared.config import settings
-from shared.redis_listener import RedisInboundListener
+from shared.events.live.redis_listener import RedisInboundListener
 from tests.conftest import spawn_agent
 
 # Explicit threshold so the assertions do not ride on the configured default.

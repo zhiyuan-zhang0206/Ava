@@ -90,7 +90,7 @@ CORPSE_REAP_GRACE_S = 900.0
 # turn-progress heartbeat TTL — while staying far inside the lease TTL the
 # fence still protects. Silence is only one probe of the evidence set; the
 # others (no live same-home host daemon, no live exec child of the agent) are
-# gathered in `shared.host_process_evidence`.
+# gathered in `shared.agents.incarnation.host_process_evidence`.
 LEGACY_HOST_ADOPTION_SILENCE_S = 60.0
 # How long a pure agent-runner's start preflight keeps re-dialing the gateway
 # before it declines (`cli.commands._repo._probe_gateway_or_die`, run by

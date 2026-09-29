@@ -9,8 +9,8 @@ from psycopg.types.json import Jsonb
 
 from ava.gateway_client.transport import get
 from shared.agents.impersonation import lock_lease
-from shared.agents.impersonation.impersonation_events import consume_events
-from shared.agents.impersonation.impersonation_history import event_belongs_to_agent
+from shared.agents.impersonation.events import consume_events
+from shared.agents.impersonation.history import event_belongs_to_agent
 from shared.agents.impersonation_manifest import (
     ManifestNotSealedError,
     certify,

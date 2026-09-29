@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from shared import plugins_config
 from shared.lm import pricing, provider_api, stop
 from shared.lm.factory import SUPPORTED_MODELS
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODELS
+from shared.packages.plugins import enable_config
 
 
 def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config.discover_plugins()
-    config = plugins_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins()
+    config = enable_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_anthropic"].enabled
     ensure_provider_plugins_loaded()
@@ -85,8 +85,8 @@ def test_gpt6_sol_luna_successors_and_capabilities() -> None:
 
 
 def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config.discover_plugins()
-    config = plugins_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins()
+    config = enable_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_openai"].enabled
     ensure_provider_plugins_loaded()

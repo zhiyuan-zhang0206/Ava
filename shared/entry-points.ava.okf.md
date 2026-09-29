@@ -14,7 +14,7 @@ tags:
 - `shared/lm/factory.py:validate_model_config` — model/key pre-check at spawn boundary
 - `shared/lm/pricing.py:tally_tokens` / `cost_usd` — token usage and three-tier cost calculation
 - `shared/agents/contract.py:AgentStatus` — agent lifecycle status enum (RUNNING / IDLING / RESTARTING / TERMINATED)
-- `shared/message_kwargs.py:read_ava_kwargs` — typed reading entry point for message `additional_kwargs`
+- `shared/agents/messages/kwargs.py:read_ava_kwargs` — typed reading entry point for message `additional_kwargs`
 - `shared/telemetry/metrics/aggregate.py:build_report_from_aggregate` — assemble metrics report
 - `shared/host/env/bootstrap.py` — system boot entry point
 

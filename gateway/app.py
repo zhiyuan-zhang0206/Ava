@@ -37,7 +37,7 @@ semantic payload.
 Concurrency:
 - DB uses one `shared.db.pool()` per process; each request borrows a connection
 - Publish callsites reuse one process-wide `aredis.Redis` via
-  `shared.redis_client.get_async_redis()`; SSE / pubsub subscribers still
+  `shared.events.live.redis_client.get_async_redis()`; SSE / pubsub subscribers still
   open their own connection per request (subscriber lifecycle ≠ publisher).
 
 Frontend: Next.js app under `ui/web/`, served on :3000; the browser calls
@@ -166,9 +166,9 @@ from gateway.run_timeline import router as run_timeline_router
 from gateway.schedules import router as schedules_router
 from gateway.schedules.manager import ScheduleManager
 from shared.agents import AvaAgentError
+from shared.agents.context import AvaContext
 from shared.cluster.auth import cookie_name
 from shared.config import settings
-from shared.context import AvaContext
 from shared.host.system.cron import register_os_cron
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 

@@ -22,9 +22,9 @@ from agent.hooks import (
     register_before_llm,
 )
 from agent.state import AgentState
-from shared import plugin_activation, plugin_contributions
-from shared.context import AvaContext
-from shared.plugin_context import PluginContext
+from shared.agents.context import AvaContext
+from shared.packages.plugins import activation, contributions
+from shared.packages.plugins.context import PluginContext
 from tests.agent._fakes import make_fake_ops_pool
 
 
@@ -243,7 +243,7 @@ async def test_runner_sees_hooks_registered_after_build():
 
 async def test_hook_can_read_agent_id_from_config():
     """hook reads agent_id via config — verifies LangGraph automatically passes config into hook."""
-    from shared.context import agent_id_from_config
+    from shared.agents.context import agent_id_from_config
 
     seen: list[int] = []
 
@@ -275,7 +275,7 @@ def activations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, st
         if plugin is not None:
             recorded.append((plugin, surface, identifier, detail))
 
-    monkeypatch.setattr(plugin_activation, "record", spy)
+    monkeypatch.setattr(activation, "record", spy)
     return recorded
 
 
@@ -328,11 +328,11 @@ async def test_activation_key_matches_the_ledger_entry(monkeypatch: pytest.Monke
         if plugin is not None:
             recorded.append((plugin, surface, identifier))
 
-    monkeypatch.setattr(plugin_activation, "record", spy)
-    before = len(plugin_contributions.contributions())
+    monkeypatch.setattr(activation, "record", spy)
+    before = len(contributions.contributions())
     with PluginContext("myplugin"):
         register_before_exec(_ReturnHook({"halted": True}))
-    ledger = plugin_contributions.contributions()[before:]
+    ledger = contributions.contributions()[before:]
 
     await make_hook_runner("before_exec", default_next="exec")(
         _empty_state(), _empty_runtime(), _empty_config()

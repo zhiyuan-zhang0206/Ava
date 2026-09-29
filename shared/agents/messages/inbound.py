@@ -9,7 +9,7 @@ Wake is Redis pub/sub: `insert_inbound_message` (`shared/db.py`) and the
 transactionally keyed chat path (`shared/agents/messages/chat_delivery.py`) publish to
 the cluster-scoped channel `<prefix>:inbound:<agent_id>`
 (`shared.cluster.inbound_channel`) on every inbound INSERT, and the claim node
-blocks on `RedisInboundListener.wait_one(timeout=...)` (`shared/redis_listener.py`)
+blocks on `RedisInboundListener.wait_one(timeout=...)` (`shared/events/live/redis_listener.py`)
 until a publish arrives. There is no module-level channel constant because the
 channel is per-agent and cluster-scoped — a hardcoded prefix would fall outside
 a dev cluster's `&<prefix>:*` redis ACL grant.

@@ -19,7 +19,7 @@ import pytest
 
 from agent.process_boot import land_cluster_extensions
 from shared import db, paths
-from shared import extension_registry as reg
+from shared.packages.extensions import registry as reg
 
 _SKILL_MD = """---
 name: {name}

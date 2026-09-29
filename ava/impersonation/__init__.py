@@ -15,7 +15,7 @@ from typing import NoReturn
 
 from ava import agent_identity
 from ava.sdk_surface.validation import coerce_str
-from shared.lifecycle import AgentImpersonation
+from shared.agents.lifecycle import AgentImpersonation
 from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 # Existing in-flight consent requests may still call accept/reject by name.

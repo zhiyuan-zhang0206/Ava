@@ -48,7 +48,7 @@ server-side: a `taskList` lists the agent's active tasks (owner-scoped,
 priority-ordered (P0 first, ties by id), complete; each row carries the
 task's id, title, and its P0..P3 priority — tasks #3819/#3866). A widget with
 nothing to show leaves the payload
-entirely — see `shared/plugin_inspector.py`. An `inspector.py` that
+entirely — see `shared/packages/plugins/inspector.py`. An `inspector.py` that
 fails to import is skipped with a loud report (loguru ERROR + the
 `plugin_load_failed` event) and the remaining widgets still serve — fail-soft
 per the plugin-load contract (user ruling 2026-09-11); registrations from the

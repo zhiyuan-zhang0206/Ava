@@ -37,7 +37,7 @@ import { FLEX } from "@/lib/layout";
 // One re-parse per SSE event window (~25 FPS) reads as live while removing the
 // per-chunk parse storm that pegs the mobile main thread. The window is the
 // same constant the agent-side publisher coalesces into (generated from
-// shared/live_events.py EVENT_COALESCE_MS). See use-throttled-streaming.ts.
+// shared/events/live/projection.py EVENT_COALESCE_MS). See use-throttled-streaming.ts.
 //
 // A FIXED window is not enough: the parse is O(payload length), so as a code
 // block streams, each flush re-highlights the whole accumulated text — total

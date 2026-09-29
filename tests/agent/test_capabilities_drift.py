@@ -29,9 +29,9 @@ from agent.graph.capabilities import (
 from agent.hooks._registry import HOOKS
 from agent.hooks.capabilities import _newly_installed_skills, register_capabilities_hooks
 from agent.state import AgentState, CapabilitiesState
+from shared.agents.context import AvaContext
+from shared.agents.messages.kwargs import NoteTag
 from shared.config import settings
-from shared.context import AvaContext
-from shared.message_kwargs import NoteTag
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
 
@@ -61,7 +61,7 @@ def skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     d.mkdir()
     monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
-        "shared.install_registry.loadable_skill_names",
+        "shared.packages.extensions.install_registry.loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])

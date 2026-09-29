@@ -7,7 +7,7 @@ otel-collector config), cli/commands/extensions/skills_sync.py and
 cli/commands/extensions/materialize.py. Before this
 reporter those warnings lived only in converge output, and a frozen LGTM
 dashboard survived three consecutive rollouts unnoticed (task #3689). Mirrors
-shared/plugin_load_report.py: one `converge_file_preserved` telemetry event per
+shared/packages/plugins/load_report.py: one `converge_file_preserved` telemetry event per
 preserve hit, so the drift is visible on the observability surface without
 reading the converge log. The event name is registered in
 shared/events/registry_ops.py next to the dashboard render-failure guard.

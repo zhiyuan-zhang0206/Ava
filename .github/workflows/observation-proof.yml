@@ -3,10 +3,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'shared/agent_observation.py'
-      - 'shared/agent_snapshot.py'
-      - 'shared/agent_roster.py'
-      - 'shared/live_announce.py'
+      - 'shared/agents/observation/evidence.py'
+      - 'shared/agents/observation/snapshot.py'
+      - 'shared/agents/observation/roster.py'
+      - 'shared/events/live/announce.py'
       - 'services/heartbeat/**'
       - 'gateway/inspect/_cache.py'
       - 'gateway/inspect/_live.py'
@@ -21,8 +21,8 @@ on:
       - 'gateway/app.py'
       - 'scripts/codegen-types.sh'
       - 'scripts/codegen/dump_openapi.py'
-      - 'tests/shared/test_agent_observation.py'
-      - 'tests/shared/test_live_announce.py'
+      - 'tests/shared/test_evidence.py'
+      - 'tests/shared/test_announce.py'
       - 'tests/shared/test_agent_snapshot_scope.py'
       - 'tests/services/test_heartbeat_liveness.py'
       - 'tests/gateway/test_agent_inspect.py'
@@ -69,7 +69,7 @@ jobs:
       - name: Generate authoritative schema types
         run: bash scripts/codegen-types.sh
       - name: Verify existing database observations and failure distinction
-        run: uv run pytest tests/shared/test_agent_observation.py tests/shared/test_live_announce.py tests/services/test_heartbeat_liveness.py tests/gateway/test_agent_inspect.py tests/gateway/test_agents_endpoints.py tests/shared/test_agent_snapshot_scope.py -q
+        run: uv run pytest tests/shared/test_evidence.py tests/shared/test_announce.py tests/services/test_heartbeat_liveness.py tests/gateway/test_agent_inspect.py tests/gateway/test_agents_endpoints.py tests/shared/test_agent_snapshot_scope.py -q
       - name: Verify rendered observation states
         if: success() || failure()
         working-directory: ui/web

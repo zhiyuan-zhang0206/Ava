@@ -30,7 +30,7 @@ on:
       - 'shared/paths/__init__.py'
       - 'shared/runtime_plugins.py'
       - 'cli/commands/_release_plugin_probe.py'
-      - 'shared/plugins_config.py'
+      - 'shared/packages/plugins/enable_config.py'
       - 'ava/sdk_surface/wraps.py'
       - 'ava/sdk_surface/plugin_loader.py'
       - 'scripts/release_proofs/prove_runtime_plugins.py'

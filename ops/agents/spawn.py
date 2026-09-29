@@ -31,12 +31,12 @@ import psycopg
 import shared.db
 from shared import telemetry
 from shared.agents import ForkCheckpointNotFound
+from shared.agents.birth_config import resolve_birth_config
 from shared.agents.impersonation_manifest import stage_central_expected_event
-from shared.birth_config import resolve_birth_config
+from shared.agents.labels import spawn_prompt_with_label
 from shared.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
 from shared.db_transaction import write_transaction
-from shared.labels import spawn_prompt_with_label
-from shared.live_announce import publish_agent_spawned_sync
+from shared.events.live.announce import publish_agent_spawned_sync
 from shared.lm.registry import normalize_overlay_llm_model
 from shared.log import logger
 from shared.telemetry.audit_events import prepare_event_log
@@ -374,7 +374,7 @@ def create_agent_row(
             None = cluster defaults. Every `lifecycle="frozen"` field NOT named
             here is resolved from the current cluster default and stamped into
             agents_meta.birth_config in the same INSERT, so a later default flip
-            leaves this agent where it was born (shared/birth_config.py).
+            leaves this agent where it was born (shared/agents/birth_config.py).
         label: optional initial label (the spawner assigning the new agent's
             role). When given, it is written with label_user_set=TRUE so the
             labeler's CAS treats it as already-set and does not overwrite it.
@@ -465,7 +465,7 @@ def create_agent_row(
         # supersedes nothing (every reader treats it like NULL). No retired
         # runtime stamped a birth epoch, so it is also this runtime's proof of
         # the row's origin: an unadmitted row it later ends by force stays
-        # resurrectable (`shared.lifecycle_acceptance.record_unowned_termination`).
+        # resurrectable (`shared.agents.incarnation.lifecycle_acceptance.record_unowned_termination`).
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
             "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, preset_name, "

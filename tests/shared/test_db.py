@@ -19,8 +19,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from shared import db, db_connections
 from shared.config import settings
+from shared.events.live.redis_listener import RedisInboundListener
 from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
-from shared.redis_listener import RedisInboundListener
 from shared.telemetry import Event
 
 

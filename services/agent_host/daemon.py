@@ -55,7 +55,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-import shared.redis_client
+import shared.events.live.redis_client
 from agent.ownership.hosted import settle_stale_running_rows
 from agent.turn.progress import turn_progress_age_s, turn_progress_snapshot
 from services.agent_host import boot_defer
@@ -66,6 +66,8 @@ from services.agent_host.pools import build_control_pool, build_shared_pool
 from services.agent_host.stdout_log import _rotate_stdout_log_forever
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared import paths, pool_release
+from shared.agents.incarnation.exec_request_evidence import disposition_hint
+from shared.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.daemon.health import (
@@ -81,8 +83,6 @@ from shared.deploy.maintenance import admission
 from shared.deploy.maintenance.straggler_reap import settle_stranded_reaps_async
 from shared.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from shared.deploy.timing import assert_clock_lattice
-from shared.exec_request_evidence import disposition_hint
-from shared.hosted_force import recover_orphaned_hosted_forces
 from shared.log import init_gateway_process, logger
 from shared.sessions.helper_chain_guard import parent_chain_intact
 
@@ -164,7 +164,7 @@ async def _publish_turn_progress_heartbeat(
     active_agents: Collection[int],
 ) -> None:
     """Best-effort Redis snapshot for the gateway's out-of-process breaker."""
-    from shared.hosted_db_wait import database_wait_snapshot
+    from shared.agents.observation.db_wait import database_wait_snapshot
 
     snapshots = {}
     for agent_id in sorted(active_agents):
@@ -177,7 +177,7 @@ async def _publish_turn_progress_heartbeat(
             }
     try:
         async with asyncio.timeout(_TURN_PROGRESS_PUBLISH_TIMEOUT_S):
-            await shared.redis_client.get_async_redis().set(
+            await shared.events.live.redis_client.get_async_redis().set(
                 f"host_turn_progress:{machine}",
                 json.dumps(snapshots, separators=(",", ":")),
                 ex=_TURN_PROGRESS_HEARTBEAT_TTL_S,
@@ -290,7 +290,7 @@ class _PageEventPublisher:
 
     def emit(self, payload: str) -> None:
         from shared.config import settings
-        from shared.redis_client import publish_best_effort
+        from shared.events.live.redis_client import publish_best_effort
 
         # Fire-and-forget: publish_best_effort never raises; the task set
         # keeps a strong ref so the publish cannot be GC'd mid-flight.

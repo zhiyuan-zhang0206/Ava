@@ -19,10 +19,13 @@ from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.schemas import SystemNoteIn
 from gateway.agents.state import post_agent_system_note
 from gateway.schemas.tasks import TaskListResponse, TaskRow, TaskSummaryRow, TaskUpdateRequest
+from shared.agents.tasks.owner_notifications import (
+    TaskOwnerNotification,
+    owner_change_notifications,
+)
+from shared.agents.tasks.reparent import resolve_reparent
+from shared.agents.tasks.rules import first_open_child, is_closed, open_title_holder
 from shared.db_transaction import write_transaction
-from shared.tasks.task_owner_notifications import TaskOwnerNotification, owner_change_notifications
-from shared.tasks.task_reparent import resolve_reparent
-from shared.tasks.task_rules import first_open_child, is_closed, open_title_holder
 
 router = APIRouter()
 

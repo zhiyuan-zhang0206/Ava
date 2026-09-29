@@ -20,8 +20,8 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import attach_message
 from agent.state import AttachState, BaseAgentState
+from shared.agents.context import AvaContext
 from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
 from shared.lm.attach import AttachEntry, pack_attachments
 
 

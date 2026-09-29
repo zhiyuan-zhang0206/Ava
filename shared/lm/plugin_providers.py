@@ -8,14 +8,14 @@ lists), the labeler daemon, the eval harness — none of which loads
 ``shared`` from importing it). This loader lives in ``shared``, reuses the
 existing plugin discovery + enable config, and imports only ``provider.py``
 (shared-only dependencies), the same standalone-by-path idiom as
-``default_config.py`` (``shared/plugins_config.py:update_all_disk_images``).
+``default_config.py`` (``shared/packages/plugins/enable_config.py:update_all_disk_images``).
 
 Loaded once per process, on the first registry-consulting call
 (``build_chat_model`` / ``validate_model_config`` / ``get_models`` /
 ``resolve_context_budget`` / ``resolve_available_model`` / the config-overlay
 validation / the gateway's per-model views). Import order is sorted plugin names — deterministic
 rather than filesystem-order. A provider.py whose module body raises is
-contained with a loud report (``shared.plugin_load_report``): the failure is
+contained with a loud report (``shared.packages.plugins.load_report``): the failure is
 recorded, the rest of that module is abandoned, and the remaining providers
 still load — the fail-soft contract (user ruling 2026-09-11): one broken
 plugin's provider code must not take down every process that builds a model.
@@ -41,7 +41,7 @@ import sys
 import threading
 from pathlib import Path
 
-from shared import plugin_load_report
+from shared.packages.plugins import load_report
 
 _lock = threading.Lock()
 
@@ -101,19 +101,20 @@ def ensure_provider_plugins_loaded() -> None:
     with _lock:
         if _STATE.loaded:
             return
-        from shared import paths, plugins_config
+        from shared import paths
         from shared.lm import provider_api
         from shared.lm import registry as model_registry
         from shared.lm.factory import _MODEL_KEY_MAP
+        from shared.packages.plugins import enable_config
 
         # Bootstrap can be the first provider consumer. Importing factory here
         # applies the same core-prefix reservation contract before any plugin
         # registers; the set is empty once every provider is plugin-owned.
         provider_api.REGISTRY.reserve_core_prefixes(set(_MODEL_KEY_MAP))
 
-        discovered = plugins_config.discover_plugins()
+        discovered = enable_config.discover_plugins()
         known = set(discovered)
-        config = plugins_config.load_for_runtime(known)
+        config = enable_config.load_for_runtime(known)
         repo_dir = str(paths.repo_plugins_dir())
         for name in sorted(config.plugins):
             if not config.plugins[name].enabled:
@@ -138,7 +139,7 @@ def ensure_provider_plugins_loaded() -> None:
                 # Fail-soft contract (user ruling 2026-09-11): report this
                 # provider loudly and keep the others. `_load_one` already
                 # dropped the half-executed module from sys.modules.
-                plugin_load_report.report_plugin_load_failure(name, exc)
+                load_report.report_plugin_load_failure(name, exc)
         if not provider_api.REGISTRY.bindings:
             raise RuntimeError(
                 "no provider plugins enabled — enable at least one provider plugin "

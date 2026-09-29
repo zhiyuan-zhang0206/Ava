@@ -12,7 +12,7 @@ Regenerates the raw material behind shared/events/registry.md:
   2. Static `label=` literals on logger calls (label fallback -> agent_events
      event names; see shared/log/__init__.py event resolution: event -> label -> "log").
   3. `insert_event_log*` event_type values (event_log event names, category=audit).
-  4. SSE role discriminators in shared/live_events.py (real-time channel,
+  4. SSE role discriminators in shared/events/live/projection.py (real-time channel,
      not persisted).
 
 Usage:
@@ -106,7 +106,7 @@ def scan_code(repo: Path) -> tuple[Counter[str], Counter[str], Counter[str], Cou
             event_kinds.update(m.group(1) for m in EVENT_RE.finditer(line))
             label_kinds.update(m.group(1) for m in LABEL_RE.finditer(line))
             event_type_kinds.update(m.group(1) for m in EVENT_TYPE_RE.finditer(line))
-    # PR-D renamed shared/events.py -> shared/live_events.py; keep both names so
+    # PR-D renamed shared/events.py -> shared/events/live/projection.py; keep both names so
     # the scanner works on pre-rename checkouts too (batch lands A -> ... -> E).
     events_path = repo / "shared" / "live_events.py"
     if not events_path.exists():
@@ -286,7 +286,9 @@ def main() -> int:
     print(f"\n===== event_log event_type literals (prod code): {len(event_type_kinds)} =====")
     for k, n in event_type_kinds.most_common():
         print(f"  {n:4d}  {k}")
-    print(f"\n===== SSE role discriminators (shared/live_events.py): {len(sse_roles)} =====")
+    print(
+        f"\n===== SSE role discriminators (shared/events/live/projection.py): {len(sse_roles)} ====="
+    )
     for k in sorted(sse_roles):
         print(f"  {k}")
 

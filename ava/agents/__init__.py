@@ -551,7 +551,7 @@ def send_system_note(
 
     Returns the durable inbound id. Does not wait for the target to act.
     """  # lint-docstring: ok "resurrect" is public behaviour, not impl detail
-    from shared.message_kwargs import NoteTag
+    from shared.agents.messages.kwargs import NoteTag
 
     agent_id = coerce_typed(agent_id, "agent_id", int)
     content = coerce_str(content, "content")

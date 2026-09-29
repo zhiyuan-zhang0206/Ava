@@ -28,8 +28,8 @@ import pytest
 import ava
 from ava.sdk_surface import wraps
 from ava.sdk_surface.wraps import wrap
-from shared import plugin_activation
-from shared.plugin_context import PluginContext
+from shared.packages.plugins import activation
+from shared.packages.plugins.context import PluginContext
 
 
 @pytest.fixture
@@ -202,7 +202,7 @@ def activations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, st
         if plugin is not None:
             recorded.append((plugin, surface, identifier, detail))
 
-    monkeypatch.setattr(plugin_activation, "record", spy)
+    monkeypatch.setattr(activation, "record", spy)
     return recorded
 
 
@@ -288,7 +288,7 @@ def test_activation_recording_never_perturbs_the_call(
     def boom(*_a: Any, **_k: Any) -> None:
         raise RuntimeError("sink down")
 
-    monkeypatch.setattr(plugin_activation, "emit", boom)
+    monkeypatch.setattr(activation, "emit", boom)
     with PluginContext("myplugin"):
         wrap("probe.fn", lambda _inner, *_a, **_k: "blocked")  # pyright: ignore[reportUnknownArgumentType]
 

@@ -13,8 +13,8 @@ from psycopg_pool import ConnectionPool
 from shared import telemetry
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.live_events import PageClosed
-from shared.redis_client import publish_best_effort
+from shared.events.live.projection import PageClosed
+from shared.events.live.redis_client import publish_best_effort
 
 _log = logging.getLogger("services.page_server.daemon")
 

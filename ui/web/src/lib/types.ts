@@ -451,7 +451,7 @@ export interface TimelineSnapshotEvent extends BaseEvent {
 }
 
 // AgentSnapshot is structurally identical to WireAgentRow (the HTTP schema)
-// — see shared/agent_snapshot.py for the canonical Python definition.
+// — see shared/agents/observation/snapshot.py for the canonical Python definition.
 // Only selected detail reads use it; lifecycle SSE events carry ID hints.
 export type AgentSnapshot = WireAgentRow;
 
@@ -706,7 +706,7 @@ export type FleetGraph = Omit<WireFleetGraph, "nodes" | "edges"> & {
 // The task registry — persistent, process-decoupled work items that outlive
 // the agent doing them. Backs the Task Graph (a free D3-force view).
 
-// The task lifecycle status set — the backend's shared/tasks/task_status.py enum,
+// The task lifecycle status set — the backend's shared/agents/tasks/status.py enum,
 // surfaced through the generated wire schema (a pytest locks db/schema.sql and
 // openapi.json to it; 'ongoing' was removed by user ruling 2026-09-15). The
 // system root is not a status: it is pinned in_progress and immutable.

@@ -32,7 +32,13 @@ from gateway.events.sse import (
 )
 from shared.config import settings
 from shared.db import create_agent
-from shared.live_events import GLOBAL_ROLES, SYSTEM_ROLES, ChatDelta, CodeDelta, LabelUpdated
+from shared.events.live.projection import (
+    GLOBAL_ROLES,
+    SYSTEM_ROLES,
+    ChatDelta,
+    CodeDelta,
+    LabelUpdated,
+)
 
 
 @dataclass
@@ -377,9 +383,8 @@ def test_sse_emits_heartbeat_data_event_when_idle(
 
     monkeypatch.setattr(sse_mod, "_HEARTBEAT_SECONDS", 0.0)
     tid = create_agent(db_conn)
-    # no payloads -> the stream sits idle -> the heartbeat is the first data frame
-    # (count_heartbeats=True: this test is ABOUT the heartbeat — the default
-    # filters them out as load noise)
+    # no payloads -> the stream sits idle -> the heartbeat is the first data frame (count_heartbeats=True: this test is
+    # ABOUT the heartbeat — the default filters them out as load noise)
     frames = asyncio.run(
         _collect_frames(tid, redis_client, [], n_data_frames=1, count_heartbeats=True)
     )
@@ -475,9 +480,8 @@ def _decode_throttled_frames(chunks: list[bytes]) -> list[list[dict]]:
     out: list[list[dict]] = []
     text = b"".join(chunks).decode()
     for frame in text.split("\n\n"):
-        # Split/rejoin exactly like the browser: "\n" only. str.splitlines()
-        # would also break on U+0085 / U+2028 / U+2029, masking a frame the
-        # writer split there instead of failing the parse.
+        # Split/rejoin exactly like the browser: "\n" only. str.splitlines() would also break on U+0085 / U+2028 /
+        # U+2029, masking a frame the writer split there instead of failing the parse.
         data_lines = [
             line[len("data: ") :] for line in frame.split("\n") if line.startswith("data: ")
         ]
@@ -544,9 +548,8 @@ def test_throttled_no_agent_filter(
         ChatDelta(agent_id=tid_a, item_id="5.0", content="A").model_dump_json(),
         ChatDelta(agent_id=tid_b, item_id="5.0", content="B").model_dump_json(),
     ]
-    # min_events, not a frame count: the assertion below is about both events
-    # arriving, and a time-windowed throttle can split two near-simultaneous
-    # publishes across frames — stopping at the first frame then sees only agent A.
+    # min_events, not a frame count: the assertion below is about both events arriving, and a time-windowed throttle can
+    # split two near-simultaneous publishes across frames — stopping at the first frame then sees only agent A.
     frames = asyncio.run(
         _collect_throttled_frames(
             redis_client, payloads, n_data_frames=1, throttle_rate=1000.0, min_events=2
@@ -706,11 +709,9 @@ def test_busy_channel_still_emits_keepalive_comments(
 ) -> None:
     """A channel flooded with other agents' events must not go silent.
 
-    Regression (2026-08-03): event_stream only emitted ``: hb`` on the
-    msg-None path, so a continuously busy ``ava:events`` channel (in a live
-    cluster, a message every ~0.1s) made the stream yield nothing at all —
-    read-timeout clients (httpx, curl) disconnected every 30s and the
-    im_bridge subscription reconnected in a loop.
+    Regression (2026-08-03): event_stream only emitted ``: hb`` on the msg-None path, so a continuously busy
+    ``ava:events`` channel (in a live cluster, a message every ~0.1s) made the stream yield nothing at all — read-
+    timeout clients (httpx, curl) disconnected every 30s and the im_bridge subscription reconnected in a loop.
     """
     tid = create_agent(db_conn)  # this subscriber's agent
     other = create_agent(db_conn)  # whose events flood the channel
@@ -786,11 +787,10 @@ def test_sse_survives_redis_typeerror(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # --- frame encoding: Unicode line separators that are legal raw in JSON ---
 #
-# U+0085 / U+2028 / U+2029 may appear unescaped inside a JSON string
-# (pydantic model_dump_json emits them raw; JSON.parse accepts them), so
-# str.splitlines() must never split a data payload: the client rejoins the
-# data lines with "\n", planting a raw newline inside the JSON literal,
-# and JSON.parse fails with "Bad control character in string literal".
+# U+0085 / U+2028 / U+2029 may appear unescaped inside a JSON string (pydantic model_dump_json emits them raw;
+# JSON.parse accepts them), so str.splitlines() must never split a data payload: the client rejoins the data lines
+# with "\n", planting a raw newline inside the JSON literal, and JSON.parse fails with "Bad control character in
+# string literal".
 
 
 @pytest.mark.parametrize("ch", ("\u0085", "\u2028", "\u2029"), ids=("U+0085", "U+2028", "U+2029"))

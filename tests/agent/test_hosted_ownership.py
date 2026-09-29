@@ -24,13 +24,17 @@ from agent.ownership.hosted import (
     stamp_turn_fatal,
 )
 from shared.agents.impersonation import ImpersonationError
+from shared.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceProcess,
+    decode_resources,
+)
 from shared.db import create_agent, insert_inbound_message
 from shared.deploy.writers.publication import AdmissionDecision, CurrentAdmission
 from shared.deploy.writers.runtime_admission import (
     PublicationAdmissionDeferredError,
     RuntimeAdmission,
 )
-from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.native_process.turn_identity import bind_turn_identity
 

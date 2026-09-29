@@ -26,7 +26,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Put project root on sys.path so `from shared.live_events import ...` finds the module
+# Put project root on sys.path so `from shared.events.live.projection import ...` finds the module
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
@@ -192,7 +192,7 @@ def _samples() -> dict[str, dict]:
 
 
 def main() -> int:
-    from shared.live_events import EVENT_ADAPTER
+    from shared.events.live.projection import EVENT_ADAPTER
 
     out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "tests/fixtures/events")
     out_dir.mkdir(parents=True, exist_ok=True)

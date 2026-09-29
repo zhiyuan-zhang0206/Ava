@@ -97,7 +97,7 @@ def _gateway_liveness_with_retry() -> bool:
 def _data_plane_abnormal() -> bool:
     """True when either dependency behind the gateway is currently unreachable."""
     import shared.db
-    from shared.redis_client import sync_redis
+    from shared.events.live.redis_client import sync_redis
 
     try:
         with shared.db.connect(autocommit=True):

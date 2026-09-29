@@ -36,7 +36,7 @@ from agent.state import (
     clear_plugin_registrations,
     register_plugin_state,
 )
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 
 _SERDE_LOGGER = "langgraph.checkpoint.serde.jsonplus"
 

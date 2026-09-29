@@ -19,9 +19,10 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from gateway.extensions.schemas import SkillEnableUpdate, SkillLayer, SkillsView, SkillView
-from shared import install_registry, paths
-from shared.install_registry import IGNORED_NAMES, PackageOrigin, tree_hash
-from shared.packages.skills.skill_names import display_name, match_key
+from shared import paths
+from shared.packages.extensions import install_registry
+from shared.packages.extensions.install_registry import IGNORED_NAMES, PackageOrigin, tree_hash
+from shared.packages.skills.names import display_name, match_key
 
 router = APIRouter()
 

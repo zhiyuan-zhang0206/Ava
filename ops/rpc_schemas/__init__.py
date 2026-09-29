@@ -49,8 +49,8 @@ from ops.rpc_schemas.terminate import OpenTaskRow as OpenTaskRow
 from ops.rpc_schemas.terminate import OpenTasksHint as OpenTasksHint
 from ops.rpc_schemas.terminate import TerminateAgentRequest as TerminateAgentRequest
 from ops.rpc_schemas.terminate import TerminateAgentResponse as TerminateAgentResponse
-from shared.agent_observation import AvailabilityReason
 from shared.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
+from shared.agents.observation.evidence import AvailabilityReason
 from shared.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 
 

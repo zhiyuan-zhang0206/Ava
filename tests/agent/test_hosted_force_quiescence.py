@@ -28,10 +28,13 @@ from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_host.daemon import _cancel_turn_route
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
-from shared import exec_request_evidence
+from shared.agents.incarnation import exec_request_evidence
+from shared.agents.incarnation.exec_request_evidence import Verdict
+from shared.agents.incarnation.hosted_force import (
+    original_host_force,
+    recover_orphaned_hosted_forces,
+)
 from shared.config import settings
-from shared.exec_request_evidence import Verdict
-from shared.hosted_force import original_host_force, recover_orphaned_hosted_forces
 from tests.agent.test_inbound_ownership import _agent, _insert
 
 
@@ -282,7 +285,9 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
         _, _, _, command = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "shared.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
 
     recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
 
@@ -312,7 +317,9 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
         )
         is not None
     )
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "shared.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
 
     # Build the torn shape directly: done + applied + unobserved with the pointer
     # still alive. INSERT is outside the commit-time guard's UPDATE window, so this
@@ -370,7 +377,9 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     request = _aged_envelope(tmp_path, agent_id, owner=None)
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "shared.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
 
     recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
 
@@ -431,9 +440,12 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
         )
     request = _aged_envelope(tmp_path, agent_id, owner=uuid4())
     quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "shared.exec_request_evidence.quarantined_exec_requests_dir", lambda: quarantine
+        "shared.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
+    monkeypatch.setattr(
+        "shared.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
+        lambda: quarantine,
     )
 
     recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
@@ -470,7 +482,9 @@ def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
 
 def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     """This box runs other agents' exec children; isolate the test's own legs."""
-    monkeypatch.setattr("shared.exec_request_evidence.psutil.process_iter", _no_process_iteration)
+    monkeypatch.setattr(
+        "shared.agents.incarnation.exec_request_evidence.psutil.process_iter", _no_process_iteration
+    )
 
 
 async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recovers(
@@ -496,9 +510,12 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
     bound = exec_request_evidence._unreadable_expiry_age_s()
     request = _unreadable_envelope(tmp_path, agent_id, age_s=bound + 60)
     quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "shared.exec_request_evidence.quarantined_exec_requests_dir", lambda: quarantine
+        "shared.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
+    monkeypatch.setattr(
+        "shared.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
+        lambda: quarantine,
     )
     _hide_machine_processes(monkeypatch)
 
@@ -540,7 +557,9 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     request = _unreadable_envelope(tmp_path, agent_id, age_s=0.0)
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "shared.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
     _hide_machine_processes(monkeypatch)
 
     recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
@@ -577,9 +596,12 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
         )
     request = _aged_envelope(tmp_path, agent_id, owner=old_host._owner, age_s=0.0)
     quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "shared.exec_request_evidence.quarantined_exec_requests_dir", lambda: quarantine
+        "shared.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
+    monkeypatch.setattr(
+        "shared.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
+        lambda: quarantine,
     )
     child = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"],

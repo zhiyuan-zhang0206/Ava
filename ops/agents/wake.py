@@ -22,16 +22,16 @@ from shared.agents import (
     ResurrectBudgetExhausted,
     ResurrectRefused,
 )
-from shared.cluster.machine import machine_name
-from shared.config import field_alias, get_field, settings
-from shared.db import fetch_one, publish_inbound_wake
-from shared.db_transaction import write_transaction
-from shared.lifecycle_acceptance import (
+from shared.agents.incarnation.lifecycle_acceptance import (
     LIFECYCLE_RELEASE,
     UNOWNED_TERMINATION_ID,
     UNOWNED_TERMINATION_RECORDED,
 )
-from shared.live_announce import publish_agent_updated_sync
+from shared.cluster.machine import machine_name
+from shared.config import field_alias, get_field, settings
+from shared.db import fetch_one, publish_inbound_wake
+from shared.db_transaction import write_transaction
+from shared.events.live.announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry.audit_events import prepare_event_log
@@ -80,11 +80,11 @@ def _transition_terminated_to_unclaimed_idling(
         unowned_termination,
     )
     if trigger_inbound_id is not None:
-        from shared.lifecycle_acceptance import (
+        from shared.agents.incarnation.lifecycle_acceptance import (
             FAILED_RESTART_FOR_CURRENT_TARGET,
             SYSTEM_REAPED_CRASH_ROW,
         )
-        from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
+        from shared.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
         cur.execute(
@@ -199,9 +199,9 @@ def _prepare_resurrect_attempt(
     (`ResurrectRefused`) — the batch entry only reinstates the recorded
     billing cohort.
     """
+    from shared.agents.incarnation.exec_owner_recovery import recover_local_resources
+    from shared.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_resurrect
     from shared.agents.messages.envelope import reject_unnegotiated_caller
-    from shared.exec_owner_recovery import recover_local_resources
-    from shared.lifecycle_acceptance import supersede_lifecycle_for_resurrect
 
     reject_unnegotiated_caller(resurrected_by)
     recover_local_resources(agent_id, machine_name())
@@ -229,7 +229,7 @@ def _prepare_resurrect_attempt(
             unowned_termination=unowned_termination,
         )
         if billing_recovery:
-            from shared.recovery_breaker import (
+            from shared.agents.recovery_breaker import (
                 HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
                 PERMANENT_REJECT_REASON_BILLING,
             )

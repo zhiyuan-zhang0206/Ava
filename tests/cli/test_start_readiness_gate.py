@@ -17,9 +17,9 @@ from cli.commands._repo import ServiceSpec
 from cli.commands.lifecycle import start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from ops.roster.service_spec import _GATEWAY
+from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.deploy.lifecycle import start_serving
 from shared.deploy.lifecycle.start_serving import RootBirth
-from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 
 pytestmark = pytest.mark.real_service_readiness_gate
 

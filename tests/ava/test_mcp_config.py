@@ -194,7 +194,7 @@ def test_machine_config_overrides_builtin(unit_home: Path, monkeypatch: pytest.M
 
 def _install_mcp(home: Path, name: str, spec: dict[str, Any]) -> Path:
     """Register a `type="mcp"` package and write its `$AVA_HOME/mcps/<name>/.mcp.json`."""
-    from shared import install_registry as reg
+    from shared.packages.extensions import install_registry as reg
 
     dest = home / "mcps" / name
     dest.mkdir(parents=True, exist_ok=True)

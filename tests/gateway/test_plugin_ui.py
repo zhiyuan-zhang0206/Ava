@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from gateway.app import app
 from shared import paths
 from shared.config import settings
-from shared.plugins_config import write_local
+from shared.packages.plugins.enable_config import write_local
 
 
 @pytest.fixture(autouse=True)

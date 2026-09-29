@@ -422,7 +422,7 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     """
     from cli.commands import _repo
     from cli.commands.lifecycle import _start_readiness_preflight, start
-    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from shared.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
     from shared.host.proc import hosting_exec_domain, hosting_supervised_session
     from shared.paths import ava_home
 

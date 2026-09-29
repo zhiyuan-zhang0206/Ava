@@ -20,7 +20,7 @@ from cli.commands.extensions.mcp import (
     cmd_mcp_uninstall,
     cmd_mcp_upgrade,
 )
-from shared import install_registry as reg
+from shared.packages.extensions import install_registry as reg
 
 
 def _make_mcp_package(

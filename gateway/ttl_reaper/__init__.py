@@ -75,7 +75,7 @@ from gateway.ttl_reaper.lifecycle_fences import (
 )
 from ops import cluster_rpc, lifecycle
 from shared import telemetry
-from shared.agents.impersonation.impersonation_maintenance import (
+from shared.agents.impersonation.maintenance import (
     reap_impersonations,
     remind_expiring_impersonations,
 )
@@ -83,9 +83,9 @@ from shared.agents.messages.inbound_provenance import InboundProvenance
 from shared.config import cluster_tz, settings
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.live_announce import publish_agent_updated_sync
-from shared.live_events import PageClosed
-from shared.redis_client import publish_best_effort_sync
+from shared.events.live.announce import publish_agent_updated_sync
+from shared.events.live.projection import PageClosed
+from shared.events.live.redis_client import publish_best_effort_sync
 
 _log = logging.getLogger(__name__)
 

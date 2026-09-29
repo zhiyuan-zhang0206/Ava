@@ -40,15 +40,17 @@ from pathlib import Path
 from loguru import logger
 
 from cli.commands.extensions.skills_sync import _Source, iter_sources
-from shared import install_registry, paths, plugin_manifest
+from shared import paths
 from shared.config import settings
 from shared.deploy.git import host_version
 from shared.deploy.git.gitenv import git_env
 from shared.host.proc import run_bounded
 from shared.host.system.cron import os_jobs_enabled
 from shared.native_process.os_platform import LockTimeoutError, file_lock
-from shared.packages.skills import skill_scan
-from shared.packages.skills.skill_names import match_key
+from shared.packages.extensions import install_registry
+from shared.packages.plugins import manifest as manifest_module
+from shared.packages.skills import scan
+from shared.packages.skills.names import match_key
 
 # Backoff: failures double the effective interval, capped after this many
 # doublings (so a repeatedly failing package still re-checks about weekly).
@@ -558,13 +560,13 @@ class _Pass:
             return "up_to_date", None
         if not any(staged.rglob("SKILL.md")):
             return "error: staged tree carries no SKILL.md", None
-        findings = skill_scan.scan_package(staged)
-        critical = skill_scan.criticals(findings)
+        findings = scan.scan_package(staged)
+        critical = scan.criticals(findings)
         if critical:
-            return f"refused_scan: {', '.join(skill_scan.rule_ids(critical))}", None
+            return f"refused_scan: {', '.join(scan.rule_ids(critical))}", None
         try:
-            manifest = plugin_manifest.load_manifest(staged)
-        except plugin_manifest.ManifestError as exc:
+            manifest = manifest_module.load_manifest(staged)
+        except manifest_module.ManifestError as exc:
             return f"error: manifest invalid: {exc}", None
         if manifest is not None:
             host_errors: list[str] = []
@@ -573,8 +575,8 @@ class _Pass:
             except host_version.HostVersionError as exc:
                 host_errors.append(str(exc))
             else:
-                host_errors += plugin_manifest.check_host_engine(manifest, host)
-            host_errors += plugin_manifest.check_host_commit(manifest, self.repo)
+                host_errors += manifest_module.check_host_engine(manifest, host)
+            host_errors += manifest_module.check_host_commit(manifest, self.repo)
             if host_errors:
                 return f"blocked_version: {'; '.join(host_errors)}", None
         recorded = pkg.installed_hash or pkg.content_hash

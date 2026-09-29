@@ -15,11 +15,11 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
-from shared import plugin_activation, plugin_contributions
 from shared.config import settings
 from shared.config.turn_view import turn_settings
+from shared.packages.plugins import activation, contributions
+from shared.packages.plugins.context import current_plugin_name
 from shared.paths import workspace_dir
-from shared.plugin_context import current_plugin_name
 
 from ._codeact import _codeact_section
 from .capabilities import (
@@ -59,7 +59,7 @@ def register_system_prompt_section(fn: Callable[[], str]) -> Callable[[], str]:
     `build_system_prompt()` runs them in registration order when called.
     """
     _SYSTEM_PROMPT_SECTIONS.append(fn)
-    plugin_contributions.record("systemPromptSections", fn.__name__, detail=fn.__module__)
+    contributions.record("systemPromptSections", fn.__name__, detail=fn.__module__)
     plugin = current_plugin_name()
     if plugin is not None:
         _SECTION_PLUGIN[fn] = plugin
@@ -768,7 +768,7 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
             # rendered text is prompt real estate the plugin is spending. Length
             # + digest identify *which* variant landed without storing the text;
             # this runs at spawn/compact only, so there is no per-turn cost.
-            plugin_activation.record(
+            activation.record(
                 _SECTION_PLUGIN.get(section_fn),
                 "systemPromptSections",
                 section_fn.__name__,

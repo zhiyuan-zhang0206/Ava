@@ -290,7 +290,7 @@ def root_manifests_path() -> Path:
 def quarantined_exec_requests_dir() -> Path:
     """Per-unit quarantine for exec request envelopes ($AVA_HOME/quarantined-exec-requests).
 
-    Stale evidence moved out of run/exec (shared/exec_request_evidence.py): the
+    Stale evidence moved out of run/exec (shared/agents/incarnation/exec_request_evidence.py): the
     files stay for inspection beside their JSON receipt, one event subdirectory
     per quarantine pass. Create if missing."""
     target = ava_home() / "quarantined-exec-requests"

@@ -14,8 +14,8 @@ import pytest
 from ava.impersonation import replay as recorded
 from shared import telemetry
 from shared.agents import impersonation as leases
-from shared.agents.impersonation import impersonation_history as history
-from shared.agents.impersonation import impersonation_sessions as sessions
+from shared.agents.impersonation import history as history
+from shared.agents.impersonation import sessions as sessions
 from shared.agents.messages.chat_delivery import insert_chat_inbound_once
 from shared.cluster.machine import machine_name
 from shared.db import create_agent

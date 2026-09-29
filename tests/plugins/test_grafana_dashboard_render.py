@@ -56,7 +56,7 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 from shared.telemetry.metrics.core import catalog
 from shared.telemetry.metrics.grafana_dashboard import (
     _CORE_SECTIONS_PREFIX,
@@ -475,7 +475,7 @@ def test_installed_supplier_loads_a_registry_row(
     """An enabled installed plugin row renders from its blob: register a tree
     with a metrics.py, load it through the supplier, and — after S3's
     ordering — see it in the render."""
-    from shared import extension_registry as registry
+    from shared.packages.extensions import registry as registry
 
     tree = tmp_path / "installed_plugin"
     tree.mkdir()

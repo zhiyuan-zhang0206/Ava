@@ -11,9 +11,10 @@ from pathlib import Path
 import pytest
 
 from agent.extensions import catalog as catalog_mod
-from shared import paths, plugin_contributions
+from shared import paths
 from shared.config import settings
-from shared.plugins_config import write_local
+from shared.packages.plugins import contributions
+from shared.packages.plugins.enable_config import write_local
 
 
 @pytest.fixture(autouse=True)
@@ -155,10 +156,10 @@ def test_framework_registrations_are_not_recorded():
         async def __call__(self, state, runtime, config, /):
             return None
 
-    before = len(plugin_contributions.contributions())
+    before = len(contributions.contributions())
     register_before_llm(_FrameworkHook())
 
-    assert len(plugin_contributions.contributions()) == before
+    assert len(contributions.contributions()) == before
 
 
 _MANIFEST = """{

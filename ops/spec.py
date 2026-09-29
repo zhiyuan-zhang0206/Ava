@@ -71,7 +71,7 @@ def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
 def plugin_services() -> tuple[ServiceSpec, ...]:
     """The services contributed by the plugins PRESENT on this machine.
 
-    Discovery, not import-of-known-plugins: `shared.plugins_config` enumerates the
+    Discovery, not import-of-known-plugins: `shared.packages.plugins.enable_config` enumerates the
     plugins installed on THIS machine (builtin + external), and each that ships a
     ``services.py`` exposing ``services() -> tuple[ServiceSpec, ...]`` gets folded
     into the roster. This keeps the direction "plugin declares, ops discovers" — no
@@ -87,7 +87,7 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     follow, since they derive from `build_services()`.
 
     The ``services.py`` module is loaded by FILE PATH (like
-    `shared.plugins_config.update_all_disk_images` loads `default_config.py`) so an
+    `shared.packages.plugins.enable_config.update_all_disk_images` loads `default_config.py`) so an
     external plugin under ``~/.ava/plugins/`` — off the ``plugins.`` package path —
     can register too; it must import only light deps (ops / shared), never its
     own `plugin.py`, so this load does not drag the agent kernel into the ops
@@ -96,13 +96,13 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     Fail-soft per plugin (user ruling 2026-09-11): a ``services.py`` that fails
     to load, a file without a ``services()`` function, or a ``services()`` call
     that raises is skipped with a loud report
-    (``shared.plugin_load_report``) — one broken plugin must not block
+    (``shared.packages.plugins.load_report``) — one broken plugin must not block
     `ava start` / the watchdog roster for every other plugin. The session-name
     collision guard stays fail-closed: no rule can pick a winner between two
     owners of one session name.
     """
-    from shared import plugin_load_report
-    from shared.plugins_config import installed_plugin_dirs
+    from shared.packages.plugins import load_report
+    from shared.packages.plugins.enable_config import installed_plugin_dirs
 
     specs: list[ServiceSpec] = []
     for name, plugin_dir in sorted(installed_plugin_dirs().items()):
@@ -114,11 +114,11 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(name, exc)
+            load_report.report_plugin_load_failure(name, exc)
             continue
         declare = getattr(module, "services", None)
         if declare is None:
-            plugin_load_report.report_plugin_load_failure(
+            load_report.report_plugin_load_failure(
                 name,
                 PluginServiceError(
                     f"plugin {name!r} ships a services.py but it defines no `services()` function"
@@ -130,7 +130,7 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(name, exc)
+            load_report.report_plugin_load_failure(name, exc)
     return tuple(specs)
 
 

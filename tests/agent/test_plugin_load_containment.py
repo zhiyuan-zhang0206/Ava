@@ -28,7 +28,7 @@ import pytest
 
 from shared import paths
 from shared.config import settings
-from shared.plugins_config import write_local
+from shared.packages.plugins.enable_config import write_local
 
 # Every dotted name a plugin module can be registered under.
 _PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")

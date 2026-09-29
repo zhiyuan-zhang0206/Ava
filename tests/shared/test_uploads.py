@@ -1,4 +1,4 @@
-"""shared.uploads — url <-> path mapping + traversal-safe resolution + base64.
+"""shared.agents.uploads — url <-> path mapping + traversal-safe resolution + base64.
 
 Pure unit (no DB / no gateway). The traversal guard is security-critical: a
 crafted image reference must never resolve outside the agent's upload dir.
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import uploads
+from shared.agents import uploads
 
 
 class TestParseUploadUrl:

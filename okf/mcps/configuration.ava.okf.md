@@ -10,7 +10,7 @@ tags: []
 ## The four layers (merged, later overrides earlier)
 1. **Builtin**: `<repo>/ava_builtins/mcps/<name>/.mcp.json` — shipped with code (currently only `ava_builtins/mcps/chrome/.mcp.json`)
 2. **Plugin**: a plugin's `.mcp.json`
-3. **Installed**: `$AVA_HOME/mcps/<name>/.mcp.json` — self-contained packages via `ava mcp install` from git URLs or local paths, gated by the install registry (`shared/install_registry.py`, `type="mcp"`)
+3. **Installed**: `$AVA_HOME/mcps/<name>/.mcp.json` — self-contained packages via `ava mcp install` from git URLs or local paths, gated by the install registry (`shared/packages/extensions/install_registry.py`, `type="mcp"`)
 4. **Machine**: user-custom `$AVA_HOME/mcp.json` — highest priority
 
 Enable control: `~/.ava/mcp_enabled.json` — `ava mcp enable/disable` per-machine toggle across all four layers.

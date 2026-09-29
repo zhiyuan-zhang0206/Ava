@@ -17,11 +17,11 @@ from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.status import cmd_status
 from cli.start_runtime import StartRuntime
 from ops.roster.service_spec import ServiceSpec
+from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.cluster import session_name
 from shared.cluster.machine import MachineRoles
 from shared.deploy.lifecycle import start_serving
 from shared.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
-from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.paths import prod_service_checkout_error
 
 

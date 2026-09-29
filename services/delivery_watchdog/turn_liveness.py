@@ -13,10 +13,10 @@ from uuid import UUID
 from psycopg_pool import ConnectionPool
 
 import shared.db
-import shared.redis_client
+import shared.events.live.redis_client
 from shared import telemetry
-from shared.hosted_db_wait import database_wait_matches
-from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
+from shared.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
+from shared.agents.observation.db_wait import database_wait_matches
 
 _log = logging.getLogger("services.delivery_watchdog.turn_liveness")
 
@@ -257,6 +257,6 @@ def _maybe_spawn_hosted_turn_recoveries(
 
 async def scan_hosted_turn_liveness(pool: ConnectionPool, threshold_s: float) -> None:
     """Run one Redis-confirmed scan on the delivery watchdog's existing tick."""
-    redis_client = cast(_RedisReader, shared.redis_client.get_async_redis())
+    redis_client = cast(_RedisReader, shared.events.live.redis_client.get_async_redis())
     wedges = await _detect_hosted_turn_wedges(pool, threshold_s, redis_client)
     _maybe_spawn_hosted_turn_recoveries(pool, wedges)

@@ -18,7 +18,7 @@ from typing import Literal
 
 import psutil
 
-from shared.exec_owner_protocol import (
+from shared.agents.incarnation.exec_owner_protocol import (
     MAX_OWNER_MESSAGE,
     OwnerClosed,
     OwnerControl,
@@ -27,7 +27,7 @@ from shared.exec_owner_protocol import (
     read_owner_bytes,
     read_owner_context,
 )
-from shared.incarnation_resources import ResourceProcess
+from shared.agents.incarnation.resources import ResourceProcess
 from shared.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from shared.native_process.os_platform import IS_WINDOWS
 from shared.native_process.winjob import WindowsJob

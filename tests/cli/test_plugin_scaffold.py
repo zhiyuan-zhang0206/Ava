@@ -17,7 +17,7 @@ from shared.cluster.machine import set_identity
 from shared.config import settings
 from shared.deploy.git import memory_repo
 from shared.host import proc
-from shared.plugins_config import write_local
+from shared.packages.plugins.enable_config import write_local
 
 
 @pytest.fixture(autouse=True)

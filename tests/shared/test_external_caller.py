@@ -4,7 +4,11 @@ import json
 
 import pytest
 
-from shared.external_caller import explicit_caller_source, external_caller, launch_caller_assignment
+from shared.agents.messages.external_caller import (
+    explicit_caller_source,
+    external_caller,
+    launch_caller_assignment,
+)
 
 
 def test_absence_stays_absent_not_human(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -31,7 +31,7 @@ import pytest
 import redis
 
 from shared.cluster import inbound_channel
-from shared.redis_listener import RedisInboundListener
+from shared.events.live.redis_listener import RedisInboundListener
 
 
 def _free_port() -> int:

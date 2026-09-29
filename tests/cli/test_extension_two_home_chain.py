@@ -32,9 +32,9 @@ from pathlib import Path
 import psycopg
 
 from cli.commands.extensions.skill import cmd_skill_install
-from shared import extension_materialize as mat
-from shared import extension_registry as reg
 from shared import paths
+from shared.packages.extensions import materialize as mat
+from shared.packages.extensions import registry as reg
 
 _AsMachine = Callable[[Path], AbstractContextManager[Path]]
 

@@ -25,12 +25,12 @@ from typing import NamedTuple
 from uuid import UUID, uuid4
 
 from ops.agent_pause.probe import HostIdentity, host_identity, host_running
+from shared.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from shared.cluster.machine import machine_name, machine_role
 from shared.db import connect, publish_inbound_wake
 from shared.deploy.maintenance import admission, cohort, pause_owner
 from shared.deploy.maintenance.hold_driver import HoldDriver
 from shared.deploy.maintenance.state import MaintenanceHold
-from shared.resource_admission import DRAINED_RESOURCES
 
 _log = logging.getLogger(__name__)
 

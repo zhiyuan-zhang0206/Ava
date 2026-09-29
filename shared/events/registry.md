@@ -345,7 +345,7 @@ consumers: see the comments at each emit point.
 
 ## 5. SSE roles (live channel, not persisted, 30)
 
-Typed Pydantic discriminators in `shared/live_events.py` (role is a Literal);
+Typed Pydantic discriminators in `shared/events/live/projection.py` (role is a Literal);
 `EVENT_ADAPTER` / `SYSTEM_ROLES` / `GLOBAL_ROLES` derive from the single
 `_ROLE_CLASSES` registry (R2-C). SSE is a **live projection** of the "latest drops"
 of the event river — not persisted, unlike persistent events; role naming shares the

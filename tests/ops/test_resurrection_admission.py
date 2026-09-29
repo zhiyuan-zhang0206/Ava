@@ -21,15 +21,19 @@ from ops.agents.spawn import create_agent_row
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.lifecycle import termination
 from shared.agents import AgentStatus, ResurrectError, ResurrectRefused
+from shared.agents.incarnation.predecessor_closure import ClosureEvidence, close_retired_predecessor
+from shared.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceBirth,
+    decode_resources,
+)
 from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
 from shared.deploy.maintenance import cohort, pause_owner
 from shared.deploy.maintenance.straggler_reap import settle_stranded_reaps
-from shared.incarnation_resources import IncarnationResources, ResourceBirth, decode_resources
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.native_process.turn_identity import bind_turn_identity
-from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
 from tests.shared.test_predecessor_closure import _retired
 
 

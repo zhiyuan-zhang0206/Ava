@@ -1148,7 +1148,7 @@ export interface paths {
         /**
          * Get Agent Inspect Widgets
          * @description The agent's plugin widgets for the inspector panel — the extension
-         *     surface where enabled plugins embed widgets (see `shared/plugin_inspector.py`;
+         *     surface where enabled plugins embed widgets (see `shared/packages/plugins/inspector.py`;
          *     registration mirrors the plugin-metric system).
          *
          *     Builds the widget registry in process (shipped builtin plugins'
@@ -4093,7 +4093,7 @@ export interface components {
          * AgentRow
          * @description GET /api/agents/{id} detail, including response-required notice bodies.
          *
-         *     The directory and live roster use bounded cards from shared.agent_roster.
+         *     The directory and live roster use bounded cards from shared.agents.observation.roster.
          *     last_active_at is the real-activity clock; last_inbound_at is the latest
          *     inbound message clock.
          */
@@ -5438,7 +5438,7 @@ export interface components {
          *     GET /api/agents/{id}/inspect/widgets.
          *
          *     The resolved twin of a registered `InspectWidgetSpec`
-         *     (`shared/plugin_inspector.py`): `plugin` + `id` name the registration,
+         *     (`shared/packages/plugins/inspector.py`): `plugin` + `id` name the registration,
          *     `kind` selects the console renderer (a closed set; an unknown kind is
          *     skipped by the console), and the payload field the kind reads (`tasks`)
          *     carries the kernel-resolved rows. A widget with an empty payload is

@@ -25,8 +25,8 @@ import ava
 import ava.agents
 from agent.graph.system_prompt import build_system_prompt
 from agent.state import clear_plugin_registrations
-from shared.agent_snapshot import select_one
-from shared.plugin_context import PluginContext
+from shared.agents.observation.snapshot import select_one
+from shared.packages.plugins.context import PluginContext
 
 
 def _seed_agent(db: psycopg.Connection) -> int:

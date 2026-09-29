@@ -614,9 +614,9 @@ def _records_repair_missing(home: Path) -> str | None:
 def _start_inside_hold(
     home: Path, holder: str, at: datetime, phase: str, db_capability: str | None
 ) -> int:
+    from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
     from shared.deploy.lifecycle import start_serving
     from shared.deploy.maintenance import admission
-    from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
     from shared.paths import ava_home
 
     if ava_home().resolve() != home:

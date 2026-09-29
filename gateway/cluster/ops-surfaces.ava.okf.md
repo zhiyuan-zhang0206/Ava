@@ -45,7 +45,7 @@ are mounted. `hours` is the aggregation window, whitelisted to
 | `live_count`, lifetime event estimate | Postgres metadata |
 | windowed tokens, cost, turn duration, warning/error counts | Loki event history |
 | warning/error `*_dismissed` / `*_net` split | active `event_dismissals` rows (Postgres) applied to the same window's Loki class counts |
-| `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`shared/plugin_stats.py`), joined by the console against the `contributions.ui.stats` declarations; NOT windowed — a plugin value is a point in time |
+| `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`shared/packages/plugins/stats.py`), joined by the console against the `contributions.ui.stats` declarations; NOT windowed — a plugin value is a point in time |
 
 The gateway caches the whole response per requested window for
 `display.stats_dashboard_cache_ttl_s` (60s by default). After expiry, a payload

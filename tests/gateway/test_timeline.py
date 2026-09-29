@@ -593,7 +593,7 @@ class TestAvaMsgTypeDispatch:
         )
 
     def test_every_msg_type_has_an_explicit_branch(self) -> None:
-        from shared.message_kwargs import AvaMsgType
+        from shared.agents.messages.kwargs import AvaMsgType
 
         expected_kind = {
             AvaMsgType.INBOUND: "inbound_chat",
@@ -636,7 +636,7 @@ class TestAvaMsgTypeDispatch:
         """Task #3323: the ava_compact_id durable anchor rides into the
         timeline item — the frontend matches the live ticking block to this
         summary by it. Pre-anchor summaries render with None."""
-        from shared.message_kwargs import AvaMsgType
+        from shared.agents.messages.kwargs import AvaMsgType
 
         anchored = self._render(
             self._tagged(AvaMsgType.COMPACT_REQUEST.value, ava_compact_id="run-1")

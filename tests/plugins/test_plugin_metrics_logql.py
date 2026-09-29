@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 from shared.telemetry.metrics.core import catalog
 from shared.telemetry.metrics.plugin_metrics import (
     MetricSpec,

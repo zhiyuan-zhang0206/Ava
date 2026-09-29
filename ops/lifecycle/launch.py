@@ -9,10 +9,10 @@ from psycopg_pool import ConnectionPool
 from ops.agents import latest_checkpoint_id
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from shared.agents import ForkSourceEmpty
+from shared.agents.labels import spawn_prompt_with_label
 from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import insert_inbound_message, publish_inbound_wake
-from shared.labels import spawn_prompt_with_label
 
 
 async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> SpawnedAgent:

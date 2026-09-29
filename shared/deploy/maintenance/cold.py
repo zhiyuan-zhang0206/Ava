@@ -14,8 +14,8 @@ import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-from shared import exec_request_evidence
 from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from shared.agents.incarnation import exec_request_evidence
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.paths import ava_home
 from shared.sessions import backend
@@ -41,7 +41,7 @@ def require_no_consumers(conn: psycopg.Connection[Any], agent_id: int) -> None:
 
     Exec request envelopes are judged by incarnation attribution and process
     proof, and unreadable bytes additionally by the protocol bound
-    (shared/exec_request_evidence.py). The caller established the retired host
+    (shared/agents/incarnation/exec_request_evidence.py). The caller established the retired host
     is absent, so provably disposable evidence is quarantined — preserved with
     a receipt, never deleted — while evidence that is still live or not
     provably disposable refuses with its file, attribution and disposition

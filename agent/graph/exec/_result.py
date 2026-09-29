@@ -26,14 +26,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from shared.agents.messages.inbound import InterruptReason
-from shared.lifecycle import (
+from shared.agents.lifecycle import (
     AgentImpersonation,
     AgentRestart,
     AgentTermination,
     LifecycleExit,
     SystemHalt,
 )
+from shared.agents.messages.inbound import InterruptReason
 
 from ._stream import StreamCap
 

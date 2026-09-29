@@ -171,7 +171,7 @@ class StatsTokens(BaseModel):
     cache_hit_pct: float = Field(ge=0, le=100)
 
 
-# The plugin-stats status vocabulary, mirrored from `shared.plugin_stats`
+# The plugin-stats status vocabulary, mirrored from `shared.packages.plugins.stats`
 # (the DB-side writer + check constraint). There is deliberately no "empty":
 # a card with no row IS the frontend's empty state, and a second spelling of
 # that would be a second fact to keep in sync.

@@ -21,9 +21,10 @@ from psycopg_pool import ConnectionPool
 from gateway.cluster.schemas import PluginStat, PluginStatStatus, StatsDashboard
 from gateway.lgtm.loki_query_budget import LokiQueryBudgetError
 from gateway.schemas.stats import StatsWindowHours
-from shared import plugin_stats, telemetry
+from shared import telemetry
 from shared.config import settings
 from shared.events.contract import StatsDashboardStaleReason
+from shared.packages.plugins import stats
 from shared.telemetry.loki_index_labels import ledger_gap_plan, retention_floor
 
 _cache: dict[int, tuple[float, StatsDashboard]] = {}
@@ -73,7 +74,7 @@ def plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
             updated_at=row.updated_at,
             updated_by=row.updated_by,
         )
-        for row in plugin_stats.read_all(pool)
+        for row in stats.read_all(pool)
     ]
 
 

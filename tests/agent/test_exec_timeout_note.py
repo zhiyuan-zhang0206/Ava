@@ -13,8 +13,8 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.context_notes import exec_timeout_note
+from shared.agents.messages.kwargs import NoteTag
 from shared.config import settings
-from shared.message_kwargs import NoteTag
 from shared.native_process.turn_identity import bind_turn_identity
 
 

@@ -35,10 +35,10 @@ from agent.graph._memory_filter import Candidate, filter_candidates
 from agent.messages import NoteTag, system_note_message
 from ava import gateway_client
 from shared.agents import GatewayUnavailable, IndexerUnavailable
+from shared.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from shared.config.turn_view import turn_settings
 from shared.lm.content import content_blocks
 from shared.log import logger
-from shared.message_kwargs import AvaMsgType, read_ava_kwargs
 from shared.paths import memory_dir
 
 # How many recent conversation messages form the search query. How many notes are

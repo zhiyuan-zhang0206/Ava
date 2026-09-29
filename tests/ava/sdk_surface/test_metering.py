@@ -20,14 +20,14 @@ import pytest
 
 import ava
 from ava.sdk_surface import metering
-from shared import sdk_telemetry
+from shared.agents.sdk import telemetry as sdk_usage_telemetry
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], float | None]]:
     """Capture (fn, detail, duration) for each emitted sdk_call event."""
     calls: list[tuple[str, dict[str, object], float | None]] = []
     monkeypatch.setattr(
-        sdk_telemetry,
+        sdk_usage_telemetry,
         "emit",
         lambda fn, detail=None, duration=None: calls.append((fn, dict(detail or {}), duration)),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -174,7 +174,7 @@ def test_plugin_wrapped_signature_survives_and_counts_once(
     assert rec.__name__ == "spawn"
     assert rec.__module__ == "ava.agents"
     assert "label" in inspect.signature(rec).parameters
-    with sdk_telemetry.recording():
+    with sdk_usage_telemetry.recording():
         assert rec(1, 2, label="x") == (1, 2)
     assert len(calls) == 1
     assert calls[0][:2] == ("agents.spawn", {})
@@ -186,7 +186,7 @@ def test_recorder_feeds_the_recording_tally(monkeypatch: pytest.MonkeyPatch) -> 
     independent of the emit sampler."""
     _spy_emit(monkeypatch)
     rec = metering._make_recorder(lambda: "ok", "ns.fn")
-    with sdk_telemetry.recording() as tally:
+    with sdk_usage_telemetry.recording() as tally:
         assert rec() == "ok"
         assert rec() == "ok"
     assert tally == {"ns.fn": 2}
@@ -218,7 +218,7 @@ def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPat
         return {"server": server, "tool": tool}
 
     rec = metering._make_mcp_recorder(_fake_call)
-    with sdk_telemetry.recording():
+    with sdk_usage_telemetry.recording():
         assert rec("chrome", "navigate", url="x") == {"server": "chrome", "tool": "navigate"}
     assert len(calls) == 1
     assert calls[0][:2] == ("mcps.chrome.navigate", {})
@@ -389,7 +389,7 @@ async def test_async_calls_measure_execution_and_isolate_concurrent_frames(
     calls = _spy_emit(monkeypatch)
 
     async def body(label: str) -> str:
-        sdk_telemetry.annotate(label=label)
+        sdk_usage_telemetry.annotate(label=label)
         await asyncio.sleep(0)
         return label
 
@@ -412,7 +412,8 @@ def test_plain_python_import_installs_sdk_events(tmp_path: Path) -> None:
     code = """
 import json, sys
 import ava
-from shared import telemetry, sdk_call_policy
+from shared import telemetry
+from shared.agents.sdk import call_policy as sdk_call_policy
 sdk_call_policy.policy = sdk_call_policy.SamplingPolicy
 rows = []
 telemetry.emit = lambda *args, **kwargs: rows.append(kwargs)
@@ -440,7 +441,8 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     from typing import Any
 
     from ava import agent_identity
-    from shared import sdk_call_policy, telemetry
+    from shared import telemetry
+    from shared.agents.sdk import call_policy
 
     rows: list[dict[str, Any]] = []
 
@@ -454,7 +456,7 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     monkeypatch.setattr(agent_identity, "_external_agent_id", 99)
     monkeypatch.setattr(agent_identity, "_agent_id", 42)
     monkeypatch.setattr(telemetry, "emit", capture)
-    monkeypatch.setattr(sdk_call_policy, "policy", sdk_call_policy.SamplingPolicy)
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     wrapped = metering._make_recorder(lambda: "ok", "files.read")
     assert wrapped() == "ok"
     assert rows[0]["agent_id"] == 99
@@ -470,16 +472,16 @@ async def test_plugin_wrap_preserves_awaited_single_event(
     from collections.abc import Awaitable, Callable
 
     from ava.sdk_surface import wraps
-    from shared.plugin_context import PluginContext
+    from shared.packages.plugins.context import PluginContext
 
     calls = _spy_emit(monkeypatch)
     clock = [0.0]
-    monkeypatch.setattr(sdk_telemetry.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(sdk_usage_telemetry.time, "monotonic", lambda: clock[0])
 
     async def body() -> str:
         await asyncio.sleep(0)
         clock[0] += 2.0
-        sdk_telemetry.annotate(body=True)
+        sdk_usage_telemetry.annotate(body=True)
         return "ok"
 
     def passthrough(inner: Callable[[], Awaitable[str]]) -> Awaitable[str]:

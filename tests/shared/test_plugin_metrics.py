@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 from shared.telemetry.metrics.plugin_metrics import (
     DuplicateMetric,
     InvalidMetricQuery,
@@ -221,7 +221,7 @@ def test_render_targets_renders_query_and_targets() -> None:
 
 
 def test_register_validates_all_targets() -> None:
-    from shared.plugin_context import PluginContext
+    from shared.packages.plugins.context import PluginContext
 
     with pytest.raises(InvalidMetricQuery, match="not on the whitelist"), PluginContext("t"):
         register_metric(

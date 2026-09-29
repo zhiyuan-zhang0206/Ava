@@ -15,7 +15,7 @@
 >
 > **S2 is mostly built.** The `extensions` / `extension_blobs` tables and their
 > constraints (the blob size cap, the repo-rows-carry-no-content iff),
-> `shared/extension_registry.py`, and `shared/extension_materialize.py` all
+> `shared/packages/extensions/registry.py`, and `shared/packages/extensions/materialize.py` all
 > exist and are tested. `ava skill install` writes the cluster row + blob BEFORE
 > touching local disk, and converge lands enabled `kind='skill'` rows onto each
 > machine, refusing to overwrite a locally edited tree.
@@ -40,7 +40,7 @@
 > that has been up since before it.
 >
 > The adoption sweep runs on every converge
-> (`shared/extension_adopt.py:adopt_local_installs`): user-origin skills this
+> (`shared/packages/extensions/adopt.py:adopt_local_installs`): user-origin skills this
 > machine installed before the registry existed become cluster rows, identical
 > content on two machines merges in silence, and differing content is refused
 > with both machines named.
@@ -244,7 +244,7 @@ What this deliberately does *not* import from dsh: isolate realms / scoped
 registration machinery. dsh needs them because many sessions share one process
 *with no composition filter*; Ava's answer is the resolved-set filter at the
 executor boundary, which is a dict lookup over attribution the `register_*`
-calls already carry (`shared/plugin_context.py`), not a runtime realm.
+calls already carry (`shared/packages/plugins/context.py`), not a runtime realm.
 
 ## Converge, enroll, boot — who materializes what, and offline semantics
 

@@ -28,7 +28,7 @@ from ava_builtins.plugins.ava_sdk_reminder._state import (
     hint_for,
     mentions_watcher,
 )
-from shared.context import AvaContext
+from shared.agents.context import AvaContext
 
 
 def _pin_compact_budget(
@@ -57,8 +57,8 @@ def _loaded() -> Iterator[Any]:
     Teardown clears registrations + unloads the module so the hooks do not
     leak into other tests.
     """
+    from shared.packages.plugins.context import PluginContext
     from shared.plugin_config_registry import bind_from_disk
-    from shared.plugin_context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):
@@ -209,7 +209,7 @@ def _load_ava_code_plugin() -> Iterator[None]:
     included) so nothing leaks into the next test."""
     from importlib import import_module
 
-    from shared.plugin_context import PluginContext
+    from shared.packages.plugins.context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):

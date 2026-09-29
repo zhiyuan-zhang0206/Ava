@@ -16,9 +16,9 @@ import redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import NoPermissionError
 
-from shared import redis_client
 from shared.config import settings
-from shared.redis_client import publish_best_effort, publish_best_effort_sync
+from shared.events.live import redis_client
+from shared.events.live.redis_client import publish_best_effort, publish_best_effort_sync
 
 
 @pytest.fixture(autouse=True)

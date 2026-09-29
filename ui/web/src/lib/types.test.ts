@@ -7,7 +7,7 @@
 // The impersonated-status cases below lock the rule that only an `active`
 // lease means the agent is actually taken over — a `requested`/`accepted`
 // lease still runs the native agent until activation reaches its next safe
-// boundary (see shared/agent_roster.py's open_impersonation LATERAL join).
+// boundary (see shared/agents/observation/roster.py's open_impersonation LATERAL join).
 
 import { expect, it } from "vitest";
 

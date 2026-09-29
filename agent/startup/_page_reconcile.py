@@ -93,7 +93,7 @@ async def _close_dead_show_pages(
         return
 
     if event_publisher is not None:
-        from shared.live_events import PageClosed
+        from shared.events.live.projection import PageClosed
 
         for name in names:
             event_publisher.emit(PageClosed(agent_id=agent_id, name=name).model_dump_json())

@@ -33,8 +33,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from shared.caller_identity import PREFIXES as _CALLER_PREFIXES
-from shared.caller_identity import CallerIdentity
+from shared.agents.messages.caller_identity import PREFIXES as _CALLER_PREFIXES
+from shared.agents.messages.caller_identity import CallerIdentity
 from shared.config import format_timestamp, now_timestamp, settings
 
 _AGENT_PREFIX = "agent:"

@@ -51,9 +51,8 @@ from langchain_core.messages.tool import ToolCallChunk
 from langchain_core.utils.json import parse_partial_json
 
 from agent.turn.progress import mark_turn_progress
-from shared.event_coalescer import DeltaCoalescer
-from shared.event_publisher import AgentEventPublisher
-from shared.live_events import (
+from shared.events.live.coalescer import DeltaCoalescer
+from shared.events.live.projection import (
     ChatDelta,
     ChatStart,
     CodeDelta,
@@ -62,6 +61,7 @@ from shared.live_events import (
     ReasoningDelta,
     ReasoningStart,
 )
+from shared.events.live.publisher import AgentEventPublisher
 from shared.lm.reasoning import to_canonical_reasoning
 
 

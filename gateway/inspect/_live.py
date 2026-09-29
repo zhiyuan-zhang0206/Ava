@@ -10,9 +10,9 @@ from psycopg_pool import ConnectionPool
 
 from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
-from shared.agent_observation import AgentObservation, observation
-from shared.agent_snapshot import OpenNotice
 from shared.agents import AgentStatus
+from shared.agents.observation.evidence import AgentObservation, observation
+from shared.agents.observation.snapshot import OpenNotice
 from shared.config import settings
 from shared.db import NOTICE_FYI_TTL_DAYS
 

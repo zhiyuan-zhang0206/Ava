@@ -41,7 +41,7 @@ from gateway.schemas.memory import (
 )
 from shared.agents import IndexerUnavailable
 from shared.config import settings
-from shared.docs.notes import Note, extract_md_links, parse_note, walk_notes
+from shared.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
 from shared.paths import gateway_memory_dir
 
 router = APIRouter()

@@ -50,7 +50,7 @@ keep a stack composable and are checked in review:
 
 Rule 3's cases are also the ones worth measuring, so a plugin layer that calls
 `inner` anything other than exactly once emits one `plugin_activation` event
-(`shared/plugin_activation.py`) — the runtime half of the attribution ledger,
+(`shared/packages/plugins/activation.py`) — the runtime half of the attribution ledger,
 and philosophy §6's obsolescence gauge for wrap-shaped shims. A layer that
 passes straight through records nothing: it always runs once installed, so
 counting it would measure the installation rather than the shim.
@@ -120,7 +120,7 @@ def _current_plugin_name() -> str:
     """The plugin importing right now, or `UNATTRIBUTED`. Lazy import keeps this
     leaf module free of an `ava -> shared` load-order dependency."""
     try:
-        from shared.plugin_context import current_plugin_name
+        from shared.packages.plugins.context import current_plugin_name
     except ImportError:
         return UNATTRIBUTED
     return current_plugin_name() or UNATTRIBUTED
@@ -131,10 +131,10 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
     import for the same reason `_current_plugin_name` is lazy; the emit path
     itself swallows its own failures."""
     try:
-        from shared import plugin_activation
+        from shared.packages.plugins import activation
     except ImportError:
         return
-    plugin_activation.record(plugin, "sdkWraps", target, detail=f"inner_calls={inner_calls}")
+    activation.record(plugin, "sdkWraps", target, detail=f"inner_calls={inner_calls}")
 
 
 def _record_contribution(target: str, wrapper: Callable[..., Any]) -> None:
@@ -143,10 +143,10 @@ def _record_contribution(target: str, wrapper: Callable[..., Any]) -> None:
     no-op outside a plugin import (a test's direct wrap keeps showing up in
     `stack(target)`, which is the whole-machine view)."""
     try:
-        from shared import plugin_contributions
+        from shared.packages.plugins import contributions
     except ImportError:
         return
-    plugin_contributions.record(
+    contributions.record(
         "sdkWraps",
         target,
         detail=f"{getattr(wrapper, '__module__', '?')}.{getattr(wrapper, '__qualname__', wrapper)}",

@@ -18,10 +18,10 @@ from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
 from cli.parsers import build_parser
 from ops import agent_pause
+from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.deploy.lifecycle import start_serving
 from shared.deploy.maintenance import admission, pause_owner
 from shared.deploy.maintenance.state import MaintenanceHold
-from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.sessions.backend import PtySessionBackend
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate

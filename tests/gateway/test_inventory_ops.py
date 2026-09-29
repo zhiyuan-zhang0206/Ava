@@ -22,7 +22,7 @@ import ava.mcp_config as mcp_cfg_mod
 from ops import inventory as ops
 from ops.inventory import inventory_read_op, inventory_write_op
 from ops.rpc_schemas import FieldWriteResult
-from shared import mcp_enabled, plugins_config
+from shared.packages.plugins import enable_config, mcp_enabled
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -113,7 +113,7 @@ def test_inventory_write_op_plugin_happy_path(
     assert result.applied is True
     assert result.plugin_results["ava_code"] == FieldWriteResult(ok=True, reason=None)
     # The per-machine plugins_config.json now records ava_code as disabled.
-    cfg = plugins_config.load(set(plugins_config.discover_plugins()))
+    cfg = enable_config.load(set(enable_config.discover_plugins()))
     assert cfg.plugins["ava_code"].enabled is False
 
 
@@ -129,7 +129,7 @@ def test_inventory_write_op_atomic_rejects_unknown_plugin(
     assert result.plugin_results["does-not-exist"].ok is False
     assert "not installed" in (result.plugin_results["does-not-exist"].reason or "")
     # Atomicity: nothing was written, so the local file does not exist yet.
-    assert not plugins_config.local_config_path().exists()
+    assert not enable_config.local_config_path().exists()
 
 
 def test_inventory_write_op_rejects_unknown_mcp_server(
@@ -175,7 +175,7 @@ def test_inventory_write_op_empty_payload_trivially_applied(
     assert result.applied is True
     assert result.plugin_results == {}
     assert result.mcp_results == {}
-    assert not plugins_config.local_config_path().exists()
+    assert not enable_config.local_config_path().exists()
     assert mcp_enabled.read_enabled() == {}
 
 
@@ -187,7 +187,7 @@ def test_inventory_write_op_applies_both_plugin_and_mcp(
     _write_machine_mcp(_machine_only_mcp, {"fs": {"command": "x"}})
     result = inventory_write_op(plugins={"ava_code": False}, mcp_servers={"fs": False})
     assert result.applied is True
-    cfg = plugins_config.load(set(plugins_config.discover_plugins()))
+    cfg = enable_config.load(set(enable_config.discover_plugins()))
     assert cfg.plugins["ava_code"].enabled is False
     assert mcp_enabled.read_enabled() == {"fs": False}
 

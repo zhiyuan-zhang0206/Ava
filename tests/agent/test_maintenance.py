@@ -24,9 +24,9 @@ from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
+from shared.agents.context import AvaContext
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.cluster.machine import machine_name
-from shared.context import AvaContext
 from shared.db import create_agent, insert_inbound_message
 from shared.deploy.maintenance import admission, cohort, pause_owner
 

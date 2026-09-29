@@ -17,9 +17,9 @@ from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import BaseAgentState
 from services.agent_host import host as host_module
+from shared.agents.context import AvaContext
 from shared.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from shared.config import settings
-from shared.context import AvaContext
 from tests.agent.test_inbound_ownership import _agent
 
 

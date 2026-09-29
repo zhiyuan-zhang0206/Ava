@@ -50,7 +50,7 @@ _MARKED_ROWS = (
 )
 
 # The settle releases the row's runtime identity, so the closed command is also
-# a lifecycle release (`shared.lifecycle_acceptance.LIFECYCLE_RELEASE`).
+# a lifecycle release (`shared.agents.incarnation.lifecycle_acceptance.LIFECYCLE_RELEASE`).
 _CLOSE_COMMANDS = (
     "UPDATE inbound_messages SET status = 'done', "
     "payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object("

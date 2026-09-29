@@ -75,7 +75,7 @@ def _database() -> None:
 
 
 def _redis() -> None:
-    from shared.redis_client import sync_redis
+    from shared.events.live.redis_client import sync_redis
 
     sync_redis().ping()  # pyright: ignore[reportUnknownMemberType] — redis-py types **kwargs as Unknown
 

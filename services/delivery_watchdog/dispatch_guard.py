@@ -48,7 +48,7 @@ def select_pending_for_dispatch(
     automatic-wake suppression window, and owners halted by the recovery
     circuit breaker (`RECOVERY_BREAKER_CLEAR`) are never selected.
     """
-    from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
+    from shared.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

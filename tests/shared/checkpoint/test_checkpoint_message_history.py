@@ -16,7 +16,7 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.types import Overwrite
 
-from shared import checkpoint_postgres_walks as history
+from shared.agents.history import checkpoint_postgres_walks as history
 from shared.agents.history.delta_read_compat import (
     _fold_history,
     wrap_saver_reads_with_delta_reconstruction,

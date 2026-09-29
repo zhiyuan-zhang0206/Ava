@@ -25,7 +25,7 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 
 from agent.graph._callbacks import RedisStreamHandler
-from shared.live_events import (
+from shared.events.live.projection import (
     EVENT_ADAPTER,
     ChatDelta,
     ChatStart,
@@ -195,7 +195,7 @@ def _scripted_monotonic(monkeypatch: pytest.MonkeyPatch, ticks: list[float]) -> 
     time module's attribute: the delta coalescer's call_later makes asyncio's
     loop.time() (asyncio.base_events uses the same time module singleton) call
     time.monotonic — patching the attribute would hijack the event loop's
-    clock and skew the scripted ticks. See test_event_coalescer.py."""
+    clock and skew the scripted ticks. See test_coalescer.py."""
     import types
 
     import agent.graph._callbacks as cb

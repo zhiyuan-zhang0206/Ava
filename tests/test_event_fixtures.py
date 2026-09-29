@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.live_events import EVENT_ADAPTER, SYSTEM_ROLES
+from shared.events.live.projection import EVENT_ADAPTER, SYSTEM_ROLES
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "events"
 
@@ -57,7 +57,7 @@ def test_fixture_validates_via_event_adapter(fixture_path: Path) -> None:
 def test_all_system_roles_have_fixtures() -> None:
     """Fixtures completely cover SYSTEM_ROLES — if a new role is added but fixture forgotten, this test fails.
 
-    SYSTEM_ROLES is the set that the frontend SSE channels actually forward from `shared.live_events`,
+    SYSTEM_ROLES is the set that the frontend SSE channels actually forward from `shared.events.live.projection`,
     fixtures must mirror 1:1."""
     fixture_roles = {p.stem for p in _all_fixture_paths()}
     missing = SYSTEM_ROLES - fixture_roles

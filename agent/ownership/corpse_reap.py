@@ -35,11 +35,11 @@ from uuid import UUID
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
+from shared.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from shared.config import settings
 from shared.db_transaction import async_write_transaction
 from shared.deploy.progress_timeout import CORPSE_REAP_GRACE_S
-from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
-from shared.live_announce import publish_agent_updated
+from shared.events.live.announce import publish_agent_updated
 from shared.log import logger
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry.audit_events import insert_event_log_async

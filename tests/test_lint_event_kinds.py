@@ -77,7 +77,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "lgtm_dashboard_render_failed",  # cli/commands/observability/_lgtm_provisioning.py:_render_ava_ops_dashboard telemetry.emit("telemetry", ...)
         "event_log_drop",  # shared/telemetry/loss.py:loss_event constructs Event directly
         "sdk_call",  # ava/sdk_surface/metering.py recorder (via shared/sdk_telemetry)
-        # shared/plugin_activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
+        # shared/packages/plugins/activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
         # module constant, like sdk_call), so the literal scan cannot see it.
         "plugin_activation",
         "gateway_latency",  # gateway/middleware/latency.py:emit_bucket telemetry.emit("telemetry", ...)
@@ -91,7 +91,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "pitr_remote_inventory",  # services/pitr/retention/scheduler.py:refresh (positional emit)
         "backup_operation_custody",  # services/pitr/operation/custody.py:report (positional emit)
         "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore + services/pitr/base_scheduler_daemon.py:run (positional emit)
-        "plugin_load_failed",  # shared/plugin_load_report.py:report_plugin_load_failure telemetry.emit("telemetry", ...)
+        "plugin_load_failed",  # shared/packages/plugins/load_report.py:report_plugin_load_failure telemetry.emit("telemetry", ...)
         "converge_file_preserved",  # shared/host/converge/preserve_report.py:report_converge_preserve telemetry.emit("telemetry", ...)
         "loki_query_budget",  # gateway/lgtm/loki_query_budget.py:_emit_observation
         "telemetry_read_stale",  # gateway/lgtm/telemetry_staleness.py:_emit

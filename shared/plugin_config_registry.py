@@ -49,8 +49,9 @@ from typing import Any, Literal, cast, overload
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
-from shared import paths, plugin_contributions
-from shared.plugin_context import current_plugin_name
+from shared import paths
+from shared.packages.plugins import contributions
+from shared.packages.plugins.context import current_plugin_name
 
 
 class PluginConfigError(Exception):
@@ -136,7 +137,7 @@ def register_plugin_config(cls: type[BaseModel]) -> None:
         )
 
     _PLUGIN_CONFIG_CLASSES[plugin] = cls
-    plugin_contributions.record(
+    contributions.record(
         "config", cls.__name__, detail=f"fields: {', '.join(cls.model_fields) or '<none>'}"
     )
 
@@ -302,14 +303,14 @@ def get_plugin_config(plugin: str, cls: type[BaseModel] | None = None) -> BaseMo
     CompactConfig).auto_compact_tokens`). Runtime does not validate cls matches
     actual instance — caller's responsibility.
 
-    Agent-scoped: the read goes through `shared/plugin_config_view.py`, which
+    Agent-scoped: the read goes through `shared/packages/plugins/config_view.py`, which
     layers the current turn's `config_overlay` over the bound disk image. With
     nothing bound (outside a turn) that is `_PLUGIN_CONFIGS[plugin]` verbatim.
 
     Raises:
         KeyError: plugin has no register_plugin_config or bind hasn't run — typo / wrong ordering.
     """
-    from shared.plugin_config_view import turn_plugin_config
+    from shared.packages.plugins.config_view import turn_plugin_config
 
     _ = cls
     return turn_plugin_config(plugin)
@@ -318,7 +319,7 @@ def get_plugin_config(plugin: str, cls: type[BaseModel] | None = None) -> BaseMo
 def all_plugin_configs() -> dict[str, BaseModel]:
     """All bound plugin config instances, agent-scoped — used to build the
     `ava._settings.plugins` namespace. See `get_plugin_config` on scoping."""
-    from shared.plugin_config_view import turn_plugin_configs
+    from shared.packages.plugins.config_view import turn_plugin_configs
 
     return turn_plugin_configs()
 

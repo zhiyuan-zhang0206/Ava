@@ -60,7 +60,7 @@ from agent.messages import has_conversation
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from ava.security import discard_inbound_findings
-from shared.context import AvaContext, agent_id_from_config
+from shared.agents.context import AvaContext, agent_id_from_config
 
 from ._decide import decide
 from ._dispatch import _BatchState, dispatch_batch

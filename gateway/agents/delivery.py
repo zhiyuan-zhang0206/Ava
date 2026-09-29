@@ -20,15 +20,15 @@ from psycopg_pool import ConnectionPool
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 from shared.agents import AgentStatus
+from shared.agents.messages.caller_protocol import CallerProtocolUnavailableError
 from shared.agents.messages.chat_delivery import (
     ChatInboundReceipt,
     insert_chat_inbound_once,
     reconcile_chat_inbound,
 )
 from shared.agents.messages.inbound_provenance import InboundProvenance
-from shared.caller_protocol import CallerProtocolUnavailableError
 from shared.db import publish_inbound_wake
-from shared.live_announce import publish_agent_updated_sync
+from shared.events.live.announce import publish_agent_updated_sync
 from shared.log import logger
 
 # Strong references for fire-and-forget publishes: asyncio's event loop holds
