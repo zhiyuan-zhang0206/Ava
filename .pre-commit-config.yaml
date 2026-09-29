@@ -585,6 +585,45 @@ repos:
         files: ^(base/db/__init__\.py$|base/agents/.*\.py$|base/events/.*\.py$|base/db/api\.txt$|base/agents/api\.txt$|base/events/api\.txt$|scripts/structure/contracts\.py$)
         pass_filenames: false
 
+      # `git rebase` / `cherry-pick` / `merge` never invoke the pre-commit
+      # hook for the commits they create, so a conflict-resolution commit
+      # can reach `git push` having never been checked by a single
+      # pre-commit-stage hook -- the range pre-commit's own push-time
+      # selection uses is also not "everything new on this branch". This
+      # re-runs the full pre-commit stage over merge-base(origin/main,
+      # HEAD)..HEAD so every hook's normal files: filter still applies, just
+      # against the correct range. Companion to
+      # lint-prepush-artifact-freshness below for the separate delete-only
+      # gap a range fix cannot close. See scripts/prepush-branch-lint.sh.
+      - id: lint-prepush-branch-diff
+        name: "lint prepush branch diff (re-run pre-commit stage over merge-base..HEAD)"
+        entry: bash scripts/prepush-branch-lint.sh
+        stages: [pre-push]
+        verbose: true  # Successful skips must stay visible.
+        language: system
+        always_run: true
+        pass_filenames: false
+
+      # pre-commit's own diff selection passes a files:-filtered hook only
+      # Added/Copied/Modified/Renamed paths -- never a Deleted one -- so a
+      # change that only deletes the last file referencing a public symbol,
+      # event, or config field can leave its generated snapshot stale with
+      # no pre-commit-stage hook ever firing, on any range (this is how PR
+      # #3658 reached CI with a stale base/agents/api.txt after a rebase
+      # deleted the module it described). This always-run duplicate ignores
+      # every files: filter and re-checks the whole repository at every
+      # push; the underlying hooks keep their normal filtered,
+      # pre-commit-stage-only behavior, so `git commit` stays fast. See
+      # scripts/prepush-artifact-freshness.sh.
+      - id: lint-prepush-artifact-freshness
+        name: "lint prepush artifact freshness (unconditional generated-artifact/snapshot check)"
+        entry: bash scripts/prepush-artifact-freshness.sh
+        stages: [pre-push]
+        verbose: true  # Successful skips must stay visible.
+        language: system
+        always_run: true
+        pass_filenames: false
+
   - repo: local
     hooks:
       - id: lint-ava-okf
