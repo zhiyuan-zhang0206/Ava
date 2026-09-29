@@ -21,11 +21,18 @@ tags:
 
 ## Artifact and activation boundary
 
-A loaded helper is never upgraded in place. A differing existing artifact or
-loaded job causes refusal. A reviewed replacement is built into a fresh explicit
-artifact directory with the same stable certificate and designated requirement.
-Activation requires an external exact-home stop/unregister; descendants cannot
-replace their permission ancestor. The optional artifact directory is host-local
-configuration, including for isolated previews; it may not overlap the ordinary
-home or production helper directories. A signing failure never falls back to
-ad-hoc identity.
+A loaded helper is never upgraded in place: a differing loaded job, or a stale
+installed artifact whose home job is still loaded, whose plist is still
+registered, or whose executable a live process still runs (resolved-path match),
+causes refusal (`launchd_job.require_retired_helper`, checked before the signing
+probes and again right before removal). After `ava stop` retired the exact-home
+job, the next start rebuilds the stale `$AVA_HOME/helper` artifact in place with
+the same stable certificate and designated requirement, so TCC grants carry over
+(stderr says so; a regenerated identity warns instead). Keychain, ACL probe,
+signing smoke and compile all finish before the old artifact is removed, so a
+host that cannot sign keeps it. Descendants cannot replace their permission
+ancestor. An artifact in the optional explicit artifact directory is
+immutable: a reviewed replacement goes into a fresh directory. That directory is
+host-local configuration, including for isolated previews; it may not overlap
+the ordinary home or production helper directories. A signing failure never
+falls back to ad-hoc identity.

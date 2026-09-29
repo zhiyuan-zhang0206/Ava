@@ -1,7 +1,8 @@
 """Full-stop of the macOS helper outside the application service roster.
 
 Normal stop and destroy share exact-home helper retirement. Start recreates its
-definition from the same signed artifact. Updates and pause preserve the helper.
+definition, first rebuilding the signed artifact when its sources changed (only
+a retired helper's artifact is replaced). Updates and pause preserve the helper.
 """
 
 from __future__ import annotations
