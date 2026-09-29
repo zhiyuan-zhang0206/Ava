@@ -52,7 +52,7 @@ tags:
   without `--confirm`; it can never touch a completed object).
 - `ava mcp ...`: isolated environments at `$AVA_HOME/mcps/`. `ava mcp serve`
   runs the other direction and exposes the cluster control plane as an MCP
-  server ([[ava/mcps.ava.okf.md|MCP]]).
+  server ([[ava/mcps/mcps.ava.okf.md|MCP]]).
 - `ava plugins ...`
 - `ava skill install/update/upgrade/enable/disable/register/scan/trust`
 - `ava presets ls/get/create/update/delete`

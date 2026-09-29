@@ -7,7 +7,7 @@ import httpx
 import psycopg
 from psycopg.types.json import Jsonb
 
-from ava._gateway_transport import _get
+from ava.gateway_client.transport import get
 from shared.agents.impersonation import lock_lease
 from shared.agents.impersonation.impersonation_events import consume_events
 from shared.agents.impersonation.impersonation_history import event_belongs_to_agent
@@ -67,7 +67,7 @@ def consume_recorded_events(session: dict[str, Any], *, page_budget: int = 4) ->
             break
         window = cursor[0]
         filters = _reader_filters(session, window["kind"])
-        response: httpx.Response = _get(
+        response: httpx.Response = get(
             "/api/events",
             params={
                 **filters,
@@ -249,7 +249,7 @@ def _read_indexed_event_family(
         start, finish = windows.pop()
         offset = 0
         while True:
-            response: httpx.Response = _get(
+            response: httpx.Response = get(
                 "/api/events",
                 params={
                     **filters,

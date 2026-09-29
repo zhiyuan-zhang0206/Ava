@@ -29,7 +29,7 @@ import pytest
 from pydantic import SecretStr
 
 import ava
-from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT
+from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.web import FetchError, SearchError, WebError
 from shared.config import settings
 

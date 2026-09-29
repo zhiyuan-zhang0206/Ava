@@ -1,4 +1,4 @@
-"""Unit tests for ava/sdk_metering.py — the per-call SDK usage recorder.
+"""Unit tests for ava/sdk_surface/metering.py — the per-call SDK usage recorder.
 
 The recorder wraps every public `ava.*` callable to emit one `sdk_call` event per
 top-level invocation (counted by the `sdk_usage` metric). These tests pin the two
@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import pytest
 
 import ava
-from ava import sdk_metering
+from ava.sdk_surface import metering
 from shared import sdk_telemetry
 
 
@@ -45,11 +45,11 @@ def _help(*targets: object) -> str:
 def _installed() -> Iterator[None]:
     """Install the recorders over the real `ava` singleton, then restore — so a
     wrapped function never leaks into the rest of the suite."""
-    sdk_metering.install()
+    metering.install()
     try:
         yield
     finally:
-        sdk_metering.uninstall()
+        metering.uninstall()
 
 
 # ── transparency ──────────────────────────────────────────────────────────────
@@ -62,13 +62,13 @@ def test_help_is_byte_identical_across_install() -> None:
     before_ns = _help(ava.files)
     before_fn = _help(ava.files.read)
 
-    sdk_metering.install()
+    metering.install()
     try:
         assert _help(ava) == before_root
         assert _help(ava.files) == before_ns
         assert _help(ava.files.read) == before_fn
     finally:
-        sdk_metering.uninstall()
+        metering.uninstall()
 
 
 def test_signature_and_identity_metadata_preserved() -> None:
@@ -76,7 +76,7 @@ def test_signature_and_identity_metadata_preserved() -> None:
     # must be unchanged (functools.wraps + __wrapped__ resolution).
     before_sig = inspect.signature(ava.files.read)
     before_doc = ava.files.read.__doc__
-    sdk_metering.install()
+    metering.install()
     try:
         read = ava.files.read
         assert read.__name__ == "read"
@@ -84,7 +84,7 @@ def test_signature_and_identity_metadata_preserved() -> None:
         assert read.__doc__ == before_doc
         assert inspect.signature(read) == before_sig
     finally:
-        sdk_metering.uninstall()
+        metering.uninstall()
 
 
 def test_function_attached_members_survive(_installed: None) -> None:
@@ -95,7 +95,7 @@ def test_function_attached_members_survive(_installed: None) -> None:
 
 def test_install_is_idempotent(_installed: None) -> None:
     once = ava.files.read
-    sdk_metering.install()  # second install must not double-wrap
+    metering.install()  # second install must not double-wrap
     assert ava.files.read is once
 
 
@@ -103,7 +103,7 @@ def test_install_is_idempotent(_installed: None) -> None:
 
 
 def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
-    fqs = {fq for _parent, _attr, fq in sdk_metering._instrument_targets()}
+    fqs = {fq for _parent, _attr, fq in metering._instrument_targets()}
     # plain functions, nested-namespace functions, and top-level functions
     assert {"files.read", "shell.run", "shell.sessions.new", "self.compact", "understand"} <= fqs
     # ava.mcps has no list __all_for_ava__, but its own module helpers are still metered
@@ -142,7 +142,7 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     with pytest.raises(shared.machine.MachineNameMissing):
         _ = ava.self.SELF_MACHINE_NAME
 
-    fqs = {fq for _parent, _attr, fq in sdk_metering._instrument_targets()}
+    fqs = {fq for _parent, _attr, fq in metering._instrument_targets()}
     assert "self.compact" in fqs  # real functions still enumerated
     assert "self.SELF_MACHINE_NAME" not in fqs  # dynamic constant skipped, not evaluated
     assert "self.MACHINE_SPEC" not in fqs
@@ -170,7 +170,7 @@ def test_plugin_wrapped_signature_survives_and_counts_once(
     plugin_wrapped.__module__ = "ava.agents"
     plugin_wrapped.__signature__ = inspect.signature(plugin_wrapped)  # type: ignore[attr-defined]
 
-    rec = sdk_metering._make_recorder(plugin_wrapped, "agents.spawn")
+    rec = metering._make_recorder(plugin_wrapped, "agents.spawn")
     assert rec.__name__ == "spawn"
     assert rec.__module__ == "ava.agents"
     assert "label" in inspect.signature(rec).parameters
@@ -185,7 +185,7 @@ def test_recorder_feeds_the_recording_tally(monkeypatch: pytest.MonkeyPatch) -> 
     """The wrapped surface bumps the recording's full tally (two calls count two),
     independent of the emit sampler."""
     _spy_emit(monkeypatch)
-    rec = sdk_metering._make_recorder(lambda: "ok", "ns.fn")
+    rec = metering._make_recorder(lambda: "ok", "ns.fn")
     with sdk_telemetry.recording() as tally:
         assert rec() == "ok"
         assert rec() == "ok"
@@ -197,8 +197,8 @@ def test_recorder_recognized_by_identity_not_copied_dict() -> None:
     wrapper, so a plugin wrapper built over a recorder inherits the recorder's dict.
     install() must key off object identity (the _RECORDERS set), not an attribute, or
     it would skip re-wrapping such a wrapper and leave the recorder buried inside."""
-    rec = sdk_metering._make_recorder(lambda: None, "ns.fn")
-    assert rec in sdk_metering._RECORDERS
+    rec = metering._make_recorder(lambda: None, "ns.fn")
+    assert rec in metering._RECORDERS
 
     def plugin_wrapper() -> None:
         return rec()
@@ -206,7 +206,7 @@ def test_recorder_recognized_by_identity_not_copied_dict() -> None:
     # replicate _install_metadata's `chained.__dict__.setdefault(k, v)` copy.
     for k, v in rec.__dict__.items():
         plugin_wrapper.__dict__.setdefault(k, v)
-    assert plugin_wrapper not in sdk_metering._RECORDERS
+    assert plugin_wrapper not in metering._RECORDERS
 
 
 def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -217,7 +217,7 @@ def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPat
     def _fake_call(server: str, tool: str, **_kw: object) -> dict[str, str]:
         return {"server": server, "tool": tool}
 
-    rec = sdk_metering._make_mcp_recorder(_fake_call)
+    rec = metering._make_mcp_recorder(_fake_call)
     with sdk_telemetry.recording():
         assert rec("chrome", "navigate", url="x") == {"server": "chrome", "tool": "navigate"}
     assert len(calls) == 1
@@ -239,14 +239,14 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
     # loaded plugins leaves the funnel already wrapped — install() then correctly
     # no-ops and the wrap assertion below reads as a failure. Which tests share a
     # worker is not deterministic under `-n`, so take a clean baseline first.
-    sdk_metering.uninstall()
+    metering.uninstall()
     before = ava.mcps._call_raw
-    sdk_metering.install()
+    metering.install()
     try:
         assert ava.mcps._call_raw is not before
-        assert ava.mcps._call_raw in sdk_metering._RECORDERS
+        assert ava.mcps._call_raw in metering._RECORDERS
     finally:
-        sdk_metering.uninstall()
+        metering.uninstall()
     assert ava.mcps._call_raw is before
 
 
@@ -255,7 +255,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     side effect and nothing used to put it back, so one plugin-loading test silently
     rewrote the callables every later test in that xdist worker saw.
 
-    The autouse `_restore_sdk_metering` in `tests/conftest.py` is what closes that.
+    The autouse `_restore_metering` in `tests/conftest.py` is what closes that.
     It runs after this test body, where a self-test cannot observe it, so the two
     halves are pinned separately: the fixture is wired onto every test, and its one
     action reverses a *real* `load_extensions()` — not just the hand-built
@@ -263,25 +263,23 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     """
     import ava.mcps
     from agent.graph import _build
-    from ava.sdk_metering import _RECORDERS
+    from ava.sdk_surface.metering import _RECORDERS
 
-    assert "_restore_sdk_metering" in request.fixturenames
+    assert "_restore_metering" in request.fixturenames
 
-    sdk_metering.uninstall()
+    metering.uninstall()
     bare_funnel = ava.mcps._call_raw
 
     _build.load_extensions()
-    metered = {fq for p, a, fq in sdk_metering._instrument_targets() if getattr(p, a) in _RECORDERS}
+    metered = {fq for p, a, fq in metering._instrument_targets() if getattr(p, a) in _RECORDERS}
     assert metered, "the leak this guards is gone"
     assert ava.mcps._call_raw in _RECORDERS
 
-    sdk_metering.uninstall()  # the fixture's action, made observable
+    metering.uninstall()  # the fixture's action, made observable
     assert ava.mcps._call_raw is bare_funnel
     # The whole surface, not just the funnel: a later test asserting on identity or
     # on call counts through a wrapped path must see no recorder anywhere.
-    assert not [
-        fq for p, a, fq in sdk_metering._instrument_targets() if getattr(p, a) in _RECORDERS
-    ]
+    assert not [fq for p, a, fq in metering._instrument_targets() if getattr(p, a) in _RECORDERS]
 
 
 def test_a_plugin_load_leaves_no_section_behind_its_namespace(
@@ -327,7 +325,7 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
     namespace walk — the walk re-resolves dynamic member surfaces (the `ava.skills`
     index scans the skills tree and reads the install registry), which state a
     passing test arranged can poison after the test itself went green."""
-    sdk_metering.uninstall()  # clean baseline, as in the sibling tests above
+    metering.uninstall()  # clean baseline, as in the sibling tests above
     target = SimpleNamespace()
 
     def demo() -> str:
@@ -338,17 +336,17 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
     def _stub_targets() -> list[tuple[object, str, str]]:
         return [(target, "demo", "demo")]
 
-    monkeypatch.setattr(sdk_metering, "_instrument_targets", _stub_targets)
-    sdk_metering.install()
+    monkeypatch.setattr(metering, "_instrument_targets", _stub_targets)
+    metering.install()
     wrapped = target.demo
     assert wrapped is not demo
-    assert wrapped in sdk_metering._RECORDERS
+    assert wrapped in metering._RECORDERS
 
     def _no_walk() -> list[tuple[object, str, str]]:
         pytest.fail("uninstall() must not re-walk the namespace (task #3426)")
 
-    monkeypatch.setattr(sdk_metering, "_instrument_targets", _no_walk)
-    sdk_metering.uninstall()
+    monkeypatch.setattr(metering, "_instrument_targets", _no_walk)
+    metering.uninstall()
     assert target.demo is demo
 
 
@@ -357,29 +355,29 @@ def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.Monkey
     surface (simulating the broken-registry state a test deliberately leaves
     behind); uninstall() must complete without touching the surface and restore
     every recorded pair."""
-    sdk_metering.uninstall()
-    before = set(sdk_metering._RECORDERS)
-    sdk_metering.install()
-    assert sdk_metering._RECORDERS
-    recorded = list(sdk_metering._WRAPPED)
+    metering.uninstall()
+    before = set(metering._RECORDERS)
+    metering.install()
+    assert metering._RECORDERS
+    recorded = list(metering._WRAPPED)
 
     def _poisoned(_self: object) -> list[str]:
         raise RuntimeError("simulated corrupt install registry")
 
     monkeypatch.setattr(type(ava.skills), "__all_for_ava__", property(_poisoned))  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(RuntimeError):
-        sdk_metering._instrument_targets()  # the old teardown path explodes here
+        metering._instrument_targets()  # the old teardown path explodes here
 
-    sdk_metering.uninstall()
+    metering.uninstall()
     # Completeness on the precise unit of the guarantee: no recorded pair still
     # holds a recorder. (The set itself may retain recorders that
     # `ava.sdk_surface.wraps._ORIGINALS` captured before this test armed metering — that
     # retention predates task #3426 and is not this fix's business.)
     for parent, attr in recorded:
-        assert getattr(parent, attr, None) not in sdk_metering._RECORDERS
-    assert ava.files.read not in sdk_metering._RECORDERS
-    assert ava.mcps._call_raw not in sdk_metering._RECORDERS
-    assert set(sdk_metering._RECORDERS) <= before
+        assert getattr(parent, attr, None) not in metering._RECORDERS
+    assert ava.files.read not in metering._RECORDERS
+    assert ava.mcps._call_raw not in metering._RECORDERS
+    assert set(metering._RECORDERS) <= before
 
 
 @pytest.mark.asyncio
@@ -395,7 +393,7 @@ async def test_async_calls_measure_execution_and_isolate_concurrent_frames(
         await asyncio.sleep(0)
         return label
 
-    wrapped = sdk_metering._make_recorder(body, "plugin.async_call")
+    wrapped = metering._make_recorder(body, "plugin.async_call")
     assert inspect.iscoroutinefunction(wrapped)
     a, b = wrapped("a"), wrapped("b")
     assert calls == []
@@ -457,7 +455,7 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     monkeypatch.setattr(agent_identity, "_agent_id", 42)
     monkeypatch.setattr(telemetry, "emit", capture)
     monkeypatch.setattr(sdk_call_policy, "policy", sdk_call_policy.SamplingPolicy)
-    wrapped = sdk_metering._make_recorder(lambda: "ok", "files.read")
+    wrapped = metering._make_recorder(lambda: "ok", "files.read")
     assert wrapped() == "ok"
     assert rows[0]["agent_id"] == 99
     assert rows[0]["source"] == "agent:99"
@@ -492,10 +490,10 @@ async def test_plugin_wrap_preserves_awaited_single_event(
 
     ava.register_namespace_member("self", "review_async_test", body)
     try:
-        sdk_metering.install()
+        metering.install()
         with PluginContext("async-test"):
             ava.extend.wrap("self.review_async_test", awaited if async_wrapper else passthrough)
-        sdk_metering.install()
+        metering.install()
         call = ava.self.review_async_test
         assert inspect.iscoroutinefunction(call)
         calls.clear()
@@ -504,7 +502,7 @@ async def test_plugin_wrap_preserves_awaited_single_event(
         assert await pending == "ok"
         assert calls == [("self.review_async_test", {"body": True}, 2.0)]
     finally:
-        sdk_metering.uninstall()
+        metering.uninstall()
         wraps.clear_wraps()
         ava.clear_registered_namespaces()
 
@@ -517,5 +515,5 @@ def test_install_does_not_evaluate_dynamic_namespace_directory(
 
     monkeypatch.setattr(ava.skills, "__dir__", dynamic_names)
     monkeypatch.setattr(ava.mcps, "__dir__", dynamic_names)
-    sdk_metering.install()
-    sdk_metering.uninstall()
+    metering.install()
+    metering.uninstall()

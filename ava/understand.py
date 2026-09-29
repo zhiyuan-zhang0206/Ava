@@ -16,8 +16,8 @@ from typing import Any, cast, overload
 from zoneinfo import ZoneInfo
 
 from ava import files as _files
-from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
-from ava.sdk_validation import coerce_str
+from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
+from ava.sdk_surface.validation import coerce_str
 from shared.config import settings
 from shared.lm.attach_constants import ATTACH_MEDIA_MIME
 from shared.lm.effort import (

@@ -12,7 +12,7 @@ import httpx
 import psycopg
 import pytest
 
-from ava import impersonation_replay as reader
+from ava.impersonation import replay as reader
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation_manifest import (
@@ -348,7 +348,7 @@ def test_v1_reader_excludes_same_agent_supervisor_sdk_events_from_receipt(
         )
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "Executor finished")
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     reader.consume_recorded_events(history.resolve(owner.agent_id, 0))
 
     assert all(request["impersonation_session"] == f"{owner.agent_id}:0" for request in reads)
@@ -410,7 +410,7 @@ def test_v1_reader_keeps_tagged_expected_send_and_excludes_same_agent_audit(
         )
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "Sent an update")
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     reader.consume_recorded_events(history.resolve(owner.agent_id, 0))
 
     consumed = [
@@ -449,8 +449,9 @@ def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A real SDK metering wrapper retains its pre-close admission through ``finally``."""
-    from ava import agent_identity, sdk_metering
+    from ava import agent_identity
     from ava.external import Attachment
+    from ava.sdk_surface import metering
 
     participant = LocalParticipant(str(v1_lease["id"]), owner.agent_id, 0, "held-sdk-finally")
     assert open_local_participant(
@@ -467,7 +468,7 @@ def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
 
     # This is the production SDK recorder shape for ava.agents.send_message,
     # not a direct hand-built telemetry event.
-    recorded_send = sdk_metering._make_recorder(held_send, "agents.send_message")
+    recorded_send = metering._make_recorder(held_send, "agents.send_message")
     worker = Thread(target=recorded_send)
     worker.start()
     assert entered.wait(timeout=2)
@@ -665,7 +666,7 @@ def test_final_envelope_reader_splits_before_the_gateway_offset_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A permitted manifest never asks the public reader for offset 11,000."""
-    from ava import impersonation_replay as reader
+    from ava.impersonation import replay as reader
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "No emitted events")
     lease = history.resolve(owner.agent_id, 0)
@@ -690,7 +691,7 @@ def test_final_envelope_reader_splits_before_the_gateway_offset_ceiling(
             json={"items": [], "meta": {"has_more": has_more}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     expected, actual, conflicting = reader._indexed_manifest_items(lease)
     assert expected == actual == {}
     assert not conflicting

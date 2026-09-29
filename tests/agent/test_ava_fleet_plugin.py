@@ -55,7 +55,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     from gateway.app import app
 
     with TestClient(app, base_url="http://test-gateway") as tc:
-        monkeypatch.setattr("ava._gateway_transport._client", tc)
+        monkeypatch.setattr("ava.gateway_client.transport._client", tc)
         yield
 
 

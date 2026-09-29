@@ -915,11 +915,11 @@ def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _restore_sdk_metering() -> Iterator[None]:
+def _restore_metering() -> Iterator[None]:
     """Per-test isolation for the process-global `ava` singleton's metering state:
     whatever a test wrapped, the next test sees the bare callables again.
 
-    `agent.extensions.load_extensions()` calls `ava.sdk_metering.install()` as
+    `agent.extensions.load_extensions()` calls `ava.sdk_surface.metering.install()` as
     a side effect, which replaces every public `ava.*` callable — plus the
     `ava.mcps._call_raw` MCP funnel — with a recording proxy, and nothing ever put
     them back. `load_extensions()` is reached directly *and* lazily, via
@@ -934,13 +934,13 @@ def _restore_sdk_metering() -> Iterator[None]:
     queue's bisect blamed whichever innocent PR shared the batch (issue #83, after
     #82 fixed that one test's symptom by taking its own baseline).
 
-    Free for the tests that never metered: `uninstall()` returns immediately when
-    nothing is installed, and `sys.modules` is read rather than imported so a test
-    process that never pulled in the agent layer does not pull it in here.
+    Free for the tests that never metered: `uninstall()` returns at once when nothing
+    is installed; the import runs only once `ava` is loaded (a rename fails loudly).
     """
     yield
-    metering = sys.modules.get("ava.sdk_metering")
-    if metering is not None:
+    if "ava" in sys.modules:
+        from ava.sdk_surface import metering
+
         metering.uninstall()
 
 

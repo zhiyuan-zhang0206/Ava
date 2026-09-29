@@ -86,7 +86,7 @@ CompletionNoticePayload = completion_notices.CompletionNoticePayload
 # 429 = rate-limited. 4xx are NOT here: the wire `reason` is authoritative
 # application semantics (AgentNotFound etc.); replaying cannot change the
 # result. One definition, shared by the SDK transport's retry policy
-# (`ava/_gateway_transport.py`) and the outbox interception on both send paths
+# (`ava/gateway_client/transport.py`) and the outbox interception on both send paths
 # (SDK `send_message` and the `ava agents send` CLI).
 TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
 

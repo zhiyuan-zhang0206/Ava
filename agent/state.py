@@ -652,8 +652,8 @@ def clear_plugin_registrations() -> None:
     _BASE_FIELD_DECLARED.clear()
     # avoid circular import: lazy import inside the function for cross-module reset points
     import ava
+    import ava.sdk_surface.skill_sources
     import ava.sdk_surface.wraps
-    import ava.skill_sources
     from agent.graph.context_notes import clear_plugin_context_notes
     from agent.graph.system_prompt import clear_plugin_system_prompt_sections
     from agent.hooks import clear_hooks
@@ -670,7 +670,7 @@ def clear_plugin_registrations() -> None:
     plugin_contributions.clear()
     ava.clear_registered_namespaces()
     ava.sdk_surface.wraps.clear_wraps()
-    ava.skill_sources.clear()
+    ava.sdk_surface.skill_sources.clear()
 
 
 def _plugin_namespace_view(state: BaseAgentState, plugin: str) -> SimpleNamespace:

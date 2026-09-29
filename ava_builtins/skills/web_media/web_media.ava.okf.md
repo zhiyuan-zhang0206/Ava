@@ -21,4 +21,4 @@ A set of skills for fetching content from **web & multimodal media**: drive Chat
 ## Key dependencies
 - [[ava/skills.ava.okf.md|Skill System]] — skill mechanism and core-vs-instance origin axis
 - [[ui/web/web.ava.okf.md]] — web-sources fetching lands on `ava.web.search/fetch`
-- [[ava/mcps.ava.okf.md]] — web-ai drives logged-in browser via chrome MCP ([[chrome.ava.okf.md]])
+- [[ava/mcps/mcps.ava.okf.md]] — web-ai drives logged-in browser via chrome MCP ([[chrome.ava.okf.md]])

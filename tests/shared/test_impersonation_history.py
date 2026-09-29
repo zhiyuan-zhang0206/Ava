@@ -355,7 +355,7 @@ def test_late_events_refresh_handoff_after_native_receipt_and_manifest_closes_re
     import httpx
     from psycopg.types.json import Jsonb
 
-    from ava import impersonation_replay as reader
+    from ava.impersonation import replay as reader
     from services.agent_host.impersonation_events import reconcile_one
 
     def workspace_for_agent(_agent_id: int) -> Path:
@@ -385,7 +385,7 @@ def test_late_events_refresh_handoff_after_native_receipt_and_manifest_closes_re
             json={"items": items, "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     reader.consume_recorded_events(lease)
     document, path = history.export_handoff(lease, db_conn)
     assert document["statistics"]["event_delivery"]["state"] == "pending"

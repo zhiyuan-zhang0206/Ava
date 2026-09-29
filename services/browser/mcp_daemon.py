@@ -33,7 +33,7 @@ out of scope by construction, and expiry surfaces as the page simply being
 gone (next page-scoped call takes the existing no-page path) -- never as an
 invented "page expired" error. See `services.browser.page_lifecycle`.
 
-Wire protocol (JSON line per request, mirrors `ava._mcps_daemon`):
+Wire protocol (JSON line per request, mirrors `ava.mcps._daemon`):
   Request:  {"id": 1, "method": "list_tools"}
             {"id": 2, "method": "call_tool", "tool": "click", "args": {...}}
             {"id": 3, "method": "release_agent_page", "agent_id": 7}

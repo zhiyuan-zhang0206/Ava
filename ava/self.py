@@ -5,7 +5,7 @@ from typing import NoReturn
 
 import ava
 from ava.attachment_transport import attach as attach
-from ava.sdk_validation import coerce_str, coerce_typed
+from ava.sdk_surface.validation import coerce_str, coerce_typed
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.lifecycle import AgentRestart, AgentTermination, SystemHalt

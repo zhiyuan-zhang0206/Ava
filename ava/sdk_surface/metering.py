@@ -201,7 +201,7 @@ def uninstall() -> None:
     teardown, so a test that installs the recorders does not leak them into the
     shared ``ava`` singleton the rest of the suite imports.
 
-    The suite calls this after every test (autouse ``_restore_sdk_metering`` in
+    The suite calls this after every test (autouse ``_restore_metering`` in
     ``tests/conftest.py``), because ``install()`` is a side effect of
     ``load_extensions()`` and is reached lazily on any ``ava.*`` miss — so merely
     touching the namespace metered it for every later test in the worker (issue #83).

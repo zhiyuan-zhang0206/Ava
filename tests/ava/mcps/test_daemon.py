@@ -1,4 +1,4 @@
-"""Unit tests for ava._mcps_daemon — JSON-line protocol / session cache / lifecycle.
+"""Unit tests for ava.mcps._daemon — JSON-line protocol / session cache / lifecycle.
 
 Does not start real MCP servers (requires external npm/uvx packages) nor long-running daemon processes.
 Three layers of mock:
@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import ava._mcps_daemon as daemon_mod
+import ava.mcps._daemon as daemon_mod
 from shared.config import settings
 
 # Most tests here are deterministic (mocked I/O / pure DB side-effects) and run in
@@ -769,7 +769,7 @@ def test_main_requires_socket_arg(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         sys,
         "argv",
-        ["_mcps_daemon", "/tmp/a.sock", "/tmp/b.sock"],  # noqa: S108
+        ["_daemon", "/tmp/a.sock", "/tmp/b.sock"],  # noqa: S108
     )
     with patch.object(daemon_mod.asyncio, "run") as run_spy, pytest.raises(SystemExit) as exc:
         daemon_mod.main()
@@ -783,7 +783,7 @@ def test_main_no_args_binds_shared_socket(monkeypatch: pytest.MonkeyPatch) -> No
     The per-machine shared socket replaces the old one-daemon-per-agent argv
     contract: no argument means the ops-managed shared daemon.
     """
-    monkeypatch.setattr(sys, "argv", ["_mcps_daemon"])
+    monkeypatch.setattr(sys, "argv", ["_daemon"])
     # The shared-socket path may resolve onto a LIVE socket on a dev machine;
     # the live guard is unit-tested separately, so pin it off here.
     monkeypatch.setattr(daemon_mod, "_socket_is_live", lambda *_a: False)  # pyright: ignore[reportUnknownArgumentType]
@@ -798,7 +798,7 @@ def test_main_no_args_binds_shared_socket(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_main_runs_daemon_with_socket_arg(monkeypatch: pytest.MonkeyPatch) -> None:
     """argv = [prog, sock_path] → calls asyncio.run(run_daemon(sock_path))."""
-    monkeypatch.setattr(sys, "argv", ["_mcps_daemon", "/tmp/test.sock"])  # noqa: S108 — fake argv, not actually opened
+    monkeypatch.setattr(sys, "argv", ["_daemon", "/tmp/test.sock"])  # noqa: S108 — fake argv, not actually opened
     with patch.object(daemon_mod.asyncio, "run") as run_spy:
         # asyncio.run accepts coroutine — after patching it doesn't actually run (saves daemon startup overhead)
         run_spy.return_value = None
@@ -914,17 +914,17 @@ def test_reap_stale_daemons_kills_only_this_unit(
 
     procs = [
         FakeProc(
-            os.getpid(), [".venv/bin/python", "-m", "ava._mcps_daemon"], root, {"AVA_HOME": home}
+            os.getpid(), [".venv/bin/python", "-m", "ava.mcps._daemon"], root, {"AVA_HOME": home}
         ),  # self
         FakeProc(
-            1001, [".venv/bin/python", "-m", "ava._mcps_daemon"], root, {}
+            1001, [".venv/bin/python", "-m", "ava.mcps._daemon"], root, {}
         ),  # same unit via cwd
         FakeProc(
-            1002, [".venv/bin/python", "-m", "ava._mcps_daemon"], "/elsewhere", {"AVA_HOME": home}
+            1002, [".venv/bin/python", "-m", "ava.mcps._daemon"], "/elsewhere", {"AVA_HOME": home}
         ),  # same via env
         FakeProc(
             1003,
-            [".venv/bin/python", "-m", "ava._mcps_daemon"],
+            [".venv/bin/python", "-m", "ava.mcps._daemon"],
             "/other/root",
             {"AVA_HOME": "/other/home"},
         ),  # other unit
@@ -943,8 +943,8 @@ def _is_daemon_cmdline_cases() -> list[tuple[list[str], bool]]:
     """(cmdline, expected) pairs for `_is_daemon_cmdline`."""
     return [
         # The daemon's own launch shapes.
-        ([".venv/bin/python", "-m", "ava._mcps_daemon"], True),
-        ([".venv/bin/python", "-m", "ava._mcps_daemon", "/tmp/x.sock"], True),  # noqa: S108
+        ([".venv/bin/python", "-m", "ava.mcps._daemon"], True),
+        ([".venv/bin/python", "-m", "ava.mcps._daemon", "/tmp/x.sock"], True),  # noqa: S108
         # A `bash -lc` wrapper: the whole launch command is ONE argv element
         # that contains the module name — no element equals it, never matched.
         (
@@ -953,22 +953,22 @@ def _is_daemon_cmdline_cases() -> list[tuple[list[str], bool]]:
                 "-lc",
                 "cd /root && export VIRTUAL_ENV=/root/.venv && "
                 'export PATH=/root/.venv/bin:"$PATH" && '
-                ".venv/bin/python -m ava._mcps_daemon",
+                ".venv/bin/python -m ava.mcps._daemon",
             ],
             False,
         ),
         # Same wrapper through `sh -c` (posixproc launches `sh -c "bash -lc ..."`).
-        (["/bin/sh", "-c", "bash -lc 'cd /root && .venv/bin/python -m ava._mcps_daemon'"], False),
+        (["/bin/sh", "-c", "bash -lc 'cd /root && .venv/bin/python -m ava.mcps._daemon'"], False),
         # The module name as a plain argument (not after -m) is not a daemon.
-        (["python", "-c", "import ava._mcps_daemon"], False),
-        (["python", "ava._mcps_daemon"], False),
+        (["python", "-c", "import ava.mcps._daemon"], False),
+        (["python", "ava.mcps._daemon"], False),
         # Unrelated process.
         (["python", "-m", "something.else"], False),
     ]
 
 
 def test_is_daemon_cmdline_discriminates_wrappers() -> None:
-    """Only argv shaped `python -m ava._mcps_daemon` is a daemon launch."""
+    """Only argv shaped `python -m ava.mcps._daemon` is a daemon launch."""
     for cmdline, expected in _is_daemon_cmdline_cases():
         assert daemon_mod._is_daemon_cmdline(cmdline) is expected, cmdline
 
@@ -982,7 +982,7 @@ def test_reap_stale_daemons_skips_bash_lc_session_wrapper(
     one argv element) and it lives in the project root with our AVA_HOME — the
     old substring match killed it, orphaning the real daemon (PPID=1), reaping
     the session record (has_session → False, `ava stop` loses the daemon, `ava
-    status` shows ✗). Only the real `python -m ava._mcps_daemon` process is a
+    status` shows ✗). Only the real `python -m ava.mcps._daemon` process is a
     reap target.
     """
     monkeypatch.setattr(daemon_mod, "_reap_stale_daemons", _ORIG_REAP)
@@ -1009,12 +1009,12 @@ def test_reap_stale_daemons_skips_bash_lc_session_wrapper(
 
     inner = (
         f"cd {root} && export VIRTUAL_ENV={root}/.venv && "
-        f'export PATH={root}/.venv/bin:"$PATH" && .venv/bin/python -m ava._mcps_daemon'
+        f'export PATH={root}/.venv/bin:"$PATH" && .venv/bin/python -m ava.mcps._daemon'
     )
     procs = [
         FakeProc(2001, ["bash", "-lc", inner], root, {"AVA_HOME": home}),  # live session wrapper
         FakeProc(
-            2002, [".venv/bin/python", "-m", "ava._mcps_daemon"], root, {"AVA_HOME": home}
+            2002, [".venv/bin/python", "-m", "ava.mcps._daemon"], root, {"AVA_HOME": home}
         ),  # the real daemon it launched
         FakeProc(2003, ["bash", "-lc", inner], "/other/root", {"AVA_HOME": "/other/home"}),
     ]
@@ -1030,7 +1030,7 @@ def test_main_refuses_live_socket(monkeypatch: pytest.MonkeyPatch) -> None:
     live = Path(tempfile.gettempdir()) / f"avadaemon_live_{os.getpid()}.sock"
     live.write_text("x")
     try:
-        monkeypatch.setattr(sys, "argv", ["_mcps_daemon", str(live)])
+        monkeypatch.setattr(sys, "argv", ["_daemon", str(live)])
         with (
             patch.object(daemon_mod, "_socket_is_live", return_value=True),
             patch.object(daemon_mod.asyncio, "run") as run_spy,
@@ -1047,7 +1047,7 @@ def test_main_refuses_live_socket(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_main_starts_over_stale_socket_file(monkeypatch: pytest.MonkeyPatch) -> None:
     """A leftover (dead) socket file does not block startup — only a LIVE one does."""
-    monkeypatch.setattr(sys, "argv", ["_mcps_daemon", "/tmp/stale.sock"])  # noqa: S108
+    monkeypatch.setattr(sys, "argv", ["_daemon", "/tmp/stale.sock"])  # noqa: S108
     with (
         patch.object(daemon_mod, "_socket_is_live", return_value=False),
         patch.object(daemon_mod.asyncio, "run") as run_spy,
@@ -1614,7 +1614,7 @@ async def test_shared_browser_server_connects_direct_no_child(
     direct = AsyncMock(return_value=(browser_session, browser_stack))
     # _connect_server imports the direct-connect helper lazily inside the
     # function, so patch the source module attribute it resolves.
-    import ava._mcp_browser as browser_mod
+    import ava.mcps._browser as browser_mod
 
     monkeypatch.setattr(browser_mod, "connect_browser_direct", direct)
     spawned: list[int] = []
@@ -1690,7 +1690,7 @@ async def test_browser_concurrent_connections_no_id_desync(
     daemon-wide buckets, so concurrent connections multiplexed on ONE socket
     with ONE shared id counter and corrupted each other's response stream.
     Each connection must dial its own socket."""
-    import ava._mcp_browser as browser_mod
+    import ava.mcps._browser as browser_mod
 
     _write_config(fake_home, {"chrome": {"command": ".venv/bin/python", "shared": "browser"}})
 
@@ -1951,7 +1951,7 @@ async def test_connect_http_oauth_builds_provider(
 
     oauth_client = MagicMock()
     oauth_builder = AsyncMock(return_value=oauth_client)
-    import ava._mcp_oauth as oauth_mod
+    import ava.mcps._oauth as oauth_mod
 
     monkeypatch.setattr(oauth_mod, "oauth_http_client", oauth_builder)
 
@@ -1973,7 +1973,7 @@ async def test_shared_computer_use_server_connects_direct_no_child(
     session = MagicMock()
     stack = MagicMock()
     direct = AsyncMock(return_value=(session, stack))
-    import ava._mcp_computer as computer_mod
+    import ava.mcps._computer as computer_mod
 
     monkeypatch.setattr(computer_mod, "connect_computer_direct", direct)
     spawned: list[int] = []
@@ -1999,7 +1999,7 @@ async def test_computer_use_call_stamps_agent_id(
         fake_home,
         {"computer_use": {"command": ".venv/bin/python", "shared": "computer_use"}},
     )
-    import ava._mcp_computer as computer_mod
+    import ava.mcps._computer as computer_mod
 
     received: dict[str, object] = {}
 

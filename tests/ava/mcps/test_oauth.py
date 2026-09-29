@@ -1,4 +1,4 @@
-"""Unit tests for ava._mcp_oauth — token storage, callback server, client assembly.
+"""Unit tests for ava.mcps._oauth — token storage, callback server, client assembly.
 
 The authorization flow itself (discovery → register → redirect → token
 exchange) lives in the SDK's OAuthClientProvider (an httpx2.Auth); these tests
@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-import ava._mcp_oauth as oauth_mod
+import ava.mcps._oauth as oauth_mod
 
 # ─── FileTokenStorage ─────────────────────────────────────────────────────
 

@@ -134,6 +134,6 @@ keep a default because one value is the only reading:
 - `relay` `--debounce` 0.5 — internal host machinery (the relay coalesces wake
   hints); not an operator parameter.
 
-See [[ava/external.ava.okf.md]],
+See [[ava/external/external.ava.okf.md]],
 [external agent procedure](../../../conventions/agent-impersonation.md), and
 [host relay setup](../../../conventions/agent-impersonation-hosts.md).

@@ -1,5 +1,9 @@
 """Attach local Python tools to a trusted external controller lease."""
 
+# Package door. This `__init__` is the `ava.external` attachment API; `state` is
+# its checkpoint-compatible plugin-delta codec and snapshot reader, shared with
+# the agent kernel's takeover return path (`agent.impersonation`).
+
 from __future__ import annotations
 
 import sys
@@ -9,14 +13,14 @@ from types import TracebackType
 from typing import Any, Self
 from uuid import uuid4
 
+from ava import agent_identity
 from shared.agents import impersonation as control
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.machine import machine_name
 from shared.native_process.ownership import process_metadata
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
 
-from . import agent_identity
-from .external_state import (
+from .state import (
     apply_plugin_delta,
     decode_plugin_delta,
     encode_plugin_delta,

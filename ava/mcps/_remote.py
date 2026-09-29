@@ -20,9 +20,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from ava.mcp_config import MCPCallError, MCPConnectError, ToolInfo
 from shared.config import settings
-
-from .mcp_config import MCPCallError, MCPConnectError, ToolInfo
 
 
 class _RemoteMCPClient:

@@ -25,7 +25,7 @@ A shared headed Chrome management service on agent-runner — a three-component 
 See [[services/agent_runner_side/browser/browser/gating.ava.okf.md]].
 
 ## Key Dependencies
-- [[ava/mcps.ava.okf.md]] — `chrome-devtools-mcp` is the upstream
+- [[ava/mcps/mcps.ava.okf.md]] — `chrome-devtools-mcp` is the upstream
 - [[services/ava_root_glue/ava_root_glue.ava.okf.md]] — keeps alive via `healthchecks/browser.py` (identity-verified CDP **and** ava-browser session liveness — CDP alone can tell neither a supervised Chrome from an orphan holding the port, nor ours from another unit's) and `healthchecks/browser_mcp.py` (Unix socket ping)
 
 ## Entry Points

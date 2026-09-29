@@ -659,7 +659,7 @@ supervisor socket for agent shells / watchers).
 | `grafana` (observability station) | Pinned native Grafana under ava-root | `services.healthchecks.lgtm` (owned listener + `/api/health`, database ready) |
 | `browser-mcp` (agent-runner only, gated with `browser`) | `.venv/bin/python -m services.browser.mcp_daemon` (one shared `chrome-devtools-mcp` upstream attached to the headed Chrome, multiplexed over a Unix socket `~/.ava/chrome-mcp.<cdp_port>.sock` to every agent's chrome bridge — serial, with per-connection page affinity so one Chrome client is shared instead of one per browser-using agent) | `services.healthchecks.browser_mcp` (Unix-socket `list_tools` probe) |
 | `computer-mcp` (agent-runner only, platform-gated: signed permissions helper enabled + capable, AF_UNIX transport, non-Windows host — Windows is the phase-3 pilot) | `.venv/bin/python -m services.computer.mcp_daemon` (computer-use executor: every desktop action through the signed permissions helper — serialized machine-wide, screen-coordinated (lease + FIFO queue + `release_control`), Vision OCR on snapshots, audited as `computer_action` + `computer_session_start/end` events, served over `~/.ava/run/computer-mcp.sock`) | `services.healthchecks.computer_mcp` (Unix-socket lock-free `ping` probe) |
-| `mcp-daemon` (agent-runner only) | `.venv/bin/python -m ava._mcps_daemon` (ONE shared MCP daemon per machine, serving every agent over `~/.ava/run/mcp_daemon.sock` — sessions isolated per client connection, replacing the old one-daemon-per-agent children) | `services.healthchecks.mcp_daemon` (Unix-socket `ping` probe) |
+| `mcp-daemon` (agent-runner only) | `.venv/bin/python -m ava.mcps._daemon` (ONE shared MCP daemon per machine, serving every agent over `~/.ava/run/mcp_daemon.sock` — sessions isolated per client connection, replacing the old one-daemon-per-agent children) | `services.healthchecks.mcp_daemon` (Unix-socket `ping` probe) |
 
 The gate preserves the browser `Host` while proxying to the loopback frontend,
 so the frontend CSP derives the same host that its API client uses. A TLS or
@@ -1069,9 +1069,9 @@ keeps per-connection page affinity (it re-selects each agent's own page before a
 page-scoped call, so concurrent agents never act on each other's tab through the
 single shared selected-page) and applies the cold-start `navigate_page` fix (a
 page-less navigate becomes `new_page`). The agent side is process-less since
-2026-08: the shared MCP daemon (`ava/_mcps_daemon.py`) dials the daemon's socket
+2026-08: the shared MCP daemon (`ava/mcps/_daemon.py`) dials the daemon's socket
 directly (`"shared": "browser"` in the chrome `.mcp.json`, in-daemon line client
-`ava/_mcp_browser.py`) — the former per-agent stdio bridge
+`ava/mcps/_browser.py`) — the former per-agent stdio bridge
 (`services/browser/mcp_wrapper.py`, ~63MB per agent) is no longer spawned. Both
 sides derive the CDP port + socket path from `settings.browser_cdp_port`
 (per-cluster).

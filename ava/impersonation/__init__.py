@@ -1,9 +1,20 @@
 """External takeover consent handshake (legacy import surface)."""
 
+# Package door. This `__init__` is the consent handshake an agent calls
+# (`ava.impersonation.accept` / `reject`); its docstring stays the one-liner the
+# agent can see. The submodules serve the takeover machinery around it and are
+# never agent-facing:
+#   launch   the bootstrap message a launched coding process receives
+#            (`ava.shell.coding_tools`, the use-other-agents skill)
+#   replay   agent-host maintenance that replays recorded SDK/API events into
+#            session history (`services.agent_host.impersonation_events`)
+# Neither is imported here: `import ava` loads this module eagerly, and `replay`
+# pulls in psycopg and httpx.
+
 from typing import NoReturn
 
 from ava import agent_identity
-from ava.sdk_validation import coerce_str
+from ava.sdk_surface.validation import coerce_str
 from shared.lifecycle import AgentImpersonation
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 

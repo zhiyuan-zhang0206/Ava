@@ -346,7 +346,7 @@ def computer_mcp_socket() -> Path:
 def mcp_daemon_shared_socket() -> str:
     """Filesystem path of the per-machine shared MCP daemon socket — one
     socket under `$AVA_HOME/run` serving every agent on the machine (the daemon
-    isolates sessions per client connection; see ava/_mcps_daemon.py). The
+    isolates sessions per client connection; see ava/mcps/_daemon.py). The
     single source of truth for the naming convention: the daemon binds here and
     the client (ava.mcps) connects here. Lives in shared/ so the agent kernel
     can import it without going through the agent-facing `ava.mcps`, which

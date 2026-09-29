@@ -355,9 +355,10 @@ _init_complete = True
 # backstop. The agent host binds identities per turn and does not
 # export a process-wide AVA_AGENT_ID; gateway / cli do not carry it either.
 # Only an agent-launched child reaches this load.
-from . import agent_identity, sdk_metering
+from . import agent_identity
+from .sdk_surface import metering as _metering
 
-sdk_metering.install()
+_metering.install()
 
 if agent_identity.is_launched_child():
     ensure_plugins_loaded()

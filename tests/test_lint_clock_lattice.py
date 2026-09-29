@@ -93,7 +93,7 @@ def test_exempt_clock_is_allowed(scan_tmp) -> None:
 def test_independent_clock_without_lattice_vocabulary_is_allowed(scan_tmp) -> None:
     errs = _errors(
         scan_tmp,
-        "ava/_mcp_oauth.py",
+        "ava/mcps/_oauth.py",
         """
         _OAUTH_FLOW_TIMEOUT_S = 600.0
         """,

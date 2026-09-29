@@ -16,7 +16,7 @@ Chrome reachable over CDP, and no MCP front end for it.
 One thing, in two places:
 
 - `services/browser/mcp_daemon.py` — `asyncio.start_unix_server`
-- `ava/_mcp_browser.py` — `asyncio.open_unix_connection` (the in-daemon line
+- `ava/mcps/_browser.py` — `asyncio.open_unix_connection` (the in-daemon line
   client that replaced the per-agent `services/browser/mcp_wrapper.py` stdio
   bridge; same AF_UNIX requirement)
 

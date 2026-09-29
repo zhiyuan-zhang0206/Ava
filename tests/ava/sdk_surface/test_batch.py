@@ -1,4 +1,4 @@
-"""`ava/_batch.py` unit tests — the one concurrent batch executor.
+"""`ava/sdk_surface/batch.py` unit tests — the one concurrent batch executor.
 
 The public SDK entry points (search / fetch / understand) each have their own
 integration tests for the batch behaviour (order, concurrency cap, error
@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
+from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 
 # ─── run_batch ────────────────────────────────────────────────────────────
 

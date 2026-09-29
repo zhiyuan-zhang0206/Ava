@@ -20,7 +20,7 @@
     "tests/agent/test_syntax_fix_helpers.py::_legacy_fix_unterminated_to_triple": 16
   },
   "directories": {
-    "tests/agent": 132
+    "tests/agent": 131
   },
   "files": {
     "tests/agent/test_ava_code_plugin.py": 1599,

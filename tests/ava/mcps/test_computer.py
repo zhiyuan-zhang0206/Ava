@@ -1,5 +1,5 @@
 """Unit tests for the MCP-daemon direct dial to the computer-mcp service
-(ava/_mcp_computer.py): line-protocol round-trips, agent-identity stamping,
+(ava/mcps/_computer.py): line-protocol round-trips, agent-identity stamping,
 and self-healing on a desynced stream.
 """
 
@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import ava._mcp_computer as computer_mod
-from ava._mcp_computer import connect_computer_direct
+import ava.mcps._computer as computer_mod
+from ava.mcps._computer import connect_computer_direct
 from shared import resilience
 
 

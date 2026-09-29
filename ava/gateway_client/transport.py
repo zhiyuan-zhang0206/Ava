@@ -328,7 +328,7 @@ def post(
     ) from last_err
 
 
-def _get(
+def get(
     path: str,
     *,
     params: dict | None = None,
@@ -376,7 +376,7 @@ def _get(
 def patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Unified PATCH wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
-    Same policy as `_get` — a PATCH (partial update, e.g. edit the current
+    Same policy as `get` — a PATCH (partial update, e.g. edit the current
     notice) is idempotent by contract: repeating it cannot change the
     outcome beyond the first application.
     """

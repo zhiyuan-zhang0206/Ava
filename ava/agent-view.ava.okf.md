@@ -23,7 +23,7 @@ This is the agent's "view" at runtime — from the LLM's perspective, what the a
 - [[agents.ava.okf.md]] — agent interop
 - [[ava_builtins/plugins/ava_fleet/tasks/tasks.ava.okf.md|Tasks]] — task registry `ava.tasks` (injected by ava_fleet plugin)
 - [[presets.ava.okf.md]] — configuration presets
-- [[ava/mcps.ava.okf.md]] — MCP tool servers
+- [[ava/mcps/mcps.ava.okf.md]] — MCP tool servers
 - [[web.ava.okf.md]] — network access
 - [[understand.ava.okf.md]] — multimodal understanding primitives
 - [[watcher.ava.okf.md]] — background watchers
