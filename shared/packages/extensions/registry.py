@@ -39,7 +39,7 @@ be a function of the tree alone.
    `octet_length(archive)` — otherwise (1) and (2) both check a number the
    writer chose rather than the bytes actually stored.
 
-The number lives here and in the DDL; `tests/shared/test_extension_registry.py`
+The number lives here and in the DDL; `tests/shared/test_registry.py`
 pins them together by writing exactly the cap and exactly one byte over. It is
 a cap on *extension content*, which is source trees — large artifacts are host
 provisioning and do not belong in the cluster's data plane.

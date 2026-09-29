@@ -32,7 +32,7 @@ from shared.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
 from tests._containers import grant_runner_login
 from tests.impersonation_support import attested_caller
-from tests.shared import test_impersonation_history as history_cases
+from tests.shared import test_history as history_cases
 
 # The capability group the receipt grants target, and the generation-shaped
 # login that inherits it (the only identity that logs in).

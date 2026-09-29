@@ -282,7 +282,7 @@ composer/plugin extension point.
   schema lives in `shared/packages/plugins/ui_contributions.py` (closed type set, closed
   icon vocabulary, and a theme token vocabulary locked against
   `ui/web/src/app/globals.css` by
-  `tests/shared/test_plugin_ui_contributions.py`, so a token the console adds
+  `tests/shared/test_ui_contributions.py`, so a token the console adds
   fails the suite until it is offered to skins or listed as non-themable).
   `shared/packages/plugins/manifest.py` calls it for the `ui` key. Declaration-only;
   zero runtime change. `--radius` is deliberately non-themable — a theme pack

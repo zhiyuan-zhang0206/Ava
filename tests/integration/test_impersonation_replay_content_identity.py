@@ -14,7 +14,7 @@ from shared.agents.impersonation.events import consume_events
 from shared.db import create_agent
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
-from tests.shared import test_impersonation_history as history_cases
+from tests.shared import test_history as history_cases
 
 
 @pytest.fixture

@@ -1,1 +1,1 @@
-"""TODO(door): describe the `shared.agents.observation` package."""
+"""Bounded agent reads: observation evidence, roster cards, full snapshot, DB-wait evidence."""

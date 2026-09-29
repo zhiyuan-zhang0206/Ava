@@ -41,7 +41,7 @@ from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
 from tests.impersonation_support import attested_caller, recorded_tree
-from tests.shared import test_impersonation_history as history_cases
+from tests.shared import test_history as history_cases
 
 _CERTIFICATION_SECRET = "test-manifest-certification-secret-000001"  # noqa: S105 -- test proof
 

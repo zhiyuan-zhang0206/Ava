@@ -1,1 +1,1 @@
-"""TODO(door): describe the `shared.packages.extensions` package."""
+"""Cluster extension registry and the machine-local install registry: adopt, materialize, track."""

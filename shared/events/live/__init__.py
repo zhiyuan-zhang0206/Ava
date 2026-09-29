@@ -1,1 +1,3 @@
-"""TODO(door): describe the `shared.events.live` package."""
+"""Live projection: typed SSE payloads, best-effort announce and publish, delta coalescing,
+and the Redis client/listener transport.
+"""

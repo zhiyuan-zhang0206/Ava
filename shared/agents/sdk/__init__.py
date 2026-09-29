@@ -1,1 +1,1 @@
-"""TODO(door): describe the `shared.agents.sdk` package."""
+"""SDK-call telemetry: live sampling policy and per-execution tallies."""

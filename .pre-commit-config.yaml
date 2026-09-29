@@ -271,7 +271,7 @@ repos:
         name: lint core-content manifests (ranges + requires_commit vs derived host version)
         entry: .venv/bin/python scripts/lint_core_content_manifests.py
         language: system
-        files: '(ava-plugin\.json$|^scripts/lint_core_content_manifests\.py$|^shared/(plugin_manifest|host_version)\.py$)'
+        files: '(ava-plugin\.json$|^scripts/lint_core_content_manifests\.py$|^shared/packages/plugins/manifest\.py$|^shared/host_version\.py$)'
         pass_filenames: false
 
       # SKILL.md line-count ceiling to prevent progressive bloat.

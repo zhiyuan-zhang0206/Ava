@@ -27,7 +27,7 @@ from shared.agents.incarnation.resources import (
 from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
 from shared.runtime_admission import RuntimeAdmission
 from shared.runtime_incarnation import RuntimeIncarnation
-from tests.agent.test_incarnation_resources import _admitted, _entry, _force, _process
+from tests.agent.test_resources import _admitted, _entry, _force, _process
 
 
 class _CurrentRuntimeAdmission(RuntimeAdmission):
