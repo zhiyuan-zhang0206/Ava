@@ -1,5 +1,5 @@
 """Contract tests for the typed `ava_*` message-metadata layer
-(`shared/message_kwargs.py`).
+(`shared/agents/messages/kwargs.py`).
 
 The load-bearing invariant here is serialization safety: the message
 constructors must store the discriminator / note-tag as a **plain `str`**, not
@@ -16,7 +16,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.messages import exec_output_message, inbound_message, system_note_message
-from shared.message_kwargs import AvaMsgType, NoteTag, read_ava_kwargs
+from shared.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 
 
 def test_msg_type_value_set() -> None:

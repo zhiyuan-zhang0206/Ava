@@ -9,9 +9,9 @@ from psycopg_pool import ConnectionPool
 from ops.agents import latest_checkpoint_id
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from shared.agents import ForkSourceEmpty
+from shared.agents.labels import spawn_prompt_with_label
 from shared.config import settings
 from shared.db import insert_inbound_message, publish_inbound_wake
-from shared.labels import spawn_prompt_with_label
 from shared.machine import machine_name
 
 

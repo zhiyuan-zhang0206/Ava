@@ -29,7 +29,7 @@ tags:
   neither substitutes for the other.
 
 - **`installed.json` rewrites are serialized the same way**, on the sibling
-  `installed.json.lock` (`shared/install_registry.py:registry_lock`). Its writers are
+  `installed.json.lock` (`shared/packages/extensions/install_registry.py:registry_lock`). Its writers are
   `ava skill install` in an agent's shell, `ava converge` on a restart, the gateway's
   skills-toggle handler, and `scripts/migrate_skill_identity.py --apply`; every one of
   them is a load-modify-save, and `save` is a full replace, so the same interleave

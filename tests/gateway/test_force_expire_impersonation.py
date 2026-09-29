@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from shared.agents import impersonation
-from shared.caller_identity import CallerIdentity
+from shared.agents.messages.caller_identity import CallerIdentity
 from shared.db import create_agent
 from shared.machine import machine_name
 from tests.impersonation_support import recorded_tree

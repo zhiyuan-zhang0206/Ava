@@ -13,9 +13,9 @@ from typing import Any, cast
 
 import pytest
 
-from shared import plugin_manifest as pm
-from shared import plugin_ui_contributions as ui
-from shared.plugin_manifest import ManifestError
+from shared.packages.plugins import manifest as pm
+from shared.packages.plugins import ui_contributions as ui
+from shared.packages.plugins.manifest import ManifestError
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GLOBALS_CSS = _REPO_ROOT / "ui" / "web" / "src" / "app" / "globals.css"

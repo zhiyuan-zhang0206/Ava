@@ -57,8 +57,8 @@ from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
     _strip_code_fence,
     syntax_fix_before_exec,
 )
+from shared.agents.context import AvaContext
 from shared.config import settings
-from shared.context import AvaContext
 
 # --- _fix_chinese_punctuation ---
 

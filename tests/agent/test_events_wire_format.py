@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from shared.live_events import (
+from shared.events.live.projection import (
     GLOBAL_ROLES,
     SYSTEM_ROLES,
     AgentSpawned,
@@ -206,7 +206,7 @@ def test_role_registry_matches_event_union() -> None:
     registry is the runtime one. This guard keeps them pinned together."""
     from typing import get_args
 
-    from shared.live_events import _ROLE_CLASSES, Event
+    from shared.events.live.projection import _ROLE_CLASSES, Event
 
     union = get_args(Event)[0]  # Annotated[Union[...], Field] -> the union
     union_classes = set(get_args(union))
@@ -220,7 +220,7 @@ def test_role_registry_matches_event_union() -> None:
 def test_derived_role_sets_match_registry_flags() -> None:
     """SYSTEM_ROLES / GLOBAL_ROLES are derived from `_ROLE_CLASSES`; the flags
     in the registry are the only free variable, so pin them here."""
-    from shared.live_events import _ROLE_CLASSES, GLOBAL_ROLES, SYSTEM_ROLES
+    from shared.events.live.projection import _ROLE_CLASSES, GLOBAL_ROLES, SYSTEM_ROLES
 
     assert frozenset(cls.model_fields["role"].default for cls, _ in _ROLE_CLASSES) == SYSTEM_ROLES
     assert (

@@ -35,7 +35,6 @@ from gateway.schemas import (
 from ops import ops_lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, TextContentBlock
-from shared import agent_snapshot
 from shared.agents.history.checkpoint import (
     CheckpointReadError,
     load_checkpoint_messages,
@@ -45,6 +44,8 @@ from shared.agents.messages.chat_delivery import ClientMessageConflictError
 from shared.agents.messages.inbound import InboundKind
 from shared.agents.messages.inbound_images import inbound_image_urls
 from shared.agents.messages.inbound_provenance import InboundProvenance
+from shared.agents.observation import snapshot
+from shared.agents.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 from shared.config import settings
 from shared.daemon.schedules.completion_notices import (
     CompletionNotice,
@@ -55,7 +56,6 @@ from shared.daemon.schedules.completion_notices import (
 )
 from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
 from shared.db_transaction import write_transaction
-from shared.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -626,7 +626,7 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
 
 
 @router.get("/api/agents/{agent_id}/activity", dependencies=[Depends(deny_isolated_result_read)])
-def get_activity_trail(agent_id: int, request: Request) -> list[agent_snapshot.ActivityEntry]:
+def get_activity_trail(agent_id: int, request: Request) -> list[snapshot.ActivityEntry]:
     """The agent's activity trail, oldest first (historical rows; the SDK write
     verb `ava.self.log` was removed 2026-08-02, so new rows no longer appear).
     The collapsed current line is already on the agent snapshot
@@ -637,7 +637,7 @@ def get_activity_trail(agent_id: int, request: Request) -> list[agent_snapshot.A
     exist (a plain activity-table read with no agent-existence precondition).
     """
     with request.app.state.db_pool.connection() as conn:
-        return agent_snapshot.select_activity_trail(conn, agent_id)
+        return snapshot.select_activity_trail(conn, agent_id)
 
 
 @router.get("/api/agents/{agent_id}/token-usage")

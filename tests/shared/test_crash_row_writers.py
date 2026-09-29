@@ -1,6 +1,6 @@
 """Enumeration guard for the crash-row predicate's write side (task #3617).
 
-`shared.lifecycle_acceptance.SYSTEM_REAPED_CRASH_ROW` reads exactly two row
+`shared.agents.incarnation.lifecycle_acceptance.SYSTEM_REAPED_CRASH_ROW` reads exactly two row
 fields — `termination_source = 'reaper'` and `last_turn_fatal_at IS NOT NULL`.
 This test enumerates the production write sites for both fields and their
 clears, so a NEW writer/clearer cannot silently change what the predicate

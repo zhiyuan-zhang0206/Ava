@@ -1,4 +1,4 @@
-"""shared/tasks/task_rules.py — the registry's transition rules, locked against a
+"""shared/agents/tasks/rules.py — the registry's transition rules, locked against a
 real database.
 
 Both write surfaces call these (the fleet plugin's create/update and the gateway
@@ -12,7 +12,7 @@ from itertools import count
 
 import psycopg
 
-from shared.tasks import task_rules
+from shared.agents.tasks import rules
 
 _TITLE = count(1)
 
@@ -54,7 +54,7 @@ def test_first_open_child_none_when_no_open_children(db_conn: psycopg.Connection
         cur.execute("UPDATE agent_tasks SET status = 'done' WHERE id = %s", (closed_child,))
     db_conn.commit()
     with db_conn.cursor() as cur:
-        assert task_rules.first_open_child(cur, parent) is None
+        assert rules.first_open_child(cur, parent) is None
 
 
 def test_first_open_child_returns_lowest_id_and_count(db_conn: psycopg.Connection) -> None:
@@ -64,7 +64,7 @@ def test_first_open_child_returns_lowest_id_and_count(db_conn: psycopg.Connectio
     first_child = _make_task(db_conn, owner=owner, parent_id=parent)
     _make_task(db_conn, owner=owner, parent_id=parent)
     with db_conn.cursor() as cur:
-        assert task_rules.first_open_child(cur, parent) == (first_child, 2)
+        assert rules.first_open_child(cur, parent) == (first_child, 2)
 
 
 def test_open_title_holder_honours_exclude_id(db_conn: psycopg.Connection) -> None:
@@ -73,13 +73,13 @@ def test_open_title_holder_honours_exclude_id(db_conn: psycopg.Connection) -> No
     title = f"rules-{next(_TITLE)}"
     tid = _make_task(db_conn, owner=owner, title=title)
     with db_conn.cursor() as cur:
-        assert task_rules.open_title_holder(cur, title) == (tid, "in_progress")
-        assert task_rules.open_title_holder(cur, title, exclude_id=tid) is None
+        assert rules.open_title_holder(cur, title) == (tid, "in_progress")
+        assert rules.open_title_holder(cur, title, exclude_id=tid) is None
 
 
 def test_is_closed_covers_every_status() -> None:
     """done and cancelled are closed; in_progress and "no status change" are not."""
-    assert task_rules.is_closed("done")
-    assert task_rules.is_closed("cancelled")
-    assert not task_rules.is_closed("in_progress")
-    assert not task_rules.is_closed(None)
+    assert rules.is_closed("done")
+    assert rules.is_closed("cancelled")
+    assert not rules.is_closed("in_progress")
+    assert not rules.is_closed(None)

@@ -595,7 +595,7 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     context plus the core definition modules — plugin metrics first, then
     core, the old snapshot's two-section order. No file involved."""
     from shared.metrics.core import core_metrics
-    from shared.plugin_context import PluginContext
+    from shared.packages.plugins.context import PluginContext
     from shared.plugin_metrics import clear_registry
 
     # Re-run the registrations fresh — earlier tests in the session may have

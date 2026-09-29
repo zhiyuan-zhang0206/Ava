@@ -10,8 +10,8 @@ from psycopg_pool import AsyncConnectionPool
 from agent.hosted_ownership import apply_hosted_lifecycle
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from services.agent_host import host as host_module
+from shared.agents.context import AvaContext
 from shared.config import settings
-from shared.context import AvaContext
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_hosted_compact_failure import _prepare_graph

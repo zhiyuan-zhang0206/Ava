@@ -1,4 +1,4 @@
-"""Unit tests for shared/sdk_telemetry.py — the SDK-usage runtime primitives.
+"""Unit tests for shared/agents/sdk/telemetry.py — the SDK-usage runtime primitives.
 
 Covers the frame/emit core (`run_metered`), the agent-code scope gate (`recording`),
 the semantic-enrichment primitive (`annotate`) and its frame attribution, and the
@@ -13,13 +13,15 @@ from typing import Any
 
 import pytest
 
-from shared import sdk_call_policy, sdk_telemetry, telemetry
-from shared.sdk_call_policy import SamplingPolicy
+from shared import telemetry
+from shared.agents.sdk import call_policy
+from shared.agents.sdk import telemetry as sdk_telemetry
+from shared.agents.sdk.call_policy import SamplingPolicy
 
 
 @pytest.fixture(autouse=True)
 def _full_sampling(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sdk_call_policy, "policy", SamplingPolicy)
+    monkeypatch.setattr(call_policy, "policy", SamplingPolicy)
 
 
 @pytest.fixture
@@ -201,7 +203,7 @@ def test_live_sampling_keeps_tally_complete(
 
     monkeypatch.setattr(random, "randrange", sample)
     current = SamplingPolicy(sampling_enabled=True, sample_every=10)
-    monkeypatch.setattr(sdk_call_policy, "policy", lambda: current)
+    monkeypatch.setattr(call_policy, "policy", lambda: current)
     with sdk_telemetry.recording() as tally:
         for _ in range(10):
             sdk_telemetry.run_metered("files.read", lambda: None, (), {})

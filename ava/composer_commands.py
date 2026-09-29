@@ -73,9 +73,9 @@ from typing import NamedTuple, TypedDict
 
 from ava import skills
 from shared.config import settings
-from shared.docs.frontmatter import FrontmatterError, parse_frontmatter
 from shared.log import logger
-from shared.packages.skills.skill_names import display_name, match_key
+from shared.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
+from shared.packages.skills.names import display_name, match_key
 from shared.paths import ava_home, repo_plugins_dir, repo_root
 from shared.runtime_interpreter import external_plugin_read_root
 

@@ -7,8 +7,9 @@ from collections.abc import Callable
 
 import pytest
 
-from shared import agent_snapshot, live_announce
+from shared.agents.observation import snapshot
 from shared.config import settings
+from shared.events.live import announce
 
 
 @pytest.fixture(autouse=True)
@@ -16,14 +17,14 @@ def _forbid_snapshot_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("lifecycle announcements must not read an agent snapshot")
 
-    monkeypatch.setattr(agent_snapshot, "select_one", forbidden)
+    monkeypatch.setattr(snapshot, "select_one", forbidden)
 
 
 @pytest.mark.parametrize(
     ("publisher", "role"),
     [
-        (live_announce.publish_agent_spawned_sync, "agent_spawned"),
-        (live_announce.publish_agent_updated_sync, "agent_updated"),
+        (announce.publish_agent_spawned_sync, "agent_spawned"),
+        (announce.publish_agent_updated_sync, "agent_updated"),
     ],
 )
 def test_sync_lifecycle_hint_has_no_snapshot(
@@ -37,7 +38,7 @@ def test_sync_lifecycle_hint_has_no_snapshot(
         published.append((channel, payload, context))
         return 0
 
-    monkeypatch.setattr(live_announce, "publish_best_effort_sync", capture)
+    monkeypatch.setattr(announce, "publish_best_effort_sync", capture)
     publisher(7)
     assert len(published) == 1
     channel, payload, context = published[0]
@@ -55,8 +56,8 @@ async def test_async_lifecycle_hint_needs_no_connection(
         published.append((channel, payload, context))
         return 0
 
-    monkeypatch.setattr(live_announce, "publish_best_effort", capture)
-    await live_announce.publish_agent_updated(7)
+    monkeypatch.setattr(announce, "publish_best_effort", capture)
+    await announce.publish_agent_updated(7)
     assert len(published) == 1
     channel, payload, context = published[0]
     assert channel == settings.data_plane.events_channel

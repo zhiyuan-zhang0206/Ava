@@ -26,8 +26,8 @@ def memory_plugin() -> Any:
     first is what makes the load — and therefore the registration — actually
     happen, exactly as the full plugin load (`agent.extensions`) does it.
     """
+    from shared.packages.plugins.context import PluginContext
     from shared.plugin_config_registry import bind_from_disk
-    from shared.plugin_context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):

@@ -17,7 +17,7 @@ from gateway.app import app
 from gateway.routers import agents as app_module
 from gateway.routers import agents_forward
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from shared.agent_observation import AvailabilityReason
+from shared.agents.observation.evidence import AvailabilityReason
 
 
 @pytest.fixture

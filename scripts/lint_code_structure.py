@@ -224,11 +224,11 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # site of a runtime isinstance (task #3633).
         "shared/lm/stop.py",
         "shared/lm/pricing.py",
-        "shared/message_kwargs.py",
+        "shared/agents/messages/kwargs.py",
         # Exec-child boot path (`_run_code` -> sdk_telemetry): ToolMessage is
         # runtime-only (imported at the isinstance call site), BaseMessage
         # annotation-only (task #3633).
-        "shared/sdk_telemetry.py",
+        "shared/agents/sdk/telemetry.py",
         # Boot-lite facade: the names are served at runtime by the lite latch;
         # TYPE_CHECKING keeps `from shared.config import X` consumers resolving
         # without an eager import that would rebuild the config chain the lite
@@ -243,8 +243,8 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # annotation-only here, imported at the raise sites (task #3816).
         "ava_builtins/plugins/ava_fleet/task_registry.py",
         "ava_builtins/plugins/ava_fleet/_task_update.py",
-        "shared/tasks/task_reparent.py",
-        "shared/tasks/task_rules.py",
+        "shared/agents/tasks/reparent.py",
+        "shared/agents/tasks/rules.py",
     }
 )
 

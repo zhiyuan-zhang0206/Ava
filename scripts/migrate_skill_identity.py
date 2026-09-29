@@ -15,7 +15,7 @@ under a name that is not its own; the runtime loader now refuses it
 
 Surface 2 — install registry (`$AVA_HOME/installed.json`): rows that fold to
 the same key (dash and underscore are one name). The registry read now refuses
-this state (`shared.install_registry.DuplicatePackageName`).
+this state (`shared.packages.extensions.install_registry.DuplicatePackageName`).
 
 Surface 3 — DB stores (optional, `AVA_DB_URL` or `--db-url`): the skill lists
 (`skills_to_inject_into_system_prompt`, `skills_to_expand_at_start`) in
@@ -51,12 +51,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-# shared.packages.skills.skill_names is importable standalone (no heavy deps).
+# shared.packages.skills.names is importable standalone (no heavy deps).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shared.packages.skills.skill_names import display_name, match_key
+from shared.packages.skills.names import display_name, match_key
 
 try:
-    from shared.install_registry import Registry, registry_lock
+    from shared.packages.extensions.install_registry import Registry, registry_lock
 except Exception:  # pragma: no cover - importable in the repo venv
     Registry = None
     registry_lock = None
@@ -173,7 +173,12 @@ def catalog(skills_root: Path, fixes: dict[str, str] | None = None) -> dict[str,
 def scan_registry(registry_path: Path) -> list[dict[str, Any]]:
     """Registry rows that fold to the same key."""
     if Registry is None:
-        return [{"kind": "registry-unreadable", "error": "shared.install_registry unavailable"}]
+        return [
+            {
+                "kind": "registry-unreadable",
+                "error": "shared.packages.extensions.install_registry unavailable",
+            }
+        ]
     if not registry_path.exists():
         return []
     try:
@@ -300,7 +305,7 @@ def apply_registry(registry_path: Path, dups: list[dict[str, Any]]) -> list[str]
     (the row whose name is already the dash form, e.g. `ava-code` over
     `ava_code`; first row wins on a tie).
 
-    This is the one registry writer outside `shared.install_registry`, and it
+    This is the one registry writer outside `shared.packages.extensions.install_registry`, and it
     re-reads the file INSIDE the lock rather than trusting the `dups` its caller
     scanned earlier: between that scan and here, another process may have merged
     the same rows already, in which case the filter below simply finds nothing to

@@ -18,7 +18,7 @@ import psycopg
 import pytest
 
 from ops.agent_spawn import create_agent_row
-from shared.birth_config import set_cluster_default_model
+from shared.agents.birth_config import set_cluster_default_model
 from shared.config import frozen_field_names
 
 

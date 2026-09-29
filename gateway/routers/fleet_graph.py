@@ -49,10 +49,10 @@ from gateway.schemas import (
 from shared import telemetry
 from shared.config import settings
 from shared.events.contract import FleetGraphStaleReason
+from shared.events.live.redis_client import sync_redis
 from shared.log import logger
 from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 from shared.observability import cluster_label
-from shared.redis_client import sync_redis
 
 router = APIRouter()
 

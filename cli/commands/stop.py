@@ -421,7 +421,7 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     Explicit force authorizes interrupting resource shutdown.
     """
     from cli.commands import _repo, _start_readiness_preflight, start
-    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from shared.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
     from shared.paths import ava_home
     from shared.proc import hosting_exec_domain, hosting_supervised_session
 

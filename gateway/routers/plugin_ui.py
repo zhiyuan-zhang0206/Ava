@@ -36,8 +36,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
-from shared import plugins_config
-from shared.packages.skills import skill_names
+from shared.packages.plugins import enable_config
+from shared.packages.skills import names
 
 router = APIRouter()
 
@@ -57,15 +57,15 @@ def _enabled_plugin_dir(plugin: str) -> Path:
     the same detail, so the mount does not report the enable-state of a plugin
     to a caller that could not otherwise see it.
     """
-    installed = plugins_config.installed_plugin_dirs()
+    installed = enable_config.installed_plugin_dirs()
     # Dash/underscore folding, exactly like `plugins_config.load`: the
     # directory is a Python package (`ava_code`) while the name a human writes
     # in a URL or a manifest is dash-spelled (`ava-code`).
-    resolved = skill_names.find(plugin, set(installed)) or plugin
+    resolved = names.find(plugin, set(installed)) or plugin
     directory = installed.get(resolved)
     if directory is None:
         raise HTTPException(status_code=404, detail=f"no plugin page mount for {plugin!r}")
-    config = plugins_config.load_for_runtime(set(installed))
+    config = enable_config.load_for_runtime(set(installed))
     entry = config.plugins.get(resolved)
     if entry is None or not entry.enabled:
         raise HTTPException(status_code=404, detail=f"no plugin page mount for {plugin!r}")

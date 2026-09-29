@@ -34,8 +34,8 @@ from agent.graph._exec_result import (
 )
 from agent.graph._exec_stream import ExecOutputChunkPublisher
 from agent.graph._exec_subprocess import _run_in_subprocess
+from shared.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from shared.config import settings
-from shared.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from shared.paths import logs_dir
 from shared.proc import kill_process_tree
 from tests._test_env_file import rewrite_line
@@ -538,7 +538,7 @@ async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> Non
     result = await _run(
         tmp_path,
         (
-            "from shared.lifecycle import LifecycleExit\n"
+            "from shared.agents.lifecycle import LifecycleExit\n"
             "class _MysteryLifecycle(LifecycleExit):\n"
             "    def __init__(self):\n"
             "        super().__init__(0)\n"

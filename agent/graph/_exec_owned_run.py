@@ -20,8 +20,7 @@ import psutil
 from agent.graph._exec_result import _ExecCrashed, _ExecResult
 from agent.graph._exec_stream import ExecOutputChunkPublisher, StreamingTextIO
 from agent.graph.exec_protocol import KILL_GRACE_S, ResultPayload, write_request
-from shared.db_transaction import write_transaction
-from shared.exec_owner_protocol import (
+from shared.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,
     OwnerControl,
@@ -30,7 +29,7 @@ from shared.exec_owner_protocol import (
     read_owner_bytes,
     validate_native_ready,
 )
-from shared.incarnation_resources import (
+from shared.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
     ResourceEvidenceError,
@@ -40,6 +39,7 @@ from shared.incarnation_resources import (
     decode_resources,
     register_exec,
 )
+from shared.db_transaction import write_transaction
 from shared.paths import exec_run_dir
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import current_hosted_resources

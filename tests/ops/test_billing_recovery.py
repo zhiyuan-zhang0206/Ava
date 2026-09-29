@@ -26,8 +26,8 @@ from ops.agent_wake import resurrect_agent
 from ops.billing_recovery import enumerate_candidates, enumerate_halted_alive, run_billing_recovery
 from ops.rpc_schemas import BillingBalanceReport
 from shared.agents import ResurrectRefused
+from shared.agents.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
 from shared.db import create_agent
-from shared.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
 from shared.telemetry import Event
 
 

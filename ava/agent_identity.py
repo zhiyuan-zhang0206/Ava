@@ -194,7 +194,7 @@ def require_actor() -> str:
     turn = current_turn_agent_id()
     if turn is not None:
         return f"agent:{turn}"
-    from shared.external_caller import external_caller
+    from shared.agents.messages.external_caller import external_caller
 
     external = external_caller()
     if external is not None:
@@ -224,7 +224,7 @@ def default_actor() -> str:
     turn = current_turn_agent_id()
     if turn is not None:
         return f"agent:{turn}"
-    from shared.external_caller import external_caller
+    from shared.agents.messages.external_caller import external_caller
 
     external = external_caller()
     if external is not None:

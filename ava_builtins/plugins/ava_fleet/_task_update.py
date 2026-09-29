@@ -6,17 +6,21 @@ import builtins
 import math
 from typing import TYPE_CHECKING
 
-from shared.tasks.priority import DEFAULT_REMIND_INTERVAL_SECONDS, Priority, validate_priority
-from shared.tasks.task_notes import task_note_line
-from shared.tasks.task_rules import first_open_child, is_closed, open_title_holder
+from shared.agents.tasks.notes import task_note_line
+from shared.agents.tasks.priority import (
+    DEFAULT_REMIND_INTERVAL_SECONDS,
+    Priority,
+    validate_priority,
+)
+from shared.agents.tasks.rules import first_open_child, is_closed, open_title_holder
 
 if TYPE_CHECKING:
     # Annotation-only here; the runtime import sits at the raise site so plugin
     # autoload stays off the psycopg stack (task #3816).
     import psycopg
-from shared.tasks.task_status import TaskStatus
+from shared.agents.tasks.status import TaskStatus
 
-# The statuses update() may assign to a task. shared/tasks/task_status.TaskStatus is
+# The statuses update() may assign to a task. shared/agents/tasks/task_status.TaskStatus is
 # the one source of the set (SDK + gateway + DB CHECK + generated frontend
 # types; the system root is permanently in_progress and immutable — see
 # _write_task_update; create() begins every regular task in_progress).
@@ -29,7 +33,7 @@ _DEFAULT_PRIORITY = "P2"
 
 
 # A new task reminds its owner after a silence window that scales with its
-# priority (P0 30m / P1 1h / P2 2h / P3 4h — shared.tasks.priority.DEFAULT_REMIND_INTERVAL_SECONDS).
+# priority (P0 30m / P1 1h / P2 2h / P3 4h — shared.agents.tasks.priority.DEFAULT_REMIND_INTERVAL_SECONDS).
 # An unattended in-progress task is the common failure the reminder guards
 # against, so the reminder is always on and cannot be disabled —
 # create(remind_interval_seconds=None) falls back to the priority default

@@ -129,7 +129,7 @@ def test_apply_registry_contends_with_the_module_registry_lock(
     `installed.json.tmp` name as `install_registry.save`, so a concurrent save
     has its staged body overwritten and its rename left with nothing to rename.
     """
-    from shared import install_registry as reg
+    from shared.packages.extensions import install_registry as reg
     from shared.platform import LockTimeoutError
 
     registry_path = home / "installed.json"

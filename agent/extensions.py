@@ -35,7 +35,7 @@ import sys
 from pathlib import Path
 
 from shared import paths
-from shared import plugins_config as plugins_cfg
+from shared.packages.plugins import enable_config as plugins_cfg
 
 FACE_MODULE = "agent_runtime"
 
@@ -119,7 +119,7 @@ def load_extensions(*, surface: bool = False) -> plugins_cfg.PluginsConfig:
     discovered, config = _discovered_and_config()
 
     from ava.sdk_surface.plugin_loader import safe_load_plugin_module
-    from shared.plugin_context import PluginContext
+    from shared.packages.plugins.context import PluginContext
 
     for name in sorted(config.plugins):
         if not config.plugins[name].enabled:
@@ -165,7 +165,7 @@ def load_agent_faces() -> None:
     surface has not loaded are skipped too: the surface owns the module
     identity the face imports against.
     """
-    from shared.plugin_context import PluginContext
+    from shared.packages.plugins.context import PluginContext
 
     for name, plugin_dir in _enabled_plugin_dirs():
         pkg = _pkg_of(plugin_dir)

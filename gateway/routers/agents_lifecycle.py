@@ -39,7 +39,7 @@ from ops.rpc_schemas import (
     TerminateAgentResponse,
 )
 from shared.agents.impersonation import ImpersonationError
-from shared.agents.impersonation.impersonation_maintenance import force_expire_impersonation
+from shared.agents.impersonation.maintenance import force_expire_impersonation
 from shared.db import agent_exists, insert_compact_request_inbound
 from shared.db_transaction import write_transaction
 

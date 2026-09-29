@@ -16,7 +16,7 @@ recorded legacy `(pid, birth)` for `scripts/cutover_inventory.py --attest`.
 Without `--check` the script dry-runs the repairs; `--execute` applies them.
 Every refusal is decided before a run's first write. The steps (`STEPS`), in
 order: `pending`, `lease`, `posture`, `units`, `incarnations` (retired-shape
-rows to the closed-predecessor form, `shared.predecessor_closure`) and
+rows to the closed-predecessor form, `shared.agents.incarnation.predecessor_closure`) and
 `identities` (a minted hosted identity for identity-less terminated rows, why:
 decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md).
 Each effect compares its row with the before and after images recorded at
@@ -84,9 +84,9 @@ from scripts.cutover_inventory import (
     registry_path,
 )
 from scripts.cutover_inventory import read_journal as read_adoption
-from shared.incarnation_resources import IncarnationResources, ResourceEvidenceError
+from shared.agents.incarnation.predecessor_closure import ClosureEvidence, close_retired_predecessor
+from shared.agents.incarnation.resources import IncarnationResources, ResourceEvidenceError
 from shared.pg_admin import OwnerAuthority
-from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
 from shared.private_storage import ensure_private_dir, write_private_bytes
 
 VERSION = 2  # 2: each run names the adoption it belongs to

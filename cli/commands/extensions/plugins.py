@@ -1,9 +1,9 @@
 """`ava plugins` subcommands.
 
 - `update`              — auto-merge plugin config disk image schema diff
-                          (logic in `shared.plugins_config.update_all_disk_images`).
+                          (logic in `shared.packages.plugins.enable_config.update_all_disk_images`).
 - `install <url>`       — install an external package from a git source and
-                          record it in the install registry (`shared.install_registry`).
+                          record it in the install registry (`shared.packages.extensions.install_registry`).
                           A bare **skill** (SKILL.md at the package root) lands in
                           the `~/.ava/skills/` load dir — `ava skill install` is the
                           fuller skill entry point (local paths + skill collections);
@@ -42,10 +42,10 @@ from ._pkg_source import cleanup_temp, clone_git
 def cmd_plugins_update() -> int:
     """`ava plugins update` — scan all plugins, auto-merge disk image schema diff.
 
-    Actual scan + merge logic lives in `shared.plugins_config.update_all_disk_images`;
+    Actual scan + merge logic lives in `shared.packages.plugins.enable_config.update_all_disk_images`;
     this function only formats the structured result for printing.
     """
-    from shared.plugins_config import update_all_disk_images
+    from shared.packages.plugins.enable_config import update_all_disk_images
 
     result = update_all_disk_images()
     if not result.entries:
@@ -83,7 +83,7 @@ def cmd_plugins_disable(name: str) -> int:
 
 
 def _set_enabled(name: str, *, enabled: bool) -> int:
-    from shared.plugins_config import DanglingPlugin, set_local_enabled
+    from shared.packages.plugins.enable_config import DanglingPlugin, set_local_enabled
 
     verb = "enable" if enabled else "disable"
     try:
@@ -103,7 +103,7 @@ def _skill_name_at(pkg_dir: Path) -> str | None:
     Raises:
         SkillFormatError: SKILL.md is present but unparseable.
     """
-    from shared.packages.skills.skill_index import parse_skill_frontmatter as _parse_frontmatter
+    from shared.packages.skills.index import parse_skill_frontmatter as _parse_frontmatter
 
     skill_md = pkg_dir / "SKILL.md"
     if not skill_md.is_file():
@@ -181,7 +181,7 @@ def _register_plugin_install(
     registry write fails, the landed dir is removed again, so a retry does
     not hit "already installed" against an untracked copy.
     """
-    from shared.install_registry import tree_hash
+    from shared.packages.extensions.install_registry import tree_hash
 
     from . import skill_package
 
@@ -257,7 +257,7 @@ def cmd_plugins_install(
         if gate_refuses(pkg_dir, command="plugins install"):
             return 1
 
-        from shared.packages.skills.skill_index import SkillFormatError
+        from shared.packages.skills.index import SkillFormatError
 
         try:
             name = _skill_name_at(pkg_dir)
@@ -345,7 +345,8 @@ def _install_dest(pkg_type: str, name: str) -> Path:
 
 def cmd_plugins_uninstall(name: str) -> int:
     """`ava plugins uninstall <name>` — remove an installed package + registry entry."""
-    from shared import install_registry, paths
+    from shared import paths
+    from shared.packages.extensions import install_registry
 
     pkg = install_registry.get(name)
     if pkg is None:
@@ -374,7 +375,7 @@ def cmd_plugins_uninstall(name: str) -> int:
 
 def cmd_plugins_installed() -> int:
     """`ava plugins installed` — list install-registry entries."""
-    from shared import install_registry
+    from shared.packages.extensions import install_registry
 
     pkgs = install_registry.load().packages
     if not pkgs:
@@ -395,7 +396,8 @@ def cmd_plugins_upgrade(name: str, *, force: bool = False) -> int:
     wrote) aborts with a conflict unless `--force` is given — the R5 conflict
     contract, mirroring `git pull` (force = reset --hard).
     """
-    from shared import install_registry, paths
+    from shared import paths
+    from shared.packages.extensions import install_registry
 
     from . import _claude_code_plugin
 

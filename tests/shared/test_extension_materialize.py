@@ -1,4 +1,4 @@
-"""Landing cluster extensions on a machine — `shared/extension_materialize.py`.
+"""Landing cluster extensions on a machine — `shared/packages/extensions/materialize.py`.
 
 Slice S2 of `future/infra/extension-ownership.md`. The contract is a three-way
 verdict per extension, and the third case is the one worth the file:
@@ -21,8 +21,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from shared import extension_materialize as mat
-from shared import extension_registry as reg
+from shared.packages.extensions import materialize as mat
+from shared.packages.extensions import registry as reg
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:
@@ -48,7 +48,7 @@ def _returns(value: str | None) -> Callable[[str], str | None]:
 
 def _register(conn: psycopg.Connection, name: str, root: Path, *, source: str = "https://x.inv"):
     """Put `root`'s content in the registry under `name`; return its tree hash."""
-    from shared.install_registry import tree_hash
+    from shared.packages.extensions.install_registry import tree_hash
 
     archive = reg.pack_tree(root)
     digest = tree_hash(root)
@@ -175,7 +175,7 @@ class TestWhatItRefusesToTouch:
         dest_root = tmp_path / "skills"
         src = _tree(tmp_path / "src", {"plugin.py": "x = 1"})
         with db_conn.transaction(force_rollback=True):
-            from shared.install_registry import tree_hash
+            from shared.packages.extensions.install_registry import tree_hash
 
             digest = tree_hash(src)
             reg.put_blob(db_conn, reg.pack_tree(src), name="p", content_hash=digest)

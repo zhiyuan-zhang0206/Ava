@@ -14,8 +14,8 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE, timezone_note
+from shared.agents.messages.kwargs import NoteTag
 from shared.config import settings
-from shared.message_kwargs import NoteTag
 
 
 @pytest.fixture(autouse=True)

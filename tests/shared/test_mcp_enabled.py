@@ -1,4 +1,4 @@
-"""shared/mcp_enabled.py unit tests — per-host MCP enable overlay.
+"""shared/packages/plugins/mcp_enabled.py unit tests — per-host MCP enable overlay.
 
 The overlay is per-machine local only: reads and writes go through
 ~/.ava/mcp_enabled.json. No DB involvement. `unit_home` points `ava_home()`
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.mcp_enabled import (
+from shared.packages.plugins.mcp_enabled import (
     McpEnabledConfig,
     McpEnabledConfigError,
     McpServerEntry,
@@ -46,7 +46,7 @@ def test_read_enabled_fails_closed_when_malformed(unit_home: Path):
     the operator's explicit enable/disable intent is unknown, and defaulting
     to "all enabled" would silently resurrect servers the operator disabled.
     Consumers catch the error and disable every server."""
-    from shared.mcp_enabled import McpEnabledConfigError
+    from shared.packages.plugins.mcp_enabled import McpEnabledConfigError
 
     local_config_path().write_text("{not json")
     with pytest.raises(McpEnabledConfigError):

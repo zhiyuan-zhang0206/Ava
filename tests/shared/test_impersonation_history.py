@@ -11,9 +11,9 @@ import psycopg
 import pytest
 
 from shared.agents import impersonation as leases
-from shared.agents.impersonation import impersonation_history as history
-from shared.agents.impersonation import impersonation_sessions as sessions
-from shared.agents.impersonation.impersonation_events import consume_events
+from shared.agents.impersonation import history as history
+from shared.agents.impersonation import sessions as sessions
+from shared.agents.impersonation.events import consume_events
 from shared.db import create_agent, insert_inbound_message
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
@@ -321,7 +321,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     from agent.impersonation_handoff import start_marker
     from gateway.routers.timeline import _window_before
     from shared.agents.history.timeline import build_timeline_items
-    from shared.agents.impersonation.impersonation_timeline import hydrate
+    from shared.agents.impersonation.timeline import hydrate
 
     lease = start(owner)
     marker = start_marker(lease)
@@ -446,8 +446,8 @@ def test_inbound_attachments_survive_timeline_and_handoff(
 
     from agent.impersonation_handoff import start_marker
     from shared.agents.history.timeline import build_timeline_items
-    from shared.agents.impersonation.impersonation_timeline import hydrate
-    from shared.uploads import upload_url
+    from shared.agents.impersonation.timeline import hydrate
+    from shared.agents.uploads import upload_url
 
     lease = start(owner)
     db_conn.execute(

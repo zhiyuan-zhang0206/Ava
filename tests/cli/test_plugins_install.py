@@ -14,7 +14,7 @@ from cli.commands.extensions.plugins import (
     cmd_plugins_uninstall,
     cmd_plugins_upgrade,
 )
-from shared import install_registry as reg
+from shared.packages.extensions import install_registry as reg
 
 
 def _git(cwd: Path, *args: str) -> None:

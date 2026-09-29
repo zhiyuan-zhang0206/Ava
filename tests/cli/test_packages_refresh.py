@@ -25,8 +25,8 @@ from cli.commands.extensions.packages_refresh import (
     parse_duration,
     run_refresh,
 )
-from shared import install_registry as reg
 from shared.config import settings
+from shared.packages.extensions import install_registry as reg
 
 
 @pytest.fixture(autouse=True)
@@ -552,7 +552,10 @@ def _manifest_for(name: str, **extra: object) -> dict[str, object]:
 def test_loadable_names_respect_the_host_contract(
     core_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.install_registry import host_contract_reason, loadable_skill_names
+    from shared.packages.extensions.install_registry import (
+        host_contract_reason,
+        loadable_skill_names,
+    )
 
     home = _home()
 

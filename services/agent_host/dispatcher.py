@@ -61,7 +61,7 @@ from agent.turn_progress import (
 )
 from services.agent_host.runtime import _active_turn_config_fingerprint
 from shared import maintenance
-from shared.hosted_db_wait import database_wait_snapshot
+from shared.agents.observation.db_wait import database_wait_snapshot
 from shared.log import logger
 from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 
@@ -571,7 +571,7 @@ class InboundWakeDispatcher:
         bounded backoff. This shared scan supplies durable recovery for all agents.
         """
         from shared.cluster import redis_channel_prefix
-        from shared.redis_client import open_async_redis, retry_auth_failures_async
+        from shared.events.live.redis_client import open_async_redis, retry_auth_failures_async
 
         pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
         while True:

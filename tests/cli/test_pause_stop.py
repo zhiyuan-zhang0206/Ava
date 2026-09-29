@@ -19,7 +19,7 @@ from cli.commands._pause_resume import StartDelegation, resume_after_start
 from cli.parsers import build_parser
 from ops import agent_pause
 from shared import maintenance, pause_owner, start_serving
-from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.maintenance_state import MaintenanceHold
 from shared.session_backend import PtySessionBackend
 from tests.agent.test_maintenance import WHEN

@@ -40,7 +40,7 @@ from gateway import loki_events, loki_query_budget
 from gateway.schemas import MetricPoint, PluginMetricResult
 from shared.metrics.core import core_metrics
 from shared.metrics.metrics_logql import validate_logql
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 from shared.plugin_metrics import (
     MetricSpec,
     PluginMetricError,
@@ -117,7 +117,7 @@ def _load_plugin_metrics() -> list[MetricSpec]:
     partial registrations are dropped too (``drop_plugin_metrics`` — a module
     can raise mid-registration), so a fixed file is picked up cleanly on the
     next call."""
-    from shared import plugin_load_report
+    from shared.packages.plugins import load_report
 
     for path in _plugin_metric_modules():
         name = path.parent.name
@@ -127,7 +127,7 @@ def _load_plugin_metrics() -> list[MetricSpec]:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(name, exc)
+            load_report.report_plugin_load_failure(name, exc)
             drop_plugin_metrics(name)
     core_metrics.collect_core_metrics()
     return registered_metrics() + core_metrics.registered_core_metrics()

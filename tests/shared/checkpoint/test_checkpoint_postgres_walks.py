@@ -17,7 +17,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.postgres.base import BasePostgresSaver
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 
-from shared import checkpoint_postgres_walks
+from shared.agents.history import checkpoint_postgres_walks
 from shared.agents.history.checkpoint import load_checkpoint_messages_segment
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.config import settings

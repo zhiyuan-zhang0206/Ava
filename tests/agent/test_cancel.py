@@ -44,9 +44,9 @@ from agent.graph._exec import (
     _ExecTimedOut,
 )
 from agent.state import AgentState
-from shared.context import AvaContext
+from shared.agents.context import AvaContext
 from shared.db import create_agent
-from shared.live_events import EVENT_ADAPTER, Cancelled
+from shared.events.live.projection import EVENT_ADAPTER, Cancelled
 from shared.machine import machine_name
 from tests.agent._fakes import make_fake_ops_pool
 
@@ -559,7 +559,7 @@ async def test_exec_node_dispatch_system_halt(
     the compact refresh. So the compact path appends no ToolMessage and emits
     no ExecOutput (only the ExecStart placeholder, which the compact refresh
     clears)."""
-    from shared.lifecycle import SystemHalt
+    from shared.agents.lifecycle import SystemHalt
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (_ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)
@@ -588,7 +588,7 @@ async def test_exec_node_dispatch_agent_termination(
     """_ExecLifecycle(AgentTermination) → halted=True + no envelope marker +
     exit_code_for_msg=IDLE_EXIT_CODE (claim side writes the lifecycle marker)."""
     from ava.self import AgentTermination
-    from shared.exit_codes import IDLE_EXIT_CODE
+    from shared.agents.exit_codes import IDLE_EXIT_CODE
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (_ExecLifecycle(output="", exc=AgentTermination()), None)
@@ -613,7 +613,7 @@ async def test_exec_node_dispatch_agent_restart(
     """_ExecLifecycle(AgentRestart) → halted=True + no envelope marker (symmetric
     with AgentTermination path)."""
     from ava.self import AgentRestart
-    from shared.exit_codes import IDLE_EXIT_CODE
+    from shared.agents.exit_codes import IDLE_EXIT_CODE
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (_ExecLifecycle(output="", exc=AgentRestart()), None)
@@ -668,7 +668,7 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
     """A future new LifecycleExit subclass that is not handled in the match ladder
     → must fallthrough raise TypeError, not silently land on halted=False (CLAUDE.md
     enumeration dispatch must be exhaustive)."""
-    from shared.lifecycle import LifecycleExit
+    from shared.agents.lifecycle import LifecycleExit
 
     class _MysteryLifecycle(LifecycleExit):
         def __init__(self) -> None:

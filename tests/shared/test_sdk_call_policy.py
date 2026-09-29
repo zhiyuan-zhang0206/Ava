@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from shared import sdk_call_policy
-from shared.sdk_call_policy import SamplingPolicy
+from shared.agents.sdk import call_policy
+from shared.agents.sdk.call_policy import SamplingPolicy
 
 
 @pytest.mark.parametrize("gateway", [True, False])
@@ -22,17 +22,17 @@ def test_local_policy_reads_live_file(
     monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", lambda: False)
     monkeypatch.setattr(runtime_config, "env_file_path", lambda: env_file)
     env_file.write_text("AVA_SDK_CALL_SAMPLING_ENABLED=true\nAVA_SDK_CALL_SAMPLE_EVERY=4\n")
-    assert sdk_call_policy._read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=4)
+    assert call_policy._read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=4)
     env_file.write_text("AVA_SDK_CALL_SAMPLING_ENABLED=false\nAVA_SDK_CALL_SAMPLE_EVERY=7\n")
-    assert sdk_call_policy._read_policy() == SamplingPolicy(sampling_enabled=False, sample_every=7)
+    assert call_policy._read_policy() == SamplingPolicy(sampling_enabled=False, sample_every=7)
     env_file.write_text("")
-    assert sdk_call_policy._read_policy() == SamplingPolicy()
+    assert call_policy._read_policy() == SamplingPolicy()
 
 
 def test_remote_policy_refreshes_without_waiting_for_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = sdk_call_policy._PolicyCache()
+    cache = call_policy._PolicyCache()
     cache.value = SamplingPolicy()
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
 
@@ -41,7 +41,7 @@ def test_remote_policy_refreshes_without_waiting_for_network(
         assert release.wait(5)
         return SamplingPolicy(sampling_enabled=True, sample_every=3)
 
-    monkeypatch.setattr(sdk_call_policy, "_read_policy", read)
+    monkeypatch.setattr(call_policy, "_read_policy", read)
     original = cache.refresh
 
     def refresh() -> None:
@@ -62,14 +62,14 @@ def test_remote_policy_refreshes_without_waiting_for_network(
 
 
 def test_failed_refresh_preserves_policy_and_warns(monkeypatch: pytest.MonkeyPatch) -> None:
-    cache = sdk_call_policy._PolicyCache()
+    cache = call_policy._PolicyCache()
     cache.value = SamplingPolicy(sampling_enabled=True, sample_every=5)
 
     def read() -> SamplingPolicy:
         raise OSError("gateway unavailable")
 
     reports: list[Any] = []
-    monkeypatch.setattr(sdk_call_policy, "_read_policy", read)
+    monkeypatch.setattr(call_policy, "_read_policy", read)
     from loguru import logger
 
     sink = logger.add(lambda message: reports.append(message.record))
@@ -100,5 +100,5 @@ def test_enrolled_process_reads_gateway_policy(monkeypatch: pytest.MonkeyPatch) 
         return {"AVA_SDK_CALL_SAMPLING_ENABLED": "true", "AVA_SDK_CALL_SAMPLE_EVERY": "2"}
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
-    assert sdk_call_policy._read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=2)
+    assert call_policy._read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=2)
     assert requests == [{"timeout": 2.0, "attempts": 1}]

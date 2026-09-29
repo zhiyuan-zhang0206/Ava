@@ -20,8 +20,8 @@ from langgraph.runtime import Runtime
 from agent.graph._exec import _exec_node_impl
 from agent.graph._exec_result import _ExecDone
 from agent.state import AgentState, AttachState
-from shared.context import AvaContext
-from shared.message_kwargs import AvaMsgType
+from shared.agents.context import AvaContext
+from shared.agents.messages.kwargs import AvaMsgType
 from tests.agent._fakes import make_fake_ops_pool
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}

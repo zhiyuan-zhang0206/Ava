@@ -1,4 +1,4 @@
-"""shared/plugins_config.py unit tests — schema + load + validation.
+"""shared/packages/plugins/enable_config.py unit tests — schema + load + validation.
 
 Plugin config is per-machine local only: reads and writes go through
 ~/.ava/plugins_config.json. No DB involvement.
@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from shared import paths
-from shared.plugins_config import (
+from shared.packages.plugins.enable_config import (
     DanglingPlugin,
     DuplicatePlugin,
     PluginEntry,
@@ -82,7 +82,7 @@ def test_load_writes_default_when_no_local_file(tmp_path: Path):
 
 def test_load_reads_local_file(tmp_path: Path):
     """End-to-end: load() honors the per-machine file via _read_raw."""
-    from shared.plugins_config import local_config_path
+    from shared.packages.plugins.enable_config import local_config_path
 
     _make_plugin_dir("compact", tmp_path)
     local_config_path().write_text(json.dumps({"plugins": {"compact": {"enabled": False}}}))
@@ -134,7 +134,7 @@ def test_set_local_enabled_writes_sorted_order(tmp_path: Path):
     """The written plugins.json key order is sorted, not set-hash-dependent —
     the on-disk iteration order drives hook registration order, so it must be
     deterministic. Created out of alphabetical order on purpose."""
-    from shared.plugins_config import local_config_path, set_local_enabled
+    from shared.packages.plugins.enable_config import local_config_path, set_local_enabled
 
     for name in ("zeta", "alpha", "mid"):
         _make_plugin_dir(name, tmp_path)
@@ -312,7 +312,7 @@ def test_duplicate_is_config_error():
 
 def test_set_local_enabled_writes_local_file(tmp_path: Path):
     """Toggling writes the per-machine local file; the flag flips."""
-    from shared.plugins_config import (
+    from shared.packages.plugins.enable_config import (
         local_config_path,
         set_local_enabled,
     )
@@ -330,7 +330,7 @@ def test_set_local_enabled_writes_local_file(tmp_path: Path):
 def test_set_local_enabled_scopes_to_local_plugins(tmp_path: Path):
     """The written local file references only plugins present on THIS machine,
     so a later load() never raises DanglingPlugin."""
-    from shared.plugins_config import set_local_enabled
+    from shared.packages.plugins.enable_config import set_local_enabled
 
     _make_plugin_dir("compact", tmp_path)
     # A stale local file references a plugin that is NOT on this machine.
@@ -344,7 +344,7 @@ def test_set_local_enabled_scopes_to_local_plugins(tmp_path: Path):
 
 def test_set_local_enabled_rejects_unknown(tmp_path: Path):
     """A name not present on this machine is refused (no file written)."""
-    from shared.plugins_config import DanglingPlugin, set_local_enabled
+    from shared.packages.plugins.enable_config import DanglingPlugin, set_local_enabled
 
     with pytest.raises(DanglingPlugin):
         set_local_enabled("nonexistent", enabled=True)
@@ -357,7 +357,7 @@ def test_load_raises_on_malformed_json(tmp_path: Path):
     """A corrupt local file fails fast instead of silently degrading to the
     all-enabled default — the same rule install_registry applies to
     installed.json (audit #9)."""
-    from shared.plugins_config import local_config_path
+    from shared.packages.plugins.enable_config import local_config_path
 
     _make_plugin_dir("compact", tmp_path)
     local_config_path().write_text("{ not json")
@@ -366,7 +366,7 @@ def test_load_raises_on_malformed_json(tmp_path: Path):
 
 
 def test_load_raises_on_non_object_json(tmp_path: Path):
-    from shared.plugins_config import local_config_path
+    from shared.packages.plugins.enable_config import local_config_path
 
     _make_plugin_dir("compact", tmp_path)
     local_config_path().write_text("[1, 2]")
@@ -375,7 +375,7 @@ def test_load_raises_on_non_object_json(tmp_path: Path):
 
 
 def test_load_empty_file_is_default_all_enabled(tmp_path: Path):
-    from shared.plugins_config import local_config_path
+    from shared.packages.plugins.enable_config import local_config_path
 
     _make_plugin_dir("compact", tmp_path)
     local_config_path().write_text("   \n")

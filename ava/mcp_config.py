@@ -14,7 +14,7 @@ collision):
    `$AVA_HOME/plugins/<name>/.mcp.json`).
 3. installed — `$AVA_HOME/mcps/<name>/.mcp.json`, MCP packages added via
    `ava mcp install`, each a self-contained dir gated by the install registry
-   (`shared.install_registry`, `type="mcp"`). An installed server's command is
+   (`shared.packages.extensions.install_registry`, `type="mcp"`). An installed server's command is
    a relative `.venv/bin/python …` resolved against that dir (see
    `installed_mcp_dir`), so its deps stay isolated from core.
 4. machine — `$AVA_HOME/mcp.json`, applied last, so a hand-added machine entry
@@ -238,7 +238,7 @@ def _installed_mcp_paths() -> list[Path]:
     install` writes the dir and the registry row together; `ava mcp uninstall`
     removes both.
     """
-    from shared.install_registry import installed_mcp_names
+    from shared.packages.extensions.install_registry import installed_mcp_names
 
     root = mcps_dir()
     if not root.is_dir():
@@ -263,7 +263,7 @@ def installed_mcp_dir(name: str) -> Path | None:
     by a same-named machine-config entry (the one layer above installed — that
     entry would be spawned from the daemon cwd instead).
     """
-    from shared.install_registry import installed_mcp_names
+    from shared.packages.extensions.install_registry import installed_mcp_names
 
     if name not in installed_mcp_names():
         return None
@@ -354,7 +354,7 @@ def load_mcp_config(*, include_disabled: bool = False) -> dict[str, dict[str, An
     merged.update(read_servers(machine_config_path()))
     if include_disabled:
         return merged
-    from shared.mcp_enabled import McpEnabledConfigError, read_enabled
+    from shared.packages.plugins.mcp_enabled import McpEnabledConfigError, read_enabled
 
     try:
         enabled = read_enabled()

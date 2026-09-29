@@ -10,9 +10,8 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from shared.db import create_agent
-from shared.hosted_force import install_hosted_force
-from shared.incarnation_resources import (
+from shared.agents.incarnation.hosted_force import install_hosted_force
+from shared.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
     ResourceBirth,
@@ -24,6 +23,7 @@ from shared.incarnation_resources import (
     freeze_resources,
     register_exec,
 )
+from shared.db import create_agent
 from shared.runtime_incarnation import RuntimeIncarnation
 
 

@@ -1,5 +1,5 @@
 """Per-call SDK usage metering — the wrapping half of the SDK Usage instrumentation
-(the runtime state + emit path live in ``shared/sdk_telemetry.py``, kept there so an
+(the runtime state + emit path live in ``shared/agents/sdk/telemetry.py``, kept there so an
 SDK function body in the ``ava`` layer can ``annotate()`` its own call).
 
 Every public ``ava.*`` callable is wrapped, once, by a transparent recorder installed
@@ -59,8 +59,8 @@ _WRAPPED: list[tuple[Any, str]] = []
 @contextlib.contextmanager
 def _caller() -> Generator[None, None, None]:
     """Snapshot provenance before the call; metering never changes SDK behavior."""
-    from shared import sdk_telemetry
-    from shared.external_caller import external_caller
+    from shared.agents.messages.external_caller import external_caller
+    from shared.agents.sdk import telemetry as sdk_telemetry
 
     identity = {}
     with contextlib.suppress(Exception):
@@ -87,11 +87,11 @@ def _caller() -> Generator[None, None, None]:
 
 def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
     """Transparent proxy around ``original`` that meters the call as ``fq`` (the frame /
-    tally / emit logic lives in ``shared.sdk_telemetry.run_metered``)."""
+    tally / emit logic lives in ``shared.agents.sdk.telemetry.run_metered``)."""
 
     @functools.wraps(original)
     def recorder(*args: Any, **kwargs: Any) -> Any:
-        from shared.sdk_telemetry import run_metered
+        from shared.agents.sdk.telemetry import run_metered
 
         with _caller():
             return run_metered(fq, original, args, kwargs)
@@ -100,7 +100,7 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
 
         @functools.wraps(original)
         async def async_recorder(*args: Any, **kwargs: Any) -> Any:
-            from shared import sdk_telemetry
+            from shared.agents.sdk import telemetry as sdk_telemetry
 
             with _caller():
                 return await sdk_telemetry.run_metered_async(fq, original, args, kwargs)
@@ -124,7 +124,7 @@ def _make_mcp_recorder(original: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(original)
     def recorder(server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
-        from shared.sdk_telemetry import run_metered
+        from shared.agents.sdk.telemetry import run_metered
 
         with _caller():
             return run_metered(f"mcps.{server}.{tool}", original, (server, tool, *args), kwargs)

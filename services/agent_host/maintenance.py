@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from services.agent_host.dispatcher import PendingInboundWake
 from shared import maintenance
-from shared.resource_admission import DRAINED_RESOURCES
+from shared.agents.incarnation.resource_admission import DRAINED_RESOURCES
 
 FailureFences = dict[int, tuple[str | None, datetime | None]]
 

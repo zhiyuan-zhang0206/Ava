@@ -18,7 +18,7 @@ from cli.commands.extensions.skill import (
     cmd_skill_scan,
     cmd_skill_trust,
 )
-from shared import install_registry as reg
+from shared.packages.extensions import install_registry as reg
 
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare

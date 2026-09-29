@@ -18,9 +18,9 @@ from cli.commands.status import cmd_status
 from cli.start_runtime import StartRuntime
 from ops.service_spec import ServiceSpec
 from shared import start_serving
+from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.cluster import session_name
 from shared.deploy_timing import SERVICE_READY_TIMEOUT_S
-from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.machine import MachineRoles
 from shared.paths import prod_service_checkout_error
 

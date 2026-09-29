@@ -2,8 +2,8 @@
 
 from scripts.post_deploy_visual_fixtures import AGENT, AGENT_CARD
 from scripts.post_deploy_visual_matrix import fixture_for
-from shared.agent_roster import AgentCard, AgentDirectoryPage, AgentRoster
-from shared.agent_snapshot import AgentSnapshot
+from shared.agents.observation.roster import AgentCard, AgentDirectoryPage, AgentRoster
+from shared.agents.observation.snapshot import AgentSnapshot
 
 
 def test_preview_agent_reads_resolve_roster_directory_and_selected_detail() -> None:

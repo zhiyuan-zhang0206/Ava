@@ -10,7 +10,7 @@ tags:
 
 # Named agent impersonation sessions
 
-`shared/agents/impersonation/impersonation_sessions.py` exposes `(agent_id, session_id)` handles.
+`shared/agents/impersonation/sessions.py` exposes `(agent_id, session_id)` handles.
 Each agent allocates increasing integers starting at zero, through a database
 counter and allocation trigger, including when an older client inserts a row.
 The session `name` and free `executor_name` are separate from the CLI's observed
@@ -43,7 +43,7 @@ their credential and the activation gate only waits for a heartbeat.
 
 ## Bounded delivery
 
-`shared/agents/impersonation/impersonation_delivery.py` reserves host submissions against the
+`shared/agents/impersonation/delivery.py` reserves host submissions against the
 lease's `max_delivery_attempts` and `ack_window_seconds`. Requests snapshot
 `impersonation_max_delivery_attempts` and `impersonation_ack_window_seconds`
 from cluster config (defaults: 2 total attempts, 180 seconds per ACK window).
@@ -95,7 +95,7 @@ inputs become processed only after the note is durable; unacknowledged incoming
 content remains in the file for the resumed agent to handle.
 
 SDK collection, sampling and instrumentation belong to the upstream collector.
-The consumption boundary is `shared/agents/impersonation/impersonation_events.py`: explicit scoped
+The consumption boundary is `shared/agents/impersonation/events.py`: explicit scoped
 session binding, stable event IDs, skew-guarded time validation, deduplication
 and export refresh when late facts arrive. Protocol-v1 controller receipts
 capture event identities before telemetry enqueue, central transactional audit

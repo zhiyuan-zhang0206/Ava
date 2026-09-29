@@ -29,6 +29,6 @@ An independent agent label auto-generation process — polls per second for rows
 - `services/labeler/labeler.py:generate_label_async()` — LLM label generation
 
 ## Notes
-- Label generation logic lives in `shared/labels.py` (labels on agent rows) + `services/labeler/labeler.py` (the generation service) — extracted out of the gateway to eliminate a services → gateway reverse dependency
+- Label generation logic lives in `shared/agents/labels.py` (labels on agent rows) + `services/labeler/labeler.py` (the generation service) — extracted out of the gateway to eliminate a services → gateway reverse dependency
 - System prompt restricts label to `services.labeler_max_chars` (default 64) characters, outputting only the label itself
 - The prompt being summarized is frequently machine-authored — a long English second-person imperative brief written by one agent to spawn another. That shape steers a summarizer into *executing* the brief; the validity check above is what keeps the result out of the user-facing `agents.label` (issue #178)

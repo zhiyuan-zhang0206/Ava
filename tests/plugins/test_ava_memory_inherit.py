@@ -104,8 +104,8 @@ def memory_plugin() -> Iterator[Any]:
     tests/agent/test_fork_notes.py) so `fork_notes` runs against the
     registered note set."""
     from agent.state import clear_plugin_registrations
+    from shared.packages.plugins.context import PluginContext
     from shared.plugin_config_registry import bind_from_disk
-    from shared.plugin_context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):

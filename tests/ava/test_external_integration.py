@@ -17,12 +17,12 @@ from agent import state as state_module
 from ava import agent_identity, external
 from ava.external_state import decode_plugin_delta, load_snapshot
 from shared.agents import impersonation as leases
-from shared.agents.impersonation import impersonation_history as history
-from shared.caller_identity import CallerIdentity
+from shared.agents.impersonation import history
+from shared.agents.messages.caller_identity import CallerIdentity
 from shared.config import settings
 from shared.db import create_agent
 from shared.machine import machine_name
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 from shared.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 

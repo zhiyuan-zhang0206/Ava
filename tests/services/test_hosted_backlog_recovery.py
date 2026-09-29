@@ -23,8 +23,9 @@ from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
+from shared.agents.incarnation import hosted_force
+from shared.agents.incarnation import resources as incarnation_resources
 from shared.db import insert_inbound_message
-from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.machine import machine_name
 from tests.agent.test_hosted_db_recovery import _admit, _graph
 from tests.services.test_agent_host import _PendingScanPool
@@ -148,15 +149,15 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
         [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE
     ) as predecessor:
         assert predecessor.stdin is not None
-        dead = ResourceProcess.capture(psutil.Process(predecessor.pid))
+        dead = incarnation_resources.ResourceProcess.capture(psutil.Process(predecessor.pid))
         predecessor.stdin.close()
         predecessor.wait(timeout=3)
     row = db_conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent,)
     ).fetchone()
     assert row is not None
-    resources = decode_resources(row[0])
-    assert isinstance(resources, IncarnationResources)
+    resources = incarnation_resources.decode_resources(row[0])
+    assert isinstance(resources, incarnation_resources.IncarnationResources)
     db_conn.execute(
         "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
         (Jsonb(resources.model_copy(update={"host_process": dead}).model_dump(mode="json")), agent),
@@ -269,9 +270,9 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
                 "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent,)
             ).fetchone()
             assert row is not None
-            resources = decode_resources(row[0])
-            assert isinstance(resources, IncarnationResources)
-            native = ResourceProcess.capture(psutil.Process(predecessor.pid))
+            resources = incarnation_resources.decode_resources(row[0])
+            assert isinstance(resources, incarnation_resources.IncarnationResources)
+            native = incarnation_resources.ResourceProcess.capture(psutil.Process(predecessor.pid))
             db_conn.execute(
                 "UPDATE agents_meta SET status=%s,incarnation_resources=%s,"
                 "lease_expires_at=now()-interval '1s' WHERE id=%s",
@@ -769,7 +770,7 @@ class TestHostedHostWakePacing:
         )
         turn = AsyncMock(return_value=None)
         monkeypatch.setattr(host, "_run_turn", turn)
-        monkeypatch.setattr("shared.hosted_force.original_host_force", AsyncMock(return_value=None))
+        monkeypatch.setattr(hosted_force, "original_host_force", AsyncMock(return_value=None))
         monkeypatch.setattr(
             "services.agent_host.host.maintenance_receipts.record_drained",
             AsyncMock(return_value=None),

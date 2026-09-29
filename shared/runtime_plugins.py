@@ -9,8 +9,8 @@ from __future__ import annotations
 import importlib.metadata
 from pathlib import Path
 
-from shared.packages.skills import skill_names
-from shared.plugin_manifest import check_host_engine, load_manifest, range_allows
+from shared.packages.plugins.manifest import check_host_engine, load_manifest, range_allows
+from shared.packages.skills import names
 from shared.runtime_release import ReleaseRejectedError
 
 
@@ -25,12 +25,12 @@ def declared_plugins(root: Path) -> dict[str, str]:
             raise ReleaseRejectedError("retained plugin requires a complete declared package")
         if (directory / ".mcp.json").exists():
             raise ReleaseRejectedError("plugin MCP executable closure is not yet supported")
-        if skill_names.match_key(manifest.name) != skill_names.match_key(directory.name):
+        if names.match_key(manifest.name) != names.match_key(directory.name):
             raise ReleaseRejectedError("plugin manifest identity differs from directory")
         for path in directory.rglob("*"):
             if path.name == ".git" or path.name.startswith(".env"):
                 raise ReleaseRejectedError("plugin input contains checkout or secret configuration")
-        if skill_names.find(directory.name, versions) is not None:
+        if names.find(directory.name, versions) is not None:
             raise ReleaseRejectedError("plugin names collide after normalization")
         versions[directory.name] = manifest.version
     return versions
@@ -40,8 +40,8 @@ def verify_plugin_dependencies(root: Path, required: tuple[str, ...]) -> None:
     """Validate against installed wheel dependencies, never host packages."""
     versions = declared_plugins(root)
     builtin = Path(__file__).resolve().parent.parent / "ava_builtins/plugins"
-    if {skill_names.match_key(name) for name in versions} & {
-        skill_names.match_key(path.name) for path in builtin.iterdir() if path.is_dir()
+    if {names.match_key(name) for name in versions} & {
+        names.match_key(path.name) for path in builtin.iterdir() if path.is_dir()
     }:
         raise ReleaseRejectedError("external plugin conflicts with builtin image package")
     if not set(required) <= set(versions):
@@ -55,7 +55,7 @@ def verify_plugin_dependencies(root: Path, required: tuple[str, ...]) -> None:
         if manifest.dependencies.host_capabilities:
             raise ReleaseRejectedError("plugin host capability closure is not yet supported")
         for dependency, constraint in manifest.dependencies.plugins.items():
-            resolved = skill_names.find(dependency, versions)
+            resolved = names.find(dependency, versions)
             if resolved is None or not range_allows(constraint, versions[resolved]):
                 raise ReleaseRejectedError("plugin dependency missing or incompatible")
         for package, constraint in manifest.dependencies.python_packages.items():

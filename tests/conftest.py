@@ -978,7 +978,7 @@ def _clean_state(
         # on the TRUNCATE below (a background writer leaked from a prior test on
         # this worker) can also DEADLOCK this TRUNCATE, not just write to a dead
         # id. The
-        # straggler's snapshot query (`shared/agent_snapshot.py`: agents_meta
+        # straggler's snapshot query (`shared/agents/observation/snapshot.py`: agents_meta
         # LEFT JOIN inbound_messages) takes its relation locks in the opposite
         # order to this TRUNCATE list (inbound_messages first, agents_meta
         # second) — and other product transactions (deliver_chat_inbound) lock in
@@ -1351,7 +1351,7 @@ async def aredis_inbound_listener():
     fixed pseudo-agent channel (agent_id=0); tests that park in a real wake need
     the listener's channel to match their agent, so they build their own
     per-agent listener instead. Closed on teardown."""
-    from shared.redis_listener import RedisInboundListener
+    from shared.events.live.redis_listener import RedisInboundListener
 
     listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=0)
     try:

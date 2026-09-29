@@ -44,9 +44,9 @@ from typing import Any
 from gateway import loki_events
 from gateway._edge_stream import EDGE_EVENT_NAMES, LINEAGE_EVENT_NAMES, LOKI_EDGE_LIMIT
 from shared import telemetry
+from shared.events.live.redis_client import sync_redis
 from shared.log import logger
 from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT
-from shared.redis_client import sync_redis
 
 # Frozen-source cache (mirrors gateway/routers/fleet_graph.py): the archive
 # stream is immutable, so a 24h Redis entry turns its per-request scan into a

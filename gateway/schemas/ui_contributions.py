@@ -1,7 +1,7 @@
 """Console contribution aggregate — `GET /api/ui/contributions`.
 
 The wire form of what the cluster's enabled plugins declare under
-`contributions.ui` (`shared/plugin_ui_contributions.py`). Every entry is
+`contributions.ui` (`shared/packages/plugins/ui_contributions.py`). Every entry is
 name-attributed: the console labels provenance, and an operator tracing a
 surface back to the plugin that put it there reads one field.
 

@@ -107,7 +107,7 @@ plugin-spec-v2's reserved growth point, filled:
 }
 ```
 
-Validated by `shared/plugin_manifest.py` like every other manifest field:
+Validated by `shared/packages/plugins/manifest.py` like every other manifest field:
 unknown contribution type = validator error (closed set, fail fast), unknown
 theme token = validator error (the vocabulary is the `globals.css` custom
 property set), `icon` from a closed icon-name set (lucide names — data, not
@@ -175,7 +175,7 @@ by setting the custom properties on the root element.
 The vocabulary is the **color** custom properties of that layer, not every
 property in it: `--radius` is deliberately excluded, because the component
 geometry is tuned around it and re-valuing it is a layout change wearing a
-theme's clothes (`shared/plugin_ui_contributions.py:NON_THEMABLE_TOKENS`, kept
+theme's clothes (`shared/packages/plugins/ui_contributions.py:NON_THEMABLE_TOKENS`, kept
 honest against `globals.css` by its test).
 
 **A skin and the light/dark mode must stay orthogonal**, which is why a pack has
@@ -279,12 +279,12 @@ catalog request. This is an agent-scoped API consumer, not a new
 composer/plugin extension point.
 
 - **U1 — manifest key + validator** — **shipped**: the `contributions.ui`
-  schema lives in `shared/plugin_ui_contributions.py` (closed type set, closed
+  schema lives in `shared/packages/plugins/ui_contributions.py` (closed type set, closed
   icon vocabulary, and a theme token vocabulary locked against
   `ui/web/src/app/globals.css` by
   `tests/shared/test_plugin_ui_contributions.py`, so a token the console adds
   fails the suite until it is offered to skins or listed as non-themable).
-  `shared/plugin_manifest.py` calls it for the `ui` key. Declaration-only;
+  `shared/packages/plugins/manifest.py` calls it for the `ui` key. Declaration-only;
   zero runtime change. `--radius` is deliberately non-themable — a theme pack
   is colors, and re-valuing the radius is a layout change in a theme's
   clothes.
@@ -363,7 +363,7 @@ composer/plugin extension point.
   **U4a — inspector widgets (shipped, task #2909)** — the one inspector
   surface a declaration cannot carry: per-agent interactive targets. A plugin
   registers `InspectWidgetSpec` at its `inspector.py` import
-  (`shared/plugin_inspector.py`); the gateway imports the ENABLED builtin
+  (`shared/packages/plugins/inspector.py`); the gateway imports the ENABLED builtin
   plugins' modules under their `PluginContext` (the plugin-metric loader's
   shape) and serves `GET /api/agents/{id}/inspect/widgets` with its payload —
   the agent's active tasks — resolved server-side. The console renders
@@ -381,7 +381,7 @@ composer/plugin extension point.
   the plugin's value row and must survive as a `plugin_stats` primary key),
   `GET /api/ui/contributions` carries them attributed, and
   `GET /api/stats/dashboard` carries the values read from `plugin_stats`
-  (`shared/plugin_stats.py`, one upsert-only row per `(plugin, id)`). The
+  (`shared/packages/plugins/stats.py`, one upsert-only row per `(plugin, id)`). The
   console joins the two halves and renders cards below the built-in grid —
   deliberately NOT windowed: a plugin value is a point in time and the window
   selector must not pretend to aggregate it.

@@ -37,8 +37,8 @@ from agent.graph import claim_node, exec_node
 from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CompactState
+from shared.agents.context import AvaContext
 from shared.config import settings
-from shared.context import AvaContext
 from shared.db import insert_inbound_message
 from tests.conftest import spawn_agent
 
@@ -3171,7 +3171,7 @@ def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
     from agent.graph.claim.node import claim_will_idle
     from agent.messages import system_note_message
     from agent.state_channels import CIRCUIT_REASON_BILLING, CircuitState
-    from shared.message_kwargs import NoteTag
+    from shared.agents.messages.kwargs import NoteTag
 
     fresh = AgentState()
     fresh.messages = [SystemMessage(content="prompt")]

@@ -34,7 +34,7 @@ def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
     from gateway.routers import agents as route
     from gateway.routers.agents_forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agent_observation import AvailabilityReason
+    from shared.agents.observation.evidence import AvailabilityReason
 
     attempts: list[LaunchAgentRequest] = []
 
@@ -113,7 +113,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
     from gateway.routers import agents as route
     from gateway.routers.agents_forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agent_observation import AvailabilityReason
+    from shared.agents.observation.evidence import AvailabilityReason
 
     async def _fail(_target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
@@ -144,7 +144,7 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
     from gateway.routers import agents as route
     from gateway.routers.agents_forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agent_observation import AvailabilityReason
+    from shared.agents.observation.evidence import AvailabilityReason
 
     with TestClient(app) as client:
         source = client.post("/api/agents", json={}).json()["id"]
@@ -178,7 +178,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
     from gateway.routers import agents as route
     from gateway.routers.agents_forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agent_observation import AvailabilityReason
+    from shared.agents.observation.evidence import AvailabilityReason
 
     async def _admit_then_fail(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         with db_conn.cursor() as cur:

@@ -114,7 +114,7 @@ An MCP declaration carries `{source, scope}` — not just a config dict:
   as a third source. `ava mcp install <git-url|local-dir>` lands a self-contained
   package (own `.mcp.json` + `pyproject.toml`) under `$AVA_HOME/mcps/<name>/`,
   runs `uv sync` to build its isolated `.venv`, and registers it in
-  `shared/install_registry.py`. `load_mcp_config` scans it as the installed layer
+  `shared/packages/extensions/install_registry.py`. `load_mcp_config` scans it as the installed layer
   (`_installed_mcp_paths`, registry-gated), between plugin and machine. The
   package's command is a relative `.venv/bin/python -m <module>` spawned with
   cwd = the package dir (`installed_mcp_dir`), so its deps stay out of core — no

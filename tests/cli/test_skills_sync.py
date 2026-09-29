@@ -11,7 +11,7 @@ import pytest
 import ava.skills as skills_mod
 from cli.commands.extensions.skill import cmd_skill_disable, cmd_skill_enable, cmd_skill_register
 from cli.commands.extensions.skills_sync import converge_skills
-from shared import install_registry as reg
+from shared.packages.extensions import install_registry as reg
 
 
 def _write_skill(root: Path, dirname: str, name: str | None = None, body: str = "# B\n") -> Path:
@@ -419,7 +419,7 @@ def test_legacy_agents_skill_converge_copy_cleaned_up(unit_home: Path, tmp_path:
     deregistered, so runtime agents' indexes lose the L4 noise."""
     import shutil
 
-    from shared.install_registry import InstalledPackage, tree_hash
+    from shared.packages.extensions.install_registry import InstalledPackage, tree_hash
 
     repo = _agents_repo(tmp_path)
     # Pre-#146 state, as converge used to write it: copy + repo row.

@@ -67,7 +67,7 @@ def test_is_excluded_covers_frozen_axes_and_fixed_base_artifacts() -> None:
     # Runs inside the reconstructed base install: its refs keep the base's paths.
     assert gate._is_excluded("scripts/legacy_lkg/cold_boot.py") is True
     assert gate._is_excluded("scripts/legacy_lkg/prepare.py") is False
-    assert gate._is_excluded("shared/docs/notes.py") is False
+    assert gate._is_excluded("shared/packages/docs/notes.py") is False
 
 
 def test_missing_accepts_submodule_fallback() -> None:

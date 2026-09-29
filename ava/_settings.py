@@ -131,7 +131,7 @@ def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[repo
 def _connect_redis() -> "redis.Redis":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     import redis as _redis_lib
 
-    from shared.redis_client import RESILIENCE_KWARGS
+    from shared.events.live.redis_client import RESILIENCE_KWARGS
 
     if not settings.data_plane.redis_url:
         raise RuntimeError(
@@ -163,7 +163,7 @@ REDIS = _LazyConnection(_connect_redis, "REDIS")
 # `ava._settings.plugins.<plugin_name>` dynamically resolves the frozen Pydantic
 # BaseModel instance for the current turn's agent (bound in by
 # `register_plugin_config` + `bind_from_disk`, agent-scoped by
-# `shared/plugin_config_view.py`).
+# `shared/packages/plugins/config_view.py`).
 #
 # Design:
 # - Private module (underscore prefix) → not in `ava.help()`, for plugin authors not the agent
@@ -176,7 +176,7 @@ REDIS = _LazyConnection(_connect_redis, "REDIS")
 
 class _PluginsView:
     """`ava._settings.plugins` — attribute access routes to the turn's config
-    for that plugin (`shared/plugin_config_view.py`).
+    for that plugin (`shared/packages/plugins/config_view.py`).
 
     Plugins not registered raise AttributeError listing known plugin names,
     so typos / "bind hasn't run yet" are immediately visible.
@@ -185,8 +185,8 @@ class _PluginsView:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
+        from shared.packages.plugins.config_view import turn_plugin_config
         from shared.plugin_config_registry import registered_plugin_config_names
-        from shared.plugin_config_view import turn_plugin_config
 
         known = registered_plugin_config_names()
         if name not in known:

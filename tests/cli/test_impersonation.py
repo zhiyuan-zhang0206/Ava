@@ -18,7 +18,7 @@ from cli.commands.agents import impersonation as cli
 from cli.commands.agents.timeline import cmd_agents_timeline
 from cli.parsers import build_parser
 from shared.agents import impersonation as control
-from shared.agents.impersonation import impersonation_sessions as sessions
+from shared.agents.impersonation import sessions as sessions
 
 
 def _private_id(agent_id: int, session_id: int) -> str:
@@ -320,9 +320,7 @@ def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
         _private_id,
     )
     monkeypatch.setattr(control, "release", release)
-    monkeypatch.setattr(
-        "shared.agents.impersonation.impersonation_history.public_session", _public_session
-    )
+    monkeypatch.setattr("shared.agents.impersonation.history.public_session", _public_session)
     assert (
         cli.cmd_impersonate(
             _args("release", "0", "--agent", "405", "--summary", "Completed X.\nNext Y.")

@@ -64,7 +64,7 @@ from shared.alerts import (
 )
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.redis_client import sync_redis
+from shared.events.live.redis_client import sync_redis
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -172,7 +172,7 @@ def publish_alert_rows(rows: list[dict[str, Any]]) -> None:
         with sync_redis() as client:
             for row in rows:
                 frame = AlertRow(**row).model_dump_json()
-                client.publish(ALERTS_CHANNEL, frame)  # pyright: ignore[reportUnknownMemberType] — redis-py from_url kwargs typed Unknown (same pattern as shared/redis_client.py)
+                client.publish(ALERTS_CHANNEL, frame)  # pyright: ignore[reportUnknownMemberType] — redis-py from_url kwargs typed Unknown (same pattern as shared/events/live/redis_client.py)
     except Exception:
         _log.warning("alerts: SSE publish failed (Redis unreachable?)", exc_info=True)
 

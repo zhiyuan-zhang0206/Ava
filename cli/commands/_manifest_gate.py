@@ -17,7 +17,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from shared import paths, plugin_manifest
+from shared import paths
+from shared.packages.plugins import manifest as plugin_manifest
 
 
 def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) -> list[str]:
@@ -40,7 +41,7 @@ def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) ->
     errors += plugin_manifest.check_host_commit(manifest, paths.repo_root())
 
     if mirror_pyproject:
-        from shared import pyproject_mirror
+        from shared.packages.plugins import pyproject_mirror
 
         pyproject = pkg_dir / "pyproject.toml"
         if pyproject.is_file():

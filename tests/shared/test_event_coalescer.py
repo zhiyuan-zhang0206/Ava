@@ -1,4 +1,4 @@
-"""DeltaCoalescer (shared/event_coalescer.py) unit tests.
+"""DeltaCoalescer (shared/events/live/coalescer.py) unit tests.
 
 The coalescer buffers per-item streamed delta fragments and flushes ONE
 event per item per SSE event window (EVENT_COALESCE_MS = 40ms), so the
@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from shared.event_coalescer import DeltaCoalescer
+from shared.events.live.coalescer import DeltaCoalescer
 
 
 def _coalescer(window_ms: int = 10) -> tuple[DeltaCoalescer, list[tuple[str, str]]]:

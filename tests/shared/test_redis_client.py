@@ -1,4 +1,4 @@
-"""shared.redis_client: per-loop singleton + uses settings.data_plane.redis_url."""
+"""shared.events.live.redis_client: per-loop singleton + uses settings.data_plane.redis_url."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ from redis.asyncio.connection import AbstractConnection
 from redis.exceptions import AuthenticationError, NoPermissionError
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from shared import redis_client as mod
 from shared.config import settings
-from shared.redis_client import _TransportAwareAsyncConnection
+from shared.events.live import redis_client as mod
+from shared.events.live.redis_client import _TransportAwareAsyncConnection
 
 
 @pytest.fixture(autouse=True)

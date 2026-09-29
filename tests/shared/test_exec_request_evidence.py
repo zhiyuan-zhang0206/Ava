@@ -15,14 +15,14 @@ from uuid import uuid4
 import psutil
 import pytest
 
-from shared import exec_request_evidence
-from shared.exec_request_evidence import (
+from shared.agents.incarnation import exec_request_evidence
+from shared.agents.incarnation.exec_request_evidence import (
     Verdict,
     main,
     quarantine_stale,
     survey,
 )
-from shared.incarnation_resources import IncarnationResources, ResourceProcess
+from shared.agents.incarnation.resources import IncarnationResources, ResourceProcess
 from shared.runtime_incarnation import RuntimeIncarnation
 
 _AGENT = 424242
@@ -552,7 +552,7 @@ def test_diagnostics_name_the_file_the_owner_and_the_commands(
     hint = exec_request_evidence.disposition_hint(_AGENT)
 
     assert str(request) in line and "[stale]" in line and "live_pids=none" in line
-    assert f"--agent {_AGENT}" in hint and "shared.exec_request_evidence" in hint
+    assert f"--agent {_AGENT}" in hint and "shared.agents.incarnation.exec_request_evidence" in hint
 
 
 def test_cli_lists_and_quarantines_reviewed_entries(

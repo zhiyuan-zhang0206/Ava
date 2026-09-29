@@ -98,7 +98,7 @@ def land_cluster_extensions() -> None:
 
     The boot-side sibling of `cli/commands/extensions/materialize.py`
     (`materialize_cluster_extensions`), over the same
-    `shared.extension_materialize.materialize_skills`. Converge covers the
+    `shared.packages.extensions.materialize.materialize_skills`. Converge covers the
     operator path — `ava start`, `ava converge`; this covers the one that needs
     no operator at all, which is what closes the offline window: a machine that
     was down when someone ran `ava skill install` elsewhere catches up the moment
@@ -127,11 +127,12 @@ def land_cluster_extensions() -> None:
     On a cluster with no installed extensions this is one indexed query
     returning no rows.
     """
-    from shared import db, extension_materialize, paths
+    from shared import db, paths
+    from shared.packages.extensions import materialize
 
     try:
         with db.connect() as conn:
-            result = extension_materialize.materialize_skills(conn, dest_root=paths.skills_dir())
+            result = materialize.materialize_skills(conn, dest_root=paths.skills_dir())
     except Exception as exc:
         logger.warning(
             "[extensions] could not read the cluster registry at boot ({}); this "
@@ -170,10 +171,10 @@ def load_process_extensions() -> None:
     made the module object stable, which removes a different obstacle, not this
     one). Newly installed plugins take effect on the next runner restart.
     """
-    from shared import plugins_config
+    from shared.packages.plugins import enable_config
 
-    known = set(plugins_config.installed_plugin_dirs())
-    config = plugins_config.load_for_runtime(known)
+    known = set(enable_config.installed_plugin_dirs())
+    config = enable_config.load_for_runtime(known)
     enabled = {name for name, entry in config.plugins.items() if entry.enabled}
     plugin_loader.scan_and_load(enabled=enabled)
     # Each loaded surface's agent-runtime face (state fields / hooks / prompt

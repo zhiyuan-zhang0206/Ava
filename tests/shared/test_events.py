@@ -1,6 +1,6 @@
-"""Tests for shared.live_events — TokenUsage model."""
+"""Tests for shared.events.live.projection — TokenUsage model."""
 
-from shared.live_events import TokenUsage
+from shared.events.live.projection import TokenUsage
 
 
 def test_token_usage_has_reasoning_tokens() -> None:

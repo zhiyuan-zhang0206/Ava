@@ -29,9 +29,10 @@ from pathlib import Path
 
 import psycopg
 
-from shared import extension_registry, plugin_load_report
 from shared.log import logger
-from shared.plugin_context import PluginContext
+from shared.packages.extensions import registry
+from shared.packages.plugins import load_report
+from shared.packages.plugins.context import PluginContext
 from shared.plugin_metrics import MetricSpec, drop_plugin_metrics, registered_metrics
 
 # ── plugin spec suppliers ─────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ def load_repo_plugin_specs() -> PluginSpecs:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(name, exc)
+            load_report.report_plugin_load_failure(name, exc)
             drop_plugin_metrics(name)
             failed.append(name)
         else:
@@ -124,14 +125,14 @@ def load_installed_plugin_specs(
     loaded: list[str] = []
     failed: list[str] = []
     already = set(skip_names)
-    for extension in extension_registry.list_enabled(conn, kind="plugin"):
+    for extension in registry.list_enabled(conn, kind="plugin"):
         if extension.is_repo_source or extension.name in already:
             continue
         if extension.content_hash is None:  # pragma: no cover — schema-forbidden
             logger.error("plugin {name} has no content hash — skipped", name=extension.name)
             failed.append(extension.name)
             continue
-        archive = extension_registry.get_blob(conn, extension.content_hash)
+        archive = registry.get_blob(conn, extension.content_hash)
         if archive is None:  # pragma: no cover — schema-forbidden
             logger.error(
                 "plugin {name} points at content_hash {digest} with no blob — skipped",
@@ -156,7 +157,7 @@ def load_installed_plugin_specs(
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(extension.name, exc)
+            load_report.report_plugin_load_failure(extension.name, exc)
             drop_plugin_metrics(extension.name)
             failed.append(extension.name)
         else:
@@ -170,7 +171,7 @@ def _unpacked_plugin(name: str, archive: bytes) -> Generator[Path]:
     (and removes) the scratch tree it creates."""
     with tempfile.TemporaryDirectory(prefix=f"ava-plugin-{name}-") as scratch:
         tree = Path(scratch)
-        extension_registry.unpack_tree(archive, tree)
+        registry.unpack_tree(archive, tree)
         yield tree
 
 

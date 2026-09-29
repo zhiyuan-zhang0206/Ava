@@ -12,9 +12,9 @@ from pydantic import (
 
 from gateway.schemas.stats import StatsWindowHours
 from ops.rpc_schemas import ShellInfo
-from shared.agent_observation import AgentObservation
-from shared.agent_snapshot import OpenNotice
-from shared.tasks.priority import Priority
+from shared.agents.observation.evidence import AgentObservation
+from shared.agents.observation.snapshot import OpenNotice
+from shared.agents.tasks.priority import Priority
 
 
 class AgentCost(BaseModel):
@@ -379,7 +379,7 @@ class InspectWidgetResult(BaseModel):
     GET /api/agents/{id}/inspect/widgets.
 
     The resolved twin of a registered `InspectWidgetSpec`
-    (`shared/plugin_inspector.py`): `plugin` + `id` name the registration,
+    (`shared/packages/plugins/inspector.py`): `plugin` + `id` name the registration,
     `kind` selects the console renderer (a closed set; an unknown kind is
     skipped by the console), and the payload field the kind reads (`tasks`)
     carries the kernel-resolved rows. A widget with an empty payload is

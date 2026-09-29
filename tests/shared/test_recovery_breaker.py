@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from shared.recovery_breaker import (
+from shared.agents.recovery_breaker import (
     HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
     PERMANENT_REJECT_REASON_BILLING,
     RECOVERY_BREAKER_CLEAR,

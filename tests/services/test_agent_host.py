@@ -43,12 +43,12 @@ from services.agent_host import dispatcher, settlement
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome, _config_fingerprint
+from shared.agents.context import AvaContext
 from shared.config import settings
 from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
 from shared.lm.factory import validate_model_config
+from shared.packages.plugins.config_view import turn_plugin_config
 from shared.plugin_config_registry import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
-from shared.plugin_config_view import turn_plugin_config
 from tests.shared.poll_until import poll_until_async
 
 
@@ -396,7 +396,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
         # settlement and refusal are covered by test_hosted_force_quiescence.
         return False
 
-    monkeypatch.setattr("shared.hosted_force.original_host_force", _no_force)
+    monkeypatch.setattr("shared.agents.incarnation.hosted_force.original_host_force", _no_force)
 
     def _build(
         rows: dict[int, _Row], results: dict[int, list[dict[str, Any]]] | None = None
@@ -536,7 +536,7 @@ class TestPoolIsolation:
 
         monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
-        monkeypatch.setattr("shared.hosted_force.original_host_force", force)
+        monkeypatch.setattr("shared.agents.incarnation.hosted_force.original_host_force", force)
         host = AgentHost(
             pool=cast(AsyncConnectionPool[Any], turn_pool),
             control_pool=cast(AsyncConnectionPool[Any], control_pool),

@@ -14,7 +14,7 @@ counting `socket.getaddrinfo` calls under a literal target: 0 for both. Only
 httpcore's `SyncBackend` (a thin wrapper over stdlib
 `socket.create_connection`, which calls `getaddrinfo` unconditionally) and
 redis-py's sync `Connection._connect` lack that check; redis-py's fix lives
-in `shared/redis_client.py` (a custom `Connection` subclass, mirroring the
+in `shared/events/live/redis_client.py` (a custom `Connection` subclass, mirroring the
 same idea).
 
 httpx.HTTPTransport doesn't expose httpcore.ConnectionPool's `network_backend`

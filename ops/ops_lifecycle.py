@@ -110,7 +110,7 @@ from shared.agents import (
 )
 from shared.audit_events import prepare_event_log
 from shared.db import insert_inbound_message
-from shared.live_announce import publish_agent_updated_sync
+from shared.events.live.announce import publish_agent_updated_sync
 from shared.lm.registry import normalize_overlay_llm_model
 from shared.machine import machine_name
 
@@ -449,8 +449,8 @@ def _restart_blocking(
     when the agent is already terminated."""
     from psycopg import sql
 
+    from shared.agents.incarnation.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
     from shared.db_transaction import write_transaction
-    from shared.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
 
     with write_transaction(db_pool) as conn:
         row = conn.execute(
@@ -528,11 +528,11 @@ def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
       refused, naming the guard that failed;
     - already terminated -> `already_terminated` (an idempotent repeat).
     """
-    from shared.db_transaction import write_transaction
-    from shared.recovery_breaker import (
+    from shared.agents.recovery_breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         SUPPRESS_REASON_PERMANENT_REJECT,
     )
+    from shared.db_transaction import write_transaction
 
     with write_transaction() as conn:
         row = conn.execute(

@@ -50,7 +50,7 @@ from ops import ops_lifecycle as _ops
 from shared.config import settings
 from shared.db import NOTICE_FYI_TTL_DAYS
 from shared.db_transaction import write_transaction
-from shared.live_announce import publish_agent_updated_sync
+from shared.events.live.announce import publish_agent_updated_sync
 
 router = APIRouter()
 _log = logging.getLogger(__name__)

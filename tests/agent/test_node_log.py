@@ -467,7 +467,7 @@ async def test_node_lifecycle_full_window_skips_anchors_query_for_modern_message
     from langchain_core.messages import HumanMessage
 
     import agent.graph.node_log as nl
-    from shared.message_kwargs import AvaMsgType
+    from shared.agents.messages.kwargs import AvaMsgType
 
     queried: list[int] = []
 

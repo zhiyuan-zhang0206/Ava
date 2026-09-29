@@ -27,8 +27,12 @@ from scripts import cutover_db_records as records
 from scripts import cutover_db_survey as survey_module
 from scripts import cutover_inventory as inventory
 from scripts.cutover_db_survey import FREE_LEASE, Inputs, RetiredUnit, export_rows, survey
+from shared.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceBirth,
+    decode_resources,
+)
 from shared.config import settings
-from shared.incarnation_resources import IncarnationResources, ResourceBirth, decode_resources
 from shared.machine import machine_name
 
 GATEWAY, PAUSED, GONE = "gw-box", "win-box", "gone-box"

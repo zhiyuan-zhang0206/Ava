@@ -131,7 +131,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
 
     from agent import state as states
     from agent.graph.claim.node import claim_node
-    from shared.context import AvaContext
+    from shared.agents.context import AvaContext
 
     agent = _agent(db_conn)
     saver = AsyncPostgresSaver(aops_pool)

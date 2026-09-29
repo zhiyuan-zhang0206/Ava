@@ -15,10 +15,10 @@ from psycopg_pool import ConnectionPool
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from gateway.routers.delivery import deliver_chat_inbound
-from shared import redis_client
 from shared.agents import AgentStatus
 from shared.config import settings
 from shared.db import create_agent
+from shared.events.live import redis_client
 
 
 def _sync_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:

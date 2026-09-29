@@ -168,7 +168,7 @@ def test_ensure_plugins_loaded_contains_a_failing_load_chain(
     namespaces; the stderr line is the always-visible channel because a
     launched child usually has no loguru sink configured."""
     from agent import extensions
-    from shared.plugins_config import DuplicatePlugin
+    from shared.packages.plugins.enable_config import DuplicatePlugin
 
     def boom(*, surface: bool = False) -> None:
         raise DuplicatePlugin("plugin 'x' exists in both builtin and external roots")

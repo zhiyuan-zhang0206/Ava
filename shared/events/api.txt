@@ -145,6 +145,187 @@ def sql_join(*parts: str) -> LiteralString
 def telemetry_events() -> frozenset[str]
 def tier_for(event_name: str, category: str, level: str) -> EventTier
 
+## shared.events.live
+
+## shared.events.live.announce
+def publish_agent_spawned_sync(agent_id: int) -> None
+async def publish_agent_updated(agent_id: int) -> None
+def publish_agent_updated_sync(agent_id: int) -> None
+def publish_impersonation_changed_sync(agent_id: int) -> None
+def publish_notice_posted_sync(agent_id: int, notice_id: int, priority: str, title: str, task_id: int | None=None) -> None
+def publish_notice_resolved_sync(agent_id: int, notice_id: int) -> None
+def publish_page_closed_sync(agent_id: int, name: str) -> None
+def publish_task_created_sync(agent_id: int, task_id: int) -> None
+def publish_task_updated_sync(agent_id: int, task_id: int) -> None
+
+## shared.events.live.coalescer
+class DeltaCoalescer
+  def __init__(self, emit: Callable[[str, str], None], *, window_ms: int=EVENT_COALESCE_MS) -> None
+  def append(self, key: str, fragment: str) -> None
+  def flush(self) -> None
+
+## shared.events.live.projection
+class AgentSpawned(_Base)
+  role: Literal['agent_spawned'] = 'agent_spawned'
+class AgentUpdated(_Base)
+  role: Literal['agent_updated'] = 'agent_updated'
+class Cancelled(_Base)
+  role: Literal['cancelled'] = 'cancelled'
+class ChatDelta(_Base)
+  content: str
+  item_id: str
+  role: Literal['chat_delta'] = 'chat_delta'
+class ChatStart(_Base)
+  item_id: str
+  role: Literal['chat_start'] = 'chat_start'
+class CodeDelta(_Base)
+  content: str
+  item_id: str
+  role: Literal['code_delta'] = 'code_delta'
+class CodeStart(_Base)
+  item_id: str
+  role: Literal['code_start'] = 'code_start'
+class CompactDone(_Base)
+  role: Literal['compact_done'] = 'compact_done'
+class CompactFinished(_Base)
+  compact_id: str
+  finished_at: str
+  role: Literal['compact_finished'] = 'compact_finished'
+  status: Literal['success', 'failure', 'replaced']
+class CompactRequest(_Base)
+  content: str
+  role: Literal['compact_request'] = 'compact_request'
+class CompactStarted(_Base)
+  compact_id: str
+  mode: Literal['request', 'auto']
+  role: Literal['compact_started'] = 'compact_started'
+  started_at: str
+EVENT_ADAPTER: TypeAdapter[Event] = ...
+EVENT_COALESCE_MS: int = 40
+class Error(_Base)
+  blocked: bool = False
+  content: str
+  error_class: str | None = None
+  provider: str | None = None
+  reason: str | None = None
+  recovery: str | None = None
+  role: Literal['error'] = 'error'
+  status: int | None = None
+Event = Annotated[ChatStart | ChatDelta | CompactRequest | CompactDone | CompactStarted | CompactFinished | CodeStart | CodeDelta | ReasoningStart | ReasoningDelta | ExecStart | ExecOutputChunk | ExecOutput | Error | Cancelled | ImpersonationChanged | InboundArrived | InboundCommitted | LabelUpdated | PageOpened | PageClosed | TokenUsage | LLMDone | TimelineSnapshot | AgentSpawned | AgentUpdated | NoticePosted | NoticeResolved | TaskCreated | TaskUpdated, Field(discriminator='role')]
+class ExecOutput(_Base)
+  content: str
+  item_id: str
+  role: Literal['exec_output'] = 'exec_output'
+class ExecOutputChunk(_Base)
+  content: str
+  item_id: str
+  keepalive: bool = False
+  role: Literal['exec_output_chunk'] = 'exec_output_chunk'
+class ExecStart(_Base)
+  item_id: str
+  role: Literal['exec_start'] = 'exec_start'
+GLOBAL_ROLES: frozenset[str] = ...
+class ImpersonationChanged(_Base)
+  role: Literal['impersonation_changed'] = 'impersonation_changed'
+class InboundArrived(_Base)
+  content: str
+  inbound_id: int
+  kind: str
+  role: Literal['inbound_arrived'] = 'inbound_arrived'
+  source: str
+class InboundCommitted(_Base)
+  inbound_id: int
+  role: Literal['inbound_committed'] = 'inbound_committed'
+class LLMDone(_Base)
+  role: Literal['llm_done'] = 'llm_done'
+class LabelUpdated(_Base)
+  label: str | None
+  role: Literal['label_updated'] = 'label_updated'
+class NoticePosted(_Base)
+  notice_id: int
+  priority: str
+  role: Literal['notice_posted'] = 'notice_posted'
+  task_id: int | None = None
+  title: str
+class NoticeResolved(_Base)
+  notice_id: int
+  role: Literal['notice_resolved'] = 'notice_resolved'
+class PageClosed(_Base)
+  name: str
+  role: Literal['page_closed'] = 'page_closed'
+class PageOpened(_Base)
+  name: str
+  page_id: int
+  port: int
+  role: Literal['page_opened'] = 'page_opened'
+  title: str | None
+  url: str
+class ReasoningDelta(_Base)
+  content: str
+  item_id: str
+  role: Literal['reasoning_delta'] = 'reasoning_delta'
+class ReasoningStart(_Base)
+  item_id: str
+  role: Literal['reasoning_start'] = 'reasoning_start'
+SYSTEM_ROLES: frozenset[str] = ...
+class TaskCreated(_Base)
+  role: Literal['task_created'] = 'task_created'
+  task_id: int
+class TaskUpdated(_Base)
+  role: Literal['task_updated'] = 'task_updated'
+  task_id: int
+class TimelineSnapshot(_Base)
+  items: list[dict[str, Any]]
+  msg_count: int
+  role: Literal['timeline_snapshot'] = 'timeline_snapshot'
+class TokenUsage(_Base)
+  input_tokens: int
+  output_tokens: int
+  reasoning_tokens: int = 0
+  role: Literal['token_usage'] = 'token_usage'
+
+## shared.events.live.publisher
+class AgentEventPublisher
+  def __init__(self, redis_async: aredis.Redis, events_channel: str, *, agent_id: int, maxsize: int=_DEFAULT_MAXSIZE, publish_timeout: float=_DEFAULT_PUBLISH_TIMEOUT_S, drain_timeout: float=_DEFAULT_DRAIN_TIMEOUT_S) -> None
+  async def aclose(self) -> None
+  def emit(self, payload: str) -> None
+  async def start(self) -> None
+
+## shared.events.live.redis_client
+RESILIENCE_KWARGS: dict[str, Any] = ...
+def get_async_redis() -> _AuthRetryAsyncRedis
+def open_async_redis(redis_url: str, *, decode_responses: bool=True) -> _AuthRetryAsyncRedis
+async def publish_best_effort(channel: str, payload: str, *, context: str='') -> int | None
+def publish_best_effort_sync(channel: str, payload: str, *, decode_responses: bool=True, context: str='') -> int | None
+async def retry_auth_failures_async(operation: Callable[[], Awaitable[T]], *, attempt_timeout_s: float | None=None) -> T
+def retry_auth_failures_sync(operation: Callable[[], T]) -> T
+def sync_redis(*, decode_responses: bool=False) -> _AuthRetrySyncRedis
+
+## shared.events.live.redis_listener
+class RedisInboundListener
+  def __init__(self, redis_url: str, agent_id: int) -> None
+  async def close(self) -> None
+  async def ensure_listening(self) -> None
+  async def wait_one(self, timeout: float) -> None
+  @property
+  def wake_degrade_reason(self) -> str | None
+  @property
+  def wake_degraded_s(self) -> float | None
+  @property
+  def wake_state(self) -> WakeState
+class WakeFailure(StrEnum)
+  ACL_DENIED = 'acl_denied'
+  CONSUME_ABANDON = 'consume_abandon'
+  GETDEL_ERROR = 'getdel_error'
+  GETDEL_TIMEOUT = 'getdel_timeout'
+  OPEN_ABANDON = 'open_abandon'
+class WakeState(StrEnum)
+  DEGRADED = 'degraded'
+  HEALTHY = 'healthy'
+
+## shared.events.live.redis_resilience
+def keepalive_options() -> dict[int, int]
+
 ## shared.events.payloads
 class AgentSpawned(TypedDict)
   forked_from: int | None

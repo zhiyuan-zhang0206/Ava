@@ -22,10 +22,10 @@ from shared.agents.history.delta_read_compat import (
     RecoveryReconstructionScope,
     recovery_reconstruction_scope,
 )
+from shared.agents.observation.db_wait import DatabaseWait, database_wait
 from shared.config import settings
 from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import AGENT_LEASE_TTL_S
-from shared.hosted_db_wait import DatabaseWait, database_wait
 from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 

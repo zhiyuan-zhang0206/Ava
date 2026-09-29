@@ -202,7 +202,10 @@ def test_unknown_target_refusal_names_the_missing_row(db_conn: psycopg.Connectio
     The HTTP route answers 404 before the gate for a missing agent, so this
     exercises the gate contract directly.
     """
-    from shared.caller_protocol import CallerProtocolUnavailableError, require_caller_protocol
+    from shared.agents.messages.caller_protocol import (
+        CallerProtocolUnavailableError,
+        require_caller_protocol,
+    )
 
     row = db_conn.execute("SELECT COALESCE(max(id), 0) + 1000 FROM agents").fetchone()
     assert row is not None
@@ -217,7 +220,7 @@ def test_unknown_target_refusal_names_the_missing_row(db_conn: psycopg.Connectio
 async def test_gate_holds_owner_lock_until_transaction_ends(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
-    from shared.caller_protocol import require_caller_protocol
+    from shared.agents.messages.caller_protocol import require_caller_protocol
 
     incarnation = await _admit(db_conn, aops_pool)
     _after_proven_old_writer_barrier(db_conn, incarnation)
@@ -239,7 +242,10 @@ async def test_gate_holds_owner_lock_until_transaction_ends(
 async def test_lease_expiring_while_waiting_for_unchanged_row_lock_is_rejected(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
-    from shared.caller_protocol import CallerProtocolUnavailableError, require_caller_protocol
+    from shared.agents.messages.caller_protocol import (
+        CallerProtocolUnavailableError,
+        require_caller_protocol,
+    )
 
     incarnation = await _admit(db_conn, aops_pool)
     _after_proven_old_writer_barrier(db_conn, incarnation)

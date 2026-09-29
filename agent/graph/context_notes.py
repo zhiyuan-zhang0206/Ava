@@ -38,10 +38,10 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from shared import plugin_contributions
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.log import logger
+from shared.packages.plugins import contributions
 from shared.paths import workspace_dir
 
 NoteBuilder = Callable[[], HumanMessage | None]
@@ -112,9 +112,7 @@ def register_context_note(
 
     def decorate(fn: NoteBuilder) -> NoteBuilder:
         _CONTEXT_NOTES.append(ContextNote(build=fn, on_fork=on_fork, rank=rank))
-        plugin_contributions.record(
-            "contextNotes", fn.__name__, detail=f"rank={rank} on_fork={on_fork}"
-        )
+        contributions.record("contextNotes", fn.__name__, detail=f"rank={rank} on_fork={on_fork}")
         return fn
 
     return decorate

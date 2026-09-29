@@ -12,8 +12,7 @@ from agent.db import claim_inbound_batch
 from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
 from ops.agent_spawn import create_agent_row
 from ops.agent_wake import resurrect_agent
-from shared.db import insert_inbound_message
-from shared.incarnation_resources import (
+from shared.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
     ResourceBirth,
@@ -21,6 +20,7 @@ from shared.incarnation_resources import (
     ResourceProcess,
     decode_resources,
 )
+from shared.db import insert_inbound_message
 from shared.machine import machine_name
 from shared.turn_identity import bind_turn_identity
 
@@ -93,7 +93,7 @@ async def test_same_host_cannot_skip_missing_predecessor_evidence(
 async def test_same_pid_different_birth_requires_exact_predecessor_exit(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import exec_owner_recovery
+    from shared.agents.incarnation import exec_owner_recovery
 
     aid, _command, owner, resources = await _resurrected(db_conn, aops_pool)
     assert resources.host_process is not None

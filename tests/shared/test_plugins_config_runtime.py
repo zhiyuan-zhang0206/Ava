@@ -3,7 +3,7 @@
 QA nit 2 from PR #878: `load()` stayed fail-fast at every consumer other than
 `load_extensions`. `load_for_runtime` is the shared runtime wrapper those
 consumers use; strict `load()` (interactive CLI paths) keeps raising. Dangling
-names route through the one canonical reporter (`shared.plugin_load_report`,
+names route through the one canonical reporter (`shared.packages.plugins.load_report`,
 once per process) — the 2026-09-11 macmini incident ran for days on a plain
 warning no alert surface carried.
 """
@@ -12,9 +12,15 @@ from pathlib import Path
 
 import pytest
 
-from shared import paths, plugin_load_report, plugins_config
+from shared import paths
 from shared.config import settings
-from shared.plugins_config import DanglingPlugin, load, load_for_runtime, write_local
+from shared.packages.plugins import enable_config, load_report
+from shared.packages.plugins.enable_config import (
+    DanglingPlugin,
+    load,
+    load_for_runtime,
+    write_local,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -27,7 +33,7 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     # The once-per-process report memo is interpreter-global module state;
     # reset it so one test's report cannot suppress another test's assertion.
-    monkeypatch.setattr(plugins_config, "_dangling_reported", set[str]())
+    monkeypatch.setattr(enable_config, "_dangling_reported", set[str]())
 
 
 def test_load_for_runtime_drops_dangling_and_reports_each_name(
@@ -47,7 +53,7 @@ def test_load_for_runtime_drops_dangling_and_reports_each_name(
     def _capture(name: str, exc: BaseException) -> None:
         reported.append((name, exc))
 
-    monkeypatch.setattr(plugin_load_report, "report_plugin_load_failure", _capture)
+    monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
 
     config = load_for_runtime({"real"})  # must not raise
 
@@ -68,7 +74,7 @@ def test_load_for_runtime_reports_each_name_once_per_process(
     def _capture(name: str, exc: BaseException) -> None:
         reported.append(name)
 
-    monkeypatch.setattr(plugin_load_report, "report_plugin_load_failure", _capture)
+    monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
 
     load_for_runtime({"real"})
     load_for_runtime({"real"})  # a later request re-reads the same config

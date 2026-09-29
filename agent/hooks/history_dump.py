@@ -41,9 +41,9 @@ from pathlib import Path
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.messages import NoteTag, system_note_message
+from shared.agents.messages.kwargs import read_ava_kwargs
 from shared.config.turn_view import turn_settings
 from shared.log import logger
-from shared.message_kwargs import read_ava_kwargs
 from shared.paths import workspace_dir
 
 # Subdirectory of the agent workspace holding the dumps.

@@ -21,7 +21,7 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 ### NoteTag Enum
 - Marks the source and nature of the message
 - Used by agent to distinguish user messages vs agent messages vs system notifications
-- canonical definition + `ava_msg_type` discriminator (`AvaMsgType`) + typed reading `read_ava_kwargs()` all in `shared/message_kwargs.py` (see [[messages.ava.okf.md]])
+- canonical definition + `ava_msg_type` discriminator (`AvaMsgType`) + typed reading `read_ava_kwargs()` all in `shared/agents/messages/kwargs.py` (see [[messages.ava.okf.md]])
 
 ### System Messages (`system_note_message`)
 - Builds system notification messages such as heartbeats, watcher wake-up calls

@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 
 from agent.graph.context_notes import _own_label, agent_id_note
+from shared.agents.messages.kwargs import NoteTag
 from shared.config import settings
-from shared.message_kwargs import NoteTag
 from shared.turn_identity import bind_turn_identity
 
 

@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 import ava
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 
 # ── Plugin simulation: wrap search() with the real implementation ───────
 # In the agent process the ava_memory plugin wraps search() at startup.

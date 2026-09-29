@@ -39,12 +39,14 @@ from pathlib import Path
 from loguru import logger
 
 from cli.commands.extensions.skills_sync import _Source, iter_sources
-from shared import host_version, install_registry, paths, plugin_manifest
+from shared import host_version, paths
 from shared.config import settings
 from shared.deploy.git.gitenv import git_env
 from shared.os_cron import os_jobs_enabled
-from shared.packages.skills import skill_scan
-from shared.packages.skills.skill_names import match_key
+from shared.packages.extensions import install_registry
+from shared.packages.plugins import manifest as plugin_manifest
+from shared.packages.skills import scan
+from shared.packages.skills.names import match_key
 from shared.platform import LockTimeoutError, file_lock
 from shared.proc import run_bounded
 
@@ -556,10 +558,10 @@ class _Pass:
             return "up_to_date", None
         if not any(staged.rglob("SKILL.md")):
             return "error: staged tree carries no SKILL.md", None
-        findings = skill_scan.scan_package(staged)
-        critical = skill_scan.criticals(findings)
+        findings = scan.scan_package(staged)
+        critical = scan.criticals(findings)
         if critical:
-            return f"refused_scan: {', '.join(skill_scan.rule_ids(critical))}", None
+            return f"refused_scan: {', '.join(scan.rule_ids(critical))}", None
         try:
             manifest = plugin_manifest.load_manifest(staged)
         except plugin_manifest.ManifestError as exc:

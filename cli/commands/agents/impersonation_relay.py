@@ -23,10 +23,10 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-import shared.redis_listener
+import shared.events.live.redis_listener
 from cli.commands.agents.codex_app_server import live_submit, require_control_endpoint
 from shared.agents.impersonation import RELAY_HEARTBEAT_SECONDS
-from shared.agents.impersonation.impersonation_delivery import reserve_delivery
+from shared.agents.impersonation.delivery import reserve_delivery
 from shared.config import settings
 
 _CATCHUP_SECONDS = 30.0
@@ -494,7 +494,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
 
     try:
         from shared.agents.impersonation import relay_get
-        from shared.agents.impersonation.impersonation_history import resolve
+        from shared.agents.impersonation.history import resolve
 
         if args.lease_id is None:
             lease_id = UUID(str(resolve(args.agent_id, args.session_id)["id"]))
@@ -522,7 +522,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
                 return
             heartbeat = asyncio.create_task(_heartbeat_loop(lease_id, token))
             try:
-                listener = shared.redis_listener.RedisInboundListener(
+                listener = shared.events.live.redis_listener.RedisInboundListener(
                     settings.data_plane.redis_url, args.agent_id
                 )
                 await relay_inbox(

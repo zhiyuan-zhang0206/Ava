@@ -1,4 +1,4 @@
-"""shared.install_registry unit tests — file-based ~/.ava/installed.json read/write + query.
+"""shared.packages.extensions.install_registry unit tests — file-based ~/.ava/installed.json read/write + query.
 
 Use `unit_home` fixture to point settings.general.ava_home to tmp, isolating the real registry file.
 """
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import install_registry as reg
+from shared.packages.extensions import install_registry as reg
 from shared.paths import install_registry_path
 from shared.platform import LockTimeoutError
 

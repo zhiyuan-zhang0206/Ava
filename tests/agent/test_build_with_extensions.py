@@ -15,7 +15,7 @@ import pytest
 
 from shared import paths
 from shared.config import settings
-from shared.plugins_config import write_local
+from shared.packages.plugins.enable_config import write_local
 
 # Every dotted name `load_extensions` can register a plugin module under.
 _PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
@@ -226,7 +226,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
 
 def test_duplicate_plugin_name_raises(monkeypatch: pytest.MonkeyPatch):
     """Same-named plugin in two locations -> discover_plugins raises DuplicatePlugin."""
-    from shared.plugins_config import DuplicatePlugin, discover_plugins
+    from shared.packages.plugins.enable_config import DuplicatePlugin, discover_plugins
 
     _make_plugin("dup")
     _make_external_plugin("dup")
@@ -397,9 +397,9 @@ def test_dangling_config_entry_reported_and_skipped(
     disabled, the rest of the config intact. The reporter's once-per-process
     memo is reset so this test does not depend on interpreter run order.
     """
-    from shared import plugins_config
+    from shared.packages.plugins import enable_config
 
-    monkeypatch.setattr(plugins_config, "_dangling_reported", set[str]())
+    monkeypatch.setattr(enable_config, "_dangling_reported", set[str]())
     _make_external_plugin("audit")
     write_local({"plugins": {"audit": {"enabled": True}, "vanished": {"enabled": True}}})
 
@@ -419,7 +419,7 @@ def test_dot_prefixed_dirs_are_not_discovered(monkeypatch: pytest.MonkeyPatch) -
     """Atomic-install residue (.name.staging / .name.backup-<pid>) must never
     surface as ghost plugins — a hard kill between rename steps would
     otherwise have the loader import a half-installed tree as a plugin."""
-    from shared.plugins_config import discover_plugins
+    from shared.packages.plugins.enable_config import discover_plugins
 
     _make_plugin("real")
     _make_external_plugin("ext")

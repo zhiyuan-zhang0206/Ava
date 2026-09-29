@@ -593,7 +593,7 @@ nodes co-located with their code:
 | What | Node |
 |---|---|
 | `$AVA_HOME` layout, what derives from the home | `shared/paths/paths.ava.okf.md` |
-| plugin enable config (`plugins_config.json`) | `shared/plugins_config.ava.okf.md` |
+| plugin enable config (`plugins_config.json`) | `shared/packages/plugins/enable_config.ava.okf.md` |
 | `installed.json` schema, installable shapes, the scanner gate | `shared/install_registry/install_registry.ava.okf.md` |
 | `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages.ava.okf.md` |
 | machine name, capability set, `machines` table, spawn-target 400 invariant | `shared/machine.ava.okf.md` |
@@ -1654,7 +1654,7 @@ programmatic rotation API at all.
 Kernel-side LLM calls go through `llm.astream()`; a LangChain callback publishes
 chat / code / reasoning start + delta to the Redis `ava:events` channel on each
 chunk. The full role table (payload fields, publisher, when each fires) is in
-`shared/live_events.ava.okf.md`; interrupt semantics for cancel / terminate are in
+`shared/events/live/live.ava.okf.md`; interrupt semantics for cancel / terminate are in
 `agent/graph/graph.ava.okf.md`.
 
 **Lifecycle command residue:** never hand-clean a stuck lifecycle command (a row

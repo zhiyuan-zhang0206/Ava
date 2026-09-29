@@ -21,8 +21,8 @@ from ops.rpc_schemas import (
     InventoryReadResult,
     InventoryWriteOpResult,
 )
-from shared import mcp_enabled, plugins_config
 from shared.machine import is_agent_runner, machine_name, machine_role
+from shared.packages.plugins import enable_config, mcp_enabled
 
 
 def _mcp_summary(spec: dict[str, Any]) -> str:
@@ -74,12 +74,12 @@ def inventory_read_op() -> InventoryReadResult:
     from ava.mcp_config import load_mcp_config, server_capability
 
     _assert_agent_runner()
-    discovered = plugins_config.discover_plugins()
-    cfg = plugins_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins()
+    cfg = enable_config.load_for_runtime(set(discovered))
     plugins: dict[str, InventoryReadItem] = {}
     for name, plugin_dir in discovered.items():
         try:
-            description = plugins_config.parse_description(plugin_dir / "plugin.py")
+            description = enable_config.parse_description(plugin_dir / "plugin.py")
         except (OSError, SyntaxError):
             description = ""
         plugins[name] = InventoryReadItem(
@@ -127,7 +127,7 @@ def inventory_write_op(
     from ava.mcp_config import load_mcp_config, server_capability
 
     _assert_agent_runner()
-    discovered = set(plugins_config.discover_plugins())
+    discovered = set(enable_config.discover_plugins())
     plugin_results: dict[str, FieldWriteResult] = {}
     for name in plugins:
         if name not in discovered:
@@ -153,7 +153,7 @@ def inventory_write_op(
 
     if applied:
         for name, want in plugins.items():
-            plugins_config.set_local_enabled(name, enabled=want)
+            enable_config.set_local_enabled(name, enabled=want)
         for name, want in mcp_servers.items():
             mcp_enabled.set_mcp_enabled(name, enabled=want)
 

@@ -9,12 +9,12 @@ import re
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
+from shared.agents.labels import publish_label_updated
+from shared.agents.messages.kwargs import message_content
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.labels import publish_label_updated
 from shared.lm.content import content_blocks
 from shared.lm.factory import build_chat_model
-from shared.message_kwargs import message_content
 
 _LABEL_SYSTEM_PROMPT_TEMPLATE = (
     "Summarize the user request delimited by <user_request> tags below "

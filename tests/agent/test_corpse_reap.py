@@ -30,9 +30,9 @@ from agent.corpse_reap import (
 )
 from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
 from ops import agent_wake
+from shared.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from shared.config import settings
 from shared.db import create_agent
-from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from shared.runtime_incarnation import RuntimeIncarnation
 
 

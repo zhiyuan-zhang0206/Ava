@@ -3,10 +3,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'shared/agent_observation.py'
-      - 'shared/agent_snapshot.py'
-      - 'shared/agent_roster.py'
-      - 'shared/live_announce.py'
+      - 'shared/agents/observation/evidence.py'
+      - 'shared/agents/observation/snapshot.py'
+      - 'shared/agents/observation/roster.py'
+      - 'shared/events/live/announce.py'
       - 'services/heartbeat/**'
       - 'gateway/inspect/_cache.py'
       - 'gateway/inspect/_live.py'

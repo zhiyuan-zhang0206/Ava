@@ -22,7 +22,7 @@ Modules:
   scan-cursor advance for a `compact` job, the tail-seal delta column for a
   `tail` job) and the build itself. Generation runs agent-shaped (task #4674):
   the child resolves the target agent's own model
-  (`shared.agent_snapshot.agent_effective_model`) and passes the agent's tool
+  (`shared.agents.observation.snapshot.agent_effective_model`) and passes the agent's tool
   schema, so each request rides the agent's conversation prefix and serves
   from the provider's prefix cache.
 

@@ -61,7 +61,7 @@ from shared.daemon_health import (
 )
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.db_transaction import write_transaction
-from shared.live_announce import publish_agent_updated_sync
+from shared.events.live.announce import publish_agent_updated_sync
 from shared.log import init_gateway_process
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")

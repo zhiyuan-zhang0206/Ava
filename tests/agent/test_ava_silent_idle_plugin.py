@@ -26,7 +26,7 @@ from langgraph.runtime import Runtime
 
 from agent.messages import NoteTag
 from agent.state import build_agent_state, clear_plugin_registrations
-from shared.context import AvaContext
+from shared.agents.context import AvaContext
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def _loaded():
     """Load plugins.ava_silent_idle via the real plugin-registration path;
     teardown clears registrations + unloads the module so its before_llm hook
     does not leak into other tests."""
-    from shared.plugin_context import PluginContext
+    from shared.packages.plugins.context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):

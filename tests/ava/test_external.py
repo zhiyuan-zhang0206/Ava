@@ -20,7 +20,7 @@ from ava import agent_identity, external, external_state
 from ava.external_state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
 from shared import telemetry
 from shared.config.turn_view import bind_agent_config, current_agent_config_pins, turn_settings
-from shared.plugin_config_view import bind_agent_plugin_config, current_plugin_config_view
+from shared.packages.plugins.config_view import bind_agent_plugin_config, current_plugin_config_view
 from shared.telemetry import Event as TelemetryEvent
 from shared.telemetry.otlp import telemetry_otlp
 

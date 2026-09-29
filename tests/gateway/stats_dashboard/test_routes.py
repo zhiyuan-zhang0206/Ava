@@ -28,10 +28,11 @@ from gateway import loki_events, loki_query_budget
 from gateway.app import app
 from gateway.routers import _stats_dashboard, status
 from gateway.schemas import StatsDashboard, StatsWindowHours, window_delta
-from shared import plugin_stats, telemetry
+from shared import telemetry
 from shared.cluster import home_label
 from shared.config import settings
 from shared.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
+from shared.packages.plugins import stats
 from shared.paths import ava_home
 from tests.gateway.loki_fake import FakeLoki
 
@@ -994,7 +995,7 @@ def test_dashboard_carries_plugin_stat_values_unwindowed() -> None:
     value is a point-in-time fact and the window selector must not pretend to
     aggregate it. Declarations are joined by the console from
     /api/ui/contributions on (plugin, id)."""
-    plugin_stats.upsert(
+    stats.upsert(
         plugin="codex_usage",
         id="codex-zhang0206",
         value="6%",
@@ -1002,7 +1003,7 @@ def test_dashboard_carries_plugin_stat_values_unwindowed() -> None:
         status="warn",
         updated_by="macmini",
     )
-    plugin_stats.upsert(
+    stats.upsert(
         plugin="codex_usage",
         id="codex-wuji",
         value="!",

@@ -545,11 +545,11 @@ class PermanentDeliveryError(Exception):
 
 def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> int | None:
     """Commit one entry through the canonical chat-inbound path; returns the id."""
+    from shared.agents.messages.caller_protocol import CallerProtocolUnavailableError
     from shared.agents.messages.chat_delivery import (
         ClientMessageConflictError,
         insert_chat_inbound_once,
     )
-    from shared.caller_protocol import CallerProtocolUnavailableError
     from shared.db import publish_inbound_wake
 
     text, payload = split_content(entry.content)

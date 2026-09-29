@@ -15,7 +15,7 @@ import psutil
 import pytest
 
 from agent.graph.exec_protocol import read_result, write_request
-from shared.exec_owner_protocol import (
+from shared.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,
     OwnerControl,
@@ -24,7 +24,7 @@ from shared.exec_owner_protocol import (
     read_owner_context,
     validate_native_ready,
 )
-from shared.incarnation_resources import ExecAllocation, ResourceProcess
+from shared.agents.incarnation.resources import ExecAllocation, ResourceProcess
 
 
 def _context(tmp_path: Path, agent_id: int = 1) -> OwnerContext:
@@ -191,7 +191,7 @@ def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: 
 @pytest.mark.parametrize("ending", ["record", "partial_eof", "oversize"])
 def test_control_pipe_is_bounded_and_owned_by_calling_loop(ending: str) -> None:
     from agent.exec_domain_owner import ControlPipe
-    from shared.exec_owner_protocol import MAX_OWNER_MESSAGE
+    from shared.agents.incarnation.exec_owner_protocol import MAX_OWNER_MESSAGE
 
     source, destination = os.pipe()
     try:
@@ -297,7 +297,7 @@ def test_owner_import_does_not_boot_graph_sdk_or_settings(tmp_path: Path) -> Non
 _HOST = """
 import os, subprocess, sys, time
 from pathlib import Path
-from shared.exec_owner_protocol import OwnerControl, OwnerReady, read_owner_context
+from shared.agents.incarnation.exec_owner_protocol import OwnerControl, OwnerReady, read_owner_context
 path = Path(sys.argv[1])
 context = read_owner_context(path)
 owner = subprocess.Popen(

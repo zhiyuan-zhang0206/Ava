@@ -25,7 +25,7 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 
 from agent.graph._callbacks import RedisStreamHandler
-from shared.live_events import (
+from shared.events.live.projection import (
     EVENT_ADAPTER,
     ChatDelta,
     ChatStart,

@@ -15,10 +15,10 @@ from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
 from shared import maintenance, pause_owner, telemetry
+from shared.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from shared.config import settings
 from shared.hold_driver import HoldDriver
 from shared.maintenance_state import MaintenanceHold
-from shared.resource_admission import DRAINED_RESOURCES
 
 
 class LifecycleCollisionError(RuntimeError):

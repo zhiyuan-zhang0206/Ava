@@ -33,7 +33,7 @@ from shared.agents.history.timeline import (
     tail_window,
     timeline_default_limit,
 )
-from shared.agents.impersonation.impersonation_timeline import hydrate
+from shared.agents.impersonation.timeline import hydrate
 from shared.config import settings
 from shared.db import agent_exists, list_inbound_messages
 

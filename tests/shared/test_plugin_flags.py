@@ -5,9 +5,8 @@ import pytest
 from shared.config import get_field, set_field
 from shared.config_registry import _fields
 from shared.lm.registry import DEFAULT_TUNING
-from shared.plugin_config_registry import _field_is_sensitive
-from shared.plugin_context import PluginContext
-from shared.plugin_flags import (
+from shared.packages.plugins.context import PluginContext
+from shared.packages.plugins.flags import (
     NoPluginContext,
     UndeclaredFlag,
     UnknownFlag,
@@ -16,6 +15,7 @@ from shared.plugin_flags import (
     declared_flags,
     read_flag,
 )
+from shared.plugin_config_registry import _field_is_sensitive
 
 
 @pytest.fixture(autouse=True)

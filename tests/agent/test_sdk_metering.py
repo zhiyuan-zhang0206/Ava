@@ -20,7 +20,7 @@ import pytest
 
 import ava
 from ava import sdk_metering
-from shared import sdk_telemetry
+from shared.agents.sdk import telemetry as sdk_telemetry
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], float | None]]:
@@ -414,7 +414,8 @@ def test_plain_python_import_installs_sdk_events(tmp_path: Path) -> None:
     code = """
 import json, sys
 import ava
-from shared import telemetry, sdk_call_policy
+from shared import telemetry
+from shared.agents.sdk import call_policy as sdk_call_policy
 sdk_call_policy.policy = sdk_call_policy.SamplingPolicy
 rows = []
 telemetry.emit = lambda *args, **kwargs: rows.append(kwargs)
@@ -442,7 +443,8 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     from typing import Any
 
     from ava import agent_identity
-    from shared import sdk_call_policy, telemetry
+    from shared import telemetry
+    from shared.agents.sdk import call_policy
 
     rows: list[dict[str, Any]] = []
 
@@ -456,7 +458,7 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     monkeypatch.setattr(agent_identity, "_external_agent_id", 99)
     monkeypatch.setattr(agent_identity, "_agent_id", 42)
     monkeypatch.setattr(telemetry, "emit", capture)
-    monkeypatch.setattr(sdk_call_policy, "policy", sdk_call_policy.SamplingPolicy)
+    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     wrapped = sdk_metering._make_recorder(lambda: "ok", "files.read")
     assert wrapped() == "ok"
     assert rows[0]["agent_id"] == 99
@@ -472,7 +474,7 @@ async def test_plugin_wrap_preserves_awaited_single_event(
     from collections.abc import Awaitable, Callable
 
     from ava.sdk_surface import wraps
-    from shared.plugin_context import PluginContext
+    from shared.packages.plugins.context import PluginContext
 
     calls = _spy_emit(monkeypatch)
     clock = [0.0]

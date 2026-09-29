@@ -11,7 +11,7 @@ R2 convergence point D (design-concept.md §4.4 + evaluation-record #14):
   loops still live in ``shared/lm/call.py`` (invoke_text, its own
   exponential backoff + jittered), ``shared/bootstrap.py``
   (fetch_bootstrap_config, linear backoff without jitter) and
-  ``shared/redis_listener.py`` (connect retry, backoff without jitter). The
+  ``shared/events/live/redis_listener.py`` (connect retry, backoff without jitter). The
   R2-D migration folds them in; until then every NEW retry loop must be
   built on this module (grep-able).
 - ``http_classifier`` — the one error-classification semantics (D2); call

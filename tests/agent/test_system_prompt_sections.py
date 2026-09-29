@@ -676,8 +676,8 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
     identifiable without storing the text. A section returning "" contributed
     nothing and records nothing."""
     from agent.graph import system_prompt
-    from shared import plugin_activation
-    from shared.plugin_context import PluginContext
+    from shared.packages.plugins import activation
+    from shared.packages.plugins.context import PluginContext
 
     recorded: list[tuple[str, str, str, str]] = []
 
@@ -685,7 +685,7 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
         if plugin is not None:
             recorded.append((plugin, surface, identifier, detail))
 
-    monkeypatch.setattr(plugin_activation, "record", spy)
+    monkeypatch.setattr(activation, "record", spy)
 
     def loud_section() -> str:
         return "## Loud\n\nsomething."

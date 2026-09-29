@@ -242,7 +242,7 @@ def test_halted_agents_count_reads_the_recovery_breaker_halt(
     """`permanent_reject_streak` is the durable halt flag (task #3617) and the
     window bounds the count to the active wave."""
     import shared.db
-    from shared.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+    from shared.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 
     queries: list[tuple[str, tuple[object, ...]]] = []
 

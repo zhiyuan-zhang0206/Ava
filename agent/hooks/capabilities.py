@@ -41,7 +41,7 @@ from agent.hooks._registry import Hook
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import NoteTag, system_note_message
 from agent.state import CapabilitiesState
-from shared.context import AvaContext
+from shared.agents.context import AvaContext
 from shared.log import logger
 
 

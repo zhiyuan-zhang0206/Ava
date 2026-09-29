@@ -69,7 +69,7 @@ from shared.metrics.grafana_dashboard_supply import (
     load_installed_plugin_specs,
     load_repo_plugin_specs,
 )
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 from shared.plugin_metrics import MetricSpec, clear_registry, registered_metrics, render_title
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -470,7 +470,7 @@ def test_installed_supplier_loads_a_registry_row(
     """An enabled installed plugin row renders from its blob: register a tree
     with a metrics.py, load it through the supplier, and — after S3's
     ordering — see it in the render."""
-    from shared import extension_registry as registry
+    from shared.packages.extensions import registry as registry
 
     tree = tmp_path / "installed_plugin"
     tree.mkdir()

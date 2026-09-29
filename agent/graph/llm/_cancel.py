@@ -28,8 +28,8 @@ from agent.graph.llm_errors import (
     _record_consecutive_error,
 )
 from agent.nodes import AFTER_EXEC
-from shared.context import AvaContext
-from shared.live_events import Cancelled
+from shared.agents.context import AvaContext
+from shared.events.live.projection import Cancelled
 from shared.log import logger
 
 from .node import LlmGoto

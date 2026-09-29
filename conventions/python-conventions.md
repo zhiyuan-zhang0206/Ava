@@ -262,7 +262,7 @@ allowlist.
 A payload crossing a process boundary (gateway↔agent-runner RPC, SSE events,
 `additional_kwargs` metadata bags) gets a `BaseModel` / `TypedDict` / `StrEnum`
 at the boundary, not a `dict[str, Any]` unpacked by hand at each call site.
-`shared/live_events.py`'s discriminated union (`role: Literal[...]` discriminator +
+`shared/events/live/projection.py`'s discriminated union (`role: Literal[...]` discriminator +
 a `TypeAdapter`) is the template. Not lint-enforced — see
 the git log (typed-boundaries design record)
 for why pyright's `reportUnknown*` family can't substitute for this.

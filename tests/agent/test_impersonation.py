@@ -23,8 +23,8 @@ from agent import impersonation
 from agent.graph._exec_result import lifecycle_exception_from_name
 from agent.graph.exec_protocol import read_request, write_request
 from agent.state import BaseAgentState
-from shared.context import AvaContext
-from shared.lifecycle import AgentImpersonation
+from shared.agents.context import AvaContext
+from shared.agents.lifecycle import AgentImpersonation
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
 from tests.impersonation_support import attested_caller, recorded_tree
@@ -830,7 +830,7 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     """
     from agent.hosted_ownership import admit_hosted_runtime
     from shared.agents import impersonation as leases
-    from shared.caller_identity import CallerIdentity
+    from shared.agents.messages.caller_identity import CallerIdentity
     from shared.machine import machine_name
     from tests.conftest import spawn_agent
 
@@ -884,7 +884,7 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     the same crash-before-ACK semantics as the lazy native_status path."""
     from agent.hosted_ownership import admit_hosted_runtime
     from shared.agents import impersonation as leases
-    from shared.caller_identity import CallerIdentity
+    from shared.agents.messages.caller_identity import CallerIdentity
     from shared.machine import machine_name
     from tests.conftest import spawn_agent
 

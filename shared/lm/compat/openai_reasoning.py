@@ -38,8 +38,8 @@ from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_openai import ChatOpenAI
 
+from shared.agents.messages.kwargs import message_content
 from shared.lm.content import ContentBlock
-from shared.message_kwargs import message_content
 
 
 class ReasoningContentChatModel(ChatOpenAI):

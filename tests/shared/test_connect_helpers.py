@@ -1,4 +1,4 @@
-"""`shared.db` / `shared.redis_client` connection helpers read settings once
+"""`shared.db` / `shared.events.live.redis_client` connection helpers read settings once
 and hand back a working connection / pool / sync client, so call sites stop
 hand-writing `psycopg.connect(settings.data_plane.db_url)` and
 `redis.Redis.from_url(settings.data_plane.redis_url)`. These pin that the helpers read the
@@ -8,7 +8,7 @@ live settings URL (the conftest testcontainer) and pass options through.
 from __future__ import annotations
 
 from shared import db
-from shared.redis_client import sync_redis
+from shared.events.live.redis_client import sync_redis
 
 
 def test_connect_runs_a_query() -> None:

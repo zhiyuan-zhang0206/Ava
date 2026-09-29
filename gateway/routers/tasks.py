@@ -24,10 +24,13 @@ from gateway.schemas import (
     TaskSummaryRow,
     TaskUpdateRequest,
 )
+from shared.agents.tasks.owner_notifications import (
+    TaskOwnerNotification,
+    owner_change_notifications,
+)
+from shared.agents.tasks.reparent import resolve_reparent
+from shared.agents.tasks.rules import first_open_child, is_closed, open_title_holder
 from shared.db_transaction import write_transaction
-from shared.tasks.task_owner_notifications import TaskOwnerNotification, owner_change_notifications
-from shared.tasks.task_reparent import resolve_reparent
-from shared.tasks.task_rules import first_open_child, is_closed, open_title_holder
 
 router = APIRouter()
 

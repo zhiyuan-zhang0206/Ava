@@ -36,11 +36,11 @@ from agent.hooks.compact_events import emit_compact_finished, emit_compact_start
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
+from shared.agents.context import AvaContext
 from shared.agents.messages.inbound import InboundKind
-from shared.context import AvaContext
-from shared.live_events import CompactDone
+from shared.agents.messages.kwargs import AvaMsgType
+from shared.events.live.projection import CompactDone
 from shared.log import logger
-from shared.message_kwargs import AvaMsgType
 
 
 @dataclass(frozen=True)

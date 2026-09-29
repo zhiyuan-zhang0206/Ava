@@ -565,7 +565,7 @@ def _start_inside_hold(
     home: Path, holder: str, at: datetime, phase: str, db_capability: str | None
 ) -> int:
     from shared import maintenance, start_serving
-    from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+    from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
     from shared.paths import ava_home
 
     if ava_home().resolve() != home:

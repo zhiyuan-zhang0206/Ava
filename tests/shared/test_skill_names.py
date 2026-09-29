@@ -1,4 +1,4 @@
-"""`shared.packages.skills.skill_names` — the one dash/underscore fold.
+"""`shared.packages.skills.names` — the one dash/underscore fold.
 
 The behaviours the rest of the system leans on: dash is what a human sees,
 underscore is what Python reaches, and an inbound name in either spelling
@@ -9,7 +9,7 @@ registry key.
 
 import pytest
 
-from shared.packages.skills.skill_names import (
+from shared.packages.skills.names import (
     SkillIdentity,
     SkillIdentityMismatch,
     display_name,

@@ -13,14 +13,14 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.hosted_ownership import admit_hosted_runtime
-from shared.db import create_agent
-from shared.incarnation_resources import (
+from shared.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
     decode_resources,
 )
+from shared.db import create_agent
 from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
 from shared.native_process.ownership import stable_create_time
 from shared.runtime_admission import RuntimeAdmission

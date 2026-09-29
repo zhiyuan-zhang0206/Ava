@@ -83,9 +83,9 @@ from agent.state_channels import (
     MemoryState,
     _memory_state_merge,
 )
-from shared import plugin_contributions
 from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from shared.plugin_context import current_plugin_name
+from shared.packages.plugins import contributions
+from shared.packages.plugins.context import current_plugin_name
 
 AttachEntry = _AttachEntry
 
@@ -600,7 +600,7 @@ def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
             # treats this base channel as a legal write target (writing base
             # fields without declaration is still rejected as typo).
             _BASE_FIELD_DECLARED.add(name)
-            plugin_contributions.record(
+            contributions.record(
                 "state", name, detail=f"{cls.__name__}.{name}: base channel, co-written"
             )
             continue
@@ -615,7 +615,7 @@ def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
                 )
         else:
             _EXTRA_FIELDS[prefixed] = (raw_annotation, model_field)
-            plugin_contributions.record(
+            contributions.record(
                 "state",
                 prefixed,
                 detail=f"{cls.__name__}.{name}: {_annotation_text(raw_annotation)}",
@@ -657,8 +657,8 @@ def clear_plugin_registrations() -> None:
     from agent.graph.context_notes import clear_plugin_context_notes
     from agent.graph.system_prompt import clear_plugin_system_prompt_sections
     from agent.hooks import clear_hooks
+    from shared.packages.plugins.flags import clear_plugin_flags
     from shared.plugin_config_registry import clear_plugin_configs
-    from shared.plugin_flags import clear_plugin_flags
 
     # Keep the framework-owned sections / context notes (registered once at
     # module import); drop only the plugin-contributed tails.
@@ -667,7 +667,7 @@ def clear_plugin_registrations() -> None:
     clear_hooks()
     clear_plugin_configs()
     clear_plugin_flags()
-    plugin_contributions.clear()
+    contributions.clear()
     ava.clear_registered_namespaces()
     ava.sdk_surface.wraps.clear_wraps()
     ava.skill_sources.clear()

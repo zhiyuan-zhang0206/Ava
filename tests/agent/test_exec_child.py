@@ -461,7 +461,7 @@ def test_child_lifecycle_envelope(tmp_path: Path) -> None:
     """A `LifecycleExit` raised by agent code becomes a lifecycle outcome with
     the class name — the parent reconstructs the exception from it."""
     proc, _request, result = _spawn(
-        tmp_path, "from shared.lifecycle import AgentRestart\nraise AgentRestart()"
+        tmp_path, "from shared.agents.lifecycle import AgentRestart\nraise AgentRestart()"
     )
     assert proc.returncode == 0
     payload = read_result(result)

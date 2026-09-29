@@ -44,7 +44,7 @@ latency and the service/agent breakdowns stay exact.
 Instrumentation points (collection layer, all on the existing loguru →
 unified emitter (`shared/telemetry/emitter.py`) → OTLP export, zero schema change):
 
-- `shared/event_publisher.py` — `AgentEventPublisher` sheds → `sse_drop`
+- `shared/events/live/publisher.py` — `AgentEventPublisher` sheds → `sse_drop`
 - `shared/telemetry/emitter.py` — emitter queue-full shedding (`event_log_drop`) →
   `event_log_drop`; `init_gateway_process` boot → `service_started`
 - `agent/graph/llm/node.py` + `agent/llm/usage.py` — whole-call wall-clock →

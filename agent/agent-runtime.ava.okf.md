@@ -82,7 +82,7 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   A legacy NULL-resource row has no stored process to prove: it is admitted
   early only through the evidence-gated proposal (renewal silence ≥
   `LEGACY_HOST_ADOPTION_SILENCE_S`, no live same-home agent-host daemon, no
-  live exec child of the agent — `shared/host_process_evidence.py`), re-pinned
+  live exec child of the agent — `shared/agents/incarnation/host_process_evidence.py`), re-pinned
   to the exact row state under the row lock and recorded as a
   `hosted_legacy_adoption` audit event. NULL evidence alone never authorizes
   takeover.

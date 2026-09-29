@@ -22,7 +22,7 @@ from agent.graph.memory_recall import PassiveRecall
 from agent.messages import NoteTag, inbound_message, system_note_message
 from agent.state import build_agent_state, clear_plugin_registrations
 from ava import gateway_client
-from shared.context import AvaContext
+from shared.agents.context import AvaContext
 
 
 @pytest.fixture
@@ -30,8 +30,8 @@ def _loaded() -> Any:
     """Load ava_memory through the real plugin-registration path, so the hook
     instance under test is the registered one (same fixture shape as
     test_ava_memory_notes.py)."""
+    from shared.packages.plugins.context import PluginContext
     from shared.plugin_config_registry import bind_from_disk
-    from shared.plugin_context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):

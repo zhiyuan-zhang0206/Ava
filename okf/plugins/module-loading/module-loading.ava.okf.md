@@ -73,7 +73,7 @@ A plugin whose `plugin.py` raises at import (missing sibling, syntax error,
 top-level exception) degrades to a **skip with a loud report**, never a
 blocked `import ava` / host boot / graph build: `safe_load_plugin_module`
 drops the half-executed module from `sys.modules`, and
-`shared/plugin_load_report.py:report_plugin_load_failure` emits a loguru ERROR
+`shared/packages/plugins/load_report.py:report_plugin_load_failure` emits a loguru ERROR
 carrying the traceback plus one `plugin_load_failed` telemetry event (anomaly
 tier). The remaining enabled plugins keep loading; a config entry whose
 plugin directory is gone (`DanglingPlugin`) is reported and treated as
@@ -89,7 +89,7 @@ reporting through the one reporter: a plugin's `provider.py`
 child's `import ava` self-load (`ava.ensure_plugins_loaded`, plus a stderr
 line — a child usually has no log sink). One contained site stays off that
 reporter: `default_config.py` images surface as `error`-status entries on the
-plugin-update result (`shared/plugins_config.py:update_all_disk_images`).
+plugin-update result (`shared/packages/plugins/enable_config.py:update_all_disk_images`).
 
 ## Semantics boundary: what stays fail-closed
 Containment covers *code* that fails to load; inventory and contract conflicts

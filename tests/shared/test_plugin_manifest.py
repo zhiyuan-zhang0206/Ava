@@ -1,4 +1,4 @@
-"""`shared.plugin_manifest` unit tests — manifest validation, range algebra,
+"""`shared.packages.plugins.manifest` unit tests — manifest validation, range algebra,
 pyproject mirror check (the S1–S2 contract layer, task #1244).
 
 Spec: `conventions/plugin-spec-v2.md`.
@@ -9,9 +9,9 @@ from typing import Any, cast
 
 import pytest
 
-from shared import plugin_manifest as pm
-from shared import pyproject_mirror as mirror
-from shared.plugin_manifest import ManifestError
+from shared.packages.plugins import manifest as pm
+from shared.packages.plugins import pyproject_mirror as mirror
+from shared.packages.plugins.manifest import ManifestError
 
 
 def _manifest(**overrides: object) -> pm.PluginManifest:

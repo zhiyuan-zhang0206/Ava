@@ -1,4 +1,4 @@
-"""The cluster extension registry — `shared/extension_registry.py` + its schema.
+"""The cluster extension registry — `shared/packages/extensions/registry.py` + its schema.
 
 Slice S2 of `future/infra/extension-ownership.md`. What is locked here is what
 the ownership model rests on:
@@ -22,8 +22,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from shared import extension_registry as reg
-from shared.install_registry import TrustTier, tree_hash
+from shared.packages.extensions import registry as reg
+from shared.packages.extensions.install_registry import TrustTier, tree_hash
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:

@@ -5,14 +5,14 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 import pytest
 
-from shared.agent_observation import (
+from shared.agents.observation.evidence import (
     LIVENESS_PASS_INTERVAL_S,
     MACHINE_OFFLINE_AFTER_FAILURES,
     AvailabilityReason,
     availability,
 )
-from shared.agent_roster import AgentCard, select_roster
-from shared.agent_snapshot import select_one
+from shared.agents.observation.roster import AgentCard, select_roster
+from shared.agents.observation.snapshot import select_one
 from shared.db import create_agent
 from tests.conftest import spawn_agent
 

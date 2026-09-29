@@ -11,7 +11,7 @@ policy forbids.
 
 import shared.db
 from shared.agents import AgentNotFound
-from shared.lifecycle_acceptance import is_system_notice_source
+from shared.agents.incarnation.lifecycle_acceptance import is_system_notice_source
 
 
 def wake_suppression_active(agent_id: int) -> bool:
@@ -32,7 +32,7 @@ def recovery_halted(agent_id: int) -> bool:
     consecutive permanent provider rejections) — NOT the wake-suppression
     window, which a claim clears by design; only the streak can carry an
     until-human halt (task #3617)."""
-    from shared.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+    from shared.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 
     with shared.db.connect() as conn:
         row = conn.execute(
@@ -84,7 +84,7 @@ def recovery_halt_reason(agent_id: int) -> str | None:
     cannot clear; it always reports `permanent_provider_reject`. An active
     wake-suppression window without a tripped breaker reports its
     operator-readable reason (or the `wake_suppressed` fallback)."""
-    from shared.recovery_breaker import (
+    from shared.agents.recovery_breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         SUPPRESS_REASON_PERMANENT_REJECT,
     )

@@ -19,7 +19,7 @@ from fastapi.responses import StreamingResponse
 
 from gateway.sse import event_stream, throttled_event_stream
 from shared.config import settings
-from shared.live_events import GLOBAL_ROLES, SYSTEM_ROLES
+from shared.events.live.projection import GLOBAL_ROLES, SYSTEM_ROLES
 
 router = APIRouter()
 

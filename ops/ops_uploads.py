@@ -9,7 +9,7 @@ gateway dial uses) and writes it into its own `~/Downloads/AvaAgent-<id>/`.
 The op result carries this host's absolute path — the gateway's notification
 message then tells the agent where the file physically landed.
 
-The fetch is a plain GET of the upload URL, NOT `shared.uploads.fetch_upload_b64`:
+The fetch is a plain GET of the upload URL, NOT `shared.agents.uploads.fetch_upload_b64`:
 that helper is image-only (it base64-inlines for the multimodal claim path).
 This op must accept arbitrary file types.
 """
@@ -19,10 +19,10 @@ from __future__ import annotations
 import logging
 
 from ops.rpc_schemas import UploadReceivePayload, UploadReceiveResult
+from shared.agents.uploads import agent_upload_dir, sanitize_upload_name
 from shared.http_dial import get as http_get
 from shared.machine import gateway_api_base
 from shared.private_storage import write_private_bytes
-from shared.uploads import agent_upload_dir, sanitize_upload_name
 
 _log = logging.getLogger(__name__)
 

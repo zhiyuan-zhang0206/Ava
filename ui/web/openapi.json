@@ -1828,7 +1828,7 @@
     "/api/agents/{agent_id}/inspect/widgets": {
       "get": {
         "summary": "Get Agent Inspect Widgets",
-        "description": "The agent's plugin widgets for the inspector panel — the extension\nsurface where enabled plugins embed widgets (see `shared/plugin_inspector.py`;\nregistration mirrors the plugin-metric system).\n\nBuilds the widget registry in process (shipped builtin plugins'\n``inspector.py`` modules imported under their plugin context, restricted\nto the plugins currently enabled), resolves the closed target vocabulary\nfor this agent — the open notice and the queue's task-ownership rule —\nand projects each widget, dropping a button whose target did not resolve\nand a widget left without buttons. Unknown agents return 404 like the\nrest of the /inspect family. Implementation in\n``gateway/inspect/_plugin_widgets.py``.",
+        "description": "The agent's plugin widgets for the inspector panel — the extension\nsurface where enabled plugins embed widgets (see `shared/packages/plugins/inspector.py`;\nregistration mirrors the plugin-metric system).\n\nBuilds the widget registry in process (shipped builtin plugins'\n``inspector.py`` modules imported under their plugin context, restricted\nto the plugins currently enabled), resolves the closed target vocabulary\nfor this agent — the open notice and the queue's task-ownership rule —\nand projects each widget, dropping a button whose target did not resolve\nand a widget left without buttons. Unknown agents return 404 like the\nrest of the /inspect family. Implementation in\n``gateway/inspect/_plugin_widgets.py``.",
         "operationId": "get_agent_inspect_widgets_api_agents__agent_id__inspect_widgets_get",
         "parameters": [
           {
@@ -7872,7 +7872,7 @@
           "heartbeat_paused_until"
         ],
         "title": "AgentRow",
-        "description": "GET /api/agents/{id} detail, including response-required notice bodies.\n\nThe directory and live roster use bounded cards from shared.agent_roster.\nlast_active_at is the real-activity clock; last_inbound_at is the latest\ninbound message clock."
+        "description": "GET /api/agents/{id} detail, including response-required notice bodies.\n\nThe directory and live roster use bounded cards from shared.agents.observation.roster.\nlast_active_at is the real-activity clock; last_inbound_at is the latest\ninbound message clock."
       },
       "AgentStats": {
         "properties": {
@@ -10357,7 +10357,7 @@
           "order"
         ],
         "title": "InspectWidgetResult",
-        "description": "One plugin widget rendered for the inspector panel — an element of\nGET /api/agents/{id}/inspect/widgets.\n\nThe resolved twin of a registered `InspectWidgetSpec`\n(`shared/plugin_inspector.py`): `plugin` + `id` name the registration,\n`kind` selects the console renderer (a closed set; an unknown kind is\nskipped by the console), and the payload field the kind reads (`tasks`)\ncarries the kernel-resolved rows. A widget with an empty payload is\ndropped from the response entirely (the panel's empty-section rule)."
+        "description": "One plugin widget rendered for the inspector panel — an element of\nGET /api/agents/{id}/inspect/widgets.\n\nThe resolved twin of a registered `InspectWidgetSpec`\n(`shared/packages/plugins/inspector.py`): `plugin` + `id` name the registration,\n`kind` selects the console renderer (a closed set; an unknown kind is\nskipped by the console), and the payload field the kind reads (`tasks`)\ncarries the kernel-resolved rows. A widget with an empty payload is\ndropped from the response entirely (the panel's empty-section rule)."
       },
       "InspectWidgetTask": {
         "properties": {

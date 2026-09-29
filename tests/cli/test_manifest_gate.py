@@ -16,7 +16,7 @@ import pytest
 from cli.commands.extensions.mcp import cmd_mcp_install, cmd_mcp_upgrade
 from cli.commands.extensions.plugins import cmd_plugins_install
 from cli.commands.extensions.skill import cmd_skill_install
-from shared import install_registry as reg
+from shared.packages.extensions import install_registry as reg
 
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare

@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from ops.cluster_rpc import ClusterOpFailed
 from ops.rpc_schemas import OpFailure
 from shared.agents import AgentNotFound, MachinePaused, ResurrectError, ResurrectRefused
-from shared.incarnation_resources import ResourceBirth, ResourceShapeError, decode_resources
+from shared.agents.incarnation.resources import ResourceBirth, ResourceShapeError, decode_resources
 from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation
 
@@ -44,7 +44,7 @@ def hosted_resurrection_target(
     - the runtime never admitted it: the fresh-INSERT birth marker is still
       unconsumed, so no predecessor allocation exists;
     - `unowned_termination` names this life's force receipt
-      (`shared.lifecycle_acceptance.record_unowned_termination`): this runtime
+      (`shared.agents.incarnation.lifecycle_acceptance.record_unowned_termination`): this runtime
       ended the row while no incarnation owned it, and its own lifecycle had
       left it unowned. Resurrection restores the state that force ended;
       admission still decides the successor.

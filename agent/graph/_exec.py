@@ -75,14 +75,14 @@ from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
 from ava.security import SecurityFindingEntry, take_findings
+from shared.agents.context import AvaContext, agent_id_from_config
+from shared.agents.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
+from shared.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
 from shared.config import settings
 from shared.config.turn_view import current_agent_config_pins
-from shared.context import AvaContext, agent_id_from_config
-from shared.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
-from shared.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
-from shared.live_events import Cancelled, ExecOutput, ExecStart
+from shared.events.live.projection import Cancelled, ExecOutput, ExecStart
 from shared.log import logger
-from shared.plugin_config_view import current_agent_plugin_pins
+from shared.packages.plugins.config_view import current_agent_plugin_pins
 
 from ._exec_alerts import maybe_alert_exec_boot_failure
 from ._exec_result import (

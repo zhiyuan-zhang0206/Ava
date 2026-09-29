@@ -492,7 +492,7 @@ class GateAuthProbeFailed(TypedDict):
 
 
 class PluginLoadFailed(TypedDict):
-    """`plugin_load_failed` payload — shared/plugin_load_report.py.
+    """`plugin_load_failed` payload — shared/packages/plugins/load_report.py.
 
     One row per plugin that could not be loaded at a plugin-code load site
     reporting through this canonical reporter: `plugin.py` at host boot or

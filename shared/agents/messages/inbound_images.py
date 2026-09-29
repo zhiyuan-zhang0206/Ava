@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from shared.uploads import image_mime_for, parse_upload_url
+from shared.agents.uploads import image_mime_for, parse_upload_url
 
 
 def inbound_image_urls(agent_id: int, payload: dict[str, Any] | None) -> list[str] | None:

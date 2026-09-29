@@ -2,7 +2,7 @@
 
 FastAPI TestClient + real ava_test DB. One table, discriminated by
 require_response, carries the whole agent->user queue. Covers:
-  - shared.agent_snapshot.select_one exposes the open require_response notices as
+  - shared.agents.observation.snapshot.select_one exposes the open require_response notices as
     notices_awaiting_response (the "waiting on you" worklist) and counts the open
     FYI notices as unread_notice_count (the badge); FYI content stays off the
     snapshot.
@@ -28,7 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from shared.agent_snapshot import select_one
+from shared.agents.observation.snapshot import select_one
 from shared.config import settings
 
 

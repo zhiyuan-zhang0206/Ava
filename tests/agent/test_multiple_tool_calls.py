@@ -15,7 +15,7 @@ from agent.graph.interrupt import InterruptEvent
 from agent.graph.tool_calls import normalize_tool_calls
 from agent.state import AgentState
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
-from shared.context import AvaContext
+from shared.agents.context import AvaContext
 from tests.agent._fakes import make_fake_ops_pool
 
 
@@ -185,7 +185,7 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
     outcome: str,
 ) -> None:
     from agent.graph._exec_result import _ExecCancelled, _ExecLifecycle, _ExecTimedOut
-    from shared.lifecycle import AgentRestart, AgentTermination, SystemHalt
+    from shared.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 
     outcomes = {
         "cancel": _ExecCancelled(output="cancelled"),

@@ -36,8 +36,8 @@ from services.agent_host.dispatcher import (
     HostRestartRequiredError,
     TurnStallTimeoutError,
 )
+from shared.agents.context import AvaContext
 from shared.config import settings
-from shared.context import AvaContext
 from shared.log import logger
 from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 

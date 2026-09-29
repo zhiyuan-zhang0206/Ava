@@ -12,8 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from shared.agents.impersonation.impersonation_history import ImpersonationMetadata
-from shared.sdk_telemetry import SdkCall
+from shared.agents.impersonation.history import ImpersonationMetadata
+from shared.agents.sdk.telemetry import SdkCall
 
 
 class TimelineItem(BaseModel):

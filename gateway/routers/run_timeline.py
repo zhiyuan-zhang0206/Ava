@@ -778,7 +778,7 @@ def _latest_compact_summary(agent_id: int) -> str | None:
     a read failure or an agent without a compaction degrades to None.
     """
     from shared.agents.history.checkpoint import load_checkpoint_messages
-    from shared.message_kwargs import AvaMsgType, message_content, read_ava_kwargs
+    from shared.agents.messages.kwargs import AvaMsgType, message_content, read_ava_kwargs
 
     try:
         messages = load_checkpoint_messages(agent_id)

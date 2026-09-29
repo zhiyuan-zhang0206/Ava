@@ -28,7 +28,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from agent.state import BaseAgentState
-from shared.context import AvaContext
+from shared.agents.context import AvaContext
 
 
 async def attach_trace_checkpoint_ref(

@@ -22,7 +22,6 @@ from ops.agents import (
     resurrect_agent,
 )
 from ops.ops_lifecycle import _force_mark_terminated
-from shared.agent_snapshot import select_one
 from shared.agents import (
     AgentNotFound,
     ForkCheckpointNotFound,
@@ -30,6 +29,7 @@ from shared.agents import (
     ResurrectError,
 )
 from shared.agents.messages.envelope import wrap_inbound
+from shared.agents.observation.snapshot import select_one
 from shared.config import settings
 from shared.machine import machine_name
 
@@ -265,7 +265,7 @@ async def _settle_hosted_force(
     db: psycopg.Connection, pool: AsyncConnectionPool, agent_id: int
 ) -> None:
     """Complete this inactive fixture through its retained hosted owner."""
-    from shared.hosted_force import original_host_force
+    from shared.agents.incarnation.hosted_force import original_host_force
 
     row = db.execute("SELECT runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert row is not None

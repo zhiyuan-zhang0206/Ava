@@ -16,7 +16,8 @@ import pytest
 
 from cli.commands._rendered_file import write_rendered_guarded
 from cli.commands.extensions.materialize import materialize_cluster_extensions
-from shared import db, extension_materialize, paths
+from shared import db, paths
+from shared.packages.extensions import materialize
 
 
 def _capture_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
@@ -84,7 +85,7 @@ def test_extensions_kept_local_edits_report_converge_file_preserved(
             landed=[], updated=[], kept_local_edits=["edit-demo"], missing_blob=[]
         )
 
-    monkeypatch.setattr(extension_materialize, "materialize_skills", kept_edit)
+    monkeypatch.setattr(materialize, "materialize_skills", kept_edit)
 
     materialize_cluster_extensions()
 

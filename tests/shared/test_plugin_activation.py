@@ -1,4 +1,4 @@
-"""Unit tests for `shared/plugin_activation.py` — the injection-surface
+"""Unit tests for `shared/packages/plugins/activation.py` — the injection-surface
 activation recorder (issue #40, philosophy §6).
 
 Pins the three properties that make it safe to hang off every plugin surface:
@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from shared import plugin_activation
+from shared.packages.plugins import activation
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, str]]:
@@ -23,14 +23,14 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, str]
     def spy(plugin: str, surface: str, identifier: str, detail: str) -> None:
         emitted.append((plugin, surface, identifier, detail))
 
-    monkeypatch.setattr(plugin_activation, "emit", spy)
+    monkeypatch.setattr(activation, "emit", spy)
     return emitted
 
 
 def test_records_an_attributed_firing(monkeypatch: pytest.MonkeyPatch) -> None:
     emitted = _spy_emit(monkeypatch)
 
-    plugin_activation.record("ava_syntax_fix", "hooks", "before_exec", detail="wrote messages")
+    activation.record("ava_syntax_fix", "hooks", "before_exec", detail="wrote messages")
 
     assert emitted == [("ava_syntax_fix", "hooks", "before_exec", "wrote messages")]
 
@@ -41,7 +41,7 @@ def test_unattributed_firing_records_nothing(monkeypatch: pytest.MonkeyPatch) ->
     stay parallel and the framework never shows up as a plugin."""
     emitted = _spy_emit(monkeypatch)
 
-    plugin_activation.record(None, "hooks", "before_llm", detail="wrote messages")
+    activation.record(None, "hooks", "before_llm", detail="wrote messages")
 
     assert emitted == []
 
@@ -58,13 +58,13 @@ def test_event_carries_the_model_in_force(monkeypatch: pytest.MonkeyPatch) -> No
 
         def info(self, _msg: str) -> None: ...
 
-    monkeypatch.setattr(plugin_activation, "logger", _Logger())
+    monkeypatch.setattr(activation, "logger", _Logger())
 
-    plugin_activation.emit("ava_code", "sdkWraps", "files.read", "inner_calls=0")
+    activation.emit("ava_code", "sdkWraps", "files.read", "inner_calls=0")
 
     assert len(bound) == 1
     payload = bound[0]
-    assert payload["event"] == plugin_activation.PLUGIN_ACTIVATION_EVENT
+    assert payload["event"] == activation.PLUGIN_ACTIVATION_EVENT
     assert payload["plugin"] == "ava_code"
     assert payload["surface"] == "sdkWraps"
     assert payload["identifier"] == "files.read"
@@ -80,9 +80,9 @@ def test_emit_failure_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
         def bind(self, **_kwargs: Any) -> None:
             raise RuntimeError("sink down")
 
-    monkeypatch.setattr(plugin_activation, "logger", _Broken())
+    monkeypatch.setattr(activation, "logger", _Broken())
 
-    plugin_activation.record("ava_memory", "hooks", "after_exec", detail="wrote messages")
+    activation.record("ava_memory", "hooks", "after_exec", detail="wrote messages")
 
 
 def test_registered_event_name_is_on_contract() -> None:
@@ -90,9 +90,9 @@ def test_registered_event_name_is_on_contract() -> None:
     entry is part of the contract, not an optional extra."""
     from shared.events.contract import EVENTS, payload_keys
 
-    spec = EVENTS[plugin_activation.PLUGIN_ACTIVATION_EVENT]
+    spec = EVENTS[activation.PLUGIN_ACTIVATION_EVENT]
     assert spec.category == "telemetry"
-    assert set(payload_keys(plugin_activation.PLUGIN_ACTIVATION_EVENT)) == {
+    assert set(payload_keys(activation.PLUGIN_ACTIVATION_EVENT)) == {
         "plugin",
         "surface",
         "identifier",

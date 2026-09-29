@@ -17,7 +17,7 @@ and the Ava agent identity stay intact. The card header does not render
 this metadata — no executor/takeover badge (user ruling 2026-09-16, task #3660).
 The roster card also carries an optional open session number plus that lease's
 phase (`requested` / `accepted` / `active`, or null with no open lease — see
-`shared/agent_roster.py`'s `open_impersonation` LATERAL join). Only `active`
+`shared/agents/observation/roster.py`'s `open_impersonation` LATERAL join). Only `active`
 means the agent is actually taken over: the console projects that case to a
 distinct `impersonated` status (replacing `idling`/`running` — see
 `projectAgentStatus` in `src/lib/types.ts`), which is the only visible sidebar

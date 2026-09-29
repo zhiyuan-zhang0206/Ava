@@ -1209,7 +1209,7 @@ def _patch_redis(monkeypatch: pytest.MonkeyPatch, pubsub: _QueueingPubSub) -> li
         clients.append(client)
         return client
 
-    from shared import redis_client
+    from shared.events.live import redis_client
 
     monkeypatch.setattr(redis_client, "open_async_redis", _open)
     return clients
@@ -1407,7 +1407,7 @@ class TestSubscriptionRecovery:
                 second_opened.set()
             return client
 
-        from shared import redis_client
+        from shared.events.live import redis_client
 
         monkeypatch.setattr(redis_client, "open_async_redis", _open)
         disp = InboundWakeDispatcher(

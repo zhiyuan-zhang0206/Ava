@@ -53,7 +53,7 @@ lifecycle; those items wait for it to land and are then designed on its code.
    entry points on its version.
 2. **Reach-in burn-down** (`private_imports`, 23 keys / 25 sites / 20 files).
    Every remaining key sits in a file #3479 rewrites. Highest yield once it
-   lands: `shared.agents.impersonation._impersonation_store` (5 sites), then
+   lands: `shared.agents.impersonation._store` (5 sites), then
    `shared.runtime_publication_input` and `shared.managed_writer_publication`
    (3 each) — each gets a verdict: contract (export it) or internal (route
    callers through a door). `ava` carries no frozen reach-ins: agent

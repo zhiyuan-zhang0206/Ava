@@ -12,7 +12,10 @@ from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
 from agent.ownership.inbound import lock_inbound_owner
-from shared.lifecycle_acceptance import LifecycleIntent, accept_lifecycle_command_async
+from shared.agents.incarnation.lifecycle_acceptance import (
+    LifecycleIntent,
+    accept_lifecycle_command_async,
+)
 from shared.runtime_incarnation import current_incarnation
 
 

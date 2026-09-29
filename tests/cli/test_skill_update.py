@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from cli.commands.extensions.skill import cmd_skill_update, cmd_skill_upgrade
-from shared import install_registry as reg
+from shared.packages.extensions import install_registry as reg
 
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare

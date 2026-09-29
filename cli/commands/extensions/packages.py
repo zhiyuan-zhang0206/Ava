@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
-from shared.install_registry import InstalledPackage
+from shared.packages.extensions.install_registry import InstalledPackage
 
 # Column width for the text table's LAST RESULT cell (JSON is untruncated).
 _RESULT_W = 40
@@ -68,7 +68,7 @@ def _read_declared_range(pkg: InstalledPackage) -> tuple[dict[str, object] | Non
     fails validation is reported as an error value instead of raising — status
     must never fail on the state it reports.
     """
-    from shared import plugin_manifest
+    from shared.packages.plugins import manifest as plugin_manifest
 
     root = _package_root(pkg)
     if root is None:
@@ -136,7 +136,8 @@ def cmd_packages_status(*, json_output: bool = False) -> int:
     import json
 
     from shared import host_version as host_version_mod
-    from shared import install_registry, paths
+    from shared import paths
+    from shared.packages.extensions import install_registry
 
     registry = install_registry.load()
     try:
@@ -355,8 +356,9 @@ def cmd_packages_rollback(name: str, *, force: bool = False) -> int:
     the current one. `--force` overrides the local-edit guard. The channel
     watermark (`applied_rev`) is left where it was: a later refresh applies only
     what changed after the revoked rev."""
-    from shared import install_registry, paths
-    from shared.packages.skills.skill_names import match_key
+    from shared import paths
+    from shared.packages.extensions import install_registry
+    from shared.packages.skills.names import match_key
 
     try:
         registry = install_registry.load()
@@ -419,8 +421,8 @@ def cmd_packages_policy(
     values survive every refresh pass (only None fields are resolved from
     settings)."""
     from cli.commands.extensions.packages_refresh import parse_duration
-    from shared import install_registry
-    from shared.packages.skills.skill_names import match_key
+    from shared.packages.extensions import install_registry
+    from shared.packages.skills.names import match_key
 
     if update_mode is None and check_every is None:
         print("[ava packages policy] pass --update-mode and/or --check-every", file=sys.stderr)

@@ -27,7 +27,7 @@ from services.delivery_watchdog.daemon import (
 from shared import telemetry
 from shared.config import settings
 from shared.db import insert_inbound_message
-from shared.redis_listener import RedisInboundListener
+from shared.events.live.redis_listener import RedisInboundListener
 
 _THRESHOLD_S = 30.0
 _DISPATCH_THRESHOLD_S = 1.0
@@ -380,7 +380,7 @@ class TestDispatchWakes:
         """End-to-end: dispatch_wakes publishes on the agent's Redis channel,
         so a listener subscribed to it wakes immediately — the lost-wake window
         collapses from 30s to ~1 tick."""
-        from shared.redis_listener import RedisInboundListener
+        from shared.events.live.redis_listener import RedisInboundListener
 
         aid = _make_idling_agent(db_conn)
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
@@ -1543,7 +1543,7 @@ class TestSystemNoticeSourcePredicateParity:
         from psycopg import sql
         from psycopg.types.json import Jsonb
 
-        from shared.lifecycle_acceptance import (
+        from shared.agents.incarnation.lifecycle_acceptance import (
             SYSTEM_NOTICE_SOURCE,
             is_system_notice_source,
         )
@@ -1581,7 +1581,7 @@ class TestSystemNoticeSourcePredicateParity:
                     assert row[0] == is_system_notice_source(source, payload), (source, label)
 
     def test_only_the_exact_boolean_true_marker_exempts(self) -> None:
-        from shared.lifecycle_acceptance import is_system_notice_source
+        from shared.agents.incarnation.lifecycle_acceptance import is_system_notice_source
 
         for source in ("system", "system:notice-reply"):
             for label, payload, exempt in self._PAYLOAD_SAMPLES:

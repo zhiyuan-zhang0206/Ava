@@ -26,14 +26,15 @@ from agent.startup import wrap_saver_writes_with_nstep_interval
 from ops.agent_spawn import create_agent_row
 from services.agent_host import db_recovery
 from services.agent_host.host import AgentHost
-from shared import hosted_db_wait, maintenance, maintenance_cohort, pause_owner
+from shared import maintenance, maintenance_cohort, pause_owner
+from shared.agents.context import AvaContext
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from shared.agents.incarnation.hosted_force import install_hosted_force
+from shared.agents.incarnation.resources import ResourceBirth
+from shared.agents.observation import db_wait
+from shared.agents.observation.db_wait import database_wait_snapshot
 from shared.config import settings
-from shared.context import AvaContext
 from shared.db import insert_inbound_message
-from shared.hosted_db_wait import database_wait_snapshot
-from shared.hosted_force import install_hosted_force
-from shared.incarnation_resources import ResourceBirth
 from shared.machine import machine_name
 from shared.maintenance_state import MaintenanceHold
 from shared.runtime_incarnation import RuntimeIncarnation
@@ -778,4 +779,4 @@ def test_db_wait_proof_ttl_covers_widened_recovery_stages() -> None:
     slack_seconds = 10 + 3 + 15 + 12  # heartbeat, publication, sleep, scheduling
     assert (
         2 * db_recovery._DATABASE_PHASE_TIMEOUT_SECONDS + slack_seconds
-    ) <= hosted_db_wait.DB_WAIT_PROOF_TTL_SECONDS
+    ) <= db_wait.DB_WAIT_PROOF_TTL_SECONDS

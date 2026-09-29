@@ -87,7 +87,7 @@ def require_current_for_managed(decision: AdmissionDecision, resource_value: obj
     refuses under every decision. Raises ResourceEvidenceError so the hosted
     caller converts the fence into a recorded refusal.
     """
-    from shared.incarnation_resources import ResourceEvidenceError, decode_resources
+    from shared.agents.incarnation.resources import ResourceEvidenceError, decode_resources
 
     if resource_value is None:
         if isinstance(decision, CurrentAdmission):

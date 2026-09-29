@@ -644,9 +644,9 @@ class TestTasksEntries:
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents (id) VALUES (900001) ON CONFLICT (id) DO NOTHING")
         db_conn.commit()
-        from shared import live_announce  # origin: deferred import at the call site (task #3816)
+        from shared.events.live import announce
 
-        monkeypatch.setattr(live_announce, "publish_task_created_sync", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(announce, "publish_task_created_sync", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
         task = task_registry.create(title=("My Task",), description="d", parent=root_id)  # pyright: ignore[reportArgumentType, reportUnknownArgumentType]
         assert task.title == "My Task"
@@ -767,7 +767,7 @@ class TestSelfEntries:
         import shared.audit_events as _audit
 
         monkeypatch.setattr(_audit, "insert_event_log", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-        from shared.lifecycle import SystemHalt
+        from shared.agents.lifecycle import SystemHalt
 
         with pytest.raises(SystemHalt):
             self_mod.compact(("summary",))  # pyright: ignore[reportArgumentType]

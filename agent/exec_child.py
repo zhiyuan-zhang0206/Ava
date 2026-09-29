@@ -328,7 +328,7 @@ def _run_code(code: str, payload: Any) -> None:
         register_agent_source,
     )
     from ava.sdk_surface.help import HelpRouter
-    from shared import sdk_telemetry
+    from shared.agents.sdk import telemetry as sdk_telemetry
 
     # Register the source so `<agent_code>` frames resolve their offending
     # line in tracebacks (exec'd code is invisible to linecache).
@@ -360,7 +360,7 @@ def _run_code(code: str, payload: Any) -> None:
         with sdk_telemetry.recording() as tally:
             exec(compile(code, "<agent_code>", "exec"), fresh_globals)
     except BaseException as exc:
-        from shared.lifecycle import LifecycleExit
+        from shared.agents.lifecycle import LifecycleExit
 
         if isinstance(exc, LifecycleExit):
             # Lifecycle (terminate/restart/compact): SDK already INSERTed the

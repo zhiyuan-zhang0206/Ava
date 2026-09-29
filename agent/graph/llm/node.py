@@ -74,16 +74,16 @@ from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
 from agent.turn_progress import mark_turn_progress
+from shared.agents.context import AvaContext, agent_id_from_config
+from shared.agents.messages.kwargs import read_ava_kwargs
 from shared.config import settings
 from shared.config.turn_view import turn_settings
-from shared.context import AvaContext, agent_id_from_config
 from shared.db_transaction import async_write_transaction
-from shared.event_publisher import AgentEventPublisher
-from shared.live_events import TokenUsage
+from shared.events.live.projection import TokenUsage
+from shared.events.live.publisher import AgentEventPublisher
 from shared.lm.content import content_blocks
 from shared.lm.usage import CACHE_MECHANISM_MIXED, CACHE_SCOPE_EXPLICIT_BLOCK
 from shared.log import logger
-from shared.message_kwargs import read_ava_kwargs
 
 from ._chunk import _assemble_final_message
 from ._stream import _stream_with_cache_retry
@@ -438,7 +438,7 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
       breaker's "first successful LLM call closes the breaker" moment).
     - permanent_reject_streak = 0 in the same statement: a completed turn is
       also the recovery signal that closes the recovery circuit breaker
-      (`shared/recovery_breaker.py`) — the only reset, so two consecutive
+      (`shared/agents/recovery_breaker.py`) — the only reset, so two consecutive
       permanent rejections with no success between them keep it >= the halt
       threshold. `last_permanent_reject_reason` is cleared with it — the reason
       class belongs to the streak generation.

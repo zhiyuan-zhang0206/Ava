@@ -20,7 +20,7 @@ from agent.state import (
     build_agent_state,
     clear_plugin_registrations,
 )
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 
 
 @pytest.fixture(autouse=True)
@@ -90,7 +90,7 @@ def _get_injected_context_notes(state_update: dict[str, object]) -> list[dict[st
     from langchain_core.messages import AnyMessage
 
     from agent.messages import read_ava_kwargs
-    from shared.message_kwargs import AvaMsgType, NoteTag
+    from shared.agents.messages.kwargs import AvaMsgType, NoteTag
 
     notes: list[dict[str, str]] = []
     for msg in cast(list[AnyMessage], state_update.get("messages", [])):

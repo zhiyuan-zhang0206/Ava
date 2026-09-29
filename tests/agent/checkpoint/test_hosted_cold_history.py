@@ -21,7 +21,7 @@ from shared.agents.history.delta_read_compat import (
     recovery_reconstruction_scope,
     wrap_saver_reads_with_delta_reconstruction,
 )
-from shared.incarnation_resources import ResourceBirth
+from shared.agents.incarnation.resources import ResourceBirth
 from shared.machine import machine_name
 
 

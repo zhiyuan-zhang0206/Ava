@@ -283,7 +283,7 @@ def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]
         return commands
 
     from ava import skills
-    from shared.packages.skills.skill_names import match_key
+    from shared.packages.skills.names import match_key
 
     loaded = skills.names()
     by_ident = {match_key(skills.identifier(skill)): skill for skill in loaded}
@@ -312,7 +312,7 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     from ava import skills
     from ava.composer_commands import discover_commands
     from ava.mcp_config import load_mcp_config
-    from shared.mcp_enabled import read_enabled
+    from shared.packages.plugins.mcp_enabled import read_enabled
 
     cwd, wanted = _agent_skill_view_inputs(pool, agent_id)
     skills.register_skill_source(lambda: _project_skill_roots(cwd))

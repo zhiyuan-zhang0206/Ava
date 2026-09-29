@@ -3,7 +3,7 @@
 
 Single source of truth: ``shared/events/contract.EVENTS`` (name x category x
 payload TypedDict x destination) plus the SSE roles in
-``shared/live_events.py``. The generated doc carries the registry data as
+``shared/events/live/projection.py``. The generated doc carries the registry data as
 tables and preserves the governance prose (§6-§8) verbatim; producer /
 consumer provenance now lives at the emit sites in code, not in this doc.
 
@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from shared.events.contract import EVENTS, payload_keys
-from shared.live_events import GLOBAL_ROLES, SYSTEM_ROLES
+from shared.events.live.projection import GLOBAL_ROLES, SYSTEM_ROLES
 
 _OUT = Path("shared/events/registry.md")
 
@@ -123,7 +123,7 @@ _LOG_INTRO = """
 _SSE_INTRO = """
 ## 5. SSE roles (live channel, not persisted, {n})
 
-Typed Pydantic discriminators in `shared/live_events.py` (role is a Literal);
+Typed Pydantic discriminators in `shared/events/live/projection.py` (role is a Literal);
 `EVENT_ADAPTER` / `SYSTEM_ROLES` / `GLOBAL_ROLES` derive from the single
 `_ROLE_CLASSES` registry (R2-C). SSE is a **live projection** of the "latest drops"
 of the event river — not persisted, unlike persistent events; role naming shares the

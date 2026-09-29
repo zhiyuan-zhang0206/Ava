@@ -358,7 +358,7 @@ ignore = [
 # telemetry / retry-policy readers sit outside node signatures, so a blanket
 # ban is not possible. New uses need a written justification in the PR
 # description before joining the per-file-ignores allowlist below.
-"contextvars" = { msg = "contextvars is allowlisted only — owners: shared/turn_identity.py, shared/config/turn_view.py, shared/plugin_config_view.py, shared/plugin_context.py, shared/redis_client.py, gateway/mcp_endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
+"contextvars" = { msg = "contextvars is allowlisted only — owners: shared/turn_identity.py, shared/config/turn_view.py, shared/packages/plugins/config_view.py, shared/packages/plugins/context.py, shared/events/live/redis_client.py, gateway/mcp_endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
@@ -423,11 +423,11 @@ ignore = [
 # justified in the PR description before joining this list.
 "shared/turn_identity.py" = ["TID251"]
 # SDK async tasks must not share active call frames or borrowed identity.
-"shared/sdk_telemetry.py" = ["TID251"]
+"shared/agents/sdk/telemetry.py" = ["TID251"]
 "shared/config/turn_view.py" = ["TID251"]
-"shared/plugin_config_view.py" = ["TID251"]
-"shared/plugin_context.py" = ["TID251"]
-"shared/redis_client.py" = ["TID251"]
+"shared/packages/plugins/config_view.py" = ["TID251"]
+"shared/packages/plugins/context.py" = ["TID251"]
+"shared/events/live/redis_client.py" = ["TID251"]
 "gateway/mcp_endpoint.py" = ["TID251"]
 "ava/sdk_surface/help.py" = ["TID251"]
 "ava/sdk_surface/discovery.py" = ["TID251"]

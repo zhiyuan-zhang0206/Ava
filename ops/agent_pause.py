@@ -23,11 +23,11 @@ from uuid import UUID, uuid4
 
 from ops.agent_pause_probe import HostIdentity, host_identity, host_running
 from shared import maintenance, maintenance_cohort, pause_owner
+from shared.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from shared.db import connect, publish_inbound_wake
 from shared.hold_driver import HoldDriver
 from shared.machine import machine_name, machine_role
 from shared.maintenance_state import MaintenanceHold
-from shared.resource_admission import DRAINED_RESOURCES
 
 _log = logging.getLogger(__name__)
 

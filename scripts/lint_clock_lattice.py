@@ -200,7 +200,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     "(decisions/2026-09-28-stop-escalates-to-sigkill.md); the stop's own deadline caps it "
     "and nothing orders against it, no lattice neighbour",
     (
-        "shared/redis_listener.py",
+        "shared/events/live/redis_listener.py",
         "_CONSUME_ABANDON_GRACE",
     ): "independent: pubsub consume-abandon window, no lattice neighbour",
     (
@@ -212,7 +212,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "DELIVERY_POISONED_KEYS",
     ): "SQL key set for the delivery_poisoned view, not a clock",
     (
-        "shared/lifecycle_acceptance.py",
+        "shared/agents/incarnation/lifecycle_acceptance.py",
         "SYSTEM_REAPED_CRASH_ROW",
     ): "SQL predicate constant for the corpse-reaper's crash-marked rows, not a clock",
     (

@@ -89,7 +89,7 @@ one is a category error and the registry rejects it. Plugin `Config` fields
 (`shared/plugin_config_registry.py`) are outside this registry and are not part of
 the frozen set; they behave as `live` and only an explicit overlay pins them.
 
-Resolution + stamping mechanics: `shared/birth_config.py`.
+Resolution + stamping mechanics: `shared/agents/birth_config.py`.
 
 ## Reading per-agent fields from turn-scoped code
 

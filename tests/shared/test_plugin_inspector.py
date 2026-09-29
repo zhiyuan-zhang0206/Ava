@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from shared.plugin_context import PluginContext
-from shared.plugin_inspector import (
+from shared.packages.plugins.context import PluginContext
+from shared.packages.plugins.inspector import (
     DuplicateInspectWidget,
     InspectWidgetSpec,
     NoPluginContext,

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Package Manifest (spec v2)
-description: The `ava-plugin.json` a package may ship — identity, dependencies, declared contribution surfaces, lifecycle shape — validated at install time by `shared/plugin_manifest.py`, with the console-contribution schema (`contributions.ui`) in `shared/plugin_ui_contributions.py`.
+description: The `ava-plugin.json` a package may ship — identity, dependencies, declared contribution surfaces, lifecycle shape — validated at install time by `shared/packages/plugins/manifest.py`, with the console-contribution schema (`contributions.ui`) in `shared/packages/plugins/ui_contributions.py`.
 tags:
 - plugins
 ---
@@ -12,14 +12,14 @@ tags:
 Packages may ship an `ava-plugin.json` at their root declaring identity
 (name/version/`engines.ava` range, optional `requires_commit` pin), dependencies (`plugins` /
 `pythonPackages` / `hostCapabilities`), contribution surfaces, and lifecycle
-shape. Install paths validate it via `shared/plugin_manifest.py` (host-axis
+shape. Install paths validate it via `shared/packages/plugins/manifest.py` (host-axis
 checks: the derived host version must satisfy `engines.ava`, and the checkout
 must contain `requires_commit` — [host-versioning.md](../../conventions/host-versioning.md)); runtime
 loading, lifecycle states, and context gates land post-open-source. Full
 contract: [conventions/plugin-spec-v2.md](../../conventions/plugin-spec-v2.md).
 
 ## Console Contributions (`contributions.ui`)
-`shared/plugin_ui_contributions.py` validates the web-console half: a plugin
+`shared/packages/plugins/ui_contributions.py` validates the web-console half: a plugin
 declares `agentInspect` sections, `nav` entries, and `themes` token packs **as
 data**, and the console renders them with its own components — it never runs
 plugin JavaScript. Every vocabulary is closed: renderers and nav locations are

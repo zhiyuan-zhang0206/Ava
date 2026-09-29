@@ -15,7 +15,7 @@ from cli.commands.extensions._plugin_scaffold import ScaffoldResult, run_plugin_
 from shared import memory_repo, paths, proc
 from shared.config import settings
 from shared.machine import set_identity
-from shared.plugins_config import write_local
+from shared.packages.plugins.enable_config import write_local
 
 
 @pytest.fixture(autouse=True)

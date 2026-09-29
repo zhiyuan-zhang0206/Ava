@@ -15,7 +15,7 @@ from psycopg import sql
 import ava.impersonation_replay as reader
 import shared.agents.impersonation_manifest as manifest
 from shared.agents import impersonation as leases
-from shared.agents.impersonation import impersonation_history as history
+from shared.agents.impersonation import history as history
 from shared.agents.impersonation_manifest import (
     LocalParticipant,
     bind_local_participant,

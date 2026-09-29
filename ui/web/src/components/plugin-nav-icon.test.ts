@@ -1,6 +1,6 @@
 // The nav vocabularies have two halves each, and each pair must be one set.
 //
-// `shared/plugin_ui_contributions.py:NAV_ICONS` is what a manifest may declare;
+// `shared/packages/plugins/ui_contributions.py:NAV_ICONS` is what a manifest may declare;
 // `PLUGIN_NAV_ICONS` is what the console can draw. A name in the validator but
 // not the map renders a fallback icon nobody asked for; a name in the map but
 // not the validator is a promise no manifest can use. Neither shows up at

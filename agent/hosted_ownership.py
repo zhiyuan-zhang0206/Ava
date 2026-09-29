@@ -13,25 +13,28 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from shared import maintenance
-from shared.agent_observation import AdmissionOutcome
+from shared.agents.incarnation.host_process_evidence import local_host_evidence
+from shared.agents.incarnation.lifecycle_acceptance import (
+    RECORD_APPLIED,
+    terminate_kills_shell_sessions,
+)
+from shared.agents.incarnation.resource_admission import admit_resources_async
+from shared.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceEvidenceError,
+    ResourceProcess,
+    decode_resources,
+)
+from shared.agents.observation.evidence import AdmissionOutcome
 from shared.audit_events import insert_event_log_async
 from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import (
     AGENT_LEASE_TTL_S,
     LEGACY_HOST_ADOPTION_SILENCE_S,
 )
-from shared.host_process_evidence import local_host_evidence
-from shared.incarnation_resources import (
-    IncarnationResources,
-    ResourceEvidenceError,
-    ResourceProcess,
-    decode_resources,
-)
-from shared.lifecycle_acceptance import RECORD_APPLIED, terminate_kills_shell_sessions
-from shared.live_announce import publish_agent_updated
+from shared.events.live.announce import publish_agent_updated
 from shared.log import logger
 from shared.paths import ava_home
-from shared.resource_admission import admit_resources_async
 from shared.runtime_admission import (
     AdmissionDecision,
     CurrentAdmission,
@@ -113,7 +116,7 @@ async def apply_hosted_lifecycle(
     if not hosted_resources_settled():
         return None
     async with async_write_transaction(pool) as conn:
-        from shared.resource_admission import require_resources_closed_async
+        from shared.agents.incarnation.resource_admission import require_resources_closed_async
 
         await require_resources_closed_async(conn, incarnation.agent_id)
         cursor = await conn.execute(
@@ -299,7 +302,7 @@ async def _legacy_dead_host_adoption(
       ``LEGACY_HOST_ADOPTION_SILENCE_S`` — the predecessor's ownership beat
       stopped, not merely its owner UUID;
     - no live same-home agent-host daemon and no live exec child of this agent
-      (``shared.host_process_evidence``) — no concurrent owner survives;
+      (``shared.agents.incarnation.host_process_evidence``) — no concurrent owner survives;
     - the row is unmarked (``last_turn_fatal_at IS NULL``): crash corpses keep
       their own reaper/resurrect recovery.
 
@@ -372,7 +375,7 @@ async def _dead_predecessor_evidence(
     """
     # Resolved at call time: the exact-exit probe is monkeypatched at its
     # source module in the resident tests.
-    from shared.exec_owner_recovery import process_ended
+    from shared.agents.incarnation.exec_owner_recovery import process_ended
 
     if previous[1] == owner or previous[3] != machine:
         return None, False
@@ -416,7 +419,7 @@ async def admit_hosted_runtime(
     before its lease expires only through the evidence-gated proposal of
     ``_legacy_dead_host_adoption``, re-checked under this row lock.
     """
-    from shared.exec_owner_recovery import recover_local_resources
+    from shared.agents.incarnation.exec_owner_recovery import recover_local_resources
 
     attempt_at = await _admission_attempt_at(pool)
     if maintenance.held() and not await _held_owner_matches(pool, agent_id, owner):

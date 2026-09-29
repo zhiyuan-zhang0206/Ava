@@ -47,7 +47,7 @@ def select_stalled_crash_marked(
     recovery breaker halted (`RECOVERY_BREAKER_CLEAR`) or one with an
     in-force suppression window is excluded — automatic recovery must not
     start for it."""
-    from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
+    from shared.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

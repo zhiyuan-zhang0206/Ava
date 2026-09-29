@@ -1,4 +1,4 @@
-"""AgentEventPublisher (shared/event_publisher.py) unit tests.
+"""AgentEventPublisher (shared/events/live/publisher.py) unit tests.
 
 The publisher is the best-effort SSE fan-out for one agent process: callers
 `emit(payload)` (synchronous, never blocks, never raises) and a single
@@ -17,8 +17,8 @@ from typing import Any, cast
 import pytest
 import redis.asyncio as aredis
 
-from shared import redis_client
-from shared.event_publisher import AgentEventPublisher
+from shared.events.live import redis_client
+from shared.events.live.publisher import AgentEventPublisher
 
 
 class _FakePipeline:

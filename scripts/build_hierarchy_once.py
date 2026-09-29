@@ -23,10 +23,10 @@ import argparse
 from urllib.parse import urlsplit
 
 from agent.llm import execute_code
-from shared.agent_snapshot import agent_effective_model
 from shared.agents.history.hierarchy.generate import build_generation_llm
 from shared.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
 from shared.agents.history.hierarchy.store import load_known_texts, write_tree
+from shared.agents.observation.snapshot import agent_effective_model
 from shared.config import settings
 from shared.lm.factory import close_chat_model
 

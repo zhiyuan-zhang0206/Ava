@@ -40,8 +40,6 @@ from ops.rpc_schemas import (
     SpawnAgentRequest,
     SpawnedAgent,
 )
-from shared import agent_roster, agent_snapshot
-from shared.agent_observation import AgentAvailability, AvailabilityReason
 from shared.agents import (
     AgentLaunchFailed,
     AgentNotFound,
@@ -49,10 +47,13 @@ from shared.agents import (
     InvalidModelConfig,
     SpawnTargetNotAgentRunner,
 )
+from shared.agents.labels import publish_label_updated, spawn_prompt_with_label
+from shared.agents.observation import roster
+from shared.agents.observation import snapshot as agent_snapshot
+from shared.agents.observation.evidence import AgentAvailability, AvailabilityReason
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.labels import publish_label_updated, spawn_prompt_with_label
-from shared.live_announce import publish_agent_updated_sync
+from shared.events.live.announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.machine import machine_name
 
@@ -143,14 +144,14 @@ def get_models() -> ModelsResponse:
 @router.get("/api/agents")
 def get_agents(
     request: Request,
-    scope: Annotated[agent_roster.AgentDirectoryScope, Query()] = "live",
+    scope: Annotated[roster.AgentDirectoryScope, Query()] = "live",
     query: Annotated[str, Query(max_length=200)] = "",
     before_id: Annotated[int | None, Query(gt=0, le=9223372036854775807)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
-) -> agent_roster.AgentDirectoryPage:
+) -> roster.AgentDirectoryPage:
     """Read one directory page. History is explicit and never fetched implicitly."""
     with request.app.state.db_pool.connection() as conn:
-        return agent_roster.list_directory(
+        return roster.list_directory(
             conn,
             scope=scope,
             query=query,
@@ -160,10 +161,10 @@ def get_agents(
 
 
 @router.get("/api/agents/roster")
-def get_agent_roster(request: Request) -> agent_roster.AgentRoster:
+def get_agent_roster(request: Request) -> roster.AgentRoster:
     """Read the live tree and its necessary ancestor links in one snapshot."""
     with request.app.state.db_pool.connection() as conn:
-        return agent_roster.select_roster(conn)
+        return roster.select_roster(conn)
 
 
 def _patch_label_blocking(pool: ConnectionPool, agent_id: int, new_label: str | None) -> None:

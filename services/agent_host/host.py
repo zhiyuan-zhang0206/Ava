@@ -95,16 +95,16 @@ from services.agent_host.settlement import close_hosted_turn
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
 from services.agent_host.truncation import reap_truncation_outcome, reap_truncation_stop
 from shared import maintenance
+from shared.agents.context import AvaContext
 from shared.agents.history.delta_read_compat import recovery_reconstruction_scope
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
-from shared.context import AvaContext
-from shared.event_publisher import AgentEventPublisher
-from shared.live_announce import publish_agent_updated
+from shared.events.live.announce import publish_agent_updated
+from shared.events.live.publisher import AgentEventPublisher
+from shared.events.live.redis_client import get_async_redis
 from shared.log import logger
 from shared.machine import machine_name
-from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
-from shared.redis_client import get_async_redis
+from shared.packages.plugins.config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.trace import turn_span
 from shared.turn_identity import bind_turn_identity
@@ -130,7 +130,7 @@ def kill_terminating_agent_shells(agent_id: int) -> None:
 
     The at-exit half of `kill_all_shell_sessions`, bound into
     `apply_hosted_lifecycle` (right before a graceful termination commits) and
-    into the force settlements (`shared.hosted_force`: the sweep once a force
+    into the force settlements (`shared.agents.incarnation.hosted_force`: the sweep once a force
     is observed quiescent, live or at boot). Never raises: a failed kill must
     not turn a termination into a crashed turn, so it is logged at ERROR and
     the termination still applies.
@@ -221,7 +221,7 @@ class AgentHost:
             raise
         finally:
             _active_turn_config_fingerprint.set(turn_context.get(_active_turn_config_fingerprint))
-            from shared.hosted_force import original_host_force
+            from shared.agents.incarnation.hosted_force import original_host_force
 
             if resources.unresolved:
                 # Keep the actual domains and scheduler registration alive.
@@ -266,7 +266,7 @@ class AgentHost:
 
     async def accepts_force(self, agent_id: int, command_id: int) -> bool:
         """Authenticate cancellation against this live host's actual boot owner."""
-        from shared.hosted_force import original_host_force
+        from shared.agents.incarnation.hosted_force import original_host_force
 
         return await original_host_force(
             self._control_pool, agent_id, self._owner, self._machine, command_id=command_id
@@ -559,7 +559,7 @@ class AgentHost:
         Handed to `TurnScheduler` so an uncancellable-turn report can say how
         long the agent has actually been silent. Deliberately THIS column and not
         the `/api/agents` field of the same name: that one is
-        `MAX(inbound_messages.created_at)` (`shared/agent_snapshot.py`) and goes
+        `MAX(inbound_messages.created_at)` (`shared/agents/observation/snapshot.py`) and goes
         stale during exactly the long turns where "is it wedged?" is a real
         question — issue #183. This column is written on every completed LLM step
         (`agent/graph/llm/node.py:_persist_last_active`).

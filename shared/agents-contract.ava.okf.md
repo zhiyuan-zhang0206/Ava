@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent Cross-Process Contract
-description: '`shared/agents/contract.py` defines the cross-process data contract between agent processes and the gateway — pure type definitions, no implementation. Both sides communicate over HTTP and must see the same status enums, exception hierarchy, and wire error protocol (bidirectional mapping between wire reason ↔ exception classes). The message-level half of the contract is its sibling `shared/message_kwargs.py`.'
+description: '`shared/agents/contract.py` defines the cross-process data contract between agent processes and the gateway — pure type definitions, no implementation. Both sides communicate over HTTP and must see the same status enums, exception hierarchy, and wire error protocol (bidirectional mapping between wire reason ↔ exception classes). The message-level half of the contract is its sibling `shared/agents/messages/kwargs.py`.'
 tags:
 - shared
 - library
@@ -31,7 +31,7 @@ tags:
 
 ## Key dependencies
 
-- [[message_kwargs.ava.okf.md]] — the sibling contract module: the message-level half, typing the `ava_*` metadata inside a message's `additional_kwargs` where this module types the HTTP wire between the two processes
+- [[kwargs.ava.okf.md]] — the sibling contract module: the message-level half, typing the `ava_*` metadata inside a message's `additional_kwargs` where this module types the HTTP wire between the two processes
 - [[gateway-cli.ava.okf.md]] — spawn/respawn/launch/fork/resurrect implementations live behind `ops/agents.py` (`ops/agent_spawn.py` birth + `ops/agent_wake.py` wake); this module provides only types
 - [[agent/lifecycle.ava.okf.md]] — the host applies native lifecycle commands under exact-incarnation ownership.
 

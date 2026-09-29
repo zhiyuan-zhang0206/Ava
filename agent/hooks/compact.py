@@ -61,14 +61,14 @@ from agent.messages import (
 )
 from agent.nodes import CLAIM, INIT_CONTEXT
 from agent.state import AgentState, CompactState, ContextReset
+from shared.agents.context import AvaContext, agent_id_from_config
 from shared.agents.history.checkpoint_cleanup import mark_compact_boundary
+from shared.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from shared.audit_events import insert_event_log_async
 from shared.config.turn_view import turn_settings
-from shared.context import AvaContext, agent_id_from_config
-from shared.live_events import Cancelled, CompactDone
+from shared.events.live.projection import Cancelled, CompactDone
 from shared.lm.context_budget import latest_input_tokens, resolve_context_budget
 from shared.log import logger
-from shared.message_kwargs import AvaMsgType, read_ava_kwargs
 
 # Compaction bookkeeping lives in the nested `compact` sub-state (CompactState)
 # on BaseAgentState — read via `state.compact.version` etc.; writers overwrite

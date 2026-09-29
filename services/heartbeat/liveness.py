@@ -59,10 +59,13 @@ from psycopg_pool import ConnectionPool
 from ops import cluster_rpc
 from ops.cluster_status import ClusterStatus
 from shared import cluster_lock, host_deploy_state
-from shared.agent_observation import LIVENESS_PASS_INTERVAL_S, MACHINE_OFFLINE_AFTER_FAILURES
+from shared.agents.observation.evidence import (
+    LIVENESS_PASS_INTERVAL_S,
+    MACHINE_OFFLINE_AFTER_FAILURES,
+)
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.live_announce import publish_agent_updated_sync
+from shared.events.live.announce import publish_agent_updated_sync
 from shared.machines import list_agent_runners
 from shared.transition import transition_severity
 

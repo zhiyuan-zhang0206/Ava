@@ -50,18 +50,19 @@ from gateway.routers.delivery import deliver_chat_inbound
 from gateway.schemas import AgentRow
 from ops.agents import get_agent_status
 from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
-from shared import agent_roster, agent_snapshot
 from shared.agents import AvaAgentError
 from shared.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
+from shared.agents.messages.caller_identity import CallerIdentity
 from shared.agents.messages.chat_delivery import ClientMessageConflictError
 from shared.agents.messages.inbound_provenance import InboundProvenance
+from shared.agents.observation import roster
+from shared.agents.observation import snapshot as agent_snapshot
 from shared.api_contracts.mcp_tool_contract import (
     project_message,
     server_instructions,
     tool_description,
 )
 from shared.audit_events import insert_event_log
-from shared.caller_identity import CallerIdentity
 from shared.machine import machine_name
 
 # Provenance of everything this surface creates. `spawner` groups the agents
@@ -195,13 +196,13 @@ class _AuditMiddleware:
 def _select_directory_blocking(
     pool: Any,
     *,
-    scope: agent_roster.AgentDirectoryScope,
+    scope: roster.AgentDirectoryScope,
     query: str,
     before_id: int | None,
     limit: int,
-) -> agent_roster.AgentDirectoryPage:
+) -> roster.AgentDirectoryPage:
     with pool.connection() as conn:
-        return agent_roster.list_directory(
+        return roster.list_directory(
             conn, scope=scope, query=query, before_id=before_id, limit=limit
         )
 

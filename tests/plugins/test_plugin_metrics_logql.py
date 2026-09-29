@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from shared.metrics.core import core_metrics
-from shared.plugin_context import PluginContext
+from shared.packages.plugins.context import PluginContext
 from shared.plugin_metrics import (
     MetricSpec,
     clear_registry,

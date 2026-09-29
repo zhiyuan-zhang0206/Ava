@@ -13,8 +13,8 @@ import pytest
 
 from agent.plugin_catalog import SURFACES, Catalog, PluginView
 from cli.commands.extensions import plugins_inspect
-from shared.plugin_contributions import Contribution
-from shared.plugin_manifest import Dependencies, Lifecycle, PluginManifest
+from shared.packages.plugins.contributions import Contribution
+from shared.packages.plugins.manifest import Dependencies, Lifecycle, PluginManifest
 
 
 def _manifest(**contributions: object) -> PluginManifest:

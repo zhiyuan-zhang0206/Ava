@@ -20,10 +20,11 @@ from psycopg_pool import ConnectionPool
 
 from gateway.loki_query_budget import LokiQueryBudgetError
 from gateway.schemas import PluginStat, PluginStatStatus, StatsDashboard, StatsWindowHours
-from shared import plugin_stats, telemetry
+from shared import telemetry
 from shared.config import settings
 from shared.events.contract import StatsDashboardStaleReason
 from shared.loki_index_labels import ledger_gap_plan, retention_floor
+from shared.packages.plugins import stats
 
 _cache: dict[int, tuple[float, StatsDashboard]] = {}
 _cache_lock = threading.Lock()
@@ -72,7 +73,7 @@ def plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
             updated_at=row.updated_at,
             updated_by=row.updated_by,
         )
-        for row in plugin_stats.read_all(pool)
+        for row in stats.read_all(pool)
     ]
 
 

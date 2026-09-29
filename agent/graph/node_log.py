@@ -70,8 +70,8 @@ from shared.agents.history.timeline import (
     timeline_default_limit,
 )
 from shared.config import settings
-from shared.event_publisher import AgentEventPublisher
-from shared.live_events import TimelineSnapshot
+from shared.events.live.projection import TimelineSnapshot
+from shared.events.live.publisher import AgentEventPublisher
 from shared.log import logger
 
 

@@ -13,7 +13,8 @@ from cli.commands.extensions.materialize import (
     materialize_cluster_extensions,
 )
 from cli.commands.extensions.skill_package import _register_in_cluster
-from shared import db, extension_adopt, extension_materialize, paths
+from shared import db, paths
+from shared.packages.extensions import adopt, materialize
 
 
 class _PoolSpy:
@@ -52,7 +53,7 @@ def test_materialize_cluster_extensions_closes_pool_on_success(
     def _noop_materialize(_conn: object, *, _dest_root: Path) -> SimpleNamespace:
         return SimpleNamespace(landed=[], updated=[], kept_local_edits=[], missing_blob=[])
 
-    monkeypatch.setattr(extension_materialize, "materialize_skills", _noop_materialize)
+    monkeypatch.setattr(materialize, "materialize_skills", _noop_materialize)
 
     materialize_cluster_extensions()
 
@@ -69,7 +70,7 @@ def test_materialize_cluster_extensions_closes_pool_when_materialize_raises(
     def raise_materialize(*args: object, **kwargs: object) -> None:
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(extension_materialize, "materialize_skills", raise_materialize)
+    monkeypatch.setattr(materialize, "materialize_skills", raise_materialize)
 
     materialize_cluster_extensions()
 
@@ -86,7 +87,7 @@ def test_adopt_local_extensions_closes_pool_on_success(
     def _noop_adopt(_pool: object, *, _skills_root: Path) -> SimpleNamespace:
         return SimpleNamespace(adopted=[], missing_tree=[], conflicts=[])
 
-    monkeypatch.setattr(extension_adopt, "adopt_local_installs", _noop_adopt)
+    monkeypatch.setattr(adopt, "adopt_local_installs", _noop_adopt)
 
     adopt_local_extensions()
 
@@ -103,7 +104,7 @@ def test_adopt_local_extensions_closes_pool_when_adopt_raises(
     def raise_adopt(*args: object, **kwargs: object) -> None:
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(extension_adopt, "adopt_local_installs", raise_adopt)
+    monkeypatch.setattr(adopt, "adopt_local_installs", raise_adopt)
 
     adopt_local_extensions()
 

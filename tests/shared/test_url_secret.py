@@ -397,7 +397,7 @@ class TestPinIpv4Hostaddr:
     literal) — defense-in-depth for other libpq consumers (PgBouncer's
     upstream dial, psql/pg_dump). redis_url is untouched — redis has no
     hostaddr-equivalent; that fix is code-level
-    (shared.redis_client._PinnedIPv4Connection)."""
+    (shared.events.live.redis_client._PinnedIPv4Connection)."""
 
     def test_ipv4_literal_host_gets_hostaddr(self) -> None:
         # A foreign IPv4 host: hostaddr is appended, and (Task #1752) the

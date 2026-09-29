@@ -394,7 +394,7 @@ def field_lifecycle(name: str) -> Lifecycle:
 
 def frozen_field_names() -> set[str]:
     """Per-agent field names whose value is resolved once at spawn and replayed for
-    the agent's life — the set `shared/birth_config.py` stamps into
+    the agent's life — the set `shared/agents/birth_config.py` stamps into
     `agents_meta.birth_config`."""
     return {n for n in per_agent_field_names() if field_lifecycle(n) == "frozen"}
 
