@@ -67,8 +67,9 @@ class _FakeAdminConnection:
 def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     import shared.db
     import shared.migrations
-    from shared import cluster, pg_admin
+    from shared import cluster
     from shared.cluster import ownership
+    from shared.db import pg_admin
 
     calls: list[str] = []
     conn = object()
@@ -126,7 +127,7 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
     """A locally owned plane migrates as the admin acting as the owner, then
     every capability shares the read-only post-migration checkpoint gate."""
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared import pg_admin
+    from shared.db import pg_admin
 
     authority = pg_admin.local_owner_authority()
     applied = cmd_migrations_apply()
@@ -162,7 +163,7 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
     """A dial that dropped the startup role (a pooler) would create
     superuser-owned objects; the owner check refuses before any DDL."""
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared import pg_admin
+    from shared.db import pg_admin
 
     def superuser_dial(_url: str, **_kwargs: object) -> _FakeAdminConnection:
         return _FakeAdminConnection("postgres")
@@ -177,8 +178,8 @@ def test_remote_managed_migration_preserves_explicit_provider_authority(
     migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared import pg_admin
     from shared.config import settings
+    from shared.db import pg_admin
 
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://cache.example/0")
@@ -201,9 +202,9 @@ def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyP
     native custody proof is replaced by a same-instance check: the admin dial
     must reach the data directory the authority names.
     """
-    from shared import pg_admin
     from shared.cluster import ownership
     from shared.config import settings
+    from shared.db import pg_admin
 
     row = conn.execute(
         "SELECT current_setting('data_directory'), current_database(), current_user"

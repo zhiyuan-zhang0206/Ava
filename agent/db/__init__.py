@@ -15,7 +15,7 @@ from agent.ownership.inbound import lock_inbound_owner
 from shared.agents.messages.inbound import InterruptReason
 from shared.config import settings
 from shared.db import ALIVE_STATUSES, InboundRow, publish_inbound_wake
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 from shared.log import logger
 
 # A successful borrow that took at least this long still gets a WARNING — a

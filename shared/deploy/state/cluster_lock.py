@@ -72,7 +72,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 import shared.db
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.deploy.progress_timeout import LEASE_RENEW_INTERVAL_S, NO_PROGRESS_TIMEOUT_S
 from shared.log import logger
 

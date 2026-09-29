@@ -406,7 +406,7 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     never as the write-generation login the start process adopted (revoked by
     the next rollout); Redis with its admin password."""
     from shared.cluster.authority import MONITOR_ROLE
-    from shared.pg_admin import pg_socket_path
+    from shared.db.pg_admin import pg_socket_path
 
     monkeypatch.setattr("shared.config.settings.data_plane.db_url", _DELIVERED)
     cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))

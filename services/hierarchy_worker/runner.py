@@ -40,7 +40,7 @@ from services.hierarchy_worker.scan import KIND_COMPACT, SILENT_BASELINE_MARKER,
 from shared import telemetry
 from shared.config import settings
 from shared.db import connect
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.log import init_gateway_process, logger
 
 # The deployed source root: shared/ sits at the repo root in prod and in a

@@ -25,7 +25,7 @@ from shared.agents.incarnation.resources import (
     decode_resources,
 )
 from shared.agents.observation.evidence import AdmissionOutcome
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 from shared.deploy.maintenance import admission
 from shared.deploy.progress_timeout import (
     AGENT_LEASE_TTL_S,

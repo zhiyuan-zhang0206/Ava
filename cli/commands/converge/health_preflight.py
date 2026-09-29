@@ -84,7 +84,7 @@ def probe_postgres(url: str, timeout: float = _PROBE_TIMEOUT_S) -> str | None:
     if url == UNANCHORED_DB_SENTINEL:
         return "no cluster connection facts (unanchored checkout)"
     try:
-        from shared.db_connections import connect_url
+        from shared.db.connections import connect_url
 
         with connect_url(url, autocommit=True, connect_timeout=int(timeout)) as conn:
             conn.execute("SELECT 1")

@@ -297,8 +297,8 @@ def test_retained_state_is_read_as_the_administrator_never_the_source_login(
     import psycopg
     from psycopg.conninfo import conninfo_to_dict
 
-    from shared import pg_admin
     from shared.config import settings
+    from shared.db import pg_admin
 
     run = tmp_path.resolve()
     (run / "home").mkdir()

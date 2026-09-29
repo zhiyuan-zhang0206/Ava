@@ -5,7 +5,7 @@ lifecycle event publish (shared/live_announce, shared/labels,
 gateway/routers/pages, ops/lifecycle all route through them). The invariant
 they enforce: pub/sub is only a latency optimization, so a publish failure must
 never propagate into (crash / roll back) the caller — it returns None and logs,
-classified like the `shared/db.py:publish_inbound_wake` template (NOPERM /
+classified like the `shared/db/__init__.py:publish_inbound_wake` template (NOPERM /
 ResponseError → WARNING, transient → DEBUG).
 """
 

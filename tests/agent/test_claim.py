@@ -128,7 +128,7 @@ def _make_runtime(
 def _insert_inbound_kind(
     db: psycopg.Connection, tid: int, content: str, kind: str, source: str = "system"
 ) -> int:
-    """Directly INSERT an inbound of any kind (bypasses the chat-only helper in shared/db.py)."""
+    """Directly INSERT an inbound of any kind (bypasses the chat-only helper in shared/db/__init__.py)."""
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "

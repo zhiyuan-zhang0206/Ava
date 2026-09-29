@@ -42,7 +42,7 @@ from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.config.service_read import current_field_values
 from shared.db import connect, publish_inbound_wake
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.events.live import redis_client
 from shared.events.live.announce import (
     publish_agent_updated_sync,

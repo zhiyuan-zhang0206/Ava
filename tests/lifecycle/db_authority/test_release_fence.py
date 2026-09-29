@@ -36,9 +36,9 @@ from cli.release_fleet.request import FleetRequest
 from cli.release_transition import authority as release_authority
 from cli.release_transition.journal import Operation, create, exclusive, read_operation
 from cli.release_transition.request import ReleaseRef
-from shared import db_connections
 from shared.cluster import authority, ownership
 from shared.config import settings
+from shared.db import connections
 from shared.host.env import dotenv_boot
 from shared.host.net.url_secret import url_with_userinfo
 from tests.lifecycle.db_authority.test_single_box import Born, _refused
@@ -432,7 +432,7 @@ def test_a_surviving_session_holds_the_fence_without_a_closure_receipt(
 @pytest.fixture
 def executor(born: Born, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """The finite executor's adopted authority; restored after the test."""
-    monkeypatch.setattr(db_connections, "_administrator_url", None)
+    monkeypatch.setattr(connections, "_administrator_url", None)
     monkeypatch.setattr(settings.data_plane, "db_url", settings.data_plane.db_url)
     release_authority.adopt_executor_authority(born.home)
     yield settings.data_plane.db_url
@@ -461,10 +461,10 @@ def test_executor_dials_the_owner_socket_acting_as_the_gateway_group(
     with shared.db.pool(min_size=1, max_size=1) as pool, pool.connection() as conn:
         assert conn.execute("SELECT current_user").fetchone() == ("ava_gateway",)
     # Only the adopted URL is exempt from the refusal; the endpoint is not.
-    with pytest.raises(db_connections.NoDatabaseAuthorityError):
-        db_connections._guard_db_url(born.endpoint())
+    with pytest.raises(connections.NoDatabaseAuthorityError):
+        connections._guard_db_url(born.endpoint())
     with pytest.raises(ValueError, match="password-free owner-only socket"):
-        db_connections.adopt_administrator(url_with_userinfo(born.endpoint(), "ava", "pw"))
+        connections.adopt_administrator(url_with_userinfo(born.endpoint(), "ava", "pw"))
 
 
 def test_the_fence_never_terminates_the_executors_own_sessions(

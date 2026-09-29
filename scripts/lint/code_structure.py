@@ -64,7 +64,7 @@ tests/ directory are exempt.
 one owning module; any other module making that decision is a bypass. Today:
 `postgres-dial` — a psycopg connect (module, class, or `from psycopg import
 connect`) or a construction of a psycopg_pool pool or of this repo's own
-`*ConnectionPool` subclass belongs to `shared/db_connections.py`, which owns the
+`*ConnectionPool` subclass belongs to `shared/db/connections.py`, which owns the
 transport posture. A site that genuinely cannot go through the owner goes in that
 decision's `allowed` map with a one-line reason; an allowed module that stops
 bypassing, or no longer exists, fails as stale.

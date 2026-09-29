@@ -195,7 +195,7 @@ def release_local_db_pools(
 
     try:
         if ops_pool is not None:
-            from shared.pool_release import release_idle_sync
+            from shared.db.pool_release import release_idle_sync
 
             released["ops"] = release_idle_sync(ops_pool)
     except Exception as exc:

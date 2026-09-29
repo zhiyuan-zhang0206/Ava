@@ -30,7 +30,7 @@ from shared.agents.incarnation.lifecycle_acceptance import (
 from shared.cluster.machine import machine_name
 from shared.config import field_alias, get_field, settings
 from shared.db import fetch_one, publish_inbound_wake
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.events.live.announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.native_process.runtime_incarnation import RuntimeIncarnation

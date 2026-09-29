@@ -25,7 +25,7 @@ from shared.agents.tasks.owner_notifications import (
 )
 from shared.agents.tasks.reparent import resolve_reparent
 from shared.agents.tasks.rules import first_open_child, is_closed, open_title_holder
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 router = APIRouter()
 

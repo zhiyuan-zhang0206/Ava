@@ -51,10 +51,11 @@ from cli.release_transition.authority import adopt_executor_authority
 from cli.release_transition.journal import exclusive, read_operation
 from cli.release_transition.request import ReleaseRef
 from cli.start_identity import mark_phase
-from shared import cluster, db_connections
+from shared import cluster
 from shared.cluster import authority
 from shared.cluster.authority import delivery
 from shared.config import settings
+from shared.db import connections
 from shared.deploy.release.runtime_release import VerifiedRelease, current_pointer
 from shared.deploy.release.start_inputs import configuration_digest
 from shared.host.env import dotenv_boot
@@ -223,7 +224,7 @@ def cycle(born: Born, monkeypatch: pytest.MonkeyPatch) -> Iterator[Cycle]:
     monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", home / ".env")
     monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", home / "mirror.env")
     monkeypatch.setattr(dotenv_boot, "_db_authority_refusal", None)
-    monkeypatch.setattr(db_connections, "_administrator_url", None)
+    monkeypatch.setattr(connections, "_administrator_url", None)
     # The simulated fact: which image the running process is.
     admit = delivery.require_admitted_runtime
 
@@ -331,7 +332,7 @@ def _execute(cycle: Cycle, request: FleetRequest, monkeypatch: pytest.MonkeyPatc
         adopt_executor_authority(cycle.home)
         with exclusive(request.path) as journal:
             Coordinator(journal, ImageGateway(request, cycle.born), RemoteUnits(request)).run()
-    monkeypatch.setattr(db_connections, "_administrator_url", None)
+    monkeypatch.setattr(connections, "_administrator_url", None)
     final = read_operation(request.path)
     assert final.fleet is not None and final.fleet.outcome == "clean", final.error
     assert current_pointer(cycle.home / "releases") == request.candidate.selector

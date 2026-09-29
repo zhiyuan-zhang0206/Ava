@@ -47,7 +47,7 @@ observed connection; a reconnect loses authority and fails. PostgreSQL admin
 and pooler dials use only the home's canonical Unix socket directory. Owned
 provisioning, checkpoint, grant and migration dials verify their native
 backend against the home's postmaster before DDL, which acts as the schema
-owner (`shared.pg_admin`).
+owner (`shared.db.pg_admin`).
 
 ## Pooler
 

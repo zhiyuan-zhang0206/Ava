@@ -48,7 +48,7 @@ migrations claiming the same slot.
 ## Who dials
 
 On a locally owned data plane the applier connects as the administrator acting
-as the schema owner (`shared.pg_admin.local_owner_authority`): the OS user over
+as the schema owner (`shared.db.pg_admin.local_owner_authority`): the OS user over
 the home's owner-only Unix socket, custody-checked against the home's
 postmaster, with `role=<owner>` as a startup option. Objects stay owner-owned,
 privilege checks see only the owner's rights, the dial bypasses PgBouncer (the

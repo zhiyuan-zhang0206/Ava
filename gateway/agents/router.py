@@ -49,7 +49,7 @@ from shared.agents.observation import snapshot as snapshot_module
 from shared.agents.observation.evidence import AgentAvailability, AvailabilityReason
 from shared.cluster.machine import machine_name
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.events.live.announce import publish_agent_updated_sync
 from shared.log import logger
 

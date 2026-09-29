@@ -38,7 +38,7 @@ def deliver_one(home: Path, alert: FleetAlert, delivery: Delivery) -> None:
 
 
 def _alert_row(row: AlertRow) -> None:
-    from shared.db_transaction import write_transaction
+    from shared.db.transaction import write_transaction
     from shared.telemetry.alerts import upsert_alert
 
     with write_transaction() as conn:
@@ -85,7 +85,7 @@ def _agent_notice(alert: FleetAlert, notice: AgentNotice) -> None:
     """Exactly once per alert key; a terminated observer is never resurrected."""
     from shared.agents.messages.inbound_provenance import InboundProvenance
     from shared.db import insert_inbound_message, publish_inbound_wake
-    from shared.db_transaction import write_transaction
+    from shared.db.transaction import write_transaction
 
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(

@@ -17,7 +17,7 @@ from shared.agents.impersonation.history import (
     resolve,
 )
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 
 def _event_key(event_id: object) -> str:

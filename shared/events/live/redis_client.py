@@ -328,7 +328,7 @@ def _log_publish_failure(exc: BaseException, *, channel: str, context: str) -> N
     """Classify + log a best-effort publish failure — never re-raises.
 
     The single discipline for every fire-and-forget event / live-UI publish,
-    mirroring the `shared/db.py:publish_inbound_wake` template: pub/sub is only a
+    mirroring the `shared/db/__init__.py:publish_inbound_wake` template: pub/sub is only a
     latency optimization, so a publish must never propagate into (and roll back /
     crash) the caller's durable DB-write or agent-lifecycle path.
 

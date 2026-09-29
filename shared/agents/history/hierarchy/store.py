@@ -39,7 +39,7 @@ from psycopg import Connection
 from shared.agents.history.hierarchy import ENGINE_VERSION, PROMPT_VERSION
 from shared.agents.history.hierarchy.nodes import MaterializedNode
 from shared.db import pool
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 # The stored row shape's version; bump with a migration when columns change.
 SCHEMA_VERSION = 1

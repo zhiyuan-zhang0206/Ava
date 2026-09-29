@@ -25,7 +25,7 @@ from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
 from shared.config import settings
 from shared.db import PG_KEEPALIVE_KWARGS, create_agent
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.native_process.turn_identity import bind_turn_identity
 

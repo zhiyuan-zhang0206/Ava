@@ -14,7 +14,7 @@ from gateway.schemas.user_settings import (
     UserSettingRow,
     UserSettingUpdateRequest,
 )
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 router = APIRouter()
 

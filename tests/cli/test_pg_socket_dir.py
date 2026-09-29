@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from cli.commands.data_plane import pgbouncer as pooler
-from shared import pg_admin
+from shared.db import pg_admin
 
 
 def test_missing_canonical_socket_does_not_discover_same_port_elsewhere(

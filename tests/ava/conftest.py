@@ -64,13 +64,13 @@ def _ensure_agents_meta_row(agent_id: int | None = None) -> None:
     import psycopg
 
     from ava._settings import DB_URL
-    from shared.test_db_guard import assert_test_db_url
+    from shared.db.test_db_guard import assert_test_db_url
 
     # Guard: refuse to write to anything but a throwaway test database. This
     # fixture writes synthetic agent rows (spawner="test", high-range IDs) that
     # would pollute the main cluster — the 2026-08-12 incident wrote rows with
     # ids 900002-900010 into the production agents table. The rule lives in
-    # shared/test_db_guard.py (single source of truth, shared with the
+    # shared/db/test_db_guard.py (single source of truth, shared with the
     # session-start guard in tests/conftest.py).
     assert_test_db_url(str(DB_URL), context="_ensure_agents_meta_row")
 

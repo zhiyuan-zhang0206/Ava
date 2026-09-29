@@ -16,7 +16,7 @@ from shared.agents import AgentStatus
 from shared.agents.messages.inbound_provenance import InboundProvenance
 from shared.config import settings
 from shared.db import ALIVE_STATUSES, fetch_one
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 router = APIRouter()
 _log = logging.getLogger(__name__)

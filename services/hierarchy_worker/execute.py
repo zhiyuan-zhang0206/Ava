@@ -41,7 +41,7 @@ from shared.agents.history.hierarchy.store import load_known_texts, write_tree
 from shared.agents.observation.snapshot import agent_effective_model
 from shared.config import settings
 from shared.db import connect
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.lm.factory import close_chat_model
 from shared.log import logger
 

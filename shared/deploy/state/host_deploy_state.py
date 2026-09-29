@@ -36,7 +36,7 @@ from typing import Any
 
 import shared.db
 from shared.cluster.machine import machine_name
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 POSTURE_IDLE = "idle"
 POSTURE_PAUSED = "paused"

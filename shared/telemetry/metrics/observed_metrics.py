@@ -281,7 +281,7 @@ def write_observations(
     if not observations:
         return 0
     if db is None:
-        from shared.db_transaction import write_transaction
+        from shared.db.transaction import write_transaction
 
         with write_transaction(_projection_pool(), timeout=0.1) as connection:
             connection.execute("SET LOCAL statement_timeout = '500ms'")

@@ -514,8 +514,8 @@ assert settings.general.machine_host == "localhost"
 assert settings.alerts.grafana_admin_password is None or (
     settings.alerts.grafana_admin_password.get_secret_value() == ""
 )
+from shared.db.test_db_guard import assert_test_db_url
 from shared.native_process.os_platform import raise_fd_limit
-from shared.test_db_guard import assert_test_db_url
 from tests._containers import postgres, redis_server
 from tests._os_jobs import host_ava_os_jobs, is_test_owned_job, remove_os_job
 
@@ -715,7 +715,7 @@ def _provisioned_db() -> Iterator[str]:
     with postgres() as url:
         # Belt: the throwaway provisioning must itself stay on a test database.
         # If the throwaway db name ever changes, this assertion makes the
-        # change explicit (update shared/test_db_guard.py) instead of silently
+        # change explicit (update shared/db/test_db_guard.py) instead of silently
         # loosening the session-start guard above.
         assert_test_db_url(url, context="_provisioned_db")
         settings.data_plane.db_url = url

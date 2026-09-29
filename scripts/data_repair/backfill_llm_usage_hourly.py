@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 # The 2x peak-price window opened at this instant. It starts AFTER the extract's
 # last row (2026-08-13), so on today's archive every hour prices as off-peak and

@@ -19,7 +19,7 @@ from shared.agents.impersonation._store import (
     token_hash,
 )
 from shared.agents.messages.caller_identity import caller_payload
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.log import logger
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 

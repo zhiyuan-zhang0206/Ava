@@ -47,7 +47,7 @@ scan for ★ to pick out "what is this new entry point doing / why was that one 
 
 ## 1a. Contract change (when a `*.api.txt` snapshot changes)
 
-`shared/db.api.txt` / `shared/agents/api.txt` / `shared/events/api.txt` are
+`shared/db/api.txt` / `shared/agents/api.txt` / `shared/events/api.txt` are
 generated snapshots of a package door's public surface
 (`scripts/structure/contracts.py`; see `conventions/python-conventions.md`).
 If any changed, add a "Contract change" section naming each changed door and

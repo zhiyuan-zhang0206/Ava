@@ -246,7 +246,7 @@ def pitr_admin_url() -> str:
     than the switch runs on.
     """
     from shared.cluster import get_record, record_postgres_port
-    from shared.pg_admin import pg_admin_url
+    from shared.db.pg_admin import pg_admin_url
 
     record = get_record(ava_home())
     if record is None:
@@ -258,12 +258,12 @@ def pitr_admin_url() -> str:
 def pitr_admin_session() -> Generator[psycopg.Connection[Any]]:
     """`pitr_admin_url()` as an autocommit session bound to this home's postmaster.
 
-    `shared.pg_admin.connect` proves the backend is a native child of the
+    `shared.db.pg_admin.connect` proves the backend is a native child of the
     home's recorded postmaster before any probe or mutation runs, so a server
     that is not this home's can neither certify the activation nor receive its
     WAL switch or configuration.
     """
-    from shared import pg_admin
+    from shared.db import pg_admin
 
     with pg_admin.connect(
         pitr_admin_url(), expected_data_dir=ava_home() / "pg", autocommit=True

@@ -36,7 +36,7 @@ from shared.cluster.machine import (
     machine_name,
 )
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.deploy.git.cluster_drift import prod_source_head_sha
 from shared.deploy.state.cluster_lock import DeployLease
 

@@ -91,7 +91,7 @@ section covers fixing a violation and maintaining its baseline.
   pairing, so any new key is refused.
 - **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
   names design decisions with exactly one owning module — today,
-  `postgres-dial` (`shared/db_connections.py`). Any other module making that
+  `postgres-dial` (`shared/db/connections.py`). Any other module making that
   decision is a bypass; fix it by routing through the owner. A site that
   genuinely cannot goes in that decision's `allowed` map with a one-line
   reason — an allowed module that stops bypassing (or disappears) fails as
@@ -127,7 +127,7 @@ What this means for common edits:
 Rule 4 says nothing outside a package may import its `_`-private modules or
 names — so a door's contract IS its public surface. `scripts/structure/contracts.py`
 renders that surface (module-by-module, function/class/variable/re-export, sorted
-and deterministic) into a snapshot file next to the code: `shared/db.api.txt`,
+and deterministic) into a snapshot file next to the code: `shared/db/api.txt`,
 `shared/agents/api.txt`, `shared/events/api.txt`. Regenerate with
 `.venv/bin/python scripts/structure/contracts.py --write`; the
 `lint-contract-snapshots` pre-commit hook runs `--check` and fails on drift.

@@ -135,7 +135,7 @@ def _render_ini(*, pg_port: int, listen_port: int, db_name: str, cluster_secret:
     `track_extra_parameters` cannot deliver statement_timeout (only GUC_REPORT
     parameters Postgres reports to clients can be tracked), so the connect_query
     SET is the one pooler-side path that reaches the backend. Same value +
-    constant as shared/db.py's client-side SET (imported lazily — this module
+    constant as shared/db/__init__.py's client-side SET (imported lazily — this module
     runs in data-plane bring-up, before any settings/env load is guaranteed).
 
     `server_reset_query = DISCARD ALL` — one statement, unquoted (pgbouncer
@@ -149,7 +149,7 @@ def _render_ini(*, pg_port: int, listen_port: int, db_name: str, cluster_secret:
     always=1 was tried and rejected (405 ruling 2026-09-03, option B): firing
     after EVERY transaction end, its DISCARD ALL wiped the client's SETs too
     (borrowers measured statement_timeout=0). Between-transaction pollution is
-    defended client-side (shared/db.py baseline restore per dial/borrow +
+    defended client-side (shared/db/__init__.py baseline restore per dial/borrow +
     read-write write posture; 2026-09-02 P0)."""
     listen_addr = ", ".join(_bind_addrs(cluster_secret))
     socket_dir = _pg_socket_dir()
@@ -301,7 +301,7 @@ def _admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0
     Backend readiness is proven separately by the caller, as each delivered
     login. Public bind verification reads the socket table, never a self-dial.
     """
-    from shared.db_connections import connect_url
+    from shared.db.connections import connect_url
     from shared.host.net.url_secret import url_with_userinfo
 
     url = url_with_userinfo(

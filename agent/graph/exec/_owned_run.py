@@ -39,7 +39,7 @@ from shared.agents.incarnation.resources import (
     decode_resources,
     register_exec,
 )
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.native_process.turn_identity import current_hosted_resources
 from shared.paths import exec_run_dir

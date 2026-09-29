@@ -20,7 +20,7 @@ from shared.agents.impersonation_manifest import (
     set_pending_reason,
 )
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 _EVENT_PAGE_SIZE = 1000
 _EVENT_OFFSET_MAX = 10_000

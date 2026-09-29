@@ -55,7 +55,7 @@ from gateway.auth.webhook import authenticate_webhook
 from gateway.events.sse import event_stream
 from shared.agents.impersonation_manifest import retention_loss_panel
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.events.live.redis_client import sync_redis
 from shared.telemetry.alerts import (
     AlertKey,

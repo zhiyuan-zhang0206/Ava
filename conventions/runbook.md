@@ -24,7 +24,7 @@ Postgres port when off (5433). There is no separate pooler-port env key
 the data-plane bring-up alone. The admin plane — migrations, `pg_dump`,
 provisioning, PITR — is the ONLY direct-Postgres consumer. On a locally owned
 plane it dials the home's owner-only socket as the OS user, acting as the
-schema owner for schema work, dumps and PITR reads (`shared.pg_admin`), never
+schema owner for schema work, dumps and PITR reads (`shared.db.pg_admin`), never
 the owner's own login or a write generation; a remote-managed plane uses its
 provider URL (`shared.db.direct_db_url`). Everything else dials `AVA_DB_URL`
 as-is. Flipping `AVA_PGBOUNCER_ENABLED=false` is the kill-switch:

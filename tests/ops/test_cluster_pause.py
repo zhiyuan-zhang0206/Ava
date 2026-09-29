@@ -282,7 +282,7 @@ def test_release_local_db_pools_dials_the_host_and_releases_the_ops_pool(
     """The stop's last step: host pools over loopback, then this daemon's own."""
     from types import SimpleNamespace
 
-    from shared import pool_release
+    from shared.db import pool_release
 
     posted: list[str] = []
 
@@ -317,7 +317,7 @@ def test_release_local_db_pools_reports_failures_without_raising(
     """Both arms are best-effort: the stop must complete on either failure."""
     from types import SimpleNamespace
 
-    from shared import pool_release
+    from shared.db import pool_release
 
     def _refused(_url: str, **_kwargs: object) -> object:
         raise RuntimeError("connection refused")

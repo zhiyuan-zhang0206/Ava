@@ -186,8 +186,8 @@ def _validate_secrets() -> dict[str, str]:
 
 
 def read_pg_state() -> dict[str, str]:
-    from shared import pg_admin
     from shared.cluster import db_identity, get_record, ownership, record_postgres_port
+    from shared.db import pg_admin
 
     from .cluster_instance import pg_admin_url
 

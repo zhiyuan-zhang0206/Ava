@@ -62,7 +62,7 @@ def pg_socket_path(home: Path, socket_root: Path | None = None) -> Path:
     """`pg_socket_dir`'s path for `home`, computed without touching the filesystem
     (for renderers that only name the socket, such as the collector config)."""
     # Lazy: `shared.cluster` imports this module (provisioning dials through
-    # it), so a module-level import would make `shared.pg_admin` unimportable
+    # it), so a module-level import would make `shared.db.pg_admin` unimportable
     # before `shared.cluster`.
     from shared.cluster.derive import home_slug
 

@@ -82,7 +82,7 @@ from shared.agents.impersonation.maintenance import (
 from shared.agents.messages.inbound_provenance import InboundProvenance
 from shared.config import cluster_tz, settings
 from shared.db import insert_inbound_message, publish_inbound_wake
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.events.live.announce import publish_agent_updated_sync
 from shared.events.live.projection import PageClosed
 from shared.events.live.redis_client import publish_best_effort_sync

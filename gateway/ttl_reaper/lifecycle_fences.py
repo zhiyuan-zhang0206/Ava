@@ -27,7 +27,7 @@ from uuid import UUID
 from psycopg_pool import ConnectionPool
 
 from shared import telemetry
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 _log = logging.getLogger(__name__)
 

@@ -35,7 +35,7 @@ from shared.agents.birth_config import resolve_birth_config
 from shared.agents.impersonation_manifest import stage_central_expected_event
 from shared.agents.labels import spawn_prompt_with_label
 from shared.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.events.live.announce import publish_agent_spawned_sync
 from shared.lm.registry import normalize_overlay_llm_model
 from shared.log import logger

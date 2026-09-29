@@ -42,7 +42,7 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     # that SV_ACTIVE window — always=1 fires after every transaction and its
     # DISCARD ALL wiped the client's own dial/borrow-time SETs (the statement
     # ceiling; measured 2026-09-03, 405 ruling option B). Between-transaction
-    # pollution is defended client-side by shared/db.py's baseline restore
+    # pollution is defended client-side by shared/db/__init__.py's baseline restore
     # (2026-09-02 P0 incident).
     assert "server_reset_query = DISCARD ALL" in ini
     # The reset is one statement and unquoted: pgbouncer 1.25.2 runs
@@ -55,7 +55,7 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     # The reset does NOT re-apply the statement ceiling: DISCARD ALL clears the
     # birth-time connect_query SET, and the reset would need a second statement
     # to re-apply it — a shape transaction pooling rejects. The ceiling is
-    # delivered by connect_query (every backend at birth) and by shared/db.py's
+    # delivered by connect_query (every backend at birth) and by shared/db/__init__.py's
     # client-side SET on every pooled use.
     reset_line = next(ln for ln in ini.splitlines() if ln.startswith("server_reset_query ="))
     assert reset_line == "server_reset_query = DISCARD ALL"

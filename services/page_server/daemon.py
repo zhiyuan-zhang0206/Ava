@@ -39,7 +39,7 @@ from shared.config import settings
 from shared.daemon.health import Liveness, start_health_server, stop_health_server
 from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from shared.daemon.shutdown import hard_exit as _hard_exit
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.log import init_gateway_process
 from shared.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
 from shared.sessions.page_session import page_session_name

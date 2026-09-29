@@ -24,7 +24,7 @@ from shared.agents.history.delta_read_compat import (
 )
 from shared.agents.observation.db_wait import DatabaseWait, database_wait
 from shared.config import settings
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 from shared.deploy.progress_timeout import AGENT_LEASE_TTL_S
 from shared.log import logger
 from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation

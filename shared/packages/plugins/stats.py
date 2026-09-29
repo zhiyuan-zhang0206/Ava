@@ -31,7 +31,7 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 # The status vocabulary. There is deliberately no "empty": a card with no row
 # IS the empty state, and a second spelling of it would be a second fact.

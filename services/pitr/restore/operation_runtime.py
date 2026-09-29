@@ -160,13 +160,13 @@ def live_probe_conninfo() -> str:
     """The dial the restricted worker's live probes (identity, live counts) use.
 
     This home's administrator acting as the schema owner over the owner-only
-    socket (`shared.pg_admin`): password-free, so the worker's stdin carries
+    socket (`shared.db.pg_admin`): password-free, so the worker's stdin carries
     no credential, and independent of the write generations a rollout
     revokes. The worker cannot run the custody check itself, so it runs here
     before the conninfo is handed over. PITR is local-only: a remote-managed
     plane has no local owner authority and refuses.
     """
-    from shared.pg_admin import local_owner_authority
+    from shared.db.pg_admin import local_owner_authority
 
     return local_owner_authority().verified_conninfo()
 

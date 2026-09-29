@@ -1,4 +1,4 @@
-"""`shared.pool_release` — release a pool's idle connections, keep it usable.
+"""`shared.db.pool_release` — release a pool's idle connections, keep it usable.
 
 Both helpers mirror `psycopg_pool`'s own `_shrink_pool` mutation, so the tests
 drive them against real pools on the session test database: release must close
@@ -13,7 +13,7 @@ import psycopg_pool
 
 from shared import db as shared_db
 from shared.config import settings
-from shared.pool_release import release_idle_async, release_idle_sync
+from shared.db.pool_release import release_idle_async, release_idle_sync
 
 
 def _sync_pool() -> psycopg_pool.ConnectionPool:

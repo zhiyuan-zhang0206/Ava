@@ -717,7 +717,7 @@ def test_cleared_publication_keeps_current_and_refuses_what_admission_cannot_rea
 
 
 def test_owner_authority_names_the_home_socket_port_owner_and_database(tmp_path: Path) -> None:
-    from shared.pg_admin import pg_socket_path
+    from shared.db.pg_admin import pg_socket_path
 
     home = tmp_path.resolve() / "home"
     home.mkdir()

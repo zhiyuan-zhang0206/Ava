@@ -1,4 +1,4 @@
-"""`shared/db.py` live-agent helpers — the SQL the `ava cluster update` quiesce step drives.
+"""`shared/db/__init__.py` live-agent helpers — the SQL the `ava cluster update` quiesce step drives.
 
 These are the relocated home of the agents_meta / inbound_messages queries the
 gateway CLI used to hand-write inline: signal_live_agents_restart (bulk
@@ -17,8 +17,9 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from shared import db, db_connections
+from shared import db
 from shared.config import settings
+from shared.db import connections
 from shared.events.live.redis_listener import RedisInboundListener
 from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.telemetry import Event
@@ -71,7 +72,7 @@ def test_async_pool_fixes_the_transport_posture(monkeypatch: pytest.MonkeyPatch)
             "sslmode": "require",
             **db.PG_KEEPALIVE_KWARGS,
         },
-        "check": db_connections._restore_pooled_session_async,
+        "check": connections._restore_pooled_session_async,
         "pool_name": "probe",
     }
 
@@ -89,7 +90,7 @@ def _spy_dials(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any
         raise AssertionError("an explicit-target dial must not scrub a pooled session")
 
     monkeypatch.setattr(psycopg, "connect", spy)
-    monkeypatch.setattr(db_connections, "_restore_pooled_session", no_scrub)
+    monkeypatch.setattr(connections, "_restore_pooled_session", no_scrub)
     return dials
 
 
@@ -138,7 +139,7 @@ def test_connect_unbounded_keeps_the_keepalives(monkeypatch: pytest.MonkeyPatch)
     long DDL on a remote link is the flow a dead peer would otherwise pin."""
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u:p@db.example:5432/x")
     monkeypatch.setattr(settings.data_plane, "db_sslmode", "")
-    monkeypatch.setattr(db_connections, "direct_db_url", lambda: "postgresql://u:p@db:5432/x")
+    monkeypatch.setattr(connections, "direct_db_url", lambda: "postgresql://u:p@db:5432/x")
     dials = _spy_dials(monkeypatch)
     db.connect(direct=True, unbounded=True)
     assert dials == [
@@ -346,7 +347,7 @@ def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     Task #1027 dead-connection check (a dead connection raises and is replaced).
     A DIRECT pool owns its backend exclusively — no scrub needed — and there the
     `check_connections=True` flag keeps its original Task #1027 meaning."""
-    real_check = db_connections.ConnectionPool.check_connection
+    real_check = connections.ConnectionPool.check_connection
     captured: dict[str, object] = {}
 
     class _FakePool:
@@ -355,12 +356,12 @@ def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, *_a: object, **_kw: object) -> None:
             captured.update(_kw)
 
-    monkeypatch.setattr(db_connections, "ConnectionPool", _FakePool)
-    monkeypatch.setattr(db_connections, "direct_db_url", lambda: "postgresql://direct-test")
+    monkeypatch.setattr(connections, "ConnectionPool", _FakePool)
+    monkeypatch.setattr(connections, "direct_db_url", lambda: "postgresql://direct-test")
     # Pooled (the default): the baseline restore is armed on configure + check.
     db.pool()
-    assert captured.get("configure") is db_connections._restore_pooled_session
-    assert captured.get("check") is db_connections._restore_pooled_session
+    assert captured.get("configure") is connections._restore_pooled_session
+    assert captured.get("check") is connections._restore_pooled_session
     captured.clear()
     # Direct: no scrub; the flag keeps arming the plain dead-connection check.
     db.pool(direct=True, check_connections=True)
@@ -374,7 +375,7 @@ def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_write_transaction_direct_refuses_a_pool() -> None:
     """`direct=True` names the dial, so it cannot combine with a pool — a pool
     owns its own dial (and the refusal keeps a silent no-op from shipping)."""
-    from shared.db_transaction import write_transaction
+    from shared.db.transaction import write_transaction
 
     with (
         pytest.raises(ValueError, match="cannot take a pool"),

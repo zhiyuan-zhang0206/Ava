@@ -428,7 +428,7 @@ def test_non_dial_calls_are_not_flagged(source: str) -> None:
 def test_the_owner_module_itself_is_exempt() -> None:
     tree = _parse("import psycopg\npsycopg.connect('dsn')\n")
 
-    assert locality.owner_bypasses(tree, "shared/db_connections.py", ()) == {}
+    assert locality.owner_bypasses(tree, "shared/db/connections.py", ()) == {}
 
 
 # --- measure: test *directories* are exempt, test-prefixed files are not ----

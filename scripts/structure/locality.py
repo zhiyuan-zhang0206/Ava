@@ -288,7 +288,7 @@ class Decision:
 
 DECISIONS: dict[str, Decision] = {
     "postgres-dial": Decision(
-        owners=frozenset({"shared/db_connections.py"}),
+        owners=frozenset({"shared/db/connections.py"}),
         find=_postgres_dials,
         fix=(
             "dial through shared.db.connect() / shared.db.pool() (the cluster's own URL) "
@@ -297,7 +297,7 @@ DECISIONS: dict[str, Decision] = {
             "or unbounded, sslmode, pooled-session scrub)"
         ),
         allowed={
-            "shared/pg_admin.py": (
+            "shared/db/pg_admin.py": (
                 "the OS-user administrator's peer-socket authority (roles, grants, schema "
                 "DDL, owner sessions) behind its own postmaster custody check; the FC-10 "
                 "cutover scripts dial through it, so its transport stays as rehearsed until "
@@ -311,7 +311,7 @@ DECISIONS: dict[str, Decision] = {
                 "proves the running postmaster demands a password by dialing a role "
                 "that cannot exist, with no credential"
             ),
-            # shared.db_connections resolves a home (shared.host.env.dotenv_boot) and imports
+            # shared.db.connections resolves a home (shared.host.env.dotenv_boot) and imports
             # settings at load; the modules below run where neither may happen.
             "services/pitr/restore/drill.py": (
                 "restore-drill dials inside the restricted restore worker, which runs "

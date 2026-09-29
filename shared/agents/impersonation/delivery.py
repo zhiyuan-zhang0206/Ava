@@ -14,7 +14,7 @@ from shared.agents.impersonation._store import (
     require_relay_active_locked,
 )
 from shared.db import publish_inbound_wake
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,

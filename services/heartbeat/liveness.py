@@ -64,7 +64,7 @@ from shared.agents.observation.evidence import (
 )
 from shared.cluster.machines import list_agent_runners
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.deploy.state import cluster_lock, host_deploy_state
 from shared.deploy.transition import transition_severity
 from shared.events.live.announce import publish_agent_updated_sync

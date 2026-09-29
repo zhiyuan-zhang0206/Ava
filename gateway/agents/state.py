@@ -55,7 +55,7 @@ from shared.daemon.schedules.completion_notices import (
     policy_for_agent,
 )
 from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 router = APIRouter()
 _log = logging.getLogger(__name__)

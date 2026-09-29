@@ -35,7 +35,7 @@ from services.pitr.operation.worker_process import StopSignal
 from services.pitr.stores.base_object_store import RestartableStreamingObjectStore
 from services.pitr.stores.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 from shared.db import connect_url
-from shared.pg_admin import OwnerAuthority, local_owner_authority
+from shared.db.pg_admin import OwnerAuthority, local_owner_authority
 from shared.pg_tools import pg_tool
 
 
@@ -332,7 +332,7 @@ def _capture_facts(owner: OwnerAuthority, replication_db_url: str) -> CandidateF
     """The capture-time identity facts, read as this home's schema owner.
 
     The administrator acting as the owner over the home's own socket
-    (`shared.pg_admin`) is custody-checked against the home's postmaster and
+    (`shared.db.pg_admin`) is custody-checked against the home's postmaster and
     needs no write-generation login; the replication URL must name the same
     server port.
     """

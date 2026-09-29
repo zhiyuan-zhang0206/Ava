@@ -34,8 +34,9 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
     point-in-time read grant went stale; failure is raised, not returned.
     """
     import shared.db
-    from shared import cluster, pg_admin
+    from shared import cluster
     from shared.config import settings
+    from shared.db import pg_admin
 
     # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
     # must first be mirrored in a paired Ava up/down migration. Failing before
@@ -44,7 +45,7 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
 
     # Both dials bypass PgBouncer — the ONE sanctioned data-plane exemption
     # (user ruling 2026-08: every consumer goes through PgBouncer; see
-    # shared/db.py `connect`). apply_pending_migrations holds a SESSION
+    # shared/db/__init__.py `connect`). apply_pending_migrations holds a SESSION
     # advisory lock (pg_advisory_lock, shared/migrations.py _MIGRATION_LOCK_KEY)
     # across its whole apply loop, and transaction pooling hands the backend
     # back to the pool at the end of each transaction — the lock would silently

@@ -15,7 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from shared.agents.incarnation.exec_request_evidence import RequestEvidence, quarantine_stale
 from shared.agents.incarnation.lifecycle_acceptance import COMMAND_KILLS_SHELL_SESSIONS
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 

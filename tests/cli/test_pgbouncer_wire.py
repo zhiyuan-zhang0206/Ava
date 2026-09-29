@@ -127,7 +127,7 @@ def _pgbouncer_in_front(
                 # the SV_ACTIVE window, so clean releases/disconnects keep the
                 # backend's session (birth connect_query ceiling and a client's
                 # own SETs survive — measured 2026-09-03); between-transaction
-                # pollution is defended client-side by shared/db.py's baseline
+                # pollution is defended client-side by shared/db/__init__.py's baseline
                 # restore on every pooled dial and borrow.
                 "server_reset_query = DISCARD ALL",
                 "server_reset_query_always = 0",
@@ -365,7 +365,7 @@ def test_session_touch_overrides_a_read_only_default() -> None:
 
 def test_async_write_transaction_overrides_a_read_only_default() -> None:
     """Rule C opens an explicit read-write transaction on an autocommit pool."""
-    from shared.db_transaction import async_write_transaction
+    from shared.db.transaction import async_write_transaction
 
     async def write_once(pooled: str) -> None:
         db_pool = AsyncConnectionPool(

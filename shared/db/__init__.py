@@ -8,7 +8,7 @@ centralizes helpers used by both ends (`config` / `db` / `events` /
 This module contains **pure SQL, no business semantics, used by both
 ends** helpers. Kernel-only (inbound claim, wait/mark/revert) is in
 `agent/db/__init__.py`. Connection policy and pool construction live in
-`shared/db_connections.py` and remain re-exported here.
+`shared/db/connections.py` and remain re-exported here.
 """
 
 import contextlib
@@ -25,18 +25,18 @@ from shared.agents.messages.inbound_provenance import (
     content_sha256,
     source_assertion_match,
 )
-from shared.db_connections import PG_KEEPALIVE_KWARGS as PG_KEEPALIVE_KWARGS
-from shared.db_connections import (
+from shared.db.connections import PG_KEEPALIVE_KWARGS as PG_KEEPALIVE_KWARGS
+from shared.db.connections import (
     PG_STATEMENT_TIMEOUT_SET_SQL as PG_STATEMENT_TIMEOUT_SET_SQL,
 )
-from shared.db_connections import NoDatabaseAuthorityError as NoDatabaseAuthorityError
-from shared.db_connections import UnanchoredHomeError as UnanchoredHomeError
-from shared.db_connections import async_pool as async_pool
-from shared.db_connections import connect as connect
-from shared.db_connections import connect_url as connect_url
-from shared.db_connections import direct_db_url as direct_db_url
-from shared.db_connections import pool as pool
-from shared.db_transaction import write_transaction
+from shared.db.connections import NoDatabaseAuthorityError as NoDatabaseAuthorityError
+from shared.db.connections import UnanchoredHomeError as UnanchoredHomeError
+from shared.db.connections import async_pool as async_pool
+from shared.db.connections import connect as connect
+from shared.db.connections import connect_url as connect_url
+from shared.db.connections import direct_db_url as direct_db_url
+from shared.db.connections import pool as pool
+from shared.db.transaction import write_transaction
 from shared.log import logger
 from shared.telemetry import Event
 

@@ -8,7 +8,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
 from shared.db import insert_inbound_message
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
 

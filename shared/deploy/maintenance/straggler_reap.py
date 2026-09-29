@@ -27,7 +27,7 @@ from __future__ import annotations
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 from shared.log import logger
 
 # The honest terminal outcome for a command the reap ended before application.

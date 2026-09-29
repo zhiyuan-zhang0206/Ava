@@ -57,7 +57,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from shared import telemetry
 from shared.config import settings
-from shared.db_transaction import async_write_transaction, write_transaction
+from shared.db.transaction import async_write_transaction, write_transaction
 from shared.log import logger
 
 

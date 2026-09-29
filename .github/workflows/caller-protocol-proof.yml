@@ -18,7 +18,7 @@ on:
       - 'shared/telemetry/audit_events.py'
       - 'shared/caller*.py'
       - 'shared/agents/messages/chat_delivery.py'
-      - 'shared/db.py'
+      - 'shared/db/__init__.py'
       - 'shared/agents/messages/envelope.py'
       - 'shared/native_process/runtime_incarnation.py'
       - 'shared/native_process/turn_identity.py'
