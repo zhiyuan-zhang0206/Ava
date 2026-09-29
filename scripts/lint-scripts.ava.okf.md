@@ -15,7 +15,7 @@ Code and document guards, mostly invoked by `.pre-commit-config.yaml` and CI:
 - `lint_ava_okf.py` — OKF format validation (frontmatter / size / wikilink)
 - `lint_python_lock.py` — wraps `shared/python_lock.py`: `uv.lock` needs PyPI registry and `files.pythonhosted.org` URLs; mirrors stay local. Pre-commit + `repo-language` CI; no project deps.
 - `lint_no_tailnet.py` — bans 100.64.0.0/10 host literals; allows CIDR, frozen `decisions/`, and `# tailnet-ip-ok:` test lines. Pre-commit + `repo-language` CI (2026-08-03/04 Gateway-URL, 2026-08-20 public-repo rulings).
-- `structure/lint_common.py` — tracked files, target resolution, UTF-8 reads, and `file:line` output for `lint_no_cjk.py` and `lint_no_tailnet.py`.
+- `structure/lint_common.py` — `FRAMEWORK_DIRS` (shared scan scope; a missing dir errors), tracked files, targets, UTF-8 reads, `file:line` output.
 - `lint_fail_fast.py`, `lint_no_emoji.py`, `lint_no_os_environ.py`, `lint_no_script_sibling_imports.py` — Python conventions; the last requires script-mode sibling imports to restore their directory to sys.path under PYTHONSAFEPATH=1 (2026-08-23 `daily_scan.py` crash).
 - `lint_code_structure.py` + `structure/{quality_budget,locality,path_imports,baseline_shards}.py` — 800-line/20-entry/CC/nesting budgets plus locality (package doors, single owners, no `ava_builtins/` path imports; see `python-conventions.md`). The `structure/baseline/*.json` shards also freeze the three locality sections as exact `path::target -> site count` maps — growth or shrinkage both fail until edited. CC 10–14 warns; `--complexity-warnings-full` unfolds counts.
 - `structure/contracts.py` — renders a door's public surface (pure AST) into `shared/*.api.txt`; `--write`/`--check` (`lint-contract-snapshots`).

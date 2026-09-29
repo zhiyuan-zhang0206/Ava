@@ -103,7 +103,7 @@ def _render_changes_table(data: dict[str, Any]) -> str:
 def _render_failure_clusters(data: dict[str, Any]) -> str:
     clusters = data.get("failure_clusters")
     if not clusters:
-        return """<div class="empty">No failures this week — all runs completed cleanly. 🎉</div>"""
+        return """<div class="empty">No failures this week — all runs completed cleanly.</div>"""
 
     parts = []
     for cl in clusters:

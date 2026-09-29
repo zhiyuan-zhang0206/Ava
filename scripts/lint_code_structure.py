@@ -137,6 +137,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import (  # noqa: E402 — standalone script
     baseline_shards,
+    lint_common,
     locality,
     path_imports,
 )
@@ -148,16 +149,7 @@ _SITE_SECTIONS = (*locality.SECTIONS, path_imports.SECTION)
 _DIRECTORY_CEILING = 20
 
 # AST rules track [tool.importlinter] root_packages; budgets also cover tooling/tests.
-_SCAN_DIRS = (
-    "agent",
-    "ava",
-    "ava_builtins",
-    "gateway",
-    "shared",
-    "services",
-    "ops",
-    "cli",
-)
+_SCAN_DIRS = lint_common.FRAMEWORK_DIRS
 _STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts")
 
 # Rule 3 allowlist — modules that may call machine_role(), each with the

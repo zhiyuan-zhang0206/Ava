@@ -1,9 +1,30 @@
-"""Shared file traversal and text decoding for standalone repository lints."""
+"""Shared scan scope, file traversal and text decoding for standalone repository lints."""
 
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
+
+# The framework code: every production Python package at the repo root. Lints
+# whose scope is "the framework" import this instead of keeping their own copy,
+# so a new or renamed package cannot drift out of one lint's scope unnoticed.
+FRAMEWORK_DIRS = ("agent", "ava", "ava_builtins", "cli", "gateway", "ops", "services", "shared")
+
+
+def scan_roots(repo_root: Path, dirs: Iterable[str]) -> list[Path]:
+    """Resolve a lint's configured scan dirs; a missing one is a configuration error.
+
+    A lint whose scope names a directory that does not exist checks nothing
+    there and still exits 0, so the gap stays invisible. Raise instead.
+    """
+    roots = [repo_root / d for d in dirs]
+    missing = [root.relative_to(repo_root).as_posix() for root in roots if not root.is_dir()]
+    if missing:
+        raise FileNotFoundError(
+            f"lint scan dir(s) not found under {repo_root}: {', '.join(missing)}"
+        )
+    return roots
 
 
 def tracked_files(repo_root: Path) -> list[str]:
