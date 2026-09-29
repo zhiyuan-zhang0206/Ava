@@ -3,7 +3,7 @@
 Hard-won bug-class rules. Every pattern here is a class of defect that actually
 shipped, or nearly shipped, in this repo — not a general best-practices list.
 
-**Read before** writing lifecycle, release, or infrastructure-touching code,
+**Read before** designing a new subsystem, writing lifecycle, release, or infrastructure-touching code,
 before adding a protective test or lint, and before acting on a diagnosis.
 
 Each entry is a rule plus a pointer to the evidence. The narrative — what broke,
@@ -12,6 +12,23 @@ distillation, and it is the half people actually re-read. The pipeline runs one
 way: a postmortem produces guardrails, and the guardrails that generalize condense
 into an entry here. See [`doc-maintenance.md`](doc-maintenance.md) for how the two
 sit among the other axes.
+
+## Design and scope
+
+### Complexity must name the failure it prevents
+
+Before designing a subsystem, write down three things:
+
+- how far the problem must be solved at this system's real scale;
+- how established tools solve the same problem, by name;
+- the simplest sufficient design, and why it falls short.
+
+Every mechanism beyond that design must name the failure it prevents: one that has happened, or a credible one that cannot be handled by hand when it happens. A mechanism that cannot name one is cost.
+
+Make the simplest path run end to end on the real topology before adding breadth. A path exercised only through stubs has not been built.
+
+Review asks "can this be deleted, and what would handle the case on site?" as well as "is this correct?".
+Evidence: [`postmortems/0009`](../postmortems/0009-complexity-must-name-the-failure-it-prevents.md).
 
 ## Release and long-lived processes
 
