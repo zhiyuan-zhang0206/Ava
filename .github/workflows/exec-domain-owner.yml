@@ -90,6 +90,15 @@ jobs:
           cp agent/exec_domain_owner.py proof/current-owner.py
           trap 'cp proof/current-owner.py agent/exec_domain_owner.py' EXIT
           git show 4faff03726be6135b9a43c8b1e555c15182c6155:agent/exec_domain_owner.py > agent/exec_domain_owner.py
+          # The frozen blob predates the shared/agents/incarnation split (PR #3646); its own
+          # imports still name the pre-move paths, which no longer exist in this tree. This
+          # regression proof is about exec_domain_owner.py's own buffered-control logic, not
+          # import-path history, so retarget just those two lines to their current location —
+          # same names, same behavior, nothing else in the frozen blob changes.
+          sed -i \
+            -e 's/^from shared\.exec_owner_protocol import (/from shared.agents.incarnation.exec_owner_protocol import (/' \
+            -e 's/^from shared\.incarnation_resources import ResourceProcess/from shared.agents.incarnation.resources import ResourceProcess/' \
+            agent/exec_domain_owner.py
           set +e
           uv run pytest --confcutdir=tests/agent tests/agent/test_exec_owner_entry.py::test_completed_owner_exits_while_original_host_keeps_control_open -q > proof/old-buffered-control.txt 2>&1
           status=$?
