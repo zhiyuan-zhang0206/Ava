@@ -52,8 +52,5 @@
     "shared/pg_foreground.py::postgres-dial": 1,
     "shared/pg_stall_watchdog.py::postgres-dial": 2,
     "shared/pg_tools.py::postgres-dial": 2
-  },
-  "private_imports": {
-    "shared/plugin_config_registry.py::shared.config.service_read._domain_model_classes": 1
   }
 }
