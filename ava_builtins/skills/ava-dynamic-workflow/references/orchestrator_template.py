@@ -60,9 +60,11 @@ for task in SUB_TASKS:
     # Clean previous result — a stale file would read as "this worker is done"
     Path(task["handoff_path"]).unlink(missing_ok=True)
 
+    # ava.agents.spawn() has no `label` parameter (dropped from the real SDK
+    # function); task["label"] is only this template's own bookkeeping key,
+    # read back below and in worker_ids.
     wid = ava.agents.spawn(
         prompt=task["prompt"].format(handoff_file=task["handoff_path"]),
-        label=task["label"],
     )
     worker_ids[task["id"]] = wid
     print(f"  spawned {task['label']}: #{wid}")
