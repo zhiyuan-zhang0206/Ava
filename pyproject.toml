@@ -296,6 +296,8 @@ layers = [
 
 [tool.ruff]
 line-length = 100
+# Tool caches unify under `.cache/<tool>/` (conventions/dev-setup.md "Tool caches").
+cache-dir = ".cache/ruff"
 # No vendored third-party Python ships in-tree today. When some does, exclude it
 # here: vendored payload is kept byte-identical to upstream so a future sync can
 # diff it directly, and reformatting or relinting it would turn every upstream
@@ -449,6 +451,8 @@ exclude = ["*.md"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Tool caches unify under `.cache/<tool>/` (conventions/dev-setup.md "Tool caches").
+cache_dir = ".cache/pytest"
 # importlib mode lets tests/ not require __init__.py; same-named test_X.py in different subdirs
 # also doesn't collide (pytest uses full module path tests.foo.test_X rather than bare test_X). The default
 # prepend mode requires __init__.py for every dir containing tests, inconsistent and prone to basename collisions.

@@ -12,6 +12,13 @@ notes, not here. The placeholders to fill in: a gateway is reached at
 `http://<gateway-host>:8000`, secrets live in per-machine `~/.ava/.env` +
 `~/.ava/secrets/*.env`, and SSH keys are per dev machine.
 
+## Tool caches
+
+Every tool's cache lives under `.cache/<tool>/` (`.cache/pytest`,
+`.cache/ruff`, `.cache/import-linter`, ...), ignored by the single root
+`/.cache/` line in `.gitignore`. Configure a newly added tool the same way
+instead of letting it drop a cache dir at the repo root.
+
 ## WSL2 needs its own private-network identity
 
 Runbook §"WSL agent-runner host bring-up notes" point 3 mentions "WSL2 IP

@@ -258,8 +258,7 @@ def test_attributes_key_literals_are_registered() -> None:
                 ".git",
                 ".worktrees",
                 "__pycache__",
-                ".ruff_cache",
-                ".pytest_cache",
+                ".cache",
             )
         ):
             continue
