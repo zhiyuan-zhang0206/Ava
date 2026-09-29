@@ -8,6 +8,7 @@ httpx client inside the lifespan context.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, cast
 
 import pytest
@@ -89,9 +90,26 @@ class TestGet:
         assert p.name == "coder"
 
     def test_not_found(self):
-        """get(name) raises PresetNotFoundError when no preset matches."""
+        """get(name) raises PresetNotFoundError, owned by the presets SDK module,
+        when no preset matches."""
         from ava.agents.presets import PresetNotFoundError, get
 
         with pytest.raises(PresetNotFoundError) as exc:
             get("ghost")
         assert "ghost" in str(exc.value)
+        assert PresetNotFoundError.__module__ == "ava.agents.presets"
+
+
+def test_timestamps_are_aware_datetimes():
+    """created_at / updated_at are the declared `datetime`, parsed from the
+    gateway's ISO strings — both from get() and from list()."""
+    from ava.agents.presets import get
+    from ava.agents.presets import list as list_presets
+
+    _post_preset("coder", "C")
+
+    for preset in (get("coder"), *cast(list[Any], list_presets())):
+        for stamp in (preset.created_at, preset.updated_at):
+            assert isinstance(stamp, datetime)
+            assert stamp.tzinfo is not None
+        assert preset.updated_at >= preset.created_at
