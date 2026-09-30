@@ -1,31 +1,42 @@
-"""A development tool that imports application code never touches a real home.
+"""A script that imports application code enters a scratch home, or says what it operates on.
 
 Importing application code boots the config package, which loads
 `$AVA_HOME/.env` (else `~/.ava/.env`) — on a host that runs a cluster, that
-cluster's credentials. A lint, a codegen dump or a docs check (every one of them
-a pre-commit or pre-push hook's payload) therefore calls `enter_scratch_home()`
-before its first application import: a fresh temporary `AVA_HOME`, whatever the
-caller's environment carries. It does so only when it runs as a program, behind
-`if __name__ == "__main__":`: tests import these modules, and a module that
-entered a scratch home while being imported would replace the whole pytest
-worker's `AVA_HOME`.
+cluster's credentials. Every entry file under `scripts/`, `.agents/skills/` and
+`ava_builtins/skills/` that imports application code therefore takes one of two
+positions, and the structure test names the third as a failure:
+
+- a development or CI tool calls `enter_scratch_home()` — a fresh temporary
+  `AVA_HOME`, whatever the caller's environment carries — behind
+  `if __name__ == "__main__":`, before its first application import. Only as a
+  program: tests import these modules, and a module that entered a scratch home
+  while being imported would replace the whole pytest worker's `AVA_HOME`;
+- a tool that really operates on the local cluster declares it, with the kind of
+  state it touches and why: a line `# operates-on-cluster: <states> -- <reason>` in
+  the file, or one row of `_CLUSTER_OPERATOR_DIRS` for a whole directory of them.
+  The states come from a closed vocabulary, so a reviewer sees at a glance whether a
+  tool reads a database, a secret or a PTY registry.
+
+An entry file is one with an `if __name__ == "__main__":` guard, module-level code
+that does work (a watcher script), or a target named by a workflow or a hook. A library
+(defs and imports only) needs neither, but it must not enter a scratch home nor resolve
+the home when it is imported: the entry that imports it owns that decision.
 
 The behaviour test runs a real tool with `AVA_HOME` and HOME pointing at homes
 whose `.env` cannot be read, so any read of either one fails the tool loudly. The
-structure test keeps the list closed: a tool that starts importing application
-code without the guarded call fails it. The import test executes every such tool
-module inside the pytest process and asserts the session's `AVA_HOME` is unchanged.
+import test executes every scratch-home tool module inside the pytest process and
+asserts the session's `AVA_HOME` is unchanged.
 
-The opposite rule holds for the tools CI and the hooks run on a bare `python3`
-(no project dependencies installed): they cannot reach the config boot at all,
-because `enter_scratch_home` lives where `dotenv` is imported. They need no
-scratch home, and a test runs each one under `python -S` to prove it stays that
-way.
+The tools CI and the hooks run on a bare `python3` (no project dependencies
+installed) are the exception: they cannot reach the config boot at all, because
+`enter_scratch_home` lives where `dotenv` is imported. They need no scratch home, and
+a test runs each one under `python -S` to prove it stays that way.
 """
 
 from __future__ import annotations
 
 import ast
+import functools
 import importlib.util
 import os
 import re
@@ -37,48 +48,117 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[2]
 
-# Tool directories whose scripts are hook payloads or dev tools, and the one
-# script outside them that is (the worktree-removal gate).
-_TOOL_DIRS = ("scripts/lint", "scripts/content_lint", "scripts/codegen")
-_TOOL_FILES = ("scripts/check_worktree_remove.py",)
+# The script roots the rule covers. Tests, `tests/` directories and conftests are
+# not tools.
+_SCAN_ROOTS = ("scripts", ".agents/skills", "ava_builtins/skills")
 _APPLICATION_PACKAGES = frozenset(
     {"base", "ava", "agent", "gateway", "cli", "ops", "services", "schedules", "ava_builtins"}
 )
 
-# Operator tools that act on a cluster's own data on purpose and therefore must
-# resolve the real home: each carries the reason.
-_OPERATOR_TOOLS = {
-    "scripts/codegen/build_hierarchy_once.py": "builds one agent's history tree in the running cluster",
-    "scripts/check_worktree_remove.py": (
-        "reads this machine's session registry ($AVA_HOME/run/pty) to find the live anchors "
-        "of a worktree, so it must read the real home; it only skips the gateway config fetch "
-        "(tests/base/test_worktree_guard.py proves it dials nothing and writes nothing)"
+# What an operator tool may say it operates on: the local cluster's state, by kind.
+_CLUSTER_STATES = frozenset(
+    {
+        "agent-records",  # agents, their messages and schedules (the database rows and the gateway)
+        "backups",  # the logical dumps, WAL archive and restore targets
+        "config",  # the cluster's configuration and the enabled plugins
+        "database",  # the cluster's Postgres
+        "home-files",  # files under the home: caches, snapshots, workspaces
+        "host-services",  # this machine's daemons: the permissions helper, launchd, the gateway process
+        "memory",  # the shared memory pool
+        "pty-sessions",  # the PTY session registry
+        "secrets",  # the cluster secret, API tokens, data-plane passwords
+        "skills",  # installed skills and their identity
+        "telemetry",  # logs, traces and metrics the cluster keeps
+    }
+)
+
+# A whole directory of operator tools: every entry file under it operates on the local
+# cluster. Each carries the states it touches and why.
+_CLUSTER_OPERATOR_DIRS: dict[str, tuple[tuple[str, ...], str]] = {
+    "ava_builtins/skills": (
+        ("agent-records", "config", "database", "memory", "pty-sessions", "skills"),
+        "run by a fleet agent in its own production shell through the `ava` SDK, acting on the "
+        "running cluster's agents, messages, memory pool, skills and schedules",
+    ),
+    "scripts/data_plane_ops": (
+        ("backups", "database", "secrets"),
+        "operator procedures on this cluster's Postgres, Redis and their secrets: rotation, "
+        "restore drills, PITR migration",
+    ),
+    "scripts/data_repair": (
+        ("database", "memory", "skills", "telemetry"),
+        "one-shot repairs of this cluster's rows, memory index, skill identities and Loki lineage",
+    ),
+    "scripts/host_ops": (
+        ("database", "host-services"),
+        "host-level operations: the hosted-inbound backlog sweep and the launchd permissions-"
+        "helper fault harnesses, which use this machine's launchd domain with a test label",
     ),
 }
 
+# An individual declaration: one comment line in the file, before its first statement
+# that is not the docstring.
+_DECLARATION = re.compile(
+    r"^# operates-on-cluster: (?P<states>[a-z-]+(?:, [a-z-]+)*) -- (?P<reason>\S.*)$", re.MULTILINE
+)
 
 # `python3 scripts/...` (or `ui/...`) on a line that is not `uv run`: CI steps and
 # pre-commit entries that run on the interpreter the runner ships with.
 _BARE_ENTRY = re.compile(r"(?:^|[\s:])python3?\s+((?:scripts|ui)/[\w./-]+\.py)")
+# Any script a workflow or a hook launches, whatever the interpreter wrapper.
+_LAUNCHED_ENTRY = re.compile(
+    r"(?:python3?|\.venv/bin/python)\s+((?:scripts|\.agents/skills|ava_builtins/skills)/[\w./-]+\.py)"
+)
 
 
-def _bare_python_scripts() -> list[str]:
-    sources = [
+def _workflow_sources() -> list[Path]:
+    return [
         *sorted((_REPO / ".github" / "workflows").glob("*.yml")),
         _REPO / ".pre-commit-config.yaml",
     ]
+
+
+def _bare_python_scripts() -> list[str]:
     found: set[str] = set()
-    for source in sources:
+    for source in _workflow_sources():
         for line in source.read_text(encoding="utf-8").splitlines():
             if "uv run" not in line:
                 found.update(_BARE_ENTRY.findall(line))
     return sorted(found)
 
 
-def _tool_scripts() -> list[Path]:
-    found = [p for d in _TOOL_DIRS for p in sorted((_REPO / d).glob("*.py"))]
-    found += [_REPO / f for f in _TOOL_FILES]
-    return found
+def _launched_scripts() -> set[str]:
+    return {
+        match
+        for source in _workflow_sources()
+        for match in _LAUNCHED_ENTRY.findall(source.read_text(encoding="utf-8"))
+    }
+
+
+def _is_tool_path(path: Path) -> bool:
+    rel = path.relative_to(_REPO)
+    skipped = {"tests", "__pycache__", "node_modules", ".venv"}
+    # A test is a `test_*.py` inside a `tests/` directory (pyproject `python_files`): where a
+    # file sits, not its name, makes it one (`scripts/ci/test_selector.py` is a CI tool).
+    return not (skipped & set(rel.parts) or path.name == "conftest.py")
+
+
+@functools.cache
+def _scan_files() -> tuple[str, ...]:
+    """Every Python file under the scan roots that is a tool (not a test)."""
+    return tuple(
+        sorted(
+            path.relative_to(_REPO).as_posix()
+            for root in _SCAN_ROOTS
+            for path in (_REPO / root).rglob("*.py")
+            if _is_tool_path(path)
+        )
+    )
+
+
+@functools.cache
+def _tree(rel: str) -> ast.Module:
+    return ast.parse((_REPO / rel).read_text(encoding="utf-8"))
 
 
 def _imports_application_code(tree: ast.AST) -> bool:
@@ -149,33 +229,195 @@ def _first_application_import_line(tree: ast.Module) -> int | None:
     return None
 
 
-def test_every_tool_that_imports_application_code_enters_a_scratch_home_when_run() -> None:
-    offenders: list[str] = []
-    bare = set(_bare_python_scripts())
-    for script in _tool_scripts():
-        rel = script.relative_to(_REPO).as_posix()
-        tree = ast.parse(script.read_text(encoding="utf-8"))
-        if not _imports_application_code(tree) or rel in _OPERATOR_TOOLS or rel in bare:
-            continue
-        guard = _guarded_call_line(tree)
-        if guard is None:
-            offenders.append(f'{rel}: no `if __name__ == "__main__": enter_scratch_home()`')
-            continue
-        first_import = _first_application_import_line(tree)
-        if first_import is not None and first_import < guard:
-            offenders.append(f"{rel}: imports application code (line {first_import}) first")
-    assert not offenders, (
-        "every tool that imports application code must call `enter_scratch_home()` behind "
-        f'`if __name__ == "__main__":`, before its first application import: {offenders}'
+def _executes_at_import(tree: ast.Module) -> bool:
+    """Whether the module body does work when imported: a call statement, a loop, a
+    `with`, a `raise`. Imports, definitions, assignments and the `sys.path` set-up a
+    script does before its imports do not count."""
+
+    def is_path_setup(node: ast.Expr) -> bool:
+        return isinstance(node.value, ast.Call) and ast.unparse(node.value.func).startswith(
+            "sys.path."
+        )
+
+    def works(stmts: list[ast.stmt]) -> bool:
+        for node in stmts:
+            if isinstance(node, ast.Expr):
+                if not isinstance(node.value, ast.Constant) and not is_path_setup(node):
+                    return True
+            elif isinstance(node, ast.For | ast.AsyncFor | ast.While | ast.With | ast.Raise):
+                return True
+            elif isinstance(node, ast.Try):
+                handler_bodies = [h.body for h in node.handlers]
+                bodies = [node.body, node.orelse, node.finalbody, *handler_bodies]
+                if any(works(body) for body in bodies):
+                    return True
+            elif (
+                isinstance(node, ast.If)
+                and not _is_main_guard(node)
+                and (works(node.body) or works(node.orelse))
+            ):
+                return True
+        return False
+
+    return works(tree.body)
+
+
+def _is_entry(rel: str, tree: ast.Module, launched: set[str]) -> bool:
+    return (
+        any(_is_main_guard(node) for node in tree.body)
+        or _executes_at_import(tree)
+        or rel in launched
     )
 
 
-def test_the_operator_allowlist_names_only_tools_that_exist_and_import_application_code() -> None:
-    """An allowlist entry that no longer applies is dead weight that would hide a
-    future offender under its name."""
-    for rel in _OPERATOR_TOOLS:
-        tree = ast.parse((_REPO / rel).read_text(encoding="utf-8"))
-        assert _imports_application_code(tree), rel
+@functools.cache
+def _home_resolvers() -> frozenset[str]:
+    """Every name that resolves the home (or a path under it): the functions of
+    `base.paths` and the resolver behind them."""
+    tree = ast.parse((_REPO / "base" / "paths" / "__init__.py").read_text(encoding="utf-8"))
+    names = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+    return frozenset(names | {"resolve_ava_home"})
+
+
+def _resolves_home_on_import(tree: ast.Module) -> list[int]:
+    """Lines of calls, made when the module is imported, to a home resolver."""
+    lines: list[int] = []
+    resolvers = set(_home_resolvers())
+    resolvers |= {  # `from base.paths import ava_home as home`
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.asname and alias.name in _home_resolvers()
+    }
+
+    class Visitor(ast.NodeVisitor):
+        # A function or lambda body runs when it is called, not when the module is imported.
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            return None
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            return None
+
+        def visit_Lambda(self, node: ast.Lambda) -> None:
+            return None
+
+        def visit_If(self, node: ast.If) -> None:
+            if not _is_main_guard(node):  # the guard body runs only as a program
+                self.generic_visit(node)
+
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            if name in resolvers:
+                lines.append(node.lineno)
+            self.generic_visit(node)
+
+    Visitor().visit(tree)
+    return lines
+
+
+def _declaration(rel: str, problems: list[str]) -> tuple[tuple[str, ...], str] | None:
+    """What `rel` declares it operates on: its own comment, or its directory's row."""
+    found = _DECLARATION.findall((_REPO / rel).read_text(encoding="utf-8"))
+    by_dir = [
+        row for directory, row in _CLUSTER_OPERATOR_DIRS.items() if rel.startswith(directory + "/")
+    ]
+    if len(found) > 1 or (found and by_dir):
+        problems.append(f"{rel}: declares what it operates on more than once")
+    if found:
+        states, reason = found[0]
+        declared = (tuple(states.split(", ")), reason)
+    elif by_dir:
+        declared = by_dir[0]
+    else:
+        return None
+    unknown = set(declared[0]) - _CLUSTER_STATES
+    if unknown:
+        problems.append(f"{rel}: states {sorted(unknown)} are not in the vocabulary")
+    if len(declared[1]) < 15:
+        problems.append(f"{rel}: the reason is too short to be a reason")
+    return declared
+
+
+def _scripts_needing_a_decision() -> tuple[str, ...]:
+    bare = set(_bare_python_scripts())
+    return tuple(
+        rel for rel in _scan_files() if rel not in bare and _imports_application_code(_tree(rel))
+    )
+
+
+def test_every_entry_that_imports_application_code_takes_a_position() -> None:
+    """Enter a scratch home when run, or declare the local cluster state it operates on."""
+    problems: list[str] = []
+    launched = _launched_scripts()
+    for rel in _scripts_needing_a_decision():
+        tree = _tree(rel)
+        if not _is_entry(rel, tree, launched):
+            continue
+        guard = _guarded_call_line(tree)
+        declared = _declaration(rel, problems)
+        if guard is None and declared is None:
+            problems.append(
+                f'{rel}: no `if __name__ == "__main__": enter_scratch_home()` and no '
+                "`# operates-on-cluster: <states> -- <reason>` declaration"
+            )
+        elif guard is not None and declared is not None:
+            problems.append(f"{rel}: enters a scratch home AND declares it operates on the cluster")
+        elif guard is not None:
+            first_import = _first_application_import_line(tree)
+            if first_import is not None and first_import < guard:
+                problems.append(f"{rel}: imports application code (line {first_import}) first")
+    assert not problems, "\n" + "\n".join(problems)
+
+
+def test_a_library_neither_enters_a_scratch_home_nor_resolves_the_home_on_import() -> None:
+    """A module that other scripts import leaves the choice to the entry that imports it."""
+    problems: list[str] = []
+    launched = _launched_scripts()
+    for rel in _scripts_needing_a_decision():
+        tree = _tree(rel)
+        if _is_entry(rel, tree, launched):
+            continue
+        if _calls_enter_scratch_home(tree):
+            problems.append(f"{rel}: a library calls enter_scratch_home()")
+        for line in _resolves_home_on_import(tree):
+            problems.append(f"{rel}:{line}: a library resolves the home when it is imported")
+    assert not problems, "\n" + "\n".join(problems)
+
+
+def test_the_declarations_name_entries_that_exist_and_need_them() -> None:
+    """A declaration that no longer applies would hide a future offender under its name."""
+    problems: list[str] = []
+    launched = _launched_scripts()
+    entries = [rel for rel in _scripts_needing_a_decision() if _is_entry(rel, _tree(rel), launched)]
+    for directory, (states, reason) in _CLUSTER_OPERATOR_DIRS.items():
+        if not [rel for rel in entries if rel.startswith(directory + "/")]:
+            problems.append(
+                f"{directory}: declared, but no entry under it imports application code"
+            )
+        if set(states) - _CLUSTER_STATES or len(reason) < 15:
+            problems.append(f"{directory}: malformed declaration")
+    for rel in _scan_files():
+        text = (_REPO / rel).read_text(encoding="utf-8")
+        if _DECLARATION.search(text) and rel not in entries:
+            problems.append(f"{rel}: declares what it operates on but is not such an entry")
+    assert not problems, "\n" + "\n".join(problems)
+
+
+def test_the_scan_covers_the_roots_it_is_meant_to_cover() -> None:
+    """A scan that silently matched little would make the tests above vacuous."""
+    needing = set(_scripts_needing_a_decision())
+    for rel in (
+        "scripts/lint/no_os_environ.py",  # enters a scratch home
+        "scripts/ci/release_cut.py",  # enters a scratch home
+        "scripts/start_gateway.py",  # declares
+        ".agents/skills/inspect-a-trace/scripts/fetch_trace.py",  # declares
+        "ava_builtins/skills/ava-watcher/scripts/watch_idle.py",  # its directory declares
+        "ava_builtins/skills/web-ai/scripts/_utils.py",  # a library
+    ):
+        assert rel in needing, rel
+    assert len(needing) >= 60
 
 
 def test_the_bare_python_scan_finds_the_entries_it_is_meant_to_guard() -> None:
@@ -238,16 +480,12 @@ def test_the_ci_classify_step_imports_with_the_standard_library_alone(tmp_path: 
 
 
 def _scratch_home_tools() -> list[str]:
-    return [
-        script.relative_to(_REPO).as_posix()
-        for script in _tool_scripts()
-        if _calls_enter_scratch_home(ast.parse(script.read_text(encoding="utf-8")))
-    ]
+    return [rel for rel in _scan_files() if _calls_enter_scratch_home(_tree(rel))]
 
 
 def test_the_import_test_covers_the_tools_it_is_meant_to_cover() -> None:
     tools = _scratch_home_tools()
-    assert len(tools) >= 17
+    assert len(tools) >= 22
     assert "scripts/lint/no_os_environ.py" in tools
     assert "scripts/content_lint/lint_ava_okf.py" in tools
 

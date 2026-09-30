@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 """Two-section chain smoke: launchd -> permissions-helper -> ava-root -> unit.
 
-The dev-side acceptance run for the macOS "two-section" adapter (task #3209,
-design #3195). A helper compiled from this checkout is registered as a
-throwaway launchd job under an isolated workdir; the helper seeds a dev
-ava-root from a seed config (the K3 face), and this script verifies the whole
-chain plus the keeper's crash semantics:
+The dev-side acceptance run for the macOS "two-section" adapter (task #3209, design #3195).
+A helper compiled from this checkout is registered as a throwaway launchd job under an
+isolated workdir; the helper seeds a dev ava-root from a seed config (the K3 face), and
+this script verifies the whole chain plus the keeper's crash semantics:
 
   build      compile + ad-hoc sign a dev helper from this checkout
   launch     bootstrap the throwaway launchd job, wait for the helper
@@ -27,13 +26,11 @@ chain plus the keeper's crash semantics:
              --sample-restart the phase also samples the surviving units'
              chain + TCC attribution around the crash (F12, task #3377)
 
-The helper binds its home to the seed file's directory, so the seed lives in
-the root run dir. Nothing here touches production: the binary is
-throwaway-signed, every path lives under the workdir, and the launchd job uses
-its own test label (never the production helper's). The helper's first-run
-registration nudge is disabled via AVA_PERMISSIONS_HELPER_SKIP_REGISTRATION=1
--- an Aqua-session helper with a fresh code identity would otherwise raise TCC
-dialogs on a machine nobody is sitting at.
+The helper binds its home to the seed file's directory, so the seed lives in the root run dir.
+Nothing here touches production: the binary is throwaway-signed, every path lives under the workdir,
+and the launchd job uses its own test label (never the production helper's). The helper's first-run
+registration nudge is disabled via AVA_PERMISSIONS_HELPER_SKIP_REGISTRATION=1 -- an Aqua-session
+helper with a fresh code identity would otherwise raise TCC dialogs on an unattended machine.
 
 Exit 0 = every phase passed. Evidence (ps/logs/status snapshots) is retained
 under the workdir; pass --cleanup to remove it. Run with the repository venv,
@@ -1055,4 +1052,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
 
 
 if __name__ == "__main__":
+    from base.host.env.dotenv_boot import enter_scratch_home
+
+    enter_scratch_home()
     raise SystemExit(main())
