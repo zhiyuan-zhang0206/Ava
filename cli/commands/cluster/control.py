@@ -147,8 +147,7 @@ def cmd_cluster_status() -> int:
     Thin client: GET `/api/cluster/roster` on the gateway, which
     assembles the roster server-side (its own row locally + each agent-runner
     probed in parallel via the status_probe op) and returns
-    every machine's name / role / paused / live status, plus the cluster-global
-    deploy lease stamped per row (the deploy-hold banner). Fails fast on any HTTP
+    every machine's name / role / paused / live status. Fails fast on any HTTP
     error rather than masking an unreachable gateway.
 
     The transport failures get one-line stderr verdicts and a nonzero exit
@@ -207,8 +206,8 @@ def cmd_cluster_status() -> int:
 
 def _render_roster(roster: list[MachineStatus]) -> list[str]:
     """Render the decoded /api/cluster/roster payload into aligned text lines
-    (the schema and deploy-hold banners above the table, then header +
-    separator + one row per machine).
+    (the schema banner above the table, then header + separator + one row per
+    machine).
 
     Pure and split from the HTTP fetch so the row formatting is unit-testable
     against the MachineStatus wire schema, which carries the three capability
@@ -221,7 +220,7 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
         *(len(f"{m.name} (staging)") if m.is_staging else len(m.name) for m in roster),
         len("name"),
     )
-    lines = _schema_mismatch_banner(roster) + _hold_banner(roster)
+    lines = _schema_mismatch_banner(roster)
     lines += [
         f"{'name'.ljust(name_w)}  {'role':<{_ROLE_COL_W}} {'paused':<7} {'status':<10} "
         f"{'code':<10} up since",
@@ -254,31 +253,6 @@ def _schema_mismatch_banner(roster: list[MachineStatus]) -> list[str]:
             continue
         lines.append(f"⚠ schema check on {mismatch.machine}: {mismatch.kind}; {mismatch.detail}")
     return lines
-
-
-def _hold_banner(roster: list[MachineStatus]) -> list[str]:
-    """The lines above the table naming the live deploy lease, or none when the
-    cluster is free.
-
-    `deploy_hold` is cluster-global and stamped identically on every row, so the
-    first row is as good as any — no row is more authoritative than another.
-
-    The banner exists because the refusal it causes happens somewhere else: another
-    owner fails to take the deploy lease, and the roster is where an operator looks
-    to learn what holds it.
-
-    It carries no "no hold" line: an absent lease is not evidence the cluster is
-    free (host-local maintenance takes no cluster lease), so printing "no deploy in
-    flight" here would assert more than the roster knows.
-    """
-    hold = next((m.deploy_hold for m in roster if m.deploy_hold is not None), None)
-    if hold is None:
-        return []
-    return [
-        f"deploy hold: {hold}",
-        "  while it holds, no other owner can take the cluster deploy lease.",
-        "",
-    ]
 
 
 def _status_cell(online: bool, identity_mismatch: bool, stopped_at: datetime | None) -> str:  # noqa: FBT001 — online / identity_mismatch are probe verdicts, passed positionally by the renderer

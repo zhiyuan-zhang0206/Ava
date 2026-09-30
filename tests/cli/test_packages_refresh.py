@@ -31,14 +31,11 @@ from cli.commands.extensions.packages_refresh import (
 
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Isolated home, no cluster-update probe, OS-job gate off (suite default)."""
-    import cli.commands.extensions.packages_refresh as refresh_mod
-
+    """Isolated home, OS-job gate off (suite default)."""
     home = tmp_path / ".ava"
     (home / "skills").mkdir(parents=True)
     (home / "logs").mkdir()
     monkeypatch.setattr(settings.general, "ava_home", home)
-    monkeypatch.setattr(refresh_mod, "_update_in_flight", lambda: False)
 
 
 def _home() -> Path:
@@ -408,7 +405,7 @@ def test_notify_mode_records_available_without_applying(core_repo: Path) -> None
     assert _row("foo").update.mode == "notify"  # explicit mode survives
 
 
-# ── gates: flock / in-flight / job switches / due cadence ───────────────────
+# ── gates: flock / job switches / due cadence ───────────────────
 
 
 def test_flock_skips_a_concurrent_pass(core_repo: Path) -> None:
@@ -417,14 +414,6 @@ def test_flock_skips_a_concurrent_pass(core_repo: Path) -> None:
     with file_lock(_home() / "packages-refresh.lock", timeout_s=1):
         report = run_refresh(repo=core_repo)
     assert not report.ran and "holds the lock" in (report.skip_reason or "")
-
-
-def test_update_in_flight_skips(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import cli.commands.extensions.packages_refresh as refresh_mod
-
-    monkeypatch.setattr(refresh_mod, "_update_in_flight", lambda: True)
-    report = run_refresh(repo=core_repo)
-    assert not report.ran and "update is in flight" in (report.skip_reason or "")
 
 
 def test_from_job_gates(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

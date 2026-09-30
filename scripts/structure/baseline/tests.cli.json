@@ -63,7 +63,6 @@
     "tests/cli/test_maintenance_stop.py::cli.commands.lifecycle.root_driver._stop_root_service_tree": 5,
     "tests/cli/test_mcp_install.py::cli.commands.extensions.mcp._uv_sync": 1,
     "tests/cli/test_packages_refresh.py::ava.skills._provider_roots": 1,
-    "tests/cli/test_packages_refresh.py::cli.commands.extensions.packages_refresh._update_in_flight": 2,
     "tests/cli/test_pause_stop.py::cli.commands._repo": 1,
     "tests/cli/test_pause_stop.py::cli.commands.lifecycle._temporary_stop": 15,
     "tests/cli/test_pause_stop.py::cli.commands.lifecycle.root_driver._root_tree_plan": 1,

@@ -6,13 +6,12 @@ import os
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
 import pytest
 
-from base.deploy.state.cluster_lock import DeployLease
 from base.deploy.state.host_deploy_state import HostDeployState
 from base.host.resource_sample import ResourceSample
 from ops import cluster_status
@@ -59,22 +58,9 @@ class _Pool:
 @pytest.fixture
 def snapshot_dependencies(
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[HostDeployState, DeployLease]:
+) -> HostDeployState:
     """Keep the snapshot focused on DB bundling and resource sampling."""
-    now = datetime.now(UTC)
-    state = HostDeployState(
-        machine="win",
-        posture="paused",
-        updated_at=now,
-        updater_lease_expires_at=now + timedelta(minutes=5),
-        paused_at=now - timedelta(seconds=30),
-    )
-    lease = DeployLease(
-        holder="gateway:pid1",
-        held_for_s=30.0,
-        expires_in_s=300.0,
-        kind="rollout",
-    )
+    state = HostDeployState(machine="win", posture="paused", updated_at=datetime.now(UTC))
 
     def _dead_pidfile(_path: str) -> tuple[bool, int | None]:
         return False, None
@@ -100,7 +86,7 @@ def snapshot_dependencies(
     monkeypatch.setattr(cluster_status, "is_observability_station", lambda: False)
     monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_head_sha", lambda: None)
     monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: None)
-    return state, lease
+    return state
 
 
 class _BatchOnlyBackend:
@@ -160,14 +146,13 @@ def test_collect_sessions_stamps_cluster_zone(monkeypatch: pytest.MonkeyPatch) -
 
 def test_status_snapshot_uses_one_connection_while_sampling_resources(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    snapshot_dependencies: HostDeployState,
 ) -> None:
     """One snapshot shares one connection while its one live sample runs in parallel."""
-    state, lease = snapshot_dependencies
+    state = snapshot_dependencies
     conn = object()
     connect_calls = 0
     state_connections: list[object | None] = []
-    lease_connections: list[object | None] = []
     schema_connections: list[object] = []
     sample_started = threading.Event()
     db_finished = threading.Event()
@@ -188,10 +173,6 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
         state_connections.append(conn)
         return state
 
-    def _read_lease(*, conn: object | None = None) -> DeployLease:
-        lease_connections.append(conn)
-        return lease
-
     def _sample() -> ResourceSample:
         nonlocal sample_calls
         sample_calls += 1
@@ -208,14 +189,12 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
 
     monkeypatch.setattr("base.db.connect", _connect)
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _read_lease)
     monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample)
 
     snapshot = cluster_status.status_snapshot()
 
     assert connect_calls == 1
     assert state_connections == [conn]
-    assert lease_connections == []
     assert schema_connections == [conn]
     assert sample_calls == 1
     assert snapshot.paused is True
@@ -224,48 +203,40 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
 
 def test_status_snapshot_borrows_pool_once_with_a_bounded_timeout(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    snapshot_dependencies: HostDeployState,
 ) -> None:
     """The ops daemon's pool contributes one bounded borrow, not fresh dials."""
-    state, lease = snapshot_dependencies
+    state = snapshot_dependencies
     conn = object()
     pool = _Pool(conn)
     state_connections: list[object | None] = []
-    lease_connections: list[object | None] = []
 
     def _read_state(_machine: str | None = None, *, conn: object | None = None) -> HostDeployState:
         state_connections.append(conn)
         return state
-
-    def _read_lease(*, conn: object | None = None) -> DeployLease:
-        lease_connections.append(conn)
-        return lease
 
     def _fresh_connect(**_kwargs: object) -> object:
         raise AssertionError("pool-backed snapshot opened a fresh DB connection")
 
     monkeypatch.setattr("base.db.connect", _fresh_connect)
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _read_lease)
     monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
 
     snapshot = cluster_status.status_snapshot(pool=pool)
 
     assert pool.timeouts == [2.0]
     assert state_connections == [conn]
-    assert lease_connections == []
     assert snapshot.paused is True
 
 
 def test_two_status_snapshots_do_not_cache_db_or_resource_reads(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    snapshot_dependencies: HostDeployState,
 ) -> None:
     """Sharing is snapshot-local: every later probe reads DB and resources again."""
-    state, lease = snapshot_dependencies
+    state = snapshot_dependencies
     pool = _Pool(object())
     state_reads = 0
-    lease_reads = 0
     sample_reads = 0
 
     def _read_state(_machine: str | None = None, *, conn: object | None = None) -> HostDeployState:
@@ -274,19 +245,12 @@ def test_two_status_snapshots_do_not_cache_db_or_resource_reads(
         state_reads += 1
         return state
 
-    def _read_lease(*, conn: object | None = None) -> DeployLease:
-        nonlocal lease_reads
-        assert conn is pool.conn
-        lease_reads += 1
-        return lease
-
     def _sample() -> ResourceSample:
         nonlocal sample_reads
         sample_reads += 1
         return _RESOURCE
 
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _read_lease)
     monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample)
 
     cluster_status.status_snapshot(pool=pool)
@@ -294,14 +258,13 @@ def test_two_status_snapshots_do_not_cache_db_or_resource_reads(
 
     assert pool.timeouts == [2.0, 2.0]
     assert state_reads == 2
-    assert lease_reads == 0
     assert sample_reads == 2
 
 
 @pytest.mark.parametrize("stored_posture", ["idle", "paused"])
 def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    snapshot_dependencies: HostDeployState,
     stored_posture: str,
 ) -> None:
     """DB-down is valid even if the unreachable row says the host was paused."""
@@ -323,23 +286,18 @@ def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
 def test_status_snapshot_preserves_invalid_real_catalog_diagnosis(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    snapshot_dependencies: HostDeployState,
 ) -> None:
     from base.deploy.schema.migrations import applied_migration_names
 
-    state, lease = snapshot_dependencies
+    state = snapshot_dependencies
     pool = _Pool(db_conn)
 
     def _state(_machine: str | None = None, *, conn: object | None = None) -> HostDeployState:
         assert conn is db_conn
         return state
 
-    def _lease(*, conn: object | None = None) -> DeployLease:
-        assert conn is db_conn
-        return lease
-
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _state)
-    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _lease)
     monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied_migration_names)
     with db_conn.transaction(force_rollback=True):
@@ -354,22 +312,17 @@ def test_status_snapshot_preserves_invalid_real_catalog_diagnosis(
 
 def test_resource_sample_failure_still_degrades_to_none_from_worker(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    snapshot_dependencies: HostDeployState,
 ) -> None:
     """Moving the sample to a worker must not let its exception fail the probe."""
-    state, lease = snapshot_dependencies
+    state = snapshot_dependencies
     pool = _Pool(object())
 
     def _read_state(_machine: str | None = None, *, conn: object | None = None) -> HostDeployState:
         del conn
         return state
 
-    def _read_lease(*, conn: object | None = None) -> DeployLease:
-        del conn
-        return lease
-
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _read_lease)
 
     def _sample_failure() -> ResourceSample:
         raise RuntimeError("psutil unavailable")
@@ -406,9 +359,9 @@ def test_agent_count_reads_local_retained_identities_without_processes(
 
 def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    snapshot_dependencies: HostDeployState,
 ) -> None:
-    state, lease = snapshot_dependencies
+    state = snapshot_dependencies
     conn = object()
     pool = _Pool(conn)
     seen: list[object] = []
@@ -420,12 +373,8 @@ def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
     def read_state(**_kwargs: object) -> HostDeployState:
         return state
 
-    def read_lease(**_kwargs: object) -> DeployLease:
-        return lease
-
     monkeypatch.setattr(cluster_status, "_count_local_agents", count)
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", read_state)
-    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", read_lease)
     monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)
     snapshot = cluster_status.status_snapshot(pool=pool)
     assert snapshot.agent_count == 7
@@ -436,7 +385,7 @@ def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
 @pytest.mark.parametrize("runner", [False, True])
 def test_agent_host_liveness_is_probed_only_on_a_runner(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    snapshot_dependencies: HostDeployState,
     runner: bool,
 ) -> None:
     from base.config import settings
@@ -485,7 +434,7 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
 )
 def test_status_snapshot_paused_reason_names_the_first_true_clause(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    snapshot_dependencies: HostDeployState,
     posture: str | None,
     held_flag: bool,
     serving: bool,
@@ -496,12 +445,7 @@ def test_status_snapshot_paused_reason_names_the_first_true_clause(
     del snapshot_dependencies
     state: HostDeployState | None = None
     if posture is not None:
-        state = HostDeployState(
-            machine="win",
-            posture=posture,
-            updated_at=datetime.now(UTC),
-            updater_lease_expires_at=None,
-        )
+        state = HostDeployState(machine="win", posture=posture, updated_at=datetime.now(UTC))
     pool = _Pool(object())
 
     def _read_state(
@@ -510,11 +454,7 @@ def test_status_snapshot_paused_reason_names_the_first_true_clause(
         del conn
         return state
 
-    def _read_lease(*, conn: object | None = None) -> None:
-        del conn
-
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _read_lease)
     monkeypatch.setattr("base.deploy.maintenance.admission.held", lambda: held_flag)
     monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: serving)
     monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)

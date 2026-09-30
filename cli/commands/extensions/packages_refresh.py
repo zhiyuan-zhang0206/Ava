@@ -11,8 +11,7 @@ converge path uses. It never restarts anything (activation is the next skill
 scan) and never passes `--accept-risk`: the scan gate refuses, nothing else.
 
 Skip conditions (job runs only: `AVA_OS_JOBS_ENABLED`, `refresh_enabled`;
-always: another pass holds the per-home flock, a cluster update is in flight,
-the registry is unreadable).
+always: another pass holds the per-home flock, the registry is unreadable).
 
 Legacy rows carry no `applied_rev`. The design infers "the checkout's installed
 commit"; this pass instead reconciles by CONTENT: it stages the remote head and
@@ -32,7 +31,6 @@ import subprocess
 import tarfile
 import tempfile
 import time
-from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -753,15 +751,6 @@ def _skip(reason: str) -> RefreshReport:
     return RefreshReport(ran=False, skip_reason=reason, channel_line=None, items=(), counts={})
 
 
-def _update_in_flight() -> bool:
-    """Whether a live cluster deploy lease is held (a refresh skips then)."""
-    with suppress(Exception):
-        from base.deploy.state.cluster_lock import update_lock_holder
-
-        return update_lock_holder() is not None
-    return False
-
-
 def run_refresh(
     *,
     check_only: bool = False,
@@ -785,8 +774,6 @@ def run_refresh(
     lock_path = paths.ava_home() / "packages-refresh.lock"
     try:
         with file_lock(lock_path, timeout_s=_QUEUE_LOCK_TIMEOUT_S):
-            if _update_in_flight():
-                return _skip("a cluster update is in flight")
             pass_ = _Pass(
                 check_only=check_only,
                 only=only,

@@ -67,13 +67,7 @@ class _StubBackend:
 
 
 def _state(posture: str) -> HostDeployState:
-    now = datetime.now(UTC)
-    return HostDeployState(
-        machine="win",
-        posture=posture,
-        updated_at=now,
-        updater_lease_expires_at=None,
-    )
+    return HostDeployState(machine="win", posture=posture, updated_at=datetime.now(UTC))
 
 
 def test_is_paused_judges_a_pre_read_state_without_another_db_read(

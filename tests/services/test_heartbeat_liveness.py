@@ -518,59 +518,6 @@ class TestMachineAlertEdges:
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: True})))
         assert len(notified) == 2
 
-    def test_cluster_deploy_explains_then_grades_from_true_start(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        _register_machine(db_conn)
-        _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
-        _age_transition(db_conn, _MACHINE, seconds=601)
-        monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", object)
-        notified: list[str] = []
-        self._mock_notify(monkeypatch, lambda text: notified.append(text) or True)
-
-        import asyncio
-
-        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
-        assert self._alerts(db_conn) == []
-
-        monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: None)
-        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
-        assert self._alerts(db_conn)[0][1] == "error"
-        assert len(notified) == 1
-
-    def test_host_updater_lease_explains_transition(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        _register_machine(db_conn)
-        _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
-        _age_transition(db_conn, _MACHINE, seconds=601)
-        monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: None)
-        monkeypatch.setattr(
-            "base.deploy.state.host_deploy_state.read_all",
-            lambda: {_MACHINE: SimpleNamespace(updater_live=True)},
-        )
-
-        import asyncio
-
-        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
-        assert self._alerts(db_conn) == []
-
-    def test_unreadable_deploy_context_fails_open(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        _register_machine(db_conn)
-        _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
-        _age_transition(db_conn, _MACHINE, seconds=601)
-        monkeypatch.setattr(
-            "base.deploy.state.cluster_lock.read_update_lease",
-            lambda: (_ for _ in ()).throw(RuntimeError("unreadable")),
-        )
-
-        import asyncio
-
-        asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
-        assert self._alerts(db_conn)[0][1] == "error"
-
     def test_recovery_resolves_preconvention_and_stable_fingerprint_rows(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:

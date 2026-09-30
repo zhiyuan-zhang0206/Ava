@@ -144,15 +144,9 @@ def test_live_repeat_start_never_runs_mutating_preparation(monkeypatch: pytest.M
 
 
 @pytest.mark.parametrize("live", [False, True])
-def test_start_does_not_consume_old_updater_authority(
+def test_start_marks_serving_for_live_and_cold_admission(
     monkeypatch: pytest.MonkeyPatch, live: bool
 ) -> None:
-    from base.deploy.state import cluster_lock
-
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("ordinary start cannot consume the retired updater authority")
-
-    monkeypatch.setattr(cluster_lock, "read_update_lease", forbidden)
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: live))
     monkeypatch.setattr(
         "base.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)

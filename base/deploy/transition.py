@@ -2,9 +2,9 @@
 
 The 2026-08-04 user ruling treats node outages, rollout windows, watchdog
 self-heal, and network recovery as normal transitions before they become
-incidents. A live deploy explains the transition for as long as its lease is
-live; otherwise the shared defaults leave three minutes for normal recovery,
-then grade WARNING until the ten-minute ERROR boundary.
+incidents. An open deploy window (`ops.deploy_window`) explains the transition
+for as long as it stays open; otherwise the shared defaults leave three minutes
+for normal recovery, then grade WARNING until the ten-minute ERROR boundary.
 """
 
 from __future__ import annotations
@@ -28,12 +28,11 @@ def transition_severity(
 ) -> TransitionSeverity | None:
     """Grade one transition episode from its true start time.
 
-    A live deploy is the expected window and therefore returns ``None``; its
-    lease bounds that explanation. Outside a deploy, elapsed time below the
-    warning threshold is the normal-recovery budget, the interval up to the
-    error threshold is ``warning``, and later observations are ``error``.
-    Naive datetimes are interpreted as UTC so persisted and local callers use
-    one timeline.
+    An open deploy window is the expected window and therefore returns ``None``.
+    Outside a deploy, elapsed time below the warning threshold is the
+    normal-recovery budget, the interval up to the error threshold is
+    ``warning``, and later observations are ``error``. Naive datetimes are
+    interpreted as UTC so persisted and local callers use one timeline.
     """
 
     if deploy_explains:
