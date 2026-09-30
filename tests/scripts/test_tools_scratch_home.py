@@ -5,12 +5,16 @@ Importing application code boots the config package, which loads
 cluster's credentials. A lint, a codegen dump or a docs check (every one of them
 a pre-commit or pre-push hook's payload) therefore calls `enter_scratch_home()`
 before its first application import: a fresh temporary `AVA_HOME`, whatever the
-caller's environment carries.
+caller's environment carries. It does so only when it runs as a program, behind
+`if __name__ == "__main__":`: tests import these modules, and a module that
+entered a scratch home while being imported would replace the whole pytest
+worker's `AVA_HOME`.
 
 The behaviour test runs a real tool with `AVA_HOME` and HOME pointing at homes
 whose `.env` cannot be read, so any read of either one fails the tool loudly. The
 structure test keeps the list closed: a tool that starts importing application
-code without the call fails it.
+code without the guarded call fails it. The import test executes every such tool
+module inside the pytest process and asserts the session's `AVA_HOME` is unchanged.
 
 The opposite rule holds for the tools CI and the hooks run on a bare `python3`
 (no project dependencies installed): they cannot reach the config boot at all,
@@ -22,6 +26,7 @@ way.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import os
 import re
 import subprocess
@@ -84,6 +89,36 @@ def _imports_application_code(tree: ast.AST) -> bool:
     return False
 
 
+def _is_main_guard(node: ast.stmt) -> bool:
+    return (
+        isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and isinstance(node.test.left, ast.Name)
+        and node.test.left.id == "__name__"
+        and len(node.test.ops) == 1
+        and isinstance(node.test.ops[0], ast.Eq)
+        and isinstance(node.test.comparators[0], ast.Constant)
+        and node.test.comparators[0].value == "__main__"
+    )
+
+
+def _is_enter_call(node: ast.stmt) -> bool:
+    return (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "enter_scratch_home"
+    )
+
+
+def _guarded_call_line(tree: ast.Module) -> int | None:
+    """Line of the module-level `if __name__ == "__main__":` that calls it."""
+    for node in tree.body:
+        if _is_main_guard(node) and any(_is_enter_call(s) for s in getattr(node, "body", [])):
+            return node.lineno
+    return None
+
+
 def _calls_enter_scratch_home(tree: ast.AST) -> bool:
     return any(
         isinstance(node, ast.Call)
@@ -93,7 +128,23 @@ def _calls_enter_scratch_home(tree: ast.AST) -> bool:
     )
 
 
-def test_every_tool_that_imports_application_code_enters_a_scratch_home() -> None:
+def _first_application_import_line(tree: ast.Module) -> int | None:
+    """First module-level application import other than the one that provides the call."""
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            modules = [node.module]
+        elif isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        else:
+            continue
+        if modules == ["base.host.env.dotenv_boot"]:
+            continue
+        if any(module.split(".")[0] in _APPLICATION_PACKAGES for module in modules):
+            return node.lineno
+    return None
+
+
+def test_every_tool_that_imports_application_code_enters_a_scratch_home_when_run() -> None:
     offenders: list[str] = []
     bare = set(_bare_python_scripts())
     for script in _tool_scripts():
@@ -101,11 +152,16 @@ def test_every_tool_that_imports_application_code_enters_a_scratch_home() -> Non
         tree = ast.parse(script.read_text(encoding="utf-8"))
         if not _imports_application_code(tree) or rel in _OPERATOR_TOOLS or rel in bare:
             continue
-        if not _calls_enter_scratch_home(tree):
-            offenders.append(rel)
+        guard = _guarded_call_line(tree)
+        if guard is None:
+            offenders.append(f'{rel}: no `if __name__ == "__main__": enter_scratch_home()`')
+            continue
+        first_import = _first_application_import_line(tree)
+        if first_import is not None and first_import < guard:
+            offenders.append(f"{rel}: imports application code (line {first_import}) first")
     assert not offenders, (
-        "these tools import application code without calling "
-        f"`enter_scratch_home()` before their first application import: {offenders}"
+        "every tool that imports application code must call `enter_scratch_home()` behind "
+        f'`if __name__ == "__main__":`, before its first application import: {offenders}'
     )
 
 
@@ -174,6 +230,54 @@ def test_the_ci_classify_step_imports_with_the_standard_library_alone(tmp_path: 
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def _scratch_home_tools() -> list[str]:
+    return [
+        script.relative_to(_REPO).as_posix()
+        for script in _tool_scripts()
+        if _calls_enter_scratch_home(ast.parse(script.read_text(encoding="utf-8")))
+    ]
+
+
+def test_the_import_test_covers_the_tools_it_is_meant_to_cover() -> None:
+    tools = _scratch_home_tools()
+    assert len(tools) >= 18
+    assert "scripts/lint/no_os_environ.py" in tools
+    assert "scripts/content_lint/lint_ava_okf.py" in tools
+
+
+@pytest.mark.parametrize("rel", _scratch_home_tools())
+def test_importing_a_tool_leaves_the_sessions_home_alone(
+    rel: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tests import these modules (the lints' own tests do, at collection). The body
+    is executed afresh under a probe name, so a cached import cannot hide a module
+    that enters a scratch home at import time; such a module would replace the
+    worker's `AVA_HOME` and every later test would read the wrong home."""
+    home = os.environ["AVA_HOME"]
+    fetch = os.environ.get("AVA_CONFIG_FETCH")
+    monkeypatch.setenv("AVA_HOME", home)  # restored on teardown whatever the module does
+    name = "_tool_import_probe_" + Path(rel).stem
+    spec = importlib.util.spec_from_file_location(name, _REPO / rel)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    assert os.environ["AVA_HOME"] == home
+    assert os.environ.get("AVA_CONFIG_FETCH") == fetch
+
+
+def test_enter_scratch_home_refuses_inside_a_pytest_process() -> None:
+    from base.host.env.dotenv_boot import enter_scratch_home
+
+    home = os.environ["AVA_HOME"]
+    with pytest.raises(RuntimeError, match="pytest process"):
+        enter_scratch_home()
+    assert os.environ["AVA_HOME"] == home
 
 
 def _unreadable_home(root: Path) -> Path:

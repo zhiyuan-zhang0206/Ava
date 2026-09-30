@@ -23,7 +23,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from base.host.env.dotenv_boot import enter_scratch_home
 
-enter_scratch_home()
+if __name__ == "__main__":
+    enter_scratch_home()
 
 
 # ava.self.AGENT_ID stays None here — fine; dump is a build-time tool that

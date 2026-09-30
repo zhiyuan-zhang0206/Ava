@@ -123,12 +123,26 @@ def enter_scratch_home() -> Path:
     cluster (a lint, a codegen dump, a docs check): it sets `AVA_HOME` to a new
     private directory and `AVA_CONFIG_FETCH=skip`, so nothing in the tree
     resolves `~/.ava`, reads another home's `.env` or dials a gateway. Call it
-    before the tool's first application import; every descendant inherits it.
-    The directory is removed at exit.
+    before the tool's first application import, and only when the tool runs as a
+    program (`if __name__ == "__main__":`): every descendant inherits the home,
+    so a module that enters one while being imported replaces the importing
+    process's own. The directory is removed at exit.
+
+    A pytest process refuses: the session home is set before any project import
+    and every later test reads it, so a tool imported at collection that entered
+    a scratch home would silently redirect the whole worker.
     """
     import atexit
     import shutil
+    import sys
     import tempfile
+
+    if "pytest" in sys.modules:
+        raise RuntimeError(
+            "enter_scratch_home() was called inside a pytest process: it would replace the "
+            "session's AVA_HOME for every later test. A tool calls it only as a program, "
+            'behind `if __name__ == "__main__":`; run the tool in a subprocess to test it.'
+        )
 
     from base.host.env.bootstrap import CONFIG_FETCH_ENV, CONFIG_FETCH_SKIP
 

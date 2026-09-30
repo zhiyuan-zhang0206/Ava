@@ -257,9 +257,10 @@ every descendant inherits it:
   anything imports application code;
 - a hook or tool that imports application code (the lints, codegen dumps and docs
   checks that pre-commit and pre-push run) calls
-  `dotenv_boot.enter_scratch_home()` before its first application import: a fresh
-  temporary `AVA_HOME` and `AVA_CONFIG_FETCH=skip`, whatever the caller's
-  environment carries.
+  `dotenv_boot.enter_scratch_home()` before its first application import, behind
+  `if __name__ == "__main__":` (tests import these modules, and a pytest process
+  refuses the call): a fresh temporary `AVA_HOME` and `AVA_CONFIG_FETCH=skip`,
+  whatever the caller's environment carries.
 
 **Which checkout may change a home.** A home that carries its own `<home>/source`
 checkout (the production home `~/.ava`; every unit started from source) is started,

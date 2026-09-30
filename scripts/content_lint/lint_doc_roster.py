@@ -53,9 +53,10 @@ from pathlib import Path
 
 from base.host.env.dotenv_boot import enter_scratch_home
 
-enter_scratch_home()
+if __name__ == "__main__":
+    enter_scratch_home()
 
-from cli.commands._repo import build_services  # noqa: E402
+from cli.commands._repo import build_services
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _RUNBOOK = _REPO_ROOT / "conventions" / "runbook.md"
