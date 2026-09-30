@@ -58,7 +58,8 @@ definition. `ava` is no exception: agent visibility there is the
 in the file (a parameter such as `self`, a local) is not followed.
 
 Test files (any `tests/` directory: the top-level one or a package's own, see
-`lint_common.is_test_path`) are exempt from Rules 1, 3, 4, 5 and 6; only budgets apply.
+`lint_common.is_test_path`) are exempt from Rules 1, 3, 4, 5 and 6; only budgets apply
+(patch targets in tests: `scripts/lint/patch_targets.py`).
 
 ### Rule 5: single decision owners (locality)
 
@@ -618,7 +619,7 @@ def _baseline_guard(
         base = _baseline_base()
     except ValueError as exc:
         return [f"{baseline_shards.SHARD_DIR}: {exc}"]
-    shards = baseline_shards.read_at(_REPO_ROOT, base)
+    shards = locality.introduced(baseline_shards.read_at(_REPO_ROOT, base), _REPO_ROOT, base)
     if shards is None:
         print(
             f"note: baseline guard skipped: git {base}:{baseline_shards.SHARD_DIR} unavailable",

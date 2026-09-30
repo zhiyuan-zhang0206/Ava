@@ -9,5 +9,11 @@
   "files": {
     "tests/plugins/ava_fleet/test_task_maintenance_daemon.py": 804,
     "tests/plugins/test_ava_memory_write.py": 1181
+  },
+  "patch_targets": {
+    "tests/plugins/ava_fleet/test_task_maintenance_daemon.py::ava_builtins.plugins.ava_fleet.task_maintenance.daemon._advance_reminder_counters": 2,
+    "tests/plugins/ava_fleet/test_task_maintenance_daemon.py::ava_builtins.plugins.ava_fleet.task_maintenance.daemon._deliver_message": 2,
+    "tests/plugins/ava_fleet/test_task_maintenance_daemon.py::ava_builtins.plugins.ava_fleet.task_maintenance.daemon._pending_counter_writes": 2,
+    "tests/plugins/test_grafana_dashboard_render.py::base.telemetry.metrics.grafana_dashboard_supply._REPO_PLUGINS_DIR": 1
   }
 }

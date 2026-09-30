@@ -134,6 +134,23 @@ repos:
         files: (^|/)tests/.*\.py$
         pass_filenames: false
 
+      # A test may not patch a private name of a package it does not belong to
+      # (structure Rule 8): every such reach-in is a missing injection seam, and
+      # Rule 4's exemption of test files left string targets such as
+      # monkeypatch.setattr("base.db.connections._pool", ...) unchecked. The
+      # package a test belongs to comes from its own imports (placement rule),
+      # not its directory, so the verdict survives the move into <pkg>/tests/.
+      # Today's sites are frozen in the `patch_targets` baseline section.
+      # Per-file verdicts: pre-commit passes the changed test files and only
+      # those are checked; a changed lint, placement module or baseline shard
+      # triggers a full scan (~5s). See scripts/lint/patch_targets.py header.
+      - id: lint-patch-targets
+        name: lint patch targets (tests may not patch another package's private names)
+        entry: .venv/bin/python scripts/lint/patch_targets.py
+        language: system
+        require_serial: true
+        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/lint/patch_targets\.py|scripts/structure/(placement|patch_points|patch_targets|patch_report|locality|baseline_shards)\.py|scripts/structure/baseline/.*\.json)$
+
       # Ban building a psycopg pool without TCP keepalives where the structure
       # gate's `postgres-dial` rule cannot see it: scripts/ and the modules that
       # decision allows. See scripts/lint_pool_keepalives.py header.

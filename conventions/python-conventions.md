@@ -69,7 +69,8 @@ Two AST rules keep a change, or a reader tracing one, inside one package plus
 its neighbors' public doors. The authoritative rule text — what counts as
 private, what a bypass is, today's single-owner decision — lives in the
 `scripts/lint/code_structure.py` module docstring (Rules 4 and 5); this
-section covers fixing a violation and maintaining its baseline.
+section covers fixing a violation and maintaining its baseline. Rule 8 has
+its own script (`scripts/lint/patch_targets.py`).
 
 - **Rule 4 — package doors.** Reaching a `_`-prefixed module or name from
   outside the package that owns it fails, whether by import or by attribute
@@ -84,7 +85,16 @@ section covers fixing a violation and maintaining its baseline.
   ([SDK surface](sdk-docstring-discipline.md)), not the underscore, so an
   `ava/_*.py` module another package needs is promoted to a public module name
   without becoming agent-visible. Files under a `tests/` directory are
-  exempt.
+  exempt from the import and attribute check, but not from Rule 8.
+- **Rule 8 — tests may not patch another package's private names.**
+  `scripts/lint/patch_targets.py` rejects a patch (`monkeypatch.setattr`,
+  `patch`, `patch.object`, `mocker.patch`, string or object target) of a
+  `_private` name whose owning package does not contain the test's home. The
+  home comes from the test's own imports, not its directory, so moving a test
+  into `<pkg>/tests/` changes no verdict; the ambient environment
+  (`base.config`, `base.paths`, machine identity, `AVA_*`) is exempt. Fix it
+  by patching a public name, giving the owner an injection seam (a parameter,
+  a settings field, a public setter), or moving the test into the owner.
 - **Rule 6 — no path imports under `ava_builtins/`.** A skill or plugin
   module may not edit `sys.path`, call `site.addsitedir`, or load a module
   by file path (`spec_from_file_location`, `SourceFileLoader`,
@@ -110,13 +120,13 @@ section covers fixing a violation and maintaining its baseline.
   decision only once its owner exists: an entry in `DECISIONS` with its owning
   module(s), a `find(tree, roots)` AST scanner, and a `fix` message.
 
-Both rules freeze today's sites in the `private_imports` / `owner_bypasses`
-sections of the baseline shards as exact `path::target -> site
-count` maps. Unlike the line/directory budgets, the count must match reality
-exactly in both directions: a new or grown site fails, and a shrunk or removed
-site fails too until its baseline entry is lowered or deleted — so a fixed
-reach-in cannot silently return uncounted. Against the base revision both
-sections are shrink-only: a new key is accepted only against a same-file
+Rules 4, 5 and 8 freeze today's sites in the `private_imports` /
+`owner_bypasses` / `patch_targets` sections of the baseline shards as exact
+`path::target -> site count` maps. Unlike the line/directory budgets, the
+count must match reality exactly in both directions: a new or grown site
+fails, and a shrunk or removed site fails too until its baseline entry is
+lowered or deleted — so a fixed reach-in cannot silently return uncounted.
+Against the base revision all three sections are shrink-only: a new key is accepted only against a same-file
 removal of the same private name with equal or greater value (the private
 owner module moved), and a git `-M` rename carries keys once they are migrated
 to the new path by hand.

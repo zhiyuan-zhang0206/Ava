@@ -143,6 +143,7 @@ _ALLOWED_FILES = frozenset(
         "scripts/release_proofs/prove_exec_owner_installed.py",  # CI-only scratch child projection for source-absent proof.
         "scripts/release_proofs/prove_release_inventory.py",  # CI-only native PG and private unit projection for source-absent proof.
         "scripts/model_registry/check_model_updates.py",  # tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback
+        "scripts/structure/patch_points.py",  # recognizes a test's patch of "os.environ" by its AST text; it matches the string and never reads the environment
         "scripts/lint/fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body
         "base/sessions/env_forwarding.py",  # forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded
         "base/deploy/release/editable_install.py",  # editable_import_gate starts an isolated venv subprocess from the live inherited environment while removing VIRTUAL_ENV/PYTHONPATH; this process-boundary sanitation cannot use Settings' startup snapshot
