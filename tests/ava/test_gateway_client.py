@@ -380,8 +380,18 @@ class TestSpawn:
             spawn(spawner="user", prompt="hello", fork_from=None, prompt_source="user")
         assert mock_client.post.call_count == 1
 
+    @pytest.mark.parametrize(
+        "error",
+        [
+            httpx.ConnectError("refused"),
+            httpx.ConnectTimeout("dial stalled"),
+            httpx.PoolTimeout("pool busy"),
+        ],
+    )
     @patch("ava.gateway_client.transport._client")
-    def test_spawn_connect_error_is_retried(self, mock_client: MagicMock):
+    def test_spawn_pre_send_error_is_retried(
+        self, mock_client: MagicMock, error: httpx.TransportError
+    ):
         """Connect-family failures happen before the request reaches the
         server, so re-sending a spawn is safe — the retry stays."""
         from ava.gateway_client import spawn
@@ -390,7 +400,7 @@ class TestSpawn:
         mock_resp.status_code = 200
         mock_resp.is_success = True
         mock_resp.json.return_value = {"id": 42}
-        mock_client.post.side_effect = [httpx.ConnectError("refused"), mock_resp]
+        mock_client.post.side_effect = [error, mock_resp]
 
         agent_id = spawn(spawner="user", prompt="hello", fork_from=None, prompt_source="user")
         assert agent_id == 42
@@ -714,11 +724,21 @@ class TestSendMessageAtLeastOnceWithKey:
     family is retried safely — no duplicate inbound even when a retry lands
     after the first attempt already committed."""
 
+    @pytest.mark.parametrize(
+        "error",
+        [
+            httpx.ReadTimeout("gateway slow"),
+            httpx.WriteTimeout("write stalled"),
+            httpx.ReadError("reply lost"),
+        ],
+    )
     @patch("ava.gateway_client.transport._client")
-    def test_send_message_retries_read_timeout_with_one_key(self, mock_client: MagicMock):
+    def test_send_message_retries_transport_failure_with_one_key(
+        self, mock_client: MagicMock, error: httpx.TransportError
+    ):
         from ava.gateway_client import GatewayUnavailable, send_message
 
-        mock_client.post.side_effect = httpx.ReadTimeout("gateway slow")
+        mock_client.post.side_effect = error
 
         with pytest.raises(GatewayUnavailable, match="after 3 retries"):
             send_message(42, content="hello", source="user")
