@@ -90,33 +90,11 @@ def test_a_fresh_interpreter_with_no_variable_resolves_to_dot_ava(tmp_path: Path
     assert (fake_home / ".ava").is_dir()
 
 
-# Every consumer that once captured the home at import (or bound it through the
-# Settings field) now derives its path when called. Each row maps a home to the
-# path the consumer must yield for it.
-def _pool_ops_dir() -> Path:
-    from ava_builtins.plugins.ava_memory import pool_ops
-
-    return pool_ops.pool_dir()
-
-
-def _memory_sdk_path() -> Path:
-    from ava_builtins.plugins.ava_memory import sdk
-
-    return sdk.PATH  # pyright: ignore[reportAttributeAccessIssue]  # module __getattr__
-
-
-def _ocr_binary() -> Path:
-    from services.computer import ocr
-
-    return ocr._bin_path()
-
-
-def _permissions_helper_build_dir() -> Path:
-    from services.permissions_helper import lifecycle
-
-    return lifecycle._build_directory(None)
-
-
+# Every base consumer that once captured the home at import (or bound it through the
+# Settings field) now derives its path when called. Each row maps a home to the path
+# the consumer must yield for it. The consumers that live in other packages (the
+# memory pool, the OCR binary, the permissions-helper build directory) carry the same
+# test in their own package's tests.
 _CONSUMERS: list[tuple[str, Callable[[], Path], str]] = [
     ("paths.ava_home", paths.ava_home, ""),
     ("paths.logs_dir", paths.logs_dir, "logs"),
@@ -124,10 +102,6 @@ _CONSUMERS: list[tuple[str, Callable[[], Path], str]] = [
     ("runtime_config.env_file_path", runtime_config.env_file_path, ".env"),
     ("bootstrap snapshot", bootstrap._snapshot_path, "run/bootstrap-snapshot.json"),
     ("config path-field default", _unit_home, ""),
-    ("memory pool_ops.pool_dir", _pool_ops_dir, "memory"),
-    ("memory sdk PATH", _memory_sdk_path, "memory"),
-    ("computer ocr binary", _ocr_binary, "logs/computer/ocr-bin/ocr"),
-    ("permissions helper build dir", _permissions_helper_build_dir, "helper"),
 ]
 
 

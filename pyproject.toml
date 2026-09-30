@@ -670,6 +670,11 @@ reportUnnecessaryIsInstance = "none"
 # resolve by running the script again.
 # BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
 [[tool.pyright.executionEnvironments]]
+root = "ava_builtins/plugins/ava_memory/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/agents/history/hierarchy/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -875,7 +880,22 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/verify/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/computer/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/permissions_helper/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
