@@ -14,10 +14,7 @@ crontab) to run on its behalf:
 
 They share a shape worth keeping together: each is idempotent, each delegates the
 platform branching to a ``base.os_*`` module, and each fails the converge loudly
-rather than leaving the cluster silently unsupervised — EXCEPT on Windows, where
-a registration failure degrades to a loud warning instead (see
-``WindowsPlatformBackend``): the failure class is transient (task #1196), and a
-cluster that is down is worse than one that is up and loudly unsupervised.
+rather than leaving the cluster silently unsupervised.
 """
 
 from __future__ import annotations
@@ -35,10 +32,7 @@ def ensure_health_probe_cron(_ctx: ConvergeCtx) -> None:
     from base.host.system.cron import register_os_cron
 
     register_os_cron()
-    # On failure the exception propagates so converge fails fast on POSIX (the
-    # cluster starts without a health probe, which is a degraded state). On
-    # Windows the backend degrades to a warning instead — see
-    # WindowsPlatformBackend.register_cron.
+    # On failure the exception propagates so converge fails fast.
 
 
 def ensure_logs_maintenance(_ctx: ConvergeCtx) -> None:
@@ -59,9 +53,7 @@ def ensure_packages_refresh_job(_ctx: ConvergeCtx) -> None:
     from base.host.system.packages_job import register_packages_job
 
     register_packages_job()
-    # POSIX: a registration failure propagates so converge fails fast (without
-    # the job, content updates would silently stall until a manual refresh).
-    # Windows degrades to a warning — see WindowsPlatformBackend.register_packages_job.
+    # A registration failure propagates so converge fails fast.
 
 
 def ensure_pr_flow_job(_ctx: ConvergeCtx) -> None:
@@ -88,6 +80,4 @@ def ensure_cluster_autostart(_ctx: ConvergeCtx) -> None:
     from base.host.system.autostart import register_autostart
 
     register_autostart()
-    # On failure the exception propagates so converge fails fast on POSIX (the
-    # cluster would silently not come back after a reboot otherwise). Windows
-    # degrades to a warning — see WindowsPlatformBackend.register_autostart.
+    # On failure the exception propagates so converge fails fast.

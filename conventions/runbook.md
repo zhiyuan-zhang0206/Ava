@@ -1431,9 +1431,8 @@ abrupt root death. There is no convergence shell script or duplicate proxy probe
 (`base/host/system/cron.py`), boot autostart (`base/host/system/autostart.py`),
 daily rotate-then-retain log maintenance (`base/host/system/logs_job.py`), and the
 per-machine content-refresh pass (`base/host/system/packages_job.py`)
-— as launchd LaunchAgents on macOS, systemd boot plus scheduled maintenance on
-Linux, and `\Ava\<home-slug>\` tasks on Windows (`base/host/system/schtasks.py`). Linux
-automatic startup requires systemd. Converge registers and enables the native
+— as launchd LaunchAgents on macOS and systemd boot plus scheduled maintenance on
+Linux. Automatic startup requires systemd. Converge registers and enables the native
 home unit without starting a recursive caller; ordinary interactive start may
 launch root directly. The unit carries the exact home, checkout and registry.
 There is no cron boot route or second boot-install command. Two properties are
@@ -1442,8 +1441,7 @@ load-bearing:
 - **A job spec is anchored to the checkout that wrote it.** `ava_binary_path()`
   resolves this checkout's `.venv` binary (PATH only as a fallback), and the
   launchd plist / systemd unit / maintenance crontab line pin `AVA_HOME` explicitly, so a job registered by
-  cluster X can never run cluster Y's `ava` against cluster Y's home. A Windows
-  task action has no env slot and relies on the interpreter path alone.
+  cluster X can never run cluster Y's `ava` against cluster Y's home.
 - **A scheduled process never reloads its own launchd label.** `launchctl bootout`
   would terminate the registering process tree. Registration defers on the
   direct child's label match (the env fast path) or on a proven live-process-
@@ -1451,14 +1449,6 @@ load-bearing:
   `XPC_SERVICE_NAME` alone is not proof for descendants, which read "0"
   (`postmortems/0008`) — leaves the existing plist untouched, and lets the
   next external converge apply any pending spec change.
-- **Windows task settings are stated, not inherited.** Registration goes through a
-  task definition (`schtasks /Create /XML`, written to
-  `$AVA_HOME/run/schtasks/<kind>.xml`) rather than `/Create` flags, because Task
-  Scheduler's defaults stop every job when a laptop runner goes on battery and let
-  one wedged invocation block its successors for 72 hours. The definition sets the
-  power settings and a per-kind `ExecutionTimeLimit`; the boot job is the one that
-  is deliberately unbounded. Details + the AC caveat:
-  [`windows-setup.md`](windows-setup.md).
 - **`AVA_OS_JOBS_ENABLED=false` disables registration for a process.** The
   scheduler is one namespace per OS user, so a test-scoped `$AVA_HOME` cannot
   isolate it — the pytest suite sets this and `tests/conftest.py` fails any run
@@ -2198,9 +2188,7 @@ inspection or deletion failed.
 
 Converge registers one low-traffic daily job per machine. macOS launchd and
 Linux cron run rotation followed by retention at 04:40 local time; the second
-command runs only when rotation succeeds. Windows registers two windowless
-Task Scheduler jobs at 04:40 and 04:41 because one task action carries one Ava
-argv. Re-converge replaces the job definitions idempotently, and cluster destroy
+command runs only when rotation succeeds. Re-converge replaces the job definitions idempotently, and cluster destroy
 removes them.
 
 Raw session output is queried in Loki, not tailed from a file — Grafana Explore

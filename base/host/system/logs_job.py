@@ -1,9 +1,7 @@
 """Daily OS job for copytruncate rotation followed by tiered retention.
 
 Each cluster registers one local maintenance schedule. POSIX runs both commands
-in one shell so retention starts only after rotation succeeds. Windows uses two
-daily Task Scheduler jobs one minute apart because its windowless Python action
-accepts one Ava argv rather than a shell pipeline.
+in one shell so retention starts only after rotation succeeds.
 """
 
 from __future__ import annotations
@@ -21,7 +19,6 @@ FAMILY_DAYS = "agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3
 _CRON_MARKER = "# ava-logs-maintenance"
 _HOUR = 4
 _MINUTE = 40
-_WINDOWS_TIME_LIMIT_S = 1800
 
 
 def _label(slug: str) -> str:
@@ -127,39 +124,6 @@ def _unregister_linux(slug: str) -> int:
     return base.host.system.cron.remove_crontab_entry(
         _cron_marker(slug), write_failure_rc=1, on_removed=None
     )
-
-
-def _register_windows() -> str | None:
-    """Register separate rotate and retention tasks at 04:40 and 04:41."""
-    from base.host.system.schtasks import create_daily_task
-
-    failures: list[str] = []
-    for kind, args, minute in (
-        ("logs-rotate", ("logs", "rotate"), _MINUTE),
-        (
-            "logs-retention",
-            ("logs", "retention", "--family-days", FAMILY_DAYS),
-            _MINUTE + 1,
-        ),
-    ):
-        reason = create_daily_task(
-            kind,
-            args,
-            hour=_HOUR,
-            minute=minute,
-            time_limit_s=_WINDOWS_TIME_LIMIT_S,
-        )
-        if reason is not None:
-            failures.append(f"{kind}: {reason}")
-    return "; ".join(failures) or None
-
-
-def _unregister_windows(slug: str) -> int:
-    from base.host.system.schtasks import delete_task
-
-    delete_task("logs-rotate", slug)
-    delete_task("logs-retention", slug)
-    return 0
 
 
 def register_logs_job() -> None:

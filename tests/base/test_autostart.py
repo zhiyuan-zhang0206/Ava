@@ -9,7 +9,7 @@ Pins the properties that matter for reboot survival without recursion:
   on a RunAtLoad job runs it immediately, and this runs inside `ava start`, so
   bootstrapping would spawn a second concurrent `ava start`.
 Linux systemd delegation is tested at the platform backend; this file also
-covers the Windows ONLOGON task.
+covers native boot jobs.
 
 The retry block (`test_the_job_retries_*`) is the one that earns its keep: a
 fire-once boot job left an agent-runner down for 6.5 hours after its `ava start`
@@ -119,25 +119,6 @@ def test_the_job_retries_on_macos_at_the_shared_interval() -> None:
     xml = autostart._autostart_plist_content()
     assert "<key>ThrottleInterval</key>" in xml
     assert f"<integer>{BOOT_RETRY_INTERVAL_S}</integer>" in xml
-
-
-def test_the_job_retries_on_windows_via_ava_boot(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`schtasks /RI` is documented as not applicable to ONLOGON, and a cmd.exe
-    retry wrapper would flash a console window -- so Windows runs the same
-    `ava boot` operation."""
-    from base.host.system import schtasks
-
-    seen: list[tuple[str, tuple[str, ...], int]] = []
-    monkeypatch.setattr(
-        schtasks,
-        "create_logon_task",
-        lambda kind, args, *, time_limit_s: seen.append((kind, tuple(args), time_limit_s)),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert autostart._register_windows() is None
-    # Unbounded on purpose: `ava boot` retries with no attempt cap, matching what
-    # launchd and systemd do, so a scheduler-imposed runtime limit would be a
-    # Windows-only cap on the one job nothing else recovers.
-    assert seen == [("autostart", ("boot",), schtasks.NO_TIME_LIMIT_S)]
 
 
 # --- the GUI-domain relaunch (the browser context heal's primitive) ---

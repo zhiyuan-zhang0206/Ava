@@ -277,11 +277,3 @@ def test_register_delegates_when_credentials_pass(
     monkeypatch.setattr("base.cluster.slug_for_home", _fake_slug)
     job.unregister_pr_flow_job()
     assert calls == ["register", "unregister:ava-deadbeef"]
-
-
-def test_windows_backend_is_a_documented_noop() -> None:
-    from base.host.system.backend import WindowsPlatformBackend
-
-    backend = WindowsPlatformBackend()
-    backend.register_pr_flow_job()  # logs only — must not raise
-    backend.unregister_pr_flow_job("ava-deadbeef")

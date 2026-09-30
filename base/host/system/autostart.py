@@ -9,15 +9,14 @@ service), so this one boot job covers the whole cluster — data plane included.
 - macOS: a launchd User LaunchAgent (RunAtLoad) in ~/Library/LaunchAgents/
 - Linux: the enabled distro-level systemd unit (`base.host.system.boot_unit`);
   automatic startup requires systemd
-- Windows: a Task Scheduler `/SC ONLOGON` job (see base/host/system/schtasks.py)
 
 The job **retries** — one boot-time `ava start` is not enough, because at boot
 its dependencies are not all up yet. See `base/host/system/boot_policy.py` for the policy
 and for how each mechanism states it: launchd keys on macOS, systemd restart
-keys on Linux, `ava boot` (`cli/boot_retry.py`) on Windows.
+keys on Linux.
 
 Mirrors base/host/system/cron.py (the health-probe registrar) -- same launchd / crontab
-/ schtasks mechanics -- but fires at boot (RunAtLoad / systemd / ONLOGON)
+mechanics -- but fires at boot (RunAtLoad / systemd)
 instead of on an interval, and runs `ava start`.
 
 Why the macOS path writes the plist but does NOT `launchctl bootstrap` it:
@@ -158,40 +157,6 @@ def _unregister_macos(slug: str) -> int:
     return 0
 
 
-def _register_windows() -> str | None:
-    """Register cluster autostart as a Windows scheduled task.
-
-    `/SC ONLOGON` — the user-session analog of launchd RunAtLoad and Linux boot target. Unlike macOS, creating the task never runs it, so there is no
-    recursion guard to worry about (see the module docstring).
-
-    Runs `ava boot`, not `ava start`, because an ONLOGON
-    trigger cannot repeat. `schtasks /RI` — the only repetition knob the command
-    line offers — is documented as "not applicable for schedule types: MINUTE,
-    HOURLY, ONSTART, ONLOGON, ONIDLE, and ONEVENT", and wrapping the command in
-    a `cmd.exe` retry loop would reintroduce the console flash `schtasks`
-    picks `pythonw.exe` to avoid. So the loop is ours (`cli/boot_retry.py`).
-
-    That loop is also why this is the one job registered with NO execution time
-    limit. `ava boot` retries with no attempt cap deliberately (`boot_policy` —
-    the three platforms must agree, and neither launchd nor systemd bounds their
-    equivalent's runtime), and nothing else recovers a host whose boot start never
-    succeeded. Any finite limit would be a Windows-only attempt cap imposed by the
-    scheduler on exactly that job; the default it replaces was a 72-hour one.
-
-    A logon trigger only fires for an interactive logon, so a reboot nobody logs
-    into leaves this cluster down — recorded as an operational limit in
-    `conventions/windows-setup.md`."""
-    from base.host.system.schtasks import NO_TIME_LIMIT_S, create_logon_task
-
-    return create_logon_task("autostart", ("boot",), time_limit_s=NO_TIME_LIMIT_S)
-
-
-def _unregister_windows(slug: str) -> int:
-    from base.host.system.schtasks import delete_task
-
-    return delete_task("autostart", slug)
-
-
 def register_autostart() -> None:
     """Register the boot-time autostart job for this cluster.
 
@@ -201,8 +166,7 @@ def register_autostart() -> None:
     A no-op when ``os_jobs_enabled()`` is off (the test suite).
 
     Raises:
-        RuntimeError: on registration failure (POSIX). The Windows backend
-        degrades to a loud warning instead — see `WindowsPlatformBackend`.
+        RuntimeError: on registration failure.
     """
     if not os_jobs_enabled():
         skip_os_job("autostart")
@@ -213,7 +177,7 @@ def register_autostart() -> None:
 
 
 def unregister_autostart(home: Path | None = None) -> None:
-    """Remove this exact home's boot job (systemd / launchd / task).
+    """Remove this exact home's boot job (systemd / launchd).
 
     Safe when none is registered.
 

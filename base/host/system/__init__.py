@@ -3,7 +3,7 @@
 ``backend`` is the cross-platform facade; the job registrations it dispatches to
 are ``autostart`` (boot-time autostart), ``boot_unit`` (the Linux systemd unit
 that owns the application root), ``cron`` (the health-probe cron line),
-``schtasks`` (Windows Task Scheduler primitives), ``logs_job``,
+``logs_job``,
 ``packages_job`` and ``pr_flow_job`` (recurring OS jobs), with
 ``boot_policy`` stating the boot retry policy once. ``probes`` holds the host
 capability probes and ``job_observation`` the settings-free, read-only native
