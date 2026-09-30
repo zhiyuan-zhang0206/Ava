@@ -13,7 +13,6 @@ tags: []
 Chrome, and npx). The converge browser step uses the settings-free twin
 `browser_deps_incapability()`: the same prongs, order, and reasons, without the
 `AVA_CHROME_BINARY` override because Settings cannot be built on a fresh host.
-The headed browser runs on Windows.
 
 On macOS, these static prongs are necessary but not sufficient at daemon launch.
 `services/browser/macos_readiness.py` additionally waits for the current service
@@ -27,7 +26,5 @@ changes Chrome profile data.
 
 `browser-mcp` requires the same browser prongs plus AF_UNIX
 (`browser_mcp_incapability()`), because the wrapper-to-daemon leg is a Unix
-socket. It is POSIX-only: a Windows agent-runner gets headed Chrome over CDP and
-no MCP front end, and the `chrome` MCP entry is gated off with it
-(`requires: {display, unix_socket}`). Porting the transport is planned in
-`future/infra/windows-browser-mcp.md`.
+socket. The `chrome` MCP entry uses the same gate
+(`requires: {display, unix_socket}`).

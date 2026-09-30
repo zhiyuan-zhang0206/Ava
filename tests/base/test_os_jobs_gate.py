@@ -210,11 +210,10 @@ def test_cron_env_prefix_scopes_to_one_command(
     assert not prefix.startswith("\n")
 
 
-@pytest.mark.parametrize("boundary", ["converge", "build", "sign", "launchd", "windows"])
+@pytest.mark.parametrize("boundary", ["converge", "build", "sign", "launchd"])
 def test_helper_native_effects_require_explicit_test_boundary(boundary: str) -> None:
     from services import permissions_helper
     from services.permissions_helper import launchd_job, lifecycle
-    from services.permissions_helper.windows import lifecycle as windows_lifecycle
 
     with pytest.raises(pytest.fail.Exception, match="native effect forbidden"):
         if boundary == "converge":
@@ -225,8 +224,6 @@ def test_helper_native_effects_require_explicit_test_boundary(boundary: str) -> 
             lifecycle._run(["codesign", "--sign", "unreachable"])
         elif boundary == "launchd":
             launchd_job._retirement_command(["bootout", "gui/0/unreachable"], float("inf"))
-        else:
-            windows_lifecycle._stop_running_helper()
 
 
 @pytest.mark.native_permissions_helper

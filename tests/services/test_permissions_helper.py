@@ -546,29 +546,7 @@ def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "no display" in reason()
 
     monkeypatch.setattr(sys, "platform", "linux")
-    assert "macOS or Windows only" in reason()
-
-
-def test_incapability_windows_branch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Windows is capable when csc.exe (the .NET Framework compiler) is present,
-    and names the fix when it is not."""
-    from base.host.system import probes as pp
-
-    monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(
-        pp,
-        "WINDOWS_CSC_CANDIDATES",
-        (r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe",),
-    )
-
-    monkeypatch.setattr(pp.Path, "exists", lambda _self: True)  # pyright: ignore[reportUnknownArgumentType]
-    assert pp.permissions_helper_incapability() is None
-    assert pp.permissions_helper_capable() is True
-
-    monkeypatch.setattr(pp.Path, "exists", lambda _self: False)  # pyright: ignore[reportUnknownArgumentType]
-    reason = pp.permissions_helper_incapability()
-    assert reason is not None
-    assert "no csc.exe" in reason
+    assert "macOS only" in reason()
 
 
 def test_recv_reassembles_across_chunks(fake_helper) -> None:
@@ -755,19 +733,6 @@ def test_accessibility_probe_keeps_unreachable_distinct_from_missing_grant() -> 
     assert status.available is False
     assert "launchctl" in status.diagnostic
     assert "System Settings" not in status.diagnostic
-
-
-def test_accessibility_probe_treats_the_windows_wire_shape_as_granted(fake_helper) -> None:
-    def ping_without_ax(req: dict) -> dict:
-        return {
-            "id": req["id"],
-            "ok": True,
-            "result": {"pong": True, "preflight_screen": True},
-        }
-
-    status = client.check_accessibility(sock_path=fake_helper(ping_without_ax))  # pyright: ignore[reportUnknownArgumentType]
-    assert status.state is AccessibilityState.GRANTED
-    assert status.available is True
 
 
 # --- Bundle content -------------------------------------------------------
@@ -1934,71 +1899,6 @@ def test_unrelated_cluster_plists_are_left_alone(
 
     assert lifecycle._stale_plists() == []
     assert other.exists()
-
-
-# --- Windows named-pipe transport -----------------------------------------
-# The pipe path is unreachable on Linux CI, so it is pinned with fakes: a
-# stubbed _connect_pipe/_pipe_read and os.name forced to "nt". The shared
-# parse_reply contract is exercised by both transports' tests.
-
-
-def test_pipe_transport_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
-    from services.permissions_helper import client
-
-    monkeypatch.setattr(client, "_IS_WINDOWS", True)
-    seen: list[bytes] = []
-    reply = b'{"id":1,"ok":true,"result":{"pong":true}}\n'
-    chunks = [reply[i : i + 3] for i in range(0, len(reply), 3)]
-
-    class _FakePipe:
-        def write(self, data: bytes) -> None:
-            seen.append(data)
-
-        def flush(self) -> None:
-            pass
-
-        def close(self) -> None:
-            pass
-
-    def fake_connect(name: str = "ava-permissions-helper"):
-        assert name == "ava-permissions-helper"
-        return _FakePipe(), object()
-
-    def fake_read(handle: object, deadline: float) -> bytes:
-        return chunks.pop(0) if chunks else b""
-
-    monkeypatch.setattr("services.permissions_helper._win_pipe.connect", fake_connect)
-    monkeypatch.setattr("services.permissions_helper._win_pipe.read_available", fake_read)
-
-    assert client.ping() == {"pong": True}
-    assert json.loads(seen[0])["method"] == "ping"
-
-
-def test_win_pipe_full_path_has_single_backslashes() -> None:
-    """BUG-1 regression: pipe_path must produce \\.\\pipe\\<name> — a doubled
-    backslash after the pipe name made WaitNamedPipeW fail with
-    ERROR_BADPATHNAME (161) on the real Windows box."""
-    from services.permissions_helper import _win_pipe
-
-    assert _win_pipe.pipe_path("ava-permissions-helper") == r"\\.\pipe\ava-permissions-helper"
-    assert _win_pipe.pipe_path().endswith(r"\ava-permissions-helper")
-
-
-def test_pipe_transport_uses_shared_reply_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Empty / truncated / error replies raise through the same parse_reply the
-    socket path uses — the two transports cannot drift apart."""
-    from services.permissions_helper import client
-
-    for buf, expect in [
-        (b"", "closed without a response"),
-        (b'{"id":1,"ok":tr', "truncated"),
-        (b'{"id":1,"ok":false,"error":"nope"}\n', "nope"),
-    ]:
-        try:
-            client.parse_reply(buf, "ping")
-            raise AssertionError(f"reply {buf!r} must raise")
-        except client.PermissionsHelperError as e:
-            assert expect in str(e)
 
 
 def test_long_mac_ipc_path_refuses_before_signing_or_native_jobs(

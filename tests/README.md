@@ -177,8 +177,8 @@ vars are set in `os.environ`, not only on the settings singleton, so subprocesse
 (the e2e gateway / ops / restarter) inherit them.
 
 **The OS scheduler is the exception, because it cannot be redirected.** launchd
-reads one `~/Library/LaunchAgents` per user, `crontab` edits one table per user,
-schtasks owns one `\Ava\` folder per user. So the suite does not redirect it — it
+reads one `~/Library/LaunchAgents` per user, and `crontab` edits one table per user.
+So the suite does not redirect it — it
 refuses to write to it at all, via `AVA_OS_JOBS_ENABLED=false`
 (`base.host.system.cron.os_jobs_enabled` gates all four registrars; the unregister paths
 stay live). `pytest_sessionfinish` then diffs the host's Ava jobs against a

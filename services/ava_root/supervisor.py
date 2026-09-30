@@ -55,7 +55,6 @@ from services.ava_root.manifest import (
     UnitRegistry,
     UnknownUnitError,
 )
-from services.ava_root.windows.process import ApplicationProcess
 
 _log = logging.getLogger(__name__)
 
@@ -96,7 +95,7 @@ class _Generation:
     that observes the event also observes the exit fully processed.
     """
 
-    proc: asyncio.subprocess.Process | ApplicationProcess
+    proc: asyncio.subprocess.Process
     started_at: float
     identity: OwnedProcess | None = None
     """The leader's native birth; None when the leader exited before root read it.
@@ -433,20 +432,15 @@ class Supervisor:
         try:
             custody = ServiceCustody(self._run_dir, manifest.id)
             env = _unit_env(manifest.id) | dict(manifest.env)
-            if os.name == "nt":
-                from services.ava_root.windows.process import spawn
-
-                proc = spawn(list(manifest.exec), env, log_fd)
-            else:
-                proc = await asyncio.create_subprocess_exec(
-                    *manifest.exec,
-                    stdin=asyncio.subprocess.DEVNULL,
-                    stdout=log_fd,
-                    stderr=asyncio.subprocess.STDOUT,
-                    env=env,
-                    close_fds=True,
-                    process_group=0,
-                )
+            proc = await asyncio.create_subprocess_exec(
+                *manifest.exec,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=log_fd,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
+                close_fds=True,
+                process_group=0,
+            )
         finally:
             os.close(log_fd)
         try:
@@ -487,11 +481,10 @@ class Supervisor:
         # that window, its number then taken by another process, misleads this
         # read. Once the survivors exit, a later group with that number may be a
         # stranger's, so no later stop signals by it.
-        if not isinstance(generation.proc, ApplicationProcess):
-            pgid = generation.proc.pid
-            generation.scope_closed_at_exit = group_closed(pgid)
-            if not generation.scope_closed_at_exit:
-                record_survivors(runtime.manifest.id, pgid, generation.tracked, generation.custody)
+        pgid = generation.proc.pid
+        generation.scope_closed_at_exit = group_closed(pgid)
+        if not generation.scope_closed_at_exit:
+            record_survivors(runtime.manifest.id, pgid, generation.tracked, generation.custody)
         if runtime.generation is generation:
             runtime.last_exit = _describe_exit(returncode)
             runtime.state = UnitState.STOPPED
@@ -513,9 +506,6 @@ class Supervisor:
         self, runtime: _UnitRuntime, generation: _Generation, *, force: bool = False
     ) -> None:
         """Stop captured births; unknown scope keeps custody and refuses success."""
-        if isinstance(generation.proc, ApplicationProcess):
-            await self._stop_job_generation(runtime, generation, generation.proc, force=force)
-            return
         # Routed by what this stop finds, not by `closing`: a retry after a
         # refused stop whose leader has since exited must not signal by the
         # group number.
@@ -611,25 +601,6 @@ class Supervisor:
                 f"root never observed its reap; custody retained at {custody.path}. Once no "
                 "process of this unit remains, move that record aside and retry the stop"
             )
-
-    async def _stop_job_generation(
-        self,
-        runtime: _UnitRuntime,
-        generation: _Generation,
-        process: ApplicationProcess,
-        *,
-        force: bool,
-    ) -> None:
-        custody = generation.custody
-        if custody is None:
-            raise RuntimeError("application Job has no durable custody")
-        generation.closing = True
-        await process.close(custody, timeout=self._config.stop_timeout_s, force=force)
-        await generation.exited.wait()
-        custody.clear()
-        process.job.close()
-        runtime.generation = None
-        runtime.state = UnitState.STOPPED
 
     @staticmethod
     def _capture_posix_stop(

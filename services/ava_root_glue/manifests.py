@@ -89,15 +89,6 @@ _SIMPLE_COMMAND_RE = re.compile(rf"{_SHELL_WORD}(?: {_SHELL_WORD})*\Z")
 
 def _exec_argv(cmd: str, repo_root: Path) -> list[str]:
     """The unit argv for a roster command: `cd <repo> && [exec] <cmd>`."""
-    if sys.platform == "win32":
-        argv = shlex.split(cmd)
-        if not argv or any(token in {"&&", "||", "|", ";", ">", "<"} for token in argv):
-            raise ManifestError("Windows application manifests require a direct command")
-        if argv[0] == ".venv/bin/python":
-            argv[0] = str(repo_root / ".venv" / "Scripts" / "python.exe")
-        if not Path(argv[0]).is_absolute():
-            raise ManifestError("Windows application executable must be absolute")
-        return argv
     cd = f"cd {shlex.quote(str(repo_root))}"
     first = cmd.split(" ", 1)[0]
     if _SIMPLE_COMMAND_RE.match(cmd) and "=" not in first and first != "exec":
