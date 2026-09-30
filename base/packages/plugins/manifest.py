@@ -19,9 +19,8 @@ and lifecycle shape. This module turns that file into a validated
 
 Version ranges are conjunctions of clauses (`,` or whitespace separated) over
 `>=`, `>`, `<=`, `<`, `==`, `=`; a bare version means `==`. No OR, no
-wildcards, no `~=`/`!=` — and no prerelease ordering: prerelease suffixes are
-accepted on versions but compare as the release (deliberately conservative,
-documented in the spec).
+wildcards, no `~=`/`!=`. Prereleases compare below their final release and
+require an explicit prerelease clause to satisfy a range.
 """
 
 from __future__ import annotations
@@ -30,7 +29,8 @@ import json
 import re
 import subprocess
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from functools import total_ordering
 from pathlib import Path
 from typing import Any, cast
 
@@ -49,23 +49,54 @@ class ManifestError(Exception):
 # ── versions ────────────────────────────────────────────────────────────
 
 _VERSION_RE = re.compile(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$")
+_PRE_RE = re.compile(r"^(dev|alpha|a|beta|b|preview|pre|rc|c)(?:[.-]?(\d+))?$", re.I)
+_PRE_ALIASES = {"alpha": "a", "beta": "b", "preview": "rc", "pre": "rc", "c": "rc"}
+_PRE_ORDER = {"dev": 0, "a": 1, "b": 2, "rc": 3}
 
 
-@dataclass(frozen=True, order=True)
+def _normalize_prerelease(raw: str) -> str:
+    match = _PRE_RE.match(raw)
+    if match is None:
+        return raw.lower()
+    label = _PRE_ALIASES.get(match[1].lower(), match[1].lower())
+    return f"{label}.{int(match[2] or 0)}"
+
+
+def _prerelease_key(raw: str) -> tuple[int, int, str]:
+    match = re.fullmatch(r"(dev|a|b|rc)\.(\d+)", raw)
+    if match is not None:
+        return (_PRE_ORDER[match[1]], int(match[2]), "")
+    return (4, 0, raw)
+
+
+@total_ordering
+@dataclass(frozen=True)
 class _Version:
-    """Three-segment version; prerelease compares as its release (no ordering)."""
+    """Three-segment version; prereleases sort below the matching release."""
 
     major: int
     minor: int = 0
     patch: int = 0
-    prerelease: str | None = field(default=None, compare=False)
+    prerelease: str | None = None
+
+    def __lt__(self, other: _Version) -> bool:
+        left = (self.major, self.minor, self.patch)
+        right = (other.major, other.minor, other.patch)
+        if left != right:
+            return left < right
+        if self.prerelease is None:
+            return False
+        if other.prerelease is None:
+            return True
+        return _prerelease_key(self.prerelease) < _prerelease_key(other.prerelease)
 
 
 def _parse_version(raw: str) -> _Version | None:
     m = _VERSION_RE.match(raw.strip())
     if m is None:
         return None
-    return _Version(int(m[1]), int(m[2] or 0), int(m[3] or 0), m[4])
+    prerelease = _normalize_prerelease(m[4]) if m[4] is not None else None
+    return _Version(int(m[1]), int(m[2] or 0), int(m[3] or 0), prerelease)
 
 
 # ── ranges ──────────────────────────────────────────────────────────────
@@ -122,8 +153,18 @@ def range_allows(raw: str, version: str) -> bool:
     ver = _parse_version(version)
     if ver is None:
         raise ManifestError(f"{version!r} is not a version")
-    for clause in parse_range(raw):
+    clauses = parse_range(raw)
+    if ver.prerelease is not None and not any(c.version.prerelease for c in clauses):
+        return False
+    for clause in clauses:
         c = clause.version
+        if (
+            clause.op == "<"
+            and ver.prerelease is not None
+            and c.prerelease is None
+            and (ver.major, ver.minor, ver.patch) == (c.major, c.minor, c.patch)
+        ):
+            return False
         ok = {
             "==": ver == c,
             ">=": ver >= c,
