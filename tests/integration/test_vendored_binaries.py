@@ -24,7 +24,6 @@ import pytest
 from base.cluster.dataplane import pg_tools
 from base.cluster.dataplane import runtime_binaries as rb
 from base.config import settings
-from base.host.net import resilience
 
 
 @pytest.fixture()
@@ -68,11 +67,10 @@ def _http_error(status: int) -> urllib.error.HTTPError:
 
 def _patch_urlopen(
     monkeypatch: pytest.MonkeyPatch, answers: list[urllib.error.URLError | _FakeResponse]
-) -> tuple[list[str], list[float]]:
-    """urlopen pops `answers` (an exception raises); returns (calls, recorded sleeps).
+) -> list[str]:
+    """urlopen pops `answers` (an exception raises); returns the recorded calls.
     The recorded call is the request's full URL (the code may pass headers)."""
     calls: list[str] = []
-    sleeps: list[float] = []
 
     def fake_urlopen(url: urllib.request.Request, timeout: float) -> _FakeResponse:
         calls.append(url.full_url)
@@ -82,51 +80,52 @@ def _patch_urlopen(
         return answer
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
-    return calls, sleeps
+    return calls
 
 
 def test_download_retries_transient_answers_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
 ) -> None:
     """429/5xx from the mirror and socket-level failures back off and retry; the
     sha256 pin makes the eventual bytes trustworthy regardless of which attempt won."""
-    calls, sleeps = _patch_urlopen(
+    calls = _patch_urlopen(
         monkeypatch,
         [_http_error(429), _http_error(503), urllib.error.URLError("reset"), _FakeResponse(b"jar")],
     )
     assert rb._download("https://repo1.invalid/x.jar") == b"jar"
     assert len(calls) == 4
-    assert sleeps == [2, 4, 8]
+    assert retry_waits == [2, 4, 8]
 
 
 @pytest.mark.parametrize("status", [403, 404, 429, 500, 502, 503, 504])
 def test_download_retries_transient_http_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch, status: int
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], status: int
 ) -> None:
-    calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(status), _FakeResponse(b"jar")])
+    calls = _patch_urlopen(monkeypatch, [_http_error(status), _FakeResponse(b"jar")])
     assert rb._download("https://repo1.invalid/x.jar") == b"jar"
     assert len(calls) == 2
-    assert sleeps == [2]
+    assert retry_waits == [2]
 
 
-def test_download_ignores_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_download_ignores_retry_after(
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+) -> None:
     error = _http_error(429)
     error.headers["Retry-After"] = "60"
-    _, sleeps = _patch_urlopen(monkeypatch, [error, _FakeResponse(b"jar")])
+    _patch_urlopen(monkeypatch, [error, _FakeResponse(b"jar")])
     assert rb._download("https://repo1.invalid/x.jar") == b"jar"
-    assert sleeps == [2]
+    assert retry_waits == [2]
 
 
 @pytest.mark.parametrize("status", [400, 401])
 def test_download_fails_fast_on_a_permanent_http_answer(
     monkeypatch: pytest.MonkeyPatch,
+    retry_waits: list[float],
     status: int,
 ) -> None:
     """A non-transient 4xx (bad request) fails without retry."""
     error = _http_error(status)
-    calls, sleeps = _patch_urlopen(monkeypatch, [error])
+    calls = _patch_urlopen(monkeypatch, [error])
     with pytest.raises(RuntimeError) as caught:
         rb._download("https://repo1.invalid/x.jar")
     assert (
@@ -135,28 +134,28 @@ def test_download_fails_fast_on_a_permanent_http_answer(
     )
     assert caught.value.__cause__ is error
     assert len(calls) == 1
-    assert sleeps == []
+    assert retry_waits == []
 
 
 @pytest.mark.parametrize("status", [403, 404, 429])
 def test_download_gives_up_after_bounded_retries(
-    monkeypatch: pytest.MonkeyPatch, status: int
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], status: int
 ) -> None:
-    calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(status)] * rb._DOWNLOAD_ATTEMPTS)
+    calls = _patch_urlopen(monkeypatch, [_http_error(status)] * rb._DOWNLOAD_ATTEMPTS)
     with pytest.raises(RuntimeError, match=str(status)):
         rb._download("https://repo1.invalid/x.jar")
     assert len(calls) == rb._DOWNLOAD_ATTEMPTS
-    assert sleeps == [2, 4, 8]
+    assert retry_waits == [2, 4, 8]
 
 
 def test_download_preserves_transient_warning_and_final_error(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
 ) -> None:
     url = "https://repo1.invalid/x.jar"
     errors: list[urllib.error.URLError | _FakeResponse] = [
         urllib.error.URLError(f"reset {i}") for i in range(1, 5)
     ]
-    calls, sleeps = _patch_urlopen(monkeypatch, errors.copy())
+    calls = _patch_urlopen(monkeypatch, errors.copy())
     warnings: list[str] = []
     monkeypatch.setattr(rb.logger, "warning", warnings.append)
 
@@ -164,7 +163,7 @@ def test_download_preserves_transient_warning_and_final_error(
         rb._download(url)
 
     assert calls == [url] * 4
-    assert sleeps == [2, 4, 8]
+    assert retry_waits == [2, 4, 8]
     assert warnings == [
         f"[runtime] transient error fetching {url} (<urlopen error reset {i}>); "
         f"retry {i}/3 in {2**i}s"

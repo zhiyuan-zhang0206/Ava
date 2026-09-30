@@ -21,7 +21,7 @@ Every test in the repository runs under the same isolation: a private `AVA_HOME`
 - `provisioning` — throwaway pg/redis, `_clean_state`, the DB connection fixtures, and the session hooks (full-run guard, non-test-database refusal, leaked OS-job / runaway-memory / home cleanup)
 - `guards` — autouse host guards and the `_stub_everywhere` helper
 - `units` — gateway / runner unit, per-test unit home and workspace, write-generation ledger, `spawn_agent`
-- `milvus`, `log_capture` — opt-in `milvus_client` and `loguru_records`
+- `milvus`, `log_capture`, `retry_waits` — opt-in `milvus_client`, `loguru_records`, and `retry_waits` (records the waits `base.host.net.resilience` retry loops request instead of sleeping them; never autouse, because a no-op wait under a wall-clock-bounded loop spins until memory runs away, issue #1001)
 - `_asyncio_stall_probe`, `collection_guard` — hook-only plugins (stall forensics; one collector node per directory)
 - **List order is load order and is load-bearing.** Same-scope autouse fixtures are set up in registration order and, inside one module, alphabetically — which is why `provisioning` (`_clean_state`) precedes `guards` (`_guard_*`). Adding a plugin means checking its autouse names against that order.
 
