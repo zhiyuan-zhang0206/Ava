@@ -1,6 +1,6 @@
 """The converge firewall step: which binaries it audits, and what it says.
 
-The audit's own decision table is pinned in `tests/base/test_macos_firewall.py`.
+The audit's own decision table is pinned in `base/host/tests/test_macos_firewall.py`.
 What is asserted here is the step's two jobs on top of it — picking the right set
 of serving binaries per capability, and reporting rather than raising.
 

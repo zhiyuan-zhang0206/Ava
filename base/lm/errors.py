@@ -110,7 +110,7 @@ _CONTEXT_OVERFLOW_VOCABULARY: frozenset[str] = frozenset(
 # Why both fields, and not `code` as a fallback for a missing `type`: DashScope's
 # OpenAI-compatible endpoint sends both, with `type` carrying only a broad class
 # and `code` the specific reason. Captured 401 (2026-08-20,
-# `tests/base/test_qwen_live_smoke.py`)::
+# `base/tests/test_qwen_live_smoke.py`)::
 #
 #     {'error': {'type': 'invalid_request_error',    <- broad class only
 #                'code': 'invalid_api_key', ...}}    <- the specific reason
@@ -138,7 +138,7 @@ _CONTEXT_OVERFLOW_VOCABULARY: frozenset[str] = frozenset(
 # ever tagged and the rule stays quiet forever, so no incident "surfaces" the gap
 # on its own. Two things close it, both operator-driven: the first real arrears
 # rejection (capture the raw body and reconcile it with this set), or an opt-in
-# live run against a drained key — `tests/base/test_qwen_live_smoke.py` carries
+# live run against a drained key — `base/tests/test_qwen_live_smoke.py` carries
 # both instructions. That is why these caveats sit at the definition site rather
 # than in a tracker.
 _BILLING_STATUS = 402

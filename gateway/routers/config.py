@@ -457,7 +457,7 @@ def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
     fields: list[ResolvedFieldView] = []
     for name in tuning_field_names():
         # A ModelTuning field name is a config field name by invariant
-        # (tests/base/test_model_registry.py) — hard index, so a rename that
+        # (base/lm/tests/test_model_registry.py) — hard index, so a rename that
         # orphans one side 500s here instead of silently dropping the row.
         meta = metas[name]
         resolved = explain_setting(name, model=target, explicit=meta.current_value)

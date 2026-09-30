@@ -217,7 +217,7 @@ def test_billing_error_types_are_billing(error_type: str) -> None:
 def test_dashscope_billing_codes_are_billing(error_code: str) -> None:
     """DashScope's OpenAI-compatible endpoint reports the broad class in
     `error.type` and the SPECIFIC reason in `error.code` — that SHAPE is
-    captured (2026-08-20, `tests/base/test_qwen_live_smoke.py`), so the
+    captured (2026-08-20, `base/tests/test_qwen_live_smoke.py`), so the
     vocabulary is matched against both fields.
 
     The body here is synthetic: the captured one is an auth failure, and no live

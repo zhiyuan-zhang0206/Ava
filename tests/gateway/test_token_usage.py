@@ -66,7 +66,7 @@ def test_reverse_scan_finds_most_recent_usage(
 
     # Through resolve_context_budget, not by re-deriving fraction * window here:
     # the threshold formula is that module's contract (covered numerically in
-    # tests/base/test_context_budget.py). What this test owns is that the
+    # base/lm/tests/test_context_budget.py). What this test owns is that the
     # endpoint SERVES the resolved budget, which a local re-derivation would
     # stop checking the moment the two drifted.
     from base.lm.context_budget import resolve_context_budget
@@ -111,7 +111,7 @@ def test_new_agent_returns_zero(db_conn: psycopg.Connection, test_client: TestCl
 
     # Through resolve_context_budget, not by re-deriving fraction * window here:
     # the threshold formula is that module's contract (covered numerically in
-    # tests/base/test_context_budget.py). What this test owns is that the
+    # base/lm/tests/test_context_budget.py). What this test owns is that the
     # endpoint SERVES the resolved budget, which a local re-derivation would
     # stop checking the moment the two drifted.
     from base.lm.context_budget import resolve_context_budget
@@ -179,7 +179,7 @@ def test_checkpoint_read_failure_returns_zero(
 
     # Through resolve_context_budget, not by re-deriving fraction * window here:
     # the threshold formula is that module's contract (covered numerically in
-    # tests/base/test_context_budget.py). What this test owns is that the
+    # base/lm/tests/test_context_budget.py). What this test owns is that the
     # endpoint SERVES the resolved budget, which a local re-derivation would
     # stop checking the moment the two drifted.
     from base.lm.context_budget import resolve_context_budget

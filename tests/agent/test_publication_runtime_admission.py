@@ -20,8 +20,8 @@ from base.deploy.writers.runtime_admission import (
     RuntimeAdmission,
     require_activation,
 )
-from tests.base.test_publication import publication_db as publication_db
-from tests.base.test_publication import seed_current
+from base.deploy.writers.tests.test_publication import publication_db as publication_db
+from base.deploy.writers.tests.test_publication import seed_current
 
 
 @pytest.mark.usefixtures("publication_db")

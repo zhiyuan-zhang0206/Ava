@@ -16,6 +16,7 @@ import psycopg
 import pytest
 from pydantic import ValidationError
 
+from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from ops import cluster, cluster_rpc, lifecycle
 from ops.lifecycle import launch
 from ops.rpc_schemas import (
@@ -26,7 +27,6 @@ from ops.rpc_schemas import (
     SpawnAgentRequest,
     TerminateAgentRequest,
 )
-from tests.base.test_admission import isolate as isolate
 
 
 class TestSpawnAgentRequestSourceValidation:

@@ -2,7 +2,7 @@
 half of agent scoping for the hosted runner
 (future/infra/agent-runner-as-server.md, work item b).
 
-Locks the same four contracts `tests/base/test_turn_config_view.py` locks for
+Locks the same four contracts `base/config/tests/test_turn_config_view.py` locks for
 framework Settings, one layer over:
 
 1. **Process-mode equivalence** — with nothing bound, every read is

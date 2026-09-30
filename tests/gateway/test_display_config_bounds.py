@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 
 from base.config import settings
 from base.config.display import DisplaySettings
+from base.config.tests.test_display_config import DISPLAY_RANGES
 from base.host.env import runtime_config
 from gateway.app import app
-from tests.base.test_display_config import DISPLAY_RANGES
 from tests.gateway.test_notices_endpoint import _seed_agent
 
 

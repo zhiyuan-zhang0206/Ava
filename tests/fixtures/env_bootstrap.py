@@ -246,7 +246,7 @@ os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
 # Pinned unconditionally, like the gateway/telegram sentinels: local runs
 # resolve the same loopback host everywhere, and a test that needs a remote
 # Tempo URL or host address monkeypatches the settings explicitly
-# (tests/base/test_machine.py does for machine_host).
+# (base/cluster/tests/test_machine.py does for machine_host).
 os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] = "http://127.0.0.1:3200"
 os.environ["AVA_TELEMETRY_TEMPO_ENDPOINT"] = "http://127.0.0.1:14318"
 # The OTLP ingress port is rendered into the collector config, the roster gate
