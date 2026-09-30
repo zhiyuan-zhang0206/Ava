@@ -13,12 +13,12 @@
 
 # Run tests + coverage report
 .venv/bin/pytest --ignore=tests/e2e -q \
-  --cov=agent --cov=ava --cov=gateway --cov=shared --cov=ui \
+  --cov=agent --cov=ava --cov=gateway --cov=base --cov=ui \
   --cov-report=term-missing
 
 # Generate HTML coverage report
 .venv/bin/pytest --ignore=tests/e2e -q \
-  --cov=agent --cov=ava --cov=gateway --cov=shared --cov=ui \
+  --cov=agent --cov=ava --cov=gateway --cov=base --cov=ui \
   --cov-report=html
 open htmlcov/index.html
 ```
