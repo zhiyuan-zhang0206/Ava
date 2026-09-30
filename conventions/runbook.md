@@ -2193,9 +2193,9 @@ and run only the relevant vitest files, as described in the
 The [Vitest placement decision](../decisions/2026-09-24-vitest-prepush-selection.md)
 records the measurements, push-cost projection and affected-test-selection limits.
 
-Two more pre-push-only hooks close gaps `git rebase` / `cherry-pick` / `merge`
-leave open, neither of which ever invokes the pre-commit hook for the commits
-they create:
+Three more pre-push-only hooks close gaps: two that `git rebase` / `cherry-pick` /
+`merge` leave open (they never invoke the pre-commit hook for the commits they
+create), and one that a per-file verdict cannot see:
 
 - `lint-prepush-branch-diff` re-runs the whole pre-commit stage, filters and
   all, over `git merge-base origin/main HEAD`..`HEAD` instead of whatever two
@@ -2216,6 +2216,11 @@ they create:
   and nothing local catching it. It is cheap (whole-repo, no DB/network) and
   does not skip under load; `types-codegen-fresh` alone still skips when
   `ui/web/node_modules` is missing, same as the frontend pre-push hooks.
+- `lint-patch-targets-full` unconditionally (`always_run: true`) runs the
+  patch-target lint over every test file (about 6 s). A test's home follows what
+  its subject's package imports, so a production import change can move the
+  home of a test the commit-time `lint-patch-targets` never receives; CI's
+  structure job scans everything too.
 
 `scripts/prepush-guard.sh` holds a separate lock for each of `pyright`,
 `tsc`, `eslint`, `vitest`, and `branch-lint` across all worktrees on the host.

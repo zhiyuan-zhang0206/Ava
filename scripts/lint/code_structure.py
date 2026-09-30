@@ -126,6 +126,8 @@ directory area (scripts/structure/baseline_shards.py: an entry lives in the shar
 its directory's first two path components). New or growing
 violations fail; the baseline itself may only lose entries or lower values versus
 the configured base (or merge-base with origin/main, falling back to HEAD).
+A rule change to a section raises its version in `scripts/structure/baseline/rules.json`;
+against a base of another version the guard holds the section's total only, not its keys.
 After splitting, shrink the relevant baseline values or remove fixed entries
 by hand. Explicit targets restrict budget checks to the selected files/directories;
 a file also checks its parent directory. The baseline guard always runs.
@@ -615,8 +617,18 @@ def _baseline_guard(
         previous = _parse_baseline(shards, renames=renames)
     except ValueError as exc:
         return [f"{baseline_shards.SHARD_DIR}: invalid base baseline ({base}): {exc}"]
+    try:
+        rules_was, rules_now = baseline_shards.read_rules(_REPO_ROOT, base)
+    except ValueError as exc:
+        return [f"{baseline_shards.SHARD_DIR}: invalid rule versions: {exc}"]
     errors: list[str] = []
     for kind, entries in baseline.items():
+        was, now = rules_was.get(kind, 1), rules_now.get(kind, 1)
+        if was != now:  # the rule changed: the keys are not comparable, only the total is
+            errors.extend(
+                baseline_shards.rule_change_errors(kind, entries, previous[kind], was, now)
+            )
+            continue
         errors.extend(
             _section_guard(
                 kind,

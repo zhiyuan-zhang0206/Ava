@@ -351,8 +351,9 @@ def _message(site: Site, home: str | None) -> str:
     if site.relation == "ancestor":
         return (
             f"this test lives in `{home}` but patches the private name {private} of the descendant "
-            f"package {owner}: move the test down into {owner}, or give {owner} a public entry "
-            "point / injection seam (a parameter, a settings field, a public setter) and patch that"
+            f"package {owner}: move the test down into {owner} (a test that also needs a package "
+            f"{owner} does not import must be split), or give {owner} a public entry point / "
+            "injection seam (a parameter, a settings field, a public setter) and patch that"
         )
     where = "a top-level test with no package home" if home is None else f"a test in `{home}`"
     return (
