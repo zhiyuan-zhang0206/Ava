@@ -21,10 +21,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from base.host.env.dotenv_boot import enter_scratch_home
 
-enter_scratch_home()
+if __name__ == "__main__":
+    enter_scratch_home()
 
 
-from base.events.live.projection import EVENT_COALESCE_MS  # noqa: E402
+from base.events.live.projection import EVENT_COALESCE_MS
 
 _OUT = Path("ui/web/src/lib/constants-generated.ts")
 

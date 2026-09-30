@@ -70,14 +70,15 @@ from typing import NamedTuple
 
 from base.host.env.dotenv_boot import enter_scratch_home
 
-enter_scratch_home()
+if __name__ == "__main__":
+    enter_scratch_home()
 
-from base.deploy.schema.migrations import (  # noqa: E402
+from base.deploy.schema.migrations import (
     _BASELINE_NAME,
     _DOWN_FILENAME_RE,
     _FILENAME_RE,
 )
-from base.deploy.schema.rollback_snapshot import is_rollback_snapshot_table  # noqa: E402
+from base.deploy.schema.rollback_snapshot import is_rollback_snapshot_table
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "migrations"

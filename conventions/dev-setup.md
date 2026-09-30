@@ -89,7 +89,8 @@ export AVA_HOME="$(mktemp -d)" AVA_CONFIG_FETCH=skip   # a throwaway home: no .e
 ```
 
 The test harness does this itself (a temporary home before any import), and so does
-every lint, codegen and docs tool the git hooks run (`dotenv_boot.enter_scratch_home()`).
+every lint, codegen and docs tool the git hooks run (`dotenv_boot.enter_scratch_home()`,
+called only when the tool runs as a program).
 
 Do not rebase or rewrite a checkout while a cluster runs from it: its root manifest
 and loaded source must remain coherent. Source checkout editing is development work;

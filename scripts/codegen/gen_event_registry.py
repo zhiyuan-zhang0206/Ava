@@ -23,11 +23,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from base.host.env.dotenv_boot import enter_scratch_home
 
-enter_scratch_home()
+if __name__ == "__main__":
+    enter_scratch_home()
 
 
-from base.events.contract import EVENTS, payload_keys  # noqa: E402
-from base.events.live.projection import GLOBAL_ROLES, SYSTEM_ROLES  # noqa: E402
+from base.events.contract import EVENTS, payload_keys
+from base.events.live.projection import GLOBAL_ROLES, SYSTEM_ROLES
 
 _OUT = Path("base/events/registry.md")
 
