@@ -12,6 +12,9 @@ that the rendered section reflects the wildcard, and that the field default is
 `["*"]`.
 """
 
+from collections.abc import Iterator
+from typing import Any
+
 import pytest
 
 import ava
@@ -23,6 +26,7 @@ from agent.graph.system_prompt import (
 )
 from ava.sdk_surface import plugins, sdk_disable
 from base.config import FIELD_INFOS, AgentSettings, settings
+from base.telemetry import audit_events
 
 # The framework-owned top-level namespaces the wildcard must always surface.
 # Asserted as a subset (not equality) so a plugin namespace registered into
@@ -49,13 +53,28 @@ def _no_plugin_expansions(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _fresh_attribution_dedup(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_recorded_skill_invocations` is per-agent-RUN state in a module global,
-    so it leaks between tests: whichever test records (agent, skill, depth)
-    first makes every later write a silent no-op — which would let the two
-    "records nothing" assertions below pass without the guard they are pinning.
-    Same fixture as tests/agent/test_capabilities_index.py."""
-    monkeypatch.setattr(ava.skills, "_recorded_skill_invocations", set())  # pyright: ignore[reportUnknownArgumentType]
+def _fresh_attribution_dedup() -> Iterator[None]:
+    """The attribution dedup is per-agent-RUN state in a module global, so it
+    leaks between tests: whichever test records (agent, skill, depth) first
+    makes every later write a silent no-op — which would let the two "records
+    nothing" assertions below pass without the guard they are pinning. Same
+    fixture as tests/agent/test_capabilities_index.py."""
+    ava.skills.clear_recorded_skill_invocations()
+    yield
+    ava.skills.clear_recorded_skill_invocations()
+
+
+@pytest.fixture
+def skill_writes(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Every batch handed to the audit-event writer — the ONE path a skill
+    attribution row takes — for the "records nothing" assertions."""
+    writes: list[dict[str, Any]] = []
+
+    def _record(**kwargs: Any) -> None:
+        writes.append(kwargs)
+
+    monkeypatch.setattr(audit_events, "insert_event_log_many", _record)
+    return writes
 
 
 def test_wildcard_expands_all_public_namespaces(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -98,24 +117,18 @@ def test_wildcard_skips_capability_surfaces(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_capability_surface_expands_when_named_explicitly(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, skill_writes: list[dict[str, Any]]
 ) -> None:
     """The skip is a wildcard default, not a ban — an operator who names a
     capability SURFACE explicitly still gets it expanded. Expanding the surface
     is index-style, so it costs a duplicate index and nothing worse: no SKILL.md
     body reaches the prompt and no attribution is recorded."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*", "skills"])
-    recorded: list[tuple[int, list]] = []
-    monkeypatch.setattr(
-        ava.skills,
-        "_insert_skill_events",
-        lambda agent, skills: recorded.append((agent, skills)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    )
 
     assert "skills" in effective_sdk_expand()
     text = _sdk_expand_section()
     assert "## ava.skills" in text
-    assert recorded == []
+    assert skill_writes == []
     # An index render carries descriptions, never bodies. Every SKILL.md in this
     # repo opens with a markdown heading; none may appear under the skills block.
     skills_block = text[text.index("## ava.skills") :]
@@ -124,7 +137,7 @@ def test_capability_surface_expands_when_named_explicitly(
 
 
 def test_member_of_a_capability_surface_is_refused(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, skill_writes: list[dict[str, Any]]
 ) -> None:
     """`skills.<name>` / `mcps.<server>` are refused even when named explicitly.
 
@@ -140,19 +153,13 @@ def test_member_of_a_capability_surface_is_refused(
     monkeypatch.setattr(
         settings.agent, "sdk_expand_in_system_prompt", ["*", "skills.gmail", "mcps.chrome"]
     )
-    recorded: list[tuple[int, list]] = []
-    monkeypatch.setattr(
-        ava.skills,
-        "_insert_skill_events",
-        lambda agent, skills: recorded.append((agent, skills)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    )
 
     assert "skills.gmail" not in effective_sdk_expand()
     assert "mcps.chrome" not in effective_sdk_expand()
     text = _sdk_expand_section()
     assert "## ava.skills.gmail" not in text
     assert "## ava.mcps.chrome" not in text
-    assert recorded == []
+    assert skill_writes == []
 
 
 def test_wildcard_respects_sdk_disable(monkeypatch: pytest.MonkeyPatch) -> None:

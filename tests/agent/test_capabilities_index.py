@@ -13,12 +13,13 @@ actually opens a skill body. The index itself tells an agent to match against
 its capabilities first by default; that instruction is independently toggled,
 ordered after the rebuild nudge, and absent with an empty index.
 
-Skills are faked by pointing `ava.skills._skills_dir` at a tmpdir, same shape as
+Skills are faked by running in a per-test unit home (`unit_home`), same shape as
 tests/agent/test_preloaded_skills.py.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -30,14 +31,14 @@ from agent.graph.capabilities import _disabled_by_sdk_config, capabilities_secti
 from agent.graph.system_prompt import _delegation_check_section, build_system_prompt
 from ava.sdk_surface import sdk_disable
 from base.config import FIELD_INFOS, settings
+from base.paths import skills_dir
+from base.telemetry import audit_events
 
 
 @pytest.fixture(autouse=True)
-def _isolate_load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: tmp_path / "no-skills")
-
+def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def _all_enabled() -> set[str]:
-        d = skills_mod._skills_dir()
+        d = skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
     monkeypatch.setattr(
@@ -46,19 +47,20 @@ def _isolate_load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _fresh_attribution_dedup(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_recorded_skill_invocations` is per-agent-RUN state living in a module
-    global, so it leaks between tests: whichever test records (agent, skill,
-    depth) first makes every later test's write a silent no-op. Any test
-    asserting on attribution has to start from an empty set."""
-    monkeypatch.setattr(skills_mod, "_recorded_skill_invocations", set())  # pyright: ignore[reportUnknownArgumentType]
+def _fresh_attribution_dedup() -> Iterator[None]:
+    """The attribution dedup is per-agent-RUN state living in a module global, so
+    it leaks between tests: whichever test records (agent, skill, depth) first
+    makes every later test's write a silent no-op. Any test asserting on
+    attribution has to start from an empty set."""
+    skills_mod.clear_recorded_skill_invocations()
+    yield
+    skills_mod.clear_recorded_skill_invocations()
 
 
 @pytest.fixture
-def fake_skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    d = tmp_path / "skills"
+def fake_skills_dir(unit_home: Path) -> Path:
+    d = skills_dir()
     d.mkdir()
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     return d
 
 
@@ -262,31 +264,34 @@ def test_delegation_check_drops_the_index_step_when_there_is_no_index(
 
 
 def test_building_the_prompt_records_no_skill_attribution(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    fake_skills_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    set_machine_identity: Callable[..., None],
 ) -> None:
     """An agent whose prompt was built but which never touched a skill must own
     zero `skill_invoked` rows. Prompt assembly is exposure, and the
     `prompt_injected` depth is no longer written at all — it was ~55K rows of
     "installed on this machine" noise that drowned the `loaded` signal
     ava_self_evolution actually scores. Exposure must not look like use."""
+    set_machine_identity("agent-runner", "test-machine")  # the built prompt names its machine
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc", body="# A\n")
     _write_skill(fake_skills_dir / "grp", "beta", "beta", "Beta desc", body="# B\n")
 
-    batches: list[list[Any]] = []
+    writes: list[dict[str, Any]] = []
 
-    def _fake_write(agent: int, skills: list[Any]) -> bool:
-        batches.append(skills)
-        return True
+    def _record(**kwargs: Any) -> None:
+        writes.append(kwargs)
 
-    # Stub the ONE write path, so any regression that routes prompt assembly
-    # (or an index render) into a skill_invoked write fails this test.
-    monkeypatch.setattr(skills_mod, "_insert_skill_events", _fake_write)  # pyright: ignore[reportUnknownArgumentType]
+    # Stub the ONE write path — every skill_invoked row goes through the
+    # audit-event writer — so any regression that routes prompt assembly (or an
+    # index render) into a skill_invoked write fails this test.
+    monkeypatch.setattr(audit_events, "insert_event_log_many", _record)
     monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
 
     prompt = build_system_prompt()
 
-    assert batches == []  # prompt assembly records nothing
+    assert writes == []  # prompt assembly records nothing
     # And the prompt carries the index once — the expanded SDK reference does
     # not re-render the skills namespace.
     assert "## ava.skills" not in prompt
