@@ -160,9 +160,9 @@ credentials work without installing. `revoke-enrollment` cuts the coordinator
 channel only. When a unit is compromised or a bundle and its key are lost,
 rotate the write generation, issue every unit a new bundle and revoke the lost
 unit's enrollment; rotate the human secret (telemetry token), the Redis runtime
-password and the provider keys as well. A networked home cannot rotate its
-write generation until networked release operations land (slices dbgen-8 and
-FC-9). Detail: [[base/cluster/authority/unit-enrollment.ava.okf.md]].
+password and the provider keys as well, by hand, in the order of
+[manual rotation after a credential leak](#manual-rotation-after-a-credential-leak).
+Detail: [[base/cluster/authority/unit-enrollment.ava.okf.md]].
 
 Its DB/Redis connection facts are not cached locally: every runner process
 fetches them at Settings construction. Start the gateway first, then the
@@ -1521,6 +1521,10 @@ between:
   rerun the whole half, which is idempotent. `--dry-run` runs only the
   read-only checks and prints the effects. Output is redacted and tee'd to
   `DIR`.
+- A unit `down` could not reach (a laptop offline) keeps running its old
+  processes. The gateway's start in `up` raises the cluster's minimum code
+  version, and those processes exit when they next touch the database
+  ([code version gate](#code-version-gate)).
 
 ### Agent recovery after a provider billing stoppage
 
@@ -1684,6 +1688,135 @@ whether a restart is required — see
 
 Not automated: each is a manual console visit, and several (Telegram) have no
 programmatic rotation API at all.
+
+### Manual rotation after a credential leak
+
+No code path rotates the database write generation outside a release, and none
+is planned: a leak is rare, single-operator and supervised, so it is a procedure
+run by hand. Every step names an existing tool. Cutting a leaked credential off
+means the previous write generation stops being able to log in: its logins lose
+`LOGIN`, their sessions are terminated, and their secret files are deleted.
+
+1. **Stop the whole cluster.** On every runner `ava stop -y`; on the gateway
+   `ava stop -y --keep-infra` (Postgres and Redis must stay up for the steps
+   below). No service may run while the generation changes: the `/ops` server
+   reads its accepted tokens once at boot, and the fence terminates whatever
+   still holds a session of the old logins.
+2. **Human bearer** (only if it leaked; on the gateway checkout, in a gateway
+   context): `rotate_cluster_secret.py --execute`. Do it before step 6: the
+   telemetry token in every unit bundle derives from this secret.
+3. **Redis** (gateway checkout): `rotate_data_plane_secrets.py --execute`
+   (`--scope admin` for `requirepass`, `--scope runner` for the ACL runtime
+   password; the default is both). Both scripts are described above.
+4. **Database write generation** (gateway checkout, home resolved from the
+   checkout, `unset AVA_PROCESS_PROFILE`). This is the release fence and the
+   next admission (`cli/commands/data_plane/write_generation.py`) under one
+   operation id. Keep the printed id: a retry after a crash must pass the same
+   one, and the ledger holds instead of minting a second pair.
+
+```bash
+OP=$(uuidgen); echo "operation $OP"
+.venv/bin/python - "$OP" <<'PY'
+import sys
+from uuid import UUID
+
+from base.cluster.authority import OperationAuthority
+from cli.commands.data_plane.write_generation import (
+    admit_write_generation,
+    fence_write_generation,
+)
+
+authority = OperationAuthority(operation=UUID(sys.argv[1]), direction="candidate")
+fence_write_generation(authority)  # revoke, NOLOGIN sweep, stop the pooler, close, prune
+print("active generation", admit_write_generation(authority).number)  # mint + activate
+PY
+```
+
+   The fence revokes the active generation (ledger `revoked`), removes `LOGIN`
+   and the password from its two logins, stops the pooler, terminates and counts
+   every session of them until none is left (ledger `closed`, secret deleted),
+   and drops the logins (one with a dependency stays as an inert `NOLOGIN`
+   tombstone). The admission mints `ava_g<n+1>_gateway` and `_runner`, proves
+   each logs in on the home's own Postgres, and marks the generation `active` in
+   `$AVA_HOME/db-authority/ledger.json`.
+5. **Start the gateway**: `ava start`. The ordinary start re-checks the group
+   grants, sweeps any stale login again, births a pooler serving exactly the new
+   pair, and launches every service with the new logins.
+6. **Every runner**: on the gateway `ava cluster db-authority issue-unit
+   --machine <name> --home <unit $AVA_HOME> --out <bundle>`, carry the bundle and
+   its printed transport key separately, then on the runner
+   `AVA_DB_CAPABILITY_KEY=<key> ava start --db-capability <bundle>` (the flow in
+   [Clusters, units, prod, and dev clone paths](#clusters-units-prod-and-dev-clone-paths)).
+   The runner's old login was revoked in step 4, so its previous bundle cannot
+   start it. A runner also fetches its Redis URL from the gateway at start, so
+   this step is what delivers the rotated Redis password. If a unit's enrollment
+   secret leaked too, `ava cluster db-authority rotate-enrollment` first.
+7. **Provider keys**: mint each in its console, then `ava config set KEY=VALUE`
+   (the table above); the command says whether a restart is needed.
+8. **Verify.** `ava status` on every unit; `active.number` in `ledger.json`
+   is the new number and every older one reads `closed`; and, as the
+   administrator (`psql`, above), `SELECT rolname, rolcanlogin FROM pg_roles
+   WHERE rolname LIKE 'ava\_g%'` shows only the two new logins able to log in.
+
+If step 4 fails, read its error: the ledger refuses rather than guess, and the
+cause is named (a session that would not close, a prepared transaction, a
+foreign pending generation). Fix that, then re-run the same block with the same
+operation id.
+
+## Code version gate
+
+Every pooled database session checks the code version of its own process against
+`deployment_state.min_code_version` and exits `78` when it is lower
+([decision](../decisions/2026-09-30-client-side-code-version-gate.md),
+[design](../base/db/code-version-gate.ava.okf.md)). It keeps a unit that missed
+an update (a closed laptop) from writing with old code when it wakes. A process's
+**code version** is the first-parent commit count of the commit it loaded; the
+gateway raises the stored minimum to its own version on every start.
+
+**A routine update needs nothing.** The update script starts the gateway first,
+which raises the minimum, and then the runners. Every unit needs a **full** clone:
+a shallow one counts fewer commits than exist, so its processes look stale and
+exit `78` (`git rev-parse --is-shallow-repository` must print `false`).
+
+**A unit exits `78`.** Its log holds one `critical` line: `code version gate:
+process <name> runs code version <v>, below the cluster minimum <m>`. The checkout
+is behind the cluster: check out the commit the gateway runs, `uv sync --frozen`,
+`ava start`. `ava stop` and every other `ava` command keep working meanwhile, so
+a behind host can always be stopped and recovered; only service processes are
+gated. A supervisor that revives the stale service gets the same exit again until
+the checkout is updated.
+
+**Read the state.**
+
+```bash
+git rev-list --count --first-parent HEAD          # this checkout's code version
+psql "host=/tmp/ava-pg-<home-slug> port=<pg port> dbname=<db>" \
+  -c "SELECT min_code_version FROM deployment_state"   # administrator, as above
+```
+
+Running processes name themselves `ava:<process>:v<version>` in the pooler's
+client list: `PGPASSWORD=$(jq -r .password "$AVA_HOME/db-authority/pooler-admin.json")
+psql "host=127.0.0.1 port=<pooler port> user=ava_pooler_admin dbname=pgbouncer"
+-c 'SHOW CLIENTS'` (the pooler port is `AVA_DB_URL`'s port in the gateway `.env`;
+read the `application_name` column). The password stays in the environment, never
+argv.
+
+**Rolling back to an older commit** must lower the minimum by hand: it never falls
+by itself, and an older process would exit `78` at its first dial (the gateway
+included).
+
+1. Stop the whole cluster (`ava stop -y` on every unit; the gateway with
+   `--keep-infra`).
+2. Compute the target's version: `git rev-list --count --first-parent <sha>`.
+3. As the administrator, `psql "host=/tmp/ava-pg-<home-slug> port=<pg port>
+   dbname=<db>" -c "UPDATE deployment_state SET min_code_version = <target>
+   WHERE id = 1"`. `0` switches the gate off until the next gateway start.
+4. Check out `<sha>` on every unit, `uv sync --frozen`, start the gateway, then the
+   runners. The gateway's start sets the minimum to exactly the target's version.
+
+**Shipping the gate itself is unprotected.** Processes that run code from before
+the gate have no check, so the update that first carries it stops every unit by
+hand, as updates did before; the gate protects from the following update on.
 
 ## Code flow & Events
 
