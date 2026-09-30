@@ -75,7 +75,7 @@ Root owns Gate and native LGTM application services. `_pause_resume`
 releases normal startup admission only after readiness.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `cli/commands/lifecycle/maintenance.py` and `_maintenance_probe`.
-They reuse the [durable maintenance journal](../../base/deploy/maintenance/maintenance.ava.okf.md).
+They reuse the [durable maintenance journal](../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
 Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,

@@ -14,13 +14,13 @@ tags:
 `base/daemon/shutdown.py`, `base/daemon/health.py`,
 `base/deploy/lifecycle/start_serving.py`: services, orchestration sessions and agent
 processes are **native** sessions; agent shells run on per-session **PTY
-hosts** ([[base/sessions/pty/pty_sessions.ava.okf.md]]); Windows uses
+hosts** ([[base/sessions/pty/docs/pty_sessions.ava.okf.md]]); Windows uses
 winproc. Start-serving gates recovery until readiness passes. Daemon health
 accepts either one `Liveness` heartbeat or a worst-case `LivenessGroup` whose
 per-loop progress snapshots make concurrent-loop failures attributable. OS
 schedulers own health/watchdog probes, boot autostart, and daily
 rotate-then-retain log maintenance through `base/os_*.py`. Launch shape, the
 kill contract and the SIGTERM unwind:
-[[base/sessions/session-backend.ava.okf.md|session backend]].
+[[base/sessions/docs/session-backend.ava.okf.md|session backend]].
 External coding tools add
 [[coding-session-owner.ava.okf.md|canonical generation ownership]].

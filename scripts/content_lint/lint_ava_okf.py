@@ -19,11 +19,11 @@ Rules (source of truth):
      rather than a new node.
   9. Overview position: a directory's overview node has exactly one
      position — <dir>/<dir>.ava.okf.md, inside the directory it describes
-     (2026-08-12 user ruling: "put it inside the folder"). The sibling
-     position <dir>.ava.okf.md at the parent level was retired 2026-08-13
-     (last nested overviews moved inside; compute_parent no longer resolves
-     it); E009 fires on any surviving sibling — merge or move it into the
-     directory (one concept, one node).
+     (user ruling: "put it inside the folder"), judged on the logical path,
+     so a node in a package's docs/ layer counts as sitting where the layer
+     sits. compute_parent does not resolve the sibling position
+     <dir>.ava.okf.md at the parent level; E009 fires on any sibling —
+     merge or move it into the directory (one concept, one node).
  10. Headroom (warn): a node whose remaining room under the character ceiling is
      below WARN_MARGIN reports W010 — non-blocking, so the author sees the wall
      while there is still room to plan a split, instead of discovering it only
@@ -71,6 +71,7 @@ import yaml
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+from base.packages.docs.okf_graph import logical_path  # noqa: E402
 from scripts.codegen.build_okf_data import resolve_wikilink  # noqa: E402
 
 # ── config ──────────────────────────────────────────────────────────
@@ -190,14 +191,13 @@ def collect_all_paths(repo_root: Path) -> set[str]:
 def _dual_node_error(filepath: Path, repo_root: Path) -> LintError | None:
     """Rule 9: the two positions of a directory's overview node must not coexist.
 
-    The canonical position is inside the directory — `<dir>/<dir>.ava.okf.md`,
-    co-located with the code it describes (user ruling 2026-08-12: "put it
-    inside the folder"). The sibling `<dir>.ava.okf.md` at the parent level
-    was retired 2026-08-13: every nested overview moved inside, and
-    compute_parent no longer resolves the sibling position, so a sibling
-    file would be an orphan node, not a parent. E009 reports any surviving
-    sibling — move it inside (or merge it, when the internal file already
-    exists).
+    The canonical position is inside the directory — `<dir>/<dir>.ava.okf.md`
+    (user ruling 2026-08-12: "put it inside the folder"), or in its `docs/`
+    layer, which the hierarchy ignores (`logical_path`). compute_parent does
+    not resolve the sibling `<dir>.ava.okf.md` at the parent level, so a
+    sibling file would be an orphan node, not a parent. E009 reports any
+    sibling, layered or not — move it inside (or merge it, when the internal
+    file already exists).
 
     Matching is done on the repo-relative path only, so the checkout
     directory's own name cannot misfire (CI checks out to .../ava/ava; the
@@ -209,35 +209,23 @@ def _dual_node_error(filepath: Path, repo_root: Path) -> LintError | None:
         rel = filepath.resolve().relative_to(repo_root)
     except ValueError:
         return None
-    if len(rel.parts) < 2:
-        # Repo-root file: the retired sibling position of directory `<stem>/`.
-        # After the 2026-08-12 ruling the root level holds no domain
-        # overviews; flag any file shaped like one (its directory exists).
-        if not (repo_root / stem).is_dir():
-            return None
-        internal = f"{stem}/{stem}.ava.okf.md"
-        return LintError(
-            str(filepath),
-            1,
-            "E009",
-            f"Misplaced overview: this root-level sibling must live at "
-            f"'{internal}', the canonical position (a directory's overview "
-            f"lives inside it; the sibling position was retired 2026-08-13). "
-            f"Move the file inside — or merge it, if '{internal}' exists.",
-        )
-    # Sibling position inside a directory: `<dir>/<stem>.ava.okf.md` is the
-    # retired overview position of `<dir>/<stem>/`.
-    internal = f"{rel.parent.as_posix()}/{stem}/{stem}.ava.okf.md"
-    if not (repo_root / rel.parent / stem).is_dir():
+    logical = logical_path(rel.as_posix())
+    layer = "docs/" if logical != rel.as_posix() else ""
+    # `<parent>/<stem>/` is the directory this file would be the overview of.
+    parent = Path(logical).parent
+    if not (repo_root / parent / stem).is_dir():
         return None
+    # A repo-root file's parent is `.`, whose prefix is empty.
+    prefix = "" if parent == Path() else f"{parent.as_posix()}/"
+    internal = f"{prefix}{stem}/{layer}{stem}.ava.okf.md"
     return LintError(
         str(filepath),
         1,
         "E009",
         f"Misplaced overview: this sibling must live at '{internal}', the "
-        f"canonical position (a directory's overview lives inside it; the "
-        f"sibling position was retired 2026-08-13). Move the file inside — "
-        f"or merge it, if '{internal}' exists.",
+        f"canonical position (a directory's overview lives inside it, in its "
+        f"docs/ layer when layered). Move the file inside — or merge it, if "
+        f"'{internal}' exists.",
     )
 
 

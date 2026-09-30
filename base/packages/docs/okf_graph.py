@@ -11,7 +11,7 @@ Two consumers share this module:
     graph cannot go stale between manual rebuilds.
 
 See `index.ava.okf.md` for the OKF format itself (frontmatter, [[wikilinks]],
-filesystem-derived hierarchy).
+filesystem-derived hierarchy, the transparent `docs/` layer).
 """
 
 from __future__ import annotations
@@ -28,6 +28,9 @@ from base.packages.docs.notes import normalize_tags
 
 EXT = ".ava.okf.md"
 ROOT_NAME = f"index{EXT}"
+# A package keeps its OKF nodes in a `docs/` directory: the layer is invisible
+# to the hierarchy (see `logical_path`).
+DOCS_LAYER = "docs"
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 
 # okf-d3-template.html's inline `window.GRAPH_DATA = /*__GRAPH_DATA_JSON__*/;` —
@@ -69,10 +72,10 @@ def find_root(all_paths: Iterable[str]) -> str | None:
     """The bundle's single root node — the `index.ava.okf.md` closest to the top.
 
     In this repo the apex lives in the index layer (`okf/index.ava.okf.md`),
-    which holds only cross-domain nodes — the domain overviews are co-located
-    with their code inside the directory they describe (`agent/agent.ava.okf.md`
-    inside `agent/`). The shallowest `*/index.ava.okf.md` wins; ties break
-    lexically, keeping the choice deterministic.
+    which holds only cross-domain nodes — the domain overviews live with their
+    code, in the `docs/` layer of the directory they describe (logical path
+    `agent/agent.ava.okf.md` for `agent/`). The shallowest `*/index.ava.okf.md`
+    wins; ties break lexically, keeping the choice deterministic.
 
     `None` when a bundle carries no index at all — every node is then a root of
     its own subtree, which is the only sane reading of a bundle with no apex.
@@ -83,36 +86,68 @@ def find_root(all_paths: Iterable[str]) -> str | None:
     return min(candidates, key=lambda p: (p.count("/"), p))
 
 
+def logical_path(path: str) -> str:
+    """The hierarchy position of `path`: the physical path minus its docs layer.
+
+    A package keeps its OKF nodes in a `docs/` directory beside its code, and
+    that directory is transparent to the hierarchy: the last directory segment
+    named `docs` is dropped (the file name never counts as a segment). So
+    `agent/graph/docs/graph.ava.okf.md` sits at `agent/graph/graph.ava.okf.md`,
+    and the layer of a Python package named `docs`
+    (`base/packages/docs/docs/x.ava.okf.md`) sits at
+    `base/packages/docs/x.ava.okf.md`. Directories below the layer are kept
+    (`agent/graph/docs/notes/x.ava.okf.md` sits at
+    `agent/graph/notes/x.ava.okf.md`); a path with no `docs` segment is its own
+    logical path. Pure string function, no filesystem access.
+    """
+    *directories, name = path.split("/")
+    for index in range(len(directories) - 1, -1, -1):
+        if directories[index] == DOCS_LAYER:
+            return "/".join([*directories[:index], *directories[index + 1 :], name])
+    return path
+
+
 def compute_parent(path: str, all_paths: set[str], root: str | None) -> str | None:
     """Hierarchy parent of `path`, resolved against the paths that actually exist.
 
-    The rule is purely filesystem-derived, as `index.ava.okf.md` documents:
-    a directory's overview node is the same-named file **inside** the
-    directory (`<dir>/<dir>.ava.okf.md`, the canonical co-located position
-    per the 2026-08-12 ruling), so `a/b/c.ava.okf.md` parents to
-    `a/b/b.ava.okf.md` when it exists — the legacy sibling position
-    (`a/b.ava.okf.md` beside `a/b/`) was removed 2026-08-13 with the last
-    nested overviews moved inside. Only the cross-domain index layer in
-    `okf/` has no filesystem parent and falls back to `root` (the apex,
-    `okf/index.ava.okf.md`); a bundle-root file's parent is `root`, not a
-    literal `index.ava.okf.md`.
+    The rule is purely filesystem-derived, as `index.ava.okf.md` documents,
+    and runs on logical paths (`logical_path`): a directory's overview node is
+    the same-named file **inside** the directory (`<dir>/<dir>.ava.okf.md`),
+    so `a/b/c.ava.okf.md` parents to `a/b/b.ava.okf.md` when it exists —
+    whether either file sits in `a/b/` itself or in its `a/b/docs/` layer.
+    Only the cross-domain index layer in `okf/` has no filesystem parent and
+    falls back to `root` (the apex, `okf/index.ava.okf.md`); a bundle-root
+    file's parent is `root`, not a literal `index.ava.okf.md`, and so is an
+    overview's own.
 
-    Every returned parent is a path that exists, which is what makes a
-    dangling tree edge structurally impossible and leaves the graph with
-    exactly one root.
+    The result is the **physical** path of the parent, looked up among
+    `all_paths`. Every returned parent is a path that exists, which is what
+    makes a dangling tree edge structurally impossible and leaves the graph
+    with exactly one root. Two physical paths sharing one logical path are a
+    misplaced duplicate node and raise.
     """
     if root is not None and path == root:
         return None
 
-    parent_dir = posix(str(Path(path).parent))
+    physical: dict[str, str] = {}
+    for candidate in all_paths:
+        logical = logical_path(candidate)
+        if logical in physical:
+            raise ValueError(
+                f"{physical[logical]} and {candidate} share the logical path {logical}"
+            )
+        physical[logical] = candidate
+
+    logical = logical_path(path)
+    parent_dir = posix(str(Path(logical).parent))
     if parent_dir in {"", "."}:
         return root
 
-    # Canonical: the overview file inside the parent directory, named after it
+    # The overview file inside the parent directory, named after it
     # (`agent/agent.ava.okf.md` is the overview of `agent/`).
     internal = posix(str(Path(parent_dir) / (Path(parent_dir).name + EXT)))
-    if internal != path and internal in all_paths:
-        return internal
+    if internal != logical and internal in physical:
+        return physical[internal]
 
     return root
 

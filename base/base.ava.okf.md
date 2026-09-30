@@ -51,7 +51,7 @@ The base-layer public entry points: [[base/entry-points.ava.okf.md]].
 - `base/host/macos_firewall.py` — declarative macOS Application Firewall manifest,
   audit, status renderer, and rootless-first reconciliation with bounded
   `sudo -n` / manual-command fallback; see
-  [[base/sessions/session-backend.ava.okf.md|session backend]].
+  [[base/sessions/docs/session-backend.ava.okf.md|session backend]].
 - Layer constraints are enforced by `import-linter`: base < ava < agent < gateway < cli
 - There is no internal layer restriction within base; services must not import agent kernel
 - File line budget: soft limit 600 / hard limit 800 (enforced by lint)

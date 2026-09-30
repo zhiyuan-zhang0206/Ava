@@ -119,5 +119,5 @@ not proof that its script cannot write. `resume --cancel` restores ordinary
 recovery during preparation/drain; it cannot bypass a partial service stop or
 prove replay safety for a failed arbitrary external effect.
 
-See [operator procedure](../../../conventions/graceful-maintenance.md) for
+See [operator procedure](../../../../conventions/graceful-maintenance.md) for
 resource scopes, recovery and the first-deployment limitation.
