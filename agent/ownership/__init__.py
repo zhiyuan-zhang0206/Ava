@@ -20,5 +20,5 @@ Package door — no imports, no re-exports; callers import the public modules:
     successor observe a restart.
 
 `hosted.py` decides ownership; `inbound.py` and `lifecycle_intent.py` enforce it
-at each queue mutation. See `agent/ownership/ownership.ava.okf.md`.
+at each queue mutation. See `agent/ownership/docs/ownership.ava.okf.md`.
 """

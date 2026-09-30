@@ -67,4 +67,4 @@ No deployment-state model (R1) · no event contracts / skill identity / env-key 
 
 ## Related as-is nodes
 
-[[../../gateway/gateway.ava.okf.md]] · [[../../services/services.ava.okf.md]] · [[../../base/base.ava.okf.md]]
+[[../../gateway/docs/gateway.ava.okf.md]] · [[../../services/docs/services.ava.okf.md]] · [[../../base/docs/base.ava.okf.md]]

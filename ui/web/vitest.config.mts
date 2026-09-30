@@ -64,9 +64,8 @@ export default defineConfig({
       // test step (ci.yml).
       reportOnFailure: true,
       include: ["src/**"],
-      // `src/**` sweeps in the *.ava.okf.md docs that live next to the code
-      // they describe (their path IS the OKF hierarchy, so they can't be
-      // relocated). v8 hands each to the
+      // `src/**` sweeps in the *.ava.okf.md docs that sit in the `docs/`
+      // layers beside the code they describe. v8 hands each to the
       // transform pipeline, which throws RolldownError PARSE_ERROR and then
       // drops the file from coverage anyway — five lines of red-looking log per
       // frontend CI run, growing with the doc tree. Exclude them up front so

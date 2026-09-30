@@ -313,8 +313,8 @@ cluster; that has to come from outside Ava today. Full policy and reporting:
 | Package manager | uv |
 | Frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui |
 
-[Frontend stack →](../ui/web/web.ava.okf.md)
-[Connection budget →](../agent/db/db.ava.okf.md)
+[Frontend stack →](../ui/web/docs/web.ava.okf.md)
+[Connection budget →](../agent/db/docs/db.ava.okf.md)
 [Model registry →](../base/lm/registry.py)
 
 ### Observability (OTel + LGTM)

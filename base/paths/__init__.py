@@ -6,7 +6,7 @@ adds first-access mkdir side effects, so calling a helper means "the
 directory is ready and writable". pydantic-settings reads the
 $AVA_HOME env var at import time; the three process classes inherit
 the same variable, no manual passing required. The package holds only
-this door; its doc nodes (`paths.ava.okf.md`, `lock-discipline.ava.okf.md`)
+this door; its doc nodes (`docs/paths.ava.okf.md`, `docs/lock-discipline.ava.okf.md`)
 sit beside it.
 """
 

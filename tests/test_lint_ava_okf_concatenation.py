@@ -21,10 +21,19 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
+
 # The linter imports build_okf_data as a top-level module — running it by path
 # puts scripts/ on sys.path[0], so importing it here has to do the same.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 _lint = importlib.import_module("scripts.content_lint.lint_ava_okf")
+
+
+@pytest.fixture(autouse=True)
+def _layout_is_not_under_test(monkeypatch):
+    """These tests exercise other rules on constructed trees whose layout is not the
+    subject; rule 14 (docs layer) has its own tests in tests/scripts/test_lint_ava_okf.py."""
+    monkeypatch.setattr(_lint, "_layer_error", lambda *_args: None)
 
 
 def _node(tmp_path: Path, rel: str, body: str = "") -> Path:
@@ -91,7 +100,7 @@ def test_bullet_glued_after_wikilink_blocks(tmp_path, monkeypatch, capsys):
 
 def test_bullet_glued_after_plain_word_blocks(tmp_path, monkeypatch, capsys):
     """No wikilink involved — a bullet fused directly onto the end of the
-    previous bullet's last word, the base/base.ava.okf.md shape found by
+    previous bullet's last word, the base/docs/base.ava.okf.md shape found by
     the tree-wide sweep."""
     _node(
         tmp_path,

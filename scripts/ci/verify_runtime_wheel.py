@@ -28,7 +28,7 @@ REQUIRED = (
     "cli/python_install.py",
     "base/deploy/release/python_lock.py",
     "ava_builtins/plugins/ava_code/plugin.py",
-    "ava_builtins/plugins/ava_code/ava_code.ava.okf.md",
+    "ava_builtins/plugins/ava_code/docs/ava_code.ava.okf.md",
     "db/schema.sql",
     "commands/compact.md",
     "schedules/manifest.json",

@@ -117,5 +117,5 @@ In full: [[okf/plugins/module-loading/reload-semantics.ava.okf.md]].
 
 ## Key Dependencies
 - [[okf/plugins/plugins.ava.okf.md]] — the injection surfaces the import registers into
-- [[agent/graph/graph.ava.okf.md]] — `build_graph()` calls the loader (`agent.extensions.load_extensions`) before wiring nodes
+- [[agent/graph/docs/graph.ava.okf.md]] — `build_graph()` calls the loader (`agent.extensions.load_extensions`) before wiring nodes
 - [[extensions.ava.okf.md]] — the `ava.extend.wrap` layer a reload re-installs from a pristine core

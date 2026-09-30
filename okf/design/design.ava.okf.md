@@ -52,4 +52,4 @@ The consolidated lexicon (single source of truth / registry / lease / doorplate 
 
 ## Related as-is nodes
 
-Current-system descriptions these designs will change: [[cli/cli.ava.okf.md]] (orchestration/update legs) · [[gateway/gateway.ava.okf.md]] (pause middleware, API surface) · [[base/base.ava.okf.md]] (env keys, events, telemetry) · [[ui/web/web.ava.okf.md]] · [[agent/agent.ava.okf.md]] (lifecycle) · [[services/services.ava.okf.md]] (daemons).
+Current-system descriptions these designs will change: [[cli/docs/cli.ava.okf.md]] (orchestration/update legs) · [[gateway/docs/gateway.ava.okf.md]] (pause middleware, API surface) · [[base/docs/base.ava.okf.md]] (env keys, events, telemetry) · [[ui/web/docs/web.ava.okf.md]] · [[agent/docs/agent.ava.okf.md]] (lifecycle) · [[services/docs/services.ava.okf.md]] (daemons).

@@ -70,4 +70,4 @@ closes every open marker issue, making the alert loop self-healing.
 ## Key dependencies
 
 - [[.github.ava.okf.md]] — parent overview and the protected CI check names.
-- [[../scripts/scripts.ava.okf.md]] — audit and model-pricing implementations.
+- [[../scripts/docs/scripts.ava.okf.md]] — audit and model-pricing implementations.

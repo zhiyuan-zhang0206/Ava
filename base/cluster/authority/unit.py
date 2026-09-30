@@ -33,7 +33,7 @@ own: the runner login and API token are the write generation's, shared by
 every runner unit, and the telemetry token is the cluster's. The binding
 guards against installing on the wrong unit by mistake, not against theft;
 what a lost bundle exposes and how to contain it:
-`base/cluster/authority/unit-enrollment.ava.okf.md`.
+`base/cluster/authority/docs/unit-enrollment.ava.okf.md`.
 
 The enrollment secret is the unit's durable identity toward the gateway: it
 keys the release coordinator channel (`base.cluster.authority.channel`). The
