@@ -508,12 +508,17 @@ Persistent `ava-schedule-<id>` terminals survive pause and update with their
 currently loaded runner code and script text. Adopt changed runner code through
 an explicit schedule restart at its work boundary, or a full stop/start.
 **A wave that moves code between packages (a package rename is the canonical
-case), changes schedule templates, or otherwise touches an import
+case), changes schedule templates, moves or renames files that an in-store copy
+loads or calls at run time, or otherwise touches an import
 surface must also close the loop on in-store schedule copies.** A rollout
 never updates them (above), and a stale copy only surfaces at its next fire
-(crash-loop auto-pause once it cannot stay up). Before trusting `schedules`,
+(crash-loop auto-pause once it cannot stay up, or a failure that folds
+into an unrelated exit code — 2026-10-01: a moved `scripts/` target read as
+"new candidates"). Before trusting `schedules`,
 verify and redeploy: run a full dry-import sweep over every in-store copy
-(py_compile + top-level imports only — never a real fire) and redeploy drifted
+(py_compile + top-level imports only — never a real fire; it does not
+execute run-time paths, so after a file move check the copies' referenced
+paths directly) and redeploy drifted
 copies through the same `ava schedules update <name> --script-file <template>`
 path. Tooling lives on the host that runs the weekly sweep (`~/.ava/sched-dry-import/run_dry.sh`;
 the weekly `sched-dry-import-weekly` backstop schedule red-reports to its
