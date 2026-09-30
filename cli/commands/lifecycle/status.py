@@ -204,7 +204,7 @@ def _print_host_resources() -> None:
         from base.host.resource_sample import resource_sample
 
         s = resource_sample()
-    except Exception as e:  # fail-fast-ok: psutil may be absent; the rest of status still prints
+    except Exception as e:  # psutil may be absent; the rest of status still prints
         print(f"  unavailable ({e})")
         return
     print(

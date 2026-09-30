@@ -233,5 +233,5 @@ def _bring_up_locked(
 def _own_create_time() -> float:
     try:
         return stable_create_time(psutil.Process(os.getpid()))
-    except psutil.Error:  # fail-fast-ok: identity extras degrade, liveness key is the shell
+    except psutil.Error:  # identity extras degrade, liveness key is the shell
         return 0.0

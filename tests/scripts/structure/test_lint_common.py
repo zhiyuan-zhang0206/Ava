@@ -16,7 +16,6 @@ import pytest
 from scripts.lint import (
     clock_lattice,
     code_structure,
-    fail_fast,
     logger_add_diagnose,
     loguru_format,
     no_emoji,
@@ -61,8 +60,3 @@ def test_missing_scan_dir_is_an_error(tmp_path: Path) -> None:
 def test_framework_scoped_lints_cover_every_framework_dir(scan_dirs: tuple[str, ...]) -> None:
     assert set(lint_common.FRAMEWORK_DIRS) <= set(scan_dirs)
     lint_common.scan_roots(_REPO_ROOT, scan_dirs)
-
-
-def test_fail_fast_scans_every_framework_dir() -> None:
-    scanned = {p.relative_to(_REPO_ROOT).parts[0] for p in fail_fast._framework_py_files()}
-    assert scanned == set(lint_common.FRAMEWORK_DIRS)

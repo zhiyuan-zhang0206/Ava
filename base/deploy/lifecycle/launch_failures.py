@@ -40,15 +40,13 @@ def record(sessions: list[str]) -> None:
     partial list.
     """
     target = base.paths.launch_failures_path()
-    try:
+    with suppress(OSError):  # a diagnostic footnote must not fail the start
         if not sessions:
             target.unlink(missing_ok=True)
             return
         tmp = target.with_suffix(".tmp")
         tmp.write_text(json.dumps(sessions), encoding="utf-8")
         tmp.replace(target)
-    except OSError:  # fail-fast-ok: a diagnostic footnote must not fail the start
-        pass
 
 
 def take() -> list[str]:
@@ -70,7 +68,7 @@ def take() -> list[str]:
     except OSError:
         return []
     finally:
-        with suppress(OSError):  # fail-fast-ok: see the docstring
+        with suppress(OSError):  # see the docstring
             target.unlink(missing_ok=True)
     try:
         parsed: object = json.loads(raw)

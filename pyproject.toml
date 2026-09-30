@@ -325,6 +325,7 @@ cache-dir = ".cache/ruff"
 # license bar a pack must clear: ava_builtins/skills/VENDORED.md.
 
 [tool.ruff.lint]
+external = ["S112"]  # checked by a separate pre-commit Ruff invocation; keep its noqa reasons valid
 select = [
     "E", "W",       # pycodestyle
     "F",            # pyflakes
@@ -355,6 +356,9 @@ select = [
 ignore = [
     "E501",         # line too long — formatter handles
     "S102",         # exec() is core to this design
+    "S112",         # checked separately with typed exceptions off; the shared
+                    # flake8-bandit switch needed for S110 would flag 138
+                    # existing typed `except: continue` paths outside this task
     "PLR0911",      # too many return statements — dispatch-style match/case naturally has many returns
     "PLR0912",      # too many branches — top-level orchestration functions (cmd_start etc.) naturally have many branches
     "PLR0913",      # too many arguments
@@ -371,6 +375,10 @@ ignore = [
                     # strict; ruff by default treats alias-equal-to-original as a noop, conflicting
                     # with typed Python convention. Allowed across the codebase.
 ]
+
+[tool.ruff.lint.flake8-bandit]
+# Match the former fail-fast lint: typed handlers with lone `pass` count too.
+check-typed-exception = true
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 # contextvars allowlist lock (user ruling 2026-08-27, audit #3607): contextvar
@@ -424,6 +432,19 @@ ignore = [
 "ava_builtins/plugins/*/skills/**/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
 "ava_builtins/plugins/*/skills/**/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
 "scripts/**" = ["ANN", "T20"]
+# The 19 typed S110 findings in scripts/tests were outside the retired lint's
+# production scan. Preserve that boundary without changing release proof or
+# updater code as part of this cleanup.
+"scripts/codegen/gen_config_lite_table.py" = ["S110"]
+"scripts/legacy_lkg/cold_boot.py" = ["S110"]
+"scripts/release_proofs/prove_release_inventory.py" = ["S110"]
+"scripts/release_proofs/prove_runtime_publication_input.py" = ["S110"]
+"tests/ava/mcps/test_daemon.py" = ["S110"]
+"tests/ava/test_core.py" = ["S110"]
+"tests/ava/test_migration_reset.py" = ["S110"]
+"tests/gateway/test_schedule_runner.py" = ["S110"]
+"tests/integration/test_grafana_native_runtime.py" = ["S110"]
+"tests/services/test_backup_scheduler_shutdown.py" = ["S110"]
 # T20 exemptions — print() is legitimate here: cli/ writes to the user's
 # terminal; ava/ and plugins/ print() is agent-facing dump (help() / context
 # injection), the SDK's documented output channel.

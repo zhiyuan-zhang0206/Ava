@@ -363,18 +363,13 @@ repos:
         files: (\.md$|^scripts/content_lint/check_narrative_facts\.py$|^services/im_bridge/)
         pass_filenames: false
 
-      # Ban the silent `except ...: pass` swallow (AST, not grep — catches
-      # multi-line forms). A handler whose body is a lone `pass` is the
-      # defensive swallow AGENTS.md's "Fail fast" principle bans. Sanctioned
-      # explicit form is `contextlib.suppress(SpecificError)`; a justified
-      # best-effort path uses an inline `# fail-fast-ok: <reason>`. The script
-      # self-filters to the framework dirs, so files: \.py$ is a coarse gate.
-      - id: lint-fail-fast
-        name: lint-fail-fast
+      # The flake8-bandit typed-exception switch needed by S110 also affects
+      # S112. Keep S112's pre-migration behavior without 138 unrelated findings.
+      - id: lint-ruff-s112
+        name: lint Ruff S112 with typed exceptions off
         language: system
-        entry: .venv/bin/python scripts/lint/fail_fast.py
+        entry: .venv/bin/ruff check --select S112 --config "lint.ignore = []" --config "lint.flake8-bandit.check-typed-exception = false"
         files: \.py$
-        pass_filenames: false
 
       # Every UPDATE that writes agents_meta.status='terminated' must stamp
       # termination_source in the SAME statement. A NULL source is permanently

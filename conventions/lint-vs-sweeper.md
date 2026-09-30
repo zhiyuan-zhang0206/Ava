@@ -72,7 +72,7 @@ now graduated to a lint as well.
 |---|---|---|---|---|
 | 1 | `deps` | ✗ networked (`uv pip list --outdated`, `npm outdated`) | varies | **Sweeper** (detection gate) |
 | 2 | `docs-aging` | ✗ `git log` + `gh pr view` per file + judgement | cross-doc reorg | **Sweeper** (judgement) |
-| 3 | `fail-fast` | grep cheap BUT irreducible FP (`get() or {}`, `case _:` legit in non-enum match) | varies | **SPLIT**: `except…: pass` → Lint; rest → Sweeper |
+| 3 | `fail-fast` | grep cheap BUT irreducible FP (`get() or {}`, `case _:` legit in non-enum match) | varies | **SPLIT**: `except…: pass` → Ruff S110; rest → Sweeper |
 | 4 | `inline-marker` (TODO/FIXME) | ✓ | varies | **Sweeper** (no hard core — cannot block all TODOs; low yield) |
 | 5 | `dead-code` (vulture) | ✗ slow + 70 FP without the exclude list | local delete | **Sweeper** (detection gate) |
 | 6 | `boundary` (type/responsibility) | ✗ cross-file reasoning | type + all consumers, multi-file | **Sweeper** (its raison d'être) |
