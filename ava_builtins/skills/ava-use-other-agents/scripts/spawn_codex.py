@@ -11,6 +11,8 @@ the ownership contract and the printed ``key=value`` fields.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import inspect
 import sys
 from pathlib import Path
 
@@ -20,6 +22,33 @@ from ava.shell.coding_tools import codex
 # contract and locates the impersonator guide, its scripts/ (this file's own
 # directory) holds the supervisor script.
 _SKILL_DIR = Path(__file__).resolve().parent.parent
+
+
+def _launch_layout() -> dict[str, Path]:
+    if "skill_dir" in inspect.signature(codex.launch).parameters:
+        return {"skill_dir": _SKILL_DIR}
+
+    # Keep the old runtime's two files together without changing the managed skill copy.
+    key = hashlib.sha256(str(_SKILL_DIR).encode()).hexdigest()[:16]
+    reference = Path.home() / ".cache" / "ava" / "skill-spawn-compat" / key / "reference"
+    reference.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for name, target in (
+        ("collaboration_protocol.md", _SKILL_DIR / "references" / "collaboration_protocol.md"),
+        ("watch_work.py", _SKILL_DIR / "scripts" / "watch_work.py"),
+    ):
+        link = reference / name
+        if link.is_symlink() and link.readlink() == target:
+            continue
+        if link.is_symlink():
+            link.unlink()
+        elif link.exists():
+            raise RuntimeError(f"compatibility path is occupied: {link}")
+        try:
+            link.symlink_to(target)
+        except FileExistsError:
+            if not link.is_symlink() or link.readlink() != target:
+                raise
+    return {"reference_dir": reference}
 
 
 def main() -> int:
@@ -114,8 +143,8 @@ def main() -> int:
         args.caller_instance,
         (args.impersonation_name or workspace.name) if args.impersonate_self else None,
         args.brief,
-        skill_dir=_SKILL_DIR,
         resume=args.resume,
+        **_launch_layout(),
     )
 
 
