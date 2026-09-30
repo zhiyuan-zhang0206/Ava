@@ -11,15 +11,24 @@ The behaviour test runs a real tool with `AVA_HOME` and HOME pointing at homes
 whose `.env` cannot be read, so any read of either one fails the tool loudly. The
 structure test keeps the list closed: a tool that starts importing application
 code without the call fails it.
+
+The opposite rule holds for the tools CI and the hooks run on a bare `python3`
+(no project dependencies installed): they cannot reach the config boot at all,
+because `enter_scratch_home` lives where `dotenv` is imported. They need no
+scratch home, and a test runs each one under `python -S` to prove it stays that
+way.
 """
 
 from __future__ import annotations
 
 import ast
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -36,6 +45,24 @@ _APPLICATION_PACKAGES = frozenset(
 _OPERATOR_TOOLS = {
     "scripts/codegen/build_hierarchy_once.py": "builds one agent's history tree in the running cluster",
 }
+
+
+# `python3 scripts/...` (or `ui/...`) on a line that is not `uv run`: CI steps and
+# pre-commit entries that run on the interpreter the runner ships with.
+_BARE_ENTRY = re.compile(r"(?:^|[\s:])python3?\s+((?:scripts|ui)/[\w./-]+\.py)")
+
+
+def _bare_python_scripts() -> list[str]:
+    sources = [
+        *sorted((_REPO / ".github" / "workflows").glob("*.yml")),
+        _REPO / ".pre-commit-config.yaml",
+    ]
+    found: set[str] = set()
+    for source in sources:
+        for line in source.read_text(encoding="utf-8").splitlines():
+            if "uv run" not in line:
+                found.update(_BARE_ENTRY.findall(line))
+    return sorted(found)
 
 
 def _tool_scripts() -> list[Path]:
@@ -68,10 +95,11 @@ def _calls_enter_scratch_home(tree: ast.AST) -> bool:
 
 def test_every_tool_that_imports_application_code_enters_a_scratch_home() -> None:
     offenders: list[str] = []
+    bare = set(_bare_python_scripts())
     for script in _tool_scripts():
         rel = script.relative_to(_REPO).as_posix()
         tree = ast.parse(script.read_text(encoding="utf-8"))
-        if not _imports_application_code(tree) or rel in _OPERATOR_TOOLS:
+        if not _imports_application_code(tree) or rel in _OPERATOR_TOOLS or rel in bare:
             continue
         if not _calls_enter_scratch_home(tree):
             offenders.append(rel)
@@ -87,6 +115,65 @@ def test_the_operator_allowlist_names_only_tools_that_exist_and_import_applicati
     for rel in _OPERATOR_TOOLS:
         tree = ast.parse((_REPO / rel).read_text(encoding="utf-8"))
         assert _imports_application_code(tree), rel
+
+
+def test_the_bare_python_scan_finds_the_entries_it_is_meant_to_guard() -> None:
+    """A scan that silently matched nothing would make the next test vacuous."""
+    bare = _bare_python_scripts()
+    assert "scripts/lint/python_lock.py" in bare
+    assert "scripts/content_lint/lint_no_cjk.py" in bare
+    assert "scripts/provision/check_git_hooks.py" in bare
+
+
+@pytest.mark.parametrize("script", _bare_python_scripts())
+def test_a_tool_run_on_a_bare_python3_imports_without_a_third_party_package(
+    script: str, tmp_path: Path
+) -> None:
+    """`python -S` drops site-packages, which is what a runner's own `python3`
+    lacks: the tool's module body (its imports, not its `main()`) must run without
+    any project dependency, so it can neither call `enter_scratch_home` nor reach
+    the config boot. HOME is a temporary directory: a stray home read or write
+    cannot touch the operator's."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
+    env["HOME"] = str(tmp_path)
+    result = subprocess.run(  # noqa: S603 — fixed argv, repository tool, no shell
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            "import runpy, sys; runpy.run_path(sys.argv[1], run_name='bare_import_check')",
+            script,
+        ],
+        cwd=_REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / ".ava").exists()
+
+
+def test_the_ci_classify_step_imports_with_the_standard_library_alone(tmp_path: Path) -> None:
+    """`ci.yml`'s classify step runs `from base.deploy.git.repo_change import
+    classify_change` on the runner's bare `python3`."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            "import sys; sys.path.insert(0, '.'); "
+            "from base.deploy.git.repo_change import classify_change",
+        ],
+        cwd=_REPO,
+        env={"HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def _unreadable_home(root: Path) -> Path:
