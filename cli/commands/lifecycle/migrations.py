@@ -22,7 +22,7 @@ def cmd_migrations_apply() -> list[str]:
     readers and agent boot may dial as ``ava_runner`` and never perform DDL.
 
     Each Ava migration runs in a single transaction. `ava start` invokes this
-    after pg is ready; on the gateway `ava cluster update` reaches it through
+    after pg is ready; on the gateway the fleet update reaches it through
     the trailing `ava start`.
 
     Returns the names applied, NOT an exit code — the `cmd_` prefix is

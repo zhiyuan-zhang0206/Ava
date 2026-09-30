@@ -7,19 +7,16 @@ class MigrationError(Exception):
 
 
 class SchemaVersionMismatch(MigrationError):  # noqa: N818 — "state description" naming, same as AgentNotFound
-    """DB is missing migrations the code carries — run `ava cluster update`
-    (or `ava start`, which applies pending migrations) to catch up."""
+    """DB is missing migrations the code carries — run `ava start`, which applies
+    pending migrations, to catch up."""
 
 
 class CodeBehindSchema(MigrationError):  # noqa: N818
     """DB has applied migrations this checkout does **not** carry — local
     code is stale; the central DB has already been migrated. Multi-
-    machine: an agent-runner missed `ava cluster update` phase B fan-out while
-    offline; on coming online, local code is still on the old SHA.
-
-    When the watchdog's schema controller sees this exception, it spawns a
-    detached `ava cluster update` to self-heal (see
-    `ops/controllers/schema.py:schema_reconcile`).
+    machine: an agent-runner missed the fleet update while offline; on coming
+    online, local code is still on the old SHA. Update its checkout
+    (`python -m cli.fleet_update`).
     """
 
 
@@ -52,7 +49,7 @@ class MigrationAuthorityMismatch(MigrationError):  # noqa: N818
     """The executing checkout is not the gateway unit of the cluster whose DB it
     is about to migrate, so it may not mutate that schema.
 
-    A cluster's schema is owned by its gateway unit: `ava cluster update` there is the
+    A cluster's schema is owned by its gateway unit: the fleet update, run from there, is the
     single orchestrator that quiesces agents, migrates, and rolls the new commit
     out. Anyone else reaching the same DB with a newer `migrations/` migrates it
     out from under the gateway, which then fails its own startup schema check

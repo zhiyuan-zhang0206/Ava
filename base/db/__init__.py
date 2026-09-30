@@ -531,14 +531,14 @@ def signal_live_agents_restart(
     inbound_messages contract, one INSERT ... SELECT over every live agent, and
     the same per-agent Redis wake so an *idling* agent restarts now instead of
     stalling to its SELECT recheck. That prompt drain matters here specifically:
-    this is `ava cluster update`'s quiesce step, whose convergence loop keeps signalling
+    this is the fleet update's quiesce step, whose convergence loop keeps signalling
     until every live agent has drained — a 30s recheck lag per idle agent would
     drag the whole quiesce out. `source` tags the signal's origin
     (e.g. 'system:update').
 
     `machine` scopes the signal to one host's agents — the per-host quiesce the
     agent-runner self-update runs before it stops services (watchdog self-heal /
-    a direct `ava cluster update` on a runner); None means the whole cluster
+    a direct fleet update on a runner); None means the whole cluster
     (the rollout's stop-the-world).
 
     Args:

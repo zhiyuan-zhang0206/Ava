@@ -107,7 +107,7 @@ def _ensure_frontend_deps(repo: Path) -> None:
     """Install frontend deps when node_modules is missing OR when
     package-lock.json changed since the last install — `npm run build` without
     the exact locked deps dies immediately and the session exits (hit by
-    first-time install, fresh clone, AND by `ava cluster update` pulling a lockfile that
+    first-time install, fresh clone, AND by the fleet update pulling a lockfile that
     adds a dependency: build fails, `npm run build && exec npm run start` short-
     circuits, port 3000 goes dark).
 
@@ -350,7 +350,7 @@ def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
 def _preflight_probes() -> int:
     """Run gateway and DB reachability checks BEFORE stopping services.
 
-    Designed for `ava restart` and `ava cluster update` (self-update leg): validate
+    Designed for `ava restart` and the fleet update (self-update leg): validate
     that the host can still reach the gateway *before* killing its own
     services, so a transient gateway outage or network blip does not leave
     the host in a "services dead, can't start" state.

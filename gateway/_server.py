@@ -126,7 +126,7 @@ def main() -> None:
     # multiprocessing.spawn, and the worker's `PPID=1` is fully detached
     # from the session: when the session closes the worker does
     # not die, leaving a zombie holding :8000; the next graceful kill on
-    # ava cluster update cannot catch it, and the new gateway boot gets
+    # a fleet update cannot catch it, and the new gateway boot gets
     # [Errno 48] Address already in use. For dev hot-reload, set
     # AVA_GATEWAY_RELOAD=1 (usually in a dev clone's .env or shell). Reload
     # mode binds through uvicorn's own bind_socket, which maps "" to a

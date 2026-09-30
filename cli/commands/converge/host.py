@@ -285,7 +285,7 @@ def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Operator-visible warning when migrations/ holds files git does not track.
 
     The applier skips untracked migrations with a log warning (Task #998); this
-    surfaces the same fact on the console every `ava start` / `ava cluster update`
+    surfaces the same fact on the console every `ava start` / the fleet update
     converge runs, so an operator who wrote a migration into the prod checkout
     without committing it is told it will NOT be applied — the silent no-op
     would otherwise read as "my migration ran". Gateway-only: the gateway is the

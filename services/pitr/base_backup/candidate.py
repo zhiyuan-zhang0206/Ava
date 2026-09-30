@@ -186,7 +186,7 @@ def _validate_replication_hba(replication: Mapping[str, object]) -> None:
         f"pg_hba.conf has no physical-replication rule for PITR role {role} "
         f"(pg_basebackup dials host={host or '(socket)'}); the data-plane "
         "renderer must emit a `host replication <role> ...` row — regenerate "
-        "pg_hba.conf via `ava start` or `ava cluster update`"
+        "pg_hba.conf via `ava start`"
     )
 
 

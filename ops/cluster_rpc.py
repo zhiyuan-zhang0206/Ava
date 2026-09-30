@@ -310,7 +310,7 @@ async def dispatch_to_machine(
     `ops_url` is the host's ops base URL. Pass it pre-resolved (from a
     `machines`-table read done earlier, while Postgres was known up) to make the
     dial Postgres-independent — the compensating `cluster/resume` in a failed
-    `ava cluster update` runs after the local update may have taken the data plane down,
+    The fleet update runs after the local update may have taken the data plane down,
     so a lookup here would raise `psycopg.OperationalError` and sink the
     compensation (the 2026-07-20 incident). Omitted (None) → resolve it from the
     `machines` table now (the ordinary path, gateway + Postgres up).

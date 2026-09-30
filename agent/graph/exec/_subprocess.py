@@ -117,7 +117,7 @@ def _editable_guard_failure(
         output = (
             "exec editable install was poisoned, but automatic repair left unresolved records and "
             "no child was started. Do not retry this execute_code call. The remaining problems need "
-            "operator recovery: run ava converge or ava cluster update on this host.\n\n"
+            "operator recovery: run ava converge on this host.\n\n"
             "Polluted records:\n"
             + "\n".join(f"- {violation}" for violation in violations)
             + "\n\nRemaining records:\n"

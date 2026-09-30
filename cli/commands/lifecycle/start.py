@@ -287,7 +287,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # a missing/NULL row means the cluster cannot reach it. Failing here means
     # this host is invisible to the cluster — fatal on both roles, because an
     # agent-runner will also fail every subsequent `ava cluster status` and
-    # `ava cluster update` orchestration.
+    # The fleet update orchestration.
     print("\n→ register machine in central DB")
     rc = _repo_commands._register_machine_or_die(resolved, roles)
     if rc != 0:

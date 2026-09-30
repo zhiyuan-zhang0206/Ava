@@ -7,11 +7,10 @@ gateway processes reverse-depending on the `ava` package.
 
 Long-running processes (gateway / agent-host /
 labeler) call `assert_schema_current()` early in startup;
-`ava cluster update` flow calls `apply_pending_migrations()` after git
-pull.
+a fleet update's `ava start` applies pending migrations after the checkout
+switches.
 
-Migrations are applied as a step of `ava start`; `ava cluster update` triggers it on
-new code.
+Migrations are applied as a step of `ava start`.
 
 Identity model (2026-07-19 timestamp-id + re-baseline cutover):
 - File layout: `<repo-root>/migrations/YYYYMMDDTHHMMSS_<kebab-name>.sql` — a
@@ -161,7 +160,7 @@ def _applied_migration_set(conn: psycopg.Connection) -> set[str]:
 
 
 def applied_migration_names(conn: psycopg.Connection) -> set[str]:
-    """The DB's applied-migration name set — the snapshot `ava cluster update` captures
+    """The DB's applied-migration name set — the snapshot a start captures
     right before it applies a batch, so a failed start can roll the schema back
     to exactly the pre-update set (`rollback_to`)."""
     return _applied_migration_set(conn)
@@ -200,15 +199,14 @@ def check_schema_version(conn: psycopg.Connection) -> None:
         if missing:
             detail += f"; and is missing {len(missing)}: {sorted(missing)} (divergent)"
         raise CodeBehindSchema(
-            f"Schema ahead of code: {detail}. Run `ava cluster update` — on an "
-            "agent-runner that is the self-heal (checkout + uv sync + restart); "
-            "on the gateway it pulls, migrates, and rolls out the cluster."
+            f"Schema ahead of code: {detail}. Update this checkout to the cluster's "
+            "commit (`python -m cli.fleet_update`) and start it again."
         )
     if missing:
         raise SchemaVersionMismatch(
             f"Schema behind code: DB is missing {len(missing)} migration(s): "
-            f"{sorted(missing)}. Run `ava cluster update` (or `ava start`, which applies "
-            "pending migrations) to catch up."
+            f"{sorted(missing)}. Run `ava start` (which applies pending migrations) "
+            "to catch up."
         )
 
 
@@ -319,7 +317,7 @@ def _assert_migration_authority(conn: psycopg.Connection) -> None:
     raise MigrationAuthorityMismatch(
         f"refusing to migrate: this checkout claims {claim}, but the database's "
         f"gateway unit is {owner}. A cluster's schema is owned by its gateway — "
-        f"run `ava cluster update` there. Applying {MIGRATIONS_DIR} would leave the "
+        f"update the cluster from there. Applying {MIGRATIONS_DIR} would leave the "
         f"gateway's own code behind the schema and wedge every agent boot."
     )
 

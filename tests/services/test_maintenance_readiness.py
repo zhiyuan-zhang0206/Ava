@@ -104,7 +104,7 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
         pause_owner.begin_maintenance("fleet", WHEN)
         with pytest.raises(ProbeBoundaryError):
             agent_pause.prepare("fleet", WHEN)
-    # The release's abort, not the drain, releases the hold (cli/release_fleet).
+    # Only an explicit abort releases the hold, never the drain.
     assert admission.held()
 
 

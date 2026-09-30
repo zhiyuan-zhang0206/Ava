@@ -13,7 +13,7 @@ spawns the ``ava-updater`` session from inside the ops daemon; the updater's own
 ``ava restart`` stops this host's services, ``ava-ops`` among them; the kill of
 ``ava-ops``'s tree took the updater with it. ``ava-updater.out.log`` ends mid
 teardown, one line after the watchdog, and the host was left both stopped and
-un-updated. Agent processes sat in the same trap: ``ava cluster update``'s stop leaves
+un-updated. Agent processes sat in the same trap: the fleet update's stop leaves
 them running on purpose, yet stopping ``ava-ops`` force-killed every agent it had
 launched, past the graceful path their ``finally`` needs.
 
@@ -234,7 +234,7 @@ def test_killing_a_daemon_spares_the_sessions_control_stewards(fleet: _Fleet) ->
 
 def test_killing_a_daemon_spares_the_agent_processes_it_launched(fleet: _Fleet) -> None:
     """Agents are records in the same namespace and are also the ops daemon's
-    children. `ava cluster update`'s stop leaves them running for the rollout to quiesce;
+    children. the fleet update's stop leaves them running for the rollout to quiesce;
     a tree kill would force-kill them past their graceful shutdown."""
     winproc.kill_session("ava-ops", graceful=False)
 
@@ -383,7 +383,7 @@ def test_a_force_kill_that_does_not_take_reports_failure(
 def test_a_graceful_kill_that_does_not_take_reports_failure(
     fleet: _Fleet, survivor: _FakeProc, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Same for the graceful path, which is the one `ava cluster update` takes: Ctrl-Break
+    """Same for the graceful path, which is the one the fleet update takes: Ctrl-Break
     went out, the wait expired, the hard kill went out, and the process is still
     there. `mode` still names the path taken — it reports how, `ok` reports
     whether."""

@@ -15,7 +15,7 @@ logged-in profile that must survive every `ava start`).
 
 `ensure_browser_profile` is called from the converge `_ensure_browser` step,
 which runs at `ava start` before the browser session launches. Non-interactive
-paths (watchdog respawn, boot autostart, `ava cluster update` rollout) pass
+paths (watchdog respawn, boot autostart, the fleet update rollout) pass
 `interactive=False` and take the fresh-profile default without prompting.
 """
 

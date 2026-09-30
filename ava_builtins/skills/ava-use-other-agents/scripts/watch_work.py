@@ -7,7 +7,7 @@ PTY and reclaims its generation state directory before this process exits.
 
 Delivery survives a restart window: each wake send retries with doubling gaps
 (10s to a 160s cap, ~10.5 min in total) because a gateway / agent restart
-window (an update wave, `ava cluster update`) outlasts the SDK's own 3 quick
+window (an update wave, the fleet update) outlasts the SDK's own 3 quick
 retries; a wake that never lands exits 2 at the one-shot call sites, while the
 supervision loop keeps its schedule and retries at its next trigger.
 """

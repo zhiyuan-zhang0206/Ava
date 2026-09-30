@@ -408,7 +408,7 @@ def cmd_plugins_upgrade(name: str, *, force: bool = False) -> int:
     if pkg.source is None:
         print(
             f"[ava plugins upgrade] '{name}' has no recorded git source "
-            f"(converge-managed, origin={pkg.origin}); it updates via `ava cluster update`.",
+            f"(converge-managed, origin={pkg.origin}); it updates via the fleet update.",
             file=sys.stderr,
         )
         return 1
