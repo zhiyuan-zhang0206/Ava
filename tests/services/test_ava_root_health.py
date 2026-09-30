@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
@@ -524,6 +525,52 @@ async def test_integration_unconfirmed_restart_backs_off(
     assert supervisor._units["svc"].restart_count == 1
     assert supervisor._units["svc"].generation is second
     assert "backing off" in caplog.text
+
+
+async def test_a_probe_outlasting_the_verification_window_leaves_the_restart_unconfirmed() -> None:
+    """The window closing before the probe answers says the replacement is not confirmed
+    (DOWN: counted, backed off), not that inspection failed (terminal: state reset)."""
+    release = threading.Event()
+    answers = 0
+
+    def probe() -> DaemonProbe:
+        nonlocal answers
+        answers += 1
+        if answers > 1:
+            release.wait(timeout=10)  # the replacement's answer never comes inside the window
+        return DaemonProbe.down("wedged")
+
+    stub = StubSupervisor()
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
+    try:
+        await monitor.run_round()
+    finally:
+        release.set()
+    state = monitor.snapshot()["svc"]
+    assert stub.restart_calls == ["svc"]
+    assert state.last_verdict == "down"
+    assert state.consecutive_failures == 1
+    assert state.respawn_attempts == 1
+    assert state.next_respawn_at is not None
+
+
+async def test_a_probe_outlasting_its_own_deadline_is_unavailable_and_never_restarts() -> None:
+    release = threading.Event()
+
+    def probe() -> DaemonProbe:
+        release.wait(timeout=10)
+        return DaemonProbe.up("late")
+
+    stub = StubSupervisor()
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(probe_timeout_s=0.05))
+    try:
+        await monitor.run_round()
+    finally:
+        release.set()
+    state = monitor.snapshot()["svc"]
+    assert state.last_verdict == "unavailable"
+    assert "exceeded 0.05s deadline" in state.last_detail
+    assert not stub.restart_calls
 
 
 async def test_health_snapshot_exposes_the_status_view(clock: FakeClock) -> None:
