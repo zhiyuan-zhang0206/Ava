@@ -35,7 +35,7 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 
 - Skills: the runtime reads ONE load directory (`$AVA_HOME/skills/`); repo built-ins are *synced copies*, so a copy refresh is hot (next skill scan / `ava.help()` — "active on the next skill scan; no restart needed"). But the refresh moments are only two:
   1. an explicit `ava skill update` (R5 ruling: converge lands a missing copy and *never* updates one — updates are the explicit verb, task #1013);
-  2. the rollout legs (`_update_local._refresh_builtin_skills` / `_update_agent_runner._refresh_builtin_skills`) which run `ava skill update` once per `ava cluster update`; conflicts are non-fatal.
+  2. the converge skills-sync step (`cli/commands/converge/host.py:_converge_skills_step` -> `cli/commands/extensions/skills_sync.py:converge_skills`), which runs on every `ava start` / `ava converge` / `ava cluster update --prepared` activation and lands missing copies the same way as (1); conflicts are non-fatal. (Superseded the old `_update_local`/`_update_agent_runner` rollout legs, retired with the pre-unified-lifecycle updater.)
   Nothing is periodic; nothing is automatic. A repo skill edit reaches a running machine only when a human types the verb or a rollout happens.
 - Plugins: built-in plugins load from the checkout/wheel (`paths.repo_plugins_dir()`; provider plugins load from the same discovery in every model-building process). Their content moves only when the *code* moves (uv sync + service restarts). `ava plugins upgrade <name>` works only for packages with a recorded git *source*; a repo-origin package is explicitly refused with "it updates via `ava cluster update`".
 
@@ -303,7 +303,7 @@ Rules:
 
 ### 5.7 Interaction with existing flows (the traps)
 
-1. **Rollout's builtin refresh must skip channel-managed packages.** `_update_local._refresh_builtin_skills` / `_update_agent_runner...` run `ava skill update` after a code pull. If a machine's copy is channel-managed (applied from a newer content rev than the checkout's), that leg would *downgrade* it. Rule: `ava skill update` (and its rollout legs) applies checkout content only to packages whose channel is not `core`, or whose policy is `off`; channel-managed packages are refreshed by the channel. (Alternative considered and rejected: ancestry comparison — "apply checkout content only if it is newer by git ancestry" — clever, untestable at fleet scale, and violates Keep-It-Simple.)
+1. **Explicit skill updates must skip channel-managed packages.** `ava skill update` (`cmd_skill_update`) applies checkout content only to packages whose channel is not `core`, or whose policy is `off`; channel-managed packages are refreshed by the channel instead (landed: `cli/commands/extensions/skill.py`, the `policy.channel == "core"` skip). The old rollout legs that used to call it once per `ava cluster update` (`_update_local`/`_update_agent_runner`, downstream of the pre-unified-lifecycle updater) are retired; their successor, the converge skills-sync step (`skills_sync.py:converge_skills`), only ever lands a *missing* copy (R5, never overwrites an existing one), so it cannot downgrade a channel-managed package by construction and needs no separate skip rule. (Alternative considered and rejected: ancestry comparison — "apply checkout content only if it is newer by git ancestry" — clever, untestable at fleet scale, and violates Keep-It-Simple.)
 2. **Converge seeding stays as-is (bootstrap-only)** for machines that have never channeled: the checkout copy remains the seed for fresh installs and for wheel-mode. Once a package is channel-managed, the channel is the writer.
 3. **The source-tree guard is untouched.** Content lives in `$AVA_HOME` data dirs; the checkout is never a content destination. This is also why the submodule candidate is rejected.
 4. **S2 cluster rows (issue #39) are the migration target, not a competitor.** P1 keeps machine-local channel state (works today, zero DB dependency). When S4 lands (plugins as cluster rows), the policy fields become cluster columns and the machine executor only materializes + fetches locally; the refresh pass keeps its interface ("make this machine match the policy").
@@ -330,7 +330,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 ### P1 — skills fast lane (the POC; the deliverable the user can feel) — **landed: PR #2368**
 - `ava packages refresh` implementing §5.3 for `skill` packages, `core` channel first (fetch from the checkout's remote, per-package diff, archive-extract, gates, staged swap, records) and `git` channel second (reusing `acquire_source` / `cmd_skill_upgrade` semantics).
 - OS job registration (`base/host/system/packages_job.py`, new module; 15-min tick, converge step) behind a setting; default ON for skill-class core content after the user's ruling; OFF until then (safe rollout).
-- Rollout skip rule (§5.7-1) in the two `_refresh_builtin_skills` legs + `cmd_skill_update`.
+- Channel-managed skip rule (§5.7-1) in `cmd_skill_update`; the converge skills-sync step needs none, by construction (see §5.7-1).
 - Install flags: `ava skill install ... [--update-mode auto|notify|off] [--check-every <dur>]` (default auto/24h per the user ruling).
 - Version gates wired into the refresh (§5.5) + the runtime skill filter (out-of-range skills excluded from the catalog with a status reason) + `ava packages rollback <name>`.
 - Acceptance (end-to-end on macmini, then a second machine):
@@ -397,7 +397,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 
 - Load dir sync + R5 bootstrap-only: `cli/commands/extensions/skills_sync.py` docstring; `okf/skills/load-directory-sync.ava.okf.md`.
 - Explicit update verbs + conflicts: `cli/commands/extensions/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/extensions/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/extensions/mcp.py`.
-- Rollout skill refresh legs: `cli/commands/_update_local.py:85` (`_refresh_builtin_skills`), `cli/commands/_update_agent_runner.py:250`.
+- Builtin skill sync (bootstrap-only, missing copies): `cli/commands/converge/host.py:_converge_skills_step` -> `cli/commands/extensions/skills_sync.py:converge_skills` (superseded the pre-unified-lifecycle updater's `_update_local`/`_update_agent_runner` rollout legs).
 - Registry model: `base/packages/extensions/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).
 - Plugin discovery + loaders: `base/packages/plugins/enable_config.py:discover_plugins`, `agent/extensions/__init__.py:load_extensions`, `base/lm/plugin_providers.py`; roots: `base/paths/__init__.py:repo_plugins_dir/plugins_dir`, `base/deploy/release/runtime_interpreter.py:external_plugin_read_root`.
 - Manifest/engines gate: `base/packages/plugins/manifest.py` (`host_version_from_repo`, `check_host_engine`), `conventions/plugin-spec-v2.md`.

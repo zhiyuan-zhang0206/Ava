@@ -241,19 +241,7 @@ class GeneralSettings(EnvSettings):
     track_branch: str = Field(
         default="main",
         alias="AVA_TRACK_BRANCH",
-        description="Git branch this cluster tracks; `ava cluster update` pulls from origin/<this>. Override for preview/staging clusters.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    fetch_via_gateway: bool = Field(
-        default=False,
-        alias="AVA_FETCH_VIA_GATEWAY",
-        description="Central-fetch topology for the cluster source: when on, the gateway is the cluster's single wall-crossing fetcher and every agent-runner's rollout fetch must come from the gateway (its `origin` points there); a runner whose `origin` still addresses a wall host (github.com) refuses the Phase-0 fetch instead of silently fetching GitHub. Off (default): every node fetches its own `origin`. Enable/rollback: conventions/fetch-via-gateway-runbook.md.",
+        description="Git branch the agent-runner memory pool tracks; `base.deploy.git.memory_repo.pull_main()` fast-forwards the gateway's consolidated memory checkout from origin/<this>, and branch-status reporting diffs against it. Override for preview/staging clusters.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,

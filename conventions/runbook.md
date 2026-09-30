@@ -231,9 +231,13 @@ check applies to the editable URL uv records beside the pointer — in each venv
 checkout's `file://` URL. If either record is wrong, do **not** delete the
 worktree: use [manual editable-install recovery](#manual-editable-install-recovery)
 from the affected stable checkout and recheck. `ava converge` / `ava start`
-independently assert and auto-repair
-both prod records, then make site-packages, `ava-*.dist-info`, and `.venv/bin`
-directories read-only outside the narrow update/repair write window.
+independently assert and auto-repair both prod records. Converge no longer
+marks site-packages, `ava-*.dist-info`, or `.venv/bin` read-only itself; a
+directory still carrying an earlier converge's `0o555` opens automatically
+inside the repair's own write window
+(`base/deploy/release/editable_install.py:protected_editable_paths` /
+`editable_pth_write_window`), or by a one-time manual `chmod u+w` on that
+directory — after either, `uv sync` behaves normally again.
 Every `execute_code` spawn also checks
 the current interpreter's records: the first poisoned call repairs the install
 and returns a retryable structured error, preventing a flood of failed child

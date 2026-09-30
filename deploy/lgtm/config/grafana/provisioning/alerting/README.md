@@ -48,7 +48,7 @@ address when `AVA_OBSERVABILITY_URL` points at a remote station.
 ## Rules (43)
 
 The rules are split between `ava-ops` (33 rules, evaluated every minute:
-R1-R6, the watchdog-tick and gateway-metrics silence rules, the checkpoint
+R1-R6, the root-health-round and gateway-metrics silence rules, the checkpoint
 guards, R8-R12, R14-R16, R24, and the R25/R26 backup-operation custody
 rules) and
 `ava-ops-slow` (ten rules, evaluated every five minutes: R7, R13, R17's two
@@ -65,7 +65,7 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-llm-latency-p95` | `ava-ops` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
 | `ava-ops-delivery-stalled-backlog` | `ava-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
 | `ava-ops-events-freshness` | `ava-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
-| `ava-ops-watchdog-tick-stale` | `ava-ops` | watchdog completed-tick timestamp | a recently seen machine+process timestamp is >3m old or absent for 3m (Prometheus) | 0m | error |
+| `ava-ops-root-health-stale` | `ava-ops` | root health round freshness | a machine+home+process expecting rounds within 24h has its last completed round >3m stale, or none since startup (Prometheus) | 0m | error |
 | `ava-ops-gateway-metrics-silent` | `ava-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
 | `ava-ops-trace-disk-watermark` | `ava-ops-slow` | trace recording auto-degraded | recording_disabled_disk_watermark count in 24h > 0 (Loki) | 5m | error |
 | `ava-ops-llm-billing-quota` | `ava-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
