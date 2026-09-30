@@ -160,6 +160,7 @@ def test_artifact_freshness_hook_list_matches_config() -> None:
         "constants-codegen-fresh",
         "events-registry-fresh",
         "config-lite-table-fresh",
+        "lint-pyright-test-environments",
         "lint-ava-okf",
         "check-doc-references",
     }

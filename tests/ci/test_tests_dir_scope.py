@@ -282,6 +282,13 @@ def _hook_selects(hook_id: str, path: str) -> bool:
         ("types-codegen-fresh", "ops/rpc_schemas/tests/test_terminate.py", False),
         ("config-lite-table-fresh", "base/config/base.py", True),
         ("config-lite-table-fresh", "base/config/tests/test_config.py", False),
+        # The generated pyright tests environments follow the tests directories themselves:
+        # any module in a package's tests/ directory can add or remove one.
+        ("lint-pyright-test-environments", "base/packages/tests/test_x.py", True),
+        ("lint-pyright-test-environments", "ava_builtins/skills/gmail/scripts/tests/x.py", True),
+        ("lint-pyright-test-environments", "pyproject.toml", True),
+        ("lint-pyright-test-environments", "tests/agent/test_x.py", False),
+        ("lint-pyright-test-environments", "base/packages/plugins.py", False),
     ],
 )
 def test_pre_commit_hook_selection_by_directory(hook_id: str, path: str, selected: bool) -> None:

@@ -597,6 +597,21 @@ repos:
         files: ^(base/host/env/config_registry\.py$|base/config/(?!(?:.*/)?tests/).*\.py$|scripts/codegen/gen_config_lite_table\.py$|base/host/env/config_lite_table\.json$)
         pass_filenames: false
 
+      # The `executionEnvironments` entries that hold each package's tests/ directory to the
+      # tests type-checking standard (pyproject.toml, between the GENERATED markers) come from
+      # the tracked tests directories: adding, moving or removing one changes the expected
+      # list. Any .py under a tests/ directory can do that; a delete-only change is not
+      # selected here and is caught by the pre-push freshness family and CI. Deliberately not
+      # named `*-fresh`: that suffix is the codegen family CI's structure job runs selectively
+      # after installing Node. This check is pure Python, so CI's unconditional
+      # `pre-commit run --all-files` (segment A) runs it on every change.
+      - id: lint-pyright-test-environments
+        name: "lint pyright tests environments (pyproject.toml matches the tests directories; drift: run .venv/bin/python scripts/codegen/gen_pyright_test_environments.py)"
+        entry: .venv/bin/python scripts/codegen/gen_pyright_test_environments.py --check
+        language: system
+        files: ^(pyproject\.toml$|scripts/codegen/gen_pyright_test_environments\.py$|.+/tests/.*\.py$)
+        pass_filenames: false
+
       # `git rebase` / `cherry-pick` / `merge` never invoke the pre-commit
       # hook for the commits they create, so a conflict-resolution commit
       # can reach `git push` having never been checked by a single

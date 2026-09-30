@@ -25,6 +25,7 @@ hooks=(
     constants-codegen-fresh
     events-registry-fresh
     config-lite-table-fresh
+    lint-pyright-test-environments
     lint-ava-okf
     check-doc-references
 )
