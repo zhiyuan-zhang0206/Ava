@@ -58,7 +58,7 @@ def test_allocate_ports_first_block(monkeypatch: pytest.MonkeyPatch):
     assert ports["gateway"] == 18000
     assert ports["milvus"] == 18008
     assert ports.get("memory_search") == 18024
-    # The release coordinator listener reuses the vacated offset 20.
+    # The retired coordinator slot stays reserved in every block.
     assert ports.get("coordinator") == 18020
     assert cluster.LEGACY_AVA_PORTS["coordinator"] == 8121
 
@@ -67,8 +67,8 @@ def test_allocate_ports_skips_a_block_with_a_bound_port(monkeypatch: pytest.Monk
     """Allocation only probes this host: a block with any port bound right now is
     skipped, and with BLOCK_SIZE=27 the next candidate is 18027 (the two
     capability watchdog health listeners extended the block after the R3
-    page_server, hosted-runner, and backup additions; the release coordinator
-    reuses the vacated offset 20). No other cluster's block is consulted.
+    page_server, hosted-runner, and backup additions; the retired coordinator
+    slot at offset 20 stays reserved). No other cluster's block is consulted.
 
     Concrete on purpose: a block growth must force someone to re-check
     allocation rather than slide past a derived assertion."""

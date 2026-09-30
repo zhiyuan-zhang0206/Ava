@@ -11,7 +11,7 @@ resolves only alerts that fired. Owner notification uses the alerts ingest and
 its local fallback when the gateway is unavailable.
 
 The probe never selects a release, rolls back code, or publishes known-good
-state. The release operation owns those decisions.
+state.
 """
 
 from __future__ import annotations
@@ -388,8 +388,7 @@ def _editable_install_failure() -> str | None:
     A polluted virtualenv can point at disposable source even when the checkout
     itself is unchanged. This probe reads only; ordinary start and converge do
     not repair editable installs. Recovery requires explicit inspection and
-    repair of the identified installation. Retained images use their verified
-    inventory instead of an editable pointer.
+    repair of the identified installation.
 
     The shared inspection helper applies exact-root allowlisting (production
     source plus the stable ~/Ava clone), never an arbitrary descendant.
@@ -456,8 +455,8 @@ def run_health_probe(
 ) -> int:
     """Return 0 for healthy, 1 for unhealthy, and 2 for a checkout refusal.
 
-    Observations feed graded owner alerts. Release selection, rollback, and
-    known-good publication belong to the release operation.
+    Observations feed graded owner alerts; nothing here selects, rolls back or
+    publishes a release.
     """
     from base.paths import ava_home, prod_service_checkout_error, repo_root
 

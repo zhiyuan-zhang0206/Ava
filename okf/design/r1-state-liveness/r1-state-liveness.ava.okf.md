@@ -30,7 +30,7 @@ tags:
 
 **`host_deploy_state`** (host-level, one row per host) — replaces the `cluster_paused` file, `updating.flag`, session probing, updater-log-mtime liveness: `posture` (`idle`/`paused`/`converging`), `updater_lease_expires_at`, `updated_at`.
 
-**Cluster UI marker** (`$AVA_HOME/deploy-state.json`) — retired with the in-place updater that wrote it. No lifecycle produces it and Gate does not read it: a release transition stops Gate with the rest of root. A leftover file is inert.
+**Cluster UI marker** (`$AVA_HOME/deploy-state.json`) — retired with the in-place updater that wrote it. No lifecycle produces it and Gate does not read it: a stop takes Gate down with the rest of root. A leftover file is inert.
 
 ### Phases: three states, not five
 

@@ -4,8 +4,7 @@ Five jobs, one concept — everything Ava asks the platform scheduler (launchd /
 crontab) to run on its behalf:
 
 - **health probe** — periodic cluster health check reporting observations and
-  graded alerts (gateway); release actions belong to the retained release
-  operation, not this probe.
+  graded alerts (gateway); it takes no repair action.
 - **boot autostart** — brings the whole cluster back after a reboot (prod only).
 - **logs maintenance** — daily copytruncate rotation followed by tiered retention.
 - **packages refresh** — the content channel's recurring pass (skills fast lane).

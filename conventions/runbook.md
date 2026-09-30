@@ -781,7 +781,7 @@ isolated drill: `ava pitr drill` (procedure:
 Backup and PITR operations (daily dump, weekly logical restore drill, base
 candidate, restore proof, operator drill) each run as one owned worker group of
 their kind. A failed or cancelled operation whose group closure was proven --
-including an `ava stop` or release drain during the nightly dump -- is
+including an `ava stop` during the nightly dump -- is
 quarantined under its kind's `$AVA_HOME/backups/quarantine/<kind>/` or
 `$AVA_HOME/physical-backup/quarantine/<kind>/` (request, logs, `failure.txt`,
 receipts; plaintext database material removed), raises the

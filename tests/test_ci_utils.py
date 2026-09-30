@@ -1752,14 +1752,14 @@ def test_limbo_runs_flags_aged_queued_zero_job_run(monkeypatch) -> None:
     calls: list[list[str]] = []
     _install_probe(
         monkeypatch,
-        [{"id": 91, "name": "Native launcher observation proof", "created_at": _aged(910)}],
+        [{"id": 91, "name": "Native root lifetime proof", "created_at": _aged(910)}],
         {91: 0},
         calls=calls,
     )
     got = ci_utils._limbo_runs("abc1234", "o/r")
     assert got is not None
     assert [r["id"] for r in got] == [91]
-    assert got[0]["name"] == "Native launcher observation proof"
+    assert got[0]["name"] == "Native root lifetime proof"
     assert got[0]["age_s"] >= 900
     # the runs probe filters queued-only server-side; the jobs probe confirms zero.
     assert 'select(.status == "queued")' in calls[0][-1]

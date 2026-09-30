@@ -61,10 +61,10 @@ def pause_local_cluster() -> None:
 
     This entry is update-family only, so the drain enables the straggler reap
     (task #4016): a member still un-landed past `update_straggler_reap_seconds`
-    is truncated and released as `reaped` instead of aborting the wave. Its
-    only production caller, the legacy lease-bound `cluster_stop` op, was
-    replaced by the fleet release transition; it stays until its straggler-reap
-    tests move to the release drain (recorded debt).
+    is truncated and released as `reaped` instead of aborting the wave. It has no
+    production caller: the legacy lease-bound `cluster_stop` op and the release
+    drain that enabled the reap are both gone (recorded debt: retire it with the
+    straggler-reap machinery).
     """
     from base.config import settings
     from ops.agent_pause import pause_agents
