@@ -20,18 +20,14 @@ from pathlib import Path
 import psutil
 import pytest
 
-from base.native_process.os_platform import IS_WINDOWS
 from base.sessions import posixproc
 from base.sessions.backend import (
     PosixProcSessionBackend,
     PtySessionBackend,
     SessionBackend,
-    WinprocSessionBackend,
     get_shell_backend,
 )
 from tests.base.poll_until import poll_until
-
-pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
 
 # A long-lived child that outlives the test body; each test kills it explicitly.
 _SLEEP = "/bin/sleep 300"
@@ -333,7 +329,7 @@ def test_no_login_shell_preserves_env_path_exactly(unit_home):
 
 
 def test_send_keys_and_capture_pane_raise():
-    """No PTY: the interactive methods raise, like the Windows backend."""
+    """No PTY: the interactive methods raise."""
     backend = _backend()
     with pytest.raises(NotImplementedError):
         backend.send_keys("s", "C-c")
@@ -351,7 +347,7 @@ def test_has_session_false_for_unknown(unit_home):
 
 def test_get_shell_backend_returns_pty_backend():
     """get_shell_backend() is the PTY backend for agent shells/watchers —
-    the self-hosted PTY supervisor on POSIX (S6 step 2), winproc on Windows —
+    the self-hosted PTY supervisor —
     a singleton distinct from the get_backend() singleton (service sessions
     live on the native backend; interactive shells on the PTY one)."""
     from base.sessions.backend import get_backend
@@ -359,9 +355,6 @@ def test_get_shell_backend_returns_pty_backend():
     b1 = get_shell_backend()
     b2 = get_shell_backend()
     assert b1 is b2  # singleton
-    if IS_WINDOWS:
-        assert isinstance(b1, WinprocSessionBackend)
-    else:
-        assert isinstance(b1, PtySessionBackend)
+    assert isinstance(b1, PtySessionBackend)
     assert isinstance(b1, SessionBackend)
     assert b1 is not get_backend()

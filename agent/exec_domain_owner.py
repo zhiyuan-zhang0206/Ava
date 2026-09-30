@@ -29,9 +29,6 @@ from base.agents.incarnation.exec_owner_protocol import (
 )
 from base.agents.incarnation.resources import ResourceProcess
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
-from base.native_process.os_platform import IS_WINDOWS
-from base.native_process.winjob import WindowsJob
-from base.native_process.winjob_pipes import PipedJobChild, start_piped_job_process
 
 
 def _ended(identity: psutil.Process) -> bool:
@@ -44,7 +41,7 @@ def _ended(identity: psutil.Process) -> bool:
 class ControlPipe:
     """The owner loop alone reads control; no buffered daemon survives shutdown.
 
-    Python 3.12 supports nonblocking pipes on POSIX and Windows. Partial records
+    Python 3.12 supports nonblocking pipes. Partial records
     retain their fixed bound, and EOF never upgrades a truncated record to permit.
     """
 
@@ -73,7 +70,7 @@ class ControlPipe:
         return line + separator
 
 
-def _relay(root: subprocess.Popen[bytes] | PipedJobChild, failures: list[BaseException]) -> None:
+def _relay(root: subprocess.Popen[bytes], failures: list[BaseException]) -> None:
     if root.stdout is None:
         failures.append(RuntimeError("owner root has no output pipe"))
         return
@@ -108,7 +105,6 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
     ):
         raise RuntimeError("exec owner request digest differs from reservation")
     control = ControlPipe(sys.stdin.fileno())
-    job = WindowsJob.create() if IS_WINDOWS else None
     argv = [
         sys.executable,
         "-I",
@@ -120,24 +116,15 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
         "--context",
         str(context_path),
     ]
-    try:
-        if job is not None:
-            root = start_piped_job_process(argv, job)
-            domain = ExecProcessDomain(root, job)
-        else:
-            root, domain = ExecProcessDomain.launch_posix(
-                argv,
-                new_session=True,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                close_fds=True,
-                bufsize=0,
-            )
-    except BaseException:
-        if job is not None:
-            job.close()
-        raise
+    root, domain = ExecProcessDomain.launch_posix(
+        argv,
+        new_session=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        close_fds=True,
+        bufsize=0,
+    )
     reader_failures: list[BaseException] = []
     reader = threading.Thread(target=_relay, args=(root, reader_failures), daemon=True)
     reason: Literal["completed", "host_eof", "cancel", "timeout"] = "completed"
@@ -156,9 +143,8 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
         reader.start()
         publish_owner_message(context_path.with_suffix(".ready"), OwnerReady(allocation=allocation))
         permitted = False
-        # POSIX must keep the root unreaped to pin its process group. Windows
-        # instead retains the Job handle and uses the actual root process handle.
-        while not (root.poll() is not None if IS_WINDOWS else _ended(root_identity)):
+        # Keep the root unreaped to pin its process group.
+        while not _ended(root_identity):
             if time.monotonic() >= deadline:
                 reason = "timeout"
                 break
@@ -211,10 +197,7 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
             original.add_note(f"owner cleanup unresolved: {type(cleanup).__name__}: {cleanup}")
         raise
     finally:
-        # Never turn failed cleanup into a terminal receipt. Closing the native
-        # handle on error is best effort containment, not positive evidence.
-        if job is not None and not job.closed:
-            job.close()
+        # Never turn failed cleanup into a terminal receipt.
         if not attached:
             root.kill()
         if root.stdin is not None and not root.stdin.closed:

@@ -3,16 +3,14 @@
 An agent process is non-interactive: it talks to the world over DB + Redis and
 logs to a file, so a host session for it no longer costs a PTY (macOS
 caps `kern.tty.ptmx_max`, a whole-box wall the fleet hit long before any real
-resource limit). This module hosts agents the way `base.sessions.windows.winproc` hosts them on
-Windows — a named, detached process tracked by a small on-disk record — so the
-POSIX agent-launch path is fully native. Daemons run here too (services
+resource limit). This module hosts agents as named, detached processes tracked
+by small on-disk records. Daemons run here too (services
 need no PTY, and the per-box PTY ceiling then stops bounding service count);
 only the agents' own persistent shells live elsewhere, each in its own
 detached pty host (`base/sessions/pty`), which keeps the long-lived
 interactive pane.
 
-The surface mirrors `base.sessions.windows.winproc` one-to-one so `ops.agent_launch` and the
-reap / status consumers dispatch to one of the two by platform:
+`ops.agent_launch` and the reap / status consumers use this surface:
 
 - a "session" is a named process launched **double-forked** (via
   `base._reparent`) so it reparents to init immediately — a long-lived spawner
@@ -399,7 +397,7 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
     except Exception as exc:
         logger.warning("posixproc kill {name} hit {exc}", name=name, exc=exc)
     mode = "graceful" if ended_on_signal else "forced"
-    # Kill result re-check (mirrors winproc's #1015 fix): a kill that reports
+    # Kill result re-check (#1015): a kill that reports
     # success it did not achieve turns a live-but-unbacked session into a
     # service nothing starts. The contract (session_backend.py) says `ok`
     # means the session is confirmed gone; on a survivor we keep the record —

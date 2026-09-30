@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Stopping a process — the kill contract and the non-session trio"
-description: "How Ava stops what it started: `kill_session`'s (ok, mode) contract and its graceful/forced escalation for named sessions, `base/host/proc.py`'s `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions (pooler, port orphans, the gate daemon) — including why the obvious POSIX spellings do not survive the crossing to Windows — how a stop converges a service tree whose leader already died (recorded process group, retry path), and what the deadline report names when convergence fails (per-process identity, stage, durable journal payload)."
+description: "How Ava stops what it started: `kill_session`'s (ok, mode) contract and its graceful/forced escalation for named sessions, `base/host/proc.py`'s `process_alive` / `request_stop` / `force_kill` trio for processes that are not sessions, how a stop converges a service tree whose leader already died, and what the deadline report names when convergence fails."
 tags:
 - shared
 - process
@@ -30,17 +30,10 @@ The lower-level escalating APIs below retain their own explicit contracts.
 
 `kill_session(name, graceful=...)` → `(ok, mode)` with mode in `{graceful, forced, noop}`. `mode` reports what **happened**, not what was requested: a graceful stop that had to escalate to the SIGKILL fallback returns `forced`, so the caller's escalation marker fires instead of a clean-stop one that hides a hard kill. Idempotent: an absent/dead session is a `noop`. `ok` means **the session is confirmed gone**, not "the kill command was accepted" — backends re-ask their own existence check after killing, because a kill that reports success it did not achieve turns a live-but-unbacked session into a service nothing starts (issue #1015). `graceful=True` SIGTERMs only the top process and waits up to the timeout, then hard-kills the tree; `graceful=False` SIGKILLs children first so a parent cannot respawn a child mid-teardown. `expected=True` marks an operator-initiated transition (rollout/update/stop) so backends that escalate a kill log at INFO instead of WARNING/ERROR there.
 
-Signal delivery follows the platform's verified launch shape. POSIX launchers
-exec into the daemon, so SIGTERM reaches the recorded PID directly. Windows
-uses a private console; its recorded root may be a venv redirector, while
-Ctrl-Break reaches the interpreter as SIGBREAK. `base/daemon/shutdown.py`
-maps both service stop signals to the daemon's KeyboardInterrupt cleanup.
-On Windows the caller's session decides the control channel: same-session
-delivery attaches the target's private console directly; a caller in another
-session (SSH = session 0 vs desktop services = session 1) routes the request
-through the session's resident control steward, which runs the same verified
-helper from inside the target's session. A cross-session target with no
-steward is an explicit refusal — the stop reports incomplete, never escalates.
+Signal delivery follows the verified launch shape. POSIX launchers exec into
+the daemon, so SIGTERM reaches the recorded PID directly.
+`base/daemon/shutdown.py` maps the service stop signal to the daemon's
+KeyboardInterrupt cleanup.
 The ops daemon explicitly cancels and awaits loop tasks before its final exit,
 without joining stuck executor threads. See [[session-backend.ava.okf.md|session backend]].
 
@@ -91,7 +84,7 @@ it back.
 
 ### Stops that do not go through a session
 
-Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `base/host/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force) — and **must**, because two of the obvious spellings do not survive the crossing to Windows: `os.kill(pid, 0)` *terminates* the target there rather than probing it, and `signal.SIGKILL` is undefined. `cli/commands/data_plane/pgbouncer.py:stop_pgbouncer` captures the exact pooler owner and delegates to its native custodian; an incomplete stop retains custody and fails. Normal pause/stop instead use the non-escalating data-plane boundary in `cli/commands/data_plane/maintenance_stop.py`. A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
+Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `base/host/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force). `cli/commands/data_plane/pgbouncer.py:stop_pgbouncer` captures the exact pooler owner and delegates to its native custodian; an incomplete stop retains custody and fails. Normal pause/stop instead use the non-escalating data-plane boundary in `cli/commands/data_plane/maintenance_stop.py`. A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
 
 ## Entry points
 
@@ -103,5 +96,5 @@ Not every process Ava stops is a named session: the pooler, an orphan holding a 
 
 ## Notes
 
-- The trio is the reason a stop path can be written once and run on all three
-  platforms: the Windows divergences live inside it, not at every call site.
+- The trio keeps liveness, graceful delivery, and force-kill behavior consistent
+  across the stop paths that use them.

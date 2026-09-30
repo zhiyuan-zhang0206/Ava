@@ -525,7 +525,6 @@ def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
         registry.HOST_PASSTHROUGH_KEYS
         | registry._TEMP_DIR_KEYS
         | registry.NETWORK_PROXY_KEYS
-        | registry.WINDOWS_SYSTEM_ENV_KEYS
         | {"PYTHONUTF8"}
     )
     declared = (

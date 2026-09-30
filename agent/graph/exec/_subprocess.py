@@ -3,7 +3,7 @@ collect one disposable child per execute_code call.
 
 The parent polls every 50ms and owns teardown through direct-child reap,
 root-independent process-domain close, and a bounded output-reader join. POSIX
-owns a new process group; Windows owns a Job Object. The child's result
+owns a new process group. The child's result
 envelope stays advisory except for lifecycle outcomes. It spawns
 `python -I -B -X utf8 -m agent.exec_child`: isolated mode keeps the inherited cwd
 and Python environment out of bootstrap import resolution, and explicit UTF-8
@@ -51,9 +51,7 @@ from base.host.env.registry import (
     MANIFEST_CERTIFICATION_SECRET_ENV,
 )
 from base.log import logger
-from base.native_process.os_platform import CREATE_NO_WINDOW, IS_WINDOWS
 from base.native_process.turn_identity import current_hosted_resources
-from base.native_process.winjob import EXEC_JOB_GATE_ENV, WindowsJob, publish_parent_job_gate
 from base.paths import exec_run_dir
 
 from . import _process
@@ -145,7 +143,6 @@ def _build_child_env(
     *,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
-    windows_job_gate: Path | None = None,
 ) -> dict[str, str]:
     """The child's environment: the parent's own (settings already materialized
     by dotenv_boot), plus the identity the session env allowlist deliberately
@@ -175,8 +172,6 @@ def _build_child_env(
     env["AVA_PROCESS_PROFILE"] = "agent"
     env["AVA_EXEC_REQUEST_FILE"] = str(request_path)
     env["AVA_EXEC_RESULT_FILE"] = str(result_path)
-    if windows_job_gate is not None:
-        env[EXEC_JOB_GATE_ENV] = str(windows_job_gate)
     if config_overlay:
         env[AGENT_CONFIG_OVERLAY_ENV] = json.dumps(config_overlay, sort_keys=True)
     if birth_config:
@@ -195,7 +190,6 @@ def _spawn(
     *,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
-    windows_job_gate: Path | None = None,
 ) -> tuple[subprocess.Popen[bytes], _process.ExecProcessDomain]:
     """Spawn one child. POSIX raw subprocesses stay in its process group;
     persistent ``ava.shell.sessions`` are backend-hosted and outside it."""
@@ -205,87 +199,21 @@ def _spawn(
         result_path,
         config_overlay=config_overlay,
         birth_config=birth_config,
-        windows_job_gate=windows_job_gate,
     )
     argv = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent.exec_child"]
-    if not IS_WINDOWS:
-        try:
-            return _process.ExecProcessDomain.launch_posix(
-                argv,
-                new_session=True,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=env,
-            )
-        except OSError as original:
-            # Native admission failures have ExecDomainBirthError, retaining the
-            # launched handle. An OS spawn failure has no surviving child.
-            raise _ExecNeverStartedError(str(original)) from original
-    windows_job = WindowsJob.create() if IS_WINDOWS else None
     try:
-        proc = subprocess.Popen(  # noqa: S603 -- fixed isolated Windows entry.
+        return _process.ExecProcessDomain.launch_posix(
             argv,
+            new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,  # OS-level merge — preserves print/traceback order
+            stderr=subprocess.STDOUT,
             env=env,
-            creationflags=CREATE_NO_WINDOW,
-            start_new_session=not IS_WINDOWS,
         )
     except OSError as original:
-        if windows_job is not None and not _attempt_spawn_cleanup(
-            original, "job_close", windows_job.close
-        ):
-            raise
+        # Native admission failures retain the launched handle; an OS spawn
+        # failure has no surviving child.
         raise _ExecNeverStartedError(str(original)) from original
-    except BaseException as original:
-        if windows_job is not None:
-            _attempt_spawn_cleanup(original, "job_close", windows_job.close)
-        raise
-
-    if windows_job is not None:
-        if windows_job_gate is None:
-            original = RuntimeError("Windows exec spawn requires an attach gate")
-            _abort_failed_windows_spawn(proc, windows_job, original)
-            raise original
-        try:
-            windows_job.assign(proc)
-            publish_parent_job_gate(windows_job_gate)
-        except BaseException as original:
-            _abort_failed_windows_spawn(proc, windows_job, original)
-            raise
-    return proc, _process.ExecProcessDomain(proc=proc, windows_job=windows_job)
-
-
-def _abort_failed_windows_spawn(
-    proc: subprocess.Popen[bytes],
-    windows_job: WindowsJob,
-    original: BaseException,
-) -> None:
-    """Fail closed without letting one cleanup failure skip or mask another."""
-    _attempt_spawn_cleanup(original, "job_close", windows_job.close)
-    _attempt_spawn_cleanup(original, "root_kill", proc.kill)
-    _attempt_spawn_cleanup(original, "root_reap", lambda: proc.wait(timeout=5.0))
-    if proc.stdout is not None:
-        _attempt_spawn_cleanup(original, "stdout_close", proc.stdout.close)
-
-
-def _attempt_spawn_cleanup(
-    original: BaseException,
-    stage: str,
-    action: Callable[[], object],
-) -> bool:
-    """Attempt one pre-owner cleanup stage, preserving the work failure."""
-    try:
-        action()
-    except Exception as cleanup_error:
-        original.add_note(
-            "exec spawn cleanup also failed "
-            f"({stage}: {type(cleanup_error).__name__}: {cleanup_error})"
-        )
-        return False
-    return True
 
 
 def _drain_output(proc: subprocess.Popen[bytes], stream: StreamingTextIO) -> None:
@@ -320,7 +248,7 @@ async def _poll_child(
     domain_close: _process.DomainCloseOwner,
 ) -> tuple[bool, bool]:
     """Poll every 50ms and publish chunks. POSIX signals SIGINT on cancel and
-    SIGTERM on deadline; Windows requests immediate Job close. Returns
+    SIGTERM on deadline. Returns
     (cancelled, timed_out); on a same-tick race cancel wins."""
     deadline = time.monotonic() + timeout
     while not root_exit_task.done():
@@ -380,7 +308,7 @@ async def _finish_failed_run(
     reader_join_task: asyncio.Task[None] | None,
     reader: threading.Thread | None,
     *,
-    request_paths: tuple[Path, Path, Path | None] | None = None,
+    request_paths: tuple[Path, Path] | None = None,
 ) -> bool:
     """Settle an interrupted run without replacing its primary failure."""
     if root_exit_task is None or reap_task is None or domain_close is None:
@@ -410,7 +338,6 @@ def _write_request_failure(
 def _finish_request_evidence(
     request_path: Path,
     result_path: Path,
-    gate: Path | None,
     expected: object | None,
     *,
     settled: bool,
@@ -421,17 +348,15 @@ def _finish_request_evidence(
             return
         if not scope.complete(request_path, expected):
             return
-    for path in (request_path, result_path, gate):
-        if path is not None:
-            with contextlib.suppress(FileNotFoundError):
-                path.unlink()
+    for path in (request_path, result_path):
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
 
 
 def _retain_late_reader_completion(
     failure: _process.ExecTeardownError,
     request: Path,
     result: Path,
-    gate: Path | None,
     reader: threading.Thread | None,
 ) -> None:
     """A failed bounded join may later finish; other failed stages stay unknown.
@@ -453,10 +378,9 @@ def _retain_late_reader_completion(
         while reader.is_alive():
             await asyncio.sleep(0.05)
         if scope.complete(request, domain):
-            for path in (request, result, gate):
-                if path is not None:
-                    with contextlib.suppress(FileNotFoundError):
-                        path.unlink()
+            for path in (request, result):
+                with contextlib.suppress(FileNotFoundError):
+                    path.unlink()
 
     task = asyncio.create_task(complete_reader(), name=f"exec-late-reader-{request.stem}")
     scope.completions.add(task)
@@ -541,7 +465,6 @@ async def _run_legacy_subprocess(
         exec_dir = exec_run_dir()
     request_path = make_request_path(exec_dir, agent_id)
     result_path = make_result_path(exec_dir, agent_id)
-    windows_job_gate = request_path.with_suffix(".job-ready.json") if IS_WINDOWS else None
 
     request_error = _write_request_failure(request_path, code, agent_id, timeout, state)
     if request_error is not None:
@@ -567,7 +490,6 @@ async def _run_legacy_subprocess(
                 agent_id,
                 config_overlay=config_overlay,
                 birth_config=birth_config,
-                windows_job_gate=windows_job_gate,
             )
             if resource_scope is not None:
                 resource_scope.unresolved[request_path] = domain
@@ -637,11 +559,11 @@ async def _run_legacy_subprocess(
             domain_close,
             reader_join_task,
             reader,
-            request_paths=(request_path, result_path, windows_job_gate),
+            request_paths=(request_path, result_path),
         )
         raise
     except _process.ExecTeardownError as exc:
-        _retain_late_reader_completion(exc, request_path, result_path, windows_job_gate, reader)
+        _retain_late_reader_completion(exc, request_path, result_path, reader)
         # Cleanup failure is an exec outcome, not an agent-process failure.
         return (
             _ExecCrashed(
@@ -663,13 +585,11 @@ async def _run_legacy_subprocess(
             domain_close,
             reader_join_task,
             reader,
-            request_paths=(request_path, result_path, windows_job_gate),
+            request_paths=(request_path, result_path),
         )
         raise
     finally:
-        _finish_request_evidence(
-            request_path, result_path, windows_job_gate, domain, settled=resources_settled
-        )
+        _finish_request_evidence(request_path, result_path, domain, settled=resources_settled)
 
 
 def _read_result_envelope(

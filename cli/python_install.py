@@ -212,9 +212,7 @@ def install(
                 repo,
                 env,
             )
-        target = (
-            repo / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-        )
+        target = repo / ".venv" / "bin/python"
         result = _mirror_environment(repo, target, interpreter, request, env, run)
         if result:
             return result

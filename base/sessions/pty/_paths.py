@@ -2,7 +2,7 @@
 
 The per-session namespace lives under ``$AVA_HOME/run/pty/``: one
 ``<name>.json`` record and one ``<name>.sock`` socket per live session. It is
-deliberately NOT ``run/sessions/`` (the posixproc/winproc service-session
+deliberately NOT ``run/sessions/`` (the service-session
 dir): a record scan is the session listing, and sharing the dir would make
 every lister on either side regex-filter the other's records out — the
 pre-2026-08 layout did exactly that and ``stop.py`` carried the filter.

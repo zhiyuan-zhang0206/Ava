@@ -85,7 +85,7 @@ def test_computer_mcp_present_when_capable(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_computer_mcp_absent_without_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """The host cannot run the signed permissions helper (no swiftc/codesign/
-    display on macOS, no csc on Windows) -> service gated out: the executor
+    display on macOS) -> service gated out: the executor
     layer would have nothing to execute through."""
     monkeypatch.setattr(repo.settings.services, "permissions_helper_enabled", True)
     monkeypatch.setattr(spec, "permissions_helper_incapability", lambda: "no swiftc")
@@ -103,14 +103,3 @@ def test_computer_mcp_never_on_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(repo.settings.services, "permissions_helper_enabled", True)
     monkeypatch.setattr(spec, "permissions_helper_incapability", lambda: None)
     assert "computer-mcp" not in _sessions("gateway")
-
-
-def test_computer_mcp_gated_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Windows is the phase-3 pilot: the C# helper lacks the screen geometry /
-    frontmost-app methods the executor needs, so the service stays gated out
-    there until those land (task #1101)."""
-    monkeypatch.setattr(repo.settings.services, "permissions_helper_enabled", True)
-    monkeypatch.setattr(spec, "permissions_helper_incapability", lambda: None)
-    monkeypatch.setattr(spec, "IS_WINDOWS", True)
-    assert "computer-mcp" not in _sessions("agent-runner")
-    assert "phase-3 pilot" in (_annotated("agent-runner")["computer-mcp"] or "")

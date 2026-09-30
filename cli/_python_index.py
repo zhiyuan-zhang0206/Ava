@@ -67,16 +67,11 @@ def _uv_index(repo: Path, env: Mapping[str, str], home: Path) -> str | None:
     )
     if value:
         return value
-    if sys.platform == "win32":
-        user = Path(env.get("APPDATA", str(home / "AppData" / "Roaming"))) / "uv" / "uv.toml"
-        system = Path(env.get("PROGRAMDATA", "C:/ProgramData")) / "uv" / "uv.toml"
-    else:
-        user = Path(env.get("XDG_CONFIG_HOME", str(home / ".config"))) / "uv" / "uv.toml"
-        candidates = [
-            Path(p) / "uv" / "uv.toml"
-            for p in env.get("XDG_CONFIG_DIRS", "/etc/xdg").split(os.pathsep)
-        ] + [Path("/etc/uv/uv.toml")]
-        system = next((p for p in candidates if p.is_file()), candidates[-1])
+    user = Path(env.get("XDG_CONFIG_HOME", str(home / ".config"))) / "uv" / "uv.toml"
+    candidates = [
+        Path(p) / "uv" / "uv.toml" for p in env.get("XDG_CONFIG_DIRS", "/etc/xdg").split(os.pathsep)
+    ] + [Path("/etc/uv/uv.toml")]
+    system = next((p for p in candidates if p.is_file()), candidates[-1])
     return _uv_config_index(user) or _uv_config_index(system)
 
 
@@ -84,14 +79,7 @@ def _pip_paths(repo: Path, env: Mapping[str, str], home: Path) -> list[Path]:
     explicit = env.get("PIP_CONFIG_FILE")
     if explicit and Path(explicit) == Path(os.devnull):
         return []
-    if sys.platform == "win32":
-        name = "pip.ini"
-        global_paths = [Path(env.get("PROGRAMDATA", "C:/ProgramData")) / "pip" / name]
-        user_paths = [
-            home / "pip" / name,
-            Path(env.get("APPDATA", str(home / "AppData" / "Roaming"))) / "pip" / name,
-        ]
-    elif sys.platform == "darwin":
+    if sys.platform == "darwin":
         name = "pip.conf"
         global_paths = [Path("/Library/Application Support/pip/pip.conf")]
         user_dir = home / "Library" / "Application Support" / "pip"

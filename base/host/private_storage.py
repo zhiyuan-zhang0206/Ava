@@ -231,10 +231,7 @@ def write_private_bytes(path: Path, data: bytes) -> None:
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        if os.name == "nt":
-            temporary.chmod(0o600)
-        else:
-            os.fchmod(fd, 0o600)
+        os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as file:
             fd = -1
             file.write(data)
@@ -242,12 +239,11 @@ def write_private_bytes(path: Path, data: bytes) -> None:
             os.fsync(file.fileno())
         os.replace(temporary, path)  # noqa: PTH105 — explicit atomic replacement primitive
         ensure_private_file(path)
-        if os.name != "nt":
-            directory_fd = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if fd != -1:
             os.close(fd)

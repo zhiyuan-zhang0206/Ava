@@ -1,10 +1,8 @@
 # Unattended boot for a WSL gateway
 
 A WSL gateway needs two boot owners: Windows starts and holds the intended
-distribution open; Linux starts the installed Ava home. Ava's native Windows
-runner still uses the interactive account described in
-[Windows setup](windows-setup.md). Do not change that runner's tasks to make the
-WSL gateway boot.
+distribution open; Linux starts the installed Ava home. The Windows task below
+anchors the WSL distribution and does not launch a native Ava runner.
 
 Windows `WSLService` being automatic does not establish a distribution boot
 trigger. A logon task needs a logged-on user, and
@@ -143,7 +141,6 @@ and running state, Linux boot ID and systemd (for the home unit:
 `systemctl status ava-boot.*` and its adopted root `MainPID`), the native
 journal, authenticated gateway/data-plane readiness, Linux network access, and
 runner/agent recovery.
-Record the Windows native runner's separate interactive-session dependency.
 Test that ending only the anchor makes the repeating trigger recover it, and
 that disabling it prevents resurrection during maintenance. Until these checks
 pass, describe the result as prepared boot wiring, not verified cold recovery.

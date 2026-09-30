@@ -17,7 +17,7 @@ plugin binding is their declaration:
   registry there would pull pydantic + all 15 sub-models into every boot
   (#3621); the index is generated from the same declarations and locked
   equal to the registry by tests/base/test_config_lite_table.py.
-- **Non-Settings keys** (ambient display vars, Windows system keys, the
+- **Non-Settings keys** (ambient display vars,
   overlay/birth JSON carriers, temp-dir vars, ...) are registered as
   `EnvField` passthrough rows below — one row per key (A1: exactly one
   declaration; a row whose key is also a Settings alias fails fast).
@@ -29,8 +29,8 @@ below); capability/scope metadata only validates (deriving env sets from
 capability was the 2026-08-06 #1570 P0).
 
 Projections (the design's boundary currency):
-- `child_env(role, platform)` — the parent->child forwarding view
-  (SESSION/AGENT_FORWARD/HOST_PASSTHROUGH/WINDOWS_SYSTEM semantics);
+- `child_env(role)` — the parent->child forwarding view
+  (SESSION/AGENT_FORWARD/HOST_PASSTHROUGH semantics);
   `role` reuses `AVA_PROCESS_PROFILE` (gateway/agent/runner) — daemons belong
   to the gateway/runner profiles.
 - `env_keep_set(role)` / `env_authority_drop_set(role)` — the dotenv_boot
@@ -41,8 +41,8 @@ The module stays importable before Settings exists: `dotenv_boot` runs its
 authority pass at `.env`-load time. Provider-plugin declarations load lazily
 only at the delivery boundaries that consume them.
 
-POSIX delivery is the backend env-dict handoff (`base.sessions.env_forwarding.forward_env_dict`);
-Windows delivers a dict. KEY=VALUE argv delivery stays forbidden (secrets never ride
+Delivery is the backend env-dict handoff (`base.sessions.env_forwarding.forward_env_dict`).
+KEY=VALUE argv delivery stays forbidden (secrets never ride
 argv — decisions/2026-07-30-secrets-never-ride-argv.md).
 """
 
@@ -150,37 +150,6 @@ def network_proxy_configured() -> bool:
     return any(os.environ.get(key) for key in NETWORK_PROXY_KEYS)
 
 
-# Windows system keys a child env MUST carry (Task #945 follow-up): on Windows a
-# child env dict is a wholesale replacement (CreateProcess / winproc — no login
-# shell rebuilds it), so without these a child dies in winsock init before its
-# first import (`import _overlapped`, WinError 10106 — v0.1.34 win daemons,
-# 2026-08-07 agent spawn). Copied from os.environ, non-empty only; POSIX needs
-# none of them (login shell rebuilds). Single declaration — the old parallel
-# copy in base/sessions/env_forwarding.py is gone.
-_WINDOWS_SYSTEM_ROWS = tuple(
-    EnvField(key)
-    for key in (
-        "SYSTEMROOT",
-        "WINDIR",
-        "COMSPEC",
-        "PATHEXT",
-        "OS",
-        "NUMBER_OF_PROCESSORS",
-        "PROCESSOR_ARCHITECTURE",
-        "USERPROFILE",
-        "USERNAME",  # getpass.getuser() on Windows reads USERNAME and falls back
-        # to `import pwd` when absent — which does not exist on Windows (Task #963:
-        # every `ava start` converge crashed at the watchdog-probe schtasks
-        # registration in allowlist-built children, three rollouts in a row).
-        "USERDOMAIN",
-        "HOMEDRIVE",
-        "HOMEPATH",
-        "APPDATA",
-        "LOCALAPPDATA",
-    )
-)
-WINDOWS_SYSTEM_ENV_KEYS = frozenset(row.key for row in _WINDOWS_SYSTEM_ROWS)
-
 # The per-agent config overlay / birth stamp travel in env vars as JSON (never
 # argv — issue #974: argv is world-readable via `ps`). Not Settings fields:
 # they are process-bound carriers the exec launcher writes and child boot consumes.
@@ -214,7 +183,6 @@ _TEMP_DIR_KEYS = frozenset({"TMPDIR", "TEMP", "TMP"})
 
 _PASSTHROUGH_ROWS = (
     _HOST_PASSTHROUGH_ROWS
-    + _WINDOWS_SYSTEM_ROWS
     + _NETWORK_PROXY_ROWS
     + tuple(EnvField(key) for key in _GUIDE_PASSTHROUGH_KEYS | {REDIS_PASSWORD_ENV})
     + tuple(EnvField(key) for key in _OS_CANONICAL_KEYS | _TEMP_DIR_KEYS)
@@ -462,7 +430,7 @@ def launch_input_keys() -> frozenset[str]:
     proof), PATH and VIRTUAL_ENV as the delivery rebuilds them from the
     runtime, and the finalizer ticket. The ambient host facts `child_env`
     copies from whoever launched it (display, HOME/USER/LOGNAME, temp dirs,
-    proxy, Windows system keys) are not: a service manager injects its own —
+    proxy) are not: a service manager injects its own —
     systemd `User=` sets USER and LOGNAME, launchd adds TMPDIR — so an observer
     running with the fixed stage environment would name a different generation
     for the same launch. Positive list: a key a delivery adds later stays out
@@ -535,7 +503,7 @@ def _ensure_validated() -> None:
     _ensure_validated._done = True  # type: ignore[attr-defined]
 
 
-def child_env(role: ProcessRole, platform: str) -> dict[str, str]:
+def child_env(role: ProcessRole) -> dict[str, str]:
     """The parent->child env dict a `role` child receives (forwarding view).
 
     POSITIVE allowlist, not a drop list (Task #856 Phase C, audit F-s3-4): a
@@ -543,9 +511,6 @@ def child_env(role: ProcessRole, platform: str) -> dict[str, str]:
     daemon session. `role` reuses AVA_PROCESS_PROFILE: `gateway` and `runner`
     (daemon/session children — daemons belong to those profiles) get the
     session view; `agent` adds the agent-scope knobs and boot-time guide keys.
-    `platform` ("posix" | "windows") selects the delivery semantics: on
-    Windows the dict replaces the child env wholesale, so the system keys ride
-    (non-empty); POSIX needs none of them (the child's login shell rebuilds).
     Host passthroughs (DISPLAY/WAYLAND_DISPLAY/HOME/USER/LOGNAME), the temp-dir vars and the
     machine's network proxy configuration (NETWORK_PROXY_KEYS — the one egress
     channel a build child needs; issue #2095) are carried non-empty only — an
@@ -569,20 +534,6 @@ def child_env(role: ProcessRole, platform: str) -> dict[str, str]:
     for key in HOST_PASSTHROUGH_KEYS | _TEMP_DIR_KEYS | NETWORK_PROXY_KEYS:
         if os.environ.get(key):
             env[key] = os.environ[key]
-    if platform == "windows":
-        # UTF-8 mode for every Windows child interpreter (PEP 540): the
-        # positive allowlist wholesale-replaces the child env, which drops the
-        # PYTHONUTF8 seed ensure_utf8_stdio planted in the parent os.environ —
-        # so daemons (agent-host) and their in-process hosted agents would
-        # start on the legacy code page and crash printing CJK (task #2540,
-        # win agent 2528). Inject it here for every role, the same value
-        # exec-child bootstrap also requires.
-        env["PYTHONUTF8"] = "1"
-        for key in WINDOWS_SYSTEM_ENV_KEYS:
-            if os.environ.get(key):
-                env[key] = os.environ[key]
-    elif platform != "posix":
-        raise ValueError(f"child_env platform={platform!r} — must be 'posix' or 'windows'")
     return env
 
 

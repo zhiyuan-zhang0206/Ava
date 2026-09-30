@@ -96,8 +96,8 @@ class TestScopeDerivationRules:
             MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
         }
         for role in ("gateway", "runner", "agent"):
-            assert MANIFEST_CERTIFICATION_SECRET_ENV not in child_env(role, "posix")
-            assert MANIFEST_CERTIFICATION_FINALIZER_ENV not in child_env(role, "posix")
+            assert MANIFEST_CERTIFICATION_SECRET_ENV not in child_env(role)
+            assert MANIFEST_CERTIFICATION_FINALIZER_ENV not in child_env(role)
 
     def test_finalizer_boot_ticket_retains_proof_from_its_unit_file(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -142,7 +142,7 @@ class TestScopeDerivationRules:
 
         monkeypatch.setenv("USER", "operator")
         monkeypatch.setenv("LOGNAME", "operator")
-        env = child_env(role, "posix")  # type: ignore[arg-type] — parametrized ProcessRole
+        env = child_env(role)  # type: ignore[arg-type] — parametrized ProcessRole
         assert env["USER"] == "operator"
         assert env["LOGNAME"] == "operator"
 
@@ -170,7 +170,7 @@ class TestScopeDerivationRules:
             monkeypatch.delenv(key, raising=False)
         assert network_proxy_configured() is False
         for role in ("gateway", "runner", "agent"):
-            assert not (NETWORK_PROXY_KEYS & set(child_env(role, "posix")))
+            assert not (NETWORK_PROXY_KEYS & set(child_env(role)))
         monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
         monkeypatch.setenv("no_proxy", "localhost,127.0.0.1")
         monkeypatch.setenv("ALL_PROXY", "")
@@ -178,11 +178,10 @@ class TestScopeDerivationRules:
         # non-empty proxy key, either spelling.
         assert network_proxy_configured() is True
         for role in ("gateway", "runner", "agent"):
-            for platform in ("posix", "windows"):
-                env = child_env(role, platform)
-                assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
-                assert env["no_proxy"] == "localhost,127.0.0.1"
-                assert "ALL_PROXY" not in env
+            env = child_env(role)
+            assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
+            assert env["no_proxy"] == "localhost,127.0.0.1"
+            assert "ALL_PROXY" not in env
 
     def test_agent_forward_is_session_plus_agent_scope_plus_guide(self) -> None:
         from base.host.env.registry import agent_forward_keys, session_forward_keys
@@ -306,7 +305,7 @@ class TestRegistryInvariants:
         from base.host.env.registry import child_env
 
         # Exercises _ensure_validated(); raises RuntimeError on a collision.
-        child_env("agent", "posix")
+        child_env("agent")
 
     def test_every_projection_key_is_registered(self) -> None:
         """A1: no orphan keys — every alias a projection emits is either a
@@ -314,7 +313,7 @@ class TestRegistryInvariants:
         import base.host.env.registry as er
 
         registered = set(_aliases_with(scope=())) | _all_aliases()
-        registered |= er.HOST_PASSTHROUGH_KEYS | er.WINDOWS_SYSTEM_ENV_KEYS
+        registered |= er.HOST_PASSTHROUGH_KEYS
         registered |= {
             "SSL_CERT_FILE",
             "REQUESTS_CA_BUNDLE",
@@ -337,35 +336,6 @@ class TestRegistryInvariants:
             er.agent_forward_keys(),
         ):
             assert proj <= registered, f"projection carries unregistered keys: {proj - registered}"
-
-    def test_windows_system_keys_are_declared_once(self) -> None:
-        """The old parallel copy in base/sessions/env_forwarding.py is gone — a single
-        declaration in the registry; USERNAME/USERDOMAIN are the Task #963
-        lock (getpass.getuser() on Windows)."""
-        from base.host.env.registry import WINDOWS_SYSTEM_ENV_KEYS, child_env
-
-        assert "USERNAME" in WINDOWS_SYSTEM_ENV_KEYS
-        assert "USERDOMAIN" in WINDOWS_SYSTEM_ENV_KEYS
-        os.environ["SYSTEMROOT"] = r"C:\Windows"
-        try:
-            env = child_env("agent", "windows")
-            assert env["SYSTEMROOT"] == r"C:\Windows"
-            assert "SYSTEMROOT" not in child_env("agent", "posix")
-        finally:
-            os.environ.pop("SYSTEMROOT", None)
-
-    def test_windows_child_env_sets_utf8_mode(self) -> None:
-        """Task #2540: the Windows positive allowlist wholesale-replaces the
-        child env, dropping ensure_utf8_stdio's PYTHONUTF8 seed — a daemon
-        (agent-host) and its in-process hosted agents then start on the legacy
-        code page and crash printing CJK (win agent 2528). The windows branch
-        must inject PYTHONUTF8=1 for every role; POSIX children are unchanged
-        (locale UTF-8)."""
-        from base.host.env.registry import child_env
-
-        for role in ("agent", "runner", "gateway"):
-            assert child_env(role, "windows")["PYTHONUTF8"] == "1"
-            assert "PYTHONUTF8" not in child_env(role, "posix")
 
 
 def _all_aliases() -> frozenset[str]:

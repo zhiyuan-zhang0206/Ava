@@ -12,7 +12,6 @@ import contextlib
 import datetime as dt
 import hashlib
 import json
-import os
 import re
 import uuid
 from dataclasses import dataclass
@@ -405,8 +404,6 @@ def _payload(owner: CodingSessionOwner) -> dict[str, object]:
 
 
 def _fsync_parent(path: Path) -> None:
-    if os.name == "nt":
-        return
     fsync_parent(path)
 
 

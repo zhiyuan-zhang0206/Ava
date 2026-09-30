@@ -15,8 +15,7 @@
     "tests/base/test_publication_admission.py::test_sync_async_decisions_and_lock_interoperate": 18,
     "tests/base/test_telemetry_otlp.py::test_log_mapping_full_record_shape": 18,
     "tests/base/test_telemetry_otlp.py::test_metric_mapping_int_counter_float_histogram": 17,
-    "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23,
-    "tests/base/test_winproc_launch.py::test_new_session_spawns_a_control_steward_bound_to_the_record_identity": 21
+    "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
     "tests/base": 265
@@ -135,12 +134,6 @@
     "tests/base/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 5,
     "tests/base/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._build_providers": 3,
     "tests/base/test_telemetry_otlp_child_defer.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 1,
-    "tests/base/test_turn_scoped_log_attribution.py::base.native_process.turn_identity._process_agent_id": 5,
-    "tests/base/test_winproc_graceful_routing.py::base.sessions.windows.winproc._process_for_record": 1,
-    "tests/base/test_winproc_graceful_routing.py::base.sessions.windows.winproc._read_record": 3,
-    "tests/base/test_winproc_kill_boundaries.py::base.sessions.windows.winproc._process_for_record": 3,
-    "tests/base/test_winproc_launch.py::base.native_process.winjob._exec_job_state": 1,
-    "tests/base/test_winproc_maintenance.py::base.sessions.windows.winproc._process_for_record": 3,
-    "tests/base/test_winproc_maintenance.py::base.sessions.windows.winproc._read_record": 2
+    "tests/base/test_turn_scoped_log_attribution.py::base.native_process.turn_identity._process_agent_id": 5
   }
 }

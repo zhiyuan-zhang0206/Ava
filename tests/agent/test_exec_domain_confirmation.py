@@ -1,12 +1,10 @@
 """Positive managed-domain closure, separate from signal submission or root exit."""
 
 import contextlib
-import ctypes
 import os
 import subprocess
 import sys
 import time
-from ctypes import wintypes
 from pathlib import Path
 
 import psutil
@@ -14,103 +12,22 @@ import pytest
 
 from agent.graph.exec import _process
 from base.native_process import group_closure
-from base.native_process.os_platform import IS_WINDOWS
-from base.native_process.winjob import WindowsJob, _kernel32
-from base.native_process.winjob_pipes import PipedJobChild, start_piped_job_process
-
-
-def _belongs_to_job(job: WindowsJob, pid: int) -> bool:
-    """Read this exact Job, not merely membership in the CI runner's Job."""
-    api = _kernel32()
-    api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    api.OpenProcess.restype = wintypes.HANDLE
-    api.IsProcessInJob.argtypes = [wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
-    handle = api.OpenProcess(0x1000, False, pid)
-    assert handle, "cannot inspect the actual fixture process"
-    try:
-        member = wintypes.BOOL()
-        assert api.IsProcessInJob(handle, job.handle, ctypes.byref(member))
-        return bool(member.value)
-    finally:
-        assert api.CloseHandle(handle)
 
 
 def _ended(identity: psutil.Process) -> bool:
     try:
-        if IS_WINDOWS:
-            # Windows status() is not a native process-handle termination wait.
-            identity.wait(timeout=0)
-            return True
         return identity.status() in {psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD}
-    except psutil.TimeoutExpired:
-        return False
     except psutil.NoSuchProcess:
         return True
 
 
-def _close_fixture(
-    root: subprocess.Popen[bytes] | PipedJobChild,
-    job: WindowsJob | None,
-    member: psutil.Process | None,
-) -> None:
-    if job is not None and not job.closed:
-        job.close()
-    if root.returncode is None:
-        root.kill()
-        root.wait(timeout=5)
-    if member is not None and not _ended(member):
-        member.kill()
-        member.wait(timeout=5)
-    if root.stdin is not None:
-        root.stdin.close()
-    if root.stdout is not None:
-        root.stdout.close()
-
-
 def test_real_domain_confirms_grandchild_with_redirected_output(tmp_path: Path) -> None:
-    _exercise_domain(tmp_path, late_attach=False)
-
-
-@pytest.mark.skipif(not IS_WINDOWS, reason="Windows venv redirector attachment boundary")
-def test_late_job_attach_does_not_adopt_existing_interpreter(tmp_path: Path) -> None:
-    _exercise_domain(tmp_path, late_attach=True)
-
-
-def _spawn_fixture(
-    argv: list[str],
-    job: WindowsJob | None,
-    *,
-    late_attach: bool,
-) -> tuple[subprocess.Popen[bytes] | PipedJobChild, _process.ExecProcessDomain]:
-    if not IS_WINDOWS:
-        root, domain = _process.ExecProcessDomain.launch_posix(
-            argv,
-            new_session=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    else:
-        root = (
-            start_piped_job_process(argv, job)
-            if job is not None and not late_attach
-            else subprocess.Popen(  # noqa: S603 -- private native fixture.
-                argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        )
-        domain = _process.ExecProcessDomain(root, job)
-    return root, domain
-
-
-def _exercise_domain(tmp_path: Path, *, late_attach: bool) -> None:
     """An already-exited root and EOF alone do not certify its living member."""
     gate = tmp_path / "gate"
     receipt = tmp_path / "member"
-    interpreter = tmp_path / "interpreter"
     code = """
 import os,pathlib,subprocess,sys,time
-gate,receipt,interpreter=map(pathlib.Path,sys.argv[1:])
-interpreter.write_text(str(os.getpid()))
+gate,receipt=map(pathlib.Path,sys.argv[1:])
 until=time.monotonic()+10
 while not gate.exists():
     if time.monotonic()>until: raise RuntimeError('fixture attach expired')
@@ -120,51 +37,39 @@ p=subprocess.Popen([sys.executable,'-I','-c','import time; time.sleep(30)'],
 receipt.write_text(str(p.pid))
 os._exit(0)
 """
-    job = WindowsJob.create() if IS_WINDOWS else None
-    argv = [sys.executable, "-I", "-c", code, str(gate), str(receipt), str(interpreter)]
-    root, domain = _spawn_fixture(argv, job, late_attach=late_attach)
-    member = None
+    root, domain = _process.ExecProcessDomain.launch_posix(
+        [sys.executable, "-I", "-c", code, str(gate), str(receipt)],
+        new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    member: psutil.Process | None = None
     try:
-        until = time.monotonic() + 10
-        while not interpreter.exists():
-            if time.monotonic() >= until:
-                raise AssertionError("actual interpreter did not start")
-            time.sleep(0.01)
-        interpreter_pid = int(interpreter.read_text())
-        if job is not None and late_attach:
-            assert isinstance(root, subprocess.Popen)
-            assert interpreter_pid != root.pid, "negative requires actual Windows venv redirector"
-            job.assign(root)
-        if job is not None:
-            assert _belongs_to_job(job, interpreter_pid) is not late_attach
-        identity = psutil.Process(root.pid)
         gate.write_text("attached")
         until = time.monotonic() + 10
-        while not receipt.exists() or not _ended(identity):
+        while not receipt.exists() or not _ended(psutil.Process(root.pid)):
             if time.monotonic() > until:
                 raise AssertionError("fixture root did not exit without reap")
             time.sleep(0.01)
         member = psutil.Process(int(receipt.read_text()))
-        member_birth = member.create_time()
         assert not _ended(member)
-        if job is not None:
-            assert _belongs_to_job(job, member.pid) is not late_attach
-            assert member.create_time() == member_birth
         close_deadline = time.monotonic() + 5
         domain.close_confirmed(close_deadline)
         while time.monotonic() < close_deadline and not _ended(member):
             time.sleep(0.01)
-        # Late attachment closes an empty Job, not the escaped fixture child.
-        # This negative demonstrates why only atomic creation supports closure.
-        assert _ended(member) is not late_attach
+        assert _ended(member)
         assert root.wait(timeout=5) == 0
-        if job is not None:
-            assert job.closed
     finally:
-        _close_fixture(root, job, member)
+        if root.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(root.pid, 9)
+            root.wait(timeout=5)
+        if member is not None and not _ended(member):
+            member.kill()
+            member.wait(timeout=5)
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX group observation contract")
 def test_live_group_after_signal_is_not_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     process, domain = _process.ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
@@ -184,7 +89,6 @@ def test_live_group_after_signal_is_not_closed(monkeypatch: pytest.MonkeyPatch) 
         process.wait(timeout=5)
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_fast_exit_owner_closes_before_reap() -> None:
     for _ in range(8):
         root, domain = _process.ExecProcessDomain.launch_posix([sys.executable, "-I", "-c", "pass"])
@@ -202,7 +106,6 @@ def test_fast_exit_owner_closes_before_reap() -> None:
                 root.wait(timeout=5)
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_reaped_owner_cannot_signal_a_reused_group(monkeypatch: pytest.MonkeyPatch) -> None:
     root, domain = _process.ExecProcessDomain.launch_posix([sys.executable, "-I", "-c", "pass"])
     root.wait(timeout=5)
@@ -216,10 +119,9 @@ def test_reaped_owner_cannot_signal_a_reused_group(monkeypatch: pytest.MonkeyPat
         domain.close_confirmed(time.monotonic() + 1)
     assert signals == []
     with pytest.raises(RuntimeError, match="launch boundary"):
-        _process.ExecProcessDomain(root, None)
+        _process.ExecProcessDomain(root)
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_group_signal_precedes_any_absence_sample(monkeypatch: pytest.MonkeyPatch) -> None:
     root, domain = _process.ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
@@ -248,7 +150,6 @@ def test_group_signal_precedes_any_absence_sample(monkeypatch: pytest.MonkeyPatc
             root.wait(timeout=5)
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_signal_failure_retains_unreaped_owner(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -294,7 +195,6 @@ def test_signal_failure_retains_unreaped_owner(
             root.wait(timeout=5)
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_native_capture_failure_retains_launched_handle(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.native_process.exec_domain import ExecDomainBirthError
     from base.native_process.ownership import OwnedProcess
@@ -317,7 +217,6 @@ def test_native_capture_failure_retains_launched_handle(monkeypatch: pytest.Monk
         root.wait(timeout=5)
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_signal_holds_native_pin_against_concurrent_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     import threading
 
@@ -359,7 +258,6 @@ def test_signal_holds_native_pin_against_concurrent_wait(monkeypatch: pytest.Mon
             waiter.join(5)
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_confirmed_domain_does_not_reobserve_reused_numeric_group(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

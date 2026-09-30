@@ -497,13 +497,6 @@ def close_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     holds when a process outlived the SIGKILL too (the notice names it) and
     when another session keeps the stop incomplete (`_closed`).
     """
-    if sys.platform == "win32":
-        backend = get_shell_backend()
-        for name in backend.list_sessions():
-            ok, _mode = backend.kill_session(name, graceful=True, timeout=remaining(deadline))
-            if not ok:
-                raise RuntimeError(f"terminal {name!r} lacks a native Job closure receipt")
-        return
     _close(
         list(capture_terminals().terminals),
         _Notice(operation, acquired_at, pty_close_notices.STOP_REASON),
