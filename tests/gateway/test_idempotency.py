@@ -538,7 +538,7 @@ def test_reconcile_heals_crash_after_commit_before_resurrect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A lost first response heals one pending chat and its terminated owner."""
-    from gateway.agents import delivery
+    from ops import lifecycle as ops_lifecycle
 
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -571,7 +571,7 @@ def test_reconcile_heals_crash_after_commit_before_resurrect(
         db_conn.commit()
         return AgentStatus.IDLING
 
-    monkeypatch.setattr(delivery._ops, "resurrect_if_terminated", _crash_then_heal)
+    monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _crash_then_heal)
     with pytest.raises(RuntimeError, match="gateway died after commit"):
         client.post(
             f"/api/agents/{agent_id}/messages",

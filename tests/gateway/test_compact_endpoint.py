@@ -86,7 +86,7 @@ def test_compact_passes_inserted_id_and_kind_to_guarded_resurrect(
 ) -> None:
     """The durable compact row itself is the final CAS evidence; the route
     cannot call the unguarded explicit resurrection path."""
-    from gateway.agents import lifecycle
+    from ops import lifecycle as ops_lifecycle
 
     tid = _seed_agent(db_conn)
     calls: list[tuple[int, int | None, str | None]] = []
@@ -100,7 +100,7 @@ def test_compact_passes_inserted_id_and_kind_to_guarded_resurrect(
         calls.append((agent_id, trigger_inbound_id, trigger_inbound_kind))
         return AgentStatus.IDLING
 
-    monkeypatch.setattr(lifecycle._ops, "resurrect_if_terminated", _resurrect)
+    monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _resurrect)
     with TestClient(app) as client:
         assert client.post(f"/api/agents/{tid}/compact").status_code == 200
     with db_conn.cursor() as cur:

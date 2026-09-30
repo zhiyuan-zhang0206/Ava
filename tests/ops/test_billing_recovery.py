@@ -25,6 +25,7 @@ from base.agents import ResurrectRefused
 from base.agents.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
 from base.db import create_agent
 from base.telemetry import Event
+from ops import cluster_rpc
 from ops.agents import wake
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle import billing_recovery
@@ -165,7 +166,7 @@ def _dispatch_through_the_op(monkeypatch: pytest.MonkeyPatch) -> list[int]:
         response = await billing_recovery.resurrect_billing_agent_op(agent_id)
         return response.model_dump()
 
-    monkeypatch.setattr(billing_recovery._cluster_rpc, "dispatch_to_machine", _dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _dispatch)
     return dispatched
 
 
@@ -261,7 +262,7 @@ async def test_execute_refused_when_balance_gate_fails(
     async def _must_not_dispatch(**kwargs: Any) -> dict[str, Any]:
         raise AssertionError("dispatch reached while the balance gate refused")
 
-    monkeypatch.setattr(billing_recovery._cluster_rpc, "dispatch_to_machine", _must_not_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _must_not_dispatch)
 
     resp = await run_billing_recovery(execute=True, pool=pool)
 
@@ -331,7 +332,7 @@ async def test_concurrent_run_is_refused_by_the_single_flight_lock(
     async def _must_not_dispatch(**kwargs: Any) -> dict[str, Any]:
         raise AssertionError("dispatch reached while another run held the lock")
 
-    monkeypatch.setattr(billing_recovery._cluster_rpc, "dispatch_to_machine", _must_not_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _must_not_dispatch)
 
     resp = await run_billing_recovery(execute=True, pool=pool)
 

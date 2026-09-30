@@ -24,6 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import ava
+from ava import gateway_client
 from ava.agents import AgentNotFound, AgentStatus, ForkSourceEmpty, TerminateResult
 from gateway.lgtm import loki_events
 from tests.gateway.loki_fake import FakeLoki
@@ -208,7 +209,7 @@ class TestSpawn:
         from ava import agents
 
         seen: dict[str, Any] = {}
-        monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
 
         assert agents.spawn(prompt=prompt) == 3  # pyright: ignore[reportArgumentType]
         assert seen["prompt"] == expected
@@ -216,7 +217,7 @@ class TestSpawn:
     def test_spawn_rejects_non_string_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava import agents
 
-        monkeypatch.setattr(agents._client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType]
 
         with pytest.raises(
             TypeError,
@@ -238,7 +239,7 @@ class TestSpawn:
         silently joined (user ruling 2026-08-28)."""
         from ava import agents
 
-        monkeypatch.setattr(agents._client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="prompt must be a string"):
             agents.spawn(prompt=prompt)  # pyright: ignore[reportArgumentType]
 
@@ -390,7 +391,7 @@ class TestTerminate:
         def _terminate(*_args: object, **_kwargs: object) -> dict[str, Any]:
             return {"status": "already_terminated", "open_tasks": None}
 
-        monkeypatch.setattr(ava.agents._client, "terminate", _terminate)
+        monkeypatch.setattr(gateway_client, "terminate", _terminate)
         result = ava.agents.terminate(7)
         assert result == "already_terminated"
         assert result == TerminateResult.ALREADY_TERMINATED
@@ -407,7 +408,7 @@ class TestTerminate:
             shell = {"when": "now", "killed": [2, 5]}
             return {"status": "already_terminated", "open_tasks": None, "shell_sessions": shell}
 
-        monkeypatch.setattr(ava.agents._client, "terminate", _terminate)
+        monkeypatch.setattr(gateway_client, "terminate", _terminate)
         result = ava.agents.terminate(7, kill_all_shell_sessions=True)
         assert result.shell_sessions == ava.agents.ShellSessionsKill(when="now", killed=[2, 5])
 
@@ -421,7 +422,7 @@ class TestTerminate:
             called = True
             return {"status": "enqueued", "open_tasks": None}
 
-        monkeypatch.setattr(ava.agents._client, "terminate", _terminate)
+        monkeypatch.setattr(gateway_client, "terminate", _terminate)
         with pytest.raises(TypeError, match="message must be a string, got int"):
             ava.agents.terminate(7, message=42)  # pyright: ignore[reportArgumentType]
         assert not called
@@ -494,7 +495,7 @@ class TestSendMessage:
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
-            agents._client,
+            gateway_client,
             "send_message",
             lambda _agent_id, **kw: seen.update(kw) or None,  # pyright: ignore[reportUnknownArgumentType]
         )
@@ -520,7 +521,7 @@ class TestSendMessage:
         ruling 2026-08-28: multi-element sequences raise TypeError)."""
         from ava import agents
 
-        monkeypatch.setattr(agents._client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="content must be a string"):
             agents.send_message(7, content)  # pyright: ignore[reportArgumentType]
 
@@ -532,7 +533,7 @@ class TestSendMessage:
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
-            agents._client,
+            gateway_client,
             "send_message",
             lambda _agent_id, **kw: seen.update(kw) or None,  # pyright: ignore[reportUnknownArgumentType]
         )
@@ -546,7 +547,7 @@ class TestSendMessage:
     def test_send_message_rejects_non_string_content(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava import agents
 
-        monkeypatch.setattr(agents._client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(
             TypeError,
             match="content must be a string, got int",
@@ -752,7 +753,7 @@ class TestGetNeighbors:
             seen["limit"] = limit
             return []
 
-        monkeypatch.setattr(ava.agents._client, "get_neighbors", _record)
+        monkeypatch.setattr(gateway_client, "get_neighbors", _record)
         monkeypatch.setattr(settings.display, "neighbors_default_depth", 3)
         monkeypatch.setattr(settings.display, "neighbors_default_limit", 7)
 
@@ -833,8 +834,6 @@ class TestGetAncestors:
 
 class TestListAgents:
     def test_gateway_client_reads_exactly_one_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava import gateway_client
-
         calls: list[tuple[str, dict[str, object]]] = []
         page: dict[str, object] = {"agents": [], "next_cursor": 17}
 
@@ -928,7 +927,7 @@ class TestListAgents:
         def forbidden(**_kwargs: Any) -> None:
             pytest.fail("invalid page arguments must not make a request")
 
-        monkeypatch.setattr(ava.agents._client, "list_agents", forbidden)
+        monkeypatch.setattr(gateway_client, "list_agents", forbidden)
         with pytest.raises(ValueError):
             ava.agents.list_agents(**kwargs)
 
@@ -948,8 +947,8 @@ class TestListAgents:
         def fake_raise(_response: object) -> None:
             return None
 
-        monkeypatch.setattr(ava.agents._client, "get", fake_get)
-        monkeypatch.setattr(ava.agents._client, "raise_from_response", fake_raise)
+        monkeypatch.setattr(gateway_client, "get", fake_get)
+        monkeypatch.setattr(gateway_client, "raise_from_response", fake_raise)
         assert ava.agents.get_status(1) == AgentStatus.TERMINATED
         assert calls == ["/api/agents/1"]
 
@@ -982,7 +981,7 @@ class TestListAgents:
                 "next_cursor": None,
             }
 
-        monkeypatch.setattr(ava.agents._client, "list_agents", directory_page)
+        monkeypatch.setattr(gateway_client, "list_agents", directory_page)
         row = ava.agents.list_agents().agents[0]
         assert row.fork_source_agent_id == fork_source_agent_id
         assert row.spawner == "agent:8"
@@ -1016,7 +1015,7 @@ class TestSpawnConfig:
         from ava import agents
 
         seen: dict[str, Any] = {}
-        monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         agents.spawn(config_overlay={"llm_model": "claude-sonnet-5"})
         assert seen["config"] == {"llm_model": "claude-sonnet-5"}
@@ -1029,7 +1028,7 @@ class TestSpawnConfig:
         from ava import agents
 
         seen: dict[str, Any] = {}
-        monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         agents.spawn(config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"})
         assert seen["config"] == {"preset": "coder", "llm_model": "claude-sonnet-5"}
@@ -1053,7 +1052,7 @@ class TestSpawnConfig:
         from base.packages.plugins.config_registration import InvalidConfigOverlay
 
         seen: dict[str, Any] = {}
-        monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         agents.spawn(config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"})
         assert seen["config"] == {"preset": "coder", "llm_model": "claude-sonnet-5"}
@@ -1078,7 +1077,7 @@ class TestResurrect:
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
-            agents._client,
+            gateway_client,
             "resurrect",
             lambda agent_id, **kw: seen.update({"agent_id": agent_id, **kw}) or "spawned",  # pyright: ignore[reportUnknownArgumentType]
         )
@@ -1098,7 +1097,7 @@ class TestResurrect:
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
-            agents._client,
+            gateway_client,
             "resurrect",
             lambda agent_id, **kw: seen.update({"agent_id": agent_id, **kw}) or "spawned",  # pyright: ignore[reportUnknownArgumentType]
         )
@@ -1112,7 +1111,7 @@ class TestResurrect:
         from ava import agents
         from base.agents import ResurrectResult
 
-        monkeypatch.setattr(agents._client, "resurrect", lambda _agent_id, **_kw: "already_alive")  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "resurrect", lambda _agent_id, **_kw: "already_alive")  # pyright: ignore[reportUnknownArgumentType]
         assert agents.resurrect(1, "ping") == ResurrectResult.ALREADY_ALIVE
 
     def test_resurrect_prompt_is_required_positional(self) -> None:

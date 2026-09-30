@@ -221,7 +221,7 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Suppression gates automatic resurrection, never durable delivery."""
-    from ops import lifecycle
+    from ops import cluster_rpc
     from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
     tid = create_agent(db_conn)
@@ -240,7 +240,7 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
         forwards.append("forwarded")
         return {"status": "already_alive"}
 
-    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _record_forward)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _record_forward)
 
     with _sync_pool() as pool:
         delivery = await deliver_chat_inbound(

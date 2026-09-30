@@ -16,11 +16,11 @@ from pydantic import SecretStr
 
 from base.agents import AgentStatus
 from base.config import settings
-from gateway.agents import delivery as delivery_router
 from gateway.agents.delivery import ChatDelivery
 from gateway.app import app
 from gateway.routers import work_failed as work_failed_router
 from gateway.schemas.work_failed import WorkFailedIn, WorkFailedResult
+from ops import lifecycle as ops_lifecycle
 
 _WEBHOOK_TOKEN = "work-failed-webhook-token"  # noqa: S105 -- isolated test credential
 _CLUSTER_SECRET = "work-failed-cluster-secret"  # noqa: S105 -- isolated test credential
@@ -236,7 +236,7 @@ def test_terminated_author_successfully_resurrected_is_final_target(
         db_conn.commit()
         return AgentStatus.IDLING
 
-    monkeypatch.setattr(delivery_router._ops, "resurrect_if_terminated", _resurrect)
+    monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _resurrect)
     with TestClient(app) as client:
         response = _post(client, _payload(author, dedup_key="author-resurrected"))
 
@@ -380,8 +380,8 @@ async def test_reconcile_delivers_stale_unfinished_event(
     async def _keep_alive(*args: object, **kwargs: object) -> AgentStatus:
         return AgentStatus.IDLING
 
-    monkeypatch.setattr(delivery_router._ops, "publish_inbound_arrived", _publish)
-    monkeypatch.setattr(delivery_router._ops, "resurrect_if_terminated", _keep_alive)
+    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _publish)
+    monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _keep_alive)
 
     assert await work_failed_router.reconcile_stale_work_failures(failure_pool) == 1
 
@@ -480,8 +480,8 @@ async def test_concurrent_delivery_cas_deduplicates_the_agent_inbound(
         await asyncio.sleep(0)
         return AgentStatus.IDLING
 
-    monkeypatch.setattr(delivery_router._ops, "publish_inbound_arrived", _publish)
-    monkeypatch.setattr(delivery_router._ops, "resurrect_if_terminated", _keep_alive)
+    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _publish)
+    monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _keep_alive)
     provenance = work_failed_router.InboundProvenance(
         source_verified_by="webhook:work_failed",
         source_transport="http",

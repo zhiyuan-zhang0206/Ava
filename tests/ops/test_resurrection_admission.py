@@ -27,7 +27,7 @@ from base.deploy.maintenance import cohort, pause_owner
 from base.deploy.maintenance.straggler_reap import settle_stranded_reaps
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
-from ops import lifecycle
+from ops import cluster_rpc, lifecycle
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.spawn import create_agent_row
@@ -197,7 +197,7 @@ def _refused_locally(monkeypatch: pytest.MonkeyPatch, db: psycopg.Connection) ->
     async def _unreachable(*_a: object, **_kw: object) -> dict[str, Any]:
         raise ClusterOpUnreachable("local ops server not reachable")
 
-    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
     return aid, trigger
 
 
@@ -209,7 +209,7 @@ def _refused_remotely(monkeypatch: pytest.MonkeyPatch, db: psycopg.Connection) -
     async def _failed(*_a: object, **_kw: object) -> dict[str, Any]:
         raise ClusterOpFailed({"error": "ResurrectRefused: runtime_cutover_required"})
 
-    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed)
     return aid, trigger
 
 
@@ -248,7 +248,7 @@ async def test_other_auto_resurrect_failures_stay_informational(
     async def _failed(*_a: object, **_kw: object) -> dict[str, Any]:
         raise ClusterOpFailed({"error": "launch failed on the home machine"})
 
-    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed)
     await lifecycle.resurrect_if_terminated(
         aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
     )
