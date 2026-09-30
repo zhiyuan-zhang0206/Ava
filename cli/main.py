@@ -27,6 +27,7 @@ import sys
 from pydantic import ValidationError
 
 from base.host.env.bootstrap import BootstrapFetchError
+from base.native_process import code_version
 from base.native_process.os_platform import (
     LockTimeoutError,
     ensure_line_buffered_stdio,
@@ -198,6 +199,12 @@ def _normalize_process_profile() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The operator CLI is exempt from the database code-version gate: `ava stop`
+    # writes to drain agents, so a host left behind by an update must still be able
+    # to run it. Service processes are launched with `python -m <module>`, never
+    # through here, so every one of them stays gated. Declared first, before any
+    # verb can dial the database.
+    code_version.exempt_from_db_gate()
     _normalize_process_profile()
     args_in = sys.argv[1:] if argv is None else argv
     if args_in[:2] == ["cluster", "update"]:

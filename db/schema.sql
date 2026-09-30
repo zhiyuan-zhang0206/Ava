@@ -1254,7 +1254,11 @@ CREATE TABLE deployment_state (
     log_path     TEXT,
     pin_advanced BOOLEAN NOT NULL DEFAULT FALSE,
     -- Operation-bound typed evidence, not an independent registry. NULL refuses.
-    managed_writer_evidence JSONB
+    managed_writer_evidence JSONB,
+    -- The lowest code version allowed to write (client-side gate,
+    -- base/db/code_version_gate.py): raised to the gateway's own version at every
+    -- gateway start, read by every pooled session. 0 = nothing recorded yet.
+    min_code_version BIGINT NOT NULL DEFAULT 0
 );
 
 INSERT INTO deployment_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
@@ -1264,6 +1268,9 @@ COMMENT ON TABLE deployment_state IS
 
 COMMENT ON COLUMN deployment_state.managed_writer_evidence IS
     'Versioned operation-bound managed-writer closure evidence; NULL is unknown, never permission.';
+
+COMMENT ON COLUMN deployment_state.min_code_version IS
+    'Lowest code version (first-parent commit count of the process''s loaded commit) allowed to write; every gateway start raises it with GREATEST, every pooled session reads it and a lower process exits (decisions/2026-09-30-client-side-code-version-gate.md). Lowered only by hand after a rollback.';
 
 -- Runtime admission must serialize with rollout writers, but agent processes
 -- dial as ava_runner and must not receive UPDATE on deployment_state. This

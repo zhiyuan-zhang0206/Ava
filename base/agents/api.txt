@@ -133,6 +133,7 @@ class TerminationSource(StrEnum)
   def resurrectable(cls) -> tuple[TerminationSource, ...]
 
 ## base.agents.exit_codes
+CODE_BEHIND_MINIMUM_EXIT_CODE = 78
 IDLE_EXIT_CODE = 42
 RESTART_DECLINED_EXIT_CODE = 3
 SERVICES_NOT_READY_EXIT_CODE = 4

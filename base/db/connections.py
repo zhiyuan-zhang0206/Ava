@@ -1,12 +1,14 @@
 """Postgres connection guards, URLs, direct connects, and sync + async pools."""
 
-from typing import Any
+from typing import Any, LiteralString
 from urllib.parse import urlsplit
 
 import psycopg
+from psycopg.rows import tuple_row
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.config import settings
+from base.db.code_version_gate import application_name, min_read_due, observe_minimum
 from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
 from base.host.net.url_secret import url_with_port
 from base.log import logger
@@ -83,7 +85,8 @@ PG_KEEPALIVE_KWARGS: dict[str, Any] = {
 # unbounded. The sanctioned entry points deliver this one ceiling — as `options`
 # on a direct dial, as PG_STATEMENT_TIMEOUT_SET_SQL on a pooled one — so it is
 # the single statement-timeout definition.
-PG_STATEMENT_TIMEOUT_OPTIONS = "-c statement_timeout=60000"
+_STATEMENT_TIMEOUT_MS: LiteralString = "60000"
+PG_STATEMENT_TIMEOUT_OPTIONS = f"-c statement_timeout={_STATEMENT_TIMEOUT_MS}"
 # The same ceiling as an explicit `SET` — the delivery path that works THROUGH
 # PgBouncer: the pooler drops the libpq `options` startup parameter
 # (ignore_startup_parameters), and `track_extra_parameters` cannot deliver
@@ -101,7 +104,7 @@ PG_STATEMENT_TIMEOUT_OPTIONS = "-c statement_timeout=60000"
 # `connect()` / `pool()` issue it on every pooled dial/borrow;
 # `cli/commands/data_plane/pgbouncer.py` also runs it as the pooler's `connect_query` so
 # every pooled backend is bounded at birth regardless of the client's code path.
-PG_STATEMENT_TIMEOUT_SET_SQL = "SET statement_timeout = 60000"
+PG_STATEMENT_TIMEOUT_SET_SQL = f"SET statement_timeout = {_STATEMENT_TIMEOUT_MS}"
 # The full kwargs the bounded dials (`connect()` / `connect_url()` / `pool()`)
 # pass to psycopg. `options` is the direct-connection delivery path (Postgres
 # parses it itself); pooled dials additionally run PG_STATEMENT_TIMEOUT_SET_SQL
@@ -115,11 +118,28 @@ PG_STATEMENT_TIMEOUT_KWARGS: dict[str, Any] = {
 # clears every session GUC another borrower may have left behind (the 2026-09-02
 # P0: a polluter's `SET default_transaction_read_only = on` on a pooled
 # connection leaked onto shared backends and 500'd the message/schedule-stop
-# APIs' writes) — then the statement ceiling is re-applied, because RESET ALL
-# also clears the pooler connect_query's birth-time SET. Two statements, always
-# together: a restore that reset without re-bounding would silently drop the F7
-# ceiling for the next borrower.
-PG_POOLED_BASELINE_RESTORE_SQL = ("RESET ALL", PG_STATEMENT_TIMEOUT_SET_SQL)
+# APIs' writes) — then what RESET ALL also cleared is re-applied: the statement
+# ceiling (the pooler connect_query's birth-time SET) and this connection's
+# `application_name` (PgBouncer takes a client's RESET of a parameter it tracks
+# as that client's own new value, and would list the connection as unnamed).
+# Two statements, always together: a restore that reset without re-bounding
+# would silently drop the F7 ceiling for the next borrower. The second is
+# `set_config(..., false)`, `SET` as an expression, one placeholder: the name.
+_PG_POOLED_SESSION_SQL: LiteralString = (
+    f"set_config('statement_timeout', '{_STATEMENT_TIMEOUT_MS}', false), "
+    "set_config('application_name', %s, false)"
+)
+PG_POOLED_BASELINE_RESTORE_SQL: tuple[LiteralString, LiteralString] = (
+    "RESET ALL",
+    f"SELECT {_PG_POOLED_SESSION_SQL}",
+)
+# The second statement on the borrow that also reads the cluster's minimum code
+# version (`base.db.code_version_gate`): same round trip, one more column. A
+# cluster with no `deployment_state` row has recorded no minimum: 0, never a refusal.
+PG_POOLED_RESTORE_WITH_MIN_SQL: LiteralString = (
+    f"SELECT {_PG_POOLED_SESSION_SQL}, "  # noqa: S608 — module constants only, no caller input
+    "COALESCE((SELECT min_code_version FROM public.deployment_state WHERE id = 1), 0)"
+)
 
 
 def _restore_pooled_session(conn: psycopg.Connection) -> None:
@@ -137,7 +157,10 @@ def _restore_pooled_session(conn: psycopg.Connection) -> None:
     at every sanctioned pooled entry point — on a fresh dial (`connect()`), on
     a pool backend's creation (`configure`), and on every borrow (`check`).
     Each restore also heals the shared backend it lands on, so a polluted
-    backend stops hurting the next borrower.
+    backend stops hurting the next borrower. The same statement re-names the
+    connection and, at most every `MIN_REFRESH_INTERVAL_S`, reads the cluster's
+    minimum code version: a process below it exits here
+    (`base.db.code_version_gate`).
 
     Used as the psycopg_pool `configure`/`check` hook and on pooled dials:
     PgBouncer drops the `options` startup parameter, so SQL is the one path
@@ -149,7 +172,17 @@ def _restore_pooled_session(conn: psycopg.Connection) -> None:
     same discard path `ConnectionPool.check_connection` feeds.
     """
     conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[0])
-    conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1])
+    name = (application_name(),)
+    if min_read_due():
+        # tuple_row: a pool built with a dict row_factory must not change the shape read.
+        with conn.cursor(row_factory=tuple_row) as cur:
+            cur.execute(PG_POOLED_RESTORE_WITH_MIN_SQL, name)
+            row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("the restore statement returned no row")
+        observe_minimum(int(row[2]))
+    else:
+        conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
     conn.commit()
 
 
@@ -158,10 +191,19 @@ async def _restore_pooled_session_async(conn: psycopg.AsyncConnection) -> None:
 
     The liveness check doubles as the baseline scrub — same RESET ALL +
     statement ceiling, same discard-on-failure semantics (psycopg_pool replaces
-    a connection whose check raises).
+    a connection whose check raises), same name and code-version read.
     """
     await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[0])
-    await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1])
+    name = (application_name(),)
+    if min_read_due():
+        async with conn.cursor(row_factory=tuple_row) as cur:
+            await cur.execute(PG_POOLED_RESTORE_WITH_MIN_SQL, name)
+            row = await cur.fetchone()
+        if row is None:
+            raise RuntimeError("the restore statement returned no row")
+        observe_minimum(int(row[2]))
+    else:
+        await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
     await conn.commit()
 
 
@@ -397,6 +439,9 @@ def connect(
         prepare_threshold=None,
         # sslmode only when the URL is silent (config is the fallback, never an override).
         **({"sslmode": sslmode} if sslmode else {}),
+        # Through the pooler the connection names its process and code version,
+        # so PgBouncer's SHOW CLIENTS shows who holds it.
+        **({} if direct else {"application_name": application_name()}),
         **_transport_kwargs(url, unbounded=unbounded),
     )
     if not direct and not unbounded:
@@ -516,6 +561,7 @@ def pool(
     connection_kwargs: dict[str, Any] = {
         "prepare_threshold": None,
         **({"sslmode": sslmode} if sslmode else {}),
+        **({} if direct else {"application_name": application_name()}),
         **_statement_kwargs(url),
     }
     if autocommit:
@@ -595,6 +641,7 @@ def async_pool(
             "autocommit": True,
             "prepare_threshold": None,
             **({"sslmode": sslmode} if sslmode else {}),
+            "application_name": application_name(),
             **PG_KEEPALIVE_KWARGS,
         },
         check=_restore_pooled_session_async,
