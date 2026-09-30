@@ -55,8 +55,10 @@ on purpose (export it / drop the underscore) so the widened contract is visible 
 the diff. No per-site allowlist: a name another package needs is contract by
 definition. `ava` is no exception: agent visibility there is the
 `__all_for_ava__` whitelist, not the underscore. A module alias rebound anywhere
-in the file (a parameter such as `self`, a local) is not followed. Files under a
-tests/ directory are exempt.
+in the file (a parameter such as `self`, a local) is not followed.
+
+Test files (any `tests/` directory: the top-level one or a package's own, see
+`lint_common.is_test_path`) are exempt from Rules 1, 3, 4, 5 and 6; only budgets apply.
 
 ### Rule 5: single decision owners (locality)
 
@@ -123,7 +125,9 @@ Budgets cover the governed packages in `_SCAN_DIRS`, plus tests/ and scripts/.
 Direct entries are .py/.pyi files and subdirectories with content; hidden entries,
 symlinks, __pycache__, migrations subtrees, and a subdirectory holding nothing
 else (a local leftover CI never checks out) are excluded. Each directory is
-independent.
+independent. A `docs/` or `tests/` layer without `__init__.py` takes no slot in its
+parent's budget, and a `tests/` layer has no entry cap of its own (see
+`scripts/structure/directory_budget.py`); its files keep the 800-line ceiling.
 AST rules retain their governed-package scope.
 
 scripts/structure/baseline/*.json freezes existing over-limit counts, one shard per
@@ -159,6 +163,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import (  # noqa: E402 — standalone script
     baseline_shards,
+    directory_budget,
     lint_common,
     locality,
     path_imports,
@@ -285,6 +290,8 @@ def _type_checking_violations(tree: ast.Module) -> list[int]:
 
 def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> list[tuple[int, str]]:
     """Return AST violations as [(lineno, message), ...]."""
+    if lint_common.is_test_path(rel_path):
+        return []  # tests are outside the AST rules (module docstring)
     if tree is None:
         try:
             text = path.read_text(encoding="utf-8")
@@ -350,17 +357,6 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return files
 
 
-def _budget_entries(directory: Path) -> list[Path]:
-    return [
-        entry
-        for entry in directory.iterdir()
-        if not entry.is_symlink()
-        and not entry.name.startswith(".")
-        and entry.name != "__pycache__"
-        and not (entry.name == "migrations" and entry.is_dir())
-    ]
-
-
 def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
     """Collect files and independently checked directories without following links."""
     files: set[Path] = set()
@@ -372,7 +368,7 @@ def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
             return
         visited.add(directory)
         directories.add(directory)
-        for entry in _budget_entries(directory):
+        for entry in directory_budget.entries(directory):
             if entry.is_dir():
                 visit(entry)
             elif entry.is_file() and entry.suffix == ".py":
@@ -656,20 +652,6 @@ def _budget_error(value: int, ceiling: int, name: str, baseline: dict[str, int])
     return None
 
 
-def _counts_toward_budget(entry: Path) -> bool:
-    """A .py/.pyi file, or a subdirectory with content. A directory holding
-    nothing but `__pycache__` / hidden files (left behind locally when a package
-    is renamed or removed) or nothing at all is not a tree CI checks out, so it
-    never counts. Neither does a `docs/` layer without `__init__.py`: it holds
-    the package's OKF documentation, not code structure (a `docs` directory
-    with `__init__.py` is a real Python package and counts)."""
-    if entry.is_dir():
-        if entry.name == "docs" and not (entry / "__init__.py").exists():
-            return False
-        return bool(_budget_entries(entry))
-    return entry.is_file() and entry.suffix in {".py", ".pyi"}
-
-
 def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> list[str]:
     files, directories = _budget_targets(targets)
     errors: list[str] = []
@@ -685,7 +667,11 @@ def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> 
                 f"{name}:{count}: file is {count} lines, over the {_HARD_CEILING}-line hard ceiling: {error}"
             )
     for path in sorted(directories):
-        count = sum(_counts_toward_budget(entry) for entry in _budget_entries(path))
+        if directory_budget.is_tests_layer(path):
+            continue  # no entry cap of its own (module docstring)
+        count = sum(
+            directory_budget.counts_toward_budget(entry) for entry in directory_budget.entries(path)
+        )
         name = path.relative_to(_REPO_ROOT).as_posix()
         error = _budget_error(count, _DIRECTORY_CEILING, name, baseline["directories"])
         if error:

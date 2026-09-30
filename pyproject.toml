@@ -123,6 +123,8 @@ build-backend = "hatchling.build"
 # `shared` is the time-boxed release-probe shell (shared/__init__.py): a new image must still
 # answer `import shared.runtime_abi` and carry the shared/release-build.json identity member.
 packages = ["ava", "cli", "agent", "base", "shared", "ops", "gateway", "services", "ava_builtins"]
+# Tests live beside the code they prove (`<pkg>/**/tests/`); a runtime image ships none of them.
+exclude = ["**/tests/**"]
 
 [tool.hatch.build.targets.wheel.force-include]
 # Existing consumers resolve these siblings of base/. Keep their relative
@@ -459,7 +461,10 @@ check-typed-exception = true
 "contextvars" = { msg = "contextvars is allowlisted only — owners: base/native_process/turn_identity.py, base/config/turn_view.py, base/packages/plugins/config_view.py, base/packages/plugins/context.py, base/events/live/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
 
 [tool.ruff.lint.per-file-ignores]
+# `tests/*` is the top-level tests directory; `**/tests/*` every package's own
+# `<pkg>/**/tests/` (tests live beside the code they prove).
 "tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
+"**/tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
 "demos/*" = ["RUF001", "RUF002", "RUF003", "ARG001", "ERA001", "S108"]
 # schedules/* are version-controlled deployment templates (runnable scripts
 # referenced by the ops docs), not runtime source: exempt them from source-level
@@ -559,7 +564,29 @@ line-ending = "lf"
 exclude = ["*.md"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# Bare `pytest` (and CI's shards, which pass no positional path) collects the
+# top-level `tests/` and every package's own `<pkg>/**/tests/`. pytest expands
+# these as recursive globs from the rootdir; `tests/ci/test_collection_roots.py`
+# keeps them complete (a tests directory outside every glob is never collected,
+# and pytest does not warn about it).
+testpaths = [
+    "tests",
+    "agent/**/tests",
+    "ava/**/tests",
+    "ava_builtins/**/tests",
+    "base/**/tests",
+    "cli/**/tests",
+    "gateway/**/tests",
+    "ops/**/tests",
+    "scripts/**/tests",
+    "services/**/tests",
+]
+# A test module is a `test_*.py` file inside a `tests/` directory. Location, not
+# just the file name, makes it a test: `base/db/test_db_guard.py` and
+# `scripts/ci/test_selector.py` are production modules that a whole-repo
+# collection would otherwise import as test modules. (pytest matches a pattern
+# containing `/` against the whole path, where `*` also spans `/`.)
+python_files = ["*/tests/test_*.py", "*/tests/*/test_*.py"]
 pythonpath = ["."]
 # Tool caches unify under `.cache/<tool>/` (conventions/dev-setup.md "Tool caches").
 cache_dir = ".cache/pytest"
@@ -722,6 +749,20 @@ reportMissingTypeArgument = "warning"
 # flags every such guard as "unnecessary" — all 18 current findings are false positives of exactly
 # this kind, so the rule is off rather than left as ignored warnings.
 reportUnnecessaryIsInstance = "none"
+
+# A package's own tests (`<pkg>/**/tests/`) are held to the tests rung below wherever they sit:
+# reportUnknownMemberType and reportUnknownArgumentType at "error", the other five at "warning".
+# pyright takes the FIRST environment whose root contains a file, and a root is a plain directory
+# (no globs). So a tests directory under base/, ops/, services/, ava/, scripts/ or ava_builtins/
+# needs its own entry, listed HERE, above the base/ops/services entries: without one it inherits
+# the package's seven "error" rules (base/ops/services) or the global "warning" (the rest).
+# cli/, gateway/ and agent/ already gate exactly the two rules. tests/ci/test_pyright_test_environments.py
+# names any tests directory that is missing its entry. Each entry looks like:
+#
+#   [[tool.pyright.executionEnvironments]]
+#   root = "base/packages/tests"
+#   reportUnknownMemberType = "error"
+#   reportUnknownArgumentType = "error"
 
 # Ladder rung: raise the reportUnknown*/reportMissing* family to "error" on the highest-signal core
 # layers, gating merge there while the rest of the tree stays at the global "warning". These three

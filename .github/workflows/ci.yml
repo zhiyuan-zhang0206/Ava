@@ -712,11 +712,15 @@ jobs:
         # from these runners) and re-arms per test, so a healthy slow run
         # cannot false-positive. A stall outside any test (controller, or a
         # worker between items) produces no dump — the cap stays its backstop.
+        #
+        # No positional path: pytest collects `testpaths` from pyproject.toml, the
+        # top-level tests/ plus every package's own <pkg>/**/tests/ (the flaky
+        # bucket and scripts/ci/refresh_test_durations.py do the same).
         run: |
           set +e
           set -o pipefail
           mkdir -p tmp
-          uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 \
+          uv run pytest -q --ignore=tests/e2e -m "not flaky" -n 4 \
             --splits 16 --group ${{ matrix.group }} \
             --splitting-algorithm least_duration \
             --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
@@ -736,7 +740,7 @@ jobs:
             # file (coverage.py appends by default) and flatten the combine;
             # drop it so the retry writes a clean per-shard file.
             rm -f "$COVERAGE_FILE"
-            uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 \
+            uv run pytest -q --ignore=tests/e2e -m "not flaky" -n 4 \
               --splits 16 --group ${{ matrix.group }} \
               --splitting-algorithm least_duration \
               --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
@@ -957,7 +961,7 @@ jobs:
         continue-on-error: true
         run: >
           mkdir -p tmp &&
-          uv run pytest tests/ -m flaky --ignore=tests/e2e -q
+          uv run pytest -m flaky --ignore=tests/e2e -q
           --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui
           --cov=ops --cov=services --cov=ava_builtins
           --junit-xml=tmp/junit-backend-serial.xml -o junit_family=xunit1

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
@@ -22,6 +23,25 @@ FRAMEWORK_DIRS = (
     "services",
     "shared",
 )
+
+
+# A test lives in a `tests/` directory: the top-level `tests/` (e2e, contract
+# and shared-support tests) or a package's own `<pkg>/**/tests/`. Every lint that
+# exempts tests, or scans them on purpose, decides it with this one pattern.
+TEST_DIR = re.compile(r"(^|/)tests?/")
+
+
+def is_test_path(rel_path: str) -> bool:
+    """Whether a repo-relative posix path sits inside any `tests/` directory."""
+    return TEST_DIR.search(rel_path) is not None
+
+
+def is_repo_test_file(path: Path, repo_root: Path) -> bool:
+    """`is_test_path` for an absolute path; a path outside the repo is never a test."""
+    try:
+        return is_test_path(path.relative_to(repo_root).as_posix())
+    except ValueError:
+        return False
 
 
 def scan_roots(repo_root: Path, dirs: Iterable[str]) -> list[Path]:

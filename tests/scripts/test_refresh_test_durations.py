@@ -187,7 +187,6 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(
         nonlocal attempts
         attempts += 1
         assert pytest_args == [
-            "tests/",
             "-q",
             "--ignore=tests/e2e",
             "-m",

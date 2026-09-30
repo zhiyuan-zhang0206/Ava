@@ -28,7 +28,7 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 | --- | --- | --- |
 | 1 | Not a pull_request, or head ref begins trunk-merge/ or trunk-temp/ | FULL (queue-or-non-pr) |
 | 2 | Every path is a documentation path | SKIP |
-| 3 | A path is under base/, ava/, agent/, ava_builtins/, db/, migrations/, or evals/ | FULL (the report names the forced root) |
+| 3 | A path is under base/, ava/, agent/, ava_builtins/, db/, migrations/, or evals/ and is not inside a `tests/` directory | FULL (the report names the forced root) |
 | 4 | A path is pyproject.toml, .test_durations, or any conftest.py | FULL |
 | 5 | A path is under tests/e2e/ | FULL |
 | 6 | A path is neither a current collectable backend test, a direct-map source key, nor documentation | FULL (unmapped) |
@@ -48,13 +48,21 @@ population was red on tests/test_lint_event_kinds.py). Name a new scan test
 tests/scripts/test_test_selector.py guards completeness and staleness.
 
 The documentation predicate reuses base.deploy.git.repo_change.is_doc_path. Files under
-scripts/, schedules/, and tests/ are deliberately not treated as documentation
-by the selector even when their name ends in Markdown: operational schedule and
-test changes must remain conservative.
+scripts/, schedules/, and any `tests/` directory (the top-level one or a package's own
+`<pkg>/**/tests/`) are deliberately not treated as documentation by the selector even
+when their name ends in Markdown: operational schedule and test changes must remain
+conservative.
+
+Tests live in the top-level `tests/` or beside the code they prove in
+`<pkg>/**/tests/` (hosts: agent, ava, ava_builtins, base, cli, gateway, ops, scripts,
+services). The selector treats both alike: a test-only edit under `base/x/tests/` is a
+test change resolved through the reverse map (rule 3 does not force FULL for it), and
+a module that merely carries a `test_` prefix outside a `tests/` directory
+(`scripts/ci/test_selector.py`) is not a test.
 
 ## Static map and blind files
 
-The map AST-parses every Python file under tests/, except files named
+The map AST-parses every Python file under any `tests/` directory, except files named
 conftest.py, and walks imports in every scope. It includes both module imports
 and absolute from-import targets; for example, from agent import exec_child
 reaches agent/exec_child.py, and from base import lm reaches

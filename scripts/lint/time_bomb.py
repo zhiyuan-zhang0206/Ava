@@ -68,8 +68,9 @@ lints):
    assignment — attribute/subscript targets, `AnnAssign`, and values laundered
    through other names are deliberately out of scope.
 
-Scope: rule 1 scans non-test source dirs only; rules 2 and 3 scan `tests/`
-only. Error format `file:line: <reason>` + non-zero exit.
+Scope: rule 1 scans non-test source dirs only; rules 2 and 3 scan test files
+only (the top-level `tests/` and every package's own `tests/` directory). Error
+format `file:line: <reason>` + non-zero exit.
 """
 
 from __future__ import annotations
@@ -717,8 +718,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         dirs = _SCAN_DIRS
         index = _Index(root, dirs)
+        # Rules 2 and 3 read test files wherever they live: the top-level tests/ and
+        # each package's own tests/ (`_lint_tests` keeps only test paths).
         errors = _lint_source(index, lint_common.scan_roots(root, dirs)) + _lint_tests(
-            index, [root / "tests"]
+            index, [root / "tests", *lint_common.scan_roots(root, dirs)]
         )
     for err in errors:
         print(err, file=sys.stderr)
