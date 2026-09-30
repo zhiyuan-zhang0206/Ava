@@ -5,9 +5,8 @@ The runtime guards the maintenance daemon needs and that are easy to regress:
   - blocking passes beat only after completion and permanently wedge on timeout;
   - a failed pass still waits a full interval before retrying, so a transient
     DB error does not become a tight hot-loop against Postgres;
-  - the hourly pass ALWAYS runs the rollup + blob vacuum, while uniform
-    checkpoint pruning rides its own fast loop — a no-op when the trim setting
-    disables it.
+  - the hourly pass ALWAYS runs the rollup + blob vacuum, while the retired
+    checkpoint reaper is not scheduled.
 
 All driven directly (no DB): `_run_maintenance` / `_maintenance_with_liveness` are
 monkeypatched, so these are pure asyncio-loop tests.
@@ -235,70 +234,15 @@ def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPa
     assert progress.snapshot()["last_success_at"] is not None
 
 
-def test_checkpoint_trim_pass_prunes_threads(monkeypatch: pytest.MonkeyPatch) -> None:
-    prune = _CallRecorder(SimpleNamespace(agents=0, checkpoints=0, writes=0, blobs=0))
-    monkeypatch.setattr(daemon, "prune_threads", prune)
-    # Trimming is opt-in since the never-delete ruling (task #3180).
-    monkeypatch.setattr(daemon.settings.daemon, "events_maintenance_checkpoint_trim_enabled", True)
-    progress = LoopProgress("trim", timeout_s=5.0)
-
-    daemon._run_checkpoint_trim(cast(ConnectionPool, _FAKE_POOL), progress)
-
-    assert prune.calls == 1
-    assert progress.snapshot()["last_success_at"] is not None
-
-
-def test_checkpoint_trim_pass_disabled_parks_without_pruning(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A disabled trim deletes nothing but still reads healthy on the loop."""
-    prune = _CallRecorder(SimpleNamespace(agents=0, checkpoints=0, writes=0, blobs=0))
-    monkeypatch.setattr(daemon, "prune_threads", prune)
-    monkeypatch.setattr(daemon.settings.daemon, "events_maintenance_checkpoint_trim_enabled", False)
-    progress = LoopProgress("trim", timeout_s=5.0)
-
-    daemon._run_checkpoint_trim(cast(ConnectionPool, _FAKE_POOL), progress)
-
-    assert prune.calls == 0
-    assert progress.snapshot()["last_success_at"] is not None
-
-
-def test_checkpoint_prune_loop_runs_on_fast_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pruning rides its own fast cadence, independent of the hourly loop."""
-    ran: list[object] = []
-
-    def fake_trim(pool: object, progress: LoopProgress) -> None:
-        ran.append(pool)
-        progress.beat()
-        progress.mark_success()
-
-    async def fake_sleep(_progress: LoopProgress, total_s: float) -> None:
-        raise asyncio.CancelledError  # break the otherwise-infinite loop after one run
-
-    monkeypatch.setattr(daemon, "_run_checkpoint_trim", fake_trim)
-    monkeypatch.setattr(daemon, "_sleep_with_liveness", fake_sleep)
-
-    progress = LoopProgress("trim", timeout_s=5.0)
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._checkpoint_trim_loop(_FAKE_POOL, progress))  # pool unused
-    assert ran == [_FAKE_POOL]
-    assert progress.snapshot()["last_success_at"] is not None
-    # The fast-loop cadence is its own constant, not the hourly maintenance interval.
-    hourly = daemon.settings.daemon.events_maintenance_interval_seconds
-    assert hourly > daemon._CHECKPOINT_TRIM_INTERVAL_S
-
-
 def test_loop_components_report_fresh_loops_as_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     now = 100.0
     monkeypatch.setattr(daemon.time, "monotonic", lambda: now)
     liveness = LivenessGroup()
     liveness.register("dispatch", timeout_s=15.0)
-    liveness.register("trim", timeout_s=10.0)
     liveness.register("resolution", timeout_s=20.0)
 
     assert daemon._loop_components(liveness) == [
         {"name": "dispatch", "status": "ok", "progress": "idle"},
-        {"name": "trim", "status": "ok", "progress": "idle"},
         {"name": "resolution", "status": "ok", "progress": "idle"},
     ]
 
@@ -324,12 +268,12 @@ def test_loop_components_report_stale_loop(monkeypatch: pytest.MonkeyPatch) -> N
     now = 100.0
     monkeypatch.setattr(daemon.time, "monotonic", lambda: now)
     liveness = LivenessGroup()
-    liveness.register("trim", timeout_s=5.0)
+    liveness.register("resolution", timeout_s=5.0)
     now = 106.0
 
     assert daemon._loop_components(liveness) == [
         {
-            "name": "trim",
+            "name": "resolution",
             "status": "degraded",
             "progress": "idle",
             "detail": "no progress for 6s",
@@ -358,33 +302,20 @@ def test_loop_components_convert_success_iso_to_epoch(monkeypatch: pytest.Monkey
 def test_deadline_settings_defaults_and_env_aliases() -> None:
     defaults = DaemonSettings()
     assert defaults.events_maintenance_pass_deadline_s == 1500.0
-    assert defaults.events_maintenance_trim_deadline_s == 300.0
     assert defaults.events_maintenance_resolution_deadline_s == 600.0
 
     configured = DaemonSettings.model_validate(
         {
             "AVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S": "15.5",
-            "AVA_EVENTS_MAINTENANCE_TRIM_DEADLINE_S": "25",
             "AVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S": "35.5",
         }
     )
     assert configured.events_maintenance_pass_deadline_s == 15.5
-    assert configured.events_maintenance_trim_deadline_s == 25.0
     assert configured.events_maintenance_resolution_deadline_s == 35.5
 
 
-def test_checkpoint_trim_setting_defaults_and_env_alias() -> None:
-    assert (
-        DaemonSettings().events_maintenance_checkpoint_trim_enabled is False
-    )  # never-delete default (task #3180)
-    configured = DaemonSettings.model_validate(
-        {"AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED": "false"}
-    )
-    assert configured.events_maintenance_checkpoint_trim_enabled is False
-
-
 def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The three concurrent loops cannot share a progress stamp at the run boundary."""
+    """The two concurrent loops cannot share a progress stamp at the run boundary."""
 
     class _RunPool:
         def __init__(self) -> None:
@@ -410,9 +341,6 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     async def dispatch(_pool: object, progress: LoopProgress) -> None:
         received["dispatch"] = progress
 
-    async def trim(_pool: object, progress: LoopProgress) -> None:
-        received["trim"] = progress
-
     async def resolution(_pool: object, progress: LoopProgress) -> None:
         received["resolution"] = progress
 
@@ -427,10 +355,9 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     monkeypatch.setattr(daemon, "health_port", fake_health_port)
     monkeypatch.setattr(daemon.base.db, "pool", lambda: pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", dispatch)
-    monkeypatch.setattr(daemon, "_checkpoint_trim_loop", trim)
     monkeypatch.setattr(daemon, "_resolution_loop", resolution)
 
-    asyncio.run(daemon.run())
+    asyncio.run(asyncio.wait_for(daemon.run(), timeout=2.0))
 
     assert pool.closed
     assert len(health_liveness) == 1
@@ -439,10 +366,8 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     assert callable(health_components[0])
     assert [record["name"] for record in health_components[0]()] == [
         "dispatch",
-        "trim",
         "resolution",
     ]
-    assert len({id(progress) for progress in received.values()}) == 3
+    assert len({id(progress) for progress in received.values()}) == 2
     assert received["dispatch"].timeout_s == 1500.0
-    assert received["trim"].timeout_s == 300.0
     assert received["resolution"].timeout_s == 600.0
