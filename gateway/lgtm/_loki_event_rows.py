@@ -10,7 +10,7 @@ from typing import Any, cast
 from base import telemetry
 from base.config import settings
 from base.events.contract import EventTier
-from base.telemetry.loki_index_labels import LokiReadEra, LokiReadSlice
+from base.telemetry.loki_index_labels import LokiReadEra, LokiReadSlice, split_index_label_window
 from gateway.lgtm import _loki_logql, _loki_transport, loki_events_cache
 
 _event_id = telemetry.event_id
@@ -85,8 +85,8 @@ def query_events(
     overrides the shared client's default for this request only.
 
     With ``archive=True`` the rows come from the task #1281 archive stream
-    (all pre-cutover events, one era — the live stream's index-label slices
-    do not apply). Callers bound ``from_``/``to`` to the archive's span
+    (all pre-cutover events, with no indexed labels). Callers bound
+    ``from_``/``to`` to the archive's span
     (ARCHIVE_FLOOR_AT..ARCHIVE_FREEZE_AT) to stay under Loki's 90d
     max_query_length.
     """
@@ -100,13 +100,12 @@ def query_events(
         # The archive stream is one era (no index-label cutover inside it).
         slices = (LokiReadSlice(LokiReadEra.LEGACY, window[0], window[1]),)
     else:
-        slices = _loki_logql._read_slices(window)
+        slices = split_index_label_window(*window)
     raw: list[tuple[int, str]] = []
     for slice_ in slices:
         logql = _loki_logql._build_logql(
             era=slice_.era,
             archive=archive,
-            indexed_labeled=not archive and len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
             agent_id=agent_id,
             exclude_agent_ids=exclude_agent_ids,
             service_only=service_only,
@@ -139,8 +138,7 @@ def query_events(
     # but cross-stream ordering needs one merge pass.
     raw.sort(key=lambda pair: pair[0], reverse=(direction == "backward"))
 
-    # The exact-cutover row can arrive from both queries; (ts, line) is the
-    # cross-cutover dedupe backstop after the time partition.
+    # Separate Loki streams can repeat a line at the same timestamp.
     seen: set[tuple[int, str]] = set()
     rows: list[dict[str, Any]] = []
     for ts_ns, line in raw:
@@ -227,12 +225,11 @@ def count_events(
             return cast(int, holder.value)
     try:
         url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
-        slices = _loki_logql._read_slices(window)
+        slices = split_index_label_window(*window)
         total = 0
         for slice_ in slices:
             pipeline = _loki_logql._build_logql(
                 era=slice_.era,
-                indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
                 agent_id=agent_id,
                 exclude_agent_ids=exclude_agent_ids,
                 service_only=service_only,
@@ -309,7 +306,6 @@ def metric_range(
 
 def _fetch_projected_slice(
     *,
-    slice_: LokiReadSlice,
     pipeline: str,
     start_ns: int,
     end_ns: int,
@@ -336,9 +332,8 @@ def _fetch_projected_slice(
         )
         rows: list[tuple[int, int | None, str]] = []
         for stream in payload.get("data", {}).get("result", []):
-            agent_label = "agent_id" if slice_.era is LokiReadEra.INDEXED else "_projected_agent_id"
             stream_labels = stream.get("stream", {})
-            aid_raw = stream_labels.get(agent_label, stream_labels.get("agent_id", ""))
+            aid_raw = stream_labels.get("agent_id", "")
             aid = int(aid_raw) if aid_raw else None
             for ts_ns, line in stream.get("values", []):
                 rows.append((int(ts_ns), aid, line))
@@ -446,10 +441,6 @@ def query_projected_lines(
     n_slices = max(1, min(256, (n + limit_per_slice - 1) // limit_per_slice))
     for slice_, base_pipeline in pipelines:
         pipeline = base_pipeline
-        if slice_.era is LokiReadEra.LEGACY:
-            # Legacy streams expose agent_id only inside the JSON body. Extract
-            # it under a temporary label before line_format replaces that body.
-            pipeline += ' | json _projected_agent_id="agent_id"'
         if fields:
             json_stage = ", ".join(
                 f'{_loki_logql._escape_label(f)}="attributes.{_loki_logql._escape_label(f)}"'
@@ -466,7 +457,6 @@ def query_projected_lines(
             if i == n_slices - 1:
                 e = slice_end_ns
             _fetch_projected_slice(
-                slice_=slice_,
                 pipeline=pipeline,
                 start_ns=s,
                 end_ns=e,
@@ -474,7 +464,7 @@ def query_projected_lines(
                 timeout_s=timeout_s,
                 out=out,
             )
-    # Dedup cross-cutover and row-slice boundaries by (ts, line), then filter
+    # Dedup row-slice boundaries by (ts, line), then filter
     # the requested window and sort ascending.
     seen: set[tuple[int, str]] = set()
     dedup: list[tuple[int, int | None, str]] = []
