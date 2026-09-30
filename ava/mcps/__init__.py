@@ -379,14 +379,15 @@ async def _invalidate_session(server: str) -> None:
                 await stack.aclose()
 
 
-async def _call_with_reconnect(server: str, call: Any, *, errlog: Any = None) -> Any:
-    """Run `call(session)` against the cached session; when the call fails with
-    a transport error (dead stdio child / broken pipe), close the dead session,
-    reconnect, and retry once.
+async def _call_with_reconnect(
+    server: str, call: Any, *, errlog: Any = None, retry_transport: bool
+) -> Any:
+    """Run `call(session)` against the cached session and invalidate it on
+    transport failure. Retry only for requests safe to repeat (tool listing).
 
-    Tool-level errors (unknown tool, bad args, server-returned error) propagate
-    untouched — retrying those would double-run side-effectful tools. At most
-    one rebuild per call, so a server that cannot start still fails fast.
+    A tool call may have run before its response was lost, so its transport
+    failure reports an unknown result without replaying. Tool-level errors
+    propagate untouched. At most one rebuild per safe call.
     """
     session = await _connect(server, errlog=errlog)
     try:
@@ -395,6 +396,11 @@ async def _call_with_reconnect(server: str, call: Any, *, errlog: Any = None) ->
         if not is_transport_error(e):
             raise
         await _invalidate_session(server)
+        if not retry_transport:
+            raise MCPCallError(
+                f"MCP tool result unknown for server {server!r}; request may have executed: "
+                f"{type(e).__name__}: {e}"
+            ) from e
         session = await _connect(server, errlog=errlog)
         return await call(session)
 
@@ -421,7 +427,7 @@ def _list_tools(server: str) -> list[ToolInfo]:
 
     async def _do() -> list[ToolInfo]:
         result = await _call_with_reconnect(
-            server, lambda s: s.list_tools(), errlog=subprocess.DEVNULL
+            server, lambda s: s.list_tools(), errlog=subprocess.DEVNULL, retry_transport=True
         )
         return [
             {
@@ -454,7 +460,11 @@ def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
 
     async def _do() -> dict[str, Any]:
         try:
-            result = await _call_with_reconnect(server, lambda s: s.call_tool(tool, args or None))
+            result = await _call_with_reconnect(
+                server, lambda s: s.call_tool(tool, args or None), retry_transport=False
+            )
+        except MCPCallError:
+            raise
         except Exception as e:
             msg = str(e)
             if "tool" in msg.lower() and ("not found" in msg.lower() or "unknown" in msg.lower()):
