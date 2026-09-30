@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from base.native_process.os_platform import IS_WINDOWS
 from base.sessions import env_forwarding
 
 
@@ -28,7 +27,7 @@ def test_managed_service_path_preserves_tools_across_callers(
     bindir = venv / env_forwarding.get_backend().venv_bin_dir_name()
     tools = tmp_path / "admitted-tools"
     tools.mkdir()
-    command = tools / ("ava-proof.exe" if IS_WINDOWS else "ava-proof")
+    command = tools / "ava-proof"
     command.write_bytes(b"proof")
     command.chmod(0o700)
     monkeypatch.setattr(runtime_interpreter, "runtime_venv", lambda: venv)
@@ -62,7 +61,6 @@ def test_managed_service_path_accepts_plain_spaces(tmp_path: Path) -> None:
     assert env_forwarding.admit_service_path(path) == path
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX toolchain paths are injected only on POSIX")
 @pytest.mark.parametrize("shell_path", ["/usr/bin:/bin", "/bin"])
 def test_frontend_toolchain_path_is_independent_of_shell_profile(shell_path: str) -> None:
     """The Node locations are injected even when a remote shell exports only system dirs."""
@@ -80,7 +78,7 @@ def test_venv_activation_prefix_omits_an_empty_path_entry() -> None:
 
 
 def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`forward_env_dict` (the `ava start` daemon child env, POSIX and Windows)
+    """`forward_env_dict` (the `ava start` daemon child env)
     drops the cluster-scope keys too — same policy as the env-file prefix it
     replaced, and it keeps the whole-env copy's PATH the child genuinely needs."""
     monkeypatch.setattr(
@@ -124,16 +122,10 @@ def test_forward_env_dict_without_venv_activation_keeps_path_but_omits_virtual_e
     assert "/usr/bin" in env["PATH"].split(os.pathsep)
 
 
-def test_forward_env_dict_carries_temp_dir_and_windows_system_keys(
+def test_forward_env_dict_carries_temp_dir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The allowlist carries no non-Settings keys, but a child env built from
-    it alone is broken in two ways fixed here: TMPDIR (a POSIX child without it
-    falls back to the OS default temp root and pinned boot files drift) and the
-    Windows system keys (CreateProcess replaces the child env wholesale, so a
-    Windows service child without SYSTEMROOT dies in winsock init — WinError
-    10106, v0.1.34 win runner). Both are copied from os.environ, non-empty
-    only."""
+    """TMPDIR is copied from the parent so pinned boot files keep their path."""
     monkeypatch.setattr(
         os,
         "environ",
@@ -141,27 +133,11 @@ def test_forward_env_dict_carries_temp_dir_and_windows_system_keys(
             "AVA_HOME": "/tmp/ava-home",  # noqa: S108 — a literal env value, never opened
             "PATH": "/usr/bin",
             "TMPDIR": "/tmp",  # noqa: S108 — a literal env value, never opened
-            "SYSTEMROOT": r"C:\Windows",
-            "USERNAME": "ava",
         },
     )
-    # POSIX: temp dir carried (a POSIX daemon may also be spawned with this dict
-    # via a direct-process backend); Windows keys not — a POSIX session runs
-    # under a login shell whose profile rebuilds the full environment.
     env = env_forwarding.forward_env_dict()
     assert env["TMPDIR"] == "/tmp"  # noqa: S108 — literal, never opened
-    assert "SYSTEMROOT" not in env
-    # Windows: system keys ride — the env block handed to the child is a
-    # wholesale replacement, so omitting them kills the child at boot.
-    monkeypatch.setattr(env_forwarding, "IS_WINDOWS", True)
-    env = env_forwarding.forward_env_dict()
-    assert env["TMPDIR"] == "/tmp"  # noqa: S108 — literal, never opened
-    assert env["SYSTEMROOT"] == r"C:\Windows"
-    assert env["PATH"].endswith("/usr/bin")
-    # USERNAME rides too: getpass.getuser() on Windows reads it and falls back
-    # to `import pwd` (nonexistent there) when absent — the Task #963 updater
-    # crash on every `ava start` converge at the watchdog-probe registration.
-    assert env["USERNAME"] == "ava"
+    assert "/usr/bin" in env["PATH"].split(os.pathsep)
 
 
 def test_forward_env_dict_carries_the_machine_proxy_configuration(
@@ -191,17 +167,3 @@ def test_forward_env_dict_carries_the_machine_proxy_configuration(
     assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
     assert env["no_proxy"] == "localhost,127.0.0.1"
     assert "ALL_PROXY" not in env
-
-
-def test_windows_system_keys_include_username() -> None:
-    """Task #963 lock: the single Windows system-keys declaration must carry
-    USERNAME and USERDOMAIN. It lives in the env registry
-    (base/host/env/registry.py) — the old parallel copy in a legacy module is gone; a
-    prune that drops USERNAME re-opens the crash: `getpass.getuser()` with no
-    USERNAME in env falls through to `import pwd`, which does not exist on
-    Windows (observed in every win rollout updater since the 2026-08-06
-    allowlist wave, Task #963)."""
-    from base.host.env.registry import WINDOWS_SYSTEM_ENV_KEYS
-
-    assert "USERNAME" in WINDOWS_SYSTEM_ENV_KEYS, "dropped USERNAME (Task #963)"
-    assert "USERDOMAIN" in WINDOWS_SYSTEM_ENV_KEYS, "dropped USERDOMAIN (Task #963)"

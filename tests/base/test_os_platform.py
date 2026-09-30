@@ -53,19 +53,11 @@ class TestPrimaryDiskPath:
         # (whose near-full C: drive has nothing to do with this Linux machine).
         monkeypatch.setattr(plat, "IS_MACOS", False)
         monkeypatch.setattr(plat, "IS_WSL", True)
-        monkeypatch.setattr(plat, "IS_WINDOWS", False)
         assert primary_disk_path() == "/"
-
-    def test_windows_system_drive(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(plat, "IS_MACOS", False)
-        monkeypatch.setattr(plat, "IS_WSL", False)
-        monkeypatch.setattr(plat, "IS_WINDOWS", True)
-        assert primary_disk_path() == "C:\\"
 
     def test_plain_posix_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(plat, "IS_MACOS", False)
         monkeypatch.setattr(plat, "IS_WSL", False)
-        monkeypatch.setattr(plat, "IS_WINDOWS", False)
         assert primary_disk_path() == "/"
 
 

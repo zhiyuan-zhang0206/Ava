@@ -198,7 +198,7 @@ def test_graceful_delivery_tolerates_whole_second_create_time_drift(
 ) -> None:
     """A drifted reading must not refuse the process resolution accepted.
 
-    Mirror of posixproc / winproc delivery: `_process_for_record` accepts the
+    Mirror of posixproc delivery: `_process_for_record` accepts the
     create_time within tolerance, so the final re-check must not be stricter
     (macOS re-derives create_time with a whole-second boot-time correction).
     """
@@ -229,18 +229,16 @@ def test_graceful_delivery_refuses_a_birth_beyond_the_tolerance(
 
 
 @pytest.mark.parametrize(
-    ("is_windows", "is_macos", "enabled", "spawn", "expected"),
+    ("is_macos", "enabled", "spawn", "expected"),
     [
-        (True, False, True, True, "WinprocSessionBackend"),
-        (False, False, True, True, "PosixProcSessionBackend"),
-        (False, True, False, True, "PosixProcSessionBackend"),
-        (False, True, True, False, "PosixProcSessionBackend"),
-        (False, True, True, True, "HelperProcSessionBackend"),
+        (False, True, True, "PosixProcSessionBackend"),
+        (True, False, True, "PosixProcSessionBackend"),
+        (True, True, False, "PosixProcSessionBackend"),
+        (True, True, True, "HelperProcSessionBackend"),
     ],
 )
 def test_backend_route_matrix(
     monkeypatch: pytest.MonkeyPatch,
-    is_windows: bool,
     is_macos: bool,
     enabled: bool,
     spawn: bool,
@@ -249,7 +247,6 @@ def test_backend_route_matrix(
     from base.config import settings
     from base.sessions import backend as session_backend
 
-    monkeypatch.setattr(session_backend, "IS_WINDOWS", is_windows)
     monkeypatch.setattr(session_backend, "IS_MACOS", is_macos)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
     monkeypatch.setattr(settings.services, "permissions_helper_spawn", spawn)
@@ -272,7 +269,6 @@ def test_backend_route_fails_closed_when_settings_are_unreadable(
         def services(self) -> object:
             raise RuntimeError("unreadable")
 
-    monkeypatch.setattr(session_backend, "IS_WINDOWS", False)
     monkeypatch.setattr(session_backend, "IS_MACOS", True)
     monkeypatch.setattr(base.config, "settings", BrokenSettings())
     monkeypatch.setattr(session_backend, "_backend", None)

@@ -268,7 +268,7 @@ class HelperProcSessionBackend(SessionBackend):
         if process is None:
             return False
         with contextlib.suppress(*_GONE):
-            # Mirror posixproc/winproc: the start-time comparison carries the
+            # Mirror posixproc: the start-time comparison carries the
             # record-resolution tolerance, so a drifted reading never refuses
             # the process it resolved.
             if expected is not None and (

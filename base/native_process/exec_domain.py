@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import errno
 import os
 import signal
@@ -16,10 +15,7 @@ import psutil
 
 from base.native_process import native_boot_id
 from base.native_process.group_closure import confirm_closure
-from base.native_process.os_platform import IS_WINDOWS
 from base.native_process.ownership import OwnedProcess
-from base.native_process.winjob import WindowsJob
-from base.native_process.winjob_pipes import PipedJobChild
 
 KILL_GRACE_S = 2.0
 _POSIX_LAUNCH = object()
@@ -53,8 +49,7 @@ def _process_group_has_live_member(pgid: int) -> bool:
 class ExecProcessDomain:
     """Direct launch authority; a retained receipt alone cannot create it."""
 
-    proc: subprocess.Popen[bytes] | PipedJobChild
-    windows_job: WindowsJob | None
+    proc: subprocess.Popen[bytes]
     _launch: InitVar[object | None] = None
     _birth: OwnedProcess | None = field(init=False, default=None)
     _boot: str | None = field(init=False, default=None)
@@ -62,8 +57,6 @@ class ExecProcessDomain:
     _lock: threading.RLock = field(init=False, default_factory=threading.RLock)
 
     def __post_init__(self, _launch: object | None) -> None:
-        if IS_WINDOWS:
-            return
         if _launch is not _POSIX_LAUNCH:
             raise RuntimeError("POSIX exec custody requires its own launch boundary")
         self._boot = native_boot_id()
@@ -80,8 +73,6 @@ class ExecProcessDomain:
         reports a zombie and no longer exposes its PGID. Callers must not poll,
         wait, communicate or signal through Popen before domain closure.
         """
-        if IS_WINDOWS:
-            raise RuntimeError("POSIX exec launch is unavailable on Windows")
         if {
             "process_group",
             "start_new_session",
@@ -100,7 +91,7 @@ class ExecProcessDomain:
             ),
         )
         try:
-            return proc, cls(proc, None, _launch=_POSIX_LAUNCH)
+            return proc, cls(proc, _launch=_POSIX_LAUNCH)
         except BaseException as exc:
             raise ExecDomainBirthError(proc) from exc
 
@@ -128,8 +119,6 @@ class ExecProcessDomain:
 
     def signal(self, signum: int) -> None:
         """Signal the launch-owned group while its direct child remains pinned."""
-        if IS_WINDOWS:
-            raise RuntimeError("Windows exec domains stop through their Job Object")
         with self._lock:
             if self._closed:
                 return
@@ -150,11 +139,6 @@ class ExecProcessDomain:
             self._closed = True
 
     def _confirm_closure(self, deadline: float) -> None:
-        if IS_WINDOWS:
-            if self.windows_job is None:
-                raise RuntimeError("Windows exec process has no Job Object")
-            self.windows_job.terminate_and_confirm(deadline)
-            return
         if not isinstance(self.proc, subprocess.Popen):
             raise TypeError("exec domain has no POSIX direct child")
         # The shared core runs the rounds, the non-reaping leader-exit wait and
@@ -179,16 +163,6 @@ class ExecProcessDomain:
                 raise
 
     def close(self) -> None:
-        if IS_WINDOWS:
-            if self.windows_job is None:
-                raise RuntimeError("Windows exec process has no Job Object")
-            try:
-                self.windows_job.close()
-            except BaseException:
-                with contextlib.suppress(OSError):
-                    self.proc.kill()
-                raise
-            return
         # Never skip this signal based on a prior process-table census. Delivery
         # uncertainty retains the unreaped leader; Popen.kill would poll/reap it.
         self.signal(signal.SIGKILL)

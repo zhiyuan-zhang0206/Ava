@@ -25,12 +25,10 @@ from pathlib import Path
 import pytest
 
 import base.sessions.backend as sb
-from base.native_process.os_platform import IS_WINDOWS
 from base.sessions.backend import (
     PosixProcSessionBackend,
     PtySessionBackend,
     SessionBackend,
-    WinprocSessionBackend,
 )
 
 # The exact CLI invocation shape the backend must produce (W1a contract):
@@ -405,16 +403,13 @@ def test_pty_capture_defaults():
 def test_non_pty_backends_still_raise_send():
     """send is PTY-only like send_keys/capture_pane: the process supervisors
     raise, the PTY backends implement."""
-    for backend in (PosixProcSessionBackend(), WinprocSessionBackend()):
-        with pytest.raises(NotImplementedError):
-            backend.send("s", "text")
+    with pytest.raises(NotImplementedError):
+        PosixProcSessionBackend().send("s", "text")
 
 
 def test_get_shell_backend_is_pty_after_switch():
     """get_shell_backend() is PtySessionBackend on POSIX; orchestration
     sessions live on the service backend (the legacy orchestration backend
     is gone)."""
-    if IS_WINDOWS:
-        pytest.skip("POSIX-only migration")
     assert isinstance(sb.get_shell_backend(), PtySessionBackend)
     assert sb.get_shell_backend() is not sb.get_backend()

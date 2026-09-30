@@ -9,9 +9,9 @@ after_exec, then claim, which decides whether to wait or continue the turn.
 Core mechanisms:
   - Subprocess backend (`agent/graph/exec/_subprocess.py`): the parent spawns
     one `python -I -X utf8 -m agent.exec_child` per exec, polls every 50ms, streams
-    output through the chunk pipeline. POSIX cancel/timeout sends a signal then
-    closes the process group after a grace period; Windows immediately closes
-    the Job Object. Natural root exit also closes the domain, so an `os._exit`
+    output through the chunk pipeline. Cancel/timeout sends a signal then
+    closes the process group after a grace period. Natural root exit also closes
+    the domain, so an `os._exit`
     cannot strand an ordinary descendant holding stdout. Cancellation returns
     only after the direct child is reaped and the pipe reader gets its bounded
     join. The child rebuilds the state snapshot from the request envelope; the

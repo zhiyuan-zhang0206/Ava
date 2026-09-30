@@ -303,7 +303,7 @@ def test_interrupted_start_keeps_admitted_tool_path(
     monkeypatch.delenv("AVA_SERVICE_PATH", raising=False)
     activated = inputs.checkout.parent / "other-venv"
     tools = str(inputs.checkout.parent / "tools")
-    bin_name = "Scripts" if start_intent.IS_WINDOWS else "bin"
+    bin_name = "bin"
     monkeypatch.setenv("VIRTUAL_ENV", str(activated))
     monkeypatch.setenv(
         "PATH",

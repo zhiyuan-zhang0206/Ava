@@ -1,4 +1,4 @@
-"""Tests for ``base.sessions.backend`` — the cross-platform session abstraction."""
+"""Tests for ``base.sessions.backend`` session selection."""
 
 from __future__ import annotations
 
@@ -11,12 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from base.native_process.os_platform import IS_WINDOWS
 from base.sessions.backend import (
     PosixProcSessionBackend,
     PtySessionBackend,
     SessionBackend,
-    WinprocSessionBackend,
     get_backend,
     get_shell_backend,
 )
@@ -35,10 +33,7 @@ def test_get_backend_returns_platform_appropriate_singleton():
     b1 = get_backend()
     b2 = get_backend()
     assert b1 is b2  # singleton
-    if IS_WINDOWS:
-        assert isinstance(b1, WinprocSessionBackend)
-    else:
-        assert isinstance(b1, PosixProcSessionBackend)
+    assert isinstance(b1, PosixProcSessionBackend)
 
 
 def test_get_shell_backend_returns_platform_appropriate_singleton():
@@ -53,12 +48,7 @@ def test_get_shell_backend_returns_platform_appropriate_singleton():
     b1 = get_shell_backend()
     b2 = get_shell_backend()
     assert b1 is b2  # singleton
-    if IS_WINDOWS:
-        from base.sessions.windows.terminal.backend import WindowsTerminalBackend
-
-        assert isinstance(b1, WindowsTerminalBackend)
-    else:
-        assert isinstance(b1, PtySessionBackend)
+    assert isinstance(b1, PtySessionBackend)
     assert b1 is not get_backend()
 
 
@@ -70,38 +60,16 @@ def test_get_backend_is_a_session_backend():
 
 def test_native_proc_dispatches_by_platform():
     """native_proc() returns the native agent-process supervisor module —
-    winproc on Windows, posixproc on POSIX — with the surface agent launch /
-    reap / status dispatch to."""
+    posixproc with the surface agent launch / reap / status dispatch to."""
     from base.sessions.backend import native_proc
 
     mod = native_proc()
-    if IS_WINDOWS:
-        assert mod.__name__ == "base.sessions.windows.winproc"
-    else:
-        assert mod.__name__ == "base.sessions.posixproc"
+    assert mod.__name__ == "base.sessions.posixproc"
     # the surface the consumers rely on
     for fn in ("has_session", "new_session", "kill_session", "list_sessions", "graceful_signal"):
         assert callable(getattr(mod, fn))
 
 
-# ---------------------------------------------------------------------------
-# WinprocSessionBackend PTY methods raise NotImplementedError
-# ---------------------------------------------------------------------------
-
-
-def test_winproc_send_keys_raises():
-    backend = WinprocSessionBackend()
-    with pytest.raises(NotImplementedError):
-        backend.send_keys("sess", "key")
-
-
-def test_winproc_capture_pane_raises():
-    backend = WinprocSessionBackend()
-    with pytest.raises(NotImplementedError):
-        backend.capture_pane("sess")
-
-
-@pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions require POSIX")
 @pytest.mark.parametrize(
     ("relative_cwd", "projection", "expected_venv"),
     [

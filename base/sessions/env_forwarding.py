@@ -22,7 +22,7 @@ Watchers explicitly validate and override runner credentials before that PTY
 handoff.
 
 **The env POLICY lives elsewhere** (Task #856 Phase C + R2 design convergence
-point A): which keys a child receives is the `child_env(role, platform)`
+point A): which keys a child receives is the `child_env(role)`
 projection of the env registry (`base/host/env/registry.py` — host-scope facts +
 AVA_HOME for daemon/session children, plus agent-scope knobs and guide keys for
 agent children, NOT "everything AVA_* minus a drop set"; the old denylist
@@ -55,7 +55,6 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from base.host.system.backend import get_backend
-from base.native_process.os_platform import IS_WINDOWS
 
 # Keep this in sync with the provisioned Node locations in scripts/provision/node.sh.
 _FRONTEND_TOOLCHAIN_DIRS = (
@@ -73,11 +72,8 @@ def frontend_toolchain_path(inherited_path: str) -> str:
     through apt on Linux. Non-login remote shells do not reliably inherit the
     Homebrew directories, so the frontend cannot rely on a shell profile to
     find `npm`. Keep the provisioned locations ahead of the inherited path,
-    while preserving every caller-specific directory after them. Windows keeps
-    its inherited PATH because its `npm.cmd` lookup uses the native shell.
+    while preserving every caller-specific directory after them.
     """
-    if IS_WINDOWS:
-        return inherited_path
     seen: set[str] = set()
     dirs = (*_FRONTEND_TOOLCHAIN_DIRS, *inherited_path.split(os.pathsep))
     return os.pathsep.join(
@@ -158,7 +154,7 @@ def _session_forward_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """
     from base.host.env.registry import child_env
 
-    forward = child_env("gateway", "windows" if IS_WINDOWS else "posix")
+    forward = child_env("gateway")
     forward.update(extra or {})
     return forward
 
@@ -179,12 +175,9 @@ def cwd_is_inside_checkout(session_cwd: Path, checkout_root: Path) -> bool:
 
 
 def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
-    """The full child env dict for a daemon/service session (the Windows analog
-    of `forward_env_prefix`; POSIX callers also use it where the backend takes a
-    dict).
+    """The full child env dict for a daemon/service session.
 
-    There is no shared server env to freeze on Windows, so each
-    child gets a built dict: the registry's session forward view
+    Each child gets a built dict: the registry's session forward view
     (`_session_forward_env`) — host-scope AVA_* config + the ambient display
     passthroughs — *and* PATH, which the child genuinely needs. Cluster-scope
     values and agent-scope/non-modeled knobs are not carried (positive
@@ -207,9 +200,9 @@ def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
     editable install. ``activate_venv=False`` applies that projection.
 
     The dict is handed to the session backend as the child's real environment
-    (`new_session(..., env=...)`) on both platforms — the out-of-band env handoff
+    (`new_session(..., env=...)`) — the out-of-band env handoff
     that replaced the old env-file handoff (issue #974), so the activation
-    here is authoritative. On **POSIX** the
+    here is authoritative. The
     daemon session still runs under a login shell (`bash -lc`) whose profile /
     macOS `path_helper` rebuilds PATH and drops this venv prefix — so POSIX PATH
     activation is re-applied inside the session command via
@@ -217,9 +210,7 @@ def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
     """
     env = _session_forward_env()
     # Venv activation (the `uv run` injection this dict reproduces): the
-    # allowlist never carried PATH/VIRTUAL_ENV, and on Windows the env block is
-    # a wholesale replacement, so the child must get them here. (The temp-dir
-    # vars and the Windows system keys ride in `child_env` already.)
+    # allowlist never carried PATH/VIRTUAL_ENV, so the child must get them here.
     from base.deploy.release.runtime_interpreter import runtime_venv
 
     venv = runtime_venv()

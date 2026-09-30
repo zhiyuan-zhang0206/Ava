@@ -2,9 +2,8 @@
 
 ``base.host.brew_pin`` (UV_VERSION / UV_ASSET_SHA256) is canonical. toolchain.sh
 embeds the same values because it runs before Python exists on a fresh box, the
-CI workflows pin setup-uv with the same version, and the Windows setup guide
-(conventions/windows-setup.md, a WSL2 install) routes uv through toolchain.sh;
-these tests fail when any of the copies drift.
+CI workflows pin setup-uv with the same version; these tests fail when any of
+the copies drift.
 """
 
 from __future__ import annotations
@@ -22,8 +21,6 @@ _CI_WORKFLOWS = (
     _REPO_ROOT / ".github" / "workflows" / "update-model-pricing.yml",
     _REPO_ROOT / ".github" / "workflows" / "audit-branch-protection.yml",
 )
-
-_WINDOWS_SETUP = _REPO_ROOT / "conventions" / "windows-setup.md"
 
 # One `echo "<platform-tag> <sha256>" ;;` arm per supported platform.
 _TAG_SHA_ARM = re.compile(r'^\s*echo "([a-z0-9_-]+) ([0-9a-f]{64})"\s*;;', re.MULTILINE)
@@ -64,12 +61,3 @@ def test_toolchain_script_parses() -> None:
     subprocess.run(  # noqa: S603 — fixed argv executes the repository script
         ["bash", "-n", str(_TOOLCHAIN)], check=True
     )
-
-
-def test_windows_setup_installs_uv_through_the_pinned_toolchain() -> None:
-    """Windows runs Ava inside WSL2; its only uv install path is toolchain.sh."""
-    text = _WINDOWS_SETUP.read_text(encoding="utf-8")
-    assert "scripts/provision/toolchain.sh" in text, (
-        "windows-setup.md must install uv through the pinned toolchain.sh"
-    )
-    assert "astral.sh/uv/install" not in text, "windows-setup.md names the unpinned installer"

@@ -73,7 +73,7 @@ stable `pty-allocation.lock`; changing `$AVA_HOME` therefore cannot bypass a fre
 The marker stores schema version, random generation, holder, reason, and UTC
 creation time. A malformed marker means frozen, never inactive.
 
-Deliberately NOT `run/sessions/` (the posixproc/winproc dir): the record
+Deliberately NOT `run/sessions/` (the service-session dir): the record
 scan IS the session listing (`list`, `list-started-at`, and the backend's
 in-process enumeration — task #1200's snapshot cost, now zero round-trips),
 and sharing the dir would force every lister to regex-filter the other
@@ -129,8 +129,8 @@ ScheduleManager, the page-server daemon, `ops.cluster_status` capture/kill, and
 
 ## Boundaries
 
-- POSIX-only (`pty.fork`; Windows has no pty backend —
-  [conventions/windows-setup.md](../../../../conventions/windows-setup.md)).
+- POSIX-only (`pty.fork`; see
+  [Windows host guidance](../../../../conventions/windows-setup.md)).
 - One pty per session counts against the host-wide `kern.tty.ptmx_max`
   ceiling (macOS default 511) — see `base/native_process/os_platform.py`.
 - [[generation-boundary.ava.okf.md]] defines the desired-state implications of

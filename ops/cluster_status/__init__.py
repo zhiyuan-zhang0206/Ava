@@ -361,9 +361,9 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
     """Enumerate this host's live sessions from the session backends, and return
     (sessions, shell_count, total).
 
-    The service/daemon sessions come from `get_backend()` (native supervisor on
-    POSIX, winproc on Windows) and the agents' persistent shells / watchers from
-    `get_shell_backend()` (per-session pty hosts on POSIX) — the same two namespaces
+    The service/daemon sessions come from `get_backend()` (native supervisor)
+    and the agents' persistent shells / watchers from
+    `get_shell_backend()` (per-session pty hosts) — the same two namespaces
     `ava start` / the healthchecks write into. Only sessions matching the
     current cluster prefix (`ava-*`) are kept — dev-worktree clusters and bare
     non-ava sessions are excluded. Agent processes are not sessions (they are

@@ -9,8 +9,7 @@ no flag and no opt-in.
 
 - **Scale out by adding machines** — each runner adds agent capacity; the
   gateway owns Postgres/Redis and the one HTTP control surface.
-- **Windows joins as a runner** — natively, no WSL, no Docker; macOS, Linux
-  and Windows are all supported.
+- **POSIX hosts join as runners** — macOS and Linux, including Linux inside WSL2.
 - **Secure by default** — cluster authentication is always on and fail-closed;
   the data plane binds loopback plus the host's own address only.
 
@@ -30,5 +29,4 @@ planned work ([unified cluster lifecycle](../../future/infra/unified-cluster-lif
 ## Design decisions
 
 - [Multi-host deployment: single-box is the N=1 case](../../decisions/2026-06-11-multihost-deployment.md)
-- [Windows agent-runner only](../../decisions/2026-07-28-windows-agent-runner-only.md)
-- [Windows setup](../../conventions/windows-setup.md)
+- [Windows host setup](../../conventions/windows-setup.md)

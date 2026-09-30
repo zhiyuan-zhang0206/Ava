@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import io
 import os
 import signal
 import subprocess
@@ -28,7 +27,6 @@ from agent.graph.exec._process import (
     finish_teardown_despite_cancellation,
     settle_cancelled_owners,
     settle_resources,
-    signal_child,
     start_reader_join,
     start_reap,
     start_root_exit_observer,
@@ -36,7 +34,7 @@ from agent.graph.exec._process import (
 )
 from agent.graph.exec._result import _ExecCrashed
 from agent.graph.exec._stream import StreamingTextIO
-from agent.graph.exec._subprocess import _collect_child, _spawn
+from agent.graph.exec._subprocess import _collect_child
 from base.native_process.ownership import OwnedProcess
 from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 from base.sessions.posixproc import _group_empty
@@ -307,7 +305,6 @@ async def test_dead_status_is_a_terminal_non_reaping_observation(
     def _identity_for_pid(_pid: int) -> MagicMock:
         return identity
 
-    monkeypatch.setattr("agent.graph.exec._process.IS_WINDOWS", False)
     monkeypatch.setattr("agent.graph.exec._process.psutil.Process", _identity_for_pid)
 
     await asyncio.wait_for(start_root_exit_observer(proc), timeout=1.0)
@@ -322,7 +319,6 @@ async def test_missing_process_is_a_terminal_non_reaping_observation(
     identity.status.side_effect = psutil.NoSuchProcess(pid=556)
     proc = MagicMock(pid=556)
 
-    monkeypatch.setattr("agent.graph.exec._process.IS_WINDOWS", False)
     monkeypatch.setattr(
         "agent.graph.exec._process.psutil.Process", MagicMock(return_value=identity)
     )
@@ -401,7 +397,6 @@ async def test_repeated_cancellation_cannot_interrupt_resource_barrier() -> None
     assert events == ["close", "reap", "reader"]
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
 async def test_runner_cancelled_owners_leave_no_exec_process_group(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -469,138 +464,6 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
             proc.wait(timeout=5.0)
 
 
-async def test_windows_stop_closes_the_owned_job_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Windows stops through the root-independent Job handle, never Popen."""
-    proc = MagicMock(pid=777)
-    job = MagicMock()
-    root_exit_task: asyncio.Task[None] = asyncio.create_task(asyncio.sleep(60))
-    domain = MagicMock(proc=proc, windows_job=job)
-
-    def close_job(_deadline: float) -> None:
-        job.close()
-
-    domain.close_confirmed.side_effect = close_job
-    domain_close = DomainCloseOwner(domain, root_exit_task)
-    monkeypatch.setattr("agent.graph.exec._process.IS_WINDOWS", True)
-
-    signal_child(proc, signal.SIGTERM, domain_close)
-    await domain_close.wait()
-    domain_close.request()
-    await domain_close.wait()
-
-    job.close.assert_called_once_with()
-    proc.terminate.assert_not_called()
-    proc.kill.assert_not_called()
-    root_exit_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await root_exit_task
-
-
-def test_windows_job_attach_failure_kills_reaps_and_closes_pipe(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Attach stays primary while every failed cleanup stage remains visible."""
-
-    class _FailingJob:
-        def __init__(self) -> None:
-            self.close_calls = 0
-            self.assign_calls = 0
-
-        def assign(self, _proc: object) -> None:
-            self.assign_calls += 1
-            raise OSError("attach failed")
-
-        def close(self) -> None:
-            self.close_calls += 1
-            raise OSError("close failed")
-
-    class _SpawnedProc:
-        pid = 888
-
-        def __init__(self) -> None:
-            self.stdout = io.BytesIO()
-            self.kill_calls = 0
-            self.wait_calls = 0
-
-        def kill(self) -> None:
-            self.kill_calls += 1
-            raise OSError("kill failed")
-
-        def wait(self, timeout: float | None = None) -> int:
-            assert timeout == 5.0
-            self.wait_calls += 1
-            assert timeout is not None
-            raise subprocess.TimeoutExpired("exec child", timeout)
-
-    job = _FailingJob()
-    proc = _SpawnedProc()
-    popen_env: dict[str, str] = {}
-
-    def _fake_popen(*_args: object, **kwargs: object) -> _SpawnedProc:
-        popen_env.update(kwargs["env"])  # type: ignore[arg-type]
-        return proc
-
-    monkeypatch.setattr("agent.graph.exec._subprocess.IS_WINDOWS", True)
-    monkeypatch.setattr("agent.graph.exec._subprocess.WindowsJob.create", lambda: job)
-    monkeypatch.setattr("agent.graph.exec._subprocess.subprocess.Popen", _fake_popen)
-    gate = tmp_path / "attach.job-ready"
-
-    with pytest.raises(OSError, match="attach failed") as caught:
-        _spawn(
-            tmp_path / "request.json",
-            tmp_path / "result.json",
-            _AGENT_ID,
-            windows_job_gate=gate,
-        )
-
-    assert job.assign_calls == 1
-    assert job.close_calls == 1
-    assert proc.kill_calls == 1
-    assert proc.wait_calls == 1
-    assert proc.stdout.closed
-    assert popen_env["AVA_EXEC_JOB_GATE"] == str(gate)
-    notes = getattr(caught.value, "__notes__", ())
-    assert any("job_close: OSError: close failed" in note for note in notes)
-    assert any("root_kill: OSError: kill failed" in note for note in notes)
-    assert any("root_reap: TimeoutExpired" in note for note in notes)
-
-
-def test_windows_popen_failure_preserves_primary_when_job_close_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Job cleanup diagnostics cannot replace the original Popen failure."""
-    from agent.graph.exec._subprocess import _ExecNeverStartedError
-
-    class _FailingJob:
-        def close(self) -> None:
-            raise OSError("close failed")
-
-    def _failing_popen(*_args: object, **_kwargs: object) -> None:
-        raise OSError("spawn failed")
-
-    job = _FailingJob()
-    monkeypatch.setattr("agent.graph.exec._subprocess.IS_WINDOWS", True)
-    monkeypatch.setattr("agent.graph.exec._subprocess.WindowsJob.create", lambda: job)
-    monkeypatch.setattr("agent.graph.exec._subprocess.subprocess.Popen", _failing_popen)
-
-    with pytest.raises(OSError, match="spawn failed") as caught:
-        _spawn(
-            tmp_path / "request.json",
-            tmp_path / "result.json",
-            _AGENT_ID,
-            windows_job_gate=tmp_path / "attach.job-ready",
-        )
-
-    assert not isinstance(caught.value, _ExecNeverStartedError)
-    assert any(
-        "job_close: OSError: close failed" in note
-        for note in getattr(caught.value, "__notes__", ())
-    )
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX live group signal refusal")
 async def test_live_signal_refusal_returns_unresolved_without_reap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

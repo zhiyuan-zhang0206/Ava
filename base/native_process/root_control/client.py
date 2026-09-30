@@ -1,7 +1,7 @@
 """A blocking client for the K1 control plane.
 
 The server (`services.ava_root.server`) is asyncio; this client is a plain
-blocking socket or native pipe — call sites (tooling, gates, tests) are
+blocking Unix socket — call sites (tooling, gates, tests) are
 synchronous, and one request/response pair per connection is all the protocol
 needs. Transport failures raise RootClientError; business
 failures come back as a `{"ok": false, ...}` response for the caller to read.
@@ -188,19 +188,6 @@ class RootClient:
     def _roundtrip(self, payload: bytes, *, status: bool = False) -> bytes:
         """One connect/send/read cycle; OSErrors become RootClientError."""
         try:
-            if sys.platform == "win32":
-                from base.native_process.root_control.windows.transport import roundtrip
-
-                raw, peer = roundtrip(self._socket_path, payload, self._timeout)
-                response = parse_response(raw)
-                body = response.get("result")
-                if status and response["ok"]:
-                    if not isinstance(body, dict):
-                        raise RootClientError("root status omitted its native identity")
-                    root = native_identity(cast("dict[str, object]", body).get("root"))
-                    if root.pid != peer:
-                        raise RootClientError("root status does not name the native pipe peer")
-                return raw
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                 sock.settimeout(self._timeout)
                 sock.connect(str(self._socket_path))

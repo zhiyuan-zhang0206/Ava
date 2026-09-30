@@ -25,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from base.native_process.os_platform import IS_MACOS, IS_WINDOWS, file_lock
+from base.native_process.os_platform import IS_MACOS, file_lock
 from base.sessions.coding_session_owner_record import (
     CodingSessionKey,
     CodingSessionOwner,
@@ -117,8 +117,6 @@ def _private_socket_dir() -> Path:
     A world-writable parent lets anyone pre-create the name, so a directory
     that is a symlink or belongs to another user is refused rather than used.
     """
-    if IS_WINDOWS:
-        raise CodingSessionSocketError("a Codex takeover's app server needs a POSIX unix socket")
     uid = os.getuid()
     directory = _SOCKET_BASE / f"ava-{uid}"
     with contextlib.suppress(FileExistsError):

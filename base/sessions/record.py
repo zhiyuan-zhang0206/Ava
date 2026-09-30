@@ -1,15 +1,12 @@
-"""On-disk session record shared by the POSIX / Windows process supervisors.
+"""On-disk session record for the POSIX process supervisor.
 
-`base.sessions.posixproc` and `base.sessions.windows.winproc` are one-to-one platform mirrors that
-persist a launched background session as JSON under
-`$AVA_HOME/run/sessions/<name>.json`. This is the single shape both sides use —
-`new_session` writes it, `_process_for_record` reads it back — so the field
-contract lives in one typed place instead of two mirrored literal dicts.
+`base.sessions.posixproc` persists a launched background session as JSON under
+`$AVA_HOME/run/sessions/<name>.json`.
 
 On Linux, WSL2 may step `/proc/stat`'s `btime`, which makes psutil's epoch
 `create_time()` drift for a still-live pid. `starttime` records `/proc/<pid>/stat`
 field 22 instead: clock ticks since boot are monotonic and therefore the stable
-process identity when available; `create_time` remains for Windows and legacy
+process identity when available; `create_time` remains for legacy
 records.
 """
 
@@ -28,8 +25,7 @@ from base.native_process import pid_starttime_ticks
 
 def record_path(name: str) -> Path:
     """Where the named session's on-disk record lives —
-    ``$AVA_HOME/run/sessions/<name>.json`` (the path both platform supervisors
-    write through their own ``_record_path`` mirrors).
+    ``$AVA_HOME/run/sessions/<name>.json``.
 
     Public so a caller can PRE-write a record before the session process
     exists (the update chain lands its session record before it lands its
@@ -45,15 +41,12 @@ class SessionRecord:
     """A launched background session's identity + provenance.
 
     `pid` + `starttime` are the liveness key on Linux; `create_time` is the
-    compatibility fallback for legacy and Windows records. A matching process
+    compatibility fallback for legacy records. A matching process
     start-time defeats pid recycling. `cmd` / `cwd` / `started_at` are diagnostic
     provenance. `generation` is the admitting allocation/runtime generation:
     PTYs use their allocation, admitted agent records their runtime incarnation.
     It is a derived observation, not permission to claim work or signal a PID.
     Legacy and other service records leave it null.
-    On Windows a Python venv redirector can be the native session/group control
-    PID while agents_meta.pid remains the admitted interpreter child. Publication
-    must verify that direct wrapper ancestry and birth identity, never guess it.
     """
 
     pid: int
@@ -64,20 +57,11 @@ class SessionRecord:
     starttime: int | None = None
     generation: str | None = None
     control_mode: str | None = None
-    # Windows only: the resident cross-session control steward (issue #1930).
-    # All three fields are absent on legacy records, which therefore support
-    # same-session console delivery only. `steward_endpoint` is the steward's
-    # loopback TCP endpoint ("127.0.0.1:<port>") and `steward_nonce` its
-    # delivery token; the spawner writes both, so a caller can address the
-    # steward only by possessing this record.
-    steward_pid: int | None = None
-    steward_endpoint: str | None = None
-    steward_nonce: str | None = None
-    # POSIX only: the session's process group at spawn (the reparent helper's
+    # The session's process group at spawn (the reparent helper's
     # setsid pgid). The durable ownership proof for a leader that already died:
     # while the group is occupied, its surviving members are still this
     # session's descendants and a stop may converge them instead of silently
-    # losing them. None on Windows and legacy records.
+    # losing them. None on legacy records.
     pgid: int | None = None
 
     @classmethod
@@ -106,26 +90,13 @@ class SessionRecord:
                 else None
             ),
             control_mode=record.get("control_mode"),
-            steward_pid=(
-                int(record["steward_pid"]) if isinstance(record.get("steward_pid"), int) else None
-            ),
-            steward_endpoint=(
-                record["steward_endpoint"]
-                if isinstance(record.get("steward_endpoint"), str) and record["steward_endpoint"]
-                else None
-            ),
-            steward_nonce=(
-                record["steward_nonce"]
-                if isinstance(record.get("steward_nonce"), str) and record["steward_nonce"]
-                else None
-            ),
             pgid=int(record["pgid"]) if isinstance(record.get("pgid"), int) else None,
         )
 
     def identifies(self, pid: int) -> bool | None:
         """Whether `pid` is this record's process by its stable Linux identity.
 
-        False proves the pid is another process; None means a legacy/Windows
+        False proves the pid is another process; None means a legacy
         record or an unavailable `/proc` reading, whose callers fall back to
         `create_time` where that compatibility behavior is required.
         """
@@ -143,7 +114,7 @@ class SessionRecord:
 
         Temp file + rename, so a concurrent reader never sees a truncated
         write: `read` treats an unparseable record as absent, and the session
-        listings (`list_sessions` on both platforms) then unlink a record
+        listings (`list_sessions`) then unlink a record
         whose process is still alive — a live agent silently forgotten by
         `ava stop`'s no-DB reap (audit 2026-08-08 P1). Same shape
         `base/deploy/lifecycle/launch_failures.py` uses for the same reason."""

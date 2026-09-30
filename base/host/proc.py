@@ -28,7 +28,6 @@ from typing import Any, Literal
 
 import psutil
 
-from base.host.system.backend import get_backend
 from base.native_process.os_platform import CREATE_NO_WINDOW, SIGKILL
 from base.native_process.ownership import OwnedProcess, capture_tree
 
@@ -43,9 +42,7 @@ _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
 # lockfiles (`.git/index.lock`), so a SIGTERM'd `git pull` leaves a usable repo
 # where a SIGKILL'd one can leave a lock that breaks the next git call. Seconds,
 # not tens of seconds, because the thing we are killing has already proven it
-# does not finish. On Windows psutil maps both terminate() and kill() to
-# TerminateProcess, so the ladder collapses to a single hard kill there at no
-# cost — which is also why this is not branched on IS_WINDOWS.
+# does not finish.
 _TERMINATE_GRACE_S = 3.0
 
 # Ceiling on the post-kill reap. A process that survives SIGKILL is in
@@ -60,7 +57,7 @@ _DRAIN_TIMEOUT_S = 5.0
 
 # A recorded pid counts as the recorded session only while the live process's
 # start time matches the record — the supervisors' own pid-recycling rule
-# (`posixproc` / `winproc` / the pty backend all use this same 2 s tolerance).
+# (`posixproc` / the pty backend use this same 2 s tolerance).
 _SESSION_CREATE_TIME_TOLERANCE_S = 2.0
 
 
@@ -75,21 +72,17 @@ def hosting_supervised_session() -> str | None:
     from inside one of those trees is killed by its own stop mid-flight
     (2026-08-12: a host transition run in an agent's pty-hosted background shell
     died when stopping ava-pty-supervisor force-killed the supervisor's whole
-    tree, stranding the cluster paused with every service down). Windows
-    preserves nested live-session subtrees during a kill, so a restart run inside
-    `ava-ops` survives it; the guard asks the kill path's predicate rather than
-    approximating that boundary.
+    tree, stranding the cluster paused with every service down).
 
     A record whose process is gone, or whose pid the OS recycled onto a
     different process (start-time mismatch), does not count.
     """
     # Function-local: `base.paths` pulls in `base.config` settings and
-    # `base.sessions.windows.winproc` its session stack, which this leaf module keeps out of its
-    # import-time closure; each call also reads the owners' current bindings.
+    # its session stack, which this leaf module keeps out of its import-time
+    # closure; each call also reads the owners' current bindings.
     from base.native_process.ownership import stable_create_time
     from base.paths import run_dir
     from base.sessions.record import SessionRecord
-    from base.sessions.windows import winproc
 
     try:
         me = psutil.Process()
@@ -110,7 +103,7 @@ def hosting_supervised_session() -> str | None:
                     abs(stable_create_time(proc) - record.create_time)
                     <= _SESSION_CREATE_TIME_TOLERANCE_S
                 )
-            if is_record_process and not winproc.tree_kill_would_spare(name, proc, lineage):
+            if is_record_process:
                 return name
         except psutil.Error:
             continue
@@ -150,11 +143,7 @@ def hosting_exec_domain() -> str | None:
 
     A session whose leader already exited reads as None — the argv evidence is
     gone with it, and the domain's own teardown is already in flight by then.
-    Windows has no `getsid`; its exec teardown is the Job Object and this
-    membership route does not exist there — the ancestry guard stands alone.
     """
-    if not get_backend().is_posix():
-        return None
     cmdline = process_cmdline(os.getsid(0))
     if cmdline is None:
         return None
@@ -172,13 +161,8 @@ def process_alive(pid: int) -> bool:
     by another user — counts as alive: we must not declare a row an orphan
     when its pid maps to *some* running process.
 
-    POSIX uses `os.kill(pid, 0)` (signal 0 — existence test, no signal sent).
-    On Windows `os.kill(pid, 0)` would call TerminateProcess and *kill* the
-    target, so we probe via psutil instead (a pure handle query).
+    Uses `os.kill(pid, 0)` (signal 0 — existence test, no signal sent).
     """
-    backend = get_backend()
-    if not backend.is_posix():  # Windows: must avoid os.kill(pid, 0)
-        return backend.process_alive(pid)
     try:
         os.kill(pid, 0)
         return True
@@ -199,10 +183,7 @@ def process_cmdline(pid: int) -> list[str] | None:
     pairs this with `process_alive` — the pair is what `ops.agent_identity` turns
     into a verdict.
 
-    Unlike `os.kill`, there is no Windows hazard here: psutil reads the process
-    table directly (`/proc/<pid>/cmdline` on Linux, `KERN_PROCARGS2` on macOS, the
-    PEB on Windows) and delivers nothing to the target, so this is not branched on
-    the backend.
+    psutil reads the process table directly and delivers nothing to the target.
     """
     try:
         cmdline = psutil.Process(pid).cmdline()
@@ -240,9 +221,7 @@ def child_state(pid: int, parent_pid: int) -> ChildState:
 def force_kill(pid: int) -> None:
     """Force-terminate `pid` (the SIGKILL intent), tolerant of an absent pid.
 
-    POSIX sends SIGKILL. On Windows `os.kill(pid, SIGKILL-alias)` would map to
-    TerminateProcess but SIGKILL is undefined, so terminate via psutil
-    (TerminateProcess under the hood). A dead/absent pid is a silent no-op —
+    A dead/absent pid is a silent no-op —
     callers force-kill exactly to make a row reach 'terminated', so racing the
     process's own exit must not raise.
 
@@ -251,11 +230,6 @@ def force_kill(pid: int) -> None:
     to". The caller re-probes and reports the process as a survivor if delivery
     failed, so an unhandled exception must not interrupt that verification.
     """
-    backend = get_backend()
-    if not backend.is_posix():  # Windows: must avoid os.kill(SIGKILL)
-        backend.force_kill(pid)
-        return
-
     try:
         os.kill(pid, SIGKILL)
     except (ProcessLookupError, PermissionError):
@@ -265,31 +239,14 @@ def force_kill(pid: int) -> None:
 def request_stop(pid: int) -> None:
     """Ask `pid` to stop (the SIGTERM intent), tolerant of an absent pid.
 
-    The missing third of the pair `process_alive` / `force_kill` already form, and
-    it is missing for the reason those two exist: a caller that wants the polite
-    first pass has to reach for a signal, and the obvious spelling —
-    `os.kill(pid, SIGTERM)` — is one of the two that do not survive the crossing to
-    Windows. Every escalating stop in this repo needs all three, so all three
-    belong here rather than being re-derived, correctly or otherwise, per caller.
-
-    **On Windows this is not gentler than `force_kill`, and that is stated rather
-    than hidden.** There is no signal to deliver to an arbitrary process: Ctrl-Break
-    reaches only a process group we own (`base.sessions.windows.winproc.graceful_signal`), and
-    TerminateProcess — what psutil's `terminate()` calls — is uncatchable. A caller
-    escalating request_stop -> wait -> force_kill therefore gets a real grace period
-    on POSIX and an immediate stop on Windows. That is a platform fact, not a bug to
-    paper over: the alternative is a call that raises where it used to work.
+    Complements `process_alive` and `force_kill` for callers that first request
+    a graceful stop before escalating to SIGKILL.
 
     A pid this user may not signal returns quietly, like `force_kill` and for the
     same reason (see there). The realistic shape is not exotic: a stray from a
     `sudo`-run instance of this very checkout passes the caller's cmdline ownership
     check, `process_alive` correctly reads it as alive, and the signal is refused.
     """
-    backend = get_backend()
-    if not backend.is_posix():  # Windows: no SIGTERM to deliver, and os.kill lies
-        backend.force_kill(pid)
-        return
-
     try:
         os.kill(pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
@@ -332,9 +289,8 @@ def kill_process_tree(
 
     The descendant set is enumerated **once, up front, while the parent is still
     alive**. Walking down from a dead parent is not possible: psutil resolves
-    children by ppid, and on Windows there is no reparent-to-init to walk to
-    instead — the link is simply lost, which is how a tree survives a kill that
-    was aimed at its root. Only the root is signalled last when included.
+    children by ppid, so the link is lost after reparenting. Only the root is
+    signalled last when included.
 
     Limitation worth knowing: a descendant that has already double-forked away
     (reparented to init) is not in the ppid walk and is not reached. git and ssh

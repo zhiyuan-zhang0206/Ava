@@ -19,7 +19,6 @@ import contextlib
 import datetime as dt
 import json
 import logging
-import os
 import uuid
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -142,8 +141,6 @@ def current_generation() -> str | None:
 
 
 def _fsync_parent(path: Path) -> None:
-    if os.name == "nt":
-        return
     fsync_parent(path)
 
 

@@ -156,7 +156,7 @@ _ALLOWED_FILES = frozenset(
         "scripts/lint/code_structure.py",  # LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings.
         "scripts/ci/coverage_gates.py",  # BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser
         "scripts/ci_utils.py",  # CI_QUEUE and TRUNK_API_TOKEN are per-invocation CI-orchestration inputs; Settings models deployment config, and its singleton cannot preserve the required live environment read for this standalone merge watcher
-        "base/native_process/os_platform.py",  # process-platform plumbing that Settings cannot model: ensure_utf8_stdio sets Python runtime encoding knobs for child interpreters; launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity
+        "base/native_process/os_platform.py",  # launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity
         "base/host/system/probes.py",  # display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not ava runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators
         "ava/watcher.py",  # _spawn() bootstrap code uses os.environ.get in a string literal for the child process bootstrap
         "ava/agent_identity.py",  # _try_establish_from_env() reads os.environ["AVA_AGENT_ID"] as a lazy fallback; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent

@@ -1,23 +1,12 @@
-"""Cross-platform session backend — unifies the POSIX native process supervisor
-and winproc (Windows) behind a common interface for long-running named process
-sessions. Module-level ``get_backend()`` returns the platform-appropriate
-singleton; callers use the same ``SessionBackend`` protocol regardless of
-platform.
+"""Session backends for long-running named processes and agent shells.
 
-- ``get_backend()`` — the **service/daemon** backend: ``WinprocSessionBackend``
-  on Windows; ``HelperProcSessionBackend`` on macOS when helper spawning is
-  enabled; otherwise ``PosixProcSessionBackend`` (``base.sessions.posixproc``) on
-  POSIX. Every long-running service session lives here: ``ava start`` launches
-  and pause/unpause.
+- ``get_backend()`` — the **service/daemon** backend: ``HelperProcSessionBackend``
+  on macOS when helper spawning is enabled; otherwise ``PosixProcSessionBackend``.
 - ``get_shell_backend()`` — agent interactive shells / watchers:
-  ``PtySessionBackend`` (one detached host per session) on POSIX, the native
-  supervisor on Windows. Never addresses service sessions.
+  ``PtySessionBackend`` (one detached host per session). Never addresses service sessions.
 
-**Every import of a platform supervisor in this module is method-local** —
-`from base.sessions.windows import winproc` / `from base.sessions import posixproc` /
-`from base.sessions.helperproc import HelperProcSessionBackend` inside method bodies,
-never at module scope — so selecting one backend does not import every
-platform implementation.
+Platform supervisor imports are method-local so selecting one backend does not
+import every implementation.
 """
 
 from __future__ import annotations
@@ -35,10 +24,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 # ruff: noqa: S603 — subprocess calls use repo-internal literal args
-from base.native_process.os_platform import (
-    IS_MACOS,
-    IS_WINDOWS,
-)
+from base.native_process.os_platform import IS_MACOS
 from base.paths import logs_dir, run_dir
 from base.sessions.record import SessionRecord
 
@@ -74,12 +60,10 @@ class SessionBackend(abc.ABC):
         responsible for building it (``base.sessions.env_forwarding.forward_env_dict`` is the
         shared builder every current caller uses).
 
-        ``login_shell`` (POSIX only) wraps the command in ``bash -lc`` so
-        user-local PATH additions are visible.  Windows ignores this flag —
-        there is no login shell, and the native supervisor runs the command
-        through cmd.exe only when its syntax requires one.
+        ``login_shell`` wraps the command in ``bash -lc`` so user-local PATH
+        additions are visible.
 
-        ``exec_cmd`` (POSIX login shells only) makes that wrapper ``exec`` into
+        ``exec_cmd`` makes that wrapper ``exec`` into
         the command, so the pid the supervisor records — and later SIGTERMs — is
         the command's own rather than a shell sitting in front of it. Daemons
         want this: a surviving wrapper swallows the graceful-stop signal and
@@ -520,100 +504,6 @@ class PtySessionBackend(SessionBackend):
         return logs_dir() / f"{name}.out.log"
 
 
-# ---------------------------------------------------------------------------
-# Windows: native process supervisor
-# ---------------------------------------------------------------------------
-
-
-class WinprocSessionBackend(SessionBackend):
-    """Windows backend: long-running sessions managed by the native process
-    supervisor (``base.sessions.windows.winproc``).
-
-    ``new_session`` hands the command to the supervisor with the caller-supplied
-    ``env`` dict; the supervisor decides whether cmd.exe is needed to run it (see
-    ``base.sessions.windows.winproc._plan_launch`` — the choice governs whether the command's
-    output survives).  PTY methods raise ``NotImplementedError``.
-
-    Each method imports ``winproc`` locally rather than at module scope — see the
-    module docstring.
-    """
-
-    def has_session(self, name: str) -> bool:
-        from base.sessions.windows import winproc
-
-        return winproc.has_session(name)
-
-    def new_session(
-        self,
-        name: str,
-        cmd: str,
-        cwd: Path,
-        *,
-        env: dict[str, str],
-        login_shell: bool = True,  # noqa: ARG002 — no login shell exists on Windows
-        exec_cmd: bool = True,  # noqa: ARG002 — cmd.exe has no exec
-    ) -> bool:
-        from base.sessions.windows import winproc
-
-        # `.venv/bin/python` -> the checkout's Windows interpreter is the
-        # supervisor's job: it rewrites the token *after* splitting the command,
-        # so a checkout path containing a space survives. Rewriting the raw
-        # string here would splice an unquoted path back into it.
-        return winproc.new_session(name, cmd, cwd, env=env)
-
-    def kill_session(
-        self,
-        name: str,
-        *,
-        graceful: bool = False,
-        timeout: float = 15.0,
-        expected: bool = False,
-    ) -> tuple[bool, str]:
-        # ``expected`` is accepted for interface parity; the native supervisor
-        # has no force-kill escalation to quieten (its kill is the escalation).
-        del expected
-        from base.sessions.windows import winproc
-
-        return winproc.kill_session(name, graceful=graceful, timeout=timeout)
-
-    def graceful_signal(
-        self, name: str, *, expected: SessionRecord | None = None, timeout: float = 5.0
-    ) -> bool:
-        from base.sessions.windows import winproc
-
-        if expected is None and timeout == 5.0:
-            return winproc.graceful_signal(name)
-        return winproc.graceful_signal(name, expected=expected, timeout=timeout)
-
-    def list_sessions(self, prefix: str = "") -> list[str]:
-        from base.sessions.windows import winproc
-
-        return winproc.list_sessions(prefix)
-
-    def session_started_at(self, name: str) -> float | None:
-        from base.sessions.windows import winproc
-
-        return winproc.session_started_at(name)
-
-    def session_log_path(self, name: str) -> Path | None:
-        from base.sessions.windows import winproc
-
-        return winproc.session_log_path(name)
-
-    def kill_session_with_verdict(
-        self,
-        name: str,
-        *,
-        graceful: bool = False,
-        timeout: float = 15.0,
-        expected: bool = False,
-    ) -> tuple[bool, str, bool]:
-        del expected
-        from base.sessions.windows import winproc
-
-        return winproc.kill_session_with_verdict(name, graceful=graceful, timeout=timeout)
-
-
 _backend: SessionBackend | None = None
 
 
@@ -643,16 +533,14 @@ def get_backend() -> SessionBackend:
     This is the **service/daemon** backend — every long-running service session
     (`ava start` launches, pause/unpause) lives here: the helper-backed
     supervisor on opted-in macOS hosts, the native supervisor on other POSIX
-    hosts, and the native supervisor on Windows. Agent
+    hosts. Agent
     *processes* do NOT call this function directly: `native_proc()` routes them
     to the same selected process supervisor. Agent shells / watchers use the
     PTY backend (`get_shell_backend()`).
     """
     global _backend  # noqa: PLW0603
     if _backend is None:
-        if IS_WINDOWS:
-            _backend = WinprocSessionBackend()
-        elif helper_spawn_enabled():
+        if helper_spawn_enabled():
             from base.sessions.helperproc import HelperProcSessionBackend
 
             _backend = HelperProcSessionBackend()
@@ -666,26 +554,20 @@ _shell_backend: SessionBackend | None = None
 
 def get_shell_backend() -> SessionBackend:
     """Return the backend for AGENT interactive shells and watchers —
-    ``PtySessionBackend`` on POSIX (one detached host per session), the
-    root-brokered durable terminal resources on Windows; distinct from ``get_backend()``
+    ``PtySessionBackend`` (one detached host per session); distinct from ``get_backend()``
     (service/daemon sessions). ``ava.shell.sessions`` and
     watcher sessions use this PTY backend — never the service backend.
     """
     global _shell_backend  # noqa: PLW0603
     if _shell_backend is None:
-        if IS_WINDOWS:
-            from base.sessions.windows.terminal.backend import WindowsTerminalBackend
-
-            _shell_backend = WindowsTerminalBackend()
-        else:
-            _shell_backend = PtySessionBackend()
+        _shell_backend = PtySessionBackend()
     return _shell_backend
 
 
 def native_proc() -> NativeProcessSupervisor:
     """The platform's native process supervisor for AGENT processes —
-    `base.sessions.windows.winproc` (Windows), the helper-backed service backend on opted-in
-    macOS hosts, or `base.sessions.posixproc` (other POSIX routes).
+    The helper-backed service backend on opted-in macOS hosts, or
+    `base.sessions.posixproc` on other hosts.
 
     Both modules expose the same surface (`has_session` / `new_session` /
     `kill_session` / `list_sessions` / `session_log_path`), so `ops.agent_launch`
@@ -698,10 +580,6 @@ def native_proc() -> NativeProcessSupervisor:
     Supervisor imports are local for the same reason as the module's backends:
     selecting one platform does not import every platform implementation.
     """
-    if IS_WINDOWS:
-        from base.sessions.windows import winproc
-
-        return cast("NativeProcessSupervisor", winproc)
     if helper_spawn_enabled():
         return cast("NativeProcessSupervisor", get_backend())
     from base.sessions import posixproc
