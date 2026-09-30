@@ -1,6 +1,6 @@
 """LogQL builders and live-event read-window planning.
 
-All query families use these helpers so filtering, index-era selection, and
+All query families use these helpers so filtering, live selector choice, and
 quoted label escaping stay identical at every Loki read boundary.
 """
 
@@ -80,7 +80,6 @@ def _build_logql(
     *,
     era: LokiReadEra = LokiReadEra.LEGACY,
     archive: bool = False,
-    indexed_labeled: bool = False,
     agent_id: int | None = None,
     exclude_agent_ids: list[int] | None = None,
     service_only: bool = False,
@@ -122,7 +121,7 @@ def _build_logql(
     With ``archive=True`` the query targets the task #1281 archive stream
     (all pre-cutover events) instead of the live event stream: the archive
     has no event_name/agent_id index labels, so those filters match the
-    plain json-extracted fields; ``era``/``indexed_labeled`` are ignored.
+    plain json-extracted fields; ``era`` is ignored.
     """
     if archive:
         # The archive stream carries no event_name/agent_id index labels, so
@@ -138,7 +137,6 @@ def _build_logql(
             era=era,
             agent_id=agent_id,
             event_names=event_names,
-            indexed_labeled=indexed_labeled,
         )
         event_name_field = "event_name_extracted"
         agent_id_field = "agent_id_extracted"
@@ -198,14 +196,8 @@ def _window(from_: datetime | None, to: datetime | None) -> tuple[datetime, date
     return start, end
 
 
-def _read_slices(window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
-    """The one event-time partition every Loki read uses during rollout."""
-
-    return split_index_label_window(*window)
-
-
 def _slice_duration_s(slice_: LokiReadSlice) -> int:
-    """Range-vector duration for one half-open rollout slice."""
+    """Range-vector duration for one live read slice."""
 
     return max(1, int((slice_.end - slice_.start).total_seconds()))
 
@@ -213,8 +205,6 @@ def _slice_duration_s(slice_: LokiReadSlice) -> int:
 def _agg_pipeline(
     *,
     era: LokiReadEra = LokiReadEra.LEGACY,
-    legacy_unlabeled: bool = False,
-    indexed_labeled: bool = False,
     agent_id: int | None = None,
     exclude_agent_ids: list[int] | None = None,
     service_only: bool = False,
@@ -244,8 +234,6 @@ def _agg_pipeline(
             era=era,
             agent_id=agent_id,
             event_names=event_names,
-            legacy_unlabeled=legacy_unlabeled,
-            indexed_labeled=indexed_labeled,
         )
     ]
     if grep:
@@ -303,15 +291,14 @@ def _agg_pipelines(
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
 ) -> list[tuple[LokiReadSlice, str]]:
-    """Build the same aggregation pipeline once for every rollout slice."""
+    """Build the aggregation pipeline for the live read window."""
 
-    slices = _read_slices(window)
+    slices = split_index_label_window(*window)
     return [
         (
             slice_,
             _agg_pipeline(
                 era=slice_.era,
-                indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
                 agent_id=agent_id,
                 exclude_agent_ids=exclude_agent_ids,
                 service_only=service_only,
@@ -325,20 +312,6 @@ def _agg_pipelines(
                 trace_id=trace_id,
                 attribute_filters=attribute_filters,
             ),
-        )
-        for slice_ in slices
-    ]
-
-
-def _range_eras(window: tuple[datetime, datetime]) -> list[tuple[LokiReadEra, bool, bool]]:
-    """Read label-disjoint eras without shifting a caller-owned range grid."""
-
-    slices = _read_slices(window)
-    return [
-        (
-            slice_.era,
-            len(slices) == 2 and slice_.era is LokiReadEra.LEGACY,
-            len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
         )
         for slice_ in slices
     ]

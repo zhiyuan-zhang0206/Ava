@@ -72,12 +72,12 @@ structured metadata.
 
 - Structured metadata is NOT index-label matched by `{...}` selectors, but
   **pipeline filters match it directly** — no `| json` stage needed for
-  level / category / machine / trace_id filters. `agent_id` and `event_name`
-  are the exceptions since the 2026-08-23 index-label cutover (Task #1407
-  B2): the collector promotes them to stream labels, so indexed-era slices
-  match them inside `{...}` (see `base/telemetry/loki_index_labels.py`); pre-cutover
-  rows keep the pipeline-filter form until legacy retention expires
-  2026-08-30.
+  level / category / machine / trace_id filters. The collector promotes
+  `agent_id` and `event_name` to stream labels, so live reads narrow those
+  fields inside `{...}` and verify the body values in the pipeline (see
+  `base/telemetry/loki_index_labels.py`). Every retained live row uses the
+  indexed read slice. The separate archive stream has no promoted labels;
+  archive reads extract those fields from JSON.
 - A plain `| json` flattens the nested `attributes` object into per-line
   labels (`attributes_msg`, ...), and `trace_id`/`span_id` differ per line —
   together they make every event its own series, so per-series range
