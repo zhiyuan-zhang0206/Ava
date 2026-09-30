@@ -104,6 +104,13 @@ A `provider.py` calls `register(binding, models=..., pricing=...)` once:
   spawnable facts, current prices, effort defaults, and Anthropic-protocol
   output caps before the binding becomes available.
 
+The current Sonnet and Sol successors are `claude-sonnet-5-5` and
+`gpt-6.1-sol`. Their predecessors remain spawnable for existing agent
+configurations and are hidden only from the spawn picker. Sonnet 5.5 rejects
+`thinking.type=disabled`, so the Claude builder ignores that request and uses
+adaptive thinking. GPT-6.1 Sol rejects `none` effort, so the GPT builder clamps
+that request to `low` using the model's effort vocabulary.
+
 `ProviderBinding.key_env` is the secret-delivery declaration. The gateway reads
 the cluster `.env` during spawn validation, bootstrap relays enabled bindings'
 present keys to split runners, and the single-box child allowlist forwards only
