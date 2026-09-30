@@ -11,7 +11,7 @@
     "tests/ava/test_agents_sdk.py": 1162,
     "tests/ava/test_mcps.py": 1367,
     "tests/ava/test_self_evolution_collect.py": 913,
-    "tests/ava/test_skills.py": 1503,
+    "tests/ava/test_skills.py": 1502,
     "tests/ava/test_understand.py": 967,
     "tests/ava/test_watcher.py": 1078,
     "tests/ava/test_web.py": 1046

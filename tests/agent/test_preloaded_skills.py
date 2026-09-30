@@ -7,8 +7,9 @@ Two surfaces:
   system note injected at cold start + after every compact (same carrier as the
   memory index).
 
-Skills are faked by pointing `ava.skills._skills_dir` at a tmpdir and treating
-every dir there as an enabled overlay entry — same shape as tests/ava/test_skills.py.
+Skills are faked by running in a per-test unit home (`unit_home`) and treating
+every dir under `<home>/skills` as an enabled overlay entry — same shape as
+tests/ava/test_skills.py.
 """
 
 from __future__ import annotations
@@ -22,16 +23,16 @@ from agent.graph.capabilities import resolve_prompt_skills
 from agent.graph.context_notes import preloaded_skills_note
 from base.agents.messages.kwargs import NoteTag
 from base.config import FIELD_INFOS, AgentSettings, per_agent_field_names, settings
+from base.paths import skills_dir
 
 
 @pytest.fixture(autouse=True)
-def _isolate_load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Point _skills_dir at a non-existent path by default so the real
-    ~/.agents/skills/ never leaks into a scan; fake_skills_dir re-points it."""
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: tmp_path / "no-skills")
+def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run in a per-test unit home whose `skills/` does not exist by default so
+    the real ~/.agents/skills/ never leaks into a scan; fake_skills_dir creates it."""
 
     def _all_enabled() -> set[str]:
-        d = skills_mod._skills_dir()
+        d = skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
     monkeypatch.setattr(
@@ -40,10 +41,9 @@ def _isolate_load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def fake_skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    d = tmp_path / "skills"
+def fake_skills_dir(unit_home: Path) -> Path:
+    d = skills_dir()
     d.mkdir()
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     return d
 
 

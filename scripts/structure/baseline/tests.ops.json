@@ -4,7 +4,6 @@
   },
   "patch_targets": {
     "tests/ops/test_agent_skill_view.py::ava.composer_commands._command_dirs": 1,
-    "tests/ops/test_agent_skill_view.py::ava.skills._skills_dir": 1,
     "tests/ops/test_billing_recovery.py::ops.lifecycle.billing_recovery._try_run_lock": 1,
     "tests/ops/test_capture_shell_trim.py::base.sessions.backend._shell_backend": 1,
     "tests/ops/test_cluster_status_batch.py::ops.cluster_status._check_pidfile": 2,

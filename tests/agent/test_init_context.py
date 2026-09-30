@@ -6,6 +6,7 @@ claim's compact return, the auto-compact hook); the drift between those copies
 is what these tests pin down now that there is one owner.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -22,6 +23,7 @@ from agent.state import AgentState, ContextReset
 from base.agents.context import AvaContext
 from base.config import settings
 from base.db import create_agent
+from base.paths import skills_dir
 
 
 def _config(tid: int) -> RunnableConfig:
@@ -52,6 +54,13 @@ def _fake_notes(monkeypatch: pytest.MonkeyPatch, *tags: str) -> list[HumanMessag
 
 def _tags(msgs: list[AnyMessage]) -> list[str | None]:
     return [m.additional_kwargs.get("ava_note_tag") for m in msgs]  # pyright: ignore[reportUnknownMemberType]
+
+
+@pytest.fixture
+def skills_unit(unit_home: Path, set_machine_identity: Callable[..., None]) -> None:
+    """A per-test unit home, so `<home>/skills` is this test's own skill load dir,
+    that still names its machine: the capability index the node renders needs one."""
+    set_machine_identity("agent-runner", "test-machine")
 
 
 async def test_empty_window_lays_down_system_prompt_then_notes(
@@ -185,24 +194,21 @@ async def test_head_is_identical_whether_or_not_the_window_had_history(
     assert "preloaded_skills" in _tags(compact_msgs)  # pyright: ignore[reportUnknownArgumentType]
 
 
+@pytest.mark.usefixtures("skills_unit")
 async def test_established_head_records_what_the_capability_index_lists(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
     """The `# Capabilities` section it renders is a snapshot of a live filesystem
     scan, so the same act has to record what that snapshot covered — otherwise
     nothing downstream can tell that a skill installed later is missing from it.
     """
-    import ava.skills as skills_mod
-
-    d = tmp_path / "skills"
+    d = skills_dir()
     (d / "alpha").mkdir(parents=True)
     (d / "alpha" / "SKILL.md").write_text(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
     )
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
         "base.packages.extensions.install_registry.loadable_skill_names", lambda: {"alpha"}
     )
@@ -217,11 +223,11 @@ async def test_established_head_records_what_the_capability_index_lists(
     assert cmd.update["capabilities"].indexed == {"alpha"}  # type: ignore[index]
 
 
+@pytest.mark.usefixtures("skills_unit")
 async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
     """The whole seam, composed: establish a window, install a skill into the
     live catalog the way an install does, and the standing SystemMessage — frozen
@@ -231,15 +237,13 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     driven in sequence, with the snapshot handed from the node that records it to
     the hook that reads it.
     """
-    import ava.skills as skills_mod
     from agent.hooks.capabilities import _newly_installed_skills
 
-    d = tmp_path / "skills"
+    d = skills_dir()
     (d / "alpha").mkdir(parents=True)
     (d / "alpha" / "SKILL.md").write_text(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
     )
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
         "base.packages.extensions.install_registry.loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
@@ -268,11 +272,11 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     assert update["capabilities"].indexed == {"alpha", "beta"}  # pyright: ignore[reportUnknownMemberType]
 
 
+@pytest.mark.usefixtures("skills_unit")
 async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
     """A simultaneous skill install survives the hook-to-LLM compaction path.
 
@@ -282,19 +286,17 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     """
     from langgraph.graph.message import add_messages
 
-    import ava.skills as skills_mod
     from agent.hooks import HOOKS, make_hook_runner
     from agent.hooks import compact as compact_mod
     from agent.hooks.capabilities import _newly_installed_skills
     from agent.hooks.compact import _compact_reminder
     from base.lm.context_budget import ContextBudget
 
-    d = tmp_path / "skills"
+    d = skills_dir()
     (d / "alpha").mkdir(parents=True)
     (d / "alpha" / "SKILL.md").write_text(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
     )
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
         "base.packages.extensions.install_registry.loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
