@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -224,8 +225,22 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   // The command list is owned here (not in the dropdown) so it doubles as the
   // lookup for the committed command's instruction hint, shown once the name is
   // followed by whitespace and the dropdown has closed.
-  const commandsCacheRef = useRef(new Map<number | null, CommandItem[]>());
-  const [commands, setCommands] = useState<CommandItem[]>([]);
+  const { data: commands = [] } = useQuery({
+    queryKey: ["agent-commands", agentId],
+    queryFn: async () => {
+      try {
+        return await (agentId == null ? api.getCommands() : api.getCommands(agentId));
+      } catch (e) {
+        // A missing list just means no autocomplete. Keep the failure uncached
+        // so switching back retries; avoid the global QueryCache 401 notifier
+        // because command-catalog failures have always been silent to users.
+        console.warn(`[composer] getCommands failed: ${errMsg(e)}`);
+        throw new Error("command catalog unavailable", { cause: e });
+      }
+    },
+    staleTime: Infinity,
+    retry: false,
+  });
   const taRef = useRef<HTMLTextAreaElement>(null);
   const acRef = useRef<SlashAutocompleteHandle>(null);
   // Single popover owner: the composer has two upward popovers over the same
@@ -272,36 +287,6 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     }
     return null;
   }, [value, caret, commands]);
-
-  // The selected agent owns the command catalog. Cache successful lists for
-  // quick agent switching; a failed request stays a miss so returning retries.
-  useEffect(() => {
-    const cacheKey = agentId ?? null;
-    const cachedCommands = commandsCacheRef.current.get(cacheKey);
-    if (cachedCommands !== undefined) {
-      setCommands(cachedCommands);
-      return;
-    }
-
-    // Do not show the previous agent's commands while this catalog loads.
-    setCommands([]);
-    let alive = true;
-    const request = agentId == null ? api.getCommands() : api.getCommands(agentId);
-    request
-      .then((c) => {
-        commandsCacheRef.current.set(cacheKey, c);
-        if (alive) setCommands(c);
-      })
-      .catch((e: unknown) => {
-        // A missing list just means no autocomplete — don't surface it in the
-        // composer. Log so a real backend failure (500 / shape change) isn't
-        // indistinguishable from "gateway down".
-        console.warn(`[composer] getCommands failed: ${errMsg(e)}`);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [agentId]);
 
   useEffect(() => {
     if (focusToken === undefined) return;
