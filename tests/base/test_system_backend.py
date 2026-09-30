@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
+import base.host.system.backend as backend_module
 from base.host.system.backend import (
     LinuxPlatformBackend,
     MacPlatformBackend,
     PlatformBackend,
-    WindowsPlatformBackend,
     get_backend,
 )
 
@@ -20,6 +20,14 @@ def test_get_backend_returns_correct_type() -> None:
     backend = get_backend()
     # All implementations are PlatformBackend instances
     assert isinstance(backend, PlatformBackend)
+
+
+def test_unsupported_host_does_not_select_linux_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backend_module, "IS_MACOS", False)
+    monkeypatch.setattr(backend_module, "IS_LINUX", False, raising=False)
+    monkeypatch.setattr(backend_module, "_backend", None)
+    with pytest.raises(RuntimeError, match="unsupported host platform"):
+        backend_module.get_backend()
 
 
 def test_mac_backend_venv_bin_dir() -> None:
@@ -32,12 +40,6 @@ def test_linux_backend_venv_bin_dir() -> None:
     """Linux venv uses 'bin' directory."""
     backend = LinuxPlatformBackend()
     assert backend.venv_bin_dir_name() == "bin"
-
-
-def test_windows_backend_venv_bin_dir() -> None:
-    """Windows venv uses 'Scripts' directory."""
-    backend = WindowsPlatformBackend()
-    assert backend.venv_bin_dir_name() == "Scripts"
 
 
 def test_mac_capability_queries() -> None:
@@ -58,98 +60,6 @@ def test_linux_capability_queries() -> None:
     assert backend.is_posix() is True
     assert backend.supports_data_plane() is True
     assert backend.npm_shell_flag() is False
-
-
-def test_windows_capability_queries() -> None:
-    """Windows returns False for features not yet wired."""
-    backend = WindowsPlatformBackend()
-    assert backend.supports_ava_symlink() is False
-    assert backend.supports_shell_rc() is False
-    assert backend.is_posix() is False
-    assert backend.supports_data_plane() is False
-    assert backend.npm_shell_flag() is True
-
-
-def test_windows_scheduling_delegates_to_schtasks(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """All four job kinds route through the Task Scheduler backend.
-
-    These used to be deliberate no-ops ("not yet wired on Windows"), which left a
-    Windows unit with no health probe, no boot autostart, and — once the watchdog
-    probe existed — no watchdog supervision either."""
-    calls: list[str] = []
-    unregistered: list[tuple[str, tuple[object, ...]]] = []
-    for mod, name in [
-        ("base.host.system.autostart", "autostart"),
-        ("base.host.system.cron", "cron"),
-        ("base.host.system.logs_job", "logs"),
-    ]:
-        monkeypatch.setattr(f"{mod}._register_windows", lambda *_a, _n=name: calls.append(_n) or 0)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(
-            f"{mod}._unregister_windows",
-            lambda *a, _n=name: unregistered.append((_n, a)) or 0,  # pyright: ignore[reportUnknownArgumentType]
-        )
-
-    backend = WindowsPlatformBackend()
-    backend.register_autostart()
-    backend.register_cron()
-    backend.register_logs_job()
-    assert calls == ["autostart", "cron", "logs"]
-
-    # Unregister stays silent-on-absent, like the launchd / crontab paths — and
-    # carries the caller's slug instead of resolving one from this process, so
-    # `ava cluster destroy` removes the target cluster's tasks and not its own.
-    from base.cluster import home_slug
-
-    target_home = tmp_path / "ava-target"
-    backend.unregister_autostart(target_home)
-    backend.unregister_cron("ava-target")
-    backend.unregister_logs_job("ava-target")
-
-    assert unregistered == [
-        ("autostart", (home_slug(target_home),)),
-        ("cron", ("ava-target",)),
-        ("logs", ("ava-target",)),
-    ]
-
-
-def test_windows_scheduling_failure_degrades_to_a_warning(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A failed Windows registration must NOT fail the bring-up (the win
-    2026-08-11 policy, task #1196): the failure class is transient (a retry
-    inside `_register` already cleared the common case), a cluster that is down
-    is worse than one that is up and loudly unsupervised, and every `ava start`
-    retries. POSIX keeps failing fast — this is the Windows backend alone."""
-    for mod, _name in [
-        ("base.host.system.autostart", "autostart"),
-        ("base.host.system.cron", "health probe"),
-        ("base.host.system.logs_job", "logs maintenance"),
-    ]:
-        monkeypatch.setattr(f"{mod}._register_windows", lambda *_a: "ERROR: Access is denied.")  # pyright: ignore[reportUnknownArgumentType]
-
-    backend = WindowsPlatformBackend()
-    backend.register_autostart()
-    backend.register_cron()
-    backend.register_logs_job()
-
-    err = capsys.readouterr().err
-    assert "autostart" in err
-    assert "health probe" in err
-    assert "logs maintenance" in err
-    # And each says WHY, on stderr. The loguru record alone never reached disk on
-    # the fleet's Windows box — a converge under the updater chain has its stderr
-    # captured into the updater log but no sink configured — so "registration
-    # failed" with nothing after it is all nine months of logs ever showed.
-    assert err.count("ERROR: Access is denied.") == 3
-
-
-def test_windows_pg_binary_path() -> None:
-    """Windows PG binary path includes .exe suffix."""
-    backend = WindowsPlatformBackend()
-    path = backend.pg_binary_path("pg_ctl")
-    assert path is None or path.name == "pg_ctl.exe"
 
 
 def test_singleton_returns_same_instance() -> None:

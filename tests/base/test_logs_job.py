@@ -224,35 +224,3 @@ def test_converge_registers_logs_maintenance(monkeypatch: pytest.MonkeyPatch) ->
 
     ensure_logs_maintenance(None)  # type: ignore[arg-type]
     assert calls == ["register"]
-
-
-def test_windows_registration_uses_two_daily_tasks_one_minute_apart(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.host.system import schtasks
-
-    calls: list[tuple[str, tuple[str, ...], int, int]] = []
-
-    def create(
-        kind: str,
-        args: tuple[str, ...],
-        *,
-        hour: int,
-        minute: int,
-        time_limit_s: int,
-    ) -> None:
-        assert time_limit_s == 1800
-        calls.append((kind, args, hour, minute))
-
-    monkeypatch.setattr(schtasks, "create_daily_task", create)
-
-    assert job._register_windows() is None
-    assert calls == [
-        ("logs-rotate", ("logs", "rotate"), 4, 40),
-        (
-            "logs-retention",
-            ("logs", "retention", "--family-days", job.FAMILY_DAYS),
-            4,
-            41,
-        ),
-    ]

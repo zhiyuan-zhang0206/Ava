@@ -187,26 +187,6 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootout"]
 
 
-def test_windows_registration_uses_a_minute_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[object, ...]] = []
-
-    def create(kind: str, args: tuple[str, ...], minutes: int, *, time_limit_s: int) -> None:
-        calls.append((kind, args, minutes, time_limit_s))
-
-    monkeypatch.setattr("base.host.system.schtasks.create_minute_task", create)
-
-    assert job._register_windows() is None
-    assert calls == [("packages-refresh", ("packages", "refresh", "--from-job"), 15, 900)]
-
-
-def test_windows_registration_reports_a_failure_reason(monkeypatch: pytest.MonkeyPatch) -> None:
-    def create(*_a: object, **_kw: object) -> str:
-        return "denied"
-
-    monkeypatch.setattr("base.host.system.schtasks.create_minute_task", create)
-    assert job._register_windows() == "denied"
-
-
 def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
     skipped: list[str] = []
     monkeypatch.setattr(cron, "os_jobs_enabled", lambda: False)
