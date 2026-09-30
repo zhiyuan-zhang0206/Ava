@@ -18,7 +18,7 @@ visible, authenticated page requests the exclusive `ava-ui-sse` Web Lock. The lo
 owns the real EventSources for `/api/system`, `/api/alerts/stream`, and the
 selected-agent union `/api/system/all`; other pages own no gateway SSE sockets.
 The leader relays raw frames (including heartbeats) and open/reconnecting/closed
-state over `BroadcastChannel("ava-ui-sse")`. Each page still folds its own cache.
+state over `BroadcastChannel("ava-ui-sse")`. Each browser page still reconciles its own Query cache.
 The selected-agent feed is filtered back to that page's active ID before its
 subscribers see it. Followers mirror state but leave auth probing, retry, and
 EventSource construction to the leader. A new leader's open state triggers each

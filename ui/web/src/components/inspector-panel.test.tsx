@@ -77,7 +77,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 // useAgentPages subscribes to the global SSE stream; stub it to a no-op so the
-// panel renders without an <EventStreamProvider> (its page-fold behavior is
+// panel renders without an <EventStreamProvider> (its page invalidation behavior is
 // covered in use-agent-pages.test.ts).
 const streamHandlers = vi.hoisted(() => ({
   system: undefined as ((event: unknown) => void) | undefined,
