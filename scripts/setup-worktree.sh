@@ -13,7 +13,7 @@ cd "$REPO_ROOT"
 python3 "$SCRIPT_DIR/provision/check_git_hooks.py"
 
 echo "→ editable venv guard …"
-python3 "$SCRIPT_DIR/guard_editable_venv.py" "$REPO_ROOT"
+python3 "$SCRIPT_DIR/host_ops/guard_editable_venv.py" "$REPO_ROOT"
 
 echo "→ locked Python install …"
 env -u VIRTUAL_ENV .venv/bin/python "$REPO_ROOT/cli/python_install.py" --locked --inexact
