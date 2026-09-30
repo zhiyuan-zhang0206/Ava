@@ -337,10 +337,11 @@ def test_stop_kills_the_recorded_family_of_a_postmaster_that_cannot_shut_down(
                 "SELECT 1 FROM pg_stat_activity WHERE state = 'active' AND query = %s", (busy,)
             ).fetchone():
                 time.sleep(0.05)
-        family = [
-            OwnedProcess.capture(child)
-            for child in psutil.Process(process.pid).children(recursive=True)
-        ]
+        # Backends come and go (the probe connection above just closed one), so the
+        # tree is captured the way production captures it, tolerating an exit
+        # between listing a child and reading its birth.
+        family = [m for m in pg_foreground.postmaster_family(process) if m.pid != process.pid]
+        assert family, "the postmaster has no children to close"
         os.kill(process.pid, signal.SIGSTOP)  # this postmaster never finishes its shutdown
         monkeypatch.setattr(pg_foreground, "POSTMASTER_SHUTDOWN_S", 0.5, raising=False)
         pg_foreground.stop_foreground_postgres(process)
