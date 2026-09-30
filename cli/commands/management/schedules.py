@@ -376,7 +376,7 @@ _VERIFY_CHILD_TIMEOUT_S = 90.0
 _VERIFY_ALERTNAME = "schedule dry-import"
 
 # Delivery attempts for one alert POST. task #3696 exception inventory: fixed
-# by the 2026-08-25 alert-delivery ruling — retry once, then drop; no direct-DB
+# by the 2026-08-25 alert-delivery ruling (design #1595) — retry once, then drop; no direct-DB
 # fallback for non-agent emitters.
 _VERIFY_ALERT_ATTEMPTS = 2
 
@@ -553,8 +553,8 @@ def _alert_verify(
                 "status": "firing",
                 "labels": labels,
                 "annotations": {"summary": f"[{label}] [schedule-verify] {detail}"},
-                "starts_at": starts_at or stamp,
-                "ends_at": "",
+                "startsAt": starts_at or stamp,
+                "endsAt": "",
                 "fingerprint": fingerprint(labels),
             }
         elif starts_at is not None:
@@ -567,8 +567,8 @@ def _alert_verify(
                         "scripts dry-import clean"
                     )
                 },
-                "starts_at": starts_at,
-                "ends_at": stamp,
+                "startsAt": starts_at,
+                "endsAt": stamp,
                 "fingerprint": fingerprint(labels),
             }
         else:

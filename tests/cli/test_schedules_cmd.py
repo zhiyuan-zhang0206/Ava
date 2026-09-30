@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 import httpx
 import psycopg
@@ -20,6 +19,7 @@ import pytest
 
 from cli.commands.management import schedules as _sched
 from cli.main import _build_parser
+from gateway.alerts.schemas import AlertWebhookPayload
 
 
 class _FakeResp:
@@ -506,14 +506,17 @@ def test_verify_alert_firing_reuses_the_open_episode(monkeypatch: pytest.MonkeyP
     payload = posted[0]["json"]
     assert isinstance(payload, dict)
     assert payload["source"] == "schedule-verify"
-    raw_alerts = cast("list[dict[str, object]]", payload["alerts"])
-    (alert,) = raw_alerts
-    assert alert["status"] == "firing"
-    assert alert["starts_at"] == "2026-09-01T00:00:00+08:00"
-    labels = cast("dict[str, str]", alert["labels"])
-    assert labels == {"alertname": "schedule dry-import", "severity": "error"}
-    assert alert["fingerprint"] == fingerprint(labels)
-    summary = cast("dict[str, str]", alert["annotations"])["summary"]
+    # Parsed through the real ingest schema: the wire shape is the Alertmanager
+    # camelCase one, and a snake_case key is silently dropped as an extra
+    # (starts_at -> "" -> the ingest rejects the instance).
+    parsed = AlertWebhookPayload.model_validate(payload)
+    (alert,) = parsed.alerts
+    assert alert.status == "firing"
+    assert alert.starts_at == "2026-09-01T00:00:00+08:00"
+    assert alert.ends_at == ""
+    assert alert.labels == {"alertname": "schedule dry-import", "severity": "error"}
+    assert alert.fingerprint == fingerprint(alert.labels)
+    summary = alert.annotations["summary"]
     assert "id=7" in summary and "shared.watcher" in summary
 
 
@@ -526,11 +529,11 @@ def test_verify_alert_clean_run_resolves_the_open_episode(
     (call,) = posted
     payload = call["json"]
     assert isinstance(payload, dict)
-    raw_alerts = cast("list[dict[str, object]]", payload["alerts"])
-    (alert,) = raw_alerts
-    assert alert["status"] == "resolved"
-    assert alert["starts_at"] == "2026-09-01T00:00:00+08:00"
-    assert alert["ends_at"] == "2026-09-30T16:00:00+08:00"
+    parsed = AlertWebhookPayload.model_validate(payload)
+    (alert,) = parsed.alerts
+    assert alert.status == "resolved"
+    assert alert.starts_at == "2026-09-01T00:00:00+08:00"
+    assert alert.ends_at == "2026-09-30T16:00:00+08:00"
 
 
 def test_verify_alert_clean_run_without_an_episode_is_silent(
