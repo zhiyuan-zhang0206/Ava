@@ -60,10 +60,7 @@ raise SystemExit(
 def test_ava_start_writes_a_loguru_warning_to_stderr_and_its_log(tmp_path: Path) -> None:
     home = tmp_path / "home"
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env.update(
-        AVA_HOME=str(home),
-        AVA_HOST_STATE_DIR=str(tmp_path / "host-state"),
-    )
+    env.update(AVA_HOME=str(home))
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
         [sys.executable, "-I", "-B", "-c", _FIRST_START, str(_REPO_ROOT)],
         cwd=tmp_path,

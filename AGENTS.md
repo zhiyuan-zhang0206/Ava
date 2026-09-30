@@ -99,7 +99,8 @@ remote agent-runner joins through the same entry with `--gateway-url` and its
 capability bundle (`--db-capability`, the transport key in `AVA_DB_CAPABILITY_KEY`),
 which also authenticates it; it creates no gateway or local data plane.
 A home describes only itself: its ports live in its own start intent, and no host
-file lists clusters (host caches: `AVA_HOST_STATE_DIR`, default `~/.ava`). First
+file lists clusters; the state a host shares (vendored runtime, initdb template,
+PTY freeze, coding-session owners) lives in the home too. First
 configuration may come from `--config-file`; credentials and identity survive retries.
 
 Application processes have one supervisor: `ava-root`. On macOS the ancestry
@@ -112,9 +113,10 @@ captured process generation; missing evidence cannot become success.
 
 A checkout's own `.venv/bin/ava` runs **the checkout it belongs to** (where its `cli`
 source lives), not the current directory, against the home above; first start runs it. The host's bare `ava`
-(`~/.local/bin/ava`, linked by production start converge) is `scripts/ava-launcher.sh`: it
-runs `$AVA_HOME/ava`, the CLI link every converge keeps in its own home, and refuses without
-`AVA_HOME` — there is no default cluster. Host wiring + each plugin's `scaffold()` are
+(`~/.local/bin/ava`, linked by production start converge) is a plain link to the production
+checkout's `.venv/bin/ava`; which home it acts on is `AVA_HOME`, else `~/.ava`, like every CLI.
+OS jobs (launchd, crontab, the Linux boot unit) are named for the job, not the home, and only
+the default home registers or removes them. Host wiring + each plugin's `scaffold()` are
 applied by the source-start converge phase (`cli/commands/converge/host.py`; standalone:
 `ava converge`).
 
@@ -139,8 +141,9 @@ ava start --no-serve-gateway --serve-agent-runner --gateway-url URL --machine-na
               # first start of a remote runner; supply AVA_DB_CAPABILITY_KEY in the
               # environment; the bundle is consumed
 ava cluster status                 # full multi-machine roster of this cluster
-ava cluster down --path PATH        # stop the cluster at a home path (data stays on disk)
-ava cluster destroy --path PATH     # stop + deregister its OS jobs + mark the home detached (refused for ~/.ava)
+ava cluster destroy [--drop-db]    # decommission this host's cluster: stop, deregister its OS jobs and
+                                   # helper, mark the home detached; you type the home path at a
+                                   # terminal, and there is no flag that skips that
 ```
 
 Agent processes are **not started directly** — they always go through the

@@ -40,13 +40,14 @@ from base.paths import ava_home
 
 DEFAULT_INTERVAL_SECONDS = 300  # 5 minutes
 
-# launchd label: com.ava.<home-slug>.health-probe (the slug is
-# `base.cluster.home_slug` — basename + 8-hex path hash, so two homes sharing
-# a basename get distinct labels).
+# launchd labels are `com.ava.<job>` (health-probe, autostart, logs-maintenance,
+# packages-refresh, pr-flow): the host runs one cluster, so a label names a job,
+# not a home. Only the default home registers or removes them (`owns_os_jobs`).
 LAUNCHD_LABEL_PREFIX = "com.ava"
 
-# Crontab marker: the Linux analog of the launchd label's slug token, scoping a
-# health-probe line to the cluster that registered it.
+# Crontab marker of the health-probe line. Lines are matched by substring, and
+# older versions wrote `# ava-health-probe.<slug>`, which contains this marker:
+# the first register replaces such a line in place instead of adding a second.
 _CRON_MARKER = "# ava-health-probe"
 
 
@@ -76,6 +77,26 @@ def os_jobs_enabled() -> bool:
 def skip_os_job(kind: str) -> None:
     """Log that `kind` was not registered because `os_jobs_enabled()` is off."""
     logger.info("OS jobs disabled (AVA_OS_JOBS_ENABLED=false) — not registering {}", kind)
+
+
+def owns_os_jobs(kind: str) -> bool:
+    """Whether this process's home may register or remove the `kind` OS job.
+
+    Labels and crontab markers carry no home, so the scheduler's one namespace per
+    OS user is shared by every process on the host, and only the default home
+    (`~/.ava`) may write or remove an entry in it. A scratch home (a test, a tool,
+    a disposable cluster) that reached a registrar would otherwise replace or
+    `bootout` the host's real job. Both directions are gated, removal included,
+    unlike `os_jobs_enabled`, which gates registration only.
+    """
+    from base.cluster import is_default_home
+    from base.host.env.dotenv_boot import resolve_ava_home
+
+    home = resolve_ava_home()
+    if is_default_home(home):
+        return True
+    logger.info("{} is not the default home: leaving the {} OS job alone", home, kind)
+    return False
 
 
 def reload_launchd_job(label: str, plist_path: Path) -> int:
@@ -206,10 +227,9 @@ def ava_binary_path() -> str:
     """The absolute path to the `ava` binary of THIS CHECKOUT.
 
     The checkout is the anchor, not PATH. A job spec written by a worktree's code
-    must run that worktree's binary, and the host's global `ava` on PATH only
-    forwards to whichever cluster `AVA_HOME` names (via that home's own
-    `$AVA_HOME/ava` link, refusing without `AVA_HOME`) — so resolving the venv
-    directly names the correct file for every checkout, prod included.
+    must run that worktree's binary, and the host's global `ava` on PATH is only a
+    link to whichever checkout last wired it — so resolving the venv directly
+    names the correct file for every checkout, prod included.
     `shutil.which` survives only as the fallback for an install with no venv (a
     global pip install).
 
@@ -278,39 +298,6 @@ def cron_env_prefix() -> str:
     return f"AVA_HOME={job_home()} "
 
 
-def _home_slug() -> str:
-    """The per-cluster label token — the home-path slug (path-only identity)."""
-    from base.cluster import home_slug
-    from base.paths import ava_home
-
-    return home_slug(ava_home())
-
-
-def _cron_marker(slug: str) -> str:
-    """Trailing comment that stamps a crontab line with the cluster that owns it.
-
-    The macOS label already carries the slug; the crontab line had nothing, so
-    every cluster's line looked identical and one cluster's register/unregister
-    rewrote them all.
-    """
-    return f"{_CRON_MARKER}.{slug}"
-
-
-def _owns_health_probe_line(line: str, slug: str) -> bool:
-    """True when `line` is the health-probe crontab entry of the cluster `slug`.
-
-    An UNMARKED health-probe line also matches, whichever slug is asked. Markers
-    are new: before them the register path rewrote every health-probe line it
-    found, so a host could hold at most one unmarked entry and there is nothing
-    to disambiguate. Leaving it behind would strand a job pointing at a home that
-    may no longer have a cluster — the exact failure this scoping exists to
-    prevent. Self-limiting: one `ava start` after the upgrade marks the line.
-    """
-    if _CRON_MARKER in line:
-        return _cron_marker(slug) in line
-    return "ava cluster health-probe" in line or "health-probe-cron" in line
-
-
 def launchd_path_env() -> str:
     """PATH for a LaunchAgent's environment.
 
@@ -335,20 +322,18 @@ def launchd_path_env() -> str:
     return ":".join(d for d in dirs if not (d in seen or seen.add(d)))
 
 
-def _health_probe_label(slug: str) -> str:
-    """The launchd label for one cluster's health probe."""
-    return f"{LAUNCHD_LABEL_PREFIX}.{slug}.health-probe"
+_HEALTH_PROBE_LABEL = f"{LAUNCHD_LABEL_PREFIX}.health-probe"
 
 
-def _launchd_plist_path(slug: str) -> Path:
-    """Path to the launchd plist for the cluster whose home slug is `slug`."""
-    return Path.home() / "Library" / "LaunchAgents" / f"{_health_probe_label(slug)}.plist"
+def _launchd_plist_path() -> Path:
+    """Path to the health probe's launchd plist."""
+    return Path.home() / "Library" / "LaunchAgents" / f"{_HEALTH_PROBE_LABEL}.plist"
 
 
 def _launchd_plist_content(interval_s: int) -> str:
     """Generate the observation-only health-probe launchd job."""
     ava_path = ava_binary_path()
-    label = _health_probe_label(_home_slug())
+    label = _HEALTH_PROBE_LABEL
     log_dir = ava_home() / "logs"
     log_file = log_dir / "health-probe.log"
 
@@ -401,9 +386,8 @@ def _register_macos(interval_s: int) -> int:
     Writes the plist to ~/Library/LaunchAgents/ and loads it with
     `launchctl bootstrap`. A call descended from this job leaves its own loaded
     spec untouched; the next external converge applies any pending change."""
-    slug = _home_slug()
-    label = _health_probe_label(slug)
-    plist_path = _launchd_plist_path(slug)
+    label = _HEALTH_PROBE_LABEL
+    plist_path = _launchd_plist_path()
 
     # `bootout` terminates the job's whole process tree. A registering job
     # cannot replace itself safely. Leave its plist in place so the next
@@ -445,10 +429,10 @@ def _register_macos(interval_s: int) -> int:
     return 0
 
 
-def _unregister_macos(slug: str) -> int:
-    """Remove the launchd job and plist of the cluster whose home slug is `slug`."""
-    plist_path = _launchd_plist_path(slug)
-    label = _health_probe_label(slug)
+def _unregister_macos() -> int:
+    """Remove the health probe's launchd job and plist."""
+    plist_path = _launchd_plist_path()
+    label = _HEALTH_PROBE_LABEL
 
     # Bootout the job.
     subprocess.run(  # noqa: S603
@@ -489,30 +473,25 @@ def _register_linux(interval_s: int) -> int:
         return missing
 
     ava_path = ava_binary_path()
-    slug = _home_slug()
     minutes = max(1, interval_s // 60)
-    entry = (
-        f"*/{minutes} * * * * {cron_env_prefix()}{ava_path} cluster health-probe "
-        f"{_cron_marker(slug)}"
-    )
+    entry = f"*/{minutes} * * * * {cron_env_prefix()}{ava_path} cluster health-probe {_CRON_MARKER}"
 
     def report_update_failure(err: str) -> None:
         print(f"  * crontab update failed: {err}", file=sys.stderr)  # noqa: T201
 
     rc = replace_crontab_entry(
-        _cron_marker(slug),
+        _CRON_MARKER,
         entry,
         skip_phrase="health-probe registration",
         update_failure=report_update_failure,
-        owns_line=lambda line: _owns_health_probe_line(line, slug),
     )
     if rc == 0:
         print(f"  . crontab entry added (every {minutes} min)")  # noqa: T201
     return rc
 
 
-def _unregister_linux(slug: str) -> int:
-    """Remove one cluster's health-probe entry from the user's crontab."""
+def _unregister_linux() -> int:
+    """Remove the health-probe entry from the user's crontab."""
 
     def report_read_failure() -> None:
         print("  . no crontab to unregister")  # noqa: T201
@@ -524,10 +503,9 @@ def _unregister_linux(slug: str) -> int:
         print("  . crontab entry removed")  # noqa: T201
 
     return remove_crontab_entry(
-        _cron_marker(slug),
+        _CRON_MARKER,
         write_failure_rc=0,
         on_removed=report_removed,
-        owns_line=lambda line: _owns_health_probe_line(line, slug),
         on_read_failed=report_read_failure,
         on_absent=report_absent,
     )
@@ -540,7 +518,8 @@ def register_os_cron(
 
     Platform-aware: delegates to ``PlatformBackend.register_cron``.
     Idempotent — re-running updates the interval and reloads the job.
-    A no-op when ``os_jobs_enabled()`` is off (the test suite).
+    A no-op when ``os_jobs_enabled()`` is off (the test suite) or when this
+    process's home is not the default home (``owns_os_jobs``).
 
     Refused (with an error log) when this process runs from a non-prod
     checkout against the prod home — the 2026-08-07 accident (Task #1025): a
@@ -558,6 +537,8 @@ def register_os_cron(
     if not os_jobs_enabled():
         skip_os_job("health-probe")
         return
+    if not owns_os_jobs("health-probe"):
+        return
     from base.paths import prod_service_checkout_error, repo_root
 
     refusal = prod_service_checkout_error(repo_root())
@@ -569,24 +550,14 @@ def register_os_cron(
     get_backend().register_cron(interval_s=interval_s)
 
 
-def unregister_os_cron(home: Path | None = None) -> None:
-    """Remove the OS cron job for a cluster's health probe.
+def unregister_os_cron() -> None:
+    """Remove the OS cron job of the cluster health probe.
 
-    `home` selects WHICH cluster's job to remove; it defaults to this process's
-    own home. Pass it explicitly when acting on another cluster (`ava cluster
-    destroy --path`) — the target cannot be carried in `AVA_HOME`, because
-    `settings` is built once at import and a later mutation of the environment
-    would silently deregister this process's cluster instead.
-
-    There is deliberately no such parameter on `register_os_cron`: a registered
-    job's content (the `ava` binary path, the log directory, the cluster env) all
-    comes from this process, so registering "for" another home would write a job
-    labelled with that home but wired to this one. Only the job's NAME is needed
-    to remove it, and that is exactly the home slug.
-
-    Platform-aware. Safe to call when no job is registered (no-op).
+    Platform-aware. Safe to call when no job is registered (no-op), and a no-op
+    when this process's home is not the default home (``owns_os_jobs``).
     """
-    from base.cluster import slug_for_home
+    if not owns_os_jobs("health-probe"):
+        return
     from base.host.system.backend import get_backend
 
-    get_backend().unregister_cron(slug_for_home(home))
+    get_backend().unregister_cron()

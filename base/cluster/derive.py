@@ -3,8 +3,8 @@
 Everything a cluster derives rather than stores: the data-plane identity read
 from `.env` URLs as data (`identity_from_url` / `db_identity` /
 `redis_identity`, plus the fixed `DATA_PLANE_IDENTITY` at birth); the
-home-derived display label and OS-artifact slug (`home_label` / `home_slug` /
-`slug_for_home`); the session-name composer (`session_name`); the redis
+home-derived display label and short-path token (`home_label` / `home_slug`);
+the session-name composer (`session_name`); the redis
 channel/wake-key names and admin URL; and
 `derive_env` — the record-to-env mapping a unit needs (plus its base-URL
 helper `per_cluster_base_urls`).
@@ -59,25 +59,13 @@ def home_label(home: Path) -> str:
 def home_slug(home: Path) -> str:
     """A filesystem/launchd-safe slug for a cluster home: `<basename>-<8-hex>`
     (leading dots stripped; the hash disambiguates two homes sharing a
-    basename). Used for OS-level artifacts that need a per-cluster token outside
-    the home itself — launchd/cron labels, the short pg socket dir under /tmp."""
+    basename). Used where a per-home token must live outside the home itself: the
+    short pg socket dir under /tmp, and the permissions helper's launchd label."""
     base = Path(home).expanduser().name.lstrip(".") or "home"
     digest = hashlib.sha1(str(Path(home).expanduser()).encode(), usedforsecurity=False).hexdigest()[
         :8
     ]
     return f"{base}-{digest}"
-
-
-def slug_for_home(home: Path | None) -> str:
-    """`home_slug` of `home`, or of this process's own home when `home` is None.
-
-    The single place the "which cluster" choice is resolved for OS-level job
-    names: callers that act on another cluster pass its home path, and everything
-    below receives a plain slug so it cannot re-derive one from process state.
-    """
-    from base.paths import ava_home
-
-    return home_slug(home if home is not None else ava_home())
 
 
 def identity_from_url(url: str) -> str:

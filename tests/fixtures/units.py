@@ -164,6 +164,22 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     reset_identity()
 
 
+@pytest.fixture
+def default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A fake OS user whose `~/.ava` is this test's home, and so the default home.
+
+    OS jobs belong to the default home only (`base.host.system.cron.owns_os_jobs`),
+    so a test of a registrar or unregistrar needs this, not `unit_home`. `HOME`
+    points into the tmp dir, which also keeps `~/Library/LaunchAgents` and the
+    crontab lock off the operator's real ones; yields the user's home, whose
+    `.ava` is the default home."""
+    user_home = tmp_path / "user"
+    user_home.mkdir()
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.setenv("AVA_HOME", str(user_home / ".ava"))
+    return user_home
+
+
 def skip_authority_pass(_home: Path) -> None:
     """Stand-in for `dotenv_boot._enforce_cluster_env_authority` where a test
     exercises the rest of the boot and must not have its env rewritten."""

@@ -1,6 +1,6 @@
 """Recurring OS job for the content-refresh pass (design §5.6; task #3267).
 
-One schedule per cluster runs `ava packages refresh --from-job` every
+One schedule per host runs `ava packages refresh --from-job` every
 `AVA_PACKAGES_REFRESH_TICK_SECONDS` (default 900s). The command owns all the
 gating (the jobs/refresh switches, a cluster update in flight, the per-home
 flock, per-package cadence and backoff), so the job spec stays dumb and
@@ -25,12 +25,11 @@ from base.config import settings
 _CRON_MARKER = "# ava-packages-refresh"
 
 
-def _label(slug: str) -> str:
-    return f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.{slug}.packages-refresh"
+_LABEL = f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.packages-refresh"
 
 
-def _launchd_plist_path(slug: str) -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{_label(slug)}.plist"
+def _launchd_plist_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
 def _log_file() -> Path:
@@ -47,7 +46,6 @@ def _tick_seconds() -> int:
 
 
 def _launchd_plist_content() -> str:
-    slug = base.host.system.cron._home_slug()
     log_file = _log_file()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -55,7 +53,7 @@ def _launchd_plist_content() -> str:
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>{_label(slug)}</string>
+    <string>{_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
@@ -77,10 +75,9 @@ def _launchd_plist_content() -> str:
 
 
 def _register_macos() -> int:
-    """Rewrite and reload this cluster's refresh LaunchAgent."""
-    slug = base.host.system.cron._home_slug()
-    label = _label(slug)
-    plist_path = _launchd_plist_path(slug)
+    """Rewrite and reload the refresh LaunchAgent."""
+    label = _LABEL
+    plist_path = _launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -92,17 +89,17 @@ def _register_macos() -> int:
     return 0
 
 
-def _unregister_macos(slug: str) -> int:
-    base.host.system.cron.remove_launchd_job(_label(slug), _launchd_plist_path(slug))
+def _unregister_macos() -> int:
+    base.host.system.cron.remove_launchd_job(_LABEL, _launchd_plist_path())
     return 0
 
 
-def _cron_marker(slug: str) -> str:
-    return f"{_CRON_MARKER}.{slug}"
-
-
 def _register_linux() -> int:
-    """Replace this cluster's refresh line in the user crontab."""
+    """Replace the refresh line in the user crontab.
+
+    Lines are matched by the marker as a substring, so a line an older version
+    wrote with a per-home suffix after the marker is replaced in place.
+    """
     missing_rc = base.host.system.cron.require_crontab(
         "  * packages refresh: crontab not installed; the recurring refresh "
         "pass cannot be registered",
@@ -112,8 +109,7 @@ def _register_linux() -> int:
     if missing_rc is not None:
         return missing_rc
 
-    slug = base.host.system.cron._home_slug()
-    marker = _cron_marker(slug)
+    marker = _CRON_MARKER
     minutes = max(1, _tick_seconds() // 60)
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -133,21 +129,23 @@ def _register_linux() -> int:
     return 0
 
 
-def _unregister_linux(slug: str) -> int:
+def _unregister_linux() -> int:
     return base.host.system.cron.remove_crontab_entry(
-        _cron_marker(slug), write_failure_rc=1, on_removed=None
+        _CRON_MARKER, write_failure_rc=1, on_removed=None
     )
 
 
 def register_packages_job() -> None:
-    """Register this cluster's recurring refresh pass (idempotent).
+    """Register the recurring refresh pass (idempotent).
 
-    Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED`) or the refresh channel
-    itself is off — the converge step is the only caller, so a disabled switch
+    Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED`), when this home is not
+    the default home (`owns_os_jobs`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
     simply leaves no job behind on machines that never registered one.
     """
     if not base.host.system.cron.os_jobs_enabled():
         base.host.system.cron.skip_os_job("packages refresh")
+        return
+    if not base.host.system.cron.owns_os_jobs("packages refresh"):
         return
     if not settings.packages.refresh_enabled:
         logger.info(
@@ -159,9 +157,11 @@ def register_packages_job() -> None:
     get_backend().register_packages_job()
 
 
-def unregister_packages_job(home: Path | None = None) -> None:
-    """Remove a cluster's recurring refresh pass; safe when none is registered."""
-    from base.cluster import slug_for_home
+def unregister_packages_job() -> None:
+    """Remove the recurring refresh pass; safe when none is registered, and a no-op
+    outside the default home."""
+    if not base.host.system.cron.owns_os_jobs("packages refresh"):
+        return
     from base.host.system.backend import get_backend
 
-    get_backend().unregister_packages_job(slug_for_home(home))
+    get_backend().unregister_packages_job()

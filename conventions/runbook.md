@@ -105,8 +105,9 @@ The home is `AVA_HOME`, else `~/.ava`, never the current directory. A bare
 repeated start keeps identity and desired service selection. Unknown existing resources, conflicting inputs, missing reservations,
 and a terminal destroy intent refuse rather than reconstructing ownership.
 A home describes only itself: its record is its own start intent, and no host
-file lists clusters (host-level caches sit in `AVA_HOST_STATE_DIR`, default
-`~/.ava`). See [[cli/docs/start_identity.ava.okf.md]].
+file lists clusters; the state a host shares (vendored runtime, initdb template,
+PTY freeze, coding-session owners) lives in the home too. See
+[[cli/docs/start_identity.ava.okf.md]].
 
 A runner fetches the gateway's authenticated bootstrap configuration before
 recording local identity. Bootstrap serves no database login: `AVA_DB_URL` is the
@@ -451,17 +452,16 @@ own instance down (data persists on disk).
 `repo` here is the checkout the running `ava` belongs to (resolved from where its `cli` source
 lives, `cli/commands/_repo.py:_repo_root`), **not** the current directory — so a given `ava` always
 targets the same cluster no matter where you run it. Invoke the checkout's
-`.venv/bin/ava` for first start: the home's own CLI link does not exist yet. Its converge
-phase links that home's `$AVA_HOME/ava` to the checkout's CLI on every source `ava start`,
-and on the production home also links `~/.local/bin/ava` to `scripts/ava-launcher.sh` and
-applies the rest of the host wiring. That global `ava` runs `$AVA_HOME/ava` and refuses
-without `AVA_HOME`. For dev, run `.venv/bin/ava` inside the worktree, or export the dev
-cluster's `AVA_HOME`.
+`.venv/bin/ava` for first start: `ava` on PATH does not exist yet. On the production
+home its converge phase links `~/.local/bin/ava` to the checkout's `.venv/bin/ava` on every
+source `ava start` and applies the rest of the host wiring. That global `ava` is the
+production CLI, acting on `AVA_HOME`, else `~/.ava`. For dev, run `.venv/bin/ava` inside the
+worktree with `AVA_HOME` set to a temporary directory (a worktree's CLI is refused on the
+production home).
 
 The converge phase (`cli/commands/converge/host.py:converge_host`) is idempotent — run
 by every source `cmd_start`. Run it standalone with `ava converge`. It covers the
-home's `$AVA_HOME/ava` CLI link, the prod `ava` launcher link, `~/.local/bin` on PATH, the
-`$AVA_HOME` dir skeleton, and one prod-host integration for
+prod `ava` link, `~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, and one prod-host integration for
 external agents: when `~/.codex` and/or `~/.claude` already exists, it copies only
 `.agents/skills/operating-ava-cluster` into that client's global `skills/` root. Missing
 client homes are not created. A private per-client ledger under `$AVA_HOME/configs/`
@@ -1231,21 +1231,26 @@ ava pause
 ava stop -y
 ava restart
 ava cluster status
-ava cluster down --path PATH
-ava cluster destroy --path PATH [--drop-db]
+ava cluster destroy [--drop-db]
 ```
 
 `pause` retains infrastructure, browser and persistent PTYs. Full `stop` closes
 those resources; `--keep-infra` and repeated `--keep-service` preserve explicitly
 selected resources. `restart` is the ordinary local pause/start path. Destroy
-retires this home's native jobs and marks it detached; `--drop-db` additionally
-removes its data directories. It refuses the default production home.
+decommissions this host's cluster: it stops it, retires the host's native jobs
+(launchd, crontab, the Linux boot unit, the permissions helper) and marks the home
+detached, so `ava start` refuses it until `destroy-intent.json` is deleted by hand;
+`--drop-db` additionally removes the data directories (`pg/`, `redis/`). It acts on
+this process's home, `~/.ava` included, and asks you to type the home path at a
+terminal: with no terminal on stdin and stdout it refuses, and no flag skips the
+prompt (over ssh, use `ssh -t`). A home that is not the default home neither
+registers nor removes OS jobs, because their names carry no home.
 
 A runner joins through the same first-start entry. Supply the capability
 bundle's `AVA_DB_CAPABILITY_KEY` without echoing it, then use its checkout's
 `.venv/bin/ava start --serve-agent-runner --no-serve-gateway --gateway-url URL
---machine-name NAME --machine-host HOST --db-capability BUNDLE` (the home's own
-CLI link does not exist until this start; the bundle comes from `ava cluster
+--machine-name NAME --machine-host HOST --db-capability BUNDLE` (`ava` on PATH
+does not exist until this start; the bundle comes from `ava cluster
 db-authority issue-unit` on the gateway). Bootstrap publishes no database
 credential and not the human secret; the runner's login, API token and
 telemetry token arrive only in that unit's bundle (they are shared by every

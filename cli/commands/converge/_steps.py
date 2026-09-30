@@ -24,8 +24,14 @@ def _ensure_symlink(link: Path, target: Path) -> None:
     link.symlink_to(target)
 
 
-def _ensure_ava_launcher(ctx: ConvergeCtx) -> None:
-    """The host's bare `ava` -> `scripts/ava-launcher.sh`, which runs `$AVA_HOME/ava`.
+def _ensure_ava_on_path(ctx: ConvergeCtx) -> None:
+    """The host's bare `ava` -> this checkout's `.venv/bin/ava`.
+
+    A plain symlink: the host runs one cluster, so the CLI needs no routing. Which
+    home it acts on is `AVA_HOME`, else `~/.ava`, like every CLI, and the checkout
+    guard (`cli.preflight.require_own_checkout`) refuses a state-changing verb from
+    a checkout that is not the home's own. An existing link to anything else (the
+    retired launcher script) is repointed.
 
     On Windows the `ava` entry point is `.venv\\Scripts\\ava.exe`, reached via the
     uv/venv on PATH (or the install.ps1 shim) — there is no `~/.local/bin/ava`
@@ -33,20 +39,7 @@ def _ensure_ava_launcher(ctx: ConvergeCtx) -> None:
     """
     if not get_backend().supports_ava_symlink():
         return
-    _ensure_symlink(
-        Path.home() / ".local" / "bin" / "ava", ctx.repo / "scripts" / "ava-launcher.sh"
-    )
-
-
-def _ensure_home_cli_link(ctx: ConvergeCtx) -> None:
-    """`$AVA_HOME/ava` -> this checkout's venv `ava`: the home names its own CLI.
-
-    The host launcher runs whatever this link names, so a bare `ava` in any shell
-    that inherited `AVA_HOME` reaches this cluster. The home records only itself.
-    """
-    if not get_backend().supports_ava_symlink():
-        return
-    _ensure_symlink(ctx.ava_home / "ava", ctx.repo / ".venv" / "bin" / "ava")
+    _ensure_symlink(Path.home() / ".local" / "bin" / "ava", ctx.repo / ".venv" / "bin" / "ava")
 
 
 _PATH_BEGIN = "# >>> ava path >>>"

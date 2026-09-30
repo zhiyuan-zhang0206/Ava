@@ -165,8 +165,7 @@ def warn_orphaned_local_instance() -> None:
     """Best-effort warning when a local instance still runs under this home.
 
     After a local→remote data-plane switch (Task #1752), the old local pg/redis
-    are no longer managed by this cluster — `ava stop` / `ava cluster down`
-    skip them, so if they are still running they keep consuming the home's
+    are no longer managed by this cluster — `ava stop` skips them, so if they are still running they keep consuming the home's
     ports and data dir. Print a manual-teardown hint instead of silently
     leaving them. Never raises: this is a hint on an already-successful path.
     """

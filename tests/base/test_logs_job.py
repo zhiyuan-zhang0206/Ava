@@ -15,7 +15,6 @@ from base.host.system import logs_job as job
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "_home_slug", lambda: "ava-deadbeef")
     monkeypatch.setattr(cron, "ava_binary_path", lambda: "/work tree/.venv/bin/ava")
     monkeypatch.setattr(cron, "job_home", lambda: "/home/u/.ava")
     monkeypatch.setattr(cron, "launchd_path_env", lambda: "/work tree/.venv/bin:/usr/bin")
@@ -31,7 +30,7 @@ def test_launchd_plist_runs_rotate_then_retention_daily() -> None:
     values = [element.text for element in root.findall("./dict/array/string")]
     command = values[2]
 
-    assert "com.ava.ava-deadbeef.logs-maintenance" in content
+    assert "<string>com.ava.logs-maintenance</string>" in content
     assert values[0:2] == ["/bin/sh", "-c"]
     assert command is not None
     assert "'/work tree/.venv/bin/ava' logs rotate" in command
@@ -55,7 +54,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
     monkeypatch.setattr(cron.subprocess, "run", run)
 
     assert job._register_macos() == 0
-    plist = job._launchd_plist_path("ava-deadbeef")
+    plist = job._launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
     assert job._register_macos() == 0
 
@@ -63,13 +62,13 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootstrap"]
 
 
-def test_macos_unregister_removes_only_the_requested_clusters_job(
+def test_macos_unregister_removes_only_its_own_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    target = job._launchd_plist_path("ava-deadbeef")
+    target = job._launchd_plist_path()
     target.parent.mkdir(parents=True)
     target.write_text("<target-plist/>", encoding="utf-8")
-    other = job._launchd_plist_path("ava-other-cafefeed")
+    other = target.parent / "com.ava.packages-refresh.plist"
     other.write_text("<other-plist/>", encoding="utf-8")
     calls: list[list[str]] = []
 
@@ -79,24 +78,18 @@ def test_macos_unregister_removes_only_the_requested_clusters_job(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
 
-    assert job._unregister_macos("ava-deadbeef") == 0
+    assert job._unregister_macos() == 0
 
     assert not target.exists()
     assert other.read_bytes() == b"<other-plist/>"
-    assert calls == [
-        [
-            "launchctl",
-            "bootout",
-            f"gui/{cron.os.getuid()}/com.ava.ava-deadbeef.logs-maintenance",
-        ]
-    ]
+    assert calls == [["launchctl", "bootout", f"gui/{cron.os.getuid()}/com.ava.logs-maintenance"]]
 
 
-def test_linux_registration_replaces_only_this_clusters_line(
+def test_linux_registration_replaces_only_its_own_lines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    other = "40 4 * * * /other/ava logs rotate  # ava-logs-maintenance.ava-other-cafefeed"
-    old = "35 4 * * * /old/ava logs retention  # ava-logs-maintenance.ava-deadbeef"
+    other = "*/15 * * * * /x/ava packages refresh --from-job  # ava-packages-refresh"
+    old = "35 4 * * * /old/ava logs retention  # ava-logs-maintenance"
     written: dict[str, str] = {}
 
     def which(_name: str) -> str:
@@ -118,7 +111,7 @@ def test_linux_registration_replaces_only_this_clusters_line(
     assert other in written["body"]
     assert f"{other}\n\n" in written["body"]
     assert old not in written["body"]
-    assert written["body"].count("# ava-logs-maintenance.ava-deadbeef") == 1
+    assert written["body"].count("# ava-logs-maintenance") == 1
     assert "40 4 * * *" in written["body"]
     assert "logs rotate" in written["body"] and "logs retention" in written["body"]
 
@@ -166,16 +159,16 @@ def test_linux_crontab_failures_and_empty_table(
     assert (
         len(writes),
         writes[0].startswith("40 4 * * * "),
-        writes[0].endswith("# ava-logs-maintenance.ava-deadbeef\n"),
+        writes[0].endswith("  # ava-logs-maintenance\n"),
         writes[0].count("\n"),
     ) == (1, True, True, 1)
 
     read.returncode = 0
     read.stdout = writes[0]
     assert (
-        job._unregister_linux("ava-deadbeef"),
+        job._unregister_linux(),
         writes[-1],
-        job._unregister_linux("ava-deadbeef"),
+        job._unregister_linux(),
         len(writes),
     ) == (0, "\n", 0, 2)
 
@@ -183,7 +176,7 @@ def test_linux_crontab_failures_and_empty_table(
     write_failure = True
     assert job._register_linux() == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
-    assert job._unregister_linux("ava-deadbeef") == 1
+    assert job._unregister_linux() == 1
     assert len(writes) == 2
 
 
@@ -205,13 +198,13 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     assert job._register_macos() == 1
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
     assert errors == [
-        ("launchctl bootstrap failed for {}: {}", job._label("ava-deadbeef"), "denied")
+        ("launchctl bootstrap failed for {}: {}", "com.ava.logs-maintenance", "denied")
     ]
 
-    plist = job._launchd_plist_path("ava-deadbeef")
+    plist = job._launchd_plist_path()
     assert plist.exists()
-    assert job._unregister_macos("ava-deadbeef") == 0
-    assert job._unregister_macos("ava-deadbeef") == 0
+    assert job._unregister_macos() == 0
+    assert job._unregister_macos() == 0
     assert not plist.exists()
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootout"]
 

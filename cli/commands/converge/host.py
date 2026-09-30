@@ -1,8 +1,8 @@
 """Idempotent host convergence for the ava lifecycle.
 
-Bring a machine to the host-level state the current code expects: the `ava`
-launcher on PATH, ~/.local/bin on PATH, the $AVA_HOME dir skeleton and its own
-CLI link, fresh plugin config images. Run by development `cmd_start`, and
+Bring a machine to the host-level state the current code expects: `ava` on
+PATH, ~/.local/bin on PATH, the $AVA_HOME dir skeleton, fresh plugin config
+images. Run by development `cmd_start`, and
 standalone via `ava converge`. Verified release startup consumes prepared assets
 without mutating its image.
 """
@@ -48,8 +48,7 @@ from cli.commands.converge._steps import (
 )
 from cli.commands.converge._steps import (
     _ensure_ava_home_dirs,
-    _ensure_ava_launcher,
-    _ensure_home_cli_link,
+    _ensure_ava_on_path,
     _ensure_local_bin_on_path,
     _ensure_pg_binaries_step,
     ensure_local_git_hooks,
@@ -305,11 +304,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # Warning-only ownership preflight must run before every write-capable step:
     # root-owned paths otherwise fail before converge can print the exact repair.
     ConvergeStep("$AVA_HOME ownership preflight", _ensure_ownership_preflight),
-    # The home's own CLI link first: prod_source_dir() resolves this home's
-    # checkout from it when $AVA_HOME/source is absent, so every later step and
-    # health read sees the home's own source, never another cluster's.
-    ConvergeStep("$AVA_HOME/ava CLI link", _ensure_home_cli_link),
-    ConvergeStep("ava launcher on PATH", _ensure_ava_launcher, host_global=True),
+    ConvergeStep("ava on PATH", _ensure_ava_on_path, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
     ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
     # Codex and Claude Code own their global homes. This prod-only host step

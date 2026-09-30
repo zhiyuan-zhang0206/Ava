@@ -15,7 +15,6 @@ from base.host.system import pr_flow_job as job
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "_home_slug", lambda: "ava-deadbeef")
     monkeypatch.setattr(cron, "ava_binary_path", lambda: "/work tree/.venv/bin/ava")
     monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".ava"))
     monkeypatch.setattr(cron, "launchd_path_env", lambda: "/work tree/.venv/bin:/usr/bin")
@@ -34,16 +33,12 @@ def _which_missing(_name: str) -> str | None:
     return None
 
 
-def _fake_slug(_home: object) -> str:
-    return "ava-deadbeef"
-
-
 def test_launchd_plist_schedules_the_daily_sampler(tmp_path: Path) -> None:
     content = job._launchd_plist_content()
     root = ET.fromstring(content)  # noqa: S314 — self-generated plist
     values = [element.text for element in root.findall("./dict/array/string")]
 
-    assert "com.ava.ava-deadbeef.pr-flow" in content
+    assert "<string>com.ava.pr-flow</string>" in content
     assert values[0:2] == ["/bin/sh", "-c"]
     command = values[2]
     assert command is not None
@@ -71,7 +66,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
     monkeypatch.setattr(cron.subprocess, "run", run)
 
     assert job._register_macos() == 0
-    plist = job._launchd_plist_path("ava-deadbeef")
+    plist = job._launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
     assert job._register_macos() == 0
 
@@ -79,11 +74,11 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootstrap"]
 
 
-def test_linux_registration_replaces_only_this_clusters_line(
+def test_linux_registration_replaces_only_its_own_lines(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    other = "25 0 * * * /other/ava  # ava-pr-flow.ava-other-cafefeed"
-    old = "25 0 * * * /old/ava  # ava-pr-flow.ava-deadbeef"
+    other = "40 4 * * * /x/ava logs rotate  # ava-logs-maintenance"
+    old = "25 0 * * * /old/ava  # ava-pr-flow"
     written: dict[str, str] = {}
 
     def which(_name: str) -> str:
@@ -105,7 +100,7 @@ def test_linux_registration_replaces_only_this_clusters_line(
     assert other in written["body"]
     assert f"{other}\n\n" in written["body"]
     assert old not in written["body"]
-    assert written["body"].count("# ava-pr-flow.ava-deadbeef") == 1
+    assert written["body"].count("# ava-pr-flow") == 1
     assert "25 0 * * *" in written["body"]
     assert "pr_flow_export.py" in written["body"]
     assert str(tmp_path / ".ava" / "logs" / "pr-flow.out.log") in written["body"]
@@ -153,15 +148,15 @@ def test_linux_crontab_failures_and_empty_table(
     assert (
         len(writes),
         writes[0].startswith("25 0 * * * "),
-        writes[0].endswith("# ava-pr-flow.ava-deadbeef\n"),
+        writes[0].endswith("  # ava-pr-flow\n"),
         writes[0].count("\n"),
     ) == (1, True, True, 1)
 
     read.returncode = 0
     assert (
-        job._unregister_linux("ava-deadbeef"),
+        job._unregister_linux(),
         writes[-1],
-        job._unregister_linux("ava-deadbeef"),
+        job._unregister_linux(),
         len(writes),
     ) == (0, "\n", 0, 2)
 
@@ -169,7 +164,7 @@ def test_linux_crontab_failures_and_empty_table(
     write_failure = True
     assert job._register_linux() == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
-    assert job._unregister_linux("ava-deadbeef") == 1
+    assert job._unregister_linux() == 1
     assert len(writes) == 2
 
 
@@ -190,14 +185,12 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     monkeypatch.setattr(job.logger, "error", record_error)
     assert job._register_macos() == 1
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
-    assert errors == [
-        ("launchctl bootstrap failed for {}: {}", job._label("ava-deadbeef"), "denied")
-    ]
+    assert errors == [("launchctl bootstrap failed for {}: {}", "com.ava.pr-flow", "denied")]
 
-    plist = job._launchd_plist_path("ava-deadbeef")
+    plist = job._launchd_plist_path()
     assert plist.exists()
-    assert job._unregister_macos("ava-deadbeef") == 0
-    assert job._unregister_macos("ava-deadbeef") == 0
+    assert job._unregister_macos() == 0
+    assert job._unregister_macos() == 0
     assert not plist.exists()
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootout"]
 
@@ -246,7 +239,7 @@ def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatc
 
 
 def test_register_skips_without_credentials(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     monkeypatch.setattr("base.telemetry.observability.production_identity", lambda: True)
@@ -260,20 +253,19 @@ def test_register_skips_without_credentials(
 
 
 def test_register_delegates_when_credentials_pass(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
-    _passing_credentials(monkeypatch, tmp_path)
+    _passing_credentials(monkeypatch, default_home)
     calls: list[str] = []
     fake_backend = types.SimpleNamespace(
         register_pr_flow_job=lambda: calls.append("register"),
-        unregister_pr_flow_job=lambda slug: calls.append(f"unregister:{slug}"),
+        unregister_pr_flow_job=lambda: calls.append("unregister"),
     )
     monkeypatch.setattr("base.host.system.backend.get_backend", lambda: fake_backend)
 
     job.register_pr_flow_job()
     assert calls == ["register"]
 
-    monkeypatch.setattr("base.cluster.slug_for_home", _fake_slug)
     job.unregister_pr_flow_job()
-    assert calls == ["register", "unregister:ava-deadbeef"]
+    assert calls == ["register", "unregister"]

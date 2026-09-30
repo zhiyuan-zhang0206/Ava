@@ -118,12 +118,9 @@ def redis_data_dir() -> Path:
 
 
 def _pg_template_dir() -> Path:
-    """Host-level cached `initdb` output, copied per cluster so a new instance is
-    a directory copy rather than a multi-second init. In the host state dir
-    (independent of any one `$AVA_HOME`), so every co-located cluster shares it."""
-    from base.paths import host_state_dir
-
-    return host_state_dir() / "pg-template-17"
+    """Cached `initdb` output, copied so a new instance is a directory copy rather
+    than a multi-second init. Kept in the home, beside the data directory it seeds."""
+    return ava_home() / "pg-template-17"
 
 
 def _redis_bin(name: str) -> str:
@@ -738,8 +735,8 @@ def configured_redis_port() -> int | None:
 
 def stop_cluster_instance() -> int:
     """Stop this cluster's own Postgres + Redis (data preserved on disk). The
-    counterpart of ensure_cluster_storage for `ava stop` / `ava cluster down` of a
-    cluster running its own instance. Best-effort: a not-running instance is a
+    counterpart of ensure_cluster_storage for `ava stop` of a cluster running its
+    own instance. Best-effort: a not-running instance is a
     no-op success only after native custody closes."""
     if settings.data_plane.is_remote:
         # A remote-managed plane has no local instance to stop — nothing on this

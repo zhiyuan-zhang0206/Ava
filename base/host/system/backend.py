@@ -72,12 +72,11 @@ class PlatformBackend(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def unregister_autostart(self, home: Path) -> None:
-        """Remove the boot-time autostart job bound to the explicit ``home``. Safe when none is registered.
+    def unregister_autostart(self) -> None:
+        """Remove the boot-time autostart job. Safe when none is registered.
 
-        The home is passed in rather than re-derived from ``$AVA_HOME``: the only
-        caller that removes *another* cluster's jobs (``ava cluster destroy``)
-        runs inside a process whose own settings were frozen at import.
+        Reached only through ``base.host.system.autostart.unregister_autostart``,
+        which applies the default-home gate — call that, not this.
         """
         ...
 
@@ -99,9 +98,8 @@ class PlatformBackend(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def unregister_cron(self, slug: str) -> None:
-        """Remove the health-probe cron job of the cluster whose home slug is
-        ``slug``. Safe when none is registered."""
+    def unregister_cron(self) -> None:
+        """Remove the health-probe cron job. Safe when none is registered."""
         ...
 
     # -- logs maintenance ----------------------------------------------------
@@ -112,8 +110,8 @@ class PlatformBackend(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def unregister_logs_job(self, slug: str) -> None:
-        """Remove the daily logs-maintenance job for ``slug``."""
+    def unregister_logs_job(self) -> None:
+        """Remove the daily logs-maintenance job."""
         ...
 
     # -- packages refresh ----------------------------------------------------
@@ -124,8 +122,8 @@ class PlatformBackend(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def unregister_packages_job(self, slug: str) -> None:
-        """Remove the recurring content-refresh pass for ``slug``."""
+    def unregister_packages_job(self) -> None:
+        """Remove the recurring content-refresh pass."""
         ...
 
     # -- pr flow -------------------------------------------------------------
@@ -144,9 +142,8 @@ class PlatformBackend(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def unregister_pr_flow_job(self, slug: str) -> None:
-        """Remove the daily PR-flow sampler job for ``slug``. Safe when none is
-        registered."""
+    def unregister_pr_flow_job(self) -> None:
+        """Remove the daily PR-flow sampler job. Safe when none is registered."""
         ...
 
     # -- process ------------------------------------------------------------
@@ -226,11 +223,10 @@ class MacPlatformBackend(PlatformBackend):
         if rc != 0:
             raise RuntimeError("autostart registration failed on macOS")
 
-    def unregister_autostart(self, home: Path) -> None:
-        from base.cluster import home_slug
+    def unregister_autostart(self) -> None:
         from base.host.system.autostart import _unregister_macos
 
-        _unregister_macos(home_slug(home))
+        _unregister_macos()
 
     # -- cron --
 
@@ -241,10 +237,10 @@ class MacPlatformBackend(PlatformBackend):
         if rc != 0:
             raise RuntimeError("cron registration failed on macOS")
 
-    def unregister_cron(self, slug: str) -> None:
+    def unregister_cron(self) -> None:
         from base.host.system.cron import _unregister_macos
 
-        _unregister_macos(slug)
+        _unregister_macos()
 
     # -- logs maintenance --
 
@@ -254,10 +250,10 @@ class MacPlatformBackend(PlatformBackend):
         if _register_macos() != 0:
             raise RuntimeError("logs-maintenance registration failed on macOS")
 
-    def unregister_logs_job(self, slug: str) -> None:
+    def unregister_logs_job(self) -> None:
         from base.host.system.logs_job import _unregister_macos
 
-        _unregister_macos(slug)
+        _unregister_macos()
 
     # -- packages refresh --
 
@@ -267,10 +263,10 @@ class MacPlatformBackend(PlatformBackend):
         if _register_macos() != 0:
             raise RuntimeError("packages-refresh registration failed on macOS")
 
-    def unregister_packages_job(self, slug: str) -> None:
+    def unregister_packages_job(self) -> None:
         from base.host.system.packages_job import _unregister_macos
 
-        _unregister_macos(slug)
+        _unregister_macos()
 
     # -- pr flow --
 
@@ -280,10 +276,10 @@ class MacPlatformBackend(PlatformBackend):
         if _register_macos() != 0:
             raise RuntimeError("PR-flow registration failed on macOS")
 
-    def unregister_pr_flow_job(self, slug: str) -> None:
+    def unregister_pr_flow_job(self) -> None:
         from base.host.system.pr_flow_job import _unregister_macos
 
-        _unregister_macos(slug)
+        _unregister_macos()
 
     # -- process --
 
@@ -336,10 +332,10 @@ class LinuxPlatformBackend(PlatformBackend):
 
         install()
 
-    def unregister_autostart(self, home: Path) -> None:
+    def unregister_autostart(self) -> None:
         from base.host.system.boot_unit import uninstall
 
-        uninstall(home)
+        uninstall()
 
     # -- cron --
 
@@ -350,10 +346,10 @@ class LinuxPlatformBackend(PlatformBackend):
         if rc != 0:
             raise RuntimeError("cron registration failed on Linux")
 
-    def unregister_cron(self, slug: str) -> None:
+    def unregister_cron(self) -> None:
         from base.host.system.cron import _unregister_linux
 
-        _unregister_linux(slug)
+        _unregister_linux()
 
     # -- logs maintenance --
 
@@ -363,10 +359,10 @@ class LinuxPlatformBackend(PlatformBackend):
         if _register_linux() != 0:
             raise RuntimeError("logs-maintenance registration failed on Linux")
 
-    def unregister_logs_job(self, slug: str) -> None:
+    def unregister_logs_job(self) -> None:
         from base.host.system.logs_job import _unregister_linux
 
-        _unregister_linux(slug)
+        _unregister_linux()
 
     # -- packages refresh --
 
@@ -376,10 +372,10 @@ class LinuxPlatformBackend(PlatformBackend):
         if _register_linux() != 0:
             raise RuntimeError("packages-refresh registration failed on Linux")
 
-    def unregister_packages_job(self, slug: str) -> None:
+    def unregister_packages_job(self) -> None:
         from base.host.system.packages_job import _unregister_linux
 
-        _unregister_linux(slug)
+        _unregister_linux()
 
     # -- pr flow --
 
@@ -389,10 +385,10 @@ class LinuxPlatformBackend(PlatformBackend):
         if _register_linux() != 0:
             raise RuntimeError("PR-flow registration failed on Linux")
 
-    def unregister_pr_flow_job(self, slug: str) -> None:
+    def unregister_pr_flow_job(self) -> None:
         from base.host.system.pr_flow_job import _unregister_linux
 
-        _unregister_linux(slug)
+        _unregister_linux()
 
     # -- process --
 

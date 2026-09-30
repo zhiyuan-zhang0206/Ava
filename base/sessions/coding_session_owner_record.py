@@ -118,9 +118,9 @@ def full_session_name(owner_agent_id: int, session_id: int, suffix: str) -> str:
 
 
 def _host_owner_dir() -> Path:
-    from base.paths import host_state_dir
+    from base.paths import ava_home
 
-    root = host_state_dir() / "coding-session-owners"
+    root = ava_home() / "coding-session-owners"
     root.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(OSError):
         root.chmod(0o700)

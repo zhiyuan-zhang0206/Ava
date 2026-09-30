@@ -98,9 +98,6 @@ from base.cluster.derive import (
     session_name as session_name,
 )
 from base.cluster.derive import (
-    slug_for_home as slug_for_home,
-)
-from base.cluster.derive import (
     wake_key as wake_key,
 )
 from base.cluster.ports import (

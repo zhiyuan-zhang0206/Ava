@@ -47,12 +47,11 @@ def trunk_token_path() -> Path:
     return Path.home() / ".trunk" / "api-token"
 
 
-def _label(slug: str) -> str:
-    return f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.{slug}.pr-flow"
+_LABEL = f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.pr-flow"
 
 
-def _launchd_plist_path(slug: str) -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{_label(slug)}.plist"
+def _launchd_plist_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
 def _log_file() -> Path:
@@ -75,7 +74,6 @@ def _shell_command() -> str:
 
 
 def _launchd_plist_content() -> str:
-    slug = base.host.system.cron._home_slug()
     log_file = _log_file()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -83,7 +81,7 @@ def _launchd_plist_content() -> str:
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>{_label(slug)}</string>
+    <string>{_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
@@ -110,10 +108,9 @@ def _launchd_plist_content() -> str:
 
 
 def _register_macos() -> int:
-    """Rewrite and reload this cluster's PR-flow LaunchAgent."""
-    slug = base.host.system.cron._home_slug()
-    label = _label(slug)
-    plist_path = _launchd_plist_path(slug)
+    """Rewrite and reload the PR-flow LaunchAgent."""
+    label = _LABEL
+    plist_path = _launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -125,13 +122,9 @@ def _register_macos() -> int:
     return 0
 
 
-def _unregister_macos(slug: str) -> int:
-    base.host.system.cron.remove_launchd_job(_label(slug), _launchd_plist_path(slug))
+def _unregister_macos() -> int:
+    base.host.system.cron.remove_launchd_job(_LABEL, _launchd_plist_path())
     return 0
-
-
-def _cron_marker(slug: str) -> str:
-    return f"{_CRON_MARKER}.{slug}"
 
 
 def _cron_entry() -> str:
@@ -139,12 +132,16 @@ def _cron_entry() -> str:
     return (
         f"{_MINUTE} {_HOUR} * * * {base.host.system.cron.cron_env_prefix()}"
         f"/bin/sh -c {shlex.quote(_shell_command())} "
-        f">> {shlex.quote(str(log_file))} 2>&1  # {_CRON_MARKER}"
+        f">> {shlex.quote(str(log_file))} 2>&1  {_CRON_MARKER}"
     )
 
 
 def _register_linux() -> int:
-    """Replace this cluster's PR-flow line in the user crontab."""
+    """Replace the PR-flow line in the user crontab.
+
+    Lines are matched by the marker as a substring, so a line an older version
+    wrote with a per-home suffix after the marker is replaced in place.
+    """
     missing_rc = base.host.system.cron.require_crontab(
         "  * PR flow: crontab not installed; the daily sampler job cannot be registered",
         missing_returncode=1,
@@ -153,14 +150,12 @@ def _register_linux() -> int:
     if missing_rc is not None:
         return missing_rc
 
-    slug = base.host.system.cron._home_slug()
-    marker = _cron_marker(slug)
+    marker = _CRON_MARKER
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    entry = f"{_cron_entry()}  {marker}"
     if base.host.system.cron.replace_crontab_entry(
         marker,
-        entry,
+        _cron_entry(),
         skip_phrase="PR-flow registration",
         update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
     ):
@@ -169,9 +164,9 @@ def _register_linux() -> int:
     return 0
 
 
-def _unregister_linux(slug: str) -> int:
+def _unregister_linux() -> int:
     return base.host.system.cron.remove_crontab_entry(
-        _cron_marker(slug), write_failure_rc=1, on_removed=None
+        _CRON_MARKER, write_failure_rc=1, on_removed=None
     )
 
 
@@ -195,14 +190,17 @@ def credential_blocker() -> str | None:
 
 
 def register_pr_flow_job() -> None:
-    """Register this cluster's daily PR-flow sampler (idempotent).
+    """Register the daily PR-flow sampler (idempotent).
 
-    Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED` — the test suite) or
-    when the credential gate says this host cannot run the sampler; the skip
-    reason is logged so converge output explains the absence.
+    Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED` — the test suite), when
+    this home is not the default home (`owns_os_jobs`) or when the credential
+    gate says this host cannot run the sampler; the skip reason is logged so
+    converge output explains the absence.
     """
     if not base.host.system.cron.os_jobs_enabled():
         base.host.system.cron.skip_os_job("pr flow")
+        return
+    if not base.host.system.cron.owns_os_jobs("pr flow"):
         return
     blocker = credential_blocker()
     if blocker is not None:
@@ -213,9 +211,11 @@ def register_pr_flow_job() -> None:
     get_backend().register_pr_flow_job()
 
 
-def unregister_pr_flow_job(home: Path | None = None) -> None:
-    """Remove a cluster's PR-flow sampler job; safe when none is registered."""
-    from base.cluster import slug_for_home
+def unregister_pr_flow_job() -> None:
+    """Remove the PR-flow sampler job; safe when none is registered, and a no-op
+    outside the default home."""
+    if not base.host.system.cron.owns_os_jobs("pr flow"):
+        return
     from base.host.system.backend import get_backend
 
-    get_backend().unregister_pr_flow_job(slug_for_home(home))
+    get_backend().unregister_pr_flow_job()

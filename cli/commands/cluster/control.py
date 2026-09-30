@@ -374,7 +374,6 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
         "  on the unit: export AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run its\n"
         "  checkout's `.venv/bin/ava start --db-capability <bundle>` (first start also takes "
         "--gateway-url, --machine-name and --machine-host; the unit never needs "
-        "AVA_CLUSTER_SECRET; a bare `ava` reaches the unit only once that start has linked "
-        "its $AVA_HOME/ava)"
+        "AVA_CLUSTER_SECRET; a bare `ava` exists only once that start has linked it)"
     )
     return 0

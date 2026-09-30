@@ -120,7 +120,6 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
     monkeypatch.setenv("AVA_HOME", str(home))
-    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     ports = dict(cluster.new_home_ports())
     ports.update(postgres=_free_port(), redis=_free_port(), pgbouncer=_free_port())
     record = cluster.ClusterRecord(

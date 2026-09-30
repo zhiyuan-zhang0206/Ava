@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava cluster Subcommands
-description: '`ava cluster ...` — verbs that act on a cluster rather than on this host''s services. Addressed by home path (`--path`), never by name: roster, down/destroy, health-probe, and the OS-job registration verbs.'
+description: '`ava cluster ...` — verbs that act on the cluster rather than on this host''s services: roster, destroy, health-probe, and the OS-job registration verbs. The home is `AVA_HOME` (else `~/.ava`), never a path argument.'
 tags:
 - cli
 - cluster-lifecycle
@@ -11,13 +11,10 @@ tags:
 
 ## What it is
 
-The verb group that acts on **a cluster** rather than on this host's local
-services. `ava start` / `ava stop` / `ava status` operate on whatever cluster
-this checkout belongs to; `ava cluster ...` can name a different one.
-
-A cluster's identity **is** its home path, so every verb that names one takes
-`--path <home>` — there is no cluster name to pass. Handlers live in
-`cli/commands/cluster/control.py`, with `down` / `destroy` in
+The verb group that acts on **the cluster** rather than on this host's local
+services. The host runs one cluster, in the home `AVA_HOME` names (else `~/.ava`),
+so no verb takes a path or a name. Handlers live in
+`cli/commands/cluster/control.py`, with `destroy` in
 `cli/commands/cluster/home.py`. The host keeps no list of clusters: each home
 describes only itself (`base/cluster/record.py`).
 
@@ -27,17 +24,21 @@ describes only itself (`base/cluster/record.py`).
 |---------|----------|
 | `status` | this cluster's multi-machine roster |
 | `db-authority issue-unit` | gateway only: seal one remote unit's capability bundle (its join, emergencies) ([[base/cluster/authority/docs/wiring.ava.okf.md]]) |
-| `down --path <home>` | stop the cluster at the home, keeping its record + data (safe stop for worktrees) |
-| `destroy --path <home>` | stop, retire its OS jobs and checkout binding, mark the home detached; `--drop-db` deletes pg/redis data too; **refuses `~/.ava` (prod)** |
+| `destroy` | decommission this host's cluster: stop it, retire its OS jobs and the permissions helper, mark the home detached; `--drop-db` deletes pg/redis data too. Asks for the home path typed at a terminal: stdin and stdout must both be terminals, and no flag skips the prompt |
 | `health-probe` | Observation-only OS job (exit 0/1; wrong-checkout refusal is 2). Every outage episode persists its start in `$AVA_HOME/health_probe_alert`, stays silent through normal recovery, then grades WARNING → ERROR. An open deploy window (a cohort machine whose `host_deploy_state` posture is not `idle`, read through `ops.deploy_window.deploy_in_flight()`) pauses explained grading without resetting its start, and disk pressure remains independent. Low agent population remains unhealthy during local maintenance and keeps global alert grading. The probe neither rolls back releases nor publishes known-good state. Provider balance and halted-agent checks remain part of health observation. |
 | `health-probe-register` / `health-probe-unregister` | Register/remove the observation-only OS job; registration accepts its interval, with no rollback threshold |
 
 ## Notes
 
-- `down` and `destroy` differ in what survives: `down` leaves a startable home
-  (the safe way to stop a dev worktree cluster), `destroy` marks it detached so it
-  never starts again. There is no slot to free: a stopped home's ports are simply
-  unbound. Only `destroy` can be told to drop the data.
+- Stopping without decommissioning is `ava stop`; `destroy` additionally marks the
+  home detached so it never starts again (deleting `destroy-intent.json` by hand is
+  the only way back). There is no slot to free: a stopped home's ports are simply
+  unbound. Only `destroy` can be told to drop the data, and its prompt then lists
+  the directories it will delete. It acts on the default home too: the typed path
+  is the guard.
+- A home that is not the default home neither registers nor removes OS jobs
+  (`base.host.system.cron.owns_os_jobs`): their labels and crontab markers name the
+  job, not a home.
 - A destroyed home keeps its files, `.env` included — that `.env` is the only
   copy of the cluster's secret, of any explicitly configured provider credentials, and
   of the URLs the data-plane identity is read from, so detaching never

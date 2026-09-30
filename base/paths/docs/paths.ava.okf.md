@@ -53,12 +53,13 @@ $AVA_HOME/
 └── deploy-state.*.lock         # home lifecycle mutexes (+ .holder.json diagnostics)
 ```
 
-The host state dir (`host_state_dir()`, `AVA_HOST_STATE_DIR`, default `~/.ava`)
-is the exception: state shared by every unit on the box, whichever reads it — the
-Postgres template, runtime binaries, coding-session owner records, and the PTY
-allocation gate (`pty-allocation-freeze.json` + its stable `pty-allocation.lock`,
-so every co-located home crosses one admission boundary for the shared kernel
-PTY pool). It lists no clusters: each home describes only itself.
+There is no separate host state directory: the host runs one cluster, so what a
+host shares lives in its home — the vendored Postgres runtime (`runtime/`), the
+initdb template (`pg-template-17/`), coding-session owner records
+(`coding-session-owners/`) and the PTY allocation gate (`pty-allocation-freeze.json`
++ its stable `pty-allocation.lock`). Pointing `AVA_HOME` at a temporary directory
+therefore isolates all of them. The home lists no clusters: each home describes
+only itself.
 
 ## Notes
 

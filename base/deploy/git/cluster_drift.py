@@ -17,7 +17,6 @@ status probe can share them with `ava status`.
 
 from __future__ import annotations
 
-import contextlib
 import subprocess
 from pathlib import Path
 
@@ -34,27 +33,13 @@ _GIT_TIMEOUT_S = 5.0
 
 
 def prod_source_dir() -> Path | None:
-    """The installed source checkout of this unit, layout-independent.
+    """The installed source checkout of this unit: `$AVA_HOME/source`.
 
-    Resolved from `$AVA_HOME/source` first, then from the home's own CLI link
-    (`$AVA_HOME/ava` → `<source>/.venv/bin/ava`, written at every converge). Both
-    are facts the home records about itself, so a co-located cluster (e.g. a
-    preview gateway `~/.ava-preview` on the same host as the prod runner
-    `~/.ava`) reports its own HEAD, never another cluster's. The link covers the
-    gateway-only layout (`$AVA_HOME=~/.ava_gateway` with the checkout at
-    `/opt/ava/source`), where `$AVA_HOME/source` does not exist."""
+    Every unit runs from its own `$AVA_HOME/source` checkout (source mode), so the
+    home names its checkout; a home without one (a test home) reads as absent."""
     from base.paths import ava_home
 
-    home = ava_home()
-    home_source = home / "source"
-    if (home_source / ".git").exists():
-        return home_source
-    link = home / "ava"
-    with contextlib.suppress(OSError, IndexError):
-        if link.is_symlink():
-            # <source>/.venv/bin/ava → parents: [bin, .venv, <source>]
-            return link.resolve().parents[2]
-    return home_source
+    return ava_home() / "source"
 
 
 # Legacy private spelling — kept so existing monkeypatches keep resolving.

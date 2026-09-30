@@ -22,7 +22,6 @@ from pathlib import Path
 
 from loguru import logger
 
-from base.cluster import home_slug
 from base.host.atomic_io import write_text_atomic
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 from base.native_process.os_platform import IS_LINUX
@@ -43,20 +42,17 @@ class BootUnitContext:
     user: str
     group: str
     home_dir: Path  # the user's $HOME
-    host_state_dir: Path  # host-level state dir (`AVA_HOST_STATE_DIR`), isolated previews included
 
 
 # --- paths and names --------------------------------------------------------
 
 
-def unit_name(home: Path) -> str:
-    """`ava-boot.<home-slug>.service` -- the com.ava.<kind>.<slug> shape, at
-    system scope."""
-    return f"ava-boot.{home_slug(home)}.service"
+UNIT_NAME = "ava-boot.service"
+"""The one boot unit of the host: the host runs one cluster."""
 
 
-def unit_path(home: Path) -> Path:
-    return SYSTEM_UNIT_DIR / unit_name(home)
+def unit_path() -> Path:
+    return SYSTEM_UNIT_DIR / UNIT_NAME
 
 
 def root_pid_path(home: Path) -> Path:
@@ -68,7 +64,7 @@ def _default_context() -> BootUnitContext:
     import grp
     import pwd
 
-    from base.paths import ava_home, host_state_dir, repo_root
+    from base.paths import ava_home, repo_root
 
     entry = pwd.getpwuid(os.getuid())
     group = grp.getgrgid(entry.pw_gid).gr_name
@@ -78,7 +74,6 @@ def _default_context() -> BootUnitContext:
         user=entry.pw_name,
         group=group,
         home_dir=Path(entry.pw_dir),
-        host_state_dir=host_state_dir(),
     )
 
 
@@ -99,11 +94,11 @@ def _systemctl(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess
     )
 
 
-def unit_enabled(home: Path) -> bool:
-    """Whether this home's boot unit is installed and enabled."""
+def unit_enabled() -> bool:
+    """Whether the boot unit is installed and enabled."""
     if not systemd_running():
         return False
-    return _systemctl("is-enabled", unit_name(home)).stdout.strip() == "enabled"
+    return _systemctl("is-enabled", UNIT_NAME).stdout.strip() == "enabled"
 
 
 # --- rendering --------------------------------------------------------------
@@ -138,7 +133,6 @@ def render_unit(ctx: BootUnitContext) -> str:
     environment = (
         ("HOME", str(ctx.home_dir)),
         ("AVA_HOME", str(ctx.home)),
-        ("AVA_HOST_STATE_DIR", str(ctx.host_state_dir)),
         ("PATH", f"{ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"),
     )
     env_lines = "\n".join(
@@ -151,7 +145,7 @@ def render_unit(ctx: BootUnitContext) -> str:
     # start that beats them fails and retries under Restart=on-failure.
     return (
         "[Unit]\n"
-        f"Description=Ava application root ({home_slug(ctx.home)})\n"
+        "Description=Ava application root\n"
         "After=network-online.target\n"
         "Wants=network-online.target\n"
         "StartLimitIntervalSec=0\n\n"
@@ -189,17 +183,15 @@ def process_cgroup(pid: int) -> str:
     raise RuntimeError(f"PID {pid} has no observable systemd cgroup")
 
 
-def in_boot_unit(home: Path) -> bool:
+def in_boot_unit() -> bool:
     """Interactive start has no systemd readiness tail, even on Linux."""
     if not IS_LINUX:
         return False
-    return process_cgroup(os.getpid()) == f"/system.slice/{unit_name(home)}"
+    return process_cgroup(os.getpid()) == f"/system.slice/{UNIT_NAME}"
 
 
-def manager_properties(home: Path) -> dict[str, str]:
-    result = _systemctl(
-        "show", "--property=MainPID,ControlPID,ControlGroup,ActiveState", unit_name(home)
-    )
+def manager_properties() -> dict[str, str]:
+    result = _systemctl("show", "--property=MainPID,ControlPID,ControlGroup,ActiveState", UNIT_NAME)
     if result.returncode:
         raise RuntimeError(f"cannot observe systemd root ownership: {result.stderr.strip()}")
     values = dict(row.split("=", 1) for row in result.stdout.splitlines() if "=" in row)
@@ -216,10 +208,10 @@ def publish_root_ready(home: Path, root: OwnedProcess) -> None:
     closure. Interactive start writes nothing. This hint never replaces the
     birth-bound root custody checked by the caller.
     """
-    if not in_boot_unit(home):
+    if not in_boot_unit():
         return
-    expected = f"/system.slice/{unit_name(home)}"
-    before = manager_properties(home)
+    expected = f"/system.slice/{UNIT_NAME}"
+    before = manager_properties()
     if (
         not root.live()
         or process_cgroup(root.pid) != expected
@@ -292,7 +284,7 @@ def install(*, context: BootUnitContext | None = None) -> list[str]:
     ctx = context if context is not None else _default_context()
     steps: list[str] = []
 
-    destination = unit_path(ctx.home)
+    destination = unit_path()
     unit_content = render_unit(ctx)
     if _read_text(destination) != unit_content:
         fd, name = tempfile.mkstemp(prefix="ava-boot-unit-", suffix=".service")
@@ -309,31 +301,26 @@ def install(*, context: BootUnitContext | None = None) -> list[str]:
         _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload")
         steps.append(f"installed system unit {destination}")
 
-    if not unit_enabled(ctx.home):
-        _privileged_or_raise(
-            ["systemctl", "enable", unit_name(ctx.home)], f"enable {unit_name(ctx.home)}"
-        )
-        steps.append(f"enabled {unit_name(ctx.home)}")
+    if not unit_enabled():
+        _privileged_or_raise(["systemctl", "enable", UNIT_NAME], f"enable {UNIT_NAME}")
+        steps.append(f"enabled {UNIT_NAME}")
     logger.info("boot unit ready for {}", ctx.home)
     return steps
 
 
-def uninstall(home: Path | None = None) -> list[str]:
-    """Remove this home's boot unit after a successful native stop.
+def uninstall() -> list[str]:
+    """Remove the host's boot unit after a successful native stop.
 
     Safe when nothing is installed, and safe to call on non-systemd hosts (a
     no-op): `ava cluster destroy` runs it unconditionally with the other OS
-    jobs. Removes only this home's exact unit path, then resets the failed
+    jobs. Removes only the exact unit path of `UNIT_NAME`, then resets the failed
     record systemd keeps listing for a removed unit whose last stop failed.
     """
     if not IS_LINUX:
         return []
-    from base.paths import ava_home
-
-    home = home if home is not None else ava_home()
     steps: list[str] = []
-    name = unit_name(home)
-    destination = unit_path(home)
+    name = UNIT_NAME
+    destination = unit_path()
     if destination.exists():
         _privileged_or_raise(["systemctl", "disable", "--now", name], f"stop {name}")
         _privileged_or_raise(["rm", "-f", str(destination)], f"remove {destination}")

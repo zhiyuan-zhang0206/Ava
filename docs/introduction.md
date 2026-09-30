@@ -230,8 +230,8 @@ that checkout's `ava`. Run `ava --help` for the full surface.
 | `ava status` | one-screen view: sessions, pg/redis/pgbouncer, healthchecks |
 | `ava logs` | list live service sessions or tail one |
 | `python -m cli.fleet_update` | roll the latest merged code across a networked cluster over SSH (`down`, then `up`) — the only update path |
-| `ava cluster status/down/destroy` | multi-machine roster + home-addressed stop / detach |
-| `.venv/bin/ava start --no-serve-gateway --serve-agent-runner --gateway-url <url> --db-capability <bundle>` | first start of a split-deployment agent-runner joining a gateway (its checkout's CLI — the home's own link does not exist yet; with the bundle's `AVA_DB_CAPABILITY_KEY` exported) |
+| `ava cluster status/destroy` | multi-machine roster + decommission of this host's cluster |
+| `.venv/bin/ava start --no-serve-gateway --serve-agent-runner --gateway-url <url> --db-capability <bundle>` | first start of a split-deployment agent-runner joining a gateway (its checkout's CLI — `ava` on PATH does not exist yet; with the bundle's `AVA_DB_CAPABILITY_KEY` exported) |
 | `ava agents` | observe + control agents (ls / cancel / restart / terminate) |
 | `ava schedules` | gateway-supervised schedules (cron jobs agents create and own) |
 | `ava skill install <src>` | install Agent Skills from a git URL or local path |
