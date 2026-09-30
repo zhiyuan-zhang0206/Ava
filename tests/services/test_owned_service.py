@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Generator
 from pathlib import Path
 
@@ -14,7 +15,7 @@ import psutil
 import pytest
 
 from base.daemon.health import DaemonProbe
-from base.native_process.ownership import OwnedProcess
+from base.native_process.ownership import OwnedProcess, capture_tree
 from services.healthchecks import owned_service as probe
 
 
@@ -70,6 +71,44 @@ def test_tcp_owned_listener_requires_application_readiness() -> None:
         result = probe.owned_tcp(owner, port, lambda: DaemonProbe.down("application unready"))
         assert result.verdict.value == "down"
         assert result.detail == "application unready"
+
+
+@pytest.fixture
+def zombie_child() -> Generator[subprocess.Popen[bytes]]:
+    """A child of this process that has exited and is not yet reaped."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        deadline = time.monotonic() + 10
+        while psutil.Process(child.pid).status() != psutil.STATUS_ZOMBIE:
+            assert time.monotonic() < deadline, "the child never became a zombie"
+            time.sleep(0.01)
+        yield child
+    finally:
+        child.wait(timeout=10)
+
+
+def test_an_exited_unreaped_member_does_not_make_the_generation_unobservable(
+    zombie_child: subprocess.Popen[bytes],
+) -> None:
+    """A zombie stays in the tree until its parent reaps it and owns no listener."""
+    owner = OwnedProcess.capture(psutil.Process())
+    assert zombie_child.pid in {member.pid for member in capture_tree(owner)}
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        assert probe.owned_tcp(owner, listener.getsockname()[1], lambda: True).alive
+
+
+def test_a_live_member_whose_sockets_cannot_be_read_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def denied(self: psutil.Process, kind: str = "inet") -> None:
+        raise psutil.AccessDenied(self.pid)
+
+    monkeypatch.setattr(psutil.Process, "net_connections", denied)
+    owner = OwnedProcess.capture(psutil.Process())
+    with pytest.raises(psutil.AccessDenied):
+        probe.owned_tcp(owner, 1, lambda: pytest.fail("an unobservable generation is not probed"))
 
 
 def test_tcp_foreign_listener_never_runs_the_application_probe() -> None:
