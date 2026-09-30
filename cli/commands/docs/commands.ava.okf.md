@@ -31,8 +31,7 @@ subpackages hold the domains, each an independent package door:
 - `observability/` — native LGTM desired state, the OTel collector, trace
   shipping, logs; owns its converge steps (`lgtm_native.py`, `otel_collector.py`)
 - `data_plane/` — per-cluster Postgres/Redis/PgBouncer bring-up, their verified
-  maintenance stop (`maintenance_stop.py`), a release's write-generation
-  effects (`write_generation.py`), PITR; owns its converge steps
+  maintenance stop (`maintenance_stop.py`), PITR; owns its converge steps
   (`pgbouncer.py`, `pitr_foundation.py`)
 - `cluster/` — whole-cluster verbs, the health probe, cron, the registry
 - `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
@@ -47,15 +46,13 @@ subpackages hold the domains, each an independent package door:
 the `_`-prefixed steps host commands call (`_probe`, `_setup`, `_repo`,
 `_start_gui_chain`, `_ownership_preflight`, ...) stay directly under
 `cli/commands/`. `root_driver.py`, `service_stop.py` and `start_generation.py`
-are internal steps under public names because other packages, such as the
-release transition, reach them.
+are internal steps under public names because other packages reach them.
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; restart reuses
 its native drain. `ops.agent_pause` and `ops.agent_pause.probe`
 own prepare/drain and runtime capability checks; `service_stop` and
-`data_plane/maintenance_stop` verify resource exits, and
-`data_plane/write_generation` performs a release's write-generation fence and
-admission. `data_plane/_pooler_stop.OwnedPooler` owns
+`data_plane/maintenance_stop` verify resource exits.
+`data_plane/_pooler_stop.OwnedPooler` owns
 ordinary pooler stop admission for maintenance and startup recovery: exact native
 birth and listener proof precede a durable stop intent and the first SIGINT
 (`WAIT_FOR_SERVERS`). Retries and already-closed listeners only wait; PgBouncer
@@ -102,14 +99,14 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 - What `ava start` treats as already-up, what it waits for, and when an unready
   service becomes exit code 4 are one subject, in
   [[cli/commands/lifecycle/docs/start-readiness.ava.okf.md]].
-- Prepared release transitions are owned by [[cli/release_transition/docs/release_transition.ava.okf.md]].
-  There are no updater shell chains or bootstrap/continuation commands.
+- A fleet update is `python -m cli.fleet_update` (`cli/fleet_update.py`): a down
+  script and an up script per unit, gated by the code version. There are no
+  updater shell chains or bootstrap/continuation commands.
 - Host-level Application Firewall and Redis bridge wiring are one subject:
   [[cli/commands/converge/docs/converge-host-wiring.ava.okf.md]].
 - Explicit editable-install inspection and write-window primitives are described
   in [[editable-install-guard.ava.okf.md]]. Ordinary start and converge never
-  repair or reinstall a separate production virtualenv; retained images are
-  verified in place by `StartRuntime`.
+  repair or reinstall a separate production virtualenv.
 - `cli/start_intent.py` is routed **before** settings-gated imports in `main()`,
   so first start records complete home identity before runtime configuration loads.
 - `cli/mcp_server.py` is the third top-level module a verb routes to

@@ -74,8 +74,7 @@ existing close-to-kill Job before any thread executes. No inherited Job handle
 or late self-enrollment keeps the family alive after timeout/owner death. The
 helper rechecks its fixed deadline before control delivery. Unsupported
 process attributes or Job restrictions refuse before helper execution; no
-system-interpreter or uncontained subprocess fallback exists. This mechanism
-does not establish a retained Windows base-Python release image.
+system-interpreter or uncontained subprocess fallback exists.
 
 ## Notes
 

@@ -60,8 +60,7 @@ name; the down SQL reverses the schema effect and deletes the upstream version
 row. Real-Postgres tests must cover both existing-N-1 update/down and fresh-N
 birth -> first-start registration/down. Until all of that ships together, the
 dependency-drift gate fails before any database mutation, preserving the
-ability to recover an interrupted update and to roll back to a previously
-retained image.
+ability to recover an interrupted update and to roll back a failed one.
 
 **Identity is the home path** — there is no cluster name; the display label is
 the home's basename. A cluster's database and the Postgres role that owns it
@@ -133,14 +132,12 @@ an altered bundle, the wrong key, another unit's bundle, an expired one, an
 older generation than the installed one, and a login the cluster rejects (a
 revoked generation); it then writes `$AVA_HOME/db-authority/unit.json` and
 `enrollment.json` (0600) and deletes the bundle. A runner without a capability
-refuses to start and names the issue command. Issue is refused while a release
-operation is incomplete and on a remote-managed plane. Networked release
-operations keep refusing; a new generation reaches remote units only by a new
+refuses to start and names the issue command. Issue is refused on a
+remote-managed plane. A new generation reaches remote units only by a new
 bundle (join, emergency).
 
-The bundle also carries the unit's enrollment secret, its identity toward a
-release coordinator (minted at its first bundle, then reused). Change it only
-on the gateway; both commands print the enrollment id, never the secret:
+The bundle also carries the unit's enrollment secret (minted at its first
+bundle, then reused). Change it only on the gateway; both commands print the enrollment id, never the secret:
 
 ```bash
 ava cluster db-authority rotate-enrollment --machine <name> --home <unit $AVA_HOME>
@@ -157,8 +154,8 @@ therefore gives its holder every runner unit's database and API admission for
 that generation (bootstrap, with its Redis runtime URL and provider keys, and
 every unit's `/ops` included). Its machine binding only stops an install on
 the wrong unit by mistake: the installer asserts its own machine name, and the
-credentials work without installing. `revoke-enrollment` cuts the coordinator
-channel only. When a unit is compromised or a bundle and its key are lost,
+credentials work without installing. `revoke-enrollment` changes the
+enrollment secret only. When a unit is compromised or a bundle and its key are lost,
 rotate the write generation, issue every unit a new bundle and revoke the lost
 unit's enrollment; rotate the human secret (telemetry token), the Redis runtime
 password and the provider keys as well, by hand, in the order of
@@ -249,8 +246,7 @@ incident and escape analysis are in
 
 ### Manual editable-install recovery
 
-Production runtime transitions use a verified prepared release request. Editable
-installation repair is a development-checkout operation; see
+Editable installation repair is a development-checkout operation; see
 [Editable Install Guard](../cli/commands/docs/editable-install-guard.ava.okf.md).
 
 A typical small deployment runs the **gateway as a single-box unit** on an
@@ -758,7 +754,7 @@ shard) behind: the lifecycle rule stays the standing channel (fragments
 aborted after 7 days), and `ava pitr multipart list/abort` is the explicit
 single-upload surface for anything that cannot wait out that window.
 
-Activation has no operator entry (there is no `ava cluster pitr`). A home whose
+Activation has no operator entry. A home whose
 activation completed keeps its archive settings and its durable record
 (`$AVA_HOME/physical-backup/activation/operation.json`), which the base-backup,
 uploader and retention services read. Never edit PostgreSQL or `.env` by hand to
@@ -1349,9 +1345,7 @@ load-bearing:
 
 `ava pause`, `ava stop`, restart and update use the native maintenance primitives.
 Pause retains infrastructure and persistent PTYs; default stop closes those local
-resources. The connected release adapter closes persistent terminals (and
-schedules) at its stop phase after a bounded completed-work wait; they do not
-survive a release. Durable agent identity and work remain on disk.
+resources. Durable agent identity and work remain on disk.
 A stop timeout is a failure; force escalation requires an explicit option.
 Normal `ava start` resumes only after readiness. See the
 [pause/stop procedure](graceful-maintenance.md) for partial stop, coordinated
@@ -1583,9 +1577,9 @@ programmatic rotation API at all.
 
 ### Manual rotation after a credential leak
 
-No code path rotates the database write generation outside a release, and none
-is planned: a leak is rare, single-operator and supervised, so it is a procedure
-run by hand. Every step names an existing tool. Cutting a leaked credential off
+No command rotates the database write generation, and none is planned: a leak
+is rare, single-operator and supervised, so it is a procedure run by hand.
+Every step names an existing tool. Cutting a leaked credential off
 means the previous write generation stops being able to log in: its logins lose
 `LOGIN`, their sessions are terminated, and their secret files are deleted.
 
@@ -1601,10 +1595,10 @@ means the previous write generation stops being able to log in: its logins lose
    (`--scope admin` for `requirepass`, `--scope runner` for the ACL runtime
    password; the default is both). Both scripts are described above.
 4. **Database write generation** (gateway checkout, home resolved from the
-   checkout, `unset AVA_PROCESS_PROFILE`). This is the release fence and the
-   next admission (`cli/commands/data_plane/write_generation.py`) under one
-   operation id. Keep the printed id: a retry after a crash must pass the same
-   one, and the ledger holds instead of minting a second pair.
+   checkout, `unset AVA_PROCESS_PROFILE`, Postgres up). The fence and the next
+   admission of `base.cluster.authority` under one operation id. Keep the
+   printed id: a retry after a crash must pass the same one, and the ledger
+   holds instead of minting a second pair.
 
 ```bash
 OP=$(uuidgen); echo "operation $OP"
@@ -1612,15 +1606,41 @@ OP=$(uuidgen); echo "operation $OP"
 import sys
 from uuid import UUID
 
-from base.cluster.authority import OperationAuthority
-from cli.commands.data_plane.write_generation import (
-    admit_write_generation,
-    fence_write_generation,
+from base.cluster import (
+    db_identity,
+    get_record,
+    ownership,
+    record_pgbouncer_port,
+    record_postgres_port,
 )
+from base.cluster.authority import (
+    OperationAuthority,
+    activate,
+    mint_generation,
+    prune,
+    require_ledger,
+    verify_generation,
+)
+from base.cluster.authority.fence import close_revoked, revoke
+from base.host.net.url_secret import url_with_port
+from base.paths import ava_home
+from cli.commands.data_plane import pgbouncer as pooler
+from cli.commands.data_plane.bringup import admin_session, db_endpoint, prove_generation_logins
 
 authority = OperationAuthority(operation=UUID(sys.argv[1]), direction="candidate")
-fence_write_generation(authority)  # revoke, NOLOGIN sweep, stop the pooler, close, prune
-print("active generation", admit_write_generation(authority).number)  # mint + activate
+home, database = ava_home().resolve(), db_identity()
+record = get_record(home)
+with admin_session(record, database) as conn:
+    revoke(conn, home, authority)  # ledger `revoking`, then the NOLOGIN sweep
+    pooler.stop_pgbouncer(force=True)  # nothing may still hold the old pair
+    ownership.require_listener(None, record_pgbouncer_port(record), required=False)
+    close_revoked(conn, home, authority)  # terminate and count sessions; ledger `closed`
+    prune(conn, home, authority)  # drop the closed logins
+    mint_generation(conn, home, authority)  # secret, ledger `pending`, the two logins
+    generation = require_ledger(home).unrevoked
+    direct = url_with_port(db_endpoint(), record_postgres_port(record))
+    prove_generation_logins(home, generation, direct)
+    print("active generation", activate(home, authority, verify_generation(conn, home)).number)
 PY
 ```
 

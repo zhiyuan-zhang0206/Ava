@@ -12,24 +12,20 @@ tags:
 `runtime_interpreter.py` names the interpreter and environment of the checkout
 that loaded the running code: its `.venv`, its plugin discovery root, and the
 Git-visible source digest of its files. An explicitly targeted checkout stays
-separate (`runtime_venv(checkout=...)`). Nothing here installs packages, reads a
-release selector or grants admission.
+separate (`runtime_venv(checkout=...)`). Nothing here installs packages or grants
+admission.
 
 The consumers include service Python commands, process-agent interpreters,
 platform console-script paths, and shell/session activation. Their lifecycle,
 enabled-state, credentials, and supervision owners do not change.
-
-The image half of loaded-runtime identity (`WHEEL_RUNTIME`, the retained
-frontend/plugin/collector paths and `verify_loaded_image`) lives in
-`loaded_image.py`, which no production module imports.
 
 ## Loaded code and local birth evidence
 
 The settings-free verifier records an explicit source identity: the canonical
 loaded module directory, native interpreter, virtual-environment prefix, expected
 cwd, and Git-visible source digest (dirty and untracked nonignored bytes included).
-It does not seal ignored build outputs or editable dependencies. `kind="release"`
-identities are produced only by the image half.
+It does not seal ignored build outputs or editable dependencies. Only
+`kind="source"` identities are produced.
 
 Deployment root wiring captures this identity before any application child is
 started. Its status reports the runtime, canonical home and launch digest with

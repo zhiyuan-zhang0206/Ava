@@ -31,15 +31,12 @@ Delivery:
   and agent processes the runner login. The launch digest binds the generation
   number and credential digest, never a password. The same login also lands at
   rest, 0600, in `$AVA_HOME/run/ava-root/manifests.json` — root's own launched-unit
-  record, rewritten on the next start and inert after the next release fence.
+  record, rewritten on the next start and inert after a generation rotation.
 - An operator process on the gateway home (the `ava` CLI, a script, an OS job)
   receives the gateway login only while it runs the home's admitted runtime:
-  the selected release image, or the source checkout the home was born from.
-  Anything else keeps the credential-free endpoint and its first dial fails
-  with `NoDatabaseAuthorityError`. The one hand-over is the release handoff:
-  the admitted CLI passes that login (no API token) in the exec environment to
-  the executor image's submission, which is not selected yet; the finite
-  executor it launches holds no login and dials as the OS-user administrator.
+  the source checkout the home was born from. Anything else keeps the
+  credential-free endpoint and its first dial fails with
+  `NoDatabaseAuthorityError`.
 - Bootstrap serves no database credential: its `AVA_DB_URL` is the
   credential-free endpoint (a remote-managed provider URL loses its password),
   and a runner strips any password an older gateway still serves. A remote
@@ -76,7 +73,7 @@ tickets, or put passwords in command arguments.
 ## Routine data-plane rotation
 
 PostgreSQL has nothing to rotate by hand: the owner never logs in, and
-application logins rotate as write generations with each release transition.
+application logins change only by the runbook's manual rotation.
 `scripts/data_plane_ops/rotate_data_plane_secrets.py` rotates the Redis credentials only; they
 do not rotate per rollout
 ([decision](../decisions/2026-09-27-write-generation-rollout-choices.md)).

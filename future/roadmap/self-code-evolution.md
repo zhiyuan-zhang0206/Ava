@@ -19,11 +19,11 @@ codebase** — the framework, the SDK, the kernel — autonomously.
 The reason this is tractable for Ava specifically is the CodeAct architecture.
 Because the agent already acts by composing Python over the `ava.*` namespace,
 and because the prod-upgrade path is already first-class
-(`ava cluster update` → cluster-wide PR-merged rollout; the one-time SDK
+(the fleet update script → cluster-wide PR-merged rollout; the one-time SDK
 call `ava.self.update()` was removed 2026-08), "modify yourself" is not
 a new mechanism — it is the agent driving the loop it already has:
 
-> read the codebase → write a change → open a PR → CI → merge → `ava cluster update`
+> read the codebase → write a change → open a PR → CI → merge → fleet update
 > → the whole cluster restarts on the new code.
 
 Today a human drives that loop. The north star is the agent driving it, end to

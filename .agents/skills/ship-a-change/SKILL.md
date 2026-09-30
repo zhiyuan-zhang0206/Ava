@@ -155,7 +155,7 @@ Still on you:
    The watcher persists the settled verdict to `ci-verdict-<pr>.txt` in your
    workspace before it tries to deliver, and retries transport failures for
    ~10 minutes:
-   an update wave or `ava cluster update` refuses connections for minutes —
+   an update wave (`python -m cli.fleet_update`) refuses connections for minutes —
    longer than any single send survives. If no wake arrives, read that file;
    the verdict is there. For a persistent owner-URL config error, delivery
    stops after one attempt and the exit notice names the absolute verdict

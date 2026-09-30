@@ -1,7 +1,7 @@
 # Self-Evolving
 
-Ava's cluster upgrades itself. New code lands on `main`, and `ava cluster update`
-rolls the whole cluster onto it — without stopping the work in flight.
+Ava's cluster upgrades itself. New code lands on `main`, and the fleet update
+script (`python -m cli.fleet_update`) rolls the whole cluster onto it — without stopping the work in flight.
 
 ## Why it matters
 

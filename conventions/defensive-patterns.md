@@ -85,7 +85,7 @@ verify `.pth` targets and their `direct_url.json` records when explicitly
 preparing that installation, and inspect those targets before deleting a
 checkout. Startup must not repair a different installation. Any explicit repair
 of protected editable files needs a bounded write window with exact-mode
-restoration; retained runtime images are verified without modification.
+restoration.
 Evidence: [`postmortems/0006`](../postmortems/0006-an-editable-install-is-a-cross-checkout-pointer.md).
 
 ### Isolation that one command can undo is a convention, not a boundary

@@ -40,7 +40,7 @@
 > update's full export with a drilled base plus a freshly verified WAL recovery
 > point. The logical snapshot slot below remains for PITR-disabled clusters;
 > daily logical backups and activation's initial recovery floor are unchanged.
-> Each `ava cluster update` that applies migrations writes a `<db>-<ts>.pre-update.dump.enc`
+> Each fleet update that applies migrations writes a `<db>-<ts>.pre-update.dump.enc`
 > snapshot into the same pool before stopping anything (pre-2026-08-27 artifacts
 > carry `.dump.gz.enc`; both stay managed). Prune keeps the newest
 > `BACKUP_KEEP = 7` **daily** dumps plus the newest one pre-update snapshot — an

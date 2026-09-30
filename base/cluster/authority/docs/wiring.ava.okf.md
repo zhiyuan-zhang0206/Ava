@@ -21,8 +21,7 @@ the ledger's credential digest:
   `reference` is the only part a launch digest or journal carries.
 - `consume`: the gateway login (and, while the API is authenticated, the
   gateway API token) for an operator process the launcher did not inject, only
-  after `require_admitted_runtime` (the selected release image's prefix, or the
-  start intent's source checkout); `operator_environment` is that delivery as
+  after `require_admitted_runtime` (the start intent's source checkout); `operator_environment` is that delivery as
   environment, refused for a launcher-started process.
 
 ## Machine API tokens
@@ -49,7 +48,7 @@ carries a login to another home:
   The enrollment is minted once per unit into `db-authority/units/<key>.json`
   and reused by later bundles; deleting that record revokes it. Refused on a
   pure runner, a remote-managed plane (no generation exists there), a home
-  without an active generation, and while a release operation is incomplete.
+  without an active generation.
   Only the enrollment is the unit's own; the login and tokens are shared
   ([what a bundle exposes](unit-enrollment.ava.okf.md#what-a-bundle-exposes)).
 - **Install** (unit, `ava start --db-capability FILE`, key in
@@ -74,13 +73,12 @@ carries a login to another home:
   the first dial.
 
 A new generation reaches a remote unit only through a new bundle (a join, an
-emergency). Networked release operations keep refusing
-until the fleet transition exchanges capabilities automatically.
+emergency).
 
 ## Unit enrollment
 
-A unit's durable identity toward a release coordinator, its operator commands
-and the coordinator channel's authentication:
+A unit's durable enrollment secret, its operator commands and the coordinator
+channel's authentication:
 [unit enrollment](unit-enrollment.ava.okf.md).
 
 ## Wiring
@@ -102,13 +100,3 @@ and the coordinator channel's authentication:
   (`cli/commands/observability/otel_collector.py`) dials the owner-only socket as
   `ava_monitor` by `peer`, so its rendered config names no credential and a
   rollout leaves it working.
-- **Release** (`cli/release_transition/authority.py`, under the home operation
-  lock, with `OperationAuthority(operation, direction)`): preflight
-  `check_invariant` -> `fencing`: `revoke` -> owned pooler stopped (escalating;
-  no listener left) -> `close_revoked` -> `prune` -> `authorizing`:
-  `mint_generation` -> a direct `SELECT 1` as each login -> `activate`; the
-  stage's ordinary start (root boot owner, never the finite executor) births
-  the pooler serving the active pair and proves a pooled login of each;
-  observation re-checks the invariant and that `stale_sessions` is empty. The
-  journal records each step's intent and receipt
-  ([[cli/release_transition/docs/write-generations.ava.okf.md|release write generations]]).
