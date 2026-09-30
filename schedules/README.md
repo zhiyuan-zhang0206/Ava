@@ -111,6 +111,19 @@ as before.
   An **enabled** schedule is relaunched onto the new script by that call alone;
   a disabled one picks it up when it is next started. `ava schedules get <name>`
   confirms which script the row holds.
+- **Verify in-store scripts when repo code moves.** `ava schedules verify`
+  dry-imports every schedule's DB-embedded script — stopped rows included —
+  against the checkout it runs from: `py_compile` plus a top-level-imports-only
+  execution in the checkout's runner venv. Nothing is started, stopped, or
+  written, and the drift class that bit twice (a module move — e.g.
+  `shared.watcher` -> `base.daemon.schedules.watcher` — leaving stale in-store
+  imports that crash-loop the next (re)start, task #4800) is caught by its
+  `RED id=<id> name=<name> missing=<module|compile-error:<l>:<m>|...>` lines
+  before it can fire. Exit codes: 0 clean / 1 red / 2 tool error. Run it on the
+  host that runs the schedules, or from a dev worktree to check the same table
+  against in-development code. `--check-file PATH` checks one script file
+  instead of the table (the falsification hook); a non-clean sweep posts one
+  alert through `/api/alerts` (`--no-notify` suppresses that for a dry run).
 - Deploy a one-off schedule with:
 
 ```bash
