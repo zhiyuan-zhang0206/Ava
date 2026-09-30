@@ -198,6 +198,8 @@ register(
         "claude-sonnet-5": ModelSpec(
             provider="claude",
             spawnable=True,
+            # Display-only supersession: existing agent configs remain valid.
+            superseded_by="claude-sonnet-5-5",
             context_window=1_000_000,
             max_output_tokens=128_000,
             knowledge_cutoff="2026-01",
@@ -210,6 +212,21 @@ register(
                 # the parameter, whose default is high). NOT the ladder floor.
                 reasoning_effort="high",
                 # User decision (2026-09-03): Claude family defaults this section off.
+                prompt_user_tone_enabled=False,
+            ),
+            media_types=frozenset({"image", "pdf"}),
+        ),
+        "claude-sonnet-5-5": ModelSpec(
+            provider="claude",
+            spawnable=True,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+            knowledge_cutoff="2026-06",
+            effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
+            # Live-checked 2026-09-30: thinking.type.disabled 400s.
+            thinking_always_on=True,
+            tuning=ModelTuning(
+                reasoning_effort="high",
                 prompt_user_tone_enabled=False,
             ),
             media_types=frozenset({"image", "pdf"}),
@@ -340,6 +357,30 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="2.0",
+                            cache_hit="0.20",
+                            output="10.0",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "claude-sonnet-5-5": PriceRates(
+            cache_miss=2.0,
+            cache_hit=0.20,
+            output=10.0,
+            source_url="https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
+            source_checked_at="2026-09-30",
+            vendor="anthropic",
+            # Cache writes cost $2.50/M for 5m or $4/M for 1h; no cache-write field.
             periods=(
                 PricePeriod(
                     effective_from=None,

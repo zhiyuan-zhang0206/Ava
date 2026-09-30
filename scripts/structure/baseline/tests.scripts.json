@@ -8,6 +8,6 @@
   },
   "files": {
     "tests/scripts/test_alert_rules.py": 1150,
-    "tests/scripts/test_check_model_updates.py": 899
+    "tests/scripts/model_registry/test_check_model_updates.py": 899
   }
 }
