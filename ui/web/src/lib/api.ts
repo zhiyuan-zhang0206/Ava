@@ -522,8 +522,8 @@ export const api = {
 
   // --- ava.ui.show pages ---
   //
-  // page-load fetches open pages; SSE page_opened / page_closed cover
-  // increments. PageRow.url is a gateway reverse-proxy URL
+  // page-load fetches open pages; SSE page_opened / page_closed prompt
+  // coalesced list refetches. PageRow.url is a gateway reverse-proxy URL
   // (shape: /pages/<agent_id>-<name>/); the frontend opens it in a new
   // tab.
 
@@ -533,7 +533,7 @@ export const api = {
 
   // Every agent's currently-open pages in one fetch — the fleet-wide twin of
   // listPages, so a many-agent view (the inbox) can surface each agent's live
-  // page without a per-agent request. SSE page_opened / page_closed cover deltas.
+  // page without a per-agent request. SSE page events prompt list refetches.
   listAllPages: (): Promise<PageRow[]> => {
     return f(`/api/pages`).then(ok<PageRow[]>);
   },

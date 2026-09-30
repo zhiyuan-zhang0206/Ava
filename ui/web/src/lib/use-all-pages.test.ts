@@ -1,7 +1,6 @@
 // useAllPages hook tests — the fleet-wide open-pages cache (every agent's live
-// page in one fetch), SSE-driven over TanStack Query. Mirrors use-agent-pages
-// but without the per-agent filter: page_opened/page_closed for ANY agent fold
-// in, keyed by (agent_id, name).
+// page in one fetch), invalidated by page events. Mirrors use-agent-pages
+// without the per-agent filter.
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import React from "react";
@@ -149,8 +148,11 @@ describe("useAllPages", () => {
     expect(api.listAllPages).toHaveBeenCalledTimes(1);
   });
 
-  it("page_opened for any agent folds in without a refetch", async () => {
-    vi.mocked(api.listAllPages).mockResolvedValue([pageRow({ name: "a", agent_id: 1 })]);
+  it("page_opened for any agent refetches the authoritative list", async () => {
+    const first = pageRow({ name: "a", agent_id: 1 });
+    vi.mocked(api.listAllPages)
+      .mockResolvedValueOnce([first])
+      .mockResolvedValueOnce([first, pageRow({ name: "b", agent_id: 2 })]);
     const { result } = renderHook(() => useAllPages(), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(1));
     await waitForEventSource();
@@ -159,25 +161,48 @@ describe("useAllPages", () => {
     await waitFor(() =>
       expect(result.current.map((p) => `${p.agent_id}:${p.name}`)).toEqual(["1:a", "2:b"]),
     );
-    expect(api.listAllPages).toHaveBeenCalledTimes(1); // SSE fold, not a refetch
+    expect(api.listAllPages).toHaveBeenCalledTimes(2);
+    expect(queryClient.getQueryData(["agent-pages", 2])).toBeUndefined();
   });
 
-  it("replace-by-(agent,name): same agent + name updates in place", async () => {
-    vi.mocked(api.listAllPages).mockResolvedValue([
-      pageRow({ name: "dash", agent_id: 1, port: 9000 }),
-    ]);
+  it("coalesces a burst of page events into one list GET", async () => {
+    vi.mocked(api.listAllPages)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        pageRow({ name: "first", agent_id: 1 }),
+        pageRow({ name: "second", agent_id: 2 }),
+      ]);
+    const { result } = renderHook(() => useAllPages(), { wrapper });
+    await waitForFetch();
+    await waitForEventSource();
+
+    deliverSseMessage(pageOpened({ name: "first", agent_id: 1 }));
+    deliverSseMessage(pageOpened({ name: "second", agent_id: 2 }));
+    await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["first", "second"]));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(api.listAllPages).toHaveBeenCalledTimes(2);
+  });
+
+  it("same agent and name reads the server's replacement row", async () => {
+    vi.mocked(api.listAllPages)
+      .mockResolvedValueOnce([pageRow({ name: "dash", agent_id: 1, port: 9000 })])
+      .mockResolvedValueOnce([pageRow({ name: "dash", agent_id: 1, port: 9999, url: "http://host/dash-new" })]);
     const { result } = renderHook(() => useAllPages(), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(1));
     await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "dash", agent_id: 1, port: 9999, url: "http://host/dash-new" }));
     await waitFor(() => expect(result.current[0].port).toBe(9999));
-    expect(result.current).toHaveLength(1); // replaced, not duplicated
+    expect(result.current).toHaveLength(1);
     expect(result.current[0].url).toBe("http://host/dash-new");
+    expect(api.listAllPages).toHaveBeenCalledTimes(2);
   });
 
-  it("same name under a DIFFERENT agent is a distinct row (keyed by agent+name)", async () => {
-    vi.mocked(api.listAllPages).mockResolvedValue([pageRow({ name: "dash", agent_id: 1 })]);
+  it("same name under a different agent remains a distinct server row", async () => {
+    const first = pageRow({ name: "dash", agent_id: 1 });
+    vi.mocked(api.listAllPages)
+      .mockResolvedValueOnce([first])
+      .mockResolvedValueOnce([first, pageRow({ name: "dash", agent_id: 2 })]);
     const { result } = renderHook(() => useAllPages(), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(1));
     await waitForEventSource();
@@ -187,24 +212,25 @@ describe("useAllPages", () => {
     expect(result.current.map((p) => p.agent_id).sort()).toEqual([1, 2]);
   });
 
-  it("page_closed removes only the matching (agent, name)", async () => {
-    vi.mocked(api.listAllPages).mockResolvedValue([
-      pageRow({ name: "dash", agent_id: 1 }),
-      pageRow({ name: "dash", agent_id: 2 }),
-    ]);
+  it("page_closed refetches without the matching server row", async () => {
+    const second = pageRow({ name: "dash", agent_id: 2 });
+    vi.mocked(api.listAllPages)
+      .mockResolvedValueOnce([pageRow({ name: "dash", agent_id: 1 }), second])
+      .mockResolvedValueOnce([second]);
     const { result } = renderHook(() => useAllPages(), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(2));
     await waitForEventSource();
 
     deliverSseMessage({ role: "page_closed", agent_id: 1, name: "dash" });
     await waitFor(() => expect(result.current.map((p) => p.agent_id)).toEqual([2]));
+    expect(api.listAllPages).toHaveBeenCalledTimes(2);
   });
 
-  it("empty-cache guard: page_opened before the fetch lands is not seeded", async () => {
+  it("page_opened before the fetch lands does not seed partial event data", async () => {
     let resolveFetch: (rows: PageRow[]) => void = () => undefined;
-    vi.mocked(api.listAllPages).mockImplementation(
-      () => new Promise((r) => { resolveFetch = r; }),
-    );
+    vi.mocked(api.listAllPages)
+      .mockImplementationOnce(() => new Promise((r) => { resolveFetch = r; }))
+      .mockResolvedValueOnce([pageRow({ name: "from-fetch", agent_id: 1 }), pageRow({ name: "early", agent_id: 1 })]);
     const { result } = renderHook(() => useAllPages(), { wrapper });
     await waitForEventSource();
 
@@ -213,7 +239,29 @@ describe("useAllPages", () => {
     expect(result.current).toEqual([]);
 
     act(() => resolveFetch([pageRow({ name: "from-fetch", agent_id: 1 })]));
-    await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["from-fetch"]));
+    await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["from-fetch", "early"]));
+    expect(api.listAllPages).toHaveBeenCalledTimes(2);
+  });
+
+  it("repairs an old initial GET snapshot after a page opens mid-flight", async () => {
+    let resolveInitial!: (rows: PageRow[]) => void;
+    vi.mocked(api.listAllPages)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveInitial = resolve; }))
+      .mockResolvedValueOnce([pageRow({ name: "new", agent_id: 2 })]);
+    const { result } = renderHook(() => useAllPages(), { wrapper });
+    await waitFor(() => expect(api.listAllPages).toHaveBeenCalledTimes(1));
+    await waitForEventSource();
+
+    deliverSseMessage(pageOpened({ name: "new", agent_id: 2 }));
+    expect(queryClient.getQueryData(["all-pages"])).toBeUndefined();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith(
+      { queryKey: ["all-pages"] }, { cancelRefetch: false },
+    ));
+    act(() => resolveInitial([]));
+
+    await waitFor(() => expect(api.listAllPages).toHaveBeenCalledTimes(2), { timeout: 2_000 });
+    await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["new"]));
   });
 
   it("reconnect (open) refetches to reconcile events missed during the gap", async () => {

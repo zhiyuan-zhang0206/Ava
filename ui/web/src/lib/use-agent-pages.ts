@@ -1,20 +1,14 @@
 // useAgentPages — the active agent's currently-open pages (registered HTML
 // servers), shown in the inspector's Page section.
 //
-// Server data on TanStack Query, kept live by the R4 fold (layer 1):
-//   ["agent-pages", agentId] query → api.listPages(agentId) — one initial fetch.
-//     staleTime Infinity: after the seed, the fold owns the cache. No
-//     refetchInterval, so a poll snapshot can never overwrite a fresher SSE
-//     merge (the SSE-vs-load race the old hand-rolled page trackers had).
-//   page_opened / page_closed are folded into this cache by the fold owner in
-//     EventStreamProvider (lib/fold/pages.ts) — this hook only reads.
-//   reconnect → the fold owner invalidates all queries, repairing the
-//     disconnect window's missed events.
+// ["agent-pages", agentId] reads the server's list. The fold owner in
+// EventStreamProvider coalesces page_opened/page_closed hints into invalidation
+// and trails a GET already in flight when the event arrived. Reconnect repairs
+// events missed while disconnected. This hook only reads the Query result.
 //
 // The inspector mounts this only while open, so the subscription's lifetime
 // is the panel's; a page that opens while the inspector is closed is picked
-// up by the cold fetch on the next open (the fold keeps the cache fresh
-// regardless — the fold owner lives at the app root).
+// up by the cold fetch on the next open (the fold owner lives at the app root).
 
 "use client";
 
@@ -29,8 +23,7 @@ export function useAgentPages(agentId: number): PageRow[] {
   const { data: pages = [], error } = useQuery({
     queryKey: ["agent-pages", agentId] as const,
     queryFn: () => api.listPages(agentId),
-    // SSE-driven: page_opened/page_closed fold into this cache, so it stays
-    // fresh from one fetch — no polling, no overwrite-on-refetch race.
+    // Page events invalidate through the fold owner; there is no polling.
     staleTime: Infinity,
     gcTime: 30 * 60_000,
   });
