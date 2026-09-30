@@ -1,8 +1,8 @@
 """Linux process descriptors through libc, independent of Python build headers.
 
 Managed Python 3.12 builds may omit os.pidfd_open and signal.pidfd_send_signal.
-Use one native implementation for both installed runtimes and preparation tools;
-missing libc/kernel support fails before custody is granted, never via kill(pid).
+Use one native implementation for every runtime; missing libc/kernel support
+fails before custody is granted, never via kill(pid).
 """
 
 from __future__ import annotations
@@ -44,12 +44,3 @@ def send_signal(descriptor: int, signum: int) -> None:
     if _api().pidfd_send_signal(descriptor, signum, None, 0) < 0:
         code = ctypes.get_errno()
         raise OSError(code, f"pidfd_send_signal({descriptor}): {os.strerror(code)}")
-
-
-def require_available() -> None:
-    """Prove open and signal support before a finite owner starts any children."""
-    descriptor = open_process(os.getpid())
-    try:
-        send_signal(descriptor, 0)
-    finally:
-        os.close(descriptor)

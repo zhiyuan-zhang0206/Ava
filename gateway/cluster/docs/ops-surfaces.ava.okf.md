@@ -12,7 +12,7 @@ tags:
 ## Cluster admin endpoints
 
 Gateway-only, for ssh-free ops on a deployed cluster. Both **bypass the
-maintenance-journal 503 guard** — deliberately: a held release operation is exactly when
+maintenance-journal 503 guard** — deliberately: a held maintenance operation is exactly when
 that guard is on and exactly when you need to look.
 
 - **`GET /api/cluster/admin/events`** — query the unified `events` stream with `agent_id` /

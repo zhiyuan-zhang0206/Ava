@@ -20,9 +20,7 @@ def report_plugin_load_failure(name: str, exc: BaseException) -> None:
     """Report one plugin that could not be loaded and was skipped.
 
     Never raises by itself — the failure already happened, and containment is
-    the point. The one substitution is deliberate: the release probe replaces
-    this function with a raising one so a candidate image with an unloadable
-    plugin is rejected instead of degraded.
+    the point.
     """
     from base.log import logger
     from base.telemetry import emit

@@ -238,7 +238,7 @@ def create(repo: Path, ref: str, root: Path) -> Preview:
             "cleanup": "pending",
             "scope": "Source checkout, private data plane, core services, scripted LLM with real execution",
             "excludes": [
-                "release image update/rollback",
+                "fleet update",
                 "multi-machine behavior",
                 "real LLM providers",
                 "browser/computer tools",

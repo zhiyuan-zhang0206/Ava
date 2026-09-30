@@ -577,8 +577,8 @@ def test_unauthenticated_serves_static_login(servers) -> None:
 def test_a_leftover_update_marker_never_owns_the_entry(
     servers: _Servers, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No lifecycle produces Gate's update marker, and a release transition stops
-    Gate with the rest of root. A marker file left by the retired updater in the
+    """No lifecycle produces Gate's update marker, and a stop takes Gate down
+    with the rest of root. A marker file left by the retired updater in the
     home must not pin the entry on "System updating": Gate answers from the live
     gateway/app."""
     monkeypatch.setattr("base.paths.ava_home", lambda: servers["flag"].parent)

@@ -328,52 +328,6 @@ def _verify_dr(app: Path) -> str:
     return actual
 
 
-def expected_requirement() -> str:
-    """The stable designated requirement every admitted helper must satisfy."""
-    return _expected_dr()
-
-
-def verified_signed_requirement(app: Path) -> str:
-    """Return `app`'s designated requirement only if it satisfies the stable identity.
-
-    A finite release-executor job runs the same signed artifact as the home
-    helper; admission re-checks the signature instead of trusting a path.
-    `codesign --verify` alone accepts code that does not satisfy the requirement
-    it embeds (whoever signs chooses that text), so the expected requirement is
-    tested cryptographically with `-R`, and the embedded one must also equal it.
-    """
-    expected = _expected_dr()
-    verify = ["codesign", "--verify", "--strict", f"-R={expected}", str(app)]
-    if _probe(verify).returncode != 0:
-        raise PermissionsHelperBuildError(
-            f"signed helper does not satisfy the stable identity requirement: {app}"
-        )
-    if not _signed_code_flags(app) & hardened_runtime.CS_RUNTIME:
-        raise PermissionsHelperBuildError(f"signed helper lacks the hardened runtime: {app}")
-    return _verify_dr(app)
-
-
-def _signed_code_flags(app: Path) -> int:
-    proc = _probe(["codesign", "--display", "--verbose=2", str(app)])
-    flags = hardened_runtime.code_directory_flags(proc.stderr.decode(errors="replace"))
-    if proc.returncode != 0 or flags is None:
-        raise PermissionsHelperBuildError(f"cannot read the helper's code-signing flags: {app}")
-    return flags
-
-
-def verified_running_requirement(pid: int, requirement: str) -> None:
-    """The running image (not whatever file its path names now) is hardened and satisfies it."""
-    if not hardened_runtime.running_hardened(pid):
-        raise PermissionsHelperBuildError(
-            f"running helper process {pid} lacks a valid hardened runtime; "
-            "code injected at its start cannot be excluded"
-        )
-    if _probe(["codesign", "--verify", f"-R={requirement}", str(pid)]).returncode != 0:
-        raise PermissionsHelperBuildError(
-            f"running helper process {pid} does not satisfy its signed identity"
-        )
-
-
 def preflight_signing_smoke() -> None:
     """Prove codesign and designated-requirement recovery before a rebuild."""
     refusal = "signing smoke failed — refusing to rebuild/deploy; codesign or keychain unusable"

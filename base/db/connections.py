@@ -213,35 +213,6 @@ async def _restore_pooled_session_async(conn: psycopg.AsyncConnection) -> None:
 # this long pass their own — see `pool`'s docstring.
 DEFAULT_POOL_TIMEOUT_S = 30.0
 
-# The administrator URL this process adopted explicitly (`adopt_administrator`);
-# in-process only, so no child inherits it.
-_administrator_url: str | None = None
-
-
-def adopt_administrator(url: str) -> None:
-    """Make `url`, the OS-user administrator over the home's owner-only socket,
-    this process's database authority for `connect()` / `pool()`.
-
-    Only the finite release executor adopts it: it runs the candidate image,
-    which the boot pass never admits to a write generation, and it fences the
-    generation it would otherwise dial. `url` is password-free (`peer`) and
-    names a socket directory; its own startup options (the executor acts as the
-    gateway group through `-c role=...`) survive the statement ceiling. A child
-    process runs its own boot pass and never inherits this authority.
-
-    Raises:
-        ValueError: `url` carries a password or does not name a socket directory.
-    """
-    global _administrator_url  # noqa: PLW0603 — per-process explicit authority
-    from psycopg.conninfo import conninfo_to_dict
-
-    parts = conninfo_to_dict(url)
-    host = parts.get("host")
-    if parts.get("password") or not isinstance(host, str) or not host.startswith("/"):
-        raise ValueError("administrator authority is a password-free owner-only socket URL")
-    _administrator_url = url
-    settings.data_plane.db_url = url
-
 
 def _statement_kwargs(url: str) -> dict[str, Any]:
     """The statement ceiling, after any startup options `url` carries itself: a
@@ -282,14 +253,13 @@ def _guard_db_url(url: str) -> str:
     Raises:
         UnanchoredHomeError: url is the unanchored sentinel.
         NoDatabaseAuthorityError: this home keeps a write-generation ledger, no
-            login was delivered to this process, url carries no password, and it
-            is not the administrator URL this process adopted.
+            login was delivered to this process, and url carries no password.
     """
     _refuse_unanchored(url)
     from base.host.env import dotenv_boot
 
     refusal = dotenv_boot.db_authority_refusal()
-    if refusal is not None and url != _administrator_url:
+    if refusal is not None:
         try:
             password = urlsplit(url).password
         except ValueError:

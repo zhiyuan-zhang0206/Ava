@@ -11,17 +11,9 @@ from base.deploy.release.verified_file import regular_bytes
 
 def configuration_digest(home: Path) -> str:
     """Include file-authoritative values omitted from child environment transport."""
-    return files_digest(configuration_files(home))
-
-
-def configuration_files(home: Path) -> dict[str, str | None]:
-    """Capture the authoritative set so an owned edit can bind its exact postimage."""
     paths = [home / name for name in (".env", "plugins_config.json", "service-selection.json")]
     paths.extend(sorted((home / "configs").glob("*/config.json")))
-    return {str(path.relative_to(home)): _file_digest(path) for path in paths}
-
-
-def files_digest(files: dict[str, str | None]) -> str:
+    files = {str(path.relative_to(home)): _file_digest(path) for path in paths}
     return hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
 
 

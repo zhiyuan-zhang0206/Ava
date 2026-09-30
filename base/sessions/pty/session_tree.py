@@ -6,7 +6,7 @@ with that process's descendants. Every path that ends a session goes through
 `kill_session_tree`: the host's ``kill`` op, the CLI's record-based kill of a
 wedged host, the lazy sweep of a crashed host's shell, the orphan-host reaper
 (`kill_host_tree`), and the SIGKILL leg of the persistent-terminal closure (a
-normal `ava stop`, a release, a PITR activation).
+normal `ava stop`).
 
 Why the POSIX session is the membership test, not process groups or the tty:
 

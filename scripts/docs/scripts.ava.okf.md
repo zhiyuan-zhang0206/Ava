@@ -28,9 +28,6 @@ Split by kind: code/AST/Python-convention guards in [[scripts/lint/docs/lint.ava
 ### `ci/` — CI job / test / release-cut infrastructure
 `accounting.py`, `job_rerun.py`, `runs_export.py` — CI-minute attribution and job/workflow tooling; `coverage_gates.py` — backend coverage gates; `qa_gate.py` + `qa_receipt.py` — exact-head QA evidence evaluation (see [receipt contract](../../conventions/qa-approval-receipt.md)); `test_selector.py` — static-import PR test selection feeding `ci.yml`; `refresh_test_durations.py` — `.test_durations` refresh; `shard_counts.py` — the executed-test counts (per shard and directory, and the total against the previous main run) that the backend shards and the `backend test counts (all shards)` job print (a shard that left no JUnit report or ran no test fails there: [[../../.github/test-gate.ava.okf.md]]); `migration_smoke.py`, `pgvector_runtime_smoke.py`, `two_section_chain_smoke.py` — smoke/verification gates; `release_cut.py`, `tag_latest.py` — dated release tagging.
 
-### `release_proofs/` — native launcher read proof (CI-only)
-`prove_native_launcher_reads.py` reads the OS scheduler's job state without installing or changing a job; invoked from `.github/workflows/native-launcher-proof.yml`.
-
 ### Startup / Deployment / Multi-host
 - `start_agent.py` (derives an agent via gateway `/api/agents`), `start_gateway.py` (directly starts the gateway FastAPI body, ≈ `.venv/bin/python -m gateway`) — **the latter does not derive an agent**
 - `multihost/` (`multihost.py` + `agent_runner_entrypoint.sh`), `preview/` (daily deployment + checkpoint rebuild)

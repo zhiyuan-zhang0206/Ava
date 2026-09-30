@@ -8,25 +8,21 @@ back stragglers, checkpoint), so neither waits on idle client connections a
 paused runner may still hold (issue #2307). Redis saves its current in-memory
 data before shutdown. An explicit save=False is reserved for callers that
 already verified a final snapshot. PID disappearance is checked in addition to
-command completion; an uncertain result always leaves the hold set. A PITR
-activation captures the same owners as a durable custody receipt first
-(`capture_custody`) and stops exactly those (`stop_captured`).
+command completion; an uncertain result always leaves the hold set.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import os
 import socket
 import sys
 import time
 from pathlib import Path
-from typing import Annotated, Self, cast
+from typing import cast
 
 import psutil
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
@@ -35,8 +31,6 @@ from redis.exceptions import RedisError
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.config import settings
-from base.deploy.release.verified_file import regular_bytes
-from base.native_process.evidence import ExpectedProcess
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler
@@ -47,50 +41,6 @@ from cli.commands.lifecycle.service_stop import (
     remaining,
     wait_for_exit,
 )
-
-
-class _Record(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-
-_Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-
-
-class DataOwner(_Record):
-    """One native data-plane owner captured as durable stop custody."""
-
-    process: ExpectedProcess
-    tree: tuple[ExpectedProcess, ...]
-    directory: str
-    port: int = Field(gt=0, le=65535)
-    config_digest: _Digest | None = None
-
-    @property
-    def identity(self) -> OwnedProcess:
-        p = self.process
-        return OwnedProcess(p.pid, p.create_time, p.starttime)
-
-    @property
-    def identities(self) -> set[OwnedProcess]:
-        return {OwnedProcess(p.pid, p.create_time, p.starttime) for p in self.tree}
-
-    @model_validator(mode="after")
-    def captured_tree(self) -> Self:
-        if self.process not in self.tree or not Path(self.directory).is_absolute():
-            raise ValueError("data custody requires the exact leader tree and absolute resource")
-        return self
-
-
-class DataStop(_Record):
-    postgres: DataOwner
-    redis: DataOwner
-    pgbouncer: DataOwner | None
-
-    def owners(self) -> dict[str, DataOwner]:
-        result = {"postgres": self.postgres, "redis": self.redis}
-        if self.pgbouncer is not None:
-            result = {"pgbouncer": self.pgbouncer, **result}
-        return result
 
 
 def capture_postgres() -> OwnedProcess | None:
@@ -150,8 +100,7 @@ async def _request_stop(
     name: str, identity: OwnedProcess, client: Redis, deadline: float, *, save: bool
 ) -> None:
     if name == "postgres":
-        # SIGINT requests PostgreSQL's fast, checkpointed shutdown. The same
-        # durable receipt gates ordinary stop and retained PITR custody.
+        # SIGINT requests PostgreSQL's fast, checkpointed shutdown.
         owned_postgres.stop(instance._pg_data_dir(), expected=identity, timeout=remaining(deadline))
     elif name == "redis":
         # Do not use redis-py's shutdown helper: it accepts any connection
@@ -234,141 +183,3 @@ def stop(timeout: float, *, save: bool = True) -> list[str]:
     if settings.data_plane.is_remote:
         raise RuntimeError("maintenance cannot verify a remote-managed data-plane stop")
     return asyncio.run(_stop(deadline, save=save))
-
-
-def _receipt_owner(
-    identity: OwnedProcess, directory: Path, port: int, *, config: Path | None = None
-) -> DataOwner:
-    def evidence(process: OwnedProcess) -> ExpectedProcess:
-        return ExpectedProcess(
-            pid=process.pid, create_time=process.birth, starttime=process.starttime
-        )
-
-    ownership.require_listener(identity, port)
-    tree = capture_tree(identity)
-    if not identity.live():
-        raise RuntimeError("data owner exited while capturing durable custody")
-    return DataOwner(
-        process=evidence(identity),
-        tree=tuple(evidence(p) for p in sorted(tree, key=lambda p: p.pid)),
-        directory=str(directory.resolve()),
-        port=port,
-        config_digest=None if config is None else hashlib.sha256(regular_bytes(config)).hexdigest(),
-    )
-
-
-def _receipt_client(port: int) -> Redis:
-    return Redis(
-        host="127.0.0.1",
-        port=port,
-        password=settings.data_plane.redis_admin_password or None,
-        decode_responses=True,
-        single_connection_client=True,
-        socket_connect_timeout=5,
-        socket_timeout=5,
-        retry=Retry(NoBackoff(), 0),
-    )
-
-
-async def _close_receipt_client(client: Redis) -> None:
-    if client.connection is not None:
-        await client.connection.disconnect(nowait=True)
-    await asyncio.wait_for(client.aclose(), 1)
-
-
-def _receipt_resources() -> tuple[int, int, int]:
-    from base.cluster import (
-        get_record,
-        record_pgbouncer_port,
-        record_postgres_port,
-        record_redis_port,
-    )
-    from base.paths import ava_home
-
-    if sys.platform == "win32" or settings.data_plane.is_remote:
-        raise RuntimeError("durable data stop requires an owned POSIX data plane")
-    record = get_record(ava_home())
-    if record is None:
-        raise RuntimeError("durable data stop requires the home's retained registry")
-    return record_postgres_port(record), record_redis_port(record), record_pgbouncer_port(record)
-
-
-async def _capture_custody(deadline: float) -> DataStop:
-    pg_port, redis_port, pooler_port = _receipt_resources()
-    pg, pgb = capture_postgres(), _capture_pooler()
-    client = _receipt_client(redis_port)
-    custody = ownership.RedisConnectionCustody()
-    try:
-        redis = await custody.capture(
-            client, port=redis_port, data_dir=instance.redis_data_dir(), deadline=deadline
-        )
-        if pg is None or redis is None:
-            raise RuntimeError("PITR must capture live PostgreSQL and Redis before any data stop")
-        receipt = DataStop(
-            postgres=_receipt_owner(pg, instance._pg_data_dir(), pg_port),
-            redis=_receipt_owner(redis, instance.redis_data_dir(), redis_port),
-            pgbouncer=None
-            if pgb is None
-            else _receipt_owner(
-                pgb, pooler.ini_path().parent, pooler_port, config=pooler.ini_path()
-            ),
-        )
-        _require_no_unrecorded({name: owner.identity for name, owner in receipt.owners().items()})
-        return receipt
-    finally:
-        await _close_receipt_client(client)
-
-
-def capture_custody(timeout: float) -> DataStop:
-    """Capture without effects; the operation must persist this before stopping."""
-    return asyncio.run(_capture_custody(deadline_after(timeout)))
-
-
-def _validate_receipt(receipt: DataStop) -> None:
-    pg_port, redis_port, pooler_port = _receipt_resources()
-    expected = {
-        "postgres": (instance._pg_data_dir(), pg_port),
-        "redis": (instance.redis_data_dir(), redis_port),
-        "pgbouncer": (pooler.ini_path().parent, pooler_port),
-    }
-    for name, owner in receipt.owners().items():
-        directory, port = expected[name]
-        if (owner.directory, owner.port) != (str(directory.resolve()), port):
-            raise RuntimeError("retained data custody names another configured resource")
-        if (
-            name == "pgbouncer"
-            and owner.config_digest != hashlib.sha256(regular_bytes(pooler.ini_path())).hexdigest()
-        ):
-            raise RuntimeError("PgBouncer configuration changed after custody capture")
-    _require_no_unrecorded({name: owner.identity for name, owner in receipt.owners().items()})
-
-
-async def _stop_captured(receipt: DataStop, deadline: float) -> None:
-    _validate_receipt(receipt)
-    client = _receipt_client(receipt.redis.port)
-    custody = ownership.RedisConnectionCustody()
-    try:
-        observed = await custody.capture(
-            client,
-            port=receipt.redis.port,
-            data_dir=Path(receipt.redis.directory),
-            deadline=deadline,
-        )
-        if observed is not None and not observed.same_birth(receipt.redis.identity):
-            raise RuntimeError("Redis replacement cannot inherit retained stop authority")
-        for name, owner in receipt.owners().items():
-            identity = owner.identity
-            if identity.live():
-                ownership.require_listener(identity, owner.port)
-                await _request_stop(name, identity, client, deadline, save=True)
-            # Even after leader exit, retained descendants must all be gone.
-            wait_for_exit(owner.identities, deadline)
-            ownership.require_listener(None, owner.port, required=False)
-        _require_no_unrecorded({})
-    finally:
-        await _close_receipt_client(client)
-
-
-def stop_captured(receipt: DataStop, timeout: float) -> None:
-    """Continue exact native stop without SQL drain or adopting new processes."""
-    asyncio.run(_stop_captured(receipt, deadline_after(timeout)))

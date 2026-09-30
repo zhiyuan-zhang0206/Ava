@@ -26,5 +26,5 @@ automatic rollback permission. An unreadable marker has no in-tree clear; the
 operator removes it in the cutover record.
 
 The stable lock inode and pending-publication fences remain until their explicit
-replacement. Old on-disk state requires the operator's one-time cutover; it is
-not adopted into the prepared release operation journal.
+replacement. Old on-disk state requires the operator's one-time cutover; nothing
+adopts it.

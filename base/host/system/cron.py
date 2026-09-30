@@ -1,8 +1,7 @@
 """OS-level cron registration for the cluster health probe.
 
 Platform-aware registration of a periodic job that runs the cluster health probe.
-The probe reports observations and graded alerts. Release actions are owned by
-the retained release operation.
+The probe reports observations and graded alerts; it takes no repair action.
 
 - macOS: launchd User LaunchAgent plist in ~/Library/LaunchAgents/
 - Linux: user crontab entry

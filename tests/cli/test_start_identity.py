@@ -474,9 +474,9 @@ def test_ready_phase_never_regresses_or_rewrites(inputs: identity.IdentityInput)
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
-def test_reservation_carries_the_release_coordinator_port(inputs: identity.IdentityInput) -> None:
-    """The fleet coordinator listener's port is part of every gateway reservation;
-    an intent recorded without it (a record from before the key) refuses."""
+def test_reservation_carries_the_retired_coordinator_port(inputs: identity.IdentityInput) -> None:
+    """The retired coordinator slot's port is still part of every gateway reservation:
+    the reservation is exactly the full block, so an intent recorded without it refuses."""
     identity.prepare_identity(inputs)
     rec = cluster.get_record(inputs.home)
     assert rec is not None

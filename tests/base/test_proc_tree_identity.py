@@ -153,26 +153,6 @@ def test_missing_libc_pidfd_support_refuses(monkeypatch: pytest.MonkeyPatch) -> 
         pidfd._api.__wrapped__()
 
 
-def test_pidfd_preflight_closes_descriptor_when_signal_denied(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    descriptor = os.open(os.devnull, os.O_RDONLY)
-
-    def refused(_fd: int, _signum: int) -> None:
-        raise PermissionError(errno.EPERM, "native signal denied")
-
-    def opened(_pid: int) -> int:
-        return descriptor
-
-    monkeypatch.setattr(pidfd, "open_process", opened)
-    monkeypatch.setattr(pidfd, "send_signal", refused)
-    with pytest.raises(PermissionError):
-        pidfd.require_available()
-    with pytest.raises(OSError) as closed:
-        os.fstat(descriptor)
-    assert closed.value.errno == errno.EBADF
-
-
 @pytest.mark.skipif(sys.platform != "linux", reason="actual libc pidfd custody")
 def test_native_descriptor_retains_exited_task_without_inheritance(
     monkeypatch: pytest.MonkeyPatch,
@@ -183,7 +163,6 @@ def test_native_descriptor_retains_exited_task_without_inheritance(
     descriptor = pidfd.open_process(child.pid)
     try:
         assert not os.get_inheritable(descriptor)
-        pidfd.require_available()
         pidfd.send_signal(descriptor, signal.SIGTERM)
         assert child.wait(timeout=5) == -signal.SIGTERM
         with pytest.raises(ProcessLookupError):

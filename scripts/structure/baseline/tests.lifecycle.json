@@ -1,6 +1,5 @@
 {
   "patch_targets": {
-    "tests/lifecycle/db_authority/test_delivery.py::base.db.connections._administrator_url": 1,
     "tests/lifecycle/preview/test_local.py::cli.start_intent._checkout": 1
   }
 }

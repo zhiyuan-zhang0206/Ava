@@ -23,7 +23,7 @@ RETIRED = (
     "cluster_bootstrap_hop",
     "cluster_bootstrap_recovery_read",
     "cluster_normal_continue",
-    # The legacy lease-bound transition; a fleet release stops and resumes units itself.
+    # The legacy lease-bound transition; a stop and a start take a unit down and up themselves.
     "cluster_stop",
     "cluster_resume",
 )

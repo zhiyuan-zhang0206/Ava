@@ -1,20 +1,14 @@
 """Durable close-notice outbox for busy persistent shells a unit closes (issue #2044).
 
-`ava stop`, a release transition and a PITR activation close busy
-persistent-shell sessions AFTER the gateway and ops server are already down, so
-the closure notice for each owner agent cannot be delivered synchronously. Each
-records one notice per busy session under ``$AVA_HOME/state/pty-close-notices/``
-— durable across the data-plane shutdown — naming why it closed. `ava stop`
-records only sessions it VERIFIED closed (its shell's exact identity gone —
-also when another session leaves the stop incomplete): its closure may be
-refused. A release or a PITR activation records before its cancel: no terminal
-survives either boundary
-(decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2;
-decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2), so the
-notice is that closure's intent and an interrupted executor cannot lose it.
-Once a session's shell is verified gone, its notice names any process of the
-session that outlived its SIGKILL — a release's by rewriting its intent record
-under the same dedup key.
+`ava stop` closes busy persistent-shell sessions AFTER the gateway and ops
+server are already down, so the closure notice for each owner agent cannot be
+delivered synchronously. It records one notice per busy session under
+``$AVA_HOME/state/pty-close-notices/`` — durable across the data-plane
+shutdown — naming why it closed. It records only sessions it VERIFIED closed
+(its shell's exact identity gone — also when another session leaves the stop
+incomplete): its closure may be refused. The notice names any process of the
+session that outlived its SIGKILL.
+
 The ops daemon flushes the journal at its next startup, once that start has
 released its maintenance hold (`services/agent_ops/close_notices.py`): a
 notice for a live owner becomes a system inbound message, one for a
@@ -59,19 +53,16 @@ _NOTIFIABLE_STATUSES = ("running", "idling")
 # Why a unit closed the session, as the owner's notice names it. A pause
 # retains terminals and records nothing.
 STOP_REASON = "an operator stop (ava stop)"
-RELEASE_REASON = "a release transition"
-PITR_REASON = "a PITR activation"
 
 
 @dataclass(frozen=True)
 class ClosureNotice:
-    """One closed busy session and the stop or release that closed it.
+    """One closed busy session and the stop that closed it.
 
     `survivors` are the session's processes that outlived the closure's SIGKILL
     (typically another user's, which neither the closure nor the agent may
-    signal), as (pid, command name); empty when every process is gone, and in
-    a release's intent recorded before its cancel. They are not part of the
-    dedup key: the notice is about the shell.
+    signal), as (pid, command name); empty when every process is gone. They are
+    not part of the dedup key: the notice is about the shell.
     """
 
     machine: str
@@ -127,11 +118,10 @@ def record_close(
     """Durably record one closed busy session; None when not an agent shell.
 
     The caller guarantees the session was busy and that it closes it for
-    `reason` (see the module docstring for when each caller records);
-    `survivors` names, as (pid, command name), the session's processes that
-    outlived the SIGKILL once its shell is verified gone. Returns the record
-    path, or None when the session name is not an agent-owned shell (the
-    canonical ``-agent-<id>-shell-<sid>`` shape).
+    `reason`; `survivors` names, as (pid, command name), the session's
+    processes that outlived the SIGKILL once its shell is verified gone.
+    Returns the record path, or None when the session name is not an
+    agent-owned shell (the canonical ``-agent-<id>-shell-<sid>`` shape).
     """
     match = AGENT_SHELL_RE.search(name)
     if match is None:

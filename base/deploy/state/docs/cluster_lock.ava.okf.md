@@ -40,6 +40,5 @@ gateway start ([[base/db/docs/code-version-gate.ava.okf.md|code version gate]]).
 The retired updater result publisher and status projections are absent.
 `cluster_last_update` and unused outcome columns in `deployment_state` remain
 physical schema pending an explicit database cutover; they have no surviving
-last-update producer or compatibility projection. The prepared release operation
-journal owns new operation status. Replacing SQL admission authority and dropping
-retired physical columns are separate work.
+last-update producer or compatibility projection. Replacing SQL admission
+authority and dropping retired physical columns are separate work.

@@ -81,15 +81,6 @@ def test_a_default_bundle_lifetime_past_the_cap_is_reported(
     assert any("UNIT_BUNDLE_TTL_S <= UNIT_BUNDLE_MAX_TTL_S" in f for f in failures)
 
 
-def test_a_coordinator_read_timeout_at_the_request_deadline_is_reported(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A per-read timeout that never fires before the whole-request deadline."""
-    monkeypatch.setattr(deploy, "COORDINATOR_READ_TIMEOUT_S", deploy.COORDINATOR_REQUEST_DEADLINE_S)
-    failures = validate_clock_lattice()
-    assert any("COORDINATOR_READ_TIMEOUT_S < COORDINATOR_REQUEST_DEADLINE_S" in f for f in failures)
-
-
 def test_renewal_clock_is_the_agent_hosts_actual_beat() -> None:
     """The lattice must check the renewal beat that runs, not a second number
     (it once registered 60 s while the agent host renewed every 15 s)."""
