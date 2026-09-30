@@ -228,8 +228,7 @@ outside the lattice.
 
 **Evidence.** [`base/deploy/timing.py`](../base/deploy/timing.py) makes `CLOCKS` the
 single authority for ordered timing constants, including boot stall, launch
-confirmation, boot budget, and reap grace, as well as `NO_PROGRESS` and
-`LOCK_TTL`. In the 2026-07-30 spawn incident, launch confirmation was extended
+confirmation, boot budget, and reap grace, as well as `NO_PROGRESS`. In the 2026-07-30 spawn incident, launch confirmation was extended
 without extending its neighbouring reap grace; the required relation existed
 only in prose. The 2026-08-31 serial-bucket audit of the last 500 runs found
 that remaining noise was pinned-count sync gates or deterministic in-PR

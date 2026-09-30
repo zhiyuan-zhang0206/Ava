@@ -1,30 +1,11 @@
 """The deploy timeout family — one definition of "this host stopped making
-progress", and the rule that keeps the deploy lease alive across it.
+progress".
 
 `NO_PROGRESS_TIMEOUT_S` is that single definition. Its consumers share it rather
-than calibrate their own: the settle hold (`base.deploy.state.cluster_lock.SETTLE_TTL_S`)
-and the ops daemon's wedge bound (`services.agent_ops.health`); the schedule-stall alert
-(`base.deploy.timing`) is ordered above it. Two clocks that disagree about
-"stopped making progress" are two chances to declare a host dead while it is
-working, or alive while it is not: in the 2026-07-29 incident the smallest of
-three independent bounds decided when the deploy lease stopped protecting the
-deploy, and a second deploy could start into a host whose checkout had moved
-while its processes had not.
-
-## The invariant
-
-**The lease must not expire before the operation it protects can finish.**
-
-It is held two ways, and the split matters:
-
-1. **While an operation is executing**, the process running it renews the lease
-   on a timer (`LEASE_RENEW_INTERVAL_S`; `base.deploy.state.cluster_lock.renew_update_lock`,
-   driven by `services.pitr.activation.lease`). So `LOCK_TTL_S` is not a ceiling
-   on how long a deploy may take; it is purely the crash-reclaim bound, and an
-   operation whose process dies still releases within one TTL because renewal
-   dies with it.
-2. **After the operation stops executing** with hosts still mid-transition, the
-   lease converts to a bounded settle hold (`SETTLE_TTL_S`) that lapses on its TTL.
+than calibrate their own: the ops daemon's wedge bound (`services.agent_ops.health`);
+the schedule-stall alert (`base.deploy.timing`) is ordered above it. Two clocks
+that disagree about "stopped making progress" are two chances to declare a host
+dead while it is working, or alive while it is not.
 
 ## Why 900 s
 
@@ -32,8 +13,8 @@ The value is far above the measured POSIX agent-runner leg (2-15 s across 44
 samples on two hosts, 2026-07-01..29) because the Windows leg is two orders of
 magnitude slower: production rollouts of 2026-08-06..12 converged `win` inside
 0-11 minutes, and five rounds spent the whole bound. It is roughly 1.5x the
-longest leg observed, not a first-principles ceiling; what has to stay true is
-the invariant above, which `base.deploy.timing` checks.
+longest leg observed, not a first-principles ceiling; the orderings it must keep
+against its neighbours are declared and checked in `base.deploy.timing`.
 
 The module also holds the agent-lease family, the `ava start` readiness
 clocks and a remote unit's capability bundle lifetime; each constant's comment
@@ -45,13 +26,6 @@ from __future__ import annotations
 # The one definition of "this host has stopped making progress" (module
 # docstring names its consumers).
 NO_PROGRESS_TIMEOUT_S = 900.0
-
-# How often the process running an orchestration re-arms its own lease. Small
-# relative to `LOCK_TTL_S` so a missed round (a slow DB, one dropped connection) is
-# never fatal — renewers retry until the lease could lapse before the next round
-# (`base.deploy.state.cluster_lock.lease_may_lapse`) — and large enough that a multi-minute
-# rollout costs a handful of single-row UPDATEs rather than a poll-rate write stream.
-LEASE_RENEW_INTERVAL_S = 60.0
 
 # How often the agent host renews its hosted agents' leases: the one ownership
 # beat of `services/agent_host/daemon.py` (`_beat_forever`), which sleeps exactly

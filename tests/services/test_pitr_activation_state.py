@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from services.pitr.activation import lease
 from services.pitr.activation.state import (
     ActivationRecord,
     load_record,
@@ -24,44 +23,6 @@ def _credentials() -> dict[str, str]:
         "backup_key_id": "key",
         "backup_key_sha256": "0" * 64,
     }
-
-
-def test_activation_lease_refuses_long_step_when_initial_ownership_is_lost(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def lose_lease(_holder: str) -> bool:
-        return False
-
-    monkeypatch.setattr(lease, "renew_update_lock", lose_lease)
-    called = False
-
-    def action(_stop: object) -> None:
-        nonlocal called
-        called = True
-
-    with pytest.raises(RuntimeError, match="lost its deployment lease"):
-        lease.run_while_renewing("pitr:op", action)
-    assert not called
-
-
-def test_activation_lease_cancels_child_and_never_returns_after_renewal_race(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    renewals = iter((True, False))
-    monkeypatch.setattr(lease, "LEASE_RENEW_INTERVAL_S", 0.001)
-
-    def renew_then_lose(_holder: str) -> bool:
-        return next(renewals, False)
-
-    monkeypatch.setattr(lease, "renew_update_lock", renew_then_lose)
-
-    def action(stop: object) -> str:
-        assert isinstance(stop, lease.threading.Event)
-        assert stop.wait(1)
-        return "must not advance"
-
-    with pytest.raises(RuntimeError, match="lost its deployment lease"):
-        lease.run_while_renewing("pitr:op", action)
 
 
 def test_activation_record_keeps_original_started_at_across_resume(tmp_path: Path) -> None:
