@@ -151,6 +151,9 @@ _HELD_DOWN = "held down"
 # task #3393): the runner reports it but has no restart verb to reach for.
 _NO_REVIVAL_VERB = "no revival verb (not a tree unit)"
 
+# What a confirmation poll reports when the verification window closes before the probe answers.
+_WINDOW_CLOSED = "replacement did not answer within the verification window"
+
 
 class ProbeRunner:
     """One bounded synchronous observation, with at most one daemon worker.
@@ -164,7 +167,10 @@ class ProbeRunner:
     def __init__(self) -> None:
         self._pending: Future[DaemonProbe] | None = None
 
-    async def observe(self, probe: Probe, timeout_s: float) -> DaemonProbe:
+    async def observe(
+        self, probe: Probe, timeout_s: float, *, overdue: DaemonProbe | None = None
+    ) -> DaemonProbe:
+        """One verdict; a probe still running at the deadline is `overdue`, else UNAVAILABLE."""
         if self._pending is not None and not self._pending.done():
             return DaemonProbe.unavailable("previous observation still running after its deadline")
         pending: Future[DaemonProbe] = Future()
@@ -183,6 +189,8 @@ class ProbeRunner:
         try:
             result = await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(pending)), timeout_s)
         except TimeoutError:
+            if overdue is not None:
+                return overdue
             return DaemonProbe.unavailable(f"observation exceeded {timeout_s:g}s deadline")
         self._pending = None
         return result
@@ -496,12 +504,17 @@ class HealthMonitor:
         """Inspection failures are unavailable evidence, never permission to restart."""
         runner = self._runners.setdefault(unit_id, ProbeRunner())
         budget = self._config.probe_timeout_s
+        # A budget cut short by the caller's verification window is not the
+        # probe's own deadline: the window closing says the replacement is still
+        # unconfirmed (DOWN), nothing about whether inspection works.
+        window_bound = timeout_s is not None and timeout_s < budget
         if timeout_s is not None:
             budget = min(budget, timeout_s)
         if budget <= 0:
-            return DaemonProbe.unavailable("verification observation deadline exhausted")
+            return DaemonProbe.down(_WINDOW_CLOSED)
         before = self._generation(unit_id)
-        result = await runner.observe(probe, budget)
+        overdue = DaemonProbe.down(_WINDOW_CLOSED) if window_bound else None
+        result = await runner.observe(probe, budget, overdue=overdue)
         after = self._generation(unit_id)
         state = self._unit_state(unit_id)
         if state.generation != after:
