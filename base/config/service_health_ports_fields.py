@@ -1,4 +1,4 @@
-"""The daemon /healthz port block of `ServiceSettings`.
+"""The daemon /healthz port fields of `ServiceSettings`.
 
 Moved out of `base/config/services.py` when the task #3696 field additions
 pushed that module past its 800-line hard ceiling (the same split pattern as
@@ -11,25 +11,17 @@ from __future__ import annotations
 
 from pydantic import Field
 
-# ── daemon /healthz ports — host scope, one unit at a time ───────────────
+# ── daemon /healthz ports — host scope ───────────────────────────────────
 #
-# `host`, not `cluster-pinned`, because a port block is a property of the
-# CLUSTER while the collision domain is one MACHINE's localhost namespace.
-# Those coincide until a machine carries two localhost namespaces (WSL2,
-# containers, netns) — on 2026-07-26 a WSL2 runner and a native Windows
-# runner of the same cluster held the same ports by construction and the
-# WSL2 relay republished the Linux daemons on the Windows loopback, so the
-# Windows watchdog probed its own port and was answered by the other unit
-# (issue #977). Nothing about a health port is cluster-constrained: the
-# runner computes its own ops URL from its own `health_port('ops')` and
-# registers it (`base/cluster/machines.py`), and the gateway reads that URL back
-# off the machines row. So the gateway no longer serves these to runners
-# over /api/bootstrap — and a runner's .env never caches a gateway-served
-# value at all since the 2026-08-01 config refactor (every runner process
-# fetches at startup), so a per-unit port is durable by construction. A
-# co-located second unit states its base once with `ava start --health-port-base`;
-# `ava start` refuses to launch onto a port another unit already answers on.
-# The sibling `*_health_url` / `*_pidfile` fields were already `host`.
+# `host`, not `cluster-pinned`: a health port is a fact of the machine's
+# localhost namespace, and the default is the fixed port table
+# (`base.host.env.port_table`). The runner computes its own ops URL from its own
+# `health_port('ops')` and registers it (`base/cluster/machines.py`), and the
+# gateway reads that URL back off the machines row. So the gateway does not serve
+# these to runners over /api/bootstrap, and a runner's .env never caches a
+# gateway-served value. `ava start` refuses to launch onto a port another home's
+# daemon already answers on. The sibling `*_health_url` / `*_pidfile` fields were
+# already `host`.
 
 
 class ServiceHealthPortFields:
@@ -38,7 +30,7 @@ class ServiceHealthPortFields:
     gateway_watchdog_health_port: int | None = Field(
         default=None,
         alias="AVA_GATEWAY_WATCHDOG_HEALTH_PORT",
-        description="Gateway watchdog /healthz port override (per unit). Unset = shared default 8119.",
+        description="Gateway watchdog /healthz port override (per unit). Unset = default 8119.",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "",
@@ -52,7 +44,7 @@ class ServiceHealthPortFields:
     agent_runner_watchdog_health_port: int | None = Field(
         default=None,
         alias="AVA_AGENT_RUNNER_WATCHDOG_HEALTH_PORT",
-        description="Agent-runner watchdog /healthz port override (per unit). Unset = shared default 8120.",
+        description="Agent-runner watchdog /healthz port override (per unit). Unset = default 8120.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",
@@ -66,7 +58,7 @@ class ServiceHealthPortFields:
     labeler_health_port: int | None = Field(
         default=None,
         alias="AVA_LABELER_HEALTH_PORT",
-        description="Labeler daemon /healthz port override (per unit). Unset = shared default 8103.",
+        description="Labeler daemon /healthz port override (per unit). Unset = default 8103.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -79,7 +71,7 @@ class ServiceHealthPortFields:
     im_bridge_health_port: int | None = Field(
         default=None,
         alias="AVA_IM_BRIDGE_HEALTH_PORT",
-        description="IM Bridge daemon /healthz port override (per unit). Unset = shared default 8111.",
+        description="IM Bridge daemon /healthz port override (per unit). Unset = default 8111.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -92,7 +84,7 @@ class ServiceHealthPortFields:
     heartbeat_health_port: int | None = Field(
         default=None,
         alias="AVA_HEARTBEAT_HEALTH_PORT",
-        description="Heartbeat daemon /healthz port override (per unit). Unset = shared default 8107.",
+        description="Heartbeat daemon /healthz port override (per unit). Unset = default 8107.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -105,7 +97,7 @@ class ServiceHealthPortFields:
     delivery_watchdog_health_port: int | None = Field(
         default=None,
         alias="AVA_DELIVERY_WATCHDOG_HEALTH_PORT",
-        description="Delivery watchdog /healthz port override (per unit). Unset = shared default 8110.",
+        description="Delivery watchdog /healthz port override (per unit). Unset = default 8110.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -131,7 +123,7 @@ class ServiceHealthPortFields:
     task_maintenance_health_port: int | None = Field(
         default=None,
         alias="AVA_TASK_MAINTENANCE_HEALTH_PORT",
-        description="Task-maintenance daemon /healthz port override (per unit). Unset = shared default 8108.",
+        description="Task-maintenance daemon /healthz port override (per unit). Unset = default 8108.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -144,7 +136,7 @@ class ServiceHealthPortFields:
     events_maintenance_health_port: int | None = Field(
         default=None,
         alias="AVA_EVENTS_MAINTENANCE_HEALTH_PORT",
-        description="Events-maintenance daemon /healthz port override (per unit). Unset = shared default 8109.",
+        description="Events-maintenance daemon /healthz port override (per unit). Unset = default 8109.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -157,7 +149,7 @@ class ServiceHealthPortFields:
     pg_backup_health_port: int | None = Field(
         default=None,
         alias="AVA_PG_BACKUP_HEALTH_PORT",
-        description="Postgres backup scheduler /healthz port override (per unit). Unset = shared default 8116.",
+        description="Postgres backup scheduler /healthz port override (per unit). Unset = default 8116.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -169,7 +161,7 @@ class ServiceHealthPortFields:
     pitr_uploader_health_port: int | None = Field(
         default=None,
         alias="AVA_PITR_UPLOADER_HEALTH_PORT",
-        description="PITR uploader /healthz port override (per unit). Unset = shared default 8117.",
+        description="PITR uploader /healthz port override (per unit). Unset = default 8117.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -194,7 +186,7 @@ class ServiceHealthPortFields:
     memory_indexer_health_port: int | None = Field(
         default=None,
         alias="AVA_MEMORY_INDEXER_HEALTH_PORT",
-        description="Memory indexer daemon /healthz port override (per unit). Unset = shared default 8105.",
+        description="Memory indexer daemon /healthz port override (per unit). Unset = default 8105.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -207,7 +199,7 @@ class ServiceHealthPortFields:
     ops_health_port: int | None = Field(
         default=None,
         alias="AVA_OPS_HEALTH_PORT",
-        description="ava-ops daemon /healthz + /ops port override (per unit) — the agent-runner's inbound port the gateway dials to run cluster ops; the runner registers the resulting URL itself. Unset = shared default 8106.",
+        description="ava-ops daemon /healthz + /ops port override (per unit) — the agent-runner's inbound port the gateway dials to run cluster ops; the runner registers the resulting URL itself. Unset = default 8113.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",

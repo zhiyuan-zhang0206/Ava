@@ -279,12 +279,11 @@ def admin_session(rec: ClusterRecord, database: str) -> Generator[psycopg.Connec
     autocommit, custody-checked against the home's own postmaster."""
     from psycopg.conninfo import make_conninfo
 
-    from base.cluster import record_postgres_port
     from base.db import pg_admin
     from base.paths import ava_home
     from cli.commands.data_plane.cluster_instance import pg_admin_url
 
-    url = make_conninfo(pg_admin_url(record_postgres_port(rec)), dbname=database)
+    url = make_conninfo(pg_admin_url(rec.ports["postgres"]), dbname=database)
     with pg_admin.connect(url, expected_data_dir=ava_home() / "pg", autocommit=True) as conn:
         yield conn
 
@@ -357,13 +356,12 @@ def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Ge
     """Serve exactly `generation` through the owned pooler (restart on change)."""
     if not settings.data_plane.pgbouncer_enabled:
         return
-    from base.cluster import record_pgbouncer_port, record_postgres_port
     from base.cluster.authority import read_pooler_admin, render_userlist
     from cli.commands.data_plane.pgbouncer import ensure_pgbouncer
 
     rc = ensure_pgbouncer(
-        pg_port=record_postgres_port(rec),
-        listen_port=record_pgbouncer_port(rec),
+        pg_port=rec.ports["postgres"],
+        listen_port=rec.ports["pgbouncer"],
         db_name=database,
         cluster_secret=settings.data_plane.cluster_secret,
         userlist=render_userlist(home, generation),

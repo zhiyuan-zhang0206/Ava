@@ -436,21 +436,20 @@ def test_next_public_keys_absent_file_is_empty(tmp_path: Path):
 def _pgbouncer_ctx(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, db_url: str | None, enabled: bool
 ):
-    """Wire ensure_pgbouncer_step's deps: a default-home record (no pgbouncer key
-    → derived pooler 6433 / pg 5433), settings reflecting the toggle, and an
-    optional existing .env carrying the pre-cutover AVA_DB_URL."""
+    """Wire ensure_pgbouncer_step's deps: a record (pooler 6433 / pg 5433), settings
+    reflecting the toggle, and an optional existing .env carrying the pre-cutover
+    AVA_DB_URL."""
     from base import cluster
 
     rec = cluster.ClusterRecord(
-        # A deliberately-partial record (no pgbouncer slot) to exercise the derive path.
-        ports=cast("cluster.ClusterPorts", {"gateway": 8000, "postgres": 5433, "redis": 6380}),
+        ports=cast(
+            "cluster.ClusterPorts",
+            {"gateway": 8000, "postgres": 5433, "redis": 6380, "pgbouncer": 6433},
+        ),
         gateway_home=str(tmp_path),
         created_at="t",
     )
     monkeypatch.setattr(cluster, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType]
-    # This record predates the pgbouncer slot; treat its home as the default home
-    # so record_pgbouncer_port derives the fixed legacy 6433.
-    monkeypatch.setattr(cluster, "is_default_home", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(converge_host.settings.data_plane, "pgbouncer_enabled", enabled)
     ctx = _ctx(tmp_path / "repo", tmp_path)
     if db_url is not None:
@@ -471,7 +470,7 @@ def test_ensure_pgbouncer_step_migrates_direct_url_to_pooler_when_enabled(
     ctx = _pgbouncer_ctx(tmp_path, monkeypatch, db_url=_DIRECT_URL, enabled=True)
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
-    assert "AVA_DB_URL=" + _POOLED_URL in env  # main's derived legacy pooler 6433
+    assert "AVA_DB_URL=" + _POOLED_URL in env  # the record's pooler 6433
     assert "AVA_PGBOUNCER_PORT" not in env
 
 

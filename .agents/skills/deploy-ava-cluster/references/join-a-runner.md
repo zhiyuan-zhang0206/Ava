@@ -59,9 +59,6 @@ is automated.
 Optional first-start inputs:
 
 - `--ssl-cert-file PATH`: a trusted CA bundle for the gateway connection.
-- `--health-port-base N`: a distinct daemon health-port block if multiple units
-  share the host's loopback namespace. Choose an unused block on the grid in
-  `base/host/env/port_block.py`. WSL2 applies its reserved default when omitted.
 - `--config-file PATH`: first-start Settings configuration outside the home,
   such as the declared transport encryption mode.
 

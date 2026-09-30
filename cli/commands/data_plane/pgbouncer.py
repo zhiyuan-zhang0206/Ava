@@ -593,8 +593,8 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     converge (which runs before the data-plane bring-up on every `ava start` /
     the fleet update) keeps the `.env` value in sync, idempotently:
 
-    1. Normalize AVA_DB_URL's port: the pooler listener (`record_pgbouncer_port`)
-       when the toggle is on, the direct Postgres port (`record_postgres_port`)
+    1. Normalize AVA_DB_URL's port: the pooler listener (the record's `pgbouncer` port)
+       when the toggle is on, the direct Postgres port (the record's `postgres` port)
        when off. Only a URL currently carrying the OTHER port of this cluster is
        rewritten — the pre-cutover 5433 (direct) value becomes 6433 (pooler) on
        an enabled cluster, and a kill-switch flip back is equally one line; an
@@ -612,7 +612,7 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
 
     from dotenv import dotenv_values
 
-    from base.cluster import get_record, record_pgbouncer_port, record_postgres_port
+    from base.cluster import get_record
     from base.config import settings
     from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
     from base.host.env.dotenv_file import remove_env, upsert_env
@@ -635,8 +635,8 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
         except ValueError:
             port = None
         if port is not None:
-            pg = record_postgres_port(rec)
-            pooler = record_pgbouncer_port(rec)
+            pg = rec.ports["postgres"]
+            pooler = rec.ports["pgbouncer"]
             want = pooler if settings.data_plane.pgbouncer_enabled else pg
             if port != want and port in (pg, pooler):
                 normalized = url_with_port(current, want)

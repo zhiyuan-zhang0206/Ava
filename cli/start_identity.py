@@ -1,7 +1,7 @@
 """Durable unit identity for the single start lifecycle; no runtime settings or effects.
 
 The private intent precedes `.env` publication and is the home's record of itself:
-a gateway unit's port block and data-plane host live in its `record`
+a gateway unit's ports (the fixed table) and data-plane host live in its `record`
 (`base.cluster.record`), and no other file on the host lists this cluster. A
 home without an intent that already holds a data plane cannot be born again
 over it; explicit reattachment is required.
@@ -123,8 +123,12 @@ def _validate_intent_record(raw: Any, home: Path, *, gateway: bool) -> None:
     if not isinstance(raw_ports, dict):
         raise TypeError("invalid start port reservation")
     ports = cast("dict[str, Any]", raw_ports)
-    if set(ports) != set(cluster.LEGACY_AVA_PORTS):
-        raise RuntimeError("invalid start port reservation")
+    if set(ports) != set(cluster.FIXED_PORTS):
+        raise RuntimeError(
+            "invalid start port reservation: slots differ from the fixed port table "
+            f"(unexpected {sorted(set(ports) - set(cluster.FIXED_PORTS))}, "
+            f"missing {sorted(set(cluster.FIXED_PORTS) - set(ports))})"
+        )
     if any(type(p) is not int or not 1 <= p <= 65535 for p in ports.values()):
         raise RuntimeError("invalid start port number")
     if len(set(ports.values())) != len(ports):
@@ -186,12 +190,9 @@ def needs_provision(home: Path) -> bool:
 
 
 def _new_record(inputs: IdentityInput) -> cluster.ClusterRecord:
-    if cluster.is_default_home(inputs.home):
-        ports = cast("cluster.ClusterPorts", cluster.LEGACY_AVA_PORTS.copy())
-        if not all(cluster.port_free(p) for p in cast("dict[str, int]", ports).values()):
-            raise RuntimeError("default home's ports are already occupied")
-    else:
-        ports = cluster.allocate_ports()
+    ports = cluster.new_home_ports()
+    if not all(cluster.port_free(p) for p in cast("dict[str, int]", ports).values()):
+        raise RuntimeError("the home's ports are already occupied")
     return cluster.ClusterRecord(
         ports=ports,
         gateway_home=str(inputs.home),
@@ -242,13 +243,6 @@ def _validate_existing(
             raise RuntimeError(
                 "existing home has no recorded identity (start-intent.json) or is incomplete; "
                 "explicit reattachment is required"
-            )
-        from cli.preflight import _port_block_conflicts
-
-        conflicts = _port_block_conflicts(asdict(rec), env)
-        if conflicts:
-            raise RuntimeError(
-                "home configuration conflicts with its port reservation: " + "; ".join(conflicts)
             )
     elif not env.get("AVA_GATEWAY_URL"):
         raise RuntimeError("existing remote unit has no gateway identity")

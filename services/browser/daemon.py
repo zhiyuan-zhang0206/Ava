@@ -39,7 +39,7 @@ from . import profile as browser_profile
 from .probe import cdp_url
 from .profile import profile_dir as _profile_dir
 
-_CDP_PORT = settings.services.browser_cdp_port  # per-cluster (cluster port block); default 9222
+_CDP_PORT = settings.services.browser_cdp_port  # the recorded/`.env` port; default 9222
 _CDP_TIMEOUT_S = 2.0
 
 

@@ -262,7 +262,7 @@ def _guard_health_port_gate(
     """Autouse safety net: `ava start`'s pre-bind health-port gate finds nothing.
 
     The gate dials this unit's daemon `/healthz` ports before launching (issue
-    #977). It does NOT reach the prod defaults 8102-8111: the env block in
+    #977). It does NOT reach the prod defaults (the health ports of the fixed table): the env block in
     `tests.fixtures.env_bootstrap` already pins every health port to a `_free_port()`, so an
     un-stubbed gate dials this session's own kernel-assigned ports and the suite is
     green with prod live. This fixture buys the weaker, residual property.
@@ -279,6 +279,25 @@ def _guard_health_port_gate(
     if request.node.get_closest_marker("real_health_port_gate"):
         return
     monkeypatch.setattr("cli.commands._probe._occupied_health_ports", lambda *_a, **_kw: ())
+
+
+@pytest.fixture(autouse=True)
+def _test_homes_get_their_own_ports(
+    monkeypatch: pytest.MonkeyPatch, session_ports: dict[str, int]
+) -> None:
+    """Autouse: a home born inside a test records this session's own ports.
+
+    `base.cluster.new_home_ports` is where birth takes the fixed port table
+    (`cli.start_identity._new_record`), and those are the numbers the operator's
+    cluster on the same box binds. A test home that recorded them could later bring
+    up storage, probe or dial the real cluster, and its endpoint would read as the
+    real home's (`dotenv_boot._endpoint_key` tells homes apart by port). Every test
+    home therefore records the session's kernel-assigned table instead; the table
+    itself is pinned by `tests/base/test_fixed_ports.py`.
+
+    The patch covers this process only: a subprocess that births a home would take
+    the real table (no test does)."""
+    monkeypatch.setattr("base.cluster.new_home_ports", lambda: dict(session_ports))
 
 
 # ── Exec guard: no test replaces the pytest process image ──

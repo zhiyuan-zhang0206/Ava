@@ -8,6 +8,12 @@ and the matching GitHub Releases, cut by `scripts/ci/release_cut.py`.
 ## [Unreleased]
 
 ### Removed
+- Port-block allocation and the start-time port scan and `.env` drift check:
+  every home records one fixed port table (25 slots,
+  `base/host/env/port_table.py`) at birth, and the health-port-base start option
+  and the WSL default base are gone. The retired `restarter` and `coordinator`
+  slots are dropped from the table, so a `start-intent.json` whose `record.ports`
+  still carries them is refused at start until the two keys are deleted by hand.
 - The retained-image release path (image preparation, the image-exec handoff, the
   finite executor, the fleet coordinator, write-generation rotation by rollout,
   PITR activation and their CI workflows) and the `shared/` release-probe shell.

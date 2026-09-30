@@ -208,21 +208,21 @@ Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blas
 ### A guard that looks redundant is the one that catches the fix
 
 Two producers of the same fact, pinned against each other, feel like a test of
-something nobody would get wrong. `tests/base/test_cluster_env.py:test_health_port_env_matches_derive_env_for_the_same_base`
-pins `derive_env` (first-start) against `health_port_env` (runner-join) for one
-base — and what it caught was not the original bug but the FIX for it: adding
-`agent_host` to the late-health-slot set made the two producers disagree, and
-the guard said so immediately.
+something nobody would get wrong. A test once pinned `derive_env` (first-start)
+against the runner-join helper that wrote the same health ports for one base
+(both producers are gone with the port block) — and what it caught was not the
+original bug but the FIX for it: adding `agent_host` to the late-health-slot set
+made the two producers disagree, and the guard said so immediately.
 
 Two lessons, and the second is the load-bearing one:
 
 - A table that is not derived needs a guard for its own internal invariants, not
-  just for agreement with its consumers. `LEGACY_AVA_PORTS` is not in offset
+  just for agreement with its consumers. `FIXED_PORTS` is not in any
   order (`ops` moved off 8106 to dodge a Windows service), so "next number after
   the last line" put `agent_host` on a port `ops` already held; the entire suite
   passed, because nothing asserted the table had no duplicates. That collision
   surfaced from reading a boot log, not from a test —
-  `test_legacy_ports_are_unique` exists now so the next one does not need a
+  `test_fixed_ports_are_unique` exists now so the next one does not need a
   careful reader.
 - The value of a cross-producer guard is highest exactly when you are changing
   the thing it guards. Deleting one because "both sides obviously agree" removes

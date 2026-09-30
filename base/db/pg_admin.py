@@ -203,7 +203,7 @@ def local_owner_authority() -> OwnerAuthority:
         RuntimeError: the data plane is remote-managed (its provider URL is
             the only authority), or this home has no registry record.
     """
-    from base.cluster import db_identity, get_record, record_postgres_port
+    from base.cluster import db_identity, get_record
     from base.config import settings
     from base.paths import ava_home
 
@@ -217,7 +217,7 @@ def local_owner_authority() -> OwnerAuthority:
     if not isinstance(database, str) or not database:
         raise RuntimeError("AVA_DB_URL names no database")
     return OwnerAuthority(
-        admin_url=pg_admin_url(record_postgres_port(record)),
+        admin_url=pg_admin_url(record.ports["postgres"]),
         database=database,
         owner=db_identity(),
         data_dir=home / "pg",

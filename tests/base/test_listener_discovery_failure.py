@@ -31,7 +31,6 @@ def test_failed_listener_discovery_is_unavailable(
     monkeypatch.setattr(proc, "run_bounded", lsof)
     with pytest.raises(port_preflight.ListenerDiscoveryError):
         port_preflight.strict_listeners_on(4319)
-    assert port_preflight.listeners_on(4319) == []
 
 
 @pytest.mark.parametrize(

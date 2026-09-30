@@ -120,10 +120,9 @@ from-scratch supervision lift.
 - **Data dir moves under `$AVA_HOME`.** `_pg_data()` / `_redis_conf_*()` resolve
   to `$AVA_HOME/pg/` and `$AVA_HOME/redis/` instead of the brew/apt shared
   locations. Each cluster's postmaster and redis own that directory.
-- **Postgres + Redis join the per-cluster `PORT_OFFSETS` block.** Every cluster's
-  pg/redis gets an allocated port in its block (postgres = base+11, redis = base+12);
-  the prod default home carries fixed pg 5433 / redis 6380, exactly as it keeps fixed
-  gateway/health ports. Nothing binds the default 5432/6379.
+- **Postgres + Redis have their own slots in the fixed port table**
+  (`base/host/env/port_table.py`): pg 5433 / redis 6380, exactly as the gateway and
+  health daemons keep fixed ports. Nothing binds the default 5432/6379.
 - **`db_url` / `redis_url` point at the per-cluster TCP port** (loopback +
   reachable address, unchanged posture). The `DERIVED_ENV_KEYS` written at cluster
   birth carry the per-cluster port.

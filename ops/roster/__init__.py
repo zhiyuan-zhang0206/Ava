@@ -52,7 +52,7 @@ def daemon_identity(name: str, pidfile: Path) -> Callable[[], DaemonProbe]:
     """The ``identity_probe`` for a daemon that serves the standard Ava ``/healthz``.
 
     Binds ``probe_daemon`` to the three facts that identify one daemon: its
-    ``name``, its ``/healthz`` URL (derived from this cluster's port block at
+    ``name``, its ``/healthz`` URL (derived from this unit's health port at
     call time, like every other probe target on the roster) and the pidfile this
     unit recorded for it. Public because plugin-registered services declare their
     own specs and must be able to state the same contract without restating the

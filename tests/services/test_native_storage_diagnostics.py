@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import Mock
 
 import pytest
@@ -58,7 +57,7 @@ async def test_native_pooler_diagnostic_uses_shared_custody(
     native_pooler: tuple[OwnedPooler, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     custodian, _pooled, _direct = native_pooler
-    ports = cast("cluster.ClusterPorts", cluster.LEGACY_AVA_PORTS.copy())
+    ports = cluster.new_home_ports()
     ports["pgbouncer"] = custodian.port
     record = cluster.ClusterRecord(
         ports=ports, gateway_home=str(custodian.config.parent.parent), created_at="fixture"

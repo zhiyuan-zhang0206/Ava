@@ -19,9 +19,9 @@ eagerly is worse than none:
   launched, naming the occupant and the remedy;
 - this unit's own daemon (an idempotent restart), a stray of its own home, and a
   cold port all pass;
-- only the ports `--health-port-base` can move are gated — the gateway, the
-  browser and the frontend are somebody else's problem, and the browser
-  deliberately tolerates another unit's Chrome.
+- only the daemon health ports are gated — the gateway, the browser and the
+  frontend are somebody else's problem, and the browser deliberately tolerates
+  another unit's Chrome.
 """
 
 from __future__ import annotations
@@ -46,8 +46,7 @@ pytestmark = pytest.mark.real_health_port_gate
 
 
 def _healthz_spec(service: str, port: int) -> ServiceSpec:
-    """A daemon whose probe target is an Ava `/healthz` — i.e. one of the ports
-    `--health-port-base` moves."""
+    """A daemon whose probe target is an Ava `/healthz` — i.e. a daemon health port."""
     return ServiceSpec(
         session=service,
         cmd="x",
@@ -70,7 +69,7 @@ def _other_endpoint_spec(service: str, url: str) -> ServiceSpec:
 
 
 _FOREIGN = (
-    "identity mismatch on http://localhost:8102/healthz: home='/home/ava/.ava' != "
+    "identity mismatch on http://localhost:8103/healthz: home='/home/ava/.ava' != "
     "'C:\\\\Users\\\\ava\\\\.ava' — another unit's daemon holds this port"
 )
 
@@ -96,12 +95,12 @@ def test_a_foreign_units_daemon_on_a_health_port_is_a_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 
-    restarter = _healthz_spec("restarter", 8102)
-    _verdicts(monkeypatch, {"restarter": DaemonProbe.port_taken(_FOREIGN)})
+    labeler = _healthz_spec("labeler", 8103)
+    _verdicts(monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN)})
 
-    occupied = _probe_commands._occupied_health_ports((restarter,))
+    occupied = _probe_commands._occupied_health_ports((labeler,))
 
-    assert [o.spec.session for o in occupied] == ["restarter"]
+    assert [o.spec.session for o in occupied] == ["labeler"]
     assert occupied[0].detail == _FOREIGN
 
 
@@ -110,10 +109,10 @@ def test_our_own_running_daemon_is_not_a_conflict(monkeypatch: pytest.MonkeyPatc
     it is about to use and finds its own daemons — a start that refused here
     would make restart impossible on exactly the hosts that are working."""
 
-    restarter = _healthz_spec("restarter", 8102)
-    _verdicts(monkeypatch, {"restarter": DaemonProbe.up("pid 4242")})
+    labeler = _healthz_spec("labeler", 8103)
+    _verdicts(monkeypatch, {"labeler": DaemonProbe.up("pid 4242")})
 
-    assert _probe_commands._occupied_health_ports((restarter,)) == ()
+    assert _probe_commands._occupied_health_ports((labeler,)) == ()
 
 
 def test_a_dead_or_cold_port_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,42 +121,40 @@ def test_a_dead_or_cold_port_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) 
     are cleared by the launch that follows — the kill-session a respawn does
     first is exactly the fix — so neither may stop the start."""
 
-    restarter = _healthz_spec("restarter", 8102)
-    ops = _healthz_spec("ops", 8106)
+    labeler = _healthz_spec("labeler", 8103)
+    ops = _healthz_spec("ops", 8113)
     _verdicts(
         monkeypatch,
         {
-            "restarter": DaemonProbe.down("healthz unreachable: URLError: refused"),
+            "labeler": DaemonProbe.down("healthz unreachable: URLError: refused"),
             "ops": DaemonProbe.down("healthz pid=9 != pidfile pid=8 — a stray process"),
         },
     )
 
-    assert _probe_commands._occupied_health_ports((restarter, ops)) == ()
+    assert _probe_commands._occupied_health_ports((labeler, ops)) == ()
 
 
-def test_only_the_ports_a_health_port_base_can_move_are_gated(
+def test_only_daemon_health_ports_are_gated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A terminal verdict on the gateway or the browser is not this gate's
     business, and folding them in would be a regression: the browser healthcheck
     deliberately tolerates another unit's Chrome on the CDP port, so a start that
-    refused would leave a headed box unable to come up at all. Neither is a port
-    `--health-port-base` moves either, so the remedy this gate prints would be
-    wrong advice."""
+    refused would leave a headed box unable to come up at all."""
 
     gateway = _other_endpoint_spec("gateway", "http://localhost:8000/api/health")
     browser = _other_endpoint_spec("browser", "http://localhost:9222/json/version")
-    restarter = _healthz_spec("restarter", 8102)
+    labeler = _healthz_spec("labeler", 8103)
     _verdicts(
         monkeypatch,
         {
             "gateway": DaemonProbe.port_taken("another unit's gateway"),
             "browser": DaemonProbe.port_taken("another unit's Chrome"),
-            "restarter": DaemonProbe.up("pid 1"),
+            "labeler": DaemonProbe.up("pid 1"),
         },
     )
 
-    assert _probe_commands._occupied_health_ports((gateway, browser, restarter)) == ()
+    assert _probe_commands._occupied_health_ports((gateway, browser, labeler)) == ()
 
 
 def test_every_conflicting_port_is_reported_not_just_the_first(
@@ -167,14 +164,14 @@ def test_every_conflicting_port_is_reported_not_just_the_first(
     only the first port turns one fix into a sequence of restarts, each revealing
     the next collision."""
 
-    specs = (_healthz_spec("restarter", 8102), _healthz_spec("ops", 8106))
+    specs = (_healthz_spec("labeler", 8103), _healthz_spec("ops", 8113))
     _verdicts(
         monkeypatch,
-        {"restarter": DaemonProbe.port_taken("a"), "ops": DaemonProbe.port_taken("b")},
+        {"labeler": DaemonProbe.port_taken("a"), "ops": DaemonProbe.port_taken("b")},
     )
 
     assert [o.spec.session for o in _probe_commands._occupied_health_ports(specs)] == [
-        "restarter",
+        "labeler",
         "ops",
     ]
 
@@ -219,18 +216,18 @@ def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> 
 def test_start_refuses_and_launches_nothing(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], _hermetic_start
 ) -> None:
-    launched = _roster(monkeypatch, (_healthz_spec("ops", 8106),))
+    launched = _roster(monkeypatch, (_healthz_spec("ops", 8113),))
     _verdicts(monkeypatch, {"ops": DaemonProbe.port_taken(_FOREIGN)})
     assert _start_commands.cmd_start() == 1
     assert launched == []
     message = "".join(capsys.readouterr())
     assert "/home/ava/.ava" in message
-    assert "--health-port-base" in message
+    assert "Stop the listed daemon" in message
     assert "--disable-service ops" in message
 
 
 def test_a_clear_roster_starts_normally(monkeypatch: pytest.MonkeyPatch, _hermetic_start) -> None:
-    launched = _roster(monkeypatch, (_healthz_spec("ops", 8106),))
+    launched = _roster(monkeypatch, (_healthz_spec("ops", 8113),))
     _verdicts(monkeypatch, {"ops": DaemonProbe.down("cold")})
     assert _start_commands.cmd_start() == 0
     assert launched == ["ops"]
@@ -239,7 +236,7 @@ def test_a_clear_roster_starts_normally(monkeypatch: pytest.MonkeyPatch, _hermet
 def test_a_disabled_service_cannot_block_start(
     monkeypatch: pytest.MonkeyPatch, _hermetic_start
 ) -> None:
-    launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103), _healthz_spec("ops", 8106)))
+    launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103), _healthz_spec("ops", 8113)))
     _verdicts(
         monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN), "ops": DaemonProbe.down("cold")}
     )

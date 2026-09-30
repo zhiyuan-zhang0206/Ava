@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.cluster import ClusterPorts
 from base.cluster.record import ClusterRecord
 from base.daemon.health import DaemonProbe
 from services.ava_root_glue.diagnostic_probes import pgbouncer
@@ -28,15 +29,13 @@ def test_pooler_protocol_requires_native_custody_and_both_listeners(
     owner = object()
 
     def _fake_get_record(_home: Path) -> ClusterRecord | None:
-        return cast(ClusterRecord, object())
-
-    def _fake_record_pgbouncer_port(_rec: ClusterRecord) -> int:
-        return 6432
+        return ClusterRecord(
+            ports=cast("ClusterPorts", {"pgbouncer": 6432}), gateway_home="/x", created_at=""
+        )
 
     admin = SimpleNamespace(password="pooler-admin-credential")  # noqa: S106 — test fixture
 
     monkeypatch.setattr("base.cluster.get_record", _fake_get_record)
-    monkeypatch.setattr("base.cluster.record_pgbouncer_port", _fake_record_pgbouncer_port)
     monkeypatch.setattr("base.cluster.authority.read_pooler_admin", Mock(return_value=admin))
     monkeypatch.setattr(ownership, "pooler", Mock(return_value=owner))
     monkeypatch.setattr(

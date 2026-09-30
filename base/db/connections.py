@@ -299,7 +299,7 @@ def direct_db_url() -> str:
     matches it byte-for-byte), and a home with no record (no gateway capability)
     keeps `AVA_DB_URL` as-is rather than guessing.
     """
-    from base.cluster import get_record, record_pgbouncer_port, record_postgres_port
+    from base.cluster import get_record
     from base.cluster.machine import reachable_host
     from base.config.data_plane import gateway_url_host
     from base.host.net.predicates import is_loopback_host
@@ -324,10 +324,10 @@ def direct_db_url() -> str:
         else None
     )
     if rec is not None:
-        if port == record_pgbouncer_port(rec):
+        if port == rec.ports["pgbouncer"]:
             # URL names this cluster's pooler -> swap to its direct pg port.
-            return url_with_port(url, record_postgres_port(rec))
-        if port == record_postgres_port(rec):
+            return url_with_port(url, rec.ports["postgres"])
+        if port == rec.ports["postgres"]:
             # URL already names Postgres (pooling off / a stand-in on a cluster
             # port) -> already direct.
             return url

@@ -371,26 +371,6 @@ def test_health_port_default(monkeypatch: pytest.MonkeyPatch) -> None:
     assert health.health_port("events_maintenance") == 8109
 
 
-def test_health_port_fallback_warns_once_per_daemon(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog,
-) -> None:
-    """F-s4-12: a unit that never declared a per-unit block falls back to the
-    shared 8102-8111 segment — the fallback must be LOUD (a warning naming the
-    fix), once per daemon per process, not silent and not per-call (healthchecks
-    call health_port every round)."""
-    monkeypatch.setattr(health, "get_field", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(health, "_warned_shared_default", set())  # pyright: ignore[reportUnknownArgumentType]
-    with caplog.at_level(logging.WARNING, logger="base.daemon.health"):  # pyright: ignore[reportUnknownMemberType]
-        assert health.health_port("im_bridge") == 8111
-        assert health.health_port("im_bridge") == 8111  # same daemon: silent now
-        assert health.health_port("delivery_watchdog") == 8110  # new daemon: warns
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]  # pyright: ignore[reportUnknownMemberType]
-    assert len(warnings) == 2  # pyright: ignore[reportUnknownArgumentType]
-    assert "im_bridge" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
-    assert "--health-port-base" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
-
-
 def test_health_ports_are_isolated_from_prod_defaults() -> None:
     """The session's own pinned ports are in force — the property that keeps a
     daemon leaked out of a test run off prod's ports."""
@@ -402,9 +382,9 @@ def test_health_ports_are_isolated_from_prod_defaults() -> None:
 
 # ─── probe_daemon: a 200 is believed only from a verified identity ───────────
 #
-# Regression cover for the 2026-07-24 outage: a pytest-leaked restarter daemon
-# fell back to prod's default 8102 and answered 200 for 98 minutes while prod's
-# own restarter was dead. Every probe read green, so the watchdog never
+# Regression cover for the 2026-07-24 outage: a pytest-leaked daemon fell back
+# to prod's default health port and answered 200 for 98 minutes while prod's
+# own daemon was dead. Every probe read green, so the watchdog never
 # respawned. These run a REAL health server on a free port and vary exactly one
 # element of the identity at a time.
 
