@@ -165,6 +165,32 @@ def test_the_shard_step_counts_the_last_attempt_and_writes_log_summary_and_json(
     assert "| tests/agent | 2 |" in summary.read_text()
 
 
+def test_a_shard_that_executed_too_few_tests_fails_after_writing_its_counts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Zero tests is what a broken `testpaths` or a deselecting marker produces, and the
+    uploader reads it as a green run."""
+    _junit(tmp_path / "junit-1-a1.xml")
+    out = tmp_path / "c.json"
+    argv = ["shard", "--group", "1", "--junit", str(tmp_path / "junit-1-a*.xml"), "--out", str(out)]
+    with pytest.raises(SystemExit, match="executed 0 tests, fewer than the 1 it must"):
+        shard_counts.main([*argv, "--min-tests", "1"])
+    assert json.loads(out.read_text())["tests"] == 0  # the counts are still there to read
+    assert "shard 1: 0 tests executed" in capsys.readouterr().out
+    assert shard_counts.main(argv) == 0  # no floor: an empty bucket is fine
+    _junit(tmp_path / "junit-1-a2.xml", _case("tests/agent/test_a.py"))
+    assert shard_counts.main([*argv, "--min-tests", "1"]) == 0
+
+
+def test_a_testcase_without_a_file_names_itself(tmp_path: Path) -> None:
+    """pytest's internal-error entry is `classname="pytest" name="internal"`, with no file."""
+    report = _junit(
+        tmp_path / "r.xml", '<testcase classname="pytest" name="internal"><error/></testcase>'
+    )
+    with pytest.raises(SystemExit, match=r"testcase pytest\.internal has no `file` attribute"):
+        shard_counts.count_junit(report)
+
+
 def test_a_shard_with_no_junit_report_says_so(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="no JUnit report matches"):
         shard_counts.main(
@@ -288,7 +314,8 @@ def test_every_test_running_job_reports_and_uploads_its_counts(job: str, group: 
     steps = _steps(job)
     report = steps[_index(steps, "Report executed test counts")]
     upload = steps[_index(steps, "Upload executed test counts")]
-    assert report["continue-on-error"] is True
+    # The report is a gate (see test_backend_test_gate.py); only the artifact upload is transport.
+    assert "continue-on-error" not in report
     assert upload["continue-on-error"] is True
     assert "scripts/ci/shard_counts.py shard" in report["run"]
     assert f"--group {group}" in report["run"]

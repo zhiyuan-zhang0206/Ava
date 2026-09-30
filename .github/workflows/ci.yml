@@ -750,17 +750,28 @@ jobs:
           fi
           exit "$status"
 
+      - name: Require the test gate
+        # Fail-closed: the Trunk gate below is the only thing that turns the pytest
+        # step's failures red (it is continue-on-error), so an empty secret must not
+        # skip it silently.
+        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          pytest-outcome: ${{ steps.pytest-shard.outcome }}
+
       - name: Report executed test counts
         # What this shard actually ran, from the JUnit report pytest already wrote
         # (the -q log has no test ids): the total and the count per tests/ directory,
-        # in this log and the job summary. The last attempt's report wins.
+        # in this log and the job summary. The last attempt's report wins. It is also a
+        # gate: no JUnit report (pytest died before writing one, e.g. a plugin failed
+        # to import) or no executed test at all reds the shard, which the Trunk
+        # uploader alone would let pass.
         if: ${{ !cancelled() }}
-        continue-on-error: true
         run: >
           python3 scripts/ci/shard_counts.py shard --group ${{ matrix.group }}
           --junit 'tmp/junit-backend-shard-${{ matrix.group }}-a*.xml'
           --out tmp/shard-counts-${{ matrix.group }}.json
-          --summary "$GITHUB_STEP_SUMMARY"
+          --summary "$GITHUB_STEP_SUMMARY" --min-tests 1
 
       - name: Upload executed test counts
         # Input of the `backend test counts` job; informational, never a gate.
@@ -779,6 +790,8 @@ jobs:
         with:
           cli-version: 0.15.4
           junit-paths: tmp/junit-backend-shard-${{ matrix.group }}-*.xml
+          # The action's default is true: a missing report would upload nothing and pass.
+          allow-missing-junit-files: false
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
@@ -926,6 +939,14 @@ jobs:
             exit 1
           fi
 
+      - name: Require the test gate
+        # Fail-closed, enforce mode only (see backend-shard): an empty secret must
+        # not skip the Trunk gate silently.
+        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' && needs.test-select.outputs.mode == 'enforce' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          pytest-outcome: ${{ steps.run-subset.outcome }}
+
       - name: Trunk quarantine gate (upload test results)
         id: trunk-gate
         # Enforce mode only: in shadow the subset never gates, so it uploads
@@ -935,6 +956,8 @@ jobs:
         with:
           cli-version: 0.15.4
           junit-paths: tmp/junit-backend-selected.xml
+          # The action's default is true: a missing report would upload nothing and pass.
+          allow-missing-junit-files: false
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
@@ -979,6 +1002,7 @@ jobs:
         uses: ./.github/actions/uv-sync
 
       - name: Run flaky pytest bucket serially
+        id: pytest-serial
         continue-on-error: true
         run: >
           mkdir -p tmp &&
@@ -987,14 +1011,22 @@ jobs:
           --cov=ops --cov=services --cov=ava_builtins
           --junit-xml=tmp/junit-backend-serial.xml -o junit_family=xunit1
 
+      - name: Require the test gate
+        # Fail-closed (see backend-shard): an empty secret must not skip the Trunk gate.
+        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          pytest-outcome: ${{ steps.pytest-serial.outcome }}
+
       - name: Report executed test counts
-        # The flaky bucket's tests count with the shards' (see backend-shard).
+        # The flaky bucket's tests count with the shards' (see backend-shard). The bucket
+        # may legitimately be empty (pytest exits 5 and still writes a report), so only
+        # a missing JUnit report reds it.
         if: ${{ !cancelled() }}
-        continue-on-error: true
         run: >
           python3 scripts/ci/shard_counts.py shard --group serial
           --junit tmp/junit-backend-serial.xml --out tmp/shard-counts-serial.json
-          --summary "$GITHUB_STEP_SUMMARY"
+          --summary "$GITHUB_STEP_SUMMARY" --min-tests 0
 
       - name: Upload executed test counts
         if: ${{ !cancelled() }}
@@ -1012,6 +1044,8 @@ jobs:
         with:
           cli-version: 0.15.4
           junit-paths: tmp/junit-backend-serial.xml
+          # The action's default is true: a missing report would upload nothing and pass.
+          allow-missing-junit-files: false
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
@@ -1400,7 +1434,7 @@ jobs:
       actions: read
     env:
       # Every count file the total expects: the backend-shard matrix groups and the
-      # serial bucket. tests/scripts/test_ci_shard_counts.py pins this against the matrix.
+      # serial bucket. tests/ci/test_shard_counts.py pins this against the matrix.
       COUNT_GROUPS: "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 serial"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
