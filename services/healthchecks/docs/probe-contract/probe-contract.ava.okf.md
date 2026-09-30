@@ -15,8 +15,11 @@ validate the connected peer PID and birth-validated ancestry. Frontend and
 collector observers make equivalent checks for their endpoints.
 
 A protocol failure from the owned endpoint is DOWN. A foreign listener is
-PORT_TAKEN. Missing permissions, inconsistent process identity, unavailable root
-status, or an observation deadline yields UNAVAILABLE. An exception in a custom
+PORT_TAKEN. Missing permissions on a live member of the owned tree,
+inconsistent process identity, unavailable root status, or an observation
+deadline yields UNAVAILABLE. A member that has exited (an unreaped zombie stays
+in the tree, its sockets unreadable) owns no listener and is not an
+inspection failure. An exception in a custom
 probe also yields unavailable through root's `ProbeRunner`; it is never converted
 into permission to restart an unobserved process.
 

@@ -25,7 +25,10 @@ return or leader exit alone does not prove that boundary.
 Status and readiness use the same probe evidence. No pidfile, session record,
 matching home, or matching executable can substitute for captured root lineage.
 A probe worker deadline yields unavailable and retains the worker to prevent
-concurrent attempts; late green results are discarded.
+concurrent attempts; late green results are discarded. The one exception is a
+restart's confirmation window: when it closes before the probe answers, the
+replacement is unconfirmed, so the poll is DOWN and the attempt is counted and
+backed off rather than reset as an inspection failure.
 
 [[services/ava_root_glue/docs/ava_root_glue.ava.okf.md|Root wiring]] separates this policy
 from read-only diagnostics and external transitions.
