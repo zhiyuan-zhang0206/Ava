@@ -37,7 +37,7 @@ from redis.exceptions import AuthenticationError, NoPermissionError
 from base.config import settings
 from base.events.live.projection import EVENT_ADAPTER, Error
 from base.events.live.redis_client import open_async_redis, retry_auth_failures_async
-from gateway.middleware import runtime_metrics
+from gateway.middleware import runtime_metrics, stopping
 
 _log = logging.getLogger(__name__)
 
@@ -194,6 +194,8 @@ async def event_stream(
         last_comment = time.monotonic()
 
         while True:
+            if stopping.is_stopping():
+                return  # a clean end: the client's EventSource reconnects to the next gateway
             try:
                 if await request.is_disconnected():
                     return
@@ -271,8 +273,9 @@ async def _drain_redis_messages(
     cumulative lag when called on every event.
     """
     # Check disconnect once per drain cycle — a disconnect detected on
-    # the next cycle (≤ flush_interval away) is a rounding error.
-    if await request.is_disconnected():
+    # the next cycle (≤ flush_interval away) is a rounding error. A gateway
+    # shutdown ends the stream the same way.
+    if stopping.is_stopping() or await request.is_disconnected():
         return [], True
 
     buffer: list[str] = []

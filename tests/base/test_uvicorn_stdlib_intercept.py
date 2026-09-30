@@ -126,29 +126,25 @@ def test_uvicorn_access_info_gated_away(loguru_records: list[dict]) -> None:
 
 def test_gateway_uvicorn_run_passes_log_config_none() -> None:
     """The gateway launch assembly must keep `log_config=None` — the whole point
-    of #970. The launch parameters live in `serve_kwargs()` (the one dict
-    `uvicorn.run` consumes as `**kwargs`), so the pin follows the call into the
-    returned dict literal; a future edit cannot silently reintroduce uvicorn's
-    dictConfig clobber."""
+    of #970. The launch parameters live in `serve_kwargs()` (the one dict `serve`
+    builds uvicorn's config from), so the pin follows the call into the returned
+    dict literal; a future edit cannot silently reintroduce uvicorn's dictConfig
+    clobber."""
     src = (_REPO_ROOT / "gateway" / "_server.py").read_text()
     tree = ast.parse(src)
 
-    run_calls = [
+    serve_calls = [
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "run"
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "uvicorn"
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "serve"
     ]
-    assert run_calls, "uvicorn.run call not found in gateway/_server.py"
-    for call in run_calls:
-        assert not call.args, "uvicorn.run must receive no positional arguments"
-        assert len(call.keywords) == 1 and call.keywords[0].arg is None, (
-            "uvicorn.run must receive the serve_kwargs() assembly as **kwargs"
-        )
-        target = call.keywords[0].value
+    assert serve_calls, "serve(...) call not found in gateway/_server.py"
+    for call in serve_calls:
+        assert not call.keywords, "serve must receive the serve_kwargs() assembly positionally"
+        assert len(call.args) == 1
+        target = call.args[0]
         assert isinstance(target, ast.Call) and isinstance(target.func, ast.Name)
         assert target.func.id == "serve_kwargs"
 

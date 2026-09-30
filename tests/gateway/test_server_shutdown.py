@@ -19,6 +19,12 @@ shutdown — closing it would make shutdown pass for the wrong reason.
 The drain budget reaches the child through a throwaway `$AVA_HOME/.env`, the
 operator's real channel; a bare environment variable is dropped for
 cluster-scope fields before Settings reads it.
+
+The child runs the production server class (`_server.GatewayServer`), which
+marks the shutdown for streams that end themselves (`gateway.middleware.stopping`):
+such a stream must cost none of the drain budget, while a stream that never
+ends still costs exactly the budget and no more. The last section checks that the
+two SSE bridges in `gateway.events.sse` are such streams, against a fake Redis.
 """
 
 from __future__ import annotations
@@ -31,18 +37,20 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO
+from typing import IO, Any, cast
 
 import pytest
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from starlette.responses import PlainTextResponse, StreamingResponse
 
 from gateway import _server
+from gateway.events import sse
+from gateway.middleware import stopping
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -101,6 +109,20 @@ async def _stream() -> StreamingResponse:
     return StreamingResponse(_frames(), media_type="text/event-stream")
 
 
+@app.get("/cooperative-stream")
+async def _cooperative_stream() -> StreamingResponse:
+    """Endless SSE-shaped stream that ends itself once the server marks its shutdown."""
+
+    async def _frames() -> AsyncIterator[bytes]:
+        _mark("cooperative-stream-open")
+        while not stopping.is_stopping():
+            yield b"data: tick\n\n"
+            await asyncio.sleep(0.1)
+        _mark("cooperative-stream-ended-itself")
+
+    return StreamingResponse(_frames(), media_type="text/event-stream")
+
+
 @app.get("/slow")
 async def _slow(seconds: float = 1.0) -> PlainTextResponse:
     _mark("slow-started")
@@ -113,7 +135,7 @@ def _run_child() -> None:
     """Child entry: a real uvicorn server from the production launch assembly."""
     kwargs = _server.serve_kwargs(host="127.0.0.1", app=f"{__name__}:app")
     kwargs["port"] = int(os.environ[_PORT_ENV])
-    uvicorn.Server(uvicorn.Config(**kwargs)).run()
+    _server.GatewayServer(uvicorn.Config(**kwargs)).run()
 
 
 @dataclass
@@ -275,6 +297,37 @@ def test_sigterm_bounds_the_drain_with_a_stuck_stream(tmp_path: Path) -> None:
         child.close()
 
 
+def test_sigterm_ends_a_cooperating_stream_without_spending_the_drain_budget(
+    tmp_path: Path,
+) -> None:
+    """A stream that ends itself at the shutdown mark costs none of the budget.
+
+    An SSE stream open for hours would otherwise hold every gateway stop for
+    the whole drain budget. Here the budget is the production default (30 s)
+    and the parent holds its connection open throughout: exit within the slack
+    proves the stream ended by the mark, since a held stream would need the
+    full budget.
+    """
+    drain = 30.0
+    child = _spawn_child(tmp_path, drain_seconds=drain)
+    conn: http.client.HTTPConnection | None = None
+    try:
+        conn = _connect_with_retry(child.port)
+        conn.request("GET", "/cooperative-stream")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        assert resp.readline().startswith(b"data:")
+        child.terminate()
+        child.wait_bounded_exit(drain_seconds=0.0, what="cooperating stream, none of the budget")
+        markers = child.markers()
+        assert "cooperative-stream-ended-itself" in markers
+        assert "lifespan-shutdown" in markers, "lifespan shutdown did not run"
+    finally:
+        if conn is not None:
+            conn.close()
+        child.close()
+
+
 def test_slow_request_finishing_inside_the_budget_completes(tmp_path: Path) -> None:
     """The budget lets an in-flight ordinary request finish before exit."""
     drain = 6.0
@@ -316,3 +369,97 @@ def test_slow_request_cut_by_the_budget_still_exits(tmp_path: Path) -> None:
         if conn is not None:
             conn.close()
         child.close()
+
+
+# --- The SSE bridges themselves end at the shutdown mark (fake Redis, in-process) ---
+#
+# The stream ending is the generator's own decision, not the transport's: hold a
+# stream open on a quiet channel, flip the mark, and require a clean end.
+
+_POLL_S = 0.05
+_ENDS_WITHIN_S = 2.0
+
+
+@dataclass
+class _Cleanup:
+    steps: list[str] = field(default_factory=list[str])
+
+
+class _PubSub:
+    def __init__(self, cleanup: _Cleanup) -> None:
+        self._cleanup = cleanup
+
+    async def subscribe(self, _channel: str) -> None:
+        return None
+
+    async def get_message(self, *, ignore_subscribe_messages: bool, timeout: float) -> None:
+        del ignore_subscribe_messages
+        await asyncio.sleep(min(timeout, _POLL_S))
+
+    async def unsubscribe(self, _channel: str) -> None:
+        self._cleanup.steps.append("unsubscribe")
+
+    async def aclose(self) -> None:
+        self._cleanup.steps.append("pubsub.aclose")
+
+
+class _RedisClient:
+    def __init__(self, cleanup: _Cleanup) -> None:
+        self._cleanup = cleanup
+
+    def pubsub(self) -> _PubSub:
+        return _PubSub(self._cleanup)
+
+    async def aclose(self) -> None:
+        self._cleanup.steps.append("client.aclose")
+
+
+class _ConnectedRequest:
+    async def is_disconnected(self) -> bool:
+        return False
+
+
+@pytest.fixture
+def cleanup(monkeypatch: pytest.MonkeyPatch) -> _Cleanup:
+    record = _Cleanup()
+
+    def open_redis(_url: str) -> _RedisClient:
+        return _RedisClient(record)
+
+    monkeypatch.setattr(sse, "open_async_redis", open_redis)
+
+    async def pass_through(call: Callable[[], Awaitable[Any]]) -> Any:
+        return await call()
+
+    monkeypatch.setattr(sse, "retry_auth_failures_async", pass_through)
+    return record
+
+
+def _sse_stream(mode: str) -> AsyncGenerator[bytes, None]:
+    request = cast(Request, _ConnectedRequest())
+    if mode == "filtered":
+        return sse.event_stream("redis://test", 7, request)
+    return sse.throttled_event_stream("redis://test", request, throttle_rate=20.0)
+
+
+@pytest.mark.parametrize("mode", ["filtered", "throttled"])
+async def test_stream_ends_cleanly_once_the_server_is_stopping(
+    monkeypatch: pytest.MonkeyPatch, cleanup: _Cleanup, mode: str
+) -> None:
+    marked = False
+    monkeypatch.setattr(stopping, "is_stopping", lambda: marked)
+    frames: list[bytes] = []
+
+    async def consume() -> None:
+        async for frame in _sse_stream(mode):
+            frames.append(frame)
+
+    consumer = asyncio.create_task(consume())
+    await asyncio.sleep(0.3)
+    assert not consumer.done(), "the stream ended before the server was stopping"
+    assert frames[0] == b": stream open\n\n"
+    assert cleanup.steps == []
+
+    marked = True
+    await asyncio.wait_for(consumer, _ENDS_WITHIN_S)  # a clean end, not a cancellation
+    assert cleanup.steps == ["unsubscribe", "pubsub.aclose", "client.aclose"]

@@ -77,7 +77,11 @@ class SupervisorConfig:
     """Timing policy for the supervise loop (test-tunable)."""
 
     stop_timeout_s: float = 10.0
-    """Grace period; only explicit force permits a later kill."""
+    """Default TERM window per unit; only explicit force permits a later kill.
+
+    A unit whose manifest declares `stop_timeout_s` gets that window instead. The
+    window must exceed the longest the unit's own SIGTERM cleanup may run: root
+    reads a unit still inside its own bound as unstopped, and refuses."""
 
 
 class UnitState(StrEnum):
@@ -547,7 +551,8 @@ class Supervisor:
         (`_drop_moved_aside`).
         """
         await self._await_reap(runtime, generation, pgid, custody)
-        deadline = monotonic() + self._config.stop_timeout_s
+        window = self._stop_window(runtime)
+        deadline = monotonic() + window
         while True:
             # Judged as each poll begins, so a refusal rests on reads taken after the deadline.
             expired = monotonic() >= deadline
@@ -558,11 +563,11 @@ class Supervisor:
             if living:
                 custody.retain(generation.tracked)
                 if expired and not force:
-                    raise ownership_retained(runtime.manifest.id, living, pgid)
+                    raise ownership_retained(runtime.manifest.id, living, pgid, window)
                 self._signal_all(living, force=expired and force)
                 if expired:
                     force = False
-                    deadline = monotonic() + self._config.stop_timeout_s
+                    deadline = monotonic() + window
             elif group_over(pgid, empty_at_exit=generation.scope_closed_at_exit):
                 custody.clear()
                 runtime.generation = None
@@ -594,7 +599,7 @@ class Supervisor:
         watch = runtime.watch_task
         if not generation.exited.is_set() and watch is not None and not watch.done():
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(generation.exited.wait(), self._config.stop_timeout_s)
+                await asyncio.wait_for(generation.exited.wait(), self._stop_window(runtime))
         if not generation.exited.is_set() and os.path.lexists(custody.path):
             raise RuntimeError(
                 f"unit {runtime.manifest.id}: leader (pid {pgid}) exited but "
@@ -639,7 +644,8 @@ class Supervisor:
         construction and is not covered.
         """
         self._signal_owned(identity, force=False)
-        deadline = monotonic() + self._config.stop_timeout_s
+        window = self._stop_window(runtime)
+        deadline = monotonic() + window
         while True:
             living = {item for item in generation.tracked if item.live()}
             if not living:
@@ -655,13 +661,18 @@ class Supervisor:
             custody.retain(generation.tracked)
             expired = monotonic() >= deadline
             if expired and not force:
-                raise ownership_retained(runtime.manifest.id, living, identity.pid)
+                raise ownership_retained(runtime.manifest.id, living, identity.pid, window)
             if not identity.live() or expired:
                 self._signal_all(living, force=expired and force)
             if expired:
                 force = False
-                deadline = monotonic() + self._config.stop_timeout_s
+                deadline = monotonic() + window
             await asyncio.sleep(0.05)
+
+    def _stop_window(self, runtime: _UnitRuntime) -> float:
+        """The TERM window for one unit: what its manifest declares, else the default."""
+        declared = runtime.manifest.stop_timeout_s
+        return self._config.stop_timeout_s if declared is None else declared
 
     @staticmethod
     def _signal_owned(identity: OwnedProcess, *, force: bool) -> None:
