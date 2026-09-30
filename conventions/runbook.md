@@ -1512,6 +1512,7 @@ itself (its own public key in its own `authorized_keys`):
   then the gateway (each must leave phase `stopped` with no failures), then on
   every host checks out NEW detached, repairs legacy read-only venv
   directories, runs `uv sync --frozen` and requires a clean tree.
+- Runners fetch through the gateway's source clone (their checkout's `origin` is the gateway host's `~/.ava/source`): the target commit is fetched by SHA before it is reachable from any of the clone's refs, so the clone carries `uploadpack.allowAnySHA1InWant=true` (repo-local; set 2026-09-30). A reclone of the clone must re-apply it.
 - A failed stop prints the next step: on that host retry
   `ava stop -y --timeout 600`, confirm `ava maintenance status` shows
   paused/stopped, then rerun `down`. A tree that is not clean after the switch
