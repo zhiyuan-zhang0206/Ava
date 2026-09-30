@@ -1,8 +1,4 @@
-"""Explicit executable expectations for source and retained-image observations.
-
-Preparation is input evidence only. This module never consults the moving
-release selector or treats an image receipt as readiness or process custody.
-"""
+"""Explicit executable expectations for a source-checkout Linux preview observation."""
 
 from __future__ import annotations
 
@@ -10,36 +6,28 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from base.deploy.release.identity import read_application_identity
-from base.deploy.release.runtime_release import VerifiedRelease, release_abi, verify_release
-from base.deploy.release.verified_file import regular_bytes
-from base.runtime_abi import current_abi
 from base.sessions.env_forwarding import frontend_toolchain_path, normalize_service_path
-from cli.release_prepare import PreparationReceipt
 
 
 @dataclass(frozen=True)
 class ExpectedRuntime:
     interpreter: Path
     cwd: Path
-    image: VerifiedRelease | None = None
-    evidence: dict[str, Any] | None = None
 
     def argv(self, run: Path) -> list[str]:
         directory = run / "home/run/ava-root"
-        arguments = (
+        return [
+            str(self.interpreter),
+            "-m",
+            "services.ava_root",
             "--run-dir",
             str(directory),
             "--manifests",
             str(directory / "manifests.json"),
             "--wiring",
             "services.ava_root_glue.glue:build_wiring",
-        )
-        if self.image is not None:
-            return list(self.image.module_argv("services.ava_root", *arguments))
-        return [str(self.interpreter), "-m", "services.ava_root", *arguments]
+        ]
 
     def environment(self, run: Path, declared: str) -> dict[str, str]:
         bindir = self.interpreter.parent
@@ -55,59 +43,10 @@ class ExpectedRuntime:
         }
 
 
-def expected_runtime(run: Path, receipt_path: Path | None) -> ExpectedRuntime:
-    """Verify the explicitly captured preparation output, never current-release."""
-    if receipt_path is None:
-        source = run / "source"
-        return ExpectedRuntime(source / ".venv/bin/python", source)
-    encoded = regular_bytes(receipt_path, max_bytes=2 * 1024 * 1024)
-    receipt = PreparationReceipt.model_validate_json(encoded)
-    return _image_runtime(run, receipt, hashlib.sha256(encoded).hexdigest())
-
-
-def bound_runtime(run: Path, receipt_path: Path, digest: str, commit: str) -> ExpectedRuntime:
-    """Read once, bind exact caller-captured bytes/source, then verify that parsed image."""
-    encoded = regular_bytes(receipt_path, max_bytes=2 * 1024 * 1024)
-    if hashlib.sha256(encoded).hexdigest() != digest:
-        raise RuntimeError("captured preparation receipt digest changed")
-    receipt = PreparationReceipt.model_validate_json(encoded)
-    if receipt.source.source_commit != commit or receipt.request.commit != commit:
-        raise RuntimeError("preparation receipt differs from requested source commit")
-    return _image_runtime(run, receipt, digest)
-
-
-def _image_runtime(run: Path, receipt: PreparationReceipt, digest: str) -> ExpectedRuntime:
-    if receipt.request.store != run / "home/releases":
-        raise RuntimeError("prepared image store belongs to another preview home")
-    image = verify_release(
-        receipt.request.store,
-        receipt.image.artifact_digest,
-        manifest_digest=receipt.image.manifest_digest,
-        host_abi=current_abi(),
-        schema_digest=receipt.image.schema_digest,
-    )
-    if (image.root, image.interpreter, image.cwd) != (
-        receipt.image.root,
-        receipt.image.interpreter,
-        receipt.image.cwd,
-    ):
-        raise RuntimeError("prepared image paths differ from the verified runtime")
-    if receipt.image.abi_tag != release_abi(image).to_json():
-        raise RuntimeError("prepared image ABI tag differs from its verified manifest")
-    if read_application_identity(image, receipt.request.commit) != receipt.source:
-        raise RuntimeError("prepared image source identity differs from its build receipt")
-    return ExpectedRuntime(
-        image.interpreter,
-        image.cwd,
-        image,
-        {
-            "kind": "image",
-            "receipt_sha256": digest,
-            "request_digest": receipt.request_digest,
-            "source_commit": receipt.source.source_commit,
-            **receipt.image.model_dump(mode="json"),
-        },
-    )
+def expected_runtime(run: Path) -> ExpectedRuntime:
+    """The preview's own checkout and its virtualenv interpreter."""
+    source = run / "source"
+    return ExpectedRuntime(source / ".venv/bin/python", source)
 
 
 def environment_digest(environment: dict[str, str]) -> str:

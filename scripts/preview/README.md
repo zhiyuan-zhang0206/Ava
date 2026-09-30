@@ -62,9 +62,9 @@ detached worktree with `git worktree remove --force <run>/source`, then the run
 directory once its evidence is no longer needed.
 
 This profile proves source startup and real agent execution. It does not prove
-sealed release update/rollback, multi-machine coordination, real provider behavior,
+fleet update, multi-machine coordination, real provider behavior,
 browser/computer permissions, or production cutover. Those require their own
-maintained scenarios using the same lifecycle and transition APIs.
+maintained scenarios using the same lifecycle APIs.
 
 ## Linux lifecycle proof
 
@@ -103,179 +103,14 @@ always uses ordinary stop/destroy and then independently verifies native and
 registry absence. A failed phase stays failed even when cleanup succeeds; the
 scenario never retries a failed admission probe or force-kills a survivor to
 produce a passing result. Keep the run directory as evidence, and stop only the
-named test VM after inspecting cleanup. This is lifecycle evidence, not release
-upgrade/rollback or production approval.
+named test VM after inspecting cleanup. This is lifecycle evidence, not fleet
+update or production approval.
 
-An image-cycle controller can call the same observer with an explicitly
-captured `cli.release_prepare` receipt:
-
-```bash
-python3 -m scripts.preview.linux_observer RUN LABEL manager-running \
-  --runtime-receipt /absolute/path/to/preparation/receipt.json
-```
-
-The observer still executes from `RUN/source` with the private home and registry
-environment. It verifies the receipt against that home's release store, the
-current native platform, the complete image inventory, and the builder's source
-identity. It never chooses an expected image from `current-release`. Omission
-of the flag retains the source-runtime contract.
-
-Both modes require exact root argv, executable, cwd, home/host-state/virtualenv
+The observer requires exact root argv, executable, cwd, home/host-state/virtualenv
 environment and admitted PATH, alongside native birth, ancestry and listener
-custody. Image argv must retain its isolation flags. Other environment values
-are represented only by a digest; this does not independently attest arbitrary
-configuration values or reveal credentials. Preparation evidence alone does
-not establish startup readiness or a successful release transition.
+custody. Other environment values are represented only by a digest; this does not
+independently attest arbitrary configuration values or reveal credentials.
 
 The `validate.sh` and `spawn-samples.sh` scripts operate an explicitly selected
 already-running preview home. They resolve that checkout's gateway and credentials;
-they are not cluster initialization or release-promotion entrypoints.
-
-## Scripted model in a sealed image
-
-The image release path this section drives is unreachable from the CLI (its
-`ava cluster update` and `ava cluster release` verbs are removed) and is deleted
-with the rest of that path; the section below is retained until then.
-
-`release_fixture.build_fixture` packages the existing message-flow model and
-scenario from the exact captured source archive into a separate proof-only wheel.
-Only those files and their package markers are included. The offline build uses
-explicit hash-pinned build-tool constraints, verifies output bytes against the
-captured inputs, and retains its wheel/source receipt in exclusive work.
-
-This wheel is an additional declared test input, not a production dependency
-resolved by `uv.lock`. An image proof must install it through the ordinary sealed
-dependency input and verify its import under the image's isolated interpreter
-before startup. Adding a checkout to `PYTHONPATH` or copying the entire tests tree
-would not prove a self-contained image. This packaging helper alone does not
-establish image startup or a completed release transition.
-
-For a completed-work Linux image A/B/A proof, first run the ordinary source
-preview with `--keep` and prepare two complete images into that preview home's
-release store with `cli.release_prepare`. Supply both captured receipts:
-
-```bash
-python3 -m scripts.preview.release_cycle /absolute/preview/run \
-  --previous /absolute/preparation-a/receipt.json \
-  --candidate /absolute/preparation-b/receipt.json
-```
-
-To acquire and prepare the image inputs through the maintained composition,
-initialize the source preview first, then supply two explicit `Acquisition`
-documents from `cli.release_prepare.acquisition_models`:
-
-```bash
-python3 -m scripts.preview.local run --ref FULL_SOURCE_COMMIT --keep
-python3 -m scripts.preview.release_proof /absolute/preview/run \
-  --previous /absolute/acquisition-a.json \
-  --candidate /absolute/acquisition-b.json
-```
-
-Each document names its own exact committed source, approved uv and hash-pinned
-build constraints, plus exact Node/npm inputs. Set its frontend `gateway_port`
-to `RUN/config.json`'s `ports.gateway`; acquisition builds that public configuration.
-Its `work` must be `RUN/release-proof/a/acquisition` or
-`RUN/release-proof/b/acquisition`, respectively. The controller creates their
-parents. Optional collector/plugin inputs retain the ordinary acquisition
-contract. Neither document can substitute a moving ref or reuse failed work.
-Both commits must differ, implement this lifecycle and share one schema, paired
-migration SQL and scenario contract; the cycle checks these before stopping
-source services.
-
-The composition invokes each acquisition and preparation in a fresh source
-interpreter. It verifies the original acquisition again after building the
-scripted fixture and after preparing the image. Production wheels/requirements
-are copied into a separate proof input directory; only the explicit hash-pinned
-fixture wheel is added. `derivation.json` links both inputs and explicitly states
-that the fixture was not resolved from the production lock. The production
-acquisition receipt and original inventories remain unchanged. The final
-`PreparationReceipt` bytes, digest and requested source commit remain bound
-through the existing release cycle's effect preflight. The adapter reads each
-receipt once and verifies that captured value before constructing image inputs;
-replacement during the other image's preparation refuses before source stop.
-
-The composition directly owns one finite Linux session per preparation. Nested
-tool commands own separate groups inside that session. The outer owner retains
-its unreaped leader, signals captured native tasks through pidfds, and requires
-the whole live session to close before proceeding, even if the coordinator dies.
-The shared stdlib-only libc adapter supplies pidfds independently of optional
-Python build bindings; libc and kernel support are probed before any child starts.
-SIGINT/SIGTERM cancellation is deferred while spawning and recording custody,
-then delivered inside the closure guard. Python handlers retain pending signals;
-deferral does not alter the signal masks inherited by executed tools.
-`custody.json` records the original failure and whether closure was proved. An
-unreadable native scan or failed closure remains unresolved and blocks the cycle.
-This is not a sandbox for build code that deliberately creates another session;
-forcibly killing the outer owner requires external reconciliation, not a retry.
-
-`RUN/release-proof/proof.json`, per-image phase records, command logs, acquisition,
-fixture and preparation receipts retain exact inputs, timing and failures. A
-preparation failure leaves the initialized source preview running and preserves
-partial artifacts; it never starts a transition or silently retries. Stop that
-preview explicitly with `scripts.preview.local stop RUN` if it is no longer
-needed. Once the release cycle begins, its finite-executor settlement and normal
-cleanup remain the sole cleanup path; the composition cannot bypass unknown
-custody. Failed composition work needs a fresh preview, not an in-place repair.
-This Linux four-service path does not replace the separate cold/source-absence,
-collector-delivery, plugin-behavior or schema-migration proofs.
-Its first-start profile disables automatic builtin schedule provisioning, so
-only the explicitly owned fixture agents enter the completed-work proof.
-
-The controller verifies both full image inventories, native platform and source
-identities. Before any stop, each image's isolated interpreter imports and
-invokes the existing scripted `message_flow` fixture. Its installed fixture
-bytes must match both images and the source HTTP smoke observer. The fixture
-wheel is an explicit proof dependency; it is never injected through PYTHONPATH
-or treated as a production model provider.
-
-The scenario closes only its completed smoke agents through the normal graceful
-terminate API, waits for durable termination and native terminal closure,
-and retains identity/configuration/checkpoint digests. Source stop keeps the
-private data plane alive. Public `ava cluster release adopt` selects A (the
-CAS requires no existing image) and starts it through the same home's ordinary
-systemd boot unit and pinned boot entry. Each transition's request is built at
-its dispatch by the public `ava cluster release request` (the fleet of one,
-with a short captured watch window), run by the then-admitted image: A builds
-A→B, B builds B→A. Public `ava cluster update`, run by that same
-admitted image, then performs it: the previous image's half of the handoff
-receives the database login and execs the executor image's `submit` entry with
-it. Each transition must finish in the requested candidate
-direction with a successful, closed finite executor; public resubmission, run
-by the image the transition selected, then retires that exact executor. A live,
-failed, recovered or retried operation cannot count as a passing transition.
-
-The first post-readiness action is real message/code-execution smoke, followed
-by the explicit-image native observer. Ports, persisted home/configuration,
-agent state and PostgreSQL/Redis births must remain identical; application births
-must change. The exact prior application tree is captured after fixture closure;
-every captured native birth must be closed before new business smoke. Unknown
-native identity is a failure, even if later cleanup succeeds. This proves
-completed-work same-schema replacement and return,
-not in-flight recovery, schema migration, fleet rollout or provider behavior.
-
-Every transition also runs on a fresh database write generation
-(`release_generation.py`). The observer records the active generation (number,
-logins, credential digest) and requires the pooler to serve exactly it: source
-birth and the initial image adoption keep generation n, A→B admits n+1 behind a
-new pooler birth, B→A n+2. Before each transition the controller captures the
-current generation's logins (0600, deleted afterwards) and starts a stale writer
-outside root custody that holds an open transaction over direct TCP, then keeps
-reconnecting. After it, `fence-LABEL.json` must show the writer's transaction
-aborted, no later commit, and every captured login refused over TCP, the
-owner-only socket and the pooler. The source checkout is no admitted runtime
-once an image is selected and holds no write-generation login, so the observer's
-stored agents and the completed-work state comparison read one read-only snapshot
-as the OS-user administrator over the owner-only socket.
-
-`release-cycle-proof.json` records phase timings and receipt paths;
-`release-inputs.json` records captured image identities and request hashes.
-`release-*-completion.json`, `release-*-retired.json`, `release-frozen-*.json`,
-`release-state-*.json`, `release-apps-*.json`, `smoke-release-*.json`,
-`fence-*.json`, `stale-writer-*.jsonl` and `cycle-release-*.json` retain
-native, journal, workload and independent observer evidence. Every command has
-its own timed run log. A failure remains failed even if ordinary cleanup passes.
-Cleanup refuses destruction while an attempted executor has live or unknown
-custody, never retries a transition, and uses normal stop/destroy plus independent
-absence checks. Stop and destroy run as the home's admitted runtime: the source
-checkout before any selection, else the selected image, which must be one of the
-two captured images. Existing cycle evidence is never overwritten by another run.
+they are not cluster initialization or update entrypoints.

@@ -16,16 +16,19 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
 import psutil
+import psycopg
 from dotenv import dotenv_values
 
+from base.cluster.authority import active_generation, render_userlist
 from base.native_process.ownership import OwnedProcess, capture_tree
 from base.native_process.root_control.client import RootClient, native_identity
-from scripts.preview import release_generation
 from scripts.preview.linux_runtime import ExpectedRuntime, environment_digest, expected_runtime
 from scripts.preview.linux_terminals import (
     observe_terminals,
@@ -40,9 +43,6 @@ MODES = ("running", "manager-running", "stopped", "manager-stopped", "destroyed"
 Report = dict[str, Any]
 Births = dict[str, dict[str, Any]]
 _DATA_SERVICES = frozenset({"postgres", "redis", "pgbouncer"})
-# A finite release executor's transient unit (`cli/release_transition/launcher_linux.py`)
-# runs with KillMode=control-group: systemd empties its cgroup when the executor exits.
-_EXECUTOR_UNIT = re.compile(r"/system\.slice/ava-update\.[^/]+\.service(/.*)?")
 
 
 def _require(condition: object, detail: str) -> None:
@@ -170,28 +170,56 @@ def _data_births(home: Path, ports: dict[str, int]) -> Births:
     values = {"postgres": pg, "redis": cache, "pgbouncer": pool}
     for name, owner in values.items():
         ownership.require_listener(owner, ports[name])
-    _require_outside_executors(values)
     return {name: dataclasses.asdict(owner) for name, owner in values.items()}
 
 
-def _require_outside_executors(births: dict[str, OwnedProcess]) -> None:
-    """No data-plane birth lives in a finite release executor's cgroup, where it
-    would die with the executor (the r6 pooler did)."""
-    from base.host.system.boot_unit import process_cgroup
+def _write_generation(home: Path) -> dict[str, Any]:
+    """The active generation's non-secret identity and the pooler's served names."""
+    generation = active_generation(home)
+    userlist = (home / "pgbouncer" / "userlist.txt").read_bytes()
+    if userlist != render_userlist(home, generation):
+        raise RuntimeError(f"pooler does not serve exactly write generation {generation.number}")
+    return {
+        "number": generation.number,
+        "credential_digest": generation.credential_digest,
+        "roles": list(generation.roles),
+        "origin": generation.origin.model_dump(mode="json"),
+    }
 
-    for name, owner in births.items():
-        cgroup = process_cgroup(owner.pid)
-        _require(
-            _EXECUTOR_UNIT.fullmatch(cgroup) is None,
-            f"{name} (pid {owner.pid}) lives in finite release executor cgroup {cgroup}",
-        )
+
+@contextmanager
+def _read_only(run: Path) -> Generator[psycopg.Connection[Any]]:
+    """One read-only snapshot of the preview home's database, with its own deadline.
+
+    The OS-user administrator over the owner-only socket (peer), bound to this
+    home's postmaster; the observer holds no write-generation login.
+    """
+    from psycopg.conninfo import make_conninfo
+
+    from base.db.pg_admin import connect, pg_admin_url
+
+    home = run / "home"
+    port = json.loads((run / "config.json").read_text())["ports"]["postgres"]
+    url = dotenv_values(home / ".env")["AVA_DB_URL"]
+    if not url:
+        raise RuntimeError("preview home has no database endpoint")
+    database = url.rsplit("/", 1)[1].split("?", 1)[0]
+    with connect(
+        make_conninfo(pg_admin_url(port), dbname=database),
+        expected_data_dir=home / "pg",
+        connect_timeout=5,
+    ) as connection:
+        connection.read_only = True
+        connection.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+        connection.execute("SET LOCAL statement_timeout = '5s'")
+        yield connection
 
 
 def _stored_agents(run: Path) -> list[int]:
     agents = sorted(
         {int(json.loads(path.read_text())["agent"]) for path in run.glob("smoke-*.json")}
     )
-    with release_generation.Context(run).read_only() as connection:
+    with _read_only(run) as connection:
         present = [
             int(row[0])
             for row in connection.execute(
@@ -337,7 +365,7 @@ def _observe_running(
     observe_terminals(home, result)
     result["data_births"] = _data_births(home, ports)
     result["stored_agents"] = _stored_agents(run)
-    result["write_generation"] = release_generation.observe(home)
+    result["write_generation"] = _write_generation(home)
     _require(
         not result["home_detached"] and result["hashes"]["source/.ava_home"],
         "running preview is detached or lost its checkout pointer",
@@ -491,7 +519,7 @@ def _observe_stopped(run: Path, mode: Mode, ports: dict[str, int], result: Repor
         )
 
 
-def observe(run: Path, label: str, mode: Mode, *, runtime_receipt: Path | None = None) -> Report:
+def observe(run: Path, label: str, mode: Mode) -> Report:
     """Record the independently observed state, including every failed check."""
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", label) or mode not in MODES:
         raise ValueError("invalid cycle label or observation mode")
@@ -499,8 +527,8 @@ def observe(run: Path, label: str, mode: Mode, *, runtime_receipt: Path | None =
     result: Report = {"label": label, "mode": mode, "at": time.time()}
     try:
         _require_context(run)
-        runtime = expected_runtime(run, runtime_receipt)
-        result["runtime"] = runtime.evidence or {
+        runtime = expected_runtime(run)
+        result["runtime"] = {
             "kind": "source",
             "interpreter": str(runtime.interpreter),
             "cwd": str(runtime.cwd),
@@ -536,9 +564,8 @@ def main() -> None:
     parser.add_argument("run", type=Path)
     parser.add_argument("label")
     parser.add_argument("mode", choices=MODES)
-    parser.add_argument("--runtime-receipt", type=Path)
     args = parser.parse_args()
-    observe(args.run, args.label, cast("Mode", args.mode), runtime_receipt=args.runtime_receipt)
+    observe(args.run, args.label, cast("Mode", args.mode))
 
 
 if __name__ == "__main__":

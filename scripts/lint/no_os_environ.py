@@ -136,12 +136,6 @@ _ALLOWED_FILES = frozenset(
         "base/cluster/auth.py",  # delivered_token reads the per-launch AVA_API_TOKEN the root launcher (or the boot pass) sets for this process — a write generation's machine credential handoff, never persisted config; it is read during the Settings import (bootstrap fetch), same class as PAGE_SERVER_TOKEN
         "services/page_server/server.py",  # reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it
         "scripts/lint/no_os_environ.py",  # this script itself has "os.environ" in strings
-        "scripts/release_proofs/prove_runtime_prepare.py",  # CI scratch/checkout guards and sanitized child environments must be read before installed Settings exists.
-        "scripts/release_proofs/prove_runtime_consumer.py",  # CI-only isolated child environment and missing-home negative control, not runtime configuration.
-        "scripts/release_proofs/prove_runtime_otel.py",  # CI-only scratch/home guard; never production collector configuration.
-        "scripts/release_proofs/prove_runtime_plugins.py",  # CI-only private home and CI guard, not runtime plugin settings.
-        "scripts/release_proofs/prove_exec_owner_installed.py",  # CI-only scratch child projection for source-absent proof.
-        "scripts/release_proofs/prove_release_inventory.py",  # CI-only native PG and private unit projection for source-absent proof.
         "scripts/model_registry/check_model_updates.py",  # tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback
         "scripts/structure/patch_points.py",  # recognizes a test's patch of "os.environ" by its AST text; it matches the string and never reads the environment
         "scripts/lint/fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body

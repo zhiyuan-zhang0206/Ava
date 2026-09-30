@@ -98,29 +98,6 @@ def test_manager_stop_rejects_restarted_data_plane(
     assert result["stored_agents"] == [27]
 
 
-def test_a_data_plane_birth_inside_a_release_executor_cgroup_is_rejected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The r6 pooler lived in the executor's KillMode=control-group unit and
-    died 90 s after the executor exited; the observer names that custody."""
-    from base.host.system import boot_unit
-
-    cgroups = {
-        40: "/system.slice/ava-boot.home-58520e1a.service",
-        41: "/user.slice/user-501.slice/session-2.scope",
-        42: "/system.slice/ava-update.19bfeb73b5acb26d3ba4c60d69c26d24.a0.service",
-    }
-    monkeypatch.setattr(boot_unit, "process_cgroup", cgroups.__getitem__)
-    births = {
-        "postgres": observer.OwnedProcess(40, 100.0, 400),
-        "redis": observer.OwnedProcess(41, 100.0, 401),
-    }
-    observer._require_outside_executors(births)
-    births["pgbouncer"] = observer.OwnedProcess(42, 100.0, 402)
-    with pytest.raises(RuntimeError, match=r"pgbouncer \(pid 42\) lives in finite release"):
-        observer._require_outside_executors(births)
-
-
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX native flock observation")
 def test_root_lock_observation_never_unlinks_a_busy_lock(tmp_path: Path) -> None:
     import fcntl
