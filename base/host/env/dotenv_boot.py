@@ -116,6 +116,19 @@ def home_checkout_error(repo: Path) -> str | None:
     )
 
 
+def skip_config_fetch() -> None:
+    """Keep this process from fetching cluster configuration from a gateway.
+
+    For a tool that must keep the real home (it reads this machine's own state) but
+    has no business asking a gateway for anything: the config boot then stays
+    settings-lite and dials nothing. Call it before the tool's first application
+    import, as a program only (see `enter_scratch_home`).
+    """
+    from base.host.env.bootstrap import CONFIG_FETCH_ENV, CONFIG_FETCH_SKIP
+
+    os.environ[CONFIG_FETCH_ENV] = CONFIG_FETCH_SKIP
+
+
 def enter_scratch_home() -> Path:
     """Point this process tree at a fresh temporary home, whatever its environment carries.
 
@@ -144,11 +157,9 @@ def enter_scratch_home() -> Path:
             'behind `if __name__ == "__main__":`; run the tool in a subprocess to test it.'
         )
 
-    from base.host.env.bootstrap import CONFIG_FETCH_ENV, CONFIG_FETCH_SKIP
-
     home = Path(tempfile.mkdtemp(prefix="ava-scratch-home-"))
     os.environ["AVA_HOME"] = str(home)
-    os.environ[CONFIG_FETCH_ENV] = CONFIG_FETCH_SKIP
+    skip_config_fetch()
     atexit.register(shutil.rmtree, home, ignore_errors=True)
     return home
 

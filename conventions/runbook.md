@@ -261,6 +261,10 @@ every descendant inherits it:
   `if __name__ == "__main__":` (tests import these modules, and a pytest process
   refuses the call): a fresh temporary `AVA_HOME` and `AVA_CONFIG_FETCH=skip`,
   whatever the caller's environment carries.
+  The worktree-removal guard (`scripts/check_worktree_remove.py`) is the one tool
+  that keeps the real home: it reads this machine's live session records
+  (`$AVA_HOME/run/pty`), so it only skips the gateway config fetch, dials nothing and
+  writes nothing; run it straight from a checkout.
 
 **Which checkout may change a home.** A home that carries its own `<home>/source`
 checkout (the production home `~/.ava`; every unit started from source) is started,
