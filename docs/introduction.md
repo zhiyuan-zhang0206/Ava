@@ -35,7 +35,7 @@ screenshots, Windows notes, and FAQ: **[QUICKSTART.md](../QUICKSTART.md)**.
 Ava's cluster upgrades itself. New code lands on `main`, and the fleet update script
 (`python -m cli.fleet_update`) rolls the whole cluster onto it — without stopping the work in flight. An
 agent's current code execution finishes at its turn boundary before the new
-version takes over; only wedged processes are force-reaped. The rollout is
+version takes over; only a wedged process needs an explicit forced stop. The rollout is
 self-supervised: a canary runs the new code under observation while a holdout
 on the old code watches, and rolls back on regression. No maintenance windows,
 no babysitting — the cluster works by day and updates itself by night.

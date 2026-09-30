@@ -135,7 +135,7 @@ def _repair(holder: str, at: datetime, *, operator: str | None) -> None:
     from ops.cluster_pause import unpause_local_cluster
 
     hold = _hold(holder, at)
-    if not hold.unsettled_failures():
+    if not hold.failures:
         raise RuntimeError(
             "no failed receipts to repair; resume --cancel abandons a failure-free drain"
         )

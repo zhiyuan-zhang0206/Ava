@@ -24,7 +24,6 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
-from base.deploy.maintenance.straggler_reap import settle_stranded_reaps
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops import cluster_rpc, lifecycle
@@ -259,8 +258,8 @@ async def test_other_auto_resurrect_failures_stay_informational(
 
 # ── Unowned termination ──────────────────────────────────────────────────────
 # Only a force ends a row that has no runtime identity. When this runtime's own
-# lifecycle left the row unowned (a birth, a resurrection, an applied restart, a
-# straggler settlement), that force records a receipt and the row resurrects.
+# lifecycle left the row unowned (a birth, a resurrection, an applied restart),
+# that force records a receipt and the row resurrects.
 
 _Arrange = Callable[[psycopg.Connection, AsyncConnectionPool], Awaitable[int]]
 
@@ -336,32 +335,8 @@ async def _restarted(db: psycopg.Connection, pool: AsyncConnectionPool) -> int:
     return aid
 
 
-async def _settled(db: psycopg.Connection, pool: AsyncConnectionPool) -> int:
-    """(d) a straggler-reap mark settled at the successor boundary."""
-    aid = _legacy_row(db)
-    db.execute(
-        "UPDATE agents_meta SET status='restarting',runtime_kind='hosted',"
-        "runtime_generation=%s,runtime_owner=%s WHERE id=%s",
-        (uuid4(), uuid4(), aid),
-    )
-    insert_inbound_message(
-        db,
-        aid,
-        "",
-        "system:maintenance",
-        kind="restart",
-        payload={
-            "maintenance": {"holder": "ops:test:1", "acquired_at": "2026-09-19T00:00:00+00:00"}
-        },
-    )
-    db.commit()
-    with db.transaction():
-        assert settle_stranded_reaps(db, machine_name()) == [aid]
-    return aid
-
-
 @pytest.mark.parametrize("guarded", [False, True])
-@pytest.mark.parametrize("arrange", [_spawned, _resurrected, _restarted, _settled])
+@pytest.mark.parametrize("arrange", [_spawned, _resurrected, _restarted])
 async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

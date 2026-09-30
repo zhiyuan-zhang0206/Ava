@@ -73,19 +73,6 @@ serial remote-dispatch batches stop starting new dispatches once shutdown
 begins, so that cleanup waits for an in-flight dispatch, never the remaining
 batch — deferred rows are re-selected by the next boot's pass.
 
-The ordinary maintenance drain can run with straggler reaping enabled (no caller
-does since the release executor was removed). A cohort member still un-landed
-`update_straggler_reap_seconds` (default 15) after its restart command was
-issued is truncated and released with the honest `reaped` outcome instead of
-aborting the wave (task #4016; the local stop family — `ava stop`/`pause`/
-`restart` drains — never reaps). Its mark is settled at the next agent-host
-boot or local resume (`ava start` runs the resume path), and its claimed
-work re-delivers on the new code. A failure recorded while that truncated
-turn unwinds (the member losing its row mid-unwind, task #4150) is settled
-with the mark: a reaped member's failure never gates resume, stop, start or
-repair. A later failure receipt for a reaped member is not latched; a failure
-that races before the reap receipt remains audit evidence but does not block.
-
 The existing home-local journal survives a CLI crash, host reboot and an
 offline database. An incomplete drain or stop retains the hold and reports
 failure. A drain that hits its deadline reports every unfinished agent — its

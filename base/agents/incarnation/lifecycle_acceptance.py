@@ -343,9 +343,9 @@ def supersede_lifecycle_for_force(conn: psycopg.Connection, agent_id: int, force
 # - its unowned state has a lifecycle origin: a birth recorded as epoch 0
 #   (`agents_meta.last_resurrect_inbound_id`, stamped by the spawn INSERT), or
 #   a `lifecycle_release` receipt on the resurrect or restart inbound whose
-#   transition left the row unowned (a resurrection, an applied restart, a
-#   straggler settlement). A retired runtime left identical row shapes but
-#   never these values, so a legacy unowned row has no origin;
+#   transition left the row unowned (a resurrection or an applied restart). A
+#   retired runtime left identical row shapes but never these values, so a
+#   legacy unowned row has no origin;
 # - the force that ended it recorded `unowned_termination` on its own command.
 #
 # Like the markers above, only the exact JSON boolean `true` counts, and the

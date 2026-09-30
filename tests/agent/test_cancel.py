@@ -32,7 +32,6 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import exec_node, llm_node
@@ -45,7 +44,6 @@ from agent.graph.exec.node import (
 )
 from agent.state import AgentState
 from base.agents.context import AvaContext
-from base.cluster.machine import machine_name
 from base.db import create_agent
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from tests.agent._fakes import make_fake_ops_pool
@@ -264,31 +262,22 @@ async def test_llm_node_cancel_event_race_normal_completion(
 
 
 @pytest.mark.parametrize(
-    ("kind", "source", "expected"),
-    [("cancel", "user", "user"), ("restart", "system:maintenance", "system")],
+    ("source", "expected"),
+    [("user", "user"), ("agent:9", "system")],
 )
 async def test_exec_node_preserves_durable_interrupt_attribution(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
-    kind: str,
     source: str,
     expected: str,
 ) -> None:
     """The real watcher aborts once, preserves partial output, and leaves claim its command."""
     agent_id = create_agent(db_conn)
-    payload = None
-    if kind == "restart":
-        payload = Jsonb({"maintenance": {"holder": "ops:test:cancel"}})
-        db_conn.execute(
-            "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
-            "VALUES(%s,'restarting',%s,'hosted')",
-            (agent_id, machine_name()),
-        )
     command = db_conn.execute(
-        "INSERT INTO inbound_messages(agent_id,kind,source,content,payload) "
-        "VALUES(%s,%s,%s,'',%s) RETURNING id",
-        (agent_id, kind, source, payload),
+        "INSERT INTO inbound_messages(agent_id,kind,source,content) "
+        "VALUES(%s,'cancel',%s,'') RETURNING id",
+        (agent_id, source),
     ).fetchone()
     assert command is not None
     db_conn.commit()

@@ -18,7 +18,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import settle_stale_running_rows
 from agent.state import AgentState
 from agent.turn import progress
-from base.agents.incarnation import hosted_force
 from base.agents.incarnation import resources as resource_codec
 from base.cluster.machine import machine_name
 from base.db import insert_inbound_message
@@ -757,41 +756,3 @@ class TestHostedHostWakePacing:
         )
         await wake_dispatcher.scan_once()
         assert scheduler.woken == [17, 23]
-
-    async def test_settled_reap_wake_is_consumed_by_first_turn_attempt(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        pool = _PendingScanPool([])
-        host = AgentHost(
-            pool=cast(AsyncConnectionPool[Any], pool),
-            checkpointer=object(),  # pyright: ignore[reportArgumentType]
-            graph=object(),  # pyright: ignore[reportArgumentType]
-            machine="this-box",
-        )
-        turn = AsyncMock(return_value=None)
-        monkeypatch.setattr(host, "_run_turn", turn)
-        monkeypatch.setattr(hosted_force, "original_host_force", AsyncMock(return_value=None))
-        monkeypatch.setattr(
-            "services.agent_host.host.maintenance_receipts.record_drained",
-            AsyncMock(return_value=None),
-        )
-        host.arm_settled_reaps([17, 17])
-        scheduler = TurnScheduler(host.run_turn)
-        wake_dispatcher = dispatcher.InboundWakeDispatcher(
-            "redis://unused",
-            scheduler,
-            pending_scan=host.pending_inbound_wakes,
-            stale_after_s=30,
-            recovery_wake_batch=1,
-        )
-        try:
-            assert [
-                (wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(30)
-            ] == [(17, True)]
-            await wake_dispatcher.scan_once()
-            await poll_until_async(lambda: not scheduler.active_agents, timeout=3)
-            await wake_dispatcher.scan_once()
-            assert await host.pending_inbound_wakes(30) == []
-            turn.assert_awaited_once_with(17)
-        finally:
-            await scheduler.aclose()

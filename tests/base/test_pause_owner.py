@@ -79,3 +79,28 @@ def test_a_malformed_shepherd_degrades_to_none_never_a_broken_journal() -> None:
     snapshot = pause_owner.read()
     assert snapshot.status == "paused"
     assert snapshot.driver is None
+
+
+def test_a_journal_written_with_the_retired_reaped_map_still_reads() -> None:
+    """A fleet update stops on the old code and starts on the new one, so the new
+    code reads the journal the old code left: its retired `reaped` map is ignored
+    and never written back."""
+    import json
+
+    from base.deploy.maintenance.state import MaintenanceHold
+
+    hold = MaintenanceHold("stopped", {7: 100}, drained=(7,))
+    pause_owner.state_path().write_text(
+        json.dumps(
+            {
+                "state": "paused",
+                "holder": "A",
+                "acquired_at": "2026-08-25T01:02:00+00:00",
+                "maintenance": {**hold.encode(), "reaped": {}},
+            }
+        )
+    )
+    snapshot = pause_owner.read()
+    assert snapshot.status == "paused"
+    assert snapshot.maintenance == hold
+    assert "reaped" not in hold.encode()
