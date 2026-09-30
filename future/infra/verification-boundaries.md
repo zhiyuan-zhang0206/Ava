@@ -214,8 +214,8 @@ commits no run, so this is what the runs established, not a log):
   about 2.5 minutes, `uv sync --locked` about 1 minute, `npm ci` about 1 minute, first start
   about 30 seconds (it includes the Next.js build), observer about 4 seconds. With the
   cache volume warm the two installs take seconds.
-- **Memory.** The whole run peaks near 3.7 GB (the frontend build dominates); the 8 GB
-  default leaves headroom.
+- **Memory.** The container's cgroup peak (page cache included) was 3.7 GB and 5.0 GB in
+  two runs, dominated by the frontend build; the 8 GB default leaves headroom.
 - **Size.** The image is about 1.6 GB on disk (380 MB of compressed content); the cache
   volume about 1.4 GB.
 - **Source.** The recipe makes a full-history standalone clone (38 MB, about a second) and
