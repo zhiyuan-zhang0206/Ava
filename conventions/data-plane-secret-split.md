@@ -75,7 +75,7 @@ tickets, or put passwords in command arguments.
 PostgreSQL has nothing to rotate by hand: the owner never logs in, and
 application logins change only by the runbook's manual rotation.
 `scripts/data_plane_ops/rotate_data_plane_secrets.py` rotates the Redis credentials only; they
-do not rotate per rollout
+do not rotate with the write generation
 ([decision](../decisions/2026-09-27-write-generation-rollout-choices.md)).
 
 Run it on the gateway checkout that owns the target cluster, in a gateway

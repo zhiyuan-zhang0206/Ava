@@ -68,7 +68,7 @@ Linux Redis (macOS Redis stays loopback-only, off-box inbound via the relay brid
 authenticates: Postgres and PgBouncer admit only SCRAM application logins (the OS-user administrator
 and the collector's password-less monitoring role use `peer` on the owner-only socket), and Redis
 requires its generated passwords. Application processes never hold schema-owner or admin credentials:
-the owner is NOLOGIN, and each rollout's write generation — one gateway and one runner login
+the owner is NOLOGIN, and the write generation — one gateway and one runner login
 inheriting the NOLOGIN groups `ava_gateway` / `ava_runner`, plus one machine API token per class,
 recorded in `$AVA_HOME/db-authority/` — is delivered in the launch environment of the admitted runtime
 (`AVA_DB_URL`, `AVA_API_TOKEN`) and, at 0600, in `$AVA_HOME/run/ava-root/manifests.json` until the
