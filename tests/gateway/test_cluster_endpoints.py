@@ -299,44 +299,6 @@ class TestUnpauseLocalCluster:
         assert pause_backend.spawned == pause_backend.killed == []
 
 
-class TestLockHolderLiveness:
-    """`_lock_holder_is_live` parses `<machine>:pid<N>` and probes the pid locally.
-
-    The probe itself lives in `base.deploy.state.cluster_lock.holder_process_gone` (the
-    manual recovery and the automatic reclaim share one verdict), so the death
-    evidence is stubbed at the shared seam — and the two "treated live" cases
-    below patch the same machine-name seam, or they would pass vacuously on a
-    host whose real name differs from the `mc` they assume.
-    """
-
-    def test_this_machine_dead_pid_is_not_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import cluster as ops_mod
-
-        monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "mc")
-        monkeypatch.setattr("base.host.proc.process_alive", lambda _pid: False)  # pyright: ignore[reportUnknownArgumentType]
-        assert ops_mod._lock_holder_is_live("mc:pid123") is False
-
-    def test_this_machine_alive_pid_is_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import cluster as ops_mod
-
-        monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "mc")
-        monkeypatch.setattr("base.host.proc.process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType]
-        assert ops_mod._lock_holder_is_live("mc:pid123") is True
-
-    def test_foreign_machine_holder_is_treated_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import cluster as ops_mod
-
-        # Can't probe a remote pid — must not clobber another gateway's lock.
-        monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "mc")
-        assert ops_mod._lock_holder_is_live("other:pid5") is True
-
-    def test_unparseable_holder_is_treated_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import cluster as ops_mod
-
-        monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "mc")
-        assert ops_mod._lock_holder_is_live("garbage") is True
-
-
 class TestRetiredDeploymentEndpoints:
     @pytest.mark.parametrize(
         ("method", "path"),
@@ -351,14 +313,12 @@ class TestRetiredDeploymentEndpoints:
     def test_removed_ingress_cannot_dispatch_or_pause(
         self, monkeypatch: pytest.MonkeyPatch, method: str, path: str
     ) -> None:
-        """Stranded-host recovery is the host-local `ava cluster recover` verb only."""
-        from ops import cluster as ops_mod
+        """The retired update and recovery routes do not exist over HTTP."""
 
         def forbidden(*_args: object, **_kwargs: object) -> None:
             pytest.fail("retired HTTP ingress reached the old updater")
 
         monkeypatch.setattr(agent_pause, "pause_agents", forbidden)
-        monkeypatch.setattr(ops_mod, "cluster_recover_op", forbidden)
         with TestClient(app) as client:
             assert client.request(method, path).status_code == 404
         assert path not in app.openapi()["paths"]

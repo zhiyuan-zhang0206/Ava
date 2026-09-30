@@ -345,44 +345,6 @@ def test_cmd_cluster_status_renders_online_stopped_offline(
     assert "corp" in out and "offline" in out
 
 
-def test_cmd_cluster_status_renders_the_deploy_hold_banner_without_a_hold_column(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A live deploy lease shows as the banner naming it (the answer to "why was
-    my deploy refused"). There is no per-host `hold` column: nothing records a
-    settle hold's waiting set any more, so a per-host verdict would be a dead
-    state."""
-    hold = "machine-1:pid42 (held 5m, lease expires in 10m)"
-    roster = [
-        _machine_row(name="test-host", deploy_hold=hold),
-        _machine_row(name="wsl", deploy_hold=hold),
-    ]
-    _patch_roster_get(monkeypatch, roster)
-    rc = cluster_control.cmd_cluster_status()
-    assert rc == 0
-    out = capsys.readouterr().out.splitlines()
-    assert out[0] == f"deploy hold: {hold}"
-    # The banner states the operator-visible consequence, which is what brought them here.
-    assert any("no other owner can take the cluster deploy lease" in line for line in out[:5])
-    header = next(line for line in out if line.startswith("name"))
-    assert "hold" not in header.split()
-    assert not any("waited-on" in line for line in out)
-
-
-def test_cmd_cluster_status_prints_no_banner_when_no_hold(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """No live lease -> no banner at all. An absent lease is not evidence the
-    cluster is free (host-local maintenance takes no cluster lease), so the roster
-    does not claim it is."""
-    _patch_roster_get(monkeypatch, [_machine_row(name="test-host")])
-    rc = cluster_control.cmd_cluster_status()
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "deploy hold" not in out
-    assert out.splitlines()[0].startswith("name")
-
-
 def test_cmd_cluster_status_fails_fast_on_http_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

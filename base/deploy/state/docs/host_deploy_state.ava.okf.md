@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Host Deploy State
-description: One row per machine in `host_deploy_state` — posture (idle/paused/converging), the pause-window anchor and the retained updater liveness lease — the host-level half of the R1 deployment-state model.
+description: One row per machine in `host_deploy_state` — its posture (idle/paused), the host-level half of the R1 deployment-state model.
 tags:
 - deploy
 - liveness
@@ -12,14 +12,12 @@ tags:
 
 ## What it is
 
-`base/deploy/state/host_deploy_state.py` is the read/write API for the `host_deploy_state` table — one row per machine in the central DB answering the two host-level questions the old signals (the `cluster_paused` file, `updating.flag`, session probing, updater-log mtime) answered with files and process-local guesses. Those file signals were retired by the old-signal sweep; this row is the contract.
+`base/deploy/state/host_deploy_state.py` is the read/write API for the `host_deploy_state` table — one row per machine in the central DB answering the host-level question the old signals (the `cluster_paused` file, `updating.flag`, session probing, updater-log mtime) answered with files and process-local guesses. Those file signals were retired by the old-signal sweep; this row is the contract.
 
-- **posture** (`idle` / `paused` / `converging`) — `paused` marks service shutdown after native drain; the admission journal keeps in-flight APIs available during the drain; `converging` is the updater actually running on this host (its lease is live). A missing row reads as `idle` — every consumer's default.
-- **paused_at** anchors the current pause window. It is set entering `paused`,
-  preserved through `converging`, and cleared on `idle`.
-- **updater lease** is retained SQL observation for admission and deploy-window
-  readers. The retired updater commands no longer renew it. A lease or timestamp
-  does not grant native process ownership or authorize a replacement updater.
+- **posture** (`idle` / `paused`) — `paused` marks service shutdown after native drain; the admission journal keeps in-flight APIs available during the drain. A missing row reads as `idle` — every consumer's default. A transition writes `posture` and `updated_at` and nothing else.
+- **`db_now`** — every `HostDeployState` carries the database's own clock, selected in the same statement as the row, so an age judgment never subtracts across two machines' clocks.
+
+The row's `updater_lease_expires_at`, `paused_at` and `stranded_hold_*` columns are neither written nor read; they stay in the schema until the explicit cleanup migration.
 
 ## Core Responsibilities
 
@@ -28,18 +26,9 @@ tags:
 - `ops/cluster_pause.py` — service shutdown sets paused posture and `unpause_local_cluster` restores idle posture; under a held journal it refuses failed receipts, and stopped services until `ava start` passes readiness. `is_paused()` reads the row (a read failure reads as NOT paused — the conservative direction). The gateway 503 middleware and the `status`/`cluster` endpoints go through it.
 - `cli/commands/lifecycle/start.py` tail — `set_posture('idle')` after a successful `ava start`.
 
-### Retained lease reader
-
-Nothing arms, renews or clears `updater_lease_expires_at` any more: the retired
-updater's lease writers and its host mutex (`$AVA_HOME/run/updater.lock`) are
-gone. `updater_lease_live()` / `HostDeployState.updater_live` still read the
-column, so a lease an upgraded host carried over keeps recovery and the
-deploy-window signal conservative until it expires. The column itself stays
-until the explicit schema cutover.
-
 ### Observers (readers)
 
-- `ops/deploy_window.py:_remote_orchestration` — deploy-window signal 2 (another machine mid-deploy) reads `read_all()` instead of probing each host's ops server: the old probe died with the daemon it observed mid self-update; the row is written outside the restarted services and survives the window. A stale `converging` row keeps the signal active — the conservative direction, except on an operator-excluded machine, where it counts only with a live updater lease behind it: nothing recovers that posture while the exclusion lasts (issue #2160).
+- `ops/deploy_window.py:_posture_signal` — the deploy-window signal (any machine mid-deploy) reads `read_all()` instead of probing each host's ops server: the old probe died with the daemon it observed mid self-update; the row is written outside the restarted services and survives the window. A non-idle row keeps the signal active until that host's `ava start` returns it to `idle` — the conservative direction, except on an operator-excluded machine, whose row is ignored and logged: nothing returns that posture to `idle` while the exclusion lasts (issue #2160).
 
 ## Key Dependencies
 
@@ -50,12 +39,11 @@ until the explicit schema cutover.
 
 - `base/deploy/state/host_deploy_state.py:read` / `read_all` — this machine's row / every machine's rows
 - `set_posture` — the posture transition
-- `updater_lease_live` — the retained lease reader
 
 ## Notes
 
-- The cluster-level counterpart is [[cluster_lock.ava.okf.md|the cluster deploy lease]] (`deployment_state`); agents carry their own leases in `agents_meta`.
-- The home lifecycle mutexes that serialize local start/stop/pause with recovery are in [[home_lifecycle_locks.ava.okf.md|Home Lifecycle Mutexes]].
+- `deployment_state` is a singleton row whose live consumer is the [[base/db/docs/code-version-gate.ava.okf.md|code-version gate]] (`min_code_version`); nothing takes a cluster deploy lease on it any more. Agents carry their own leases in `agents_meta`.
+- The home lifecycle mutex that serializes local start/stop/pause is in [[home_lifecycle_locks.ava.okf.md|Home Lifecycle Mutex]].
 
 The controller-driven stranded-hold writer, budget, local note queue, heartbeat
 alert, and status projection have been removed. Their five physical columns

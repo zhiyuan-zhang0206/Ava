@@ -13,6 +13,8 @@ tags:
 
 > Design lead #2861 · design concept v3.3 (2026-08-07) · **design-phase node — the current system is NOT this; see the as-is nodes linked at the bottom.**
 
+> **As landed:** the cluster deploy lease and the per-host updater lease described below were retired with the in-place updater ([decision](../../../decisions/2026-09-30-remove-deployment-lease.md)). `host_deploy_state` carries only the `idle`/`paused` posture, and `deployment_state`'s live consumer is the code-version gate's `min_code_version`. The `stable` / `updating` / `settling` phases, the settle note and `recover` do not exist; agent leases (`agents_meta.lease_expires_at`) landed as designed.
+
 ## Problem in one sentence
 
 "Now what is happening?" has no authority today: deployment status is the implicit conjunction of 6 signals (DB lock row, two flag files, session names, updater log mtime, orchestrator-local variables); agent liveness is a self-report chain that breaks; `agents_meta.status` transitions live in 8+ scattered SQL statements; the event stream doubles as a state register. Every consumer writes its own predicate subset — three heal controllers diverged into two settle semantics in one 48h window (#1020/#1074/#1116).

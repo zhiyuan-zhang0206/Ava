@@ -60,7 +60,7 @@ database state changes, source resets, or hand-built per-host Git/package
 installation sequences for deployment.
 
 Verify every participating unit's target, installed and running versions,
-service identities/start times, readiness, maintenance state, lease release,
+service identities/start times, readiness, maintenance state and its release,
 and representative agent claim/exec progress. Disabled services and stopped
 schedules must remain so. Hosted agents need an actual host consumer, not a
 separate PID per agent.
@@ -68,9 +68,9 @@ separate PID per agent.
 Do not declare success from a filtered roster, pointer, CLI exit, or stale
 health response. An offline host is an explicit incomplete result.
 
-If rollout fails, preserve evidence and inspect the installed
-`ava cluster recover --help`. Confirm live
-holder semantics and schema compatibility before acting. Do not blindly retry
+If rollout fails, preserve evidence and read `ava maintenance status` and
+`conventions/graceful-maintenance.md`. Confirm the hold's owner is not live and
+schema compatibility before acting. Do not blindly retry
 updates or reset production source. If no supported safe path exists, report
 the precise blocker and request a scoped recovery decision.
 

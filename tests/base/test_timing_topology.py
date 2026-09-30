@@ -28,21 +28,10 @@ def test_default_lattice_holds() -> None:
 
 
 def test_checker_catches_lt_violation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A deploy progress deadline must fit inside its ownership lease."""
-    monkeypatch.setattr(deploy, "NO_PROGRESS_TIMEOUT_S", CLOCKS["LOCK_TTL_S"].get() + 10)
+    """One gateway preflight dial must fit inside the no-progress judgment."""
+    monkeypatch.setattr(deploy, "GATEWAY_PREFLIGHT_BUDGET_S", deploy.NO_PROGRESS_TIMEOUT_S + 10)
     failures = validate_clock_lattice()
-    assert any("NO_PROGRESS_TIMEOUT_S < LOCK_TTL_S" in f for f in failures)
-
-
-def test_checker_catches_eq_violation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A drifted settle hold (no longer equal to NO_PROGRESS) must be reported —
-    two clocks disagreeing about "stopped making progress"."""
-    monkeypatch.setattr(
-        "base.deploy.state.cluster_lock.SETTLE_TTL_S",
-        deploy.NO_PROGRESS_TIMEOUT_S + 100,
-    )
-    failures = validate_clock_lattice()
-    assert any("SETTLE_TTL_S == NO_PROGRESS_TIMEOUT_S" in f for f in failures)
+    assert any("GATEWAY_PREFLIGHT_BUDGET_S < NO_PROGRESS_TIMEOUT_S" in f for f in failures)
 
 
 def test_checker_catches_derived_violation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,7 +82,7 @@ def test_assert_clock_lattice_raises_on_violation(monkeypatch: pytest.MonkeyPatc
     """The fail-fast entry point raises, never returns, on a violation."""
     from base.deploy.timing import ClockLatticeError
 
-    monkeypatch.setattr(deploy, "NO_PROGRESS_TIMEOUT_S", CLOCKS["LOCK_TTL_S"].get() + 10)
+    monkeypatch.setattr(deploy, "GATEWAY_PREFLIGHT_BUDGET_S", deploy.NO_PROGRESS_TIMEOUT_S + 10)
     with pytest.raises(ClockLatticeError):
         assert_clock_lattice()
 

@@ -53,8 +53,8 @@ helper exit and removal of its definition. Start recreates that definition.
 Root owns Gate and native LGTM application services. `_pause_resume` releases
 normal startup admission only after readiness, and never releases the fleet
 cutover's hold (`cli/cutover_hold.py`, deleted with the cutover scripts);
-`ava maintenance resume` and `ava cluster recover` refuse that hold and name its
-one exit, `scripts/cutover_adopt_home.py --resume`.
+`ava maintenance resume` refuses that hold and names its one exit,
+`scripts/cutover_adopt_home.py --resume`.
 
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `maintenance.py`, which reads its generation's hold through the maintenance

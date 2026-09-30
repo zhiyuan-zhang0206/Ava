@@ -1,9 +1,8 @@
 """`scripts/lint/clock_lattice.py` — the lattice-vocabulary placement invariant.
 
 A module-level constant whose name carries lattice vocabulary (STALL / GRACE /
-REAP / BUDGET / WEDGED / NO_PROGRESS / LOCK_TTL / UPDATER_LEASE / SETTLE_TTL /
-LAUNCH_CONFIRM / LEASE_TTL / LEASE_RENEW / SCAN_INTERVAL) must live in a lattice
-family module, be an alias of a registered clock, or carry an explicit exemption.
+REAP / BUDGET / WEDGED / NO_PROGRESS / LAUNCH_CONFIRM / LEASE_TTL / LEASE_RENEW /
+SCAN_INTERVAL) must live in a lattice family module, be an alias of a registered clock, or carry an explicit exemption.
 A bare `_SOME_REAP_GRACE_S = 100` in a new module is the 2026-07-30 spawn
 incident's seedling — the name reads as part of the lattice while nothing knows
 its neighbours.

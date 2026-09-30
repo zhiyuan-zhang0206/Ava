@@ -33,12 +33,10 @@ from base.cluster.machine import (
 )
 from base.config import settings
 from base.deploy.git.cluster_drift import prod_source_head_sha
-from base.deploy.state.cluster_lock import DeployLease
 from base.host.resource_sample import ResourceSample
 from base.telemetry.observability import cluster_label
 from gateway.cluster import _loki_shards, _roster_rows, _stats_dashboard, roster_probe
 from gateway.cluster._health import get_health
-from gateway.cluster._roster_rows import stamp_cluster_globals
 from gateway.cluster.schemas import (
     ClusterPanel,
     ServiceItem,
@@ -437,34 +435,6 @@ async def _probe_agent_runner(
     )
 
 
-def _read_deploy_lease() -> DeployLease | None:
-    """The live deploy lease (`base.deploy.state.cluster_lock.read_update_lease`), or None when
-    the cluster is free / the row cannot be read.
-
-    Read once per roster assembly and stamped onto every row: a hold is a
-    diagnostic overlay, so a transient `OperationalError` (a host mid-restart is
-    exactly when this is asked) leaves the deploy-hold banner blank rather than
-    taking the roster down, while any other failure is a real bug and is logged
-    loudly first.
-
-    Deliberately NOT `ops.deploy_window.deploy_in_flight()`. That call also reads
-    every machine's posture row, which does not belong on a read-only roster GET.
-    Rendering the lease row keeps the roster a display of state rather than a
-    second derivation of it.
-    """
-    import psycopg
-
-    from base.deploy.state.cluster_lock import read_update_lease
-
-    try:
-        return read_update_lease()
-    except psycopg.OperationalError:
-        return None
-    except Exception:
-        _log.exception("reading the deploy lease failed (roster hold column will be blank)")
-        return None
-
-
 def _local_resource_sample() -> ResourceSample | None:
     """One live resource reading for the gateway's own machine (no status_snapshot call)."""
     try:
@@ -517,8 +487,6 @@ def _local_machine_status_blocking(
 async def gather_cluster_status(
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]],
     local_name: str,
-    *,
-    deploy_lease: DeployLease | None = None,
 ) -> list[MachineStatus]:
     """Async fan-out: every machine probed in parallel via a status_probe op
     to its ops server (the local machine included — its ops server is dialed
@@ -540,11 +508,7 @@ async def gather_cluster_status(
     `gateway/cluster/router.py:get_cluster_machines` reuses the same fan-out to back
     ava.agents.list_machines().
 
-    `deploy_lease` (the live lease, read once by the caller) is the cluster-global
-    fact stamped per row: its `describe()` onto `deploy_hold`. It is transcribed
-    from the lease row — the fan-out's own probes do not inform it, and nothing
-    here re-derives whether a deploy is in flight.
-
+    The rows come back sorted by machine name.
     """
     machines: list[MachineStatus] = []
     probe_coros: list[Any] = []
@@ -579,7 +543,7 @@ async def gather_cluster_status(
     if probe_coros:
         machines.extend(await asyncio.gather(*probe_coros))
 
-    return stamp_cluster_globals(machines, deploy_lease=deploy_lease)
+    return sorted(machines, key=lambda m: m.name)
 
 
 def _get_cluster_status(cur: Cursor) -> ClusterPanel:
@@ -609,11 +573,8 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
         cur.fetchall()
     )
 
-    lease = _read_deploy_lease()
     local_name = machine_name()
-    machines = (
-        asyncio.run(gather_cluster_status(rows, local_name, deploy_lease=lease)) if rows else []
-    )
+    machines = asyncio.run(gather_cluster_status(rows, local_name)) if rows else []
 
     return ClusterPanel(
         current_machine=local_name,

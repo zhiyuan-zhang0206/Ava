@@ -1,9 +1,9 @@
 """Load-bearing timing relationships for hosted agents and cluster maintenance.
 
-Each registered clock is safe only relative to its declared neighbours: deploy
-leases outlast progress deadlines, agent leases outlast their renewal interval,
-and wedged detection allows the full exec and model retry budget. Independent
-HTTP deadlines remain beside their consumers.
+Each registered clock is safe only relative to its declared neighbours: agent
+leases outlast their renewal interval, service-readiness windows nest inside one
+another, and wedged detection allows the full exec and model retry budget.
+Independent HTTP deadlines remain beside their consumers.
 
 Define values in the relevant family module (deploy, stop, or schedule timing),
 register them in CLOCKS, and declare their ordering in CONSTRAINTS. Tests check
@@ -21,7 +21,6 @@ import base.deploy.progress_timeout as deploy
 import base.deploy.stop_timing as stop
 from base.config import settings
 from base.daemon.schedules.timing import SCHEDULE_STALL_ALERT_AFTER_S
-from base.deploy.state import cluster_lock
 
 # --- schedule supervision family ---------------------------------------------
 # Value lives in base/daemon/schedules/timing.py: the gateway's schedule manager
@@ -71,26 +70,11 @@ class Constraint:
 
 
 CLOCKS: dict[str, Clock] = {
-    # --- deploy family (values in base/deploy/progress_timeout.py / base/deploy/state/cluster_lock.py) ---
+    # --- deploy family (values in base/deploy/progress_timeout.py) ---
     "NO_PROGRESS_TIMEOUT_S": Clock(
         "deploy",
         lambda: deploy.NO_PROGRESS_TIMEOUT_S,
         "the one definition of 'this host stopped making progress'",
-    ),
-    "LOCK_TTL_S": Clock(
-        "deploy",
-        lambda: cluster_lock.LOCK_TTL_S,
-        "deploy lease crash-reclaim bound",
-    ),
-    "SETTLE_TTL_S": Clock(
-        "deploy",
-        lambda: cluster_lock.SETTLE_TTL_S,
-        "settle hold after an orchestration exits with hosts still converging",
-    ),
-    "LEASE_RENEW_INTERVAL_S": Clock(
-        "deploy",
-        lambda: deploy.LEASE_RENEW_INTERVAL_S,
-        "how often a lease-owning operation re-arms its own deploy lease",
     ),
     "GATEWAY_PREFLIGHT_BUDGET_S": Clock(
         "deploy",
@@ -179,15 +163,7 @@ CLOCKS: dict[str, Clock] = {
 
 
 CONSTRAINTS: list[Constraint] = [
-    # --- deploy family: the lease must not expire before the operation it
-    # protects can finish ---
-    Constraint(
-        "<",
-        "NO_PROGRESS_TIMEOUT_S",
-        "LOCK_TTL_S",
-        "the crash-reclaim bound must outlast the no-progress judgment, or a "
-        "slow-but-alive rollout loses its lease mid-operation (2026-07-29 incident)",
-    ),
+    # --- deploy family and agent-lease family ---
     Constraint(
         "<",
         "AGENT_LEASE_TTL_S",
@@ -209,14 +185,6 @@ CONSTRAINTS: list[Constraint] = [
         "the tiered gate's premise: the non-critical window must end long before "
         "the critical bound, so a healthy start is never held to the long number "
         "by a straggling non-critical daemon",
-    ),
-    Constraint(
-        "==",
-        "SETTLE_TTL_S",
-        "NO_PROGRESS_TIMEOUT_S",
-        "the settle hold shares the whole-run no-progress definition — it lapses "
-        "when the host it waits for has outlived the longest legitimate leg, "
-        "never before",
     ),
     # --- unit-bundle family ---
     Constraint(

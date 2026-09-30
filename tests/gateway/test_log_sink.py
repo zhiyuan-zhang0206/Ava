@@ -262,39 +262,17 @@ def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
     assert "exception_value" not in payload
 
 
-# ─── rollout-window quieting (task #731) ────────────────────────────────────
+# ─── levels pass through untouched ──────────────────────────────────────────
 #
-# User ruling 2026-08-04: while a cluster deploy holds the update lease, the
-# rollout's predictable side effects (ops manager rounds blocked by
-# pause/schema/pin, slow pool acquires, DB-outage pauses, query cancellations)
-# must not alarm at WARNING in the event stream. The downgrade lives in
-# `_message_to_params` (the one place both sink paths derive rows), gated on
-# `_deploy_in_progress()` — monkeypatched here to keep the tests hermetic (no
-# real lease reads against the test DB).
+# `_message_to_params` is pure: a record's level is the level the caller logged.
+# Predictable side effects of an update window (slow pool acquires, DB-outage
+# pauses, query cancellations) keep their WARNING; the sink consults no deploy
+# state and never reads the database.
 
 
-@pytest.fixture(autouse=True)
-def _reset_deploy_cache():
-    """Each test starts with a cold deploy cache — the module-level cache is a
-    process singleton and would otherwise leak a True/False across tests."""
-    import base.log as slog
-
-    slog._deploy_cached = cast(
-        bool | None, None
-    )  # keep bool|None for pyright (bare None literal narrows every later read)
-    slog._deploy_cached_at = 0.0
-    yield
-
-
-def test_rollout_quiet_db_pool_acquire_slow(
-    monkeypatch: pytest.MonkeyPatch,
-    sink_logger,
-) -> None:
-    """db_pool_acquire_slow during a deploy → INFO in the events row (file sink
-    keeps the original level; only the PG row is quieted)."""
-    import base.log as slog
-
-    monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
+def test_slow_acquire_and_db_outage_warnings_keep_their_level(sink_logger) -> None:
+    """db_pool_acquire_slow, every db_outage_* category and the query-cancellation
+    line stay WARNING in the events row — nothing rewrites them."""
     sink_logger.warning(  # pyright: ignore[reportUnknownMemberType]
         "[db pool] acquire took 2.0s (slow — Postgres under load)",
         event="db_pool_acquire_slow",
@@ -302,112 +280,16 @@ def test_rollout_quiet_db_pool_acquire_slow(
         elapsed=2.0,
     )
     _event, _agent_id, level, _payload = _last_event()
-    assert level == "info"
+    assert level == "warning"
 
-
-def test_rollout_quiet_db_outage_events(
-    monkeypatch: pytest.MonkeyPatch,
-    sink_logger,
-) -> None:
-    """Every db_outage_* category is quieted while a deploy holds the lease."""
-    import base.log as slog
-
-    monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
     for event in ("db_outage_wait", "db_outage_pause", "db_outage_reconcile_retry"):
         sink_logger.warning("db unreachable — pausing", event=event, agent_id="-")  # pyright: ignore[reportUnknownMemberType]
         _event, _agent_id, level, _payload = _last_event()
-        assert level == "info", f"{event} should be quieted to INFO"
+        assert level == "warning", f"{event} must keep its WARNING level"
 
-
-def test_rollout_quiet_query_cancellation(
-    monkeypatch: pytest.MonkeyPatch,
-    sink_logger,
-) -> None:
-    """The 'query cancellation failed' line (bare warning, event='log') is
-    quieted by message prefix while a deploy holds the lease."""
-    import base.log as slog
-
-    monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
     sink_logger.warning("query cancellation failed: cancellation timeout expired")  # pyright: ignore[reportUnknownMemberType]
     _event, _agent_id, level, _payload = _last_event()
-    assert level == "info"
-
-
-def test_rollout_quiet_no_deploy_keeps_warning(
-    monkeypatch: pytest.MonkeyPatch,
-    sink_logger,
-) -> None:
-    """No deploy in flight → the same categories keep their original WARNING:
-    outside a rollout window these are real signals."""
-    import base.log as slog
-
-    monkeypatch.setattr(slog, "_deploy_in_progress", lambda: False)
-    sink_logger.warning("slow acquire", event="db_pool_acquire_slow", elapsed=2.0)  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()
     assert level == "warning"
-
-
-def test_rollout_quiet_unrelated_warning_stays(
-    monkeypatch: pytest.MonkeyPatch,
-    sink_logger,
-) -> None:
-    """A WARNING outside the quiet categories is untouched even mid-deploy —
-    the suppression list is deliberately narrow (no blanket WARNING
-    suppression)."""
-    import base.log as slog
-
-    monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
-    sink_logger.warning("real trouble", event="db_pool_acquire_timeout")  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()
-    assert level == "warning"
-
-
-def test_deploy_quieting_read_never_blocks_producer(
-    monkeypatch: pytest.MonkeyPatch,
-    sink_logger,
-) -> None:
-    """The quieting lease read must never block the log producer (P1, audit
-    2026-08-08): the check runs in the synchronous sink on the caller's
-    thread, and a lease read dials the DB — during a DB outage (exactly when
-    db_outage_* warnings fire) a synchronous read froze the agent runloop for
-    seconds per record. The read happens on a background thread; the producer
-    gets the stale snapshot immediately."""
-    import threading
-    import time
-
-    import base.log as slog
-
-    entered = threading.Event()
-    release = threading.Event()
-
-    def slow_read() -> bool:
-        entered.set()
-        release.wait(5)
-        return True  # a deploy holds the lease
-
-    monkeypatch.setattr(slog, "_read_deploy_lease", slow_read)
-    slog._deploy_cached = cast(
-        bool | None, None
-    )  # keep bool|None for pyright (bare None literal narrows every later read)
-    slog._deploy_cached_at = 0.0
-
-    start = time.monotonic()
-    sink_logger.warning("db unreachable — pausing", event="db_outage_wait", agent_id="-")  # pyright: ignore[reportUnknownMemberType]
-    elapsed = time.monotonic() - start
-    assert elapsed < 0.5, (
-        f"producer was blocked by the quieting lease read ({elapsed:.2f}s) — "
-        "the outage amplifier is back"
-    )
-    # The refresh is in flight on a background thread; releasing it updates
-    # the snapshot asynchronously.
-    assert entered.wait(1.0), "refresh thread never started"
-    release.set()
-    deadline = time.monotonic() + 5
-    cached: bool | None = slog._deploy_cached
-    while cached is not True and time.monotonic() < deadline:
-        time.sleep(0.02)
-        cached = slog._deploy_cached  # re-read each pass; the background thread refreshes it
-    assert cached is True, "cache was not refreshed from the background read"
 
 
 def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -434,26 +316,6 @@ def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> 
     good = logging.LogRecord("x", logging.WARNING, "path.py", 1, "fine", (), None)
     handler.emit(good)
     assert seen == [], "a healthy record must not hit handleError"
-
-
-def test_deploy_quieting_cache_holds_answer_through_read_failure(
-    monkeypatch: pytest.MonkeyPatch,
-    sink_logger,
-) -> None:
-    """A failed refresh keeps the previous answer for the TTL: a mid-rollout DB
-    blip (the gateway restart drops the data plane the lease lives in) must
-    not cancel the quieting a rollout relies on."""
-    import time
-
-    import base.log as slog
-
-    monkeypatch.setattr(slog, "_read_deploy_lease", lambda: True)
-    slog._deploy_cached = True
-    slog._deploy_cached_at = time.monotonic()
-
-    sink_logger.warning("slow acquire", event="db_pool_acquire_slow", elapsed=2.0)  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()
-    assert level == "info", "cached lease must quiet within the TTL"
 
 
 # ─── call-site contract: the delta read-compat reconstruction (task #3897) ──

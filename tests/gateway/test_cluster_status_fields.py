@@ -622,79 +622,24 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(monkeypatch: pytes
     assert m.supervisor_online is None
 
 
-# ─── deploy-hold stamping (the roster's deploy-hold banner) ───────────────────
+# ─── row order ────────────────────────────────────────────────────────────────
 
 
-def _hold_rows() -> list[
-    tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]
-]:
-    """Two pure-gateway-shaped rows so the fan-out takes the no-probe path (the hold
-    stamping is independent of what the probes return)."""
+def test_gather_returns_rows_sorted_by_name(monkeypatch: pytest.MonkeyPatch):
+    """The local pure-gateway row takes the lightweight local read and the
+    address-less row is reported offline without a dial; the roster comes back
+    ordered by machine name whatever order the table gave."""
+    monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
+    monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
     now = datetime.now(UTC)
-    return [
+    rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
+        ("m2", None, ["agent-runner"], now, None, None, False),
         ("m1", "http://m1", ["gateway"], now, None, None, False),
-        ("m2", "http://m2", ["gateway"], now, None, None, False),
     ]
 
+    machines = asyncio.run(status_mod.gather_cluster_status(rows, "m1"))
 
-def test_gather_stamps_the_lease_sentence_on_every_row(monkeypatch: pytest.MonkeyPatch):
-    """The live lease is cluster-global: its sentence (settle note included) is
-    stamped on ALL rows. No per-host settle verdict rides the wire — nothing
-    records a settle hold's waiting set any more."""
-    from base.deploy.state.cluster_lock import DeployLease, settle_note
-
-    monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
-    monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
-    lease = DeployLease(
-        holder="gateway-host:pid42",
-        held_for_s=300.0,
-        expires_in_s=600.0,
-        settle_hosts=["m2"],
-        settle_note=settle_note(["m2"]),
-    )
-
-    machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1", deploy_lease=lease))
-
-    assert all(
-        m.deploy_hold is not None and "gateway-host:pid42" in m.deploy_hold for m in machines
-    )
-    assert all("settle_waited_on" not in m.model_dump() for m in machines)
-
-
-def test_gather_stamps_hold_for_an_executing_lease(monkeypatch: pytest.MonkeyPatch):
-    """A lease with no settle fact (for example PITR provisioning) is stamped so the
-    roster can explain a refused acquire."""
-    from base.deploy.state.cluster_lock import DeployLease
-
-    monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
-    monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
-    lease = DeployLease(holder="gateway-host:pid42", held_for_s=60.0, expires_in_s=1740.0)
-
-    machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1", deploy_lease=lease))
-
-    assert all(m.deploy_hold is not None for m in machines)
-
-
-def test_gather_leaves_hold_blank_when_no_lease(monkeypatch: pytest.MonkeyPatch):
-    """No live lease -> the hold field at its default, on every row."""
-    monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
-    monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
-
-    machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1"))
-
-    assert all(m.deploy_hold is None for m in machines)
-
-
-def test_read_deploy_lease_degrades_on_operational_error(monkeypatch: pytest.MonkeyPatch):
-    """A connectivity blip while reading the lease blanks the hold banner instead of
-    failing the roster — mid-restart is exactly when the roster is asked for."""
-    import psycopg
-
-    def _boom() -> None:
-        raise psycopg.OperationalError("connection refused")
-
-    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _boom)
-    assert status_mod._read_deploy_lease() is None
+    assert [m.name for m in machines] == ["m1", "m2"]
 
 
 def test_gather_cluster_status_carries_probe_paused_reason(monkeypatch: pytest.MonkeyPatch):

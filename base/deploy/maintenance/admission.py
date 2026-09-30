@@ -2,8 +2,9 @@
 
 The existing pause-owner file is authoritative even when Postgres is offline.
 Its maintenance payload has no expiry. Ordinary startup releases it only after
-readiness; stranded-rollout recovery cannot override an incomplete service stop. Business API calls remain available while an
-already admitted model/action finishes; this gate only controls new work.
+readiness, and nothing overrides an incomplete service stop. Business API calls
+remain available while an already admitted model/action finishes; this gate only
+controls new work.
 """
 
 from collections.abc import Generator

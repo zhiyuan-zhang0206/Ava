@@ -26,6 +26,5 @@ The base-layer domain map below complements the public
 - [[paths.ava.okf.md]] — `$AVA_HOME` layout
 - [[install_registry.ava.okf.md]] — `installed.json` + the skill-scanner gate
 - [[base/packages/plugins/docs/enable_config.ava.okf.md]] — per-machine plugin enable state
-- [[cluster_lock.ava.okf.md]] — the cluster deploy lease
-- [[host_deploy_state.ava.okf.md]] — per-host deploy posture + updater lease
+- [[host_deploy_state.ava.okf.md]] — per-host deploy posture
 - [[base/agents/impersonation/docs/impersonation.ava.okf.md]] — cooperative local leases, native consent, external inbox ACKs and handoff

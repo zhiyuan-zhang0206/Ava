@@ -59,7 +59,7 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 | Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `base/packages/plugins/manifest.py`, `conventions/plugin-spec-v2.md` |
 | Per-machine OS jobs | launchd / crontab / schtasks registrars, idempotent, converge-registered (health probe, watchdog, autostart, logs), test switch `AVA_OS_JOBS_ENABLED=false` | `base/os_*.py`, `cli/commands/converge/_os_jobs.py` |
 | Cluster extension registry (S2, in progress) | `extensions` / `extension_blobs` tables; install writes row+blob; converge/boot materialize; adoption sweep; content-addressed by tree hash; trust rises only | `base/packages/extensions/registry.py`, `base/packages/extensions/materialize.py` |
-| Update coordination | cluster-wide DB update lock + in-flight detection; source-tree tamper detection (health-probe check 8, alert-only) | `base/deploy/state/cluster_lock.py`, `cli/commands/extensions/packages_refresh.py:_update_in_flight`, `base/deploy/git/source_tree_guard.py` |
+| Update coordination | per-home refresh flock; source-tree tamper detection (health-probe check 8, alert-only) | `cli/commands/extensions/packages_refresh.py`, `base/deploy/git/source_tree_guard.py` |
 | Existing boundaries | four-layer modification model; extension ownership (cluster/machine/agent); CLI scope convention; CLI-only updates | `decisions/2026-08-19-four-layer-modification-model.md`, `decisions/2026-08-21-extension-ownership-three-tiers.md`, `2026-08-02-cli-scope-convention.md`, `2026-08-05-cli-only-updates.md` |
 
 ## 3. Constraints the design must respect (hard facts)
@@ -187,7 +187,6 @@ Algorithm, per run:
 ```
 skip unless: os jobs enabled (when run from the job)
         and no refresh run is already active (per-home flock)
-        and no cluster update is in flight (reuse _update_in_flight() + gateway orchestration session)
         and this host's registry is readable
 
 for each channel with any due package:
@@ -230,7 +229,7 @@ Design decisions embedded above:
 - **Never auto-overwrite a human.** The local-edit guard is the existing R5 contract, reused verbatim; conflicts are recorded, not forced. `--force` remains a human-only flag.
 - **Bounded and polite.** Per-run wall budget, apply cap, network timeouts, ±jitter on intervals, exponential backoff on repeated errors (recorded in `last_result`).
 - **Removal is out of scope.** The pass never deletes packages; a package whose source disappeared upstream is left as-is — removal belongs to the converge cleanup path.
-- **Never a rollout.** The pass takes the per-home refresh flock and refuses while an update is in flight; it never restarts a service, never writes the checkout, never touches the DB schema. It may run while the cluster is fully live — that is the point.
+- **Never a rollout.** The pass takes the per-home refresh flock; it never restarts a service, never writes the checkout, never touches the DB schema. It may run while the cluster is fully live — that is the point.
 
 ### 5.4 Activation boundaries (the "no disruption" contract)
 
@@ -337,7 +336,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
   1. merge a skill-only PR to main → within the interval, the machine's load dir shows the new content, `applied_rev` = the merge commit, no service restarted (`ava status` shows nothing bounced), and an agent reads the new body via `ava.help`.
   2. hand-edit a load-dir copy → the next refresh refuses with a conflict record, content preserved.
   3. offline / fetch failure → old content stays, `last_result` records the error, backoff, cluster unaffected.
-  4. refresh during an in-flight fleet update → skipped (recorded).
+  4. a second refresh pass on the same home while one runs → skipped (recorded).
   5. `notify` package → a moved ref records "available" without applying.
   6. idempotence: consecutive runs apply nothing, checks are cheap (`ls-remote` only).
   7. no checkout mutation: `git status` in the prod checkout unchanged after refresh (source-tree guard agrees).
@@ -366,7 +365,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 | Content ahead of installed code breaks a *skill* | fail-soft by design; visible in transcript; CI on the repo checks content against main; escalate normally |
 | Content ahead of code breaks a *plugin* | `engines.ava` hard gate at every landing; refuse + retry later |
 | Auto-applied third-party content | **user-ruled default (24h auto)**; the scan gate, trust rules (no promotion, no auto `--accept-risk`) and the conflict guard are what keep it safe; per-package `notify`/`off` overrides |
-| Refresh races a rollout / the source-tree guard | per-home refresh flock; skip when update in flight; content never lives in the checkout; rollout legs skip channel-managed packages |
+| Refresh races a rollout / the source-tree guard | per-home refresh flock; content never lives in the checkout; rollout legs skip channel-managed packages |
 | A skill edit merged to main is *not* cluster-reviewed for the fleet | it is reviewed by the repo's PR/CI (same as any commit); the fast lane changes delivery, not review |
 | Disk growth (previous trees, fetched objects) | one previous tree per package (pruned on next apply); no mirrors in P1; wheel-mode mirrors get the same bound |
 | Core-plugin materialization changes module identity (import context is now uniform) | P2 verifies/locks the identity-observing surfaces (§6 P2b) + probe + atomic swap before any live path; isolation gates §3.9 |
@@ -402,7 +401,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Plugin discovery + loaders: `base/packages/plugins/enable_config.py:discover_plugins`, `agent/extensions/__init__.py:load_extensions`, `base/lm/plugin_providers.py`; roots: `base/paths/__init__.py:repo_plugins_dir/plugins_dir`, `base/deploy/release/runtime_interpreter.py:external_plugin_read_root`.
 - Manifest/engines gate: `base/packages/plugins/manifest.py` (`host_version_from_repo`, `check_host_engine`), `conventions/plugin-spec-v2.md`.
 - OS jobs: `base/host/system/cron.py` (5-min health tick as the registrar template), `cli/commands/converge/_os_jobs.py`, `AVA_OS_JOBS_ENABLED`.
-- Update coordination: `base/deploy/state/cluster_lock.py`, `cli/commands/extensions/packages_refresh.py:_update_in_flight`, `base/deploy/git/source_tree_guard.py` (tamper detection, alert-only); objects-only fetch: `cli/commands/extensions/packages_refresh.py`.
+- Update coordination: the per-home flock and objects-only fetch in `cli/commands/extensions/packages_refresh.py`; `base/deploy/git/source_tree_guard.py` (tamper detection, alert-only).
 - Extension ownership S1/S2: `decisions/2026-08-21-extension-ownership-three-tiers.md`, `future/infra/extension-ownership.md`, `base/packages/extensions/registry.py`, `base/packages/extensions/materialize.py`.
 - Four-layer model / builtin-plugin ruling: `decisions/2026-08-19-four-layer-modification-model.md` (revised in part: builtin plugins stay *authored* in the kernel but are *delivered* via the content channel).
 - Historical incident class: skill edit merged to main, runtime stale for two days (2026-08-27). R5 background: task #1013.

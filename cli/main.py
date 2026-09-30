@@ -120,7 +120,7 @@ _LITE_VERBS = frozenset(
 # current one; and why the read-only (`ls`, `status`) and probe-registration
 # subcommands are absent too.
 _ANCHORED_HOME_VERBS = frozenset({"stop", "pause", "restart", "converge", "logs", "maintenance"})
-_ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset({"recover", "db-authority"})
+_ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset({"db-authority"})
 
 
 def _print_settings_load_failure(e: ValidationError) -> int:

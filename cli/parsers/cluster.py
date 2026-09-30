@@ -37,12 +37,6 @@ def _h_cluster_resume(args: argparse.Namespace) -> int:
     return cmd_cluster_resume(name=args.name)
 
 
-def _h_cluster_recover(_args: argparse.Namespace) -> int:
-    from cli.commands.cluster.recover import cmd_cluster_recover
-
-    return cmd_cluster_recover()
-
-
 def _h_cluster_down(args: argparse.Namespace) -> int:
     from cli.commands.cluster.home import cmd_cluster_down
 
@@ -178,12 +172,6 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         p_.set_defaults(func=_h_cluster_pause if verb == "pause" else _h_cluster_resume)
 
     _add_db_authority_parser(cluster_sub)
-
-    cluster_recover_p = cluster_sub.add_parser(
-        "recover",
-        help="[cluster] recover an abandoned maintenance lease; refuses live ownership",
-    )
-    cluster_recover_p.set_defaults(func=_h_cluster_recover)
 
     cluster_down_p = cluster_sub.add_parser(
         "down",

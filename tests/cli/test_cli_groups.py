@@ -54,6 +54,9 @@ def test_cluster_group_has_down_and_destroy_and_no_listing() -> None:
     assert "ls" not in choices
     # The whole-cluster bounce left with the retired updater; `ava restart` is per unit.
     assert "restart" not in choices
+    # The stranded-lease clearer left with the deploy lease: a stranded pause is
+    # read with `ava maintenance status` and ended with `resume --cancel` / `repair`.
+    assert "recover" not in choices
 
 
 def test_start_rejects_retired_identity_flags(tmp_path: Path) -> None:

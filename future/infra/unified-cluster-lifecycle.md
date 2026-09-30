@@ -19,8 +19,10 @@ and the PITR activation transition. A cluster is updated from source by
 gate. Statements below about that path are void and the sections that only
 planned it are gone. What stays live: root and resource custody (item 1),
 the database authority that ordinary start uses (groups, generation 0, API
-admission), the protocol-zero publication fence and its cutover, and the
-retired-storage cleanup.
+admission) and the retired-storage cleanup. [A second
+decision](../../decisions/2026-09-30-remove-publication.md) deleted the
+managed-writer publication fence: hosted admission reads no deployment-wide
+state.
 
 ## Boundaries
 
@@ -62,18 +64,17 @@ retired-storage cleanup.
    - Every cluster reads `deployment_state.managed_writer_evidence->'pending'
      IS NULL` before this release is admitted. The retired updater's checked
      publication recovery is gone, and no runtime command clears a recorded
-     pending publication. It keeps fencing every deploy-lease acquire, including
-     PITR provisioning, until an operator's manual database repair clears
-     exactly the recorded value. The fence itself stays.
+     pending publication; an operator's manual database repair clears exactly
+     the recorded value.
    - `$AVA_HOME/installed_sha` has no reader or writer; the source-tree check
      alerts only on checkout edits of a source-run home. Delete the file in the
      cutover record.
-   - Do not run `ava cluster recover` on a host while a legacy updater, rollout,
-     cluster-restart or hold-recovery session may still be alive there. No
-     current code spawns such a session, so recovery no longer probes for one:
-     a legacy session is invisible to it until it takes its database lease. The
-     remaining guards (deploy-lease holder PID probe, host updater lease,
-     maintenance admission) cover every current owner.
+   - Do not remove `$AVA_HOME/run/deploy-pause-owner.json` on a host while a
+     legacy updater, rollout, cluster-restart or hold-recovery session, an `ava
+     stop`, or an `ava maintenance` command may still be alive there. No current
+     code spawns a legacy session, and no command clears a `paused` record one
+     left: once `ava maintenance status` shows no live owner, the operator
+     removes the journal by hand.
    - `$AVA_HOME/run/updater-handoff.json`, `updater-handoff.lock`,
      `updater-bootstrap-recovery.json` and `updater-spawn/` have no reader or
      writer: recovery no longer refuses on them. Delete them in the cutover
@@ -96,8 +97,10 @@ Physical schema deletion is not implemented in this slice.
 The same cutover must retire `cluster_last_update` and the unused updater-outcome
 columns in `host_deploy_state`. Their controller producers and status projections
 are removed together; historical values must not masquerade as a current release
-operation. Preserve active maintenance, publication and deployment guards until
-their replacement authority is implemented and verified. Mixed deployment-clock
+operation. The same cutover drops `deployment_state.managed_writer_evidence` and
+the `lock_runtime_publication_admission()` function, which no code reads or
+calls. Preserve active maintenance and deployment guards until their replacement
+authority is implemented and verified. Mixed deployment-clock
 and telemetry helpers still serve live deployment-window settlement; deleting
 their retired callers does not authorize removing those shared guards.
 The cutover must also reconcile any historical `deploy-probe` alert named
@@ -144,24 +147,20 @@ settled command state. Historical process/unknown rows and incomplete hosted
 identities refuse pending explicit cutover reconciliation. Hosted termination
 follows continuation/resource settlement, never agent-host process exit.
 
-This local proof does not replace the surviving database publication fence.
 The current resource path still permits legacy protocol-zero rows with unknown
 `incarnation_resources`, and ordinary spawn does not produce `ResourceBirth`.
 Consequently a local root proof cannot certify in-flight execution,
 managed resource admission, or fleet writer closure. Do not enable protocol one
 merely because local root evidence is available.
 
-No activation path exists: every admission is protocol zero. The retired
+No activation path exists: every admission writes protocol zero. The retired
 updater's activation chain (the pending journal's migration receipt, selector
 change, normal-service readbacks and the `current` commit recording the verified
 activation) bound per-service session readbacks and a version-2 selector that
 the release path does not produce; it is not a dormant implementation to
 reconnect. Protocol one would be a new design: the release/fleet path it was to
-ride on was removed. The publication storage helpers left without a production caller
-(`begin_pending_publication`, `adopt_pending_collection`,
-`require_current_publication`, the barrier's `record_collection`, and the
-synchronous `RuntimeAdmission.decide`) retire with the old publication journal
-below.
+ride on was removed. The publication storage helpers, the barrier and the
+runtime-admission decision are deleted.
 
 The replacement must preserve one transaction for runtime ownership and resource
 admission. A fresh metadata INSERT may stamp `ResourceBirth`; an existing agent
@@ -177,9 +176,8 @@ needed. Retain the evidence used to reconcile each existing metadata row. Do not
 mass-convert unknown NULL resources into `{}` or a new-agent birth marker;
 unresolved rows remain inadmissible. Install the database contract that rejects
 incompatible future writers before admitting the replacement protocol. Only
-after this boundary is proven can the old publication journal, preparation
-grants, legacy selector parser, protocol-zero fallback and their dead controllers
-be deleted together. No permanent row-adoption compatibility path belongs in the
+after this boundary is proven can the preparation grants, legacy selector
+parser, protocol-zero fallback and their dead controllers be deleted together. No permanent row-adoption compatibility path belongs in the
 new runtime.
 
 Implemented for existing agents (FC-4a; why: `decisions/2026-09-27-existing-agent-closed-predecessor-admission.md`):

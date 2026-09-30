@@ -13,7 +13,7 @@ What it flags — any of these inside an `async def` (not inside a nested
   `fetchone` / `fetchall` / `commit` / `rollback` calls
 - known sync DB helpers (`insert_inbound_message`, `get_agent_status`,
   `agent_exists`, `publish_agent_updated_sync`, ...)
-- sync ops (`config_read_op`, `cluster_recover_op`, `spawn_agent`, ...)
+- sync ops (`config_read_op`, `spawn_agent`, ...)
 - process/session backends (`kill_session`, `has_session`, `force_kill`,
   `process_alive`, `capture_pane`)
 - filesystem (`shutil.rmtree`, `Path.write_bytes/read_text`, ...)
@@ -98,7 +98,6 @@ _REPO_BLOCKING_HELPERS = {
     "config_write_op",
     "spawn_agent",
     "resurrect_agent",
-    "cluster_recover_op",
     "cluster_stopping_op",
     # process / session backends
     "kill_session",

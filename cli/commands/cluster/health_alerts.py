@@ -409,10 +409,10 @@ def _alert_recovery(home: Path) -> None:
 
 
 def _deploy_suppression() -> str | None:
-    """Pause alert grading only while a live deploy explains the outage.
+    """Pause alert grading only while an open deploy window explains the outage.
 
-    An expired or unreadable deploy owner explains nothing, so severity resumes
-    from the outage's true start.
+    An unreadable window explains nothing, so severity resumes from the
+    outage's true start.
     """
     from ops.deploy_window import deploy_in_flight
 

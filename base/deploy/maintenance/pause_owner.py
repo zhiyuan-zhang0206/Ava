@@ -5,13 +5,12 @@ acquired_at)`` capability in this atomic local journal, so a compensating
 resume still works while the gateway database is down. Every transition
 matches only that journal; a delayed generation A resume can therefore never
 unpause generation B. A ``paused`` or ``resumed`` record without a maintenance
-hold is what the retired updater's stop op left: readers keep honoring it and
-recovery removes it (`clear` / `force_clear`).
+hold is what the retired updater's stop op left: readers keep honoring it, and
+only an operator's `rm` of the journal removes it.
 """
 
 from __future__ import annotations
 
-import contextlib
 import datetime as dt
 import json
 import logging
@@ -147,39 +146,6 @@ def _write_atomic(path: Path, payload: dict[str, object]) -> None:
         _fsync_parent(path)
     except OSError:
         _log.warning("[pause-owner] directory fsync failed after commit", exc_info=True)
-
-
-def clear(holder: str, acquired_at: dt.datetime) -> bool:
-    """CAS-clear one recovered/completed generation; never a replacement."""
-    path = state_path()
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        current = _read_unlocked(path)
-        if current.maintenance is not None:
-            return False
-        if not current.matches(holder, acquired_at):
-            return False
-        path.unlink(missing_ok=True)
-        with contextlib.suppress(OSError):
-            _fsync_parent(path)
-        return True
-
-
-def force_clear() -> bool:
-    """Explicit recovery of malformed state after its no-live-owner proof."""
-    path = state_path()
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        _refuse_maintenance(_read_unlocked(path))
-        existed = path.exists()
-        path.unlink(missing_ok=True)
-        if existed:
-            with contextlib.suppress(OSError):
-                _fsync_parent(path)
-        return existed
-
-
-def _refuse_maintenance(current: PauseOwnerSnapshot) -> None:
-    if current.status == "paused" and current.maintenance is not None:
-        raise RuntimeError("maintenance requires its exact operation's explicit resume")
 
 
 def begin_maintenance(

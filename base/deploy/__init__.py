@@ -1,4 +1,4 @@
-"""Deployment and unit lifecycle: publication, holds, deploy state, timing.
+"""Deployment and unit lifecycle: holds, deploy state, timing.
 
 Sub-packages:
 
@@ -6,17 +6,15 @@ Sub-packages:
 - ``release`` — config-free loaded-runtime identity, the startup-input digest,
   verified reads, lock and collector acquisition, the editable-install guard and
   dated release tags.
-- ``writers`` — managed-writer publication evidence and admission.
 - ``maintenance`` — explicit maintenance holds: admission, pause ownership,
   restart cohorts.
 - ``lifecycle`` — local unit lifecycle state: serving generations, the desired
-  service set, the status journal, home lifecycle mutexes.
-- ``state`` — durable deploy state: the cluster deploy lease, host deploy
-  posture and updater lease.
+  service set, the status journal, the home lifecycle mutex.
+- ``state`` — durable deploy state: the per-host deploy posture.
 
 The top-level modules are the deploy clock family: ``timing`` (the clock lattice
 every ordered timing constant registers in), ``progress_timeout`` (the one
-"stopped making progress" timeout and the lease rule around it), ``stop_timing``
+"stopped making progress" timeout and the deploy-family readiness and agent-lease clocks), ``stop_timing``
 (host cancellation diagnostics) and ``transition`` (time-graded severity for bounded
 transition windows).
 

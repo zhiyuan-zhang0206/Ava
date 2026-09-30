@@ -432,7 +432,7 @@ def _anchored(monkeypatch: pytest.MonkeyPatch, home: str = "/Users/x/.ava-worktr
         ["stop", "-y"],
         ["restart"],
         ["converge"],
-        ["cluster", "recover"],
+        ["cluster", "db-authority", "issue-unit"],
         ["logs", "retention"],
     ],
 )

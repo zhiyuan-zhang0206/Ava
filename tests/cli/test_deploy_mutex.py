@@ -1,9 +1,5 @@
-"""Deploy mutual exclusion at the two actors that can move the cluster pin.
-
-The lease existed and every automated healer already read it; the defect was that
-its protected window was shorter than the dangerous one, and that the health probe
-was the single actor never consulting it.
-"""
+"""Alert grading while a deploy window is open: the health probe asks
+`ops.deploy_window`, and "cannot tell" never suppresses an alert."""
 
 from __future__ import annotations
 
@@ -18,7 +14,7 @@ from cli.commands.cluster import health_alerts as alerts
 from ops.deploy_window import DeployWindow
 
 _IN_FLIGHT = DeployWindow(
-    active=True, detail="a cluster deploy is still settling — gateway-host:pid81319 (held 5m)"
+    active=True, detail="machine 'win' is mid-deploy (host_deploy_state.posture=paused)"
 )
 _IDLE = DeployWindow(active=False, detail="no deploy in flight")
 
@@ -45,9 +41,6 @@ def _sent_alerts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 def _healthy_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
     """This file exercises deploy suppression, not live Postgres/Redis availability."""
     monkeypatch.setattr(health, "_data_plane_abnormal", lambda: False)
-
-
-# ─── the human/agent actor: a second deploy is refused, legibly ──────────────
 
 
 # ─── alert grading during a deploy ───────────────────────────────────────
@@ -78,19 +71,21 @@ def test_deploy_window_tracks_episode_and_grades_after_it_ends(
     ]
 
 
-def test_an_unreadable_lease_does_not_suppress(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_an_unreadable_posture_table_does_not_suppress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """ "Cannot prove a deploy is running" must mean "assume none is" — a probe that
     goes quiet the moment its evidence source breaks is the failure it exists to
     catch."""
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
+    monkeypatch.setattr("base.cluster.machine_exclusions.list_excluded_machines", list)
     monkeypatch.setattr(
-        "base.deploy.state.cluster_lock.read_update_lease",
+        "base.deploy.state.host_deploy_state.read_all",
         lambda: (_ for _ in ()).throw(RuntimeError("db gone")),
     )
-    monkeypatch.setattr("base.cluster.machines.list_all", list)
     monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
     monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(health, "_ingest_alert", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert health.run_health_probe() == 1
+    assert "alert grading paused" not in capsys.readouterr().err
