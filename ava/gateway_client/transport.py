@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json as _json
-import time as _time
 import uuid as _uuid
+from collections.abc import Callable
 
 import ava
 from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
@@ -15,6 +15,7 @@ from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency
 from base.cluster.auth import bearer_header, client_bearer
 from base.config import settings
+from base.host.net.resilience import Policy, http_classifier, retry
 
 # Singleton: process-wide shared connection pool. Connect/read timeout is a
 # guard against a stuck gateway line. Most gateway ops are near-instant,
@@ -217,6 +218,65 @@ def _wire_reason(resp: httpx.Response) -> tuple[ErrorReason, dict] | None:  # no
     return reason, body
 
 
+class _TransientResponseError(Exception):
+    """Carry the original HTTP response through the exception-based retry executor."""
+
+    def __init__(self, response: httpx.Response) -> None:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+        self.response = response
+
+
+def _request_with_retry(
+    request: Callable[[], httpx.Response],  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    attempts: int,
+    *,
+    retryable: bool = True,
+) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    """Execute one route's policy while keeping its final wire response intact."""
+    import httpx
+
+    pre_send_errors = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+    def classify(exc: Exception) -> bool:
+        if not retryable:
+            # A non-idempotent POST can only be repeated when nothing was sent.
+            return isinstance(exc, pre_send_errors)
+        return http_classifier(exc)
+
+    def once() -> httpx.Response:
+        resp = request()
+        if retryable and resp.status_code in _TRANSIENT_HTTP_STATUSES:
+            raise _TransientResponseError(resp)
+        return resp
+
+    if attempts < 1:
+        # Preserve the old range(attempts) behavior for a zero/negative override.
+        raise GatewayUnavailable(
+            f"Gateway transport error at {_client_singleton().base_url} (after {attempts} retries): None"
+        )
+    policy = Policy(
+        max_attempts=attempts,
+        backoff=_retry_delay_seconds,
+        jitter="none",  # backoff already includes the exact agent-only phase
+        classify=classify,
+        respect_retry_after=False,
+    )
+    try:
+        return retry(policy)(once)
+    except _TransientResponseError as exc:
+        # The caller still owns raise_from_response and its wire-reason mapping.
+        return exc.response
+    except httpx.TransportError as exc:
+        if not retryable and not isinstance(exc, pre_send_errors):
+            raise GatewayUnavailable(
+                f"Gateway transport error at {_client_singleton().base_url} "
+                f"(no retry: non-idempotent request; result unknown, may have been delivered): {exc!s}"
+            ) from exc
+        raise GatewayUnavailable(
+            f"Gateway transport error at {_client_singleton().base_url} "
+            f"(after {attempts} retries): {exc!s}"
+        ) from exc
+
+
 def post(
     path: str,
     json: dict | None = None,
@@ -290,43 +350,14 @@ def post(
     key = idempotency_key or _uuid.uuid4().hex
     headers = {"Idempotency-Key": key} if semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY else None
 
-    last_err: Exception | None = None
     retries = _MAX_RETRIES if max_retries is None else max_retries
-    for attempt in range(retries):
-        try:
-            resp = _client_singleton().post(
-                path, json=json or {}, params=params, timeout=per_call, headers=headers
-            )
-        except httpx.TransportError as e:
-            if not retryable and not isinstance(
-                e, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
-            ):
-                # The request may have landed; only pre-send failures are safe to retry.
-                raise GatewayUnavailable(
-                    f"Gateway transport error at {_client_singleton().base_url} "
-                    f"(no retry: non-idempotent request; result unknown, may have been delivered): {e!s}"
-                ) from e
-            last_err = e
-        else:
-            if resp.status_code in _TRANSIENT_HTTP_STATUSES and retryable and attempt < retries - 1:
-                # Backend blip; the request is safe to re-send (idempotent,
-                # or AtLeastOnceWithKey — the server dedups by our key).
-                # Record the response and retry — the final failure (if
-                # retries run out) is still loud: the last response is
-                # returned so `raise_from_response` surfaces the wire error /
-                # HTTPStatusError with the full status + body.
-                last_err = httpx.HTTPStatusError(
-                    f"transient HTTP {resp.status_code} for POST {path}",
-                    request=resp.request,
-                    response=resp,
-                )
-            else:
-                return resp
-        if attempt < retries - 1:
-            _time.sleep(_retry_delay_seconds(attempt))
-    raise GatewayUnavailable(
-        f"Gateway transport error at {_client_singleton().base_url} (after {retries} retries): {last_err!s}"
-    ) from last_err
+    return _request_with_retry(
+        lambda: _client_singleton().post(
+            path, json=json or {}, params=params, timeout=per_call, headers=headers
+        ),
+        retries,
+        retryable=retryable,
+    )
 
 
 def get(
@@ -352,26 +383,9 @@ def get(
 
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
     retries = _MAX_RETRIES if max_retries is None else max_retries
-    last_err: Exception | None = None
-    for attempt in range(retries):
-        try:
-            resp = _client_singleton().get(path, params=params, timeout=per_call)
-        except httpx.TransportError as e:
-            last_err = e
-        else:
-            if resp.status_code in _TRANSIENT_HTTP_STATUSES and attempt < retries - 1:
-                last_err = httpx.HTTPStatusError(
-                    f"transient HTTP {resp.status_code} for GET {path}",
-                    request=resp.request,
-                    response=resp,
-                )
-            else:
-                return resp
-        if attempt < retries - 1:
-            _time.sleep(_retry_delay_seconds(attempt))
-    raise GatewayUnavailable(
-        f"Gateway transport error at {_client_singleton().base_url} (after {retries} retries): {last_err!s}"
-    ) from last_err
+    return _request_with_retry(
+        lambda: _client_singleton().get(path, params=params, timeout=per_call), retries
+    )
 
 
 def patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
@@ -381,51 +395,11 @@ def patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821 
     notice) is idempotent by contract: repeating it cannot change the
     outcome beyond the first application.
     """
-    import httpx
-
-    last_err: Exception | None = None
-    for attempt in range(_MAX_RETRIES):
-        try:
-            resp = _client_singleton().patch(path, json=json or {})
-        except httpx.TransportError as e:
-            last_err = e
-        else:
-            if resp.status_code in _TRANSIENT_HTTP_STATUSES and attempt < _MAX_RETRIES - 1:
-                last_err = httpx.HTTPStatusError(
-                    f"transient HTTP {resp.status_code} for PATCH {path}",
-                    request=resp.request,
-                    response=resp,
-                )
-            else:
-                return resp
-        if attempt < _MAX_RETRIES - 1:
-            _time.sleep(_retry_delay_seconds(attempt))
-    raise GatewayUnavailable(
-        f"Gateway transport error at {_client_singleton().base_url} (after {_MAX_RETRIES} retries): {last_err!s}"
-    ) from last_err
+    return _request_with_retry(
+        lambda: _client_singleton().patch(path, json=json or {}), _MAX_RETRIES
+    )
 
 
 def _delete(path: str) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Unified DELETE wrapper + transient-failure retry + failure → GatewayUnavailable. Same policy as `post`; DELETE is idempotent by semantics."""
-    import httpx
-
-    last_err: Exception | None = None
-    for attempt in range(_MAX_RETRIES):
-        try:
-            resp = _client_singleton().delete(path)
-        except httpx.TransportError as e:
-            last_err = e
-        else:
-            if resp.status_code in _TRANSIENT_HTTP_STATUSES and attempt < _MAX_RETRIES - 1:
-                last_err = httpx.HTTPStatusError(
-                    f"transient HTTP {resp.status_code} for DELETE {path}",
-                    request=resp.request,
-                    response=resp,
-                )
-            else:
-                return resp
-        if attempt < _MAX_RETRIES - 1:
-            _time.sleep(_retry_delay_seconds(attempt))
-    raise GatewayUnavailable(
-        f"Gateway transport error at {_client_singleton().base_url} (after {_MAX_RETRIES} retries): {last_err!s}"
-    ) from last_err
+    return _request_with_retry(lambda: _client_singleton().delete(path), _MAX_RETRIES)
