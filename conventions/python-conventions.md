@@ -90,8 +90,9 @@ its own script (`scripts/lint/patch_targets.py`).
   `scripts/lint/patch_targets.py` rejects a patch (`monkeypatch.setattr`,
   `patch`, `patch.object`, `mocker.patch`, string or object target) of a
   `_private` name whose owning package does not contain the test's home. The
-  home comes from the test's own imports, not its directory, so moving a test
-  into `<pkg>/tests/` changes no verdict; the ambient environment
+  home is the deepest package that holds or directly depends on everything the
+  test imports (its own imports plus what the package imports), not its
+  directory, so moving a test into `<pkg>/tests/` changes no verdict; the ambient environment
   (`base.config`, `base.paths`, machine identity, `AVA_*`) is exempt. Fix it
   by patching a public name, giving the owner an injection seam (a parameter,
   a settings field, a public setter), or moving the test into the owner.
@@ -129,7 +130,9 @@ lowered or deleted — so a fixed reach-in cannot silently return uncounted.
 Against the base revision all three sections are shrink-only: a new key is accepted only against a same-file
 removal of the same private name with equal or greater value (the private
 owner module moved), and a git `-M` rename carries keys once they are migrated
-to the new path by hand.
+to the new path by hand. Changing how a section's sites are measured raises
+its version in `scripts/structure/baseline/rules.json` and re-freezes it; for
+that one change the guard holds the section's total instead of its keys.
 
 What this means for common edits:
 

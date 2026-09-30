@@ -29,19 +29,23 @@ documents classes A-E and U). A point is a violation (class D) when all of these
 
 The home is the package the file's own first-party references place it in, not the
 directory it sits in (`scripts/structure/placement.py`), so the verdict is the same before
-and after a test moves into `<pkg>/tests/`. Recognised forms: `monkeypatch.setattr /
-delattr / setitem` (string target or object plus attribute name), `patch`, `patch.object`,
-`patch.dict`, `patch.multiple`, `mocker.patch`, as calls, decorators or `with` blocks.
-Deep attributes of another package's public name (`module.Class.method`) are counted in the
-report but are not violations yet; a target the linter cannot resolve statically is counted,
-never flagged.
+and after a test moves into `<pkg>/tests/`. It is the deepest package that holds or directly
+depends on every module the file references: a test of `cli.commands.cluster.health` that
+also references `cli.commands._probe` lives in `cli/commands/cluster` when `health.py`
+imports `_probe`, and a private name of that package is then its own. Recognised forms:
+`monkeypatch.setattr / delattr / setitem` (string target or object plus attribute name),
+`patch`, `patch.object`, `patch.dict`, `patch.multiple`, `mocker.patch`, as calls, decorators
+or `with` blocks. Deep attributes of another package's public name (`module.Class.method`)
+are counted in the report but are not violations yet; a target the linter cannot resolve
+statically is counted, never flagged.
 
 ## Fixing a violation
 
 The message names the package that owns the private name and the relation of the test to it:
 
 - the test lives in an ancestor package (its imports span several packages) and patches a
-  descendant's private name: move the test down into the owning package, or
+  descendant's private name: move the test down into the owning package (a test that also
+  needs a package the owner does not import cannot sit there: split the file), or
 - give the owning package a public entry point or injection seam (a parameter, a settings
   field, a public setter) and patch that.
 
@@ -49,14 +53,26 @@ There is no per-site opt-out. Today's sites are frozen in the `patch_targets` se
 structure baseline shards (`scripts/structure/baseline/`) as `path::target -> site count`:
 growth is a violation, a fixed site fails until its entry is lowered or removed, and against
 the base revision the section is shrink-only (a moved owner may carry a key, `git -M`
-renames carry keys), all enforced by `scripts/lint/code_structure.py`.
+renames carry keys), all enforced by `scripts/lint/code_structure.py`. Changing how a site
+is measured (the placement rule) re-freezes the section under a higher version in
+`scripts/structure/baseline/rules.json`; across that one change the guard holds the total
+(it may not rise) instead of the keys.
 
 ## Scope and cost
 
-Scans `tests/` and every `**/tests/` under the governed packages. A file's result depends
-only on its own text plus `pyproject.toml`, so pre-commit passes the changed test files and
-only those are checked; a changed lint script, placement module or baseline shard triggers a
-full scan. A frozen entry whose file was deleted is stale wherever the run started.
+Scans `tests/` and every `**/tests/` under the governed packages. A file's result depends on
+its own text, `pyproject.toml` and the direct imports of the non-test source (the home
+follows what the subject's package imports), so a production import change can move the home
+of a test nobody touched. The checks split accordingly:
+
+- pre-commit (`lint-patch-targets`) passes the changed test files and only those are
+  checked; a changed lint script, placement module or baseline shard triggers a full scan;
+- pre-push (`lint-patch-targets-full`) and the CI structure job scan everything, so a
+  production import change is caught before it merges.
+
+A frozen entry whose file was deleted is stale wherever the run started. The production
+imports are read from the working tree on every run (about 0.4 s warm, 1.5-2.5 s cold) and
+cached per file in `.cache/structure/`; no dependency graph is committed.
 """
 
 from __future__ import annotations

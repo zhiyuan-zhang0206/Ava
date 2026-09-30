@@ -9,6 +9,9 @@ for the exact rule (`shard_of`) and `scripts/lint/code_structure.py` for how
 the shards are merged, validated and compared against the base revision. An
 entry filed under the wrong shard fails the gate.
 
+`rules.json` is not a shard: it records the rule version a section was frozen under
+(`baseline_shards.py` explains how the guard uses it when a rule changes).
+
 This README is committed even when every shard is empty (all structural debt
 paid off): git does not track empty directories, so without it a fully clean
 baseline directory would vanish from the tree and become indistinguishable

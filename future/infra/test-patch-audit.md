@@ -5,10 +5,10 @@ packages: which private names of other packages tests replace, from which packag
 often. It is a census, not a design: what a seam looks like for a given target is decided
 per package when that package's tests are worked through.
 
-The numbers are the output of `scripts/lint/patch_targets.py --report` on `6e6347dbb`
-(904 test files with patch points). Regenerate after every package move or injection
+The numbers are the output of `scripts/lint/patch_targets.py --report` on `ab1ca1c0a`
+(839 test files with patch points). Regenerate after every package move or injection
 refactor: the class D counts fall as seams appear, and the frozen `patch_targets` section of
-`scripts/structure/baseline/` (642 keys, 1472 sites now) shrinks in step. Rule and
+`scripts/structure/baseline/` (325 keys, 685 sites now) shrinks in step. Rule and
 fixes: [python-conventions](../../conventions/python-conventions.md), Rule 8.
 
 ## The five classes
@@ -16,7 +16,10 @@ fixes: [python-conventions](../../conventions/python-conventions.md), Rule 8.
 Every patch point of a test file (`monkeypatch.setattr` / `delattr` / `setitem` with a string
 or an object target, `patch`, `patch.object`, `patch.dict`, `patch.multiple`, `mocker.patch`,
 also as decorators and `with` blocks) lands in exactly one class. A test's *home* is the
-package its own first-party imports place it in, not the directory it sits in.
+deepest package that holds or directly depends on every module the test references
+(`scripts/structure/placement.py`), not the directory it sits in: a test of `a.x` and `b.y`
+lives in `b` when `b`'s production code imports `a`. The home follows production imports, so
+the census moves when they do.
 
 - **A, environment boundary.** Not repository code: stdlib, third-party, the runtime, the
   test harness, or an environment variable that is not an `AVA_*` setting.
@@ -28,7 +31,8 @@ package its own first-party imports place it in, not the directory it sits in.
 - **D, violation.** A private name (a single leading underscore, on an attribute or on a
   module segment) whose owning package does not contain the test's home. Reported by relation:
   `ancestor` (the test lives in an ancestor package and reaches into a descendant's private),
-  `other-unit`, `sibling`, `top-level` (a test with no package home).
+  `other-unit`, `sibling` (same unit, the home is in another sub-package than the owner),
+  `top-level` (a test with no package home).
 - **E, global environment.** The explicit list `E_MODULES` in
   `scripts/structure/patch_targets.py` (settings, paths, machine and cluster identity, env
   resolution, ambient services) and `AVA_*` environment variables. Tests replace these through
@@ -39,66 +43,66 @@ package its own first-party imports place it in, not the directory it sits in.
 
 | class | meaning | points |
 |---|---|---|
-| A | environment boundary (stdlib, third-party, runtime, non-AVA env vars) | 1892 |
-| B | own package (the owning package contains the test's home) | 2633 |
-| C | another package's public name | 2443 |
-| D | violation: a private name of a package the test does not belong to | 1472 |
-| E | global environment (settings, paths, identity, env resolution, ambient services) | 3414 |
-| U | unresolved (object not statically known) | 282 |
-|  | total patch points | 12136 |
+| A | environment boundary (stdlib, third-party, runtime, non-AVA env vars) | 1763 |
+| B | own package (the owning package contains the test's home) | 3204 |
+| C | another package's public name | 2030 |
+| D | violation: a private name of a package the test does not belong to | 685 |
+| E | global environment (settings, paths, identity, env resolution, ambient services) | 3320 |
+| U | unresolved (object not statically known) | 239 |
+|  | total patch points | 11241 |
 
-Class C includes 150 deep attributes (`module.Class.method`), not violations.
+Class C includes 88 deep attributes (`module.Class.method`), not violations.
 
 ## Patch points by test home (top 15)
 
 | test home | files | points | A | B | C | D | E | U |
 |---|---|---|---|---|---|---|---|---|
-| `base` | 90 | 1318 | 333 | 0 | 237 | 144 | 586 | 18 |
-| `cli` | 73 | 997 | 115 | 42 | 361 | 221 | 244 | 14 |
-| `gateway` | 76 | 944 | 75 | 28 | 300 | 206 | 333 | 2 |
-| `cli/commands` | 31 | 887 | 75 | 78 | 222 | 245 | 261 | 6 |
-| `ava` | 30 | 618 | 91 | 114 | 65 | 121 | 217 | 10 |
-| `services/agent_host` | 45 | 511 | 28 | 192 | 136 | 54 | 99 | 2 |
-| `cli/commands/data_plane` | 16 | 433 | 34 | 218 | 54 | 12 | 115 | 0 |
-| `ops` | 20 | 375 | 24 | 50 | 176 | 67 | 57 | 1 |
-| `agent` | 34 | 304 | 20 | 16 | 97 | 74 | 95 | 2 |
-| `services/agent_ops` | 9 | 213 | 4 | 115 | 31 | 3 | 59 | 1 |
-| `cli/commands/converge` | 12 | 210 | 33 | 51 | 75 | 10 | 38 | 3 |
-| `scripts` | 16 | 202 | 95 | 26 | 11 | 32 | 3 | 35 |
-| `services/pitr` | 16 | 190 | 34 | 2 | 50 | 39 | 59 | 6 |
-| `agent/graph` | 12 | 189 | 8 | 13 | 29 | 10 | 129 | 0 |
-| `cli/commands/lifecycle` | 12 | 187 | 17 | 29 | 72 | 41 | 26 | 2 |
+| `cli/commands/lifecycle` | 25 | 601 | 50 | 225 | 172 | 44 | 108 | 2 |
+| `gateway` | 56 | 592 | 38 | 25 | 224 | 54 | 250 | 1 |
+| `services/agent_host` | 45 | 509 | 28 | 192 | 134 | 54 | 99 | 2 |
+| `ava` | 24 | 468 | 58 | 79 | 49 | 71 | 201 | 10 |
+| `base/lm` | 11 | 374 | 145 | 45 | 1 | 2 | 181 | 0 |
+| `cli/commands/data_plane` | 13 | 357 | 33 | 162 | 42 | 23 | 97 | 0 |
+| `cli` | 27 | 338 | 53 | 42 | 49 | 55 | 136 | 3 |
+| `base` | 25 | 332 | 55 | 0 | 62 | 55 | 149 | 11 |
+| `cli/commands/cluster` | 8 | 281 | 24 | 137 | 41 | 3 | 76 | 0 |
+| `ops` | 12 | 270 | 19 | 60 | 123 | 29 | 38 | 1 |
+| `agent/graph` | 19 | 257 | 6 | 35 | 52 | 4 | 158 | 2 |
+| `gateway/routers` | 13 | 247 | 30 | 64 | 92 | 3 | 58 | 0 |
+| `base/telemetry` | 6 | 244 | 44 | 23 | 19 | 10 | 148 | 0 |
+| `cli/parsers` | 11 | 239 | 28 | 0 | 149 | 20 | 42 | 0 |
+| `cli/commands` | 14 | 222 | 22 | 2 | 49 | 58 | 85 | 6 |
 
 ## Class D
 
-1472 points, 642 distinct (file, target) keys, 267 files.
+685 points, 325 distinct (file, target) keys, 151 files.
 
 | relation | meaning | points |
 |---|---|---|
-| ancestor | the test's home is a strict ancestor of the owner (patches a descendant's private) | 1067 |
-| other-unit | the owner is in a different top-level unit | 384 |
-| sibling | same unit, another lineage | 11 |
+| ancestor | the test's home is a strict ancestor of the owner (patches a descendant's private) | 344 |
+| other-unit | the owner is in a different top-level unit | 268 |
+| sibling | same unit, another lineage | 63 |
 | top-level | the test has no package home | 10 |
 
 ### By test home (top 15)
 
 | test home | D points |
 |---|---|
-| `cli/commands` | 245 |
-| `cli` | 221 |
-| `gateway` | 206 |
-| `base` | 144 |
-| `ava` | 121 |
-| `agent` | 74 |
-| `ops` | 67 |
+| `ava` | 71 |
+| `cli/commands` | 58 |
+| `base` | 55 |
+| `cli` | 55 |
 | `services/agent_host` | 54 |
-| `cli/commands/lifecycle` | 41 |
-| `ava_builtins/plugins` | 40 |
-| `services/pitr` | 39 |
-| `scripts` | 32 |
-| `ava/gateway_client` | 13 |
-| `cli/commands/data_plane` | 12 |
-| `ava_builtins/plugins/ava_memory` | 11 |
+| `gateway` | 54 |
+| `cli/commands/lifecycle` | 44 |
+| `ops` | 29 |
+| `ava_builtins/plugins` | 25 |
+| `cli/commands/data_plane` | 23 |
+| `cli/parsers` | 20 |
+| `agent` | 18 |
+| `scripts` | 18 |
+| `agent/graph/claim` | 16 |
+| `cli/commands/converge` | 15 |
 
 ### By production module (top 20)
 
@@ -107,42 +111,42 @@ patched and the test homes that patch them. This is the injection-seam work list
 
 | production module | points | private names | patched from (test home) |
 |---|---|---|---|
-| `cli.commands.cluster.health` | 71 | `_gateway_liveness_with_retry` 14, `_service_probes` 9, `_agent_population` 8 | `cli/commands` 63, `cli` 8 |
-| `cli.commands.lifecycle.root_driver` | 69 | `_stop_root_service_tree` 15, `_root_client` 10, `_launch_service_tree` 9 | `cli/commands` 56, `cli` 11, `cli/commands/observability` 1, `(top-level)` 1 |
-| `cli.release_transition.launcher_linux` | 66 | `_command` 29, `_properties` 19, `_boot_id` 5 | `cli` 66 |
-| `base.host.net.resilience` | 49 | `_sleep` 29, `_asleep` 13, `_agent_phase` 7 | `ava/gateway_client` 13, `services/memory_indexer/embeddings` 10, `base/lm` 7, `services/browser` 5 |
 | `ava.mcps` | 43 | `_read_cache` 10, `_get_remote_client` 9, `_sessions` 8 | `ava` 40, `agent` 3 |
-| `ops.lifecycle` | 40 | `_cluster_rpc` 16, `_recovery_halt_reason` 5, `_cancel_hosted_turn_best_effort` 4 | `ops` 35, `agent` 3, `gateway/agents` 1, `services/delivery_watchdog` 1 |
-| `ava.mcps._daemon` | 39 | `_daemon` 39 | `ava` 39 |
-| `ava.agents` | 38 | `_client` 38 | `gateway` 21, `ava_builtins/plugins` 15, `agent` 2 |
 | `agent.impersonation` | 32 | `_PROCESS_STARTED_MONOTONIC` 9, `_spawn_codex_relay` 8, `_provider_anchor_states` 6 | `services/agent_host` 32 |
 | `cli.commands.extensions.external_skills` | 28 | `_rename_no_replace` 20, `_stage_copy` 3, `_commit_activation` 2 | `cli/commands` 28 |
-| `gateway.cluster.status` | 25 | `_cluster_rpc` 15, `_compute_stats_dashboard` 8, `_probe_agent_runner` 1 | `gateway` 25 |
-| `agent.graph.exec.node` | 21 | `_run_in_subprocess` 12, `_run_agent_code` 9 | `agent` 14, `ava_builtins/plugins/ava_syntax_fix` 7 |
 | `base.deploy.git.memory_repo` | 21 | `_run_git` 13, `_download_pool_snapshot` 4, `_init_local_repo` 2 | `base` 21 |
-| `cli.commands.lifecycle._temporary_stop` | 21 | `_temporary_stop` 21 | `cli` 21 |
-| `cli.commands.lifecycle.stop` | 21 | `_do_stop` 9, `_reap_cluster_chrome` 3, `_release_self_heal_pause` 3 | `cli` 18, `cli/commands` 3 |
-| `gateway.agents.router` | 21 | `_forward_spawn_to_remote` 20, `_mark_launch_failure` 1 | `gateway` 21 |
-| `services.permissions_helper.lifecycle` | 21 | `_expected_dr` 4, `_BUILD_DIR` 3, `_keychain_lock_reason` 3 | `cli/commands/lifecycle` 19, `cli` 2 |
-| `services.pitr.restore.drill` | 20 | `_require_group_leader` 2, `_live_identity` 2, `_prepare_pgdata` 2 | `services/pitr` 20 |
-| `cli.commands.observability.lgtm_native` | 19 | `_load_versions` 5, `_verify_loki` 4, `_download_and_verify` 4 | `cli/commands` 19 |
-| `gateway.routers.fleet_graph` | 19 | `_monotonic` 6, `_fetch_loki_edges` 4, `_fetch_archive_edges` 3 | `gateway` 19 |
+| `ops.lifecycle` | 21 | `_recovery_halt_reason` 5, `_wake_suppression_active` 3, `_recovery_halted` 3 | `ops` 21 |
+| `services.permissions_helper.lifecycle` | 19 | `_BUILD_DIR` 3, `_keychain_lock_reason` 3, `_interactive_signing_reason` 3 | `cli/commands/lifecycle` 19 |
+| `ava.mcps._remote` | 18 | `_remote` 18 | `ava` 18 |
+| `scripts.lint.async_no_sync_blocking` | 18 | `_REPO_ROOT` 9, `_ROOT` 2, `_DEFINITION_DIRS` 2 | `scripts` 18 |
+| `agent.startup` | 16 | `_page_server_alive` 9, `_last_reconcile_at` 7 | `agent/graph/claim` 16 |
+| `cli.commands.lifecycle.root_driver` | 16 | `_stop_root_service_tree` 8, `_root_tree_selection` 4, `_root_tree_plan` 2 | `cli/commands/data_plane` 10, `cli` 4, `cli/commands/observability` 1, `(top-level)` 1 |
+| `cli.commands.lifecycle._temporary_stop` | 15 | `_temporary_stop` 15 | `cli` 15 |
+| `base.daemon.health` | 14 | `_probe_daemon` 5, `_probe_home` 3, `_health_payload` 3 | `base` 9, `cli/commands` 2, `services/healthchecks` 2, `services/events_maintenance` 1 |
+| `cli.commands.observability.lgtm_native` | 14 | `_download_and_verify` 4, `_verify_loki` 3, `_stream_download` 2 | `cli/commands` 9, `cli/commands/converge` 5 |
+| `ops.agent_pause` | 14 | `_wake` 7, `_lifecycle_wait_seconds` 4, `_LIFECYCLE_WAIT_POLL_SECONDS` 3 | `agent/ownership` 8, `services/agent_host` 3, `cli/commands/lifecycle` 1, `cli/parsers` 1 |
+| `base.telemetry.otlp.telemetry_otlp` | 11 | `_OtlpBackend` 8, `_build_providers` 3 | `base/telemetry` 8, `agent` 2, `base` 1 |
+| `gateway.alerts.router` | 10 | `_notify_im` 10 | `cli/commands` 10 |
+| `gateway.cluster.status` | 10 | `_compute_stats_dashboard` 8, `_probe_agent_runner` 1, `_STATUS_CACHE_TTL_S` 1 | `gateway` 10 |
+| `services.permissions_helper.launchd_job` | 10 | `_retirement_command` 4, `_executable_pids` 2, `_retirement_owner` 2 | `cli/commands/lifecycle` 10 |
+| `ava.shell.sessions` | 9 | `_next_session_index_from_db` 3, `_shell_prefix` 3, `_record_ttl` 3 | `ava` 6, `cli/commands/data_plane` 3 |
+| `cli.commands.agents.impersonation_relay` | 9 | `_MIN_EMIT_INTERVAL_SECONDS` 2, `_read_inbox` 2, `_write_heartbeat` 2 | `cli/parsers` 9 |
 
 ## Class E by module (top 15)
 
 | ambient module | tier | points | test homes |
 |---|---|---|---|
-| `base.config` | config | 1707 | 76 |
-| `env:AVA_*` | env-var | 414 | 34 |
-| `base.paths` | paths | 410 | 51 |
-| `base.cluster.machine` | identity | 250 | 24 |
-| `ava.agent_identity` | identity | 99 | 13 |
-| `base.log` | ambient-service | 87 | 17 |
-| `base.telemetry` | ambient-service | 84 | 26 |
-| `base.db` | ambient-service | 83 | 23 |
-| `base.host.env.runtime_config` | env-resolution | 83 | 15 |
-| `base.host.env.dotenv_boot` | env-resolution | 74 | 6 |
-| `base.cluster` | identity | 73 | 15 |
+| `base.config` | config | 1676 | 90 |
+| `env:AVA_*` | env-var | 411 | 40 |
+| `base.paths` | paths | 375 | 55 |
+| `base.cluster.machine` | identity | 236 | 29 |
+| `ava.agent_identity` | identity | 99 | 14 |
+| `base.log` | ambient-service | 87 | 18 |
+| `base.telemetry` | ambient-service | 84 | 31 |
+| `base.db` | ambient-service | 81 | 31 |
+| `base.host.env.runtime_config` | env-resolution | 80 | 17 |
+| `base.host.env.dotenv_boot` | env-resolution | 73 | 7 |
+| `base.cluster` | identity | 68 | 17 |
 | `base.host.env.bootstrap` | env-resolution | 50 | 9 |
 
 ## Files placed by the patch-evidence fallback
