@@ -73,8 +73,15 @@ def owned_tcp(
 ) -> DaemonProbe:
     members = {identity.pid: identity for identity in capture_tree(owner)}
     # A permission failure observing our own generation is unknown, never DOWN.
+    # A member that has exited is not one: an unreaped zombie is still in the
+    # tree, its socket table is unreadable (AccessDenied on Linux, ZombieProcess
+    # on macOS), and it owns no listener.
     for identity in members.values():
-        psutil.Process(identity.pid).net_connections(kind="tcp")
+        try:
+            psutil.Process(identity.pid).net_connections(kind="tcp")
+        except psutil.Error:
+            if identity.live():
+                raise
     listeners = listener_pids(port)
     if not listeners:
         return absent_listener(port)
