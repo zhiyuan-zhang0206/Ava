@@ -21,6 +21,7 @@ import psycopg
 import pytest
 import redis as sync_redis
 from fastapi.testclient import TestClient
+from redis.asyncio.client import PubSub
 
 from base.config import settings
 from base.db import create_agent
@@ -195,30 +196,41 @@ def test_sse_drops_invalid_payload_as_comment(
     assert decoded[0]["content"] == "after"
 
 
-def test_sse_endpoint_response_headers(
+@pytest.mark.parametrize(
+    ("path", "batched", "agent_id"),
+    [
+        ("/api/agents/1/events/stream", False, 1),
+        ("/api/system/all", True, 0),
+    ],
+)
+def test_sse_subscribe_failure_after_http_start_sends_error_frame(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    batched: bool,
+    agent_id: int,
 ) -> None:
-    """SSE endpoint HTTP layer smoke: Content-Type + X-Accel-Buffering and Cache-Control needed
-    by nginx/cloudflare. Without these two, SSE completely breaks when deployed behind a proxy
-    (already written in `gateway/app.py`), verified via TestClient + mock short generator.
+    """Exercise the real router, StreamingResponse, and Redis subscription path."""
 
-    Use mock event_stream (immediate yield + end) to bypass real Redis pubsub — header fields
-    are decided by FastAPI StreamingResponse wrapper, unrelated to event_stream concrete output.
-    """
+    async def fail_subscribe(self: PubSub, *args: object, **kwargs: object) -> None:
+        raise sync_redis.ConnectionError("Redis unavailable")
 
-    async def fake_stream(*_args: object, **_kwargs: object) -> AsyncIterator[bytes]:
-        yield b": stream open\n\n"
+    monkeypatch.setattr(PubSub, "subscribe", fail_subscribe)
 
-    from gateway.events import agent_events as agent_events_router
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get(path)
 
-    monkeypatch.setattr(agent_events_router, "event_stream", fake_stream)
-
-    with TestClient(app) as client, client.stream("GET", "/api/agents/1/events/stream") as resp:
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("text/event-stream")
-        assert resp.headers["cache-control"] == "no-cache"
-        assert resp.headers["x-accel-buffering"] == "no"
+    assert response.status_code == 200  # StreamingResponse already sent response.start
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert response.content.startswith(b"data: ")
+    assert response.content.endswith(b"\n\n")
+    payload = json.loads(response.content[len(b"data: ") : -2])
+    event = payload[0] if batched else payload
+    assert event["role"] == "error"
+    assert event["agent_id"] == agent_id
+    assert event["content"] == "event stream interrupted: ConnectionError"
 
 
 # --- task 10/11: new SSE endpoint + role_filter tests ---
@@ -636,26 +648,6 @@ def test_throttled_wire_format_is_json_array(
                 assert isinstance(payload, list), f"Expected JSON array, got {type(payload)}"
                 return
     pytest.fail("No data frame found")
-
-
-def test_throttled_endpoint_response_headers(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """/api/system/all endpoint response headers."""
-
-    async def fake_stream(*_args: object, **_kwargs: object) -> AsyncIterator[bytes]:
-        yield b": stream open\n\n"
-
-    from gateway.events import system as system_router
-
-    monkeypatch.setattr(system_router, "throttled_event_stream", fake_stream)
-
-    with TestClient(app) as client, client.stream("GET", "/api/system/all") as resp:
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("text/event-stream")
-        assert resp.headers["cache-control"] == "no-cache"
-        assert resp.headers["x-accel-buffering"] == "no"
 
 
 def test_throttled_agent_filter_endpoint_query(

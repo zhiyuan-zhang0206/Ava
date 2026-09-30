@@ -90,6 +90,34 @@ def _warm_frame(
     return None, now, last_data_frame
 
 
+def _error_payload(agent_id: int, exc: Exception) -> str:
+    return Error(
+        agent_id=agent_id,
+        content=f"event stream interrupted: {type(exc).__name__}",
+    ).model_dump_json()
+
+
+def _matches_filter(
+    event: Any, agent_id: int, *, broadcast: bool, role_filter: frozenset[str] | None
+) -> bool:
+    return (broadcast or event.agent_id == agent_id) and (
+        not role_filter or event.role in role_filter
+    )
+
+
+async def _subscribe_error_frame(
+    pubsub: Any, channel: str, agent_id: int, *, batched: bool = False
+) -> bytes | None:
+    """Return a wire-shaped error after a failed subscribe, else None."""
+    try:
+        await retry_auth_failures_async(lambda: pubsub.subscribe(channel))
+    except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
+        _log.warning("sse pubsub subscribe failed: %r agent_id=%s", exc, agent_id)
+        payload = _error_payload(agent_id, exc)
+        return _sse_batch_frame([payload]) if batched else _sse_frame(payload)
+    return None
+
+
 async def event_stream(
     redis_url: str,
     agent_id: int,  # ignored in broadcast mode
@@ -104,11 +132,10 @@ async def event_stream(
     or Redis goes down.
 
     Lifetime defenses:
-    - `await pubsub.subscribe(...)` runs **before** the first yield, and
-      is wrapped in try/finally — if subscribe itself raises (Redis
-      unreachable), let cleanup run and then re-raise so FastAPI returns
-      500 (EventSource `onerror` fires normally, instead of a 200+empty
-      body "connected but no events" zombie state).
+    - `await pubsub.subscribe(...)` runs before the first yield, but
+      StreamingResponse has already sent HTTP 200 by then. If Redis rejects
+      the subscription, emit an `error` data frame and close the stream.
+      The surrounding try/finally still cleans up the pubsub connection.
     - The `yield` is inside the try — when a client aborts on the first
       frame, `GeneratorExit` is raised; finally must run, otherwise the
       Redis pubsub socket leaks and a long run hits maxclients.
@@ -152,7 +179,9 @@ async def event_stream(
     metrics_opened = False
     _log.info("sse attach: agent_id=%s channel=%s broadcast=%s", agent_id, _channel, broadcast)
     try:
-        await retry_auth_failures_async(lambda: pubsub.subscribe(_channel))
+        if error_frame := await _subscribe_error_frame(pubsub, _channel, agent_id):
+            yield error_frame
+            return
         runtime_metrics.sse_opened("filtered")
         metrics_opened = True
 
@@ -176,12 +205,7 @@ async def event_stream(
                 )
             except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
                 _log.warning("sse pubsub read failed: %r agent_id=%s", exc, agent_id)
-                yield _sse_frame(
-                    Error(
-                        agent_id=agent_id,
-                        content=f"event stream interrupted: {type(exc).__name__}",
-                    ).model_dump_json()
-                )
+                yield _sse_frame(_error_payload(agent_id, exc))
                 return
 
             now = time.monotonic()
@@ -193,9 +217,7 @@ async def event_stream(
                     last_comment = now
                     continue
                 # broadcast mode: do not filter by agent_id
-                if (broadcast or event.agent_id == agent_id) and (
-                    not role_filter or event.role in role_filter
-                ):
+                if _matches_filter(event, agent_id, broadcast=broadcast, role_filter=role_filter):
                     yield _sse_frame(msg["data"])
                     data_frames += 1
                     last_data_frame = now
@@ -301,9 +323,9 @@ async def throttled_event_stream(
 
         data: [{...}, {...}, ...]\n\n
 
-    Lifetime defenses mirror ``event_stream``: subscribe-before-yield,
-    GeneratorExit-safe finally, Redis-IO recovery, client disconnect
-    detection.
+    Lifetime defenses mirror ``event_stream``: a subscription failure after
+    HTTP 200 sends a batch-shaped error frame; GeneratorExit-safe finally,
+    Redis-IO recovery, and client disconnect detection also apply.
 
     Args:
         redis_url: Redis connection string.
@@ -331,7 +353,9 @@ async def throttled_event_stream(
         throttle_rate,
     )
     try:
-        await retry_auth_failures_async(lambda: pubsub.subscribe(_channel))
+        if error_frame := await _subscribe_error_frame(pubsub, _channel, 0, batched=True):
+            yield error_frame
+            return
         runtime_metrics.sse_opened("throttled")
         metrics_opened = True
 
@@ -349,14 +373,7 @@ async def throttled_event_stream(
                 )
             except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
                 _log.warning("sse throttle pubsub read failed: %r", exc)
-                yield _sse_batch_frame(
-                    [
-                        Error(
-                            agent_id=0,
-                            content=f"event stream interrupted: {type(exc).__name__}",
-                        ).model_dump_json()
-                    ]
-                )
+                yield _sse_batch_frame([_error_payload(0, exc)])
                 return
 
             if disconnected:
