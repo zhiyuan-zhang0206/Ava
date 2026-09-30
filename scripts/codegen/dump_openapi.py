@@ -21,6 +21,10 @@ from pathlib import Path
 # Put project root on sys.path so `from gateway.app import app` finds the module.
 # Same pattern as scripts/start_gateway.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from base.host.env.dotenv_boot import enter_scratch_home
+
+enter_scratch_home()
+
 
 # ava.self.AGENT_ID stays None here — fine; dump is a build-time tool that
 # does not exercise the SDK or make any gateway HTTP calls.

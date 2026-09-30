@@ -363,7 +363,7 @@ def _private_pg_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     home, data = tmp_path / "home", tmp_path / "home/pg"
     home.mkdir()
     port = _free_port()
-    monkeypatch.setattr(settings.general, "ava_home", str(home))
+    monkeypatch.setenv("AVA_HOME", str(home))
     monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     monkeypatch.setattr(settings.data_plane, "db_url", f"postgresql://test@127.0.0.1:{port}/test")
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")

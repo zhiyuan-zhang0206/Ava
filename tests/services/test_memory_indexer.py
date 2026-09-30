@@ -86,7 +86,7 @@ def _watched_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     `tmp_path` must make `tmp_path` the root — otherwise every file they
     write would count as foreign and be deleted.
     """
-    monkeypatch.setattr(daemon, "_MEMORY_ROOT", tmp_path)
+    monkeypatch.setattr(daemon, "_memory_root", lambda: tmp_path)
 
 
 def test_content_hash_deterministic() -> None:
@@ -466,7 +466,7 @@ def test_process_paths_deletes_foreign_paths_even_when_file_exists(
     as duplicate search hits (e.g. user-profile.md ×2)."""
     watched = tmp_path / "watched"
     watched.mkdir()
-    monkeypatch.setattr(daemon, "_MEMORY_ROOT", watched)
+    monkeypatch.setattr(daemon, "_memory_root", lambda: watched)
 
     foreign_dir = tmp_path / "foreign"
     foreign_dir.mkdir()
@@ -494,7 +494,7 @@ def test_cold_start_reconcile_prunes_foreign_rows(
     foreign = tmp_path / "foreign.md"  # exists on disk, outside root
     foreign.write_text("foreign content")
 
-    monkeypatch.setattr(daemon, "_MEMORY_ROOT", root)
+    monkeypatch.setattr(daemon, "_memory_root", lambda: root)
     # Both rows pre-exist in the index (e.g. from an era before the
     # gateway-checkout split).
     backend = _backend(milvus_client)
@@ -520,7 +520,7 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
     watched = root / "a.md"
     watched.write_text("watched content")
 
-    monkeypatch.setattr(daemon, "_MEMORY_ROOT", root)
+    monkeypatch.setattr(daemon, "_memory_root", lambda: root)
     backend = _backend(milvus_client)
     watched_mtime = watched.stat().st_mtime
     backend.upsert(str(watched.resolve()), watched_mtime, "h", _vec(0), kind="body", chunk_idx=0)
@@ -763,7 +763,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
         note = root / f"note-{i}.md"
         note.write_text(f"content {i}")
         files.append(note)
-    monkeypatch.setattr(daemon, "_MEMORY_ROOT", root)
+    monkeypatch.setattr(daemon, "_memory_root", lambda: root)
     monkeypatch.setattr(daemon, "_RECONCILE_CHUNK_PATHS", 2)  # 7 files -> 4 chunks
 
     chunk_sizes: list[int] = []
@@ -807,7 +807,7 @@ def test_reconcile_embed_error_truncates_and_returns_false(
     root.mkdir()
     for i in range(6):
         (root / f"note-{i}.md").write_text(f"content {i}")
-    monkeypatch.setattr(daemon, "_MEMORY_ROOT", root)
+    monkeypatch.setattr(daemon, "_memory_root", lambda: root)
     monkeypatch.setattr(daemon, "_RECONCILE_CHUNK_PATHS", 2)  # 6 files -> 3 chunks
 
     calls: list[int] = []

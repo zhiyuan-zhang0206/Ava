@@ -51,18 +51,13 @@ _log = logging.getLogger(__name__)
 def _ava_home() -> Path:
     """$AVA_HOME directory, created if missing.
 
-    Routed through `dotenv_boot.resolve_ava_home()`, never a bare `AVA_HOME
-    env > ~/.ava` guess: this module's callers run before `load_ava_env` pins
-    `AVA_HOME` into the environment (the Settings-lite maintenance commands
-    defer it — see `base.host.env.bootstrap._serve_flag`), so a raw
-    `os.environ.get("AVA_HOME", Path.home() / ".ava")` read (and, on a fresh
-    HOME, created) `~/.ava` for an unanchored checkout — the prod source's own
-    home, which such a checkout may not read or create (#3520 P2-1).
-    `resolve_ava_home()` still honors an explicit `AVA_HOME` env var (rule 1);
-    it only replaces the bare fallback for when that is unset."""
+    Routed through `dotenv_boot.resolve_ava_home()`: this module's callers run
+    before `load_ava_env` pins `AVA_HOME` into the environment (the
+    Settings-lite maintenance commands defer it — see
+    `base.host.env.bootstrap._serve_flag`)."""
     from base.host.env.dotenv_boot import resolve_ava_home
 
-    root = resolve_ava_home()[0]
+    root = resolve_ava_home()
     root.mkdir(parents=True, exist_ok=True)
     return root
 

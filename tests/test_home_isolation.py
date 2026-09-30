@@ -1,9 +1,9 @@
 """The test process must never hold the operator's real home or credentials.
 
 `tests/fixtures/env_bootstrap.py` redirects AVA_HOME to a tmpfs dir *before* the first project
-import, because `base.host.env.dotenv_boot` binds `AVA_ENV_PATH` once at import time and
+import, because the config boot loads `$AVA_HOME/.env` at import and
 `_enforce_cluster_env_authority()` then force-assigns every `derived_env_keys()`
-entry from whatever `.env` that path resolved to. Get the ordering wrong and the
+entry from whatever `.env` that home held. Get the ordering wrong and the
 suite silently runs against `~/.ava` — production cluster secret, db/redis URLs
 and gateway URL all live in the test process.
 
@@ -44,13 +44,13 @@ from pathlib import Path
 
 import pytest
 
-import base.host.env.dotenv_boot
+from base.host.env.dotenv_boot import resolve_ava_home
 
 _E2E_CONFTEST = Path(__file__).parent / "e2e" / "conftest.py"
 
 
-def _real_home_env() -> Path:
-    return Path.home() / ".ava" / ".env"
+def _real_home() -> Path:
+    return Path.home() / ".ava"
 
 
 def _e2e_restore_list() -> frozenset[str]:
@@ -74,20 +74,20 @@ def _e2e_restore_list() -> frozenset[str]:
     raise AssertionError(f"no `_env_keys` assignment found in {_E2E_CONFTEST}")
 
 
-def test_env_path_is_not_the_operators_real_dotenv() -> None:
-    """The bound `.env` path is the session's tmpfs home, not `~/.ava/.env`.
+def test_home_is_not_the_operators_real_home() -> None:
+    """The resolved home is the session's tmpfs home, not `~/.ava`.
 
     This is the single fact everything else follows from — boot loads
-    `AVA_ENV_PATH` and force-assigns its cluster keys, and the CLI's `.env`
+    `$AVA_HOME/.env` and force-assigns its cluster keys, and the CLI's `.env`
     writers land beside it, so if it points at the real home a test can read or
     rewrite the operator's live cluster config.
     """
-    bound = Path(base.host.env.dotenv_boot.AVA_ENV_PATH)
-    assert bound != _real_home_env(), (
-        f"base.host.env.dotenv_boot.AVA_ENV_PATH is the operator's real .env ({bound}). "
-        "AVA_HOME was set too late — see the env block at the top of tests/fixtures/env_bootstrap.py."
+    home = resolve_ava_home()
+    assert home != _real_home(), (
+        f"the resolved home is the operator's real home ({home}). AVA_HOME was set too "
+        "late — see the env block at the top of tests/fixtures/env_bootstrap.py."
     )
-    assert bound.parent == Path(os.environ["AVA_HOME"])
+    assert home == Path(os.environ["AVA_HOME"])
 
 
 def test_cluster_secret_is_the_test_secret_not_the_real_one() -> None:

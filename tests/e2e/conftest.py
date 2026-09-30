@@ -505,7 +505,7 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
 
     # This direct-process fixture gate lives in the private E2E home.
     # It grants no production root custody or local birth evidence.
-    monkeypatch.setattr(settings.general, "ava_home", _AVA_HOME)
+    monkeypatch.setenv("AVA_HOME", str(_AVA_HOME))
     fixture_gate = _AVA_HOME / "e2e-serving"
     fixture_gate.unlink(missing_ok=True)
     generation = str(fixture_gate)

@@ -56,8 +56,12 @@ import re
 import sys
 from pathlib import Path
 
-from base.packages.skills.index import SkillFile, SkillIndex
-from base.packages.skills.names import match_key
+from base.host.env.dotenv_boot import enter_scratch_home
+
+enter_scratch_home()
+
+from base.packages.skills.index import SkillFile, SkillIndex  # noqa: E402
+from base.packages.skills.names import match_key  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 

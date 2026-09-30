@@ -33,8 +33,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from base.config import settings
 from base.packages.extensions import install_registry as reg
+from base.paths import ava_home
 from cli.commands.extensions.skills_sync import _Source
 
 _REFUSAL_ADVICE = (
@@ -483,7 +483,7 @@ def cmd_skill_update(
 
     repo = repo or _repo_root()
     try:
-        assert_repo_source_bound(repo, Path(settings.general.ava_home).expanduser())
+        assert_repo_source_bound(repo, ava_home())
     except RuntimeError as e:
         print(f"[ava skill update] {e}", file=sys.stderr)
         return 1

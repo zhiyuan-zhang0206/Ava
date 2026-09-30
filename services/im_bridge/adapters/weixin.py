@@ -30,9 +30,9 @@ from typing import Any
 
 import httpx
 
-from base.config import settings
 from base.host.private_storage import write_private_bytes
 from base.log import logger
+from base.paths import ava_home
 from services.im_bridge.types import IMAdapter, InboundMessage
 
 ILINK_BASE_URL = "https://ilinkai.weixin.qq.com"
@@ -83,7 +83,7 @@ class _SessionExpiredError(Exception):
 
 def _state_dir() -> Path:
     """``$AVA_HOME/state/im_bridge`` — shared state root for every adapter."""
-    path = Path(settings.general.ava_home) / "state" / "im_bridge"
+    path = ava_home() / "state" / "im_bridge"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

@@ -22,7 +22,7 @@ import pytest
 from base.cluster.machine import reachable_host, reset_identity
 from base.config import DataPlaneSettings, data_plane, settings
 from base.config.data_plane import _self_machine_host
-from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.url_secret import redacted_url, url_with_password, url_with_userinfo
 
 _SECRET = "new-secret_v2"  # noqa: S105 — test fixture, not a real credential
@@ -255,16 +255,16 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
         assert s.db_url == db
         assert s.redis_url == rd
 
-    def test_unanchored_sentinel_is_left_untouched(self) -> None:
+    def test_placeholder_url_is_left_untouched(self) -> None:
         # The connect guard matches the sentinel byte-for-byte; injecting a password
         # would break that recognition, so the sentinel must pass through unchanged
         # even when a secret is present.
         s = _settings_with(
-            db_url=UNANCHORED_DB_SENTINEL,
+            db_url=PLACEHOLDER_DB_URL,
             redis_url=_redis("OLD", host="h:6379"),
             secret=_SECRET,
         )
-        assert s.db_url == UNANCHORED_DB_SENTINEL
+        assert s.db_url == PLACEHOLDER_DB_URL
         # Redis is independent from the bearer and remains verbatim.
         assert s.redis_url == _redis("OLD", host="h:6379")
 
@@ -381,11 +381,11 @@ class TestSelfHostDialsLoopback:
     def test_sentinel_stays_byte_identical(self, tmp_path: Path) -> None:
         self._isolate(tmp_path, machine_host="gw.host")
         s = _settings_with(
-            db_url=UNANCHORED_DB_SENTINEL,
+            db_url=PLACEHOLDER_DB_URL,
             redis_url=_redis("STALE", host="h:6379"),
             secret=_SECRET,
         )
-        assert s.db_url == UNANCHORED_DB_SENTINEL
+        assert s.db_url == PLACEHOLDER_DB_URL
 
 
 class TestPinIpv4Hostaddr:
@@ -420,13 +420,13 @@ class TestPinIpv4Hostaddr:
         assert s.db_url == _pg("OLD", host="gw.host:5433")
         assert "hostaddr" not in s.db_url
 
-    def test_unanchored_sentinel_untouched(self) -> None:
+    def test_placeholder_url_untouched(self) -> None:
         s = _settings_with(
-            db_url=UNANCHORED_DB_SENTINEL,
+            db_url=PLACEHOLDER_DB_URL,
             redis_url=_redis("OLD", host="h:6379"),
             secret=_SECRET,
         )
-        assert s.db_url == UNANCHORED_DB_SENTINEL
+        assert s.db_url == PLACEHOLDER_DB_URL
 
     def test_existing_query_params_preserved(self) -> None:
         # hostaddr is appended alongside any existing query string, not over it.
@@ -462,7 +462,7 @@ class TestSelfMachineHostParity:
         # reads the settings singleton (machine_host / ava_home fields). Pin both
         # surfaces to the same values so the assertion compares precedence only.
         os.environ["AVA_HOME"] = str(tmp_path)
-        monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))
         if env is None:
             os.environ.pop("AVA_MACHINE_HOST", None)
             monkeypatch.setattr(settings.general, "machine_host", "")

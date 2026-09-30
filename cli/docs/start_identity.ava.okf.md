@@ -10,15 +10,18 @@ tags:
 # Idempotent cluster start
 
 `cli/start_intent.py` resolves and validates first-start inputs without importing
-runtime Settings. `cli/start_identity.py` persists the complete private intent
-under the home and checkout binding locks (in that order) before publishing
-`.env`. The intent is the home's record of itself: a gateway's ports and
+runtime Settings: the home is `AVA_HOME` (else `~/.ava`), and a home that carries its
+own `<home>/source` checkout starts only from that checkout. `cli/start_identity.py`
+persists the complete private intent under the home's start-intent lock before
+publishing `.env`. The intent is the home's record of itself: a gateway's ports and
 data-plane host live in its `record` (`base/cluster/record.py`), and no host
 file lists clusters. A new home records the fixed port table
 (`base/host/env/port_table.py`) after a bind probe finds every port free; a
-record whose slots differ from the table is refused. The checkout lock serializes
-different homes; stale first-start inputs cannot replace an existing binding.
-Pointer publication and retirement share that lock. An interrupted claim
+record whose slots differ from the table is refused. The intent's `checkout` is the
+home's admitted runtime: the database-authority delivery admits only a process running
+from it (`base/cluster/authority/delivery.py`). An intent that still carries the
+`worktree` key an older start recorded is refused by name rather than read. An
+interrupted claim
 resumes the same ports and credentials: the intent carries
 the `.env` payload only while claiming and drops it once `.env` is published, so
 no stale copy of a credential outlives a rotation there. A gateway claim
@@ -27,8 +30,8 @@ also pins a minted logical-backup passphrase before it publishes `.env`
 keeps the first one). Conflicting identity,
 unregistered existing resources, or a terminal destroy intent refuses startup.
 
-`ava start --worktree` creates a gateway and runner with an isolated home and port
-block. Explicit capabilities initialize other layouts. A remote runner uses the
+First start needs explicit capabilities (`--serve-gateway`, `--serve-agent-runner`,
+`--serve-observability-station`) and a machine name. A remote runner uses the
 same entry with `--gateway-url` and `--db-capability` (a sealed bundle minted by
 `ava cluster db-authority issue-unit`, opened with its transport key from
 `AVA_DB_CAPABILITY_KEY`); the bundle's machine API token authenticates the join
@@ -78,10 +81,8 @@ The start intent records `claiming`, `configured`, `provisioned`, then `ready`.
 This phase journal preserves initialization authority; it is not evidence of current
 process health. Current readiness is freshly observed from the owned generation.
 
-Destroy retains the home lock while closing native custody, then retires only
-the worktree `.ava_home` pointer bound by the durable start intent before marking
-the home detached. A changed or symlink pointer is preserved and refuses release;
-a missing pointer permits an interrupted retirement to finish. Ordinary stop
-retains that binding, credentials and the record.
+Destroy retains the home lock while closing native custody, then retires the home's
+OS jobs before marking the home detached. Ordinary stop retains the credentials and
+the record.
 
 Parent: [[cli.ava.okf.md]].

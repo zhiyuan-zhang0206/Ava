@@ -87,7 +87,7 @@ where user modification concentrates. Sweep them too:
 import json, subprocess
 from datetime import UTC, datetime, timedelta
 from base.paths import ava_home, plugins_dir
-home = ava_home()  # checkout-anchored $AVA_HOME — never a guessed ~/.ava
+home = ava_home()  # $AVA_HOME, else ~/.ava
 cutoff = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 reg = json.loads((home / "installed.json").read_text())  # install registry
 print([p["name"] for p in reg["packages"] if (p.get("updated_at") or "") >= cutoff])

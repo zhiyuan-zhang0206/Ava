@@ -15,7 +15,7 @@ from base import cluster, config
 from base import db as db_module
 from base.cluster import ClusterPorts, ClusterRecord
 from base.config.data_plane import DataPlaneSettings
-from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
 _POOLED = "postgresql://ava_main:sek@127.0.0.1:6433/ava_main"
 _DIRECT = "postgresql://ava_main:sek@127.0.0.1:5433/ava_main"
@@ -69,10 +69,10 @@ def test_direct_db_url_passes_through_when_already_direct(monkeypatch: pytest.Mo
     assert db_module.direct_db_url() == _DIRECT
 
 
-def test_direct_db_url_never_rewrites_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_direct_db_url_never_rewrites_placeholder_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """The sentinel must stay byte-identical for the connect guard."""
-    _set(monkeypatch, db_url=UNANCHORED_DB_SENTINEL, rec=_PG_REC)
-    assert db_module.direct_db_url() == UNANCHORED_DB_SENTINEL
+    _set(monkeypatch, db_url=PLACEHOLDER_DB_URL, rec=_PG_REC)
+    assert db_module.direct_db_url() == PLACEHOLDER_DB_URL
 
 
 def test_direct_db_url_keeps_the_url_without_a_record(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1672,16 +1672,15 @@ def test_ingest_recovery_self_heals_when_instance_never_persisted(
 
 
 def test_run_health_probe_refused_from_worktree_checkout(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     """The 2026-08-07 accident: a probe launched from a worktree checkout
     (prod home) misjudged schema health against prod data and auto-rolled-back
     the cluster. The probe now refuses with exit 2 and never runs a check."""
-    monkeypatch.setattr("base.paths.ava_home", lambda: Path("~/.ava").expanduser())
-    monkeypatch.setattr(
-        "base.paths.repo_root",
-        lambda: Path("~/Ava/.worktrees/ava-2890-r4").expanduser(),
-    )
+    prod_home = tmp_path / ".ava"
+    (prod_home / "source").mkdir(parents=True)
+    monkeypatch.setenv("AVA_HOME", str(prod_home))
+    monkeypatch.setattr("base.paths.repo_root", lambda: tmp_path / "Ava" / ".worktrees" / "r4")
 
     rc = cluster_health.run_health_probe()
 
@@ -1692,14 +1691,13 @@ def test_run_health_probe_refused_from_worktree_checkout(
 
 
 def test_run_health_probe_allowed_from_prod_checkout(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The prod anchored checkout runs the probe normally (exit 0 healthy)."""
-    monkeypatch.setattr("base.paths.ava_home", lambda: Path("~/.ava").expanduser())
-    monkeypatch.setattr(
-        "base.paths.repo_root",
-        lambda: Path("~/.ava/source").expanduser(),
-    )
+    """The home's own `source` checkout runs the probe normally (exit 0 healthy)."""
+    prod_home = tmp_path / ".ava"
+    (prod_home / "source").mkdir(parents=True)
+    monkeypatch.setenv("AVA_HOME", str(prod_home))
+    monkeypatch.setattr("base.paths.repo_root", lambda: prod_home / "source")
 
     def _ok(*_args: object, **_kwargs: object) -> object:
         return True

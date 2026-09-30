@@ -59,6 +59,10 @@ from pathlib import Path
 # Project root (this script lives under scripts/)
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
+from base.host.env.dotenv_boot import enter_scratch_home  # noqa: E402
+
+enter_scratch_home()
+
 
 from scripts.structure import lint_common  # noqa: E402 - standalone script
 
@@ -116,15 +120,12 @@ _LIVE_READ_ENV_VARS = frozenset(
 _ALLOWED_FILES = frozenset(
     {
         "cli/main.py",  # CLI bootstrap sets config/profile/log routing before importing Settings or command modules.
-        "cli/preflight.py",  # Validates explicit home/registry and config inputs before Settings can load a cluster.
         "cli/commands/cluster/home.py",  # Cross-home child environment projection removes caller credentials before the target's Settings loads.
-        "cli/commands/lifecycle/_temporary_stop.py",  # Clears one-shot home override transport; this is child environment control, not runtime config.
-        "cli/start_intent.py",  # Identity bootstrap precedes Settings: read and pin the explicit home and birth inputs before config imports.
+        "cli/start_intent.py",  # Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports.
         "tests/cli/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
         "tests/cli/test_start_repo_guard.py",  # Verifies checkout/home routing before Settings can be constructed.
         "base/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
-        "base/config/base.py",  # _unit_home reads AVA_HOME to root path-field defaults at field-construction time
-        "base/config/data_plane.py",  # _self_machine_host reads AVA_MACHINE_HOST/AVA_HOME at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)
+        "base/config/data_plane.py",  # _self_machine_host reads AVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)
         "base/host/env/dotenv_boot.py",  # load_dotenv ~/.ava/.env, must run before Settings import
         "base/host/env/runtime_config.py",  # path bootstrap; cannot import Settings (circular dep)
         "cli/commands/management/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first

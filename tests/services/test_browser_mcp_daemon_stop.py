@@ -163,7 +163,6 @@ def _daemon_env(home: Path, bin_dir: Path, chrome: _ChromeFake, mode: str) -> di
     env.update(
         {
             "AVA_HOME": str(home),
-            "AVA_HOME_OVERRIDE": "1",
             "FAKE_UPSTREAM_MODE": mode,
             "PATH": f"{bin_dir}:{env['PATH']}",
         }

@@ -26,7 +26,6 @@ def native_env(tmp_path: Path) -> dict[str, str]:
     home.mkdir()
     env.update(
         AVA_HOME=str(home),
-        AVA_HOME_OVERRIDE="1",
         AVA_HOST_STATE_DIR=str(tmp_path / "host-state"),
         AVA_CONFIG_FETCH="skip",
         AVA_DB_URL="postgresql://unused@127.0.0.1:1/unused",
@@ -50,7 +49,7 @@ def pytest_configure(config: pytest.Config) -> None:
     repo_conftest = Path(__file__).parents[3] / "conftest.py"
     if config.pluginmanager.get_plugin(str(repo_conftest)) is not None:
         return
-    # Do not trust a caller's existing AVA_HOME_OVERRIDE as test isolation.
+    # Do not trust a caller's existing AVA_HOME as test isolation: name a home of our own.
     import tempfile
 
     isolated = tempfile.TemporaryDirectory(prefix="ava-native-root-")
@@ -58,7 +57,6 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.update(
         AVA_HOME=str(Path(isolated.name) / "home"),
         AVA_HOST_STATE_DIR=str(Path(isolated.name) / "host-state"),
-        AVA_HOME_OVERRIDE="1",
         AVA_CONFIG_FETCH="skip",
         AVA_DB_URL="postgresql://unused@127.0.0.1:1/unused",
         AVA_REDIS_URL="redis://127.0.0.1:1/0",

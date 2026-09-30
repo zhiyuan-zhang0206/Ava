@@ -25,11 +25,6 @@ build/
 # import-linter, ...) — see conventions/dev-setup.md "Tool caches".
 /.cache/
 
-# Per-checkout home pointer: maps a dev worktree to its cluster's $AVA_HOME so
-# bare invocations resolve the right home (written by `ava start`).
-.ava_home
-.ava_home.lock
-
 # Secrets
 .env
 .env.local

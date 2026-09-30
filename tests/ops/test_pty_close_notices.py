@@ -17,7 +17,6 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.config import settings
 from base.db import create_agent
 from ops import pty_close_notices as notices
 
@@ -26,7 +25,7 @@ _WHEN = datetime(2026, 9, 10, 1, 2, 3, tzinfo=UTC)
 
 @pytest.fixture()
 def journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     return tmp_path
 
 

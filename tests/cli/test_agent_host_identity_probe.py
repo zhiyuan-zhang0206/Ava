@@ -18,7 +18,7 @@ async def test_actual_stats_route_matches_configured_port_home_pid_and_owner(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     pidfile = tmp_path / "agent-host.pid"
     pidfile.write_text(str(os.getpid()))
     monkeypatch.setattr(settings.services, "agent_host_pidfile", pidfile)

@@ -1,26 +1,24 @@
 """$AVA_HOME path resolution — single-point entry shared by gateway /
 agent / subprocess.
 
-`Settings.ava_home` (`base.config`) is the path source; this door
-adds first-access mkdir side effects, so calling a helper means "the
-directory is ready and writable". pydantic-settings reads the
-$AVA_HOME env var at import time; the three process classes inherit
-the same variable, no manual passing required. The package holds only
-this door; its doc nodes (`docs/paths.ava.okf.md`, `docs/lock-discipline.ava.okf.md`)
-sit beside it.
+`base.host.env.dotenv_boot.resolve_ava_home` is the path source (`$AVA_HOME`,
+else `~/.ava`, read on every call); this door adds first-access mkdir side
+effects, so calling a helper means "the directory is ready and writable". The
+three process classes inherit the same variable, no manual passing required.
+The package holds only this door; its doc nodes (`docs/paths.ava.okf.md`,
+`docs/lock-discipline.ava.okf.md`) sit beside it.
 """
 
 from pathlib import Path
 
 from base.config import settings
-from base.host.env.dotenv_boot import checkout_anchored
+from base.host.env.dotenv_boot import home_checkout_error, resolve_ava_home
 from base.host.private_storage import ensure_private_dir
 
 
 def ava_home() -> Path:
     """User data root directory; create if missing."""
-    root = Path(settings.general.ava_home).expanduser()
-    return ensure_private_dir(root)
+    return ensure_private_dir(resolve_ava_home())
 
 
 def host_state_dir() -> Path:
@@ -78,39 +76,12 @@ def prod_service_checkout_error(repo: Path) -> str | None:
     The 01:13 worktree accident (Task #966): `repo_root()` is "whoever imported
     base/paths/__init__.py", and a prod daemon bound to a dev clone's or worktree's
     code loses its floor when that checkout is deleted — routine worktree
-    cleanup. The prod home's services may only be launched from its own
-    anchored checkout (`~/.ava/source`); every other checkout is refused.
-
-    An UNANCHORED process (dotenv_boot rule 4: no AVA_HOME, not the prod
-    source, no `.ava_home` pointer) is refused outright: it runs on a private
-    scratch home that no cluster lives in, so there is nothing to launch.
-    Otherwise a non-prod unit (any home other than the default `~/.ava`)
-    passes: a dev cluster's own home is anchored to its own checkout, and
-    running that checkout's code is exactly what its home is for.
+    cleanup. A home that carries its own `<home>/source` checkout (the prod home
+    `~/.ava`) may only launch services from that checkout; a home with none (a
+    test home) accepts any. The rule is `dotenv_boot.home_checkout_error`, shared
+    with the CLI's pre-Settings gate.
     """
-    if not checkout_anchored():
-        return (
-            f"this checkout ({repo}) claims no cluster — no AVA_HOME, not the prod "
-            "source, no .ava_home pointer — so it may launch no services. Birth its "
-            "own cluster first: ava start --worktree"
-        )
-    # Both sides resolved: a non-canonical AVA_HOME spelling that resolves to the
-    # prod home (`$HOME/../.ava`, a symlinked path) must not bypass the refusal —
-    # the filesystem would land the writes in the same directory either way
-    # (same-class hardening as `_assert_env_agrees_with_checkout`'s resolve
-    # comparison).
-    home = ava_home().resolve()
-    if home != (Path.home() / ".ava").resolve():
-        return None
-    expected = Path.home() / ".ava" / "source"
-    if repo.resolve() == expected.resolve():
-        return None
-    return (
-        f"this unit is the prod home ({home}) but the launching checkout is {repo} "
-        f"— only the prod home's anchored checkout ({expected}) may launch its "
-        f"services; a dev checkout would bind every prod daemon to disposable code "
-        f"(01:13 worktree accident, Task #966). Run `ava start` from {expected}."
-    )
+    return home_checkout_error(repo)
 
 
 def repo_plugins_dir() -> Path:

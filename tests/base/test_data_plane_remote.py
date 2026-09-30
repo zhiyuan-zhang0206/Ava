@@ -12,7 +12,7 @@ makes the pool footprint config-driven with explicit caller sizes winning.
 from __future__ import annotations
 
 from base.config.data_plane import DataPlaneSettings, resolved_pool_size, sslmode_for_url
-from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
 # A foreign host that could never be this machine's own reachable address in
 # the test env (AVA_MACHINE_HOST=localhost, so a `localhost` URL is rewritten
@@ -48,11 +48,11 @@ def test_is_remote_true_for_foreign_hosts() -> None:
     assert _settings(_LOOPBACK_DB, _FOREIGN_REDIS).is_remote is True
 
 
-def test_is_remote_false_for_unanchored_sentinel() -> None:
+def test_is_remote_false_for_placeholder_url() -> None:
     """The never-dialed boot placeholder names loopback and must stay local —
     the connect guard matches it byte-for-byte and no management path may
     treat a pre-install checkout as remote."""
-    assert _settings(UNANCHORED_DB_SENTINEL, _LOOPBACK_REDIS).is_remote is False
+    assert _settings(PLACEHOLDER_DB_URL, _LOOPBACK_REDIS).is_remote is False
 
 
 def test_is_remote_false_for_hostless_socket_url() -> None:

@@ -77,9 +77,7 @@ def _spawn_backup_lock_holder(
 
         sys.path.insert(0, {str(_REPO)!r})
         from services.backup import backup_lock
-        from base.config import settings
 
-        settings.general.ava_home = Path({str(ava_home)!r})
         with backup_lock(timeout_s=60):
             Path({str(ready)!r}).write_text("1", encoding="utf-8")
             time.sleep({hold_s})
@@ -1110,7 +1108,7 @@ def test_run_backup_narrates_both_silent_stages_through_progress(
 def test_backup_lock_reentrant_same_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A snapshot may take the lock before `run_backup` takes it again."""
     ava_home = tmp_path / "ava-home"
-    monkeypatch.setattr(settings.general, "ava_home", ava_home)
+    monkeypatch.setenv("AVA_HOME", str(ava_home))
 
     with backup.backup_lock(), backup.backup_lock(timeout_s=0.5):
         pass
@@ -1124,7 +1122,7 @@ def test_backup_lock_cross_process_excludes(
 ) -> None:
     """A scheduler dump waits for a rollout snapshot already holding the lock."""
     ava_home = tmp_path / "ava-home"
-    monkeypatch.setattr(settings.general, "ava_home", ava_home)
+    monkeypatch.setenv("AVA_HOME", str(ava_home))
     ready = tmp_path / "ready"
     holder = _spawn_backup_lock_holder(ava_home, ready, hold_s=2.0)
     try:
@@ -1145,7 +1143,7 @@ def test_backup_lock_cross_process_excludes(
 def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A wedged snapshot produces a bounded failure rather than an unbounded wait."""
     ava_home = tmp_path / "ava-home"
-    monkeypatch.setattr(settings.general, "ava_home", ava_home)
+    monkeypatch.setenv("AVA_HOME", str(ava_home))
     ready = tmp_path / "ready"
     holder = _spawn_backup_lock_holder(ava_home, ready, hold_s=30.0)
     try:

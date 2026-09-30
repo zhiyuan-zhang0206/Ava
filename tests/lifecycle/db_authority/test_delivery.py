@@ -126,7 +126,7 @@ def test_source_runtime_must_be_the_home_checkout(home: Path, tmp_path: Path) ->
 
 @pytest.fixture
 def boot(monkeypatch: pytest.MonkeyPatch, home: Path) -> Iterator[Path]:
-    """Point the boot pass at `home` as this process's anchored home.
+    """Point the boot pass at `home` as this process's home.
 
     The authority pass force-assigns and DROPS cluster keys in os.environ
     directly; the whole environment is restored after each test so no later
@@ -134,10 +134,7 @@ def boot(monkeypatch: pytest.MonkeyPatch, home: Path) -> Iterator[Path]:
     saved = dict(os.environ)
     env_file = home / ".env"
     env_file.write_text(f"AVA_DB_URL={_ENDPOINT}\n")
-    monkeypatch.setattr(dotenv_boot, "_HOME", home)
-    monkeypatch.setattr(dotenv_boot, "_ANCHORED", True)
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", home / "absent-mirror.env")
+    monkeypatch.setenv("AVA_HOME", str(home))
     monkeypatch.setattr(dotenv_boot, "_db_authority_refusal", None)
     for key in (
         "AVA_PROCESS_PROFILE",
@@ -160,7 +157,7 @@ def test_a_delivered_login_for_this_home_survives_the_env_file(
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "gateway")
     monkeypatch.setitem(os.environ, "AVA_DB_URL", delivered)
     monkeypatch.setitem(os.environ, authority.GENERATION_ENV, "4")
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(dotenv_boot.resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == delivered
     assert dotenv_boot.db_authority_refusal() is None
 
@@ -173,13 +170,13 @@ def test_a_sibling_homes_delivery_is_replaced_by_this_homes_endpoint(
         os.environ, "AVA_DB_URL", "postgresql://ava_g4_gateway:sibling@127.0.0.1:7433/ava"
     )
     monkeypatch.setitem(os.environ, authority.GENERATION_ENV, "4")
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(dotenv_boot.resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
 
 
 def test_an_admitted_operator_process_receives_the_gateway_login(boot: Path, seeded: Any) -> None:
     _intent(boot, _REPO)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(dotenv_boot.resolve_ava_home())
     gateway = seeded.roles.gateway
     assert os.environ["AVA_DB_URL"] == (
         f"postgresql://{gateway.name}:{gateway.password}@127.0.0.1:6433/ava"
@@ -193,7 +190,7 @@ def test_a_foreign_runtime_gets_nothing_and_its_dial_fails_by_name(
 ) -> None:
     del seeded
     _intent(boot, tmp_path / "another-checkout")
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(dotenv_boot.resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
     assert authority.GENERATION_ENV not in os.environ
     refusal = dotenv_boot.db_authority_refusal()
@@ -210,14 +207,14 @@ def test_a_launched_process_without_delivery_is_refused(
     del seeded
     _intent(boot, _REPO)
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "runner")
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(dotenv_boot.resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
     refusal = dotenv_boot.db_authority_refusal()
     assert refusal is not None and "only the root launcher delivers" in refusal
 
 
 def test_a_home_without_a_ledger_is_untouched(boot: Path) -> None:
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(dotenv_boot.resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
     assert dotenv_boot.db_authority_refusal() is None
     assert _guard_db_url(_ENDPOINT) == _ENDPOINT

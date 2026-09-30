@@ -25,6 +25,7 @@ from base.host.converge.accessibility import (
 )
 from base.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
 from base.host.converge.screen_capture import clear_status, write_status
+from base.host.env.dotenv_boot import resolve_ava_home
 from base.host.system.probes import browser_incapability
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge._brew_pin import ensure_brew_pin
@@ -499,9 +500,7 @@ def converge_host(
     to (`roles & step.roles`), so a single-box gateway,agent-runner host runs
     both the gateway and agent-runner steps.
     """
-    resolved_home = (
-        ava_home if ava_home is not None else Path(settings.general.ava_home).expanduser()
-    )
+    resolved_home = ava_home if ava_home is not None else resolve_ava_home()
     selected = _desired_service_names(roles) if services is None else services
     ctx = ConvergeCtx(repo=repo, ava_home=resolved_home, roles=roles, services=selected)
 
@@ -510,8 +509,8 @@ def converge_host(
     # not repoint `~/.local/bin/ava` or rewrite the shell rc.
     #
     # Identity is the home path, so the criterion is direct: this unit's resolved
-    # home must BE the default home. An uninstalled dev worktree resolves its home
-    # to `~/.ava` too (the unanchored fallback), so additionally require a repo
+    # home must BE the default home. A dev worktree resolves its home to `~/.ava`
+    # too whenever AVA_HOME is unset, so additionally require a repo
     # that is not a dev worktree (`.worktrees/...` or `.claude/worktrees/...`) —
     # host-global wiring runs only for a genuine prod-install checkout.
     repo_resolved = str(ctx.repo.resolve())

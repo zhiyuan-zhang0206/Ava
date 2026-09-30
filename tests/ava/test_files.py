@@ -8,7 +8,7 @@ When identity is not bound (pre-bootstrap, `_agent_id = None`), resolves to `$HO
 `~/...` goes through expanduser and always points to $HOME. Absolute paths are unchanged.
 
 workspace mock: shared `workspace` fixture (tests/fixtures/units.py) explicitly pins
-`_agent_id=1` and points `settings.general.ava_home` to tmp_path, returns the resolution base
+`_agent_id=1` and points `AVA_HOME` to tmp_path, returns the resolution base
 `<tmp>/workspaces/1` (workspace_dir is created on demand, not pre-built).
 
 $HOME mock premise: `Path.home()` goes through `os.path.expanduser("~")` which uses the `$HOME` env

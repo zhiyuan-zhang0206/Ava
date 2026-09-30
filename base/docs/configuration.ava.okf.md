@@ -45,12 +45,11 @@ annotations, editor types, choices, and `json_schema_extra` metadata. Both the
 gateway metadata view and the local config CLI use it, preventing scope,
 sensitivity, and editability policy from diverging. `base/host/env/bootstrap.py`
 remains the authority for whether a unit's `.env` owns cluster configuration or
-a pure runner must fetch it from the gateway. An unanchored checkout (no
-`AVA_HOME`, not the prod source, no `.ava_home` pointer) is neither: the lite
-source decision asks `checkout_anchored()` first and boots it bare on its
-scratch home, `should_fetch_from_gateway()` answers no for it whatever its
-environment carries, and `fetch_bootstrap_config()` refuses to dial for it — its
-imports never read another unit's `.env` or present a gateway bearer.
+a pure runner must fetch it from the gateway. The home is not configuration:
+`AVA_HOME` is read by `dotenv_boot.resolve_ava_home` before Settings exists (there
+is no `ava_home` field), and a tool that imports application code without owning
+a cluster calls `dotenv_boot.enter_scratch_home()` first, so its imports never
+read another unit's `.env` or present a gateway bearer.
 
 Bootstrap serves `AVA_HOST_MAX_CONCURRENT_TURNS` verbatim, including zero for
 unlimited admission. Runner requests select only the credential role. Snapshot

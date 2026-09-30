@@ -27,7 +27,6 @@ from typing import Any
 import pytest
 
 from base import paths
-from base.config import settings
 from base.packages.plugins.enable_config import write_local
 
 # Every dotted name a plugin module can be registered under.
@@ -43,7 +42,7 @@ def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
     monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path / "ava"))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
 
 

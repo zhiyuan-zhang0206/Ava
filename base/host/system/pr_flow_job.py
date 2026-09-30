@@ -15,7 +15,7 @@ network: the checks are `shutil.which` plus one file read, so converge
 stays cheap.
 
 The job command runs the checkout's own venv python against the checkout's
-`scripts/pr_flow_export.py` (same checkout-anchored resolution as
+`scripts/pr_flow_export.py` (same checkout rule as
 `base.host.system.cron.ava_binary_path`), so a worktree's converge — should the gate
 ever pass there — would register its own pair, never prod's.
 

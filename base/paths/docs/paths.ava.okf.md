@@ -13,7 +13,8 @@ tags:
 ## What it is
 
 `base/paths/__init__.py` is the single-point resolver for every per-unit path. The root
-comes from `settings.general.ava_home` (env `AVA_HOME`, default `~/.ava`); each
+comes from `base.host.env.dotenv_boot.resolve_ava_home` (env `AVA_HOME`, default
+`~/.ava`), read on every call — never captured at import; each
 helper `mkdir(parents=True, exist_ok=True)` on first access, so calling one
 means "this directory is ready and writable".
 
@@ -28,7 +29,6 @@ identity**: a co-located gateway unit at `~/.ava_gateway` and a runner unit at
 $AVA_HOME/
 ├── .env                        # the unit's config source of truth
 ├── .env.lock                   # serializes .env rewrites across processes (never .env itself)
-├── .ava_home                   # (in a dev *checkout*, not here) pointer to that worktree's home
 ├── source/                     # prod only — the git checkout the sessions run from
 ├── pg/  redis/                 # this cluster's own data-plane instances
 ├── run/                        # pidfiles, unix sockets, sessions/ (native-supervisor records)
@@ -63,18 +63,13 @@ PTY pool). It lists no clusters: each home describes only itself.
 ## Notes
 
 - **`.env` / `installed.json` lock discipline** (sibling file locks at every door, leaves stay leaves, atomic save vs lost update): [[base/paths/docs/lock-discipline.ava.okf.md]].
-- The home is resolved **checkout-anchored** by
-  `base/host/env/dotenv_boot.py:resolve_ava_home`, never from cwd and never from a
-  flag: `AVA_HOME` env > the prod source checkout → `~/.ava` > the checkout's
-  `.ava_home` pointer > *unanchored*: a checkout claiming no cluster boots bare
-  on a private per-process scratch home under the system temp dir — never
-  `~/.ava` — reading no `.env`, fetching nothing, and planting an unreachable
-  DB sentinel so a DB connection fails loud; `prod_service_checkout_error`
-  refuses it outright. An `AVA_HOME` that **contradicts** the checkout's
-  own claim raises `AvaHomeContradictionError` instead of resolving; the callers
-  for which that mixing is deliberate (the install, `ava cluster down/destroy`,
-  the test suite) set `AVA_HOME_OVERRIDE=1`. Cluster identity **is** this path —
-  there is no cluster name; see [[base.ava.okf.md|the base overview]].
+- The home is `AVA_HOME` when set, else `~/.ava`
+  (`base/host/env/dotenv_boot.py:resolve_ava_home`), never from cwd and never from a
+  flag: no pointer file, no checkout claim, no in-process override. A home that
+  carries its own `<home>/source` checkout is changed only by that checkout's code
+  (`dotenv_boot.home_checkout_error`; `prod_service_checkout_error` applies it to
+  service launches). Cluster identity **is** this path — there is no cluster name;
+  see [[base.ava.okf.md|the base overview]].
 - `run/` exists so ephemeral runtime artifacts (pidfiles, sockets, session
   records) do not litter the home's top level.
 - `$AVA_HOME/disabled_services` records the operator's durable disabled set.

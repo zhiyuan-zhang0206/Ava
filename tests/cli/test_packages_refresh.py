@@ -20,6 +20,7 @@ from typing import cast
 import pytest
 
 from base.config import settings
+from base.host.env.dotenv_boot import resolve_ava_home
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.packages_refresh import (
     effective_interval_seconds,
@@ -35,11 +36,11 @@ def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home = tmp_path / ".ava"
     (home / "skills").mkdir(parents=True)
     (home / "logs").mkdir()
-    monkeypatch.setattr(settings.general, "ava_home", home)
+    monkeypatch.setenv("AVA_HOME", str(home))
 
 
 def _home() -> Path:
-    return Path(settings.general.ava_home)
+    return resolve_ava_home()
 
 
 def _git(cwd: Path, *args: str, check: bool = True) -> str:

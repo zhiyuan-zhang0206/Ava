@@ -11,7 +11,6 @@ import pytest
 
 from base import paths
 from base.cluster.machine import set_identity
-from base.config import settings
 from base.deploy.git import memory_repo
 from base.host import proc
 from base.packages.plugins.enable_config import write_local
@@ -30,13 +29,13 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
     monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
     # One home, read through the one seam every consumer shares. `paths.ava_home()` is
-    # `settings.general.ava_home` plus a mkdir, and modules that did `from base.paths import
+    # `AVA_HOME` plus a mkdir, and modules that did `from base.paths import
     # ava_home` (the service roster `converge_host` consults) hold their own reference that a
-    # patch of `paths.ava_home` never reaches — so the home lives in settings, not in a patch,
+    # patch of `paths.ava_home` never reaches — so the home lives in the variable, not in a patch,
     # and a second, real `ava_home()` cannot create a sibling directory next to it.
     home = tmp_path / "ava"
     home.mkdir()
-    monkeypatch.setattr(settings.general, "ava_home", str(home))
+    monkeypatch.setenv("AVA_HOME", str(home))
 
 
 def test_the_isolated_home_is_the_one_every_consumer_resolves(tmp_path: Path) -> None:

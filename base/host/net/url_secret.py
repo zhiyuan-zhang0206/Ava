@@ -112,7 +112,7 @@ def url_host(url: str, fallback: str = "127.0.0.1") -> str:
     sentinels name loopback), so the fallback is a defensive floor for a
     hand-written URL without one — never a route for an empty host to reach
     something unintended: 127.0.0.1 is unreachable off-box, and the connect
-    guard still matches the unanchored sentinel byte-for-byte.
+    guard still matches the placeholder URL byte-for-byte.
     """
     return urlsplit(url).hostname or fallback
 

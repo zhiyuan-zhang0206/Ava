@@ -640,7 +640,7 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
         flush_interval_seconds=1.0,
         max_entries=8,
     )
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(outbox, "limits", lambda: snapshot)
     outbox._reset_caches_for_tests()
     monkeypatch.setattr(

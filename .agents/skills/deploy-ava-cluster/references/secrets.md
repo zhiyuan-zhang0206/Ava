@@ -49,7 +49,6 @@ The first-start capabilities determine the initial control-plane secret:
 |---|---|
 | `--serve-gateway --serve-agent-runner` | Empty bearer by default; unauthenticated loopback API. Postgres/PgBouncer still admit only write-generation logins (generation 0 minted at first start) and Redis gets its generated admin and runtime passwords. |
 | `--serve-gateway --no-serve-agent-runner` | Minted automatically. It stays on the gateway; runners receive capability bundles instead. |
-| `--worktree` | Single-box defaults; no production secret or data is copied. |
 | `--serve-agent-runner --no-serve-gateway` | No bearer: supply the capability bundle's transport key as `AVA_DB_CAPABILITY_KEY` for the first start. A runner home recording `AVA_CLUSTER_SECRET` refuses. |
 
 The initialization journal binds credentials before their first effects.

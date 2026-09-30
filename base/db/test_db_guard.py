@@ -43,8 +43,8 @@ _FRESH_BIRTH_DB_NAME = "ava"
 # ava_test* is the namespace for any per-session test database. The sentinel
 # URLs have no server behind them (port 1 on loopback) — every write fails
 # loudly, so they are safe to allow: "unprovisioned" is what the Ava suite pins
-# at import, "run-ava-start-first" is dotenv_boot's unanchored-dev-checkout
-# sentinel (base/dotenv_boot.UNANCHORED_DB_SENTINEL), which a harness whose
+# at import, "run-ava-start-first" is the never-dialed placeholder a lite boot
+# plants (base.host.env.dotenv_boot.PLACEHOLDER_DB_URL), which a harness whose
 # bootstrap skips the env block lands on instead of the prod URL.
 _TEST_DB_NAME_PREFIXES = ("ava_citest", "ava_test")
 _SENTINEL_DB_NAMES = frozenset({"unprovisioned", "run-ava-start-first"})

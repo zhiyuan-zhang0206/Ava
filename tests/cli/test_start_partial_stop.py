@@ -26,7 +26,6 @@ def partial_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         IdentityInput(
             home,
             tmp_path,
-            False,
             frozenset({"gateway", "agent-runner"}),
             {"AVA_MACHINE_NAME": "partial"},
         )

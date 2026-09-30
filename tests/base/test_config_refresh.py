@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from base import config
-from base.host.env import dotenv_boot
+from tests.fixtures.units import use_env_files
 
 _IDENTITY_LINES = [
     f"AVA_DB_URL={os.environ['AVA_DB_URL']}",
@@ -82,8 +82,7 @@ def _point_env_at(monkeypatch: pytest.MonkeyPatch, env_text: str, tmp_path: Path
     merged = tmp_path / "merged.env"
     # The unit's own lines come last: a later duplicate key wins.
     merged.write_text("\n".join(_IDENTITY_LINES) + "\n" + env_text)
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", merged)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
+    use_env_files(monkeypatch, merged)
 
 
 def _env_text(runtime_password: str) -> str:

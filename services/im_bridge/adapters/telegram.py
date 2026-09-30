@@ -26,6 +26,7 @@ import httpx
 
 from base.config import settings
 from base.log import logger
+from base.paths import ava_home
 from services.im_bridge.types import IMAdapter, InboundMessage
 
 # Telegram's per-message cap for plain-text messages.
@@ -129,7 +130,7 @@ class TelegramAdapter(IMAdapter):
         return self._client
 
     def _offset_path(self) -> Path:
-        return Path(settings.general.ava_home) / "state" / "im_bridge" / "telegram_offset"
+        return ava_home() / "state" / "im_bridge" / "telegram_offset"
 
     # -- lifecycle -------------------------------------------------------
 

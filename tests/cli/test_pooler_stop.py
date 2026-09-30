@@ -34,7 +34,7 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="native POSIX po
 
 # Port 1 on loopback never listens for an unprivileged test: a refused dial is
 # the stop path's proof that this home has no Redis, and no other process can
-# take the port between allocation and use (the unanchored sentinel's choice).
+# take the port between allocation and use (the placeholder URL's choice).
 _ABSENT_REDIS = "redis://127.0.0.1:1"
 _BIND_ATTEMPTS = 5
 # The pooler port comes from a range no OS ephemeral allocator hands out (macOS
@@ -129,7 +129,7 @@ def native_pooler(
     binary = pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
         pytest.skip("native PgBouncer is not installed")
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(pooler, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@127.0.0.1:12345/test")
     monkeypatch.setattr(settings.data_plane, "redis_url", _ABSENT_REDIS)

@@ -113,7 +113,7 @@ from base.deploy.schema.migration_layout import (
 from base.deploy.schema.migration_layout import (
     validate_migrations_at_ref as validate_migrations_at_ref,
 )
-from base.host.env.dotenv_boot import checkout_anchored_home
+from base.host.env.dotenv_boot import home_checkout_error, resolve_ava_home
 from base.log import logger
 from base.native_process.os_platform import CREATE_NO_WINDOW as CREATE_NO_WINDOW
 
@@ -293,24 +293,26 @@ def _assert_migration_authority(conn: psycopg.Connection) -> None:
     """Refuse unless this checkout is the gateway unit of the cluster it is about
     to migrate. Raises MigrationAuthorityMismatch naming both identities.
 
-    The executing identity is deliberately `checkout_anchored_home()`, NOT the
-    env-resolved home: a worktree process that inherited `AVA_HOME=~/.ava` has a
-    prod DB URL *and* a prod-looking `ava_home()`, so only the checkout's own
-    claim distinguishes it. An unanchored checkout cannot prove ownership at all
-    and is refused on that ground.
+    The executing identity is the process's home (`resolve_ava_home()`) together
+    with the rule that a home carrying its own `<home>/source` checkout is
+    changed only by that checkout (`home_checkout_error`): a worktree process
+    that inherited `AVA_HOME=~/.ava` has a prod DB URL *and* a prod-looking
+    `ava_home()`, and carries its own `migrations/`, so the checkout rule is what
+    distinguishes it.
     """
     units = _gateway_units(conn)
     if not units:
         return
-    home, anchored = checkout_anchored_home()
+    home = resolve_ava_home()
+    foreign = home_checkout_error(MIGRATIONS_DIR.parent)
     try:
         this_machine = machine_name()
     except MachineNameMissing:
         this_machine = "<unset>"
-    if anchored and (this_machine, str(home)) in units:
+    if foreign is None and (this_machine, str(home)) in units:
         return
     owner = ", ".join(f"{name}:{path}" for name, path in units)
-    claim = f"{this_machine}:{home}" if anchored else f"{this_machine}:<unanchored checkout>"
+    claim = f"{this_machine}:{home}" if foreign is None else f"{this_machine}:<foreign checkout>"
     raise MigrationAuthorityMismatch(
         f"refusing to migrate: this checkout claims {claim}, but the database's "
         f"gateway unit is {owner}. A cluster's schema is owned by its gateway — "

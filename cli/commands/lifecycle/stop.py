@@ -8,7 +8,6 @@ updates preserve persistent PTYs.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -164,12 +163,6 @@ def _force_stop(
     Preserves agent identities/data and the selected service/infra/terminal
     scope, but may interrupt work. Never entered merely because drain timed out.
     """
-    # `_repo` imported base.config above, so dotenv_boot has already consumed
-    # AVA_HOME_OVERRIDE. Strip it only when stop actually runs: cluster down/destroy
-    # needs the exemption to enter this process, but pg_ctl and future Python children
-    # must not inherit it — the "cannot become ambient" boundary (F-s4-7).
-    os.environ.pop("AVA_HOME_OVERRIDE", None)
-
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 

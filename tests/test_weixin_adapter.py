@@ -22,7 +22,6 @@ from typing import Any
 import httpx
 import pytest
 
-from base.config import settings
 from services.im_bridge.adapters import weixin
 from services.im_bridge.adapters.weixin import (
     InboundMessage,
@@ -88,7 +87,7 @@ def _transport(
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Path:
     """Point the state dir at a tmp AVA_HOME and write a test account."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     account = {
         "account_id": "bot-id",
         "bot_token": "test-bot-token",
@@ -340,7 +339,7 @@ async def test_skips_echo_group_bot_and_textless(env: Any) -> None:
 
 async def test_unconfigured_start_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     """No account file -> start() does nothing and send() raises."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     adapter = WeixinAdapter(FakeCore())
     assert not adapter._configured
     await adapter.start()

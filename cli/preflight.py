@@ -1,45 +1,84 @@
-"""Settings-free home anchoring for lifecycle commands.
+"""Settings-free gate for lifecycle commands: which checkout may act on a home.
 
 First start publishes identity through cli.start_intent before Settings loads.
-Other lifecycle commands require an existing checkout or explicit home anchor.
+Every verb that changes the resolved home passes `require_own_checkout` first.
 """
 
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+# Verbs that read and change nothing on the home they resolve; any checkout may
+# run them. A verb missing from this list is refused from a foreign checkout:
+# the list is the only way a verb becomes exempt.
+_READ_ONLY_VERBS: frozenset[tuple[str, ...]] = frozenset(
+    {
+        ("status",),
+        ("maintenance", "status"),
+        ("pty", "status"),
+        ("firewall", "status"),
+        ("lgtm", "status"),
+        ("cluster", "status"),
+        ("agents", "ls"),
+        ("agents", "timeline"),
+        ("notices", "list"),
+        ("impersonate", "list"),
+        ("impersonate", "status"),
+        ("config", "get"),
+        ("config", "audit"),
+        ("presets", "ls"),
+        ("presets", "get"),
+        ("schedules", "ls"),
+        ("schedules", "get"),
+        ("schedules", "runs"),
+        ("schedules", "logs"),
+        ("plugins", "installed"),
+        ("plugins", "inspect"),
+        ("mcp", "list"),
+        ("mcp", "ls"),
+        ("memory", "search"),
+        ("packages", "status"),
+        ("pitr", "operations", "status"),
+        ("pitr", "retention", "inspect"),
+        ("pitr", "retention", "status"),
+        ("pitr", "multipart", "list"),
+        ("pitr", "snapshot", "verify"),
+    }
+)
 
 
-def require_anchored_home(verb: str) -> int | None:
-    """Refuse a verb that acts on this checkout's own cluster when the checkout
-    claims none. Returns None to proceed, an error rc to refuse.
+def _command_path(args_in: list[str]) -> tuple[str, ...]:
+    """The leading verb words of an argv (up to three), stopping at the first flag."""
+    path: list[str] = []
+    for token in args_in:
+        if token.startswith("-"):
+            break
+        path.append(token)
+    return tuple(path[:3])
 
-    `resolve_ava_home`'s last rule resolves a checkout with no `AVA_HOME`, no
-    prod-source match and no `.ava_home` pointer to a private per-process scratch
-    home, flagged `anchored=False`: it boots bare so tools and hooks keep working,
-    but it owns no cluster. A verb that stops, restarts or reconfigures "this
-    cluster" has nothing to act on there, and the default home it might have meant
-    belongs to the prod source's own `ava`. So the family refuses with the birth
-    command instead of quietly operating an empty scratch.
 
-    This validates only the anchor. First-start identity owns reservation and
-    port validation; stop must remain available to finish exact cleanup after
-    a failed initialization or a recorded destroy intent.
+def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
+    """Refuse a verb that changes a home from a checkout that is not the home's own.
+
+    A home that carries its own `<home>/source` checkout is changed only by that
+    checkout's CLI (`base.host.env.dotenv_boot.home_checkout_error`); a home with
+    none (a test home) accepts any checkout. Only the verbs in `_READ_ONLY_VERBS`
+    are exempt. Returns None to proceed, an error rc to refuse.
+
+    `repo` is the checkout the running CLI belongs to. This gate is settings-free
+    and runs before every other one, so a foreign checkout is stopped before
+    anything loads the home's configuration.
     """
-    from base.host.env.dotenv_boot import resolve_ava_home
+    from base.host.env.dotenv_boot import home_checkout_error
 
-    home, anchored = resolve_ava_home()
-    if anchored:
+    path = _command_path(args_in)
+    if any(path[: len(verb)] == verb for verb in _READ_ONLY_VERBS):
         return None
-    print(
-        f"✗ ava {verb}: this checkout claims no cluster (no AVA_HOME, not the prod "
-        f"source, no .ava_home pointer), so it runs on a throwaway scratch home {home} "
-        f"— `ava {verb}` from here has no cluster to act on. "
-        "Birth this checkout's own cluster first:\n"
-        "  ava start --worktree   # from this checkout\n"
-        "To act on the default home (~/.ava) deliberately, run ITS `ava` (the one on "
-        "PATH), not this checkout's.",
-        file=sys.stderr,
-    )
+    error = home_checkout_error(repo)
+    if error is None:
+        return None
+    print(f"✗ ava {' '.join(path)}: {error}", file=sys.stderr)
     return 1
 
 
@@ -48,10 +87,7 @@ def unit_already_stopped() -> bool:
     from base.deploy.maintenance.pause_owner import read_for_home
     from base.host.env.dotenv_boot import resolve_ava_home
 
-    home, anchored = resolve_ava_home()
-    if not anchored:
-        return False
-    current = read_for_home(home)
+    current = read_for_home(resolve_ava_home())
     return (
         current.status == "paused"
         and current.maintenance is not None

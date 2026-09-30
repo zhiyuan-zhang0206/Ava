@@ -21,7 +21,6 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.messages import delivery_outbox as outbox
 from base.agents.messages.chat_delivery import insert_chat_inbound_once
-from base.config import settings
 from base.db import create_agent
 
 _NOW = datetime(2026, 9, 17, 9, 30, 0, tzinfo=UTC)
@@ -43,7 +42,7 @@ def _limits(**overrides: object) -> outbox.DeliveryOutboxLimits:
 
 @pytest.fixture()
 def journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     outbox._reset_caches_for_tests()
     yield tmp_path
     outbox._reset_caches_for_tests()

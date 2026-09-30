@@ -95,9 +95,10 @@ def preflight_start_readiness(
 
 
 def _prod_checkout_problem(repo: Path) -> str | None:
-    """`ava start`'s first refusal — the prod home may only launch from its own
-    anchored checkout (`base.paths.prod_service_checkout_error`) — moved ahead
-    of the stop. Cheap and read-only; a non-prod unit always passes it."""
+    """`ava start`'s first refusal — a home that carries its own `source` checkout
+    may only launch from it (`base.paths.prod_service_checkout_error`) — moved
+    ahead of the stop. Cheap and read-only; a home with no `source` of its own
+    always passes it."""
     from base.paths import prod_service_checkout_error
 
     return prod_service_checkout_error(repo)

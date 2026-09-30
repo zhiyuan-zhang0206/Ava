@@ -67,7 +67,11 @@ import re
 import sys
 from pathlib import Path
 
-import ava
+from base.host.env.dotenv_boot import enter_scratch_home
+
+enter_scratch_home()
+
+import ava  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _DOCS_CONVENTIONS = _REPO_ROOT / "conventions"

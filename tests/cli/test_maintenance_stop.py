@@ -41,7 +41,7 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX sign
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(stop, "get_shell_backend", lambda: SimpleNamespace(list_sessions=list))
     monkeypatch.setattr(root_driver, "_root_tree_selection", dict)
     monkeypatch.setattr(root_driver, "_stop_root_service_tree", Mock(return_value=0))
@@ -60,7 +60,6 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             env={
                 **os.environ,
                 "AVA_HOME": str(tmp_path),
-                "AVA_HOME_OVERRIDE": "1",
                 "HOME": str(tmp_path),
             },
         )
@@ -138,7 +137,7 @@ def test_explicit_keep_preserves_real_idle_terminal_during_service_stop(
     try:
         created = subprocess.run(  # noqa: S603 — test-owned home and repository module
             [sys.executable, "-m", "base.sessions.pty.cli", name, "new", str(home), str(envfile)],
-            env={**os.environ, "AVA_HOME": str(home), "AVA_HOME_OVERRIDE": "1", "HOME": str(home)},
+            env={**os.environ, "AVA_HOME": str(home), "HOME": str(home)},
             capture_output=True,
             text=True,
             timeout=30,

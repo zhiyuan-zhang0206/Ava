@@ -27,7 +27,7 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   but a later `uv sync` in that worktree writes through the symlink and
   re-points the shared venv's editable `.pth` here — breaking every other
   checkout that uses that venv
-  ([rationale](../../../conventions/dev-setup.md#per-worktree-cluster-dev-flow)).
+  ([rationale](../../../conventions/dev-setup.md#development-in-a-worktree)).
   No venv yet? Build the worktree's own (`env -u VIRTUAL_ENV python
   scripts/host_ops/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`),
   or for a test-only run reuse another worktree's real venv:
@@ -191,8 +191,7 @@ Doing that by hand, two things save you from stopping the wrong postmaster:
 
 - **`ppid` does not discriminate.** Every postmaster on the box has `ppid 1`, real
   clusters included — they are all detached, which is the whole reason they survive.
-- **The path does.** A real cluster's data dir is `$AVA_HOME/pg` (`~/.ava`,
-  `~/.ava-<worktree>`); a throwaway's is `<throwaway base>/ava-pg-*/data`. That is
+- **The path does.** A real cluster's data dir is `$AVA_HOME/pg` (`~/.ava`); a throwaway's is `<throwaway base>/ava-pg-*/data`. That is
   the same distinction `_resolved_throwaway_dir` encodes, and on a live box it
   separates real clusters from corpses immediately.
 

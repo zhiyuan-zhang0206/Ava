@@ -40,7 +40,7 @@ from urllib.parse import urlsplit, urlunsplit
 from base.cluster import get_record, port_free
 from base.config import settings
 from base.deploy.git.gitenv import git_env
-from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.proc import run_bounded
 from cli.commands.converge.spec import ConvergeCtx
 
@@ -79,8 +79,8 @@ def probe_postgres(url: str, timeout: float = _PROBE_TIMEOUT_S) -> str | None:
     """None when a SELECT 1 round-trip against `url` succeeds; an error string
     otherwise. Bounded by `connect_timeout` so a black-holed peer cannot hang a
     start (the data plane's own fail-fast posture, shortened for the gate)."""
-    if url == UNANCHORED_DB_SENTINEL:
-        return "no cluster connection facts (unanchored checkout)"
+    if url == PLACEHOLDER_DB_URL:
+        return "no cluster connection facts (placeholder database URL)"
     try:
         from base.db.connections import connect_url
 
@@ -159,7 +159,7 @@ def _data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
             return []
 
     out: list[str] = []
-    if pg_url != UNANCHORED_DB_SENTINEL:
+    if pg_url != PLACEHOLDER_DB_URL:
         err = probe_postgres(pg_url)
         if err is not None:
             out.append(f"postgres {_redact(pg_url)}: {err}")

@@ -66,7 +66,6 @@ def test_pause_preserves_unselected_process_and_real_pty(
     dependencies(monkeypatch)
     # Bootstrap and spawned interpreters consume the raw home before Settings.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
     orchestration = launch("unowned-test-process", _IGNORE)
     terminal = PtySessionBackend()
@@ -112,7 +111,6 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
 ) -> None:
     dependencies(monkeypatch)
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
     from cli.commands.lifecycle import service_stop as strict
 
@@ -309,7 +307,6 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     full_stop: bool,
 ) -> None:
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr("base.sessions.backend.get_shell_backend", PtySessionBackend)
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))

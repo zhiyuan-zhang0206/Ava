@@ -45,7 +45,6 @@
     "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._retirement_command": 4,
     "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._retirement_owner": 2,
     "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._wait_retirement_owner": 2,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._BUILD_DIR": 3,
     "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._expected_dr": 2,
     "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._interactive_signing_reason": 3,
     "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._is_valid_stable_app": 1,

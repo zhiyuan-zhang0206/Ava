@@ -51,7 +51,7 @@ Skill nodes see [[ava_builtins/plugins/ava_memory/skills/docs/skills.ava.okf.md|
 
 This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and calls `register_namespace("memory", ...)`. There is no core `ava/memory.py`; disabling the plugin removes the surface entirely.
 
-- `ava.memory.PATH` — memory pool root path (`$AVA_HOME/memory`, computed by `ava_home()`), shared by all agents
+- `ava.memory.PATH` — memory pool root path (`$AVA_HOME/memory`, computed by `ava_home()` each time it is read), shared by all agents
 - `ava.memory.search(query, k=5)` — semantic search, returns `list[(path, description, tags)]`
   (description empty string when absent; tags include the note's `type/<x>` tag so a caller can weigh a hit by its kind)
 - `ava.memory.write(slug, content, *, title=None, description=None, tags=None, store="personal")` — canonical entry writer for personal and shared stores; resolves the target from the agent/store rather than cwd, writes the note's frontmatter (a caller-supplied block stays the note's only one, is completed with the fields it is missing, and has its bare values quoted where YAML would misread them), closes the composed note with a terminal newline when it lacks one, and upserts the relevant index pointer — the store's `MEMORY.md`, or the shared topic directory's own `index.md` (created when missing) for a subdirectory entry

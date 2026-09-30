@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 from pydantic import ValidationError
 
 from base.host.env.bootstrap import BootstrapFetchError
+from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from base.native_process import code_version
 from base.native_process.os_platform import (
     LockTimeoutError,
@@ -88,7 +90,7 @@ _LITE_VERBS = frozenset(
         # `restart` is deliberately NOT here: its preflight registers this
         # machine in the central DB and its start leg needs the cluster config
         # regardless, so on a pure runner a lite restart could only ever hit
-        # the never-dialed placeholder DB URL (UnanchoredHomeError, observed on
+        # the never-dialed placeholder DB URL (PlaceholderDbUrlError, observed on
         # the fleet Windows box). With the gateway down, restart now fails at
         # the fetch with the actionable BootstrapFetchError — `stop` stays lite
         # and remains the recovery verb.
@@ -107,20 +109,6 @@ _LITE_VERBS = frozenset(
         "boot",
     }
 )
-
-
-# Verbs that act on THIS checkout's own cluster and name no target. An unanchored
-# checkout resolves to a private per-process scratch home, not a real cluster, so
-# these must refuse rather than act on it — `cli.preflight.require_anchored_home`.
-# `start` is gated separately, by the stricter installed-home check.
-#
-# The membership rule is mechanical: a verb belongs here iff it acts on the current
-# home AND takes no explicit target. That is why `cluster down` / `cluster destroy` are
-# absent — both REQUIRE `--path` and address a home by name, so they never act on the
-# current one; and why the read-only (`ls`, `status`) and probe-registration
-# subcommands are absent too.
-_ANCHORED_HOME_VERBS = frozenset({"stop", "pause", "restart", "converge", "logs", "maintenance"})
-_ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset({"db-authority"})
 
 
 def _print_settings_load_failure(e: ValidationError) -> int:
@@ -158,16 +146,6 @@ def _print_settings_load_failure(e: ValidationError) -> int:
     return 1
 
 
-# Where the recorded launcher profile lives; base/host/env/dotenv_boot.py reads the
-# same key back (`LAUNCHER_PROFILE_ENV_KEY`). It stays a literal here:
-# importing base.host.env.dotenv_boot at CLI entry is not safe — it resolves the
-# process home at import (resolve_ava_home raises for an installed wheel
-# without an explicit absolute AVA_HOME, and on an env/checkout home
-# contradiction), while first start must run exactly on hosts where those
-# gates cannot hold yet.
-_LAUNCHER_PROFILE_ENV_KEY = "AVA_LAUNCHER_PROFILE"
-
-
 def _normalize_process_profile() -> None:
     """Pop the launcher's process profile, recording it for the boot pass.
 
@@ -189,7 +167,7 @@ def _normalize_process_profile() -> None:
     """
     launcher_profile = os.environ.pop("AVA_PROCESS_PROFILE", None)
     if launcher_profile:
-        os.environ[_LAUNCHER_PROFILE_ENV_KEY] = launcher_profile
+        os.environ[LAUNCHER_PROFILE_ENV_KEY] = launcher_profile
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -201,6 +179,16 @@ def main(argv: list[str] | None = None) -> int:
     code_version.exempt_from_db_gate()
     _normalize_process_profile()
     args_in = sys.argv[1:] if argv is None else argv
+    # The checkout gate comes first, before `boot` and before anything loads a
+    # home's configuration: a verb that changes a home is refused unless this
+    # CLI belongs to that home (`cli.preflight.require_own_checkout`). Skips
+    # --help (parse-only invocations).
+    if args_in and not ({"-h", "--help"} & set(args_in)):
+        from cli.preflight import require_own_checkout
+
+        rc = require_own_checkout(args_in, Path(__file__).resolve().parents[1])
+        if rc is not None:
+            return rc
     # `ava boot` is what the OS boot job runs on the platforms whose scheduler
     # cannot retry a failed job for us (Linux cron `@reboot`, Windows ONLOGON):
     # `ava start` re-run while the machine is still coming up. Dispatched here,
@@ -216,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     # `maintenance stop` deliberately does NOT: its verify-drained and
     # host-identity legs dial this unit's real data plane, so on a pure runner a
     # lite stop could only ever hit the never-dialed placeholder DB URL
-    # (UnanchoredHomeError — the 2026-09-13 drill stall, issue #2346). With the
+    # (PlaceholderDbUrlError — the 2026-09-13 drill stall, issue #2346). With the
     # gateway down such a stop now fails at the fetch with the actionable
     # BootstrapFetchError — the same contract `restart` took above. Every other
     # verb — start, converge, update, trace-ship — and every daemon/agent process
@@ -235,26 +223,6 @@ def main(argv: list[str] | None = None) -> int:
         ["maintenance", "stop-data-plane"],
     ):
         os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
-
-    # Home gates — settings-free (cli.preflight), so an uninstalled/unanchored home
-    # gets the actionable pointer instead of the generic Settings validation error the
-    # cli.commands import would raise first. Skips --help (parse-only invocations).
-    #
-    # First start owns its identity validation before importing Settings. Other
-    # verbs that act on THIS checkout's cluster take the anchoring check — enough to stop an unanchored dev
-    # worktree from reaching production, without blocking a home whose registry record
-    # is gone from cleaning itself up.
-    if args_in and not ({"-h", "--help"} & set(args_in)):
-        verb = args_in[0]
-        sub = args_in[1] if len(args_in) > 1 else ""
-        if verb in _ANCHORED_HOME_VERBS or (
-            verb == "cluster" and sub in _ANCHORED_HOME_CLUSTER_SUBVERBS
-        ):
-            from cli.preflight import require_anchored_home
-
-            rc = require_anchored_home(f"{verb} {sub}" if verb == "cluster" else verb)
-            if rc is not None:
-                return rc
 
     parser = _build_parser()
     args = parser.parse_args(argv)

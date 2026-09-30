@@ -23,9 +23,9 @@ def test_freeze_is_host_wide_and_records_operator_generation(
 ) -> None:
     first_home = tmp_path / "cluster-a"
     second_home = tmp_path / "cluster-b"
-    monkeypatch.setattr(settings.general, "ava_home", first_home)
+    monkeypatch.setenv("AVA_HOME", str(first_home))
     first_state_path = allocation_freeze.state_path()
-    monkeypatch.setattr(settings.general, "ava_home", second_home)
+    monkeypatch.setenv("AVA_HOME", str(second_home))
 
     frozen = allocation_freeze.freeze(holder="operator-1818", reason="bounded cleanup")
 
