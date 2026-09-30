@@ -29,8 +29,23 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
     monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path / "ava"))
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    # One home, read through the one seam every consumer shares. `paths.ava_home()` is
+    # `settings.general.ava_home` plus a mkdir, and modules that did `from base.paths import
+    # ava_home` (the service roster `converge_host` consults) hold their own reference that a
+    # patch of `paths.ava_home` never reaches — so the home lives in settings, not in a patch,
+    # and a second, real `ava_home()` cannot create a sibling directory next to it.
+    home = tmp_path / "ava"
+    home.mkdir()
+    monkeypatch.setattr(settings.general, "ava_home", str(home))
+
+
+def test_the_isolated_home_is_the_one_every_consumer_resolves(tmp_path: Path) -> None:
+    """`ops.roster` binds `ava_home` by name at import, out of reach of any patch of
+    `paths.ava_home`; `converge_host` reaches it through `_desired_service_names`. A home that
+    only a patch pointed at made that real call create a second, unrelated directory."""
+    from ops import roster
+
+    assert roster.ava_home() == paths.ava_home() == tmp_path / "ava"
 
 
 def test_scaffold_runs_despite_dangling_config() -> None:
@@ -173,6 +188,10 @@ def _install_memory_plugin() -> Path:
 
 def _make_dirty_memory_repo(pool: Path, branch: str) -> None:
     subprocess.run(["git", "init", "-q", "-b", branch, str(pool)], check=True)  # noqa: S603
+    # `git commit` would otherwise spawn a detached `git maintenance run --auto` that holds
+    # `.git/objects/maintenance.lock` while the test walks the tree.
+    for key, value in (("maintenance.auto", "false"), ("gc.auto", "0")):
+        subprocess.run(["git", "-C", str(pool), "config", key, value], check=True)  # noqa: S603
     subprocess.run(  # noqa: S603
         ["git", "-C", str(pool), "config", "user.email", "ava@test.invalid"], check=True
     )
@@ -224,7 +243,7 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
         converge_host.converge_host(
             tmp_path / "repo",
             frozenset({"agent-runner"}),
-            ava_home=tmp_path,
+            ava_home=paths.ava_home(),
             steps=converge_host.CONVERGE_STEPS,
         )
 
