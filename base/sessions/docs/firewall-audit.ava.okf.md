@@ -3,7 +3,7 @@ type: doc
 title: macOS Firewall Manifest
 description: base/host/macos_firewall.py — the declarative per-binary Application Firewall allow-list manifest, renderer, and rootless-first reconciliation behind converge and `ava firewall`.
 tags:
-- shared
+- base
 - macos
 - firewall
 ---

@@ -3,7 +3,7 @@ type: doc
 title: Loaded-runtime interpreter binding
 description: Interpreter paths and the source identity of the checkout that loaded the running code.
 tags:
-- shared
+- base
 - runtime
 ---
 

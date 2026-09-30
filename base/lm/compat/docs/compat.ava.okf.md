@@ -3,7 +3,7 @@ type: doc
 title: LLM Compatibility Layers
 description: '`base/lm/compat/anthropic_thinking.py` and `openai_reasoning.py` — provider quirks folded into the chat classes.'
 tags:
-- shared
+- base
 - library
 - llm-inference
 ---

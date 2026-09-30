@@ -3,7 +3,7 @@ type: doc
 title: "Root control contract — protocol and Unix-socket client"
 description: "The client side of the ava-root supervisor below every consumer: the JSON-line wire protocol and the blocking RootClient, which validates status against the kernel-reported Unix-socket peer identity."
 tags:
-- shared
+- base
 - lifecycle
 - ipc
 ---
@@ -23,4 +23,4 @@ service ([[services/ava_root/docs/ava_root.ava.okf.md]] is the server).
 
 Consumers below the service: the start-serving gate (`base/deploy/lifecycle/start_serving.py`)
 authenticates the live root generation through `RootClient.status()`.
-Import-linter's "shared must not import services" contract keeps this direction.
+Import-linter's "base must not import services" contract keeps this direction.

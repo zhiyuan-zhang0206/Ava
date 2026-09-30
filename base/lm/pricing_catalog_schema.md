@@ -3,7 +3,7 @@ type: doc
 title: Provider Metadata Schema v1 — Pricing Catalog
 description: Cross-line provider metadata contract implemented by Ava's reviewed pricing catalog.
 tags:
-- shared
+- base
 - lm
 - billing
 - schema

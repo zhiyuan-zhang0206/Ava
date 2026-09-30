@@ -3,7 +3,7 @@ type: doc
 title: Managed writer closure evidence
 description: Operation-bound evidence and transaction fencing for managed-writer protocol admission.
 tags:
-  - shared
+  - base
   - deployment
 ---
 

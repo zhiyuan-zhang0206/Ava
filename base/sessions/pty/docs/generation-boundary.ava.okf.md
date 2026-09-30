@@ -3,7 +3,7 @@ type: doc
 title: "PTY allocation generation boundary"
 description: "A freeze advances the generation immediately: reconcilers reap superseded exact sessions, current desired state remains rebuildable, and corrupt markers are repaired without discarding their generation UUID."
 tags:
-- shared
+- base
 - pty
 - sessions
 ---

@@ -3,7 +3,7 @@ type: doc
 title: Machine Identity & Capabilities
 description: '`base/cluster/machine.py` — this host''s stable name plus its capability SET (`gateway` / `agent-runner` / `observability-station`, any subset). A host runs the union of its capabilities'' services; the `machines` table is the cluster-wide view of the same two labels.'
 tags:
-- shared
+- base
 - library
 - cluster
 ---

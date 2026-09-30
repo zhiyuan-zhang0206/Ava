@@ -516,8 +516,8 @@ schedule on the spot) — see [`schedules/README.md`](../schedules/README.md).
 Persistent `ava-schedule-<id>` terminals survive pause and update with their
 currently loaded runner code and script text. Adopt changed runner code through
 an explicit schedule restart at its work boundary, or a full stop/start.
-**A wave that moves code between packages (the `shared/` → `base/` rename is the
-canonical case), changes schedule templates, or otherwise touches an import
+**A wave that moves code between packages (a package rename is the canonical
+case), changes schedule templates, or otherwise touches an import
 surface must also close the loop on in-store schedule copies.** A rollout
 never updates them (above), and a stale copy only surfaces at its next fire
 (crash-loop auto-pause once it cannot stay up). Before trusting `schedules`,

@@ -3,7 +3,7 @@ type: doc
 title: Base library dependencies
 description: Dependency map for shared contracts, state, infrastructure, and agent identity.
 tags:
-- shared
+- base
 - library
 ---
 

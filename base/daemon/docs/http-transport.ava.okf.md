@@ -3,7 +3,7 @@ type: doc
 title: Settings-free daemon HTTP transport
 description: Shared bounded HTTP parsing, bearer authentication and explicit route serving without Settings initialization.
 tags:
-  - shared
+  - base
   - transport
 ---
 

@@ -3,7 +3,7 @@ type: doc
 title: Path Lock Discipline
 description: The serialization contract for .env and installed.json rewrites — sibling file locks at every door, the leaves-must-stay-leaves rule, and why atomic save alone is not enough.
 tags:
-- shared
+- base
 - paths
 - locks
 ---

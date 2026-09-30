@@ -3,7 +3,7 @@ type: doc
 title: Language Model Provider Layer
 description: '`base/lm/` — provider-neutral LLM contracts above LangChain; enabled plugins own every chat provider.'
 tags:
-- shared
+- base
 - library
 - llm-inference
 ---

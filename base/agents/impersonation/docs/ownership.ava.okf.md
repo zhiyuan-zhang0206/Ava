@@ -3,7 +3,7 @@ type: doc
 title: Impersonation ownership and return
 description: Lease state transitions, renewal, native return, and operator closure.
 tags:
-- shared
+- base
 - identity
 - lifecycle
 ---

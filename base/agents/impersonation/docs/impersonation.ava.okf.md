@@ -3,7 +3,7 @@ type: doc
 title: Named agent impersonation sessions
 description: Trusted same-machine controllers, per-agent session numbers, permanent messages, and durable native handoffs.
 tags:
-- shared
+- base
 - identity
 - lifecycle
 ---

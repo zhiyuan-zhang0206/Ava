@@ -3,7 +3,7 @@ type: doc
 title: "`$AVA_HOME` Layout"
 description: '`base/paths/__init__.py` resolves every per-unit path from `$AVA_HOME`. One home = one unit; co-located units keep separate state because their homes differ. Helpers mkdir on first access, so calling one means the directory is ready.'
 tags:
-- shared
+- base
 - library
 - filesystem
 ---
@@ -74,7 +74,7 @@ PTY pool). It lists no clusters: each home describes only itself.
   own claim raises `AvaHomeContradictionError` instead of resolving; the callers
   for which that mixing is deliberate (the install, `ava cluster down/destroy`,
   the test suite) set `AVA_HOME_OVERRIDE=1`. Cluster identity **is** this path —
-  there is no cluster name; see [[base.ava.okf.md|the shared overview]].
+  there is no cluster name; see [[base.ava.okf.md|the base overview]].
 - `run/` exists so ephemeral runtime artifacts (pidfiles, sockets, session
   records) do not litter the home's top level.
 - `$AVA_HOME/disabled_services` records the operator's durable disabled set.

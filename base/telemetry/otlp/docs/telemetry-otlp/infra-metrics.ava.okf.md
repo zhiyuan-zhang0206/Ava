@@ -3,7 +3,7 @@ type: doc
 title: "Infrastructure metrics — the sidecar's own scrapes"
 description: "The traditional SRE layer (issue #46): each running OTel Collector scrapes host metrics and its own queue/drop/uptime metrics; the marked gateway also scrapes its usable data-plane receivers. The dedicated `metrics/infra` pipeline attaches physical `host` and Ava roster `machine_name` identities and lands in central Prometheus without extra exporter binaries."
 tags:
-- shared
+- base
 - telemetry
 - otlp
 - observability

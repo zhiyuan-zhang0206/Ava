@@ -3,7 +3,7 @@ type: doc
 title: Live Event Channel (`ava:events`)
 description: Redis pub/sub channel carrying live agent activity to the UI. One Pydantic model per role, `role` as the Literal discriminator, `EVENT_ADAPTER` a closed discriminated union — an unknown role raises rather than degrading.
 tags:
-- shared
+- base
 - contract
 - observability
 ---

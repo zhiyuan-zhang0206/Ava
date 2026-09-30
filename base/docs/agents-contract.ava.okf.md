@@ -3,7 +3,7 @@ type: doc
 title: Agent Cross-Process Contract
 description: '`base/agents/contract.py` defines the cross-process data contract between agent processes and the gateway — pure type definitions, no implementation. Both sides communicate over HTTP and must see the same status enums, exception hierarchy, and wire error protocol (bidirectional mapping between wire reason ↔ exception classes). The message-level half of the contract is its sibling `base/agents/messages/kwargs.py`.'
 tags:
-- shared
+- base
 - library
 - agent-lifecycle
 ---

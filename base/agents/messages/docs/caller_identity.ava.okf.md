@@ -3,7 +3,7 @@ type: doc
 title: "Asserted External Caller Identity"
 description: "Bounded external caller provenance, structured inbound and audit persistence, and reader-first rollout constraints."
 tags:
-- shared
+- base
 - identity
 ---
 

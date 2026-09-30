@@ -3,7 +3,7 @@ type: doc
 title: Exec domain closure
 description: How the dedicated exec owner proves its domain closed on POSIX and Windows, and what remains unknown.
 tags:
-- shared
+- base
 - exec
 - process
 ---

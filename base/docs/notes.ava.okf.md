@@ -3,7 +3,7 @@ type: doc
 title: "Markdown Note Model"
 description: '`base/packages/docs/notes.py` — one parser for the whole repo: reads a `---`-frontmatter markdown note off disk, decides it is a note, and lifts the fields both graph consumers need. Note/walk_notes/extract_md_links/normalize_tags, plus the lenient type-preserving `parse_frontmatter_typed` in `base/packages/docs/frontmatter.py`.'
 tags:
-- shared
+- base
 - library
 - markdown
 ---

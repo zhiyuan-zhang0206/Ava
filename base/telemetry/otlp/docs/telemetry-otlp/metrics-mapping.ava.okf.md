@@ -3,7 +3,7 @@ type: doc
 title: "OTLP metrics mapping"
 description: "How telemetry-category events become Prometheus series — the per-field disposition (`_METRIC_DISPOSITION`), instrument naming (unit suffix stripped), the cluster-aware metrics Resource, and the Views shaping the LLM latency histograms."
 tags:
-- shared
+- base
 - telemetry
 - otlp
 - observability

@@ -3,7 +3,7 @@ type: doc
 title: Published Model Rates
 description: Reviewed model-specific token rates, cache-write gaps, and retirement caveats in Ava's pricing catalog.
 tags:
-- shared
+- base
 - library
 - llm-inference
 - billing

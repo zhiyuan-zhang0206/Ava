@@ -3,7 +3,7 @@ type: doc
 title: "PTY sessions — one detached host process per agent interactive shell"
 description: "Each agent shell/watcher owns a pty host, screen model, capture buffer, and unix-socket protocol. Opted-in macOS hosts are direct permissions-helper children; others reparent to init."
 tags:
-- shared
+- base
 - pty
 - sessions
 ---

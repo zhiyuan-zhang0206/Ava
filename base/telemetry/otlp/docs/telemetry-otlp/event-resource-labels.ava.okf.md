@@ -3,7 +3,7 @@ type: doc
 title: "OTLP event resource labels"
 description: "The source-side resource grouping that keeps every Loki event_name index label equal to the unified event JSON body and stamps the event's cluster identity."
 tags:
-- shared
+- base
 - telemetry
 - otlp
 - loki

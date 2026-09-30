@@ -3,7 +3,7 @@ type: doc
 title: LLM Billing Catalog
 description: '`base/lm/pricing.py` + the archive and plugin rates — deterministic, network-free pricing behind every cost figure.'
 tags:
-- shared
+- base
 - library
 - llm-inference
 - billing
