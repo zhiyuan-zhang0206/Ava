@@ -304,7 +304,7 @@ def _group_empty(pgid: int | None) -> bool:
         os.killpg(pgid, 0)
     except ProcessLookupError:
         return True
-    except OSError:  # fail-fast-ok: macOS EPERM for a zombie-only group falls through to the member scan below (the authoritative reading)
+    except OSError:  # noqa: S110 - macOS EPERM for a zombie-only group falls through to the member scan below (the authoritative reading)
         pass
     for process in psutil.process_iter():
         try:

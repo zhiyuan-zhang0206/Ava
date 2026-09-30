@@ -210,7 +210,7 @@ SKIP=types-codegen-fresh git commit -m "..."
 **Never reach for `--no-verify`.** It is not "skip the broken hook" — it disables
 *every* hook at once, including the lints that have no other local gate
 (`lint-ava-okf`, `lint-doc-symbols`, `lint-doc-anchors`, `lint-doc-roster`,
-`lint-agents-md-size`, `lint-skill-*`, `lint-fail-fast`, `lint-no-os-environ`,
+`lint-agents-md-size`, `lint-skill-*`, `lint-no-os-environ`,
 …). The failure mode is
 silent: the commit succeeds, and you learn nothing about what you turned off.
 

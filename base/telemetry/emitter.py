@@ -201,7 +201,7 @@ def capture_trace_ids() -> tuple[str | None, str | None]:
         if ctx.is_valid:
             return format(ctx.trace_id, "032x"), format(ctx.span_id, "016x")
     except Exception:  # noqa: S110
-        pass  # fail-fast-ok: trace capture must never break an emit
+        pass  # trace capture must never break an emit
     return None, None
 
 

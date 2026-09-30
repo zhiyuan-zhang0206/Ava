@@ -8,6 +8,7 @@ fields are inherited from `service_runtime`; aggregated by base/config.
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
@@ -584,11 +585,9 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
             s = v.strip()
             if not s:
                 return []
-            try:
+            with suppress(json.JSONDecodeError):  # not JSON -> fall through to comma split
                 parsed = cast("list[Any]", json.loads(s))
                 if isinstance(parsed, list):
                     return [x for x in parsed if isinstance(x, str)]
-            except json.JSONDecodeError:
-                pass  # fail-fast-ok: not JSON -> fall through to comma split
             return [x.strip() for x in s.split(",") if x.strip()]
         return v

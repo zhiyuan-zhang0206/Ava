@@ -249,8 +249,8 @@ def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) 
     def _call() -> dict[str, Any]:
         try:
             asyncio.get_running_loop()
-        except RuntimeError:
-            pass  # fail-fast-ok: no running loop is the required sync calling context.
+        except RuntimeError:  # noqa: S110 - no running loop is the required sync calling context
+            pass
         else:
             raise RuntimeError(
                 "This is the sync embedding provider API; call it from a worker thread "

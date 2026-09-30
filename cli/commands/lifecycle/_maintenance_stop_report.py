@@ -159,7 +159,7 @@ def live_identities(identities: Iterable[OwnedProcess]) -> list[OwnedProcess]:
     for identity in identities:
         try:
             alive = identity.live()
-        except Exception:  # fail-fast-ok: the deadline report must not raise
+        except Exception:  # the deadline report must not raise
             alive = True
         if alive:
             present.append(identity)

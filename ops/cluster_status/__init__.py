@@ -379,7 +379,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
         try:
             names = backend.list_sessions(_CLUSTER_SESSION_PREFIX)
         except Exception:
-            # fail-fast-ok: a down backend means no sessions to show, and the
+            # A down backend means no sessions to show, and the
             # status snapshot must stay readable while it is down.
             _log.warning("session enumeration failed on %s", type(backend).__name__, exc_info=True)
             continue
@@ -423,7 +423,7 @@ def _read_deploy_snapshot(
             agent_count = _count_local_agents(conn) if is_agent_runner() else 0
             schema_status = schema_mismatch_status(conn=conn)
         return state, agent_count, schema_status
-    except Exception as exc:  # fail-fast-ok: status degrades when the central DB is unavailable
+    except Exception as exc:  # status degrades when the central DB is unavailable
         # Deploy state and agent count share one bounded connection. During a
         # data-plane outage the snapshot remains readable with no deploy claim
         # and the existing zero-count default.
@@ -445,7 +445,7 @@ def _read_resource_sample() -> ResourceSample | None:
         from base.host.resource_sample import resource_sample
 
         return resource_sample()
-    except Exception:  # fail-fast-ok: psutil may not be installed; degrade gracefully
+    except Exception:  # psutil may not be installed; degrade gracefully
         _log.warning("resource_sample failed (psutil missing?)", exc_info=True)
         return None
 
