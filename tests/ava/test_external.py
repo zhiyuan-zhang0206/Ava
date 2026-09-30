@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
-from ava import agent_identity, external
+from ava import agent_identity, external, gateway_client
 from ava.external import state
 from ava.external.state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
 from base import telemetry
@@ -391,7 +391,7 @@ def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
         with pytest.raises(RuntimeError, match="closing"):
             ava.agents.send_message(99, "must not reach gateway")
 
-    monkeypatch.setattr(ava.agents._client, "send_message", record_send)
+    monkeypatch.setattr(gateway_client, "send_message", record_send)
     monkeypatch.setattr(attachment, "_seal_manifest_participant", lambda: None)
     monkeypatch.setattr(attachment, "flush", new_call_during_close)
     attachment.close()
@@ -418,7 +418,7 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
         assert release.wait(2), "close did not release the pre-close SDK call"
         delivered.append((agent_id, content))
 
-    monkeypatch.setattr(ava.agents._client, "send_message", held_send)
+    monkeypatch.setattr(gateway_client, "send_message", held_send)
     monkeypatch.setattr(attachment, "_seal_manifest_participant", lambda: None)
 
     def skip_seal(_participant: manifest.LocalParticipant) -> None:

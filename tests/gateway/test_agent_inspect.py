@@ -14,6 +14,7 @@ from base.config import settings
 from gateway.app import app
 from gateway.inspect import router as inspect_router
 from gateway.lgtm import loki_events
+from ops import cluster_rpc
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 
 
@@ -129,7 +130,7 @@ def test_inspect_live_returns_only_window_independent_fields(
             "shells": [{"id": 5, "name": "live-shell", "created_at": None, "uptime_seconds": 42}]
         }
 
-    monkeypatch.setattr(inspect_router._cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
 
@@ -187,7 +188,7 @@ def test_inspect_live_probe_failure_is_unavailable_not_empty_success(
     async def unreachable(*args: object, **kwargs: object) -> dict[str, object]:
         raise inspect_router._cluster_rpc.ClusterOpUnreachable("connect failed")
 
-    monkeypatch.setattr(inspect_router._cluster_rpc, "dispatch_to_machine", unreachable)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", unreachable)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.status_code == 200
@@ -205,7 +206,7 @@ def test_inspect_live_distinguishes_valid_empty_from_missing_shell_data(
     async def probe(*args: object, **kwargs: object) -> dict[str, object]:
         return {} if malformed else {"shells": []}
 
-    monkeypatch.setattr(inspect_router._cluster_rpc, "dispatch_to_machine", probe)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", probe)
     with TestClient(app) as client:
         if malformed:
             with pytest.raises(KeyError, match="shells"):
@@ -252,8 +253,6 @@ def test_inspect_shells_probed_on_agents_machine(
     """shells come from a `shell_probe` op dispatched to the agent's machine —
     a remote runner's live shells appear exactly like a local one's (no local
     session probing in the gateway)."""
-    from gateway.inspect import router as inspect_mod
-
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
@@ -273,7 +272,7 @@ def test_inspect_shells_probed_on_agents_machine(
             ]
         }
 
-    monkeypatch.setattr(inspect_mod._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
@@ -321,7 +320,7 @@ def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
             ]
         }
 
-    monkeypatch.setattr(inspect_router._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
@@ -335,9 +334,6 @@ def test_inspect_shells_degrade_to_empty_on_unreachable(
 ) -> None:
     """An unreachable machine (or unregistered name) degrades to an empty shell
     list — the inspector shows 'None open' instead of 503ing the whole panel."""
-    from gateway.inspect import router as inspect_mod
-    from ops import cluster_rpc
-
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
@@ -348,7 +344,7 @@ def test_inspect_shells_degrade_to_empty_on_unreachable(
     ) -> dict[str, object]:
         raise cluster_rpc.ClusterOpUnreachable("connect failed")
 
-    monkeypatch.setattr(inspect_mod._cluster_rpc, "dispatch_to_machine", _unreachable_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable_dispatch)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/live")
@@ -361,9 +357,6 @@ def test_inspect_shells_degrade_to_empty_on_failed_op(
 ) -> None:
     """A version-skewed runner that does not know the op reports 'failed' —
     same graceful degradation to an empty shell list."""
-    from gateway.inspect import router as inspect_mod
-    from ops import cluster_rpc
-
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
@@ -374,7 +367,7 @@ def test_inspect_shells_degrade_to_empty_on_failed_op(
     ) -> dict[str, object]:
         raise cluster_rpc.ClusterOpFailed({"error": "unknown kind: shell_probe"})
 
-    monkeypatch.setattr(inspect_mod._cluster_rpc, "dispatch_to_machine", _failed_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed_dispatch)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/live")

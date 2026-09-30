@@ -17,7 +17,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.routers import shell as shell_router
 from ops import cluster_rpc
 
 
@@ -70,7 +69,7 @@ def test_shell_no_such_session_404(
             {"error": "ShellNotFoundError: agent 1 has no live shell 0 on this host"}
         )
 
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _failed_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed_dispatch)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/shell/0")
@@ -97,7 +96,7 @@ def test_shell_capture_success(
         seen["payload"] = payload
         return await _ok_dispatch(target_machine, kind, payload)
 
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _capture_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _capture_dispatch)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/shell/3")
@@ -136,7 +135,7 @@ def test_shell_capture_custom_lines_forwarded(
         seen["payload"] = payload
         return await _ok_dispatch(target_machine, kind, payload)
 
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _capture_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _capture_dispatch)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/shell/1?lines=500")
@@ -163,7 +162,7 @@ def test_shell_capture_default_lines_follow_display_config(
         seen["payload"] = payload
         return await _ok_dispatch(target_machine, kind, payload)
 
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _capture_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _capture_dispatch)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/shell/1")
@@ -199,7 +198,7 @@ def test_shell_capture_carries_created_at_and_ttl_deadline(
             "uptime_seconds": 1800,
         }
 
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _meta_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _meta_dispatch)
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/shell/3").json()
@@ -234,7 +233,7 @@ def test_shell_capture_without_row_has_no_deadline(
             "uptime_seconds": 10800,
         }
 
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _meta_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _meta_dispatch)
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/shell/7").json()
@@ -261,7 +260,7 @@ def test_shell_capture_without_row_and_epoch_keeps_no_deadline(
             "uptime_seconds": 0,
         }
 
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _meta_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _meta_dispatch)
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/shell/8").json()
@@ -294,7 +293,7 @@ def test_shell_capture_returns_recorded_deadline(
             "uptime_seconds": 300,
         }
 
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _meta_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _meta_dispatch)
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/shell/9").json()
@@ -314,7 +313,7 @@ def test_shell_machine_unreachable_503(
     ) -> dict[str, object]:
         raise cluster_rpc.ClusterOpUnreachable("connect failed")
 
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _unreachable_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable_dispatch)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/shell/1")
@@ -339,7 +338,7 @@ def test_shell_capture_carries_renewal_facts(
             (aid, 4, datetime.now(tz=UTC) + timedelta(hours=2), 3, renewed),
         )
     db_conn.commit()
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _ok_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _ok_dispatch)
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/shell/4").json()

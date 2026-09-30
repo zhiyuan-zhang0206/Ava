@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from gateway.app import app
 from gateway.cluster import roster_probe
 from gateway.cluster import status as status_router
+from ops import cluster_rpc
 
 _OPS_URL = "http://wsl:18121"
 
@@ -343,9 +344,7 @@ class TestClusterPanel:
             calls.append(kw)
             assert kw["ops_url"] == _OPS_URL
             if kw["retries"] != 1:
-                from ops import cluster_rpc as cw
-
-                raise cw.ClusterOpUnreachable("connection reset was not retried")
+                raise cluster_rpc.ClusterOpUnreachable("connection reset was not retried")
             return {
                 "machine_name": "wsl-test",
                 "serve_gateway": False,
@@ -353,7 +352,7 @@ class TestClusterPanel:
                 "paused": False,
             }
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", retry_aware_dispatch)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", retry_aware_dispatch)
         with TestClient(app) as client:
             first = client.get("/api/status")
             second = client.get("/api/status")
@@ -395,7 +394,7 @@ class TestProbeAgentRunner:
                 "paused": False,
             }
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
@@ -417,7 +416,7 @@ class TestProbeAgentRunner:
             called = True
             raise AssertionError("missing roster URL must not trigger a DB re-lookup")
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", must_not_dispatch)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", must_not_dispatch)
         row = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], None, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
@@ -448,7 +447,7 @@ class TestProbeAgentRunner:
                 raise
             raise AssertionError("unreachable")
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", blackhole)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", blackhole)
         row = await asyncio.wait_for(
             status_router._probe_agent_runner(
                 "wsl",
@@ -469,12 +468,10 @@ class TestProbeAgentRunner:
     async def test_timeout_returns_offline(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from datetime import UTC, datetime
 
-        from ops import cluster_rpc as cw
-
         async def fake_enqueue(*_a: object, **_kw: object) -> dict[str, object]:
-            raise cw.ClusterOpUnreachable("ops server unreachable")
+            raise cluster_rpc.ClusterOpUnreachable("ops server unreachable")
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
         stopped = datetime(2026, 5, 25, tzinfo=UTC)
         r = await status_router._probe_agent_runner(
             "wsl",
@@ -503,7 +500,7 @@ class TestProbeAgentRunner:
                 "paused": True,
             }
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl",
             ["agent-runner"],
@@ -532,7 +529,7 @@ class TestProbeAgentRunner:
                 "head_sha": "def5678",
             }
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
@@ -552,7 +549,7 @@ class TestProbeAgentRunner:
             # Missing the required serve_gateway / serve_agent_runner / serve_observability_station fields.
             return {"machine_name": "wsl", "paused": True}
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
@@ -636,15 +633,13 @@ class TestProbeBackoff:
         skipped without dialing the ops server."""
         from datetime import UTC, datetime
 
-        from ops import cluster_rpc as cw
-
         calls: list[dict[str, object]] = []
 
         async def fake_dispatch(**kw: object) -> dict[str, object]:
             calls.append(kw)
-            raise cw.ClusterOpUnreachable("down")
+            raise cluster_rpc.ClusterOpUnreachable("down")
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_dispatch)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)
         last = datetime(2026, 5, 24, tzinfo=UTC)
         r1 = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, last, None, None
@@ -663,15 +658,13 @@ class TestProbeBackoff:
         backed off: the next poll dials it again so the real error keeps surfacing."""
         from datetime import UTC, datetime
 
-        from ops import cluster_rpc as cw
-
         calls: list[dict[str, object]] = []
 
         async def fake_dispatch(**kw: object) -> dict[str, object]:
             calls.append(kw)
-            raise cw.ClusterOpFailed({"error": "schema drift"})
+            raise cluster_rpc.ClusterOpFailed({"error": "schema drift"})
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_dispatch)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)
         last = datetime(2026, 5, 24, tzinfo=UTC)
         first = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, last, None, None
@@ -725,7 +718,7 @@ class TestFastFailBudget:
                 "paused": False,
             }
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
@@ -749,7 +742,7 @@ class TestFastFailBudget:
             await asyncio.Event().wait()
             raise AssertionError("unreachable")
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", blackhole)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", blackhole)
         started = time.monotonic()
         r = await asyncio.wait_for(
             status_router._probe_agent_runner(
@@ -792,7 +785,7 @@ class TestDetachedRecoveryDial:
         async def must_not_dispatch(*_a: object, **_kw: object) -> dict[str, object]:
             raise AssertionError("a known-down host must not be dialed inline")
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", must_not_dispatch)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", must_not_dispatch)
         roster_probe._probe_failures["wsl"] = (1, time.monotonic())  # fresh failure
 
         started = time.monotonic()
@@ -817,7 +810,7 @@ class TestDetachedRecoveryDial:
         async def must_not_dispatch(*_a: object, **_kw: object) -> dict[str, object]:
             raise AssertionError("a known-down host must not be dialed inline")
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", must_not_dispatch)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", must_not_dispatch)
         roster_probe._probe_failures["wsl"] = (1, 0.0)  # window long elapsed
 
         started = time.monotonic()
@@ -881,10 +874,9 @@ class TestDetachedRecoveryDial:
     ) -> None:
         """A landed detached dial that timed out widens the record exactly as the
         inline re-dial did: failures+1 with the window at min(5 * 2**n, 300)."""
-        from ops import cluster_rpc as rpc
 
         async def unreachable(*_a: object, **_kw: object) -> dict[str, object]:
-            raise rpc.ClusterOpUnreachable("blackholed")
+            raise cluster_rpc.ClusterOpUnreachable("blackholed")
 
         monkeypatch.setattr(roster_probe, "dispatch_status_probe", unreachable)
         roster_probe._probe_failures["wsl"] = (1, 0.0)
@@ -935,7 +927,6 @@ class TestDetachedRecoveryDial:
         from datetime import UTC, datetime
 
         from base.config import settings
-        from ops import cluster_rpc as rpc
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 0.05)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.05)
@@ -958,7 +949,7 @@ class TestDetachedRecoveryDial:
         ) -> dict[str, object]:
             calls.append((name, timeout_s))
             if name == "mba" and blackholed["on"]:
-                raise rpc.ClusterOpUnreachable("blackholed")
+                raise cluster_rpc.ClusterOpUnreachable("blackholed")
             return {
                 "machine_name": name,
                 "serve_gateway": False,
@@ -1045,7 +1036,7 @@ class TestDetachedRecoveryDial:
             await asyncio.Event().wait()
             raise AssertionError("unreachable")
 
-        monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", blackhole)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", blackhole)
         roster_probe._probe_failures["wsl"] = (1, 0.0)  # window long elapsed
 
         started = time.monotonic()

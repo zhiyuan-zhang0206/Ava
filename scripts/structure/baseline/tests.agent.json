@@ -45,7 +45,6 @@
     "tests/agent/conftest.py::agent.graph.llm._cancel": 1,
     "tests/agent/test_ava_code_plugin.py::agent.graph.exec.output._overflow_dir": 1,
     "tests/agent/test_ava_fleet_plugin.py::ava.gateway_client.transport._client": 1,
-    "tests/agent/test_ava_fleet_plugin.py::gateway.agents.notices._ops": 2,
     "tests/agent/test_build_with_extensions.py::base.packages.plugins.enable_config._dangling_reported": 1,
     "tests/agent/test_cancel.py::agent.graph.exec.node._run_in_subprocess": 10,
     "tests/agent/test_capabilities_drift.py::ava.skills._recorded_skill_invocations": 1,

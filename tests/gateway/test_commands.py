@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from ava import composer_commands as ava_commands
 from gateway.app import app
 from gateway.routers import commands as commands_router
+from ops import cluster_rpc
 
 
 def _runner_a(_request: Request, _agent_id: int) -> str:
@@ -60,7 +61,7 @@ def test_endpoint_agent_view_dispatches_to_agents_machine(monkeypatch: pytest.Mo
             "mcp_names": ["runner-only-groundwork"],
         }
 
-    monkeypatch.setattr(commands_router._cluster_rpc, "dispatch_to_machine", _dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _dispatch)
     with TestClient(app) as client:
         resp = client.get("/api/commands?agent_id=42")
     assert resp.status_code == 200, resp.text
@@ -91,7 +92,7 @@ def test_endpoint_agent_view_unavailable_falls_back_locally(
     async def _unavailable(*_args: object, **_kwargs: object) -> NoReturn:
         raise failure()
 
-    monkeypatch.setattr(commands_router._cluster_rpc, "dispatch_to_machine", _unavailable)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unavailable)
     with TestClient(app) as client:
         resp = client.get("/api/commands?agent_id=42")
     assert resp.status_code == 200, resp.text

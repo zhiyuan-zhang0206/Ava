@@ -68,7 +68,6 @@
     "tests/services/test_browser_mcp_wrapper.py::base.host.net.resilience._asleep": 5,
     "tests/services/test_computer_mcp_wrapper.py::base.host.net.resilience._asleep": 1,
     "tests/services/test_computer_mcp_wrapper.py::base.host.net.resilience._sleep": 1,
-    "tests/services/test_delivery_watchdog_turn_liveness.py::ops.lifecycle._cluster_rpc": 1,
     "tests/services/test_embeddings.py::base.host.net.resilience._asleep": 5,
     "tests/services/test_embeddings.py::base.host.net.resilience._sleep": 5,
     "tests/services/test_embeddings.py::base.telemetry.tracing._state": 1,

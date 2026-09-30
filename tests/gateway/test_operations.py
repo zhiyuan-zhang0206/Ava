@@ -16,7 +16,7 @@ import psycopg
 import pytest
 from pydantic import ValidationError
 
-from ops import cluster, lifecycle
+from ops import cluster, cluster_rpc, lifecycle
 from ops.lifecycle import launch
 from ops.rpc_schemas import (
     LaunchAgentRequest,
@@ -585,7 +585,7 @@ class TestResurrectIfTerminatedPlacement:
             dispatch_called.append(kwargs)
             raise lifecycle._cluster_rpc.ClusterOpUnreachable("ops server not reachable")
 
-        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
         status = await lifecycle.resurrect_if_terminated(
             5,
@@ -635,7 +635,7 @@ class TestResurrectIfTerminatedPlacement:
             captured.update(target=target_machine, kind=kind, payload=payload)
             return {"status": "spawned"}
 
-        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
         status = await lifecycle.resurrect_if_terminated(
             7,
@@ -666,7 +666,7 @@ class TestResurrectIfTerminatedPlacement:
         async def _unreachable(*_a: object, **_kw: object) -> dict:
             raise ClusterOpUnreachable("ops server for machine='wsl' unreachable")
 
-        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
 
         with caplog.at_level("INFO"):
             status = await lifecycle.resurrect_if_terminated(
@@ -687,7 +687,7 @@ class TestResurrectIfTerminatedPlacement:
         async def _failed(*_a: object, **_kw: object) -> dict:
             raise ClusterOpFailed({"error": "launch failed on the home machine"})
 
-        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed)
 
         status = await lifecycle.resurrect_if_terminated(
             7, trigger_inbound_id=99, trigger_inbound_kind="chat"
@@ -773,7 +773,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         async def _unreachable(*_a: object, **_kw: object) -> dict:
             raise lifecycle._cluster_rpc.ClusterOpUnreachable("no ops server")
 
-        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
 
         status = await lifecycle.resurrect_if_terminated(
             5, trigger_inbound_id=10**12, trigger_inbound_kind="chat"
@@ -895,7 +895,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         async def _unreachable(*_a: object, **_kw: object) -> dict:
             raise lifecycle._cluster_rpc.ClusterOpUnreachable("no ops server")
 
-        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
 
         status = await lifecycle.resurrect_if_terminated(
             aid, trigger_inbound_id=rec_iid, trigger_inbound_kind="chat"
@@ -928,7 +928,7 @@ async def test_spawned_auto_resurrect_clears_suppression_in_database(
         db_conn.commit()
         return {"status": "spawned"}
 
-    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _spawn_on_home)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _spawn_on_home)
 
     status = await lifecycle.resurrect_if_terminated(
         agent_id,

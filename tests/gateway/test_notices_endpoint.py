@@ -1257,7 +1257,7 @@ def test_supersede_publishes_global_notice_id(
     Regression: both used the local id, so the frontend could not drop the
     superseded notice from the open feed until the next snapshot refresh.
     """
-    from gateway.agents import notices as notices_router
+    from ops import lifecycle as ops_lifecycle
 
     agent_id = _seed_agent(db_conn)
     # Skew the per-agent LOCAL sequence clear of the GLOBAL one (a resolved
@@ -1296,7 +1296,7 @@ def test_supersede_publishes_global_notice_id(
     async def _capture(_agent_id: int, notice_id: int) -> None:
         published.append(notice_id)
 
-    monkeypatch.setattr(notices_router._ops, "publish_notice_resolved", _capture)
+    monkeypatch.setattr(ops_lifecycle, "publish_notice_resolved", _capture)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/agents/{agent_id}/notices",

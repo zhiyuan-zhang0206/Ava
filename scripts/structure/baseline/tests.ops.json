@@ -5,7 +5,6 @@
   "patch_targets": {
     "tests/ops/test_agent_skill_view.py::ava.composer_commands._command_dirs": 1,
     "tests/ops/test_agent_skill_view.py::ava.skills._skills_dir": 1,
-    "tests/ops/test_billing_recovery.py::ops.lifecycle.billing_recovery._cluster_rpc": 3,
     "tests/ops/test_billing_recovery.py::ops.lifecycle.billing_recovery._try_run_lock": 1,
     "tests/ops/test_capture_shell_trim.py::base.sessions.backend._shell_backend": 1,
     "tests/ops/test_cluster_status_batch.py::ops.cluster_status._check_pidfile": 2,
@@ -15,9 +14,7 @@
     "tests/ops/test_cluster_status_batch.py::ops.cluster_status._read_resource_sample": 2,
     "tests/ops/test_observe.py::ops.roster.observe._curl_ok": 3,
     "tests/ops/test_observe.py::ops.roster.observe._tcp_ok": 1,
-    "tests/ops/test_recover_crash_marked.py::ops.lifecycle._cluster_rpc": 4,
     "tests/ops/test_recover_crash_marked.py::ops.lifecycle._recovery_halt_reason": 5,
-    "tests/ops/test_resurrection_admission.py::ops.lifecycle._cluster_rpc": 3,
     "tests/ops/test_schema_mismatch.py::gateway.cluster.roster_probe._probe_failures": 1,
     "tests/ops/test_spec_roster.py::base.daemon.health._probe_daemon": 2,
     "tests/ops/test_spec_roster.py::ops.roster._browser_probe": 1,

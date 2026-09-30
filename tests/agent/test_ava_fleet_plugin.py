@@ -763,8 +763,8 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     monkeypatch.setattr(
         notices_router, "publish_agent_updated_sync", _capture_snapshot, raising=False
     )
-    monkeypatch.setattr(notices_router._ops, "publish_notice_posted", _capture_posted)
-    monkeypatch.setattr(notices_router._ops, "publish_notice_resolved", _capture_resolved)
+    monkeypatch.setattr("ops.lifecycle.publish_notice_posted", _capture_posted)
+    monkeypatch.setattr("ops.lifecycle.publish_notice_resolved", _capture_resolved)
 
     agent_id = _seed_agent(db_conn)
     original = ava.agent_identity._agent_id

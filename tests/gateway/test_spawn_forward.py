@@ -17,6 +17,7 @@ from base.agents.observation.evidence import AvailabilityReason
 from gateway.agents import forward
 from gateway.agents import router as app_module
 from gateway.app import app
+from ops import cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
 
@@ -287,7 +288,7 @@ async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
         seen.append((kind, payload))
         raise ClusterOpUnreachable("offline")
 
-    monkeypatch.setattr(forward._cluster_rpc, "dispatch_to_machine", _fail)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
     with pytest.raises(forward.LaunchForwardError) as raised:
         await forward._forward_spawn_to_remote(
             "runner", LaunchAgentRequest(agent_id=4, launch_attempt_id=attempt_id)
@@ -311,7 +312,7 @@ async def test_spawn_forward_preserves_runner_rejection_detail(
             }
         )
 
-    monkeypatch.setattr(forward._cluster_rpc, "dispatch_to_machine", _fail)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
     with pytest.raises(forward.LaunchForwardError) as raised:
         await forward._forward_spawn_to_remote("runner", LaunchAgentRequest(agent_id=4))
     assert raised.value.reason == AvailabilityReason.LAUNCH_REJECTED
