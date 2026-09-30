@@ -340,6 +340,7 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
     """Image-capable ids match their registered media declarations."""
     expected = {
         "claude-sonnet-5",
+        "claude-sonnet-5-5",
         "claude-haiku-4-5-20251001",
         "claude-opus-5",
         "claude-opus-5-5",
@@ -352,6 +353,7 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
         "gemini-3.1-pro-preview",
         "gpt-6-astra",
         "gpt-6-sol",
+        "gpt-6.1-sol",
         "gpt-6-luna",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
