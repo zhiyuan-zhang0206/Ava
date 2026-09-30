@@ -3,7 +3,7 @@ type: doc
 title: Durable LLM Usage
 description: '`base/lm/usage.py` — canonical durable usage events and matching billing spans for completed LLM calls.'
 tags:
-- shared
+- base
 - library
 - llm-inference
 - billing

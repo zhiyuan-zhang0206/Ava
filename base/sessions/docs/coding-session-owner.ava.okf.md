@@ -3,7 +3,7 @@ type: doc
 title: Coding Session Owner
 description: Host-local generation records for external coding-tool sessions. Every launch owns a generation of its own, several may share a workspace, and a launch reclaims the workspace's dead generations; exact terminal cleanup.
 tags:
-- shared
+- base
 - lifecycle
 - concurrency
 ---

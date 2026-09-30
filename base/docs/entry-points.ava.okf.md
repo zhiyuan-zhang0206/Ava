@@ -3,7 +3,7 @@ type: doc
 title: Base Library Entry Points
 description: The base-layer public entry points — model factory, pricing, agent-status enum, message kwargs reader, metrics report, bootstrap.
 tags:
-- shared
+- base
 ---
 
 # Base Library Entry Points

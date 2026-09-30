@@ -3,7 +3,7 @@ type: doc
 title: Logging
 description: '`base/log/__init__.py` is the single structural logging module spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields and assemble three sink types: stderr / JSONL file / the unified event pipeline (`base/telemetry/emitter.py`).'
 tags:
-- shared
+- base
 - library
 - observability
 ---

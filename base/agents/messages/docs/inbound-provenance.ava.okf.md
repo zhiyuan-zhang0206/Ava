@@ -3,7 +3,7 @@ type: doc
 title: Inbound Provenance Facts
 description: "Nullable server-owned credential, transport, content-hash, and source-assertion facts stored beside gateway-created inbound messages."
 tags:
-- shared
+- base
 - identity
 - audit
 ---

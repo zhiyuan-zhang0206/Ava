@@ -3,7 +3,7 @@ type: doc
 title: Install Registry Write Path
 description: The single write path — mutate() under registry_lock, the register/deregister wrappers, the three bulk-edit cycles, and why migrate_skill_identity takes the lock explicitly.
 tags:
-- shared
+- base
 - install-registry
 ---
 

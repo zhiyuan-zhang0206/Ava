@@ -3,7 +3,7 @@ type: doc
 title: Provider Plugin Mechanics
 description: 'The base-layer contract and lazy loader for LLM provider plugins.'
 tags:
-- shared
+- base
 - library
 - llm-inference
 - plugins

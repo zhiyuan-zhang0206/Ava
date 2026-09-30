@@ -3,7 +3,7 @@ type: doc
 title: Plugin Enable Config
 description: '`base/packages/plugins/enable_config.py` — the per-machine-local `plugins_config.json` that decides which discovered plugins load. Read-first from the local file; the cluster-wide DB singleton was dropped in decentralized-install step 3.'
 tags:
-- shared
+- base
 - library
 - plugins
 ---

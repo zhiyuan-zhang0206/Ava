@@ -1,11 +1,11 @@
 ---
 type: doc
-title: Shared — .env write audit & integrity guard
+title: Base — .env write audit & integrity guard
 description: base/host/env/audit.py — owner-only JSONL history of official .env writes (ts, site, pid, process, redacted command line, actor, trace id, key names, digest; old/new values for non-sensitive fields only) and a read-boundary guard that surfaces out-of-band modifications as an env_unauthorized_write anomaly.
 tags: []
 ---
 
-# Shared — .env write audit & integrity guard
+# Base — .env write audit & integrity guard
 
 - **`.env` write audit** (`base/host/env/audit.py`): every post-bootstrap official `.env` write records
   an owner-only (0600) JSONL history entry. Record v2 (2026-09-16, task #3588; additive — older

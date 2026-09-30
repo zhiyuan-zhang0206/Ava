@@ -3,7 +3,7 @@ type: doc
 title: OTLP Export Backpressure
 description: The bounded queue, network deadlines, circuit breaker, and flush ceilings that keep collector failure outside agent turns.
 tags:
-- shared
+- base
 - telemetry
 - otlp
 ---

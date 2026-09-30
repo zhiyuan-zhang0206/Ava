@@ -3,7 +3,7 @@ type: doc
 title: Caller protocol admission
 description: Generation-bound chat source admission and the remaining rollout barrier.
 tags:
-- shared
+- base
 - identity
 ---
 

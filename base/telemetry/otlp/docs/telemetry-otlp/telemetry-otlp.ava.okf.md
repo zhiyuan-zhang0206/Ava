@@ -3,7 +3,7 @@ type: doc
 title: "OTLP export backend & trace ship to Tempo"
 description: "The OTLP logs, metrics, and traces backend: producer mapping, collector delivery, local trace mirror, and recovery shipping."
 tags:
-- shared
+- base
 - telemetry
 - otlp
 - observability

@@ -3,7 +3,7 @@ type: doc
 title: LM Media Capabilities and Attachments
 description: Per-model native-media resolution and turn-boundary attachment packing.
 tags:
-- shared
+- base
 - library
 - llm-inference
 ---

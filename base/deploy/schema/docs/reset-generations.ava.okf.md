@@ -3,7 +3,7 @@ type: doc
 title: Schema reset generations
 description: Frozen migration inventories guard partial restores, atomically replace tracking history, and enforce the current rollback floor.
 tags:
-- shared
+- base
 - database
 ---
 
