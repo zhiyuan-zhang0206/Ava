@@ -275,7 +275,7 @@ def _restore_machine_env() -> Iterator[None]:
     aliases, so monkeypatch.setenv on them is banned by the force-settings lint —
     but `_self_machine_host` (like `_unit_home`) reads os.environ directly at
     sub-model construction time, so the tests set os.environ directly with
-    explicit restore (the pattern of tests/base/test_unit_home.py)."""
+    explicit restore (the pattern of base/config/tests/test_unit_home.py)."""
     saved = {k: os.environ.get(k) for k in ("AVA_MACHINE_HOST", "AVA_HOME")}
     try:
         yield

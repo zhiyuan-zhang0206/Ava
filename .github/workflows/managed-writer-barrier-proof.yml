@@ -5,9 +5,9 @@ on:
     paths:
       - 'base/deploy/writers/barrier.py'
       - 'base/deploy/writers/publication.py'
-      - 'tests/base/test_barrier.py'
-      - 'tests/base/test_publication.py'
-      - 'tests/base/test_publication_admission.py'
+      - 'base/deploy/writers/tests/test_barrier.py'
+      - 'base/deploy/writers/tests/test_publication.py'
+      - 'base/deploy/writers/tests/test_publication_admission.py'
       - '.github/workflows/managed-writer-barrier-proof.yml'
 permissions:
   contents: read
@@ -27,5 +27,5 @@ jobs:
           version: 0.10.2
       - uses: ./.github/actions/install-pg-redis
       - run: uv sync --frozen
-      - run: uv run pytest tests/base/test_barrier.py tests/base/test_publication.py tests/base/test_publication_admission.py -q
-      - run: uv run pyright base/deploy/writers/barrier.py base/deploy/writers/publication.py tests/base/test_barrier.py tests/base/test_publication.py tests/base/test_publication_admission.py
+      - run: uv run pytest base/deploy/writers/tests/test_barrier.py base/deploy/writers/tests/test_publication.py base/deploy/writers/tests/test_publication_admission.py -q
+      - run: uv run pyright base/deploy/writers/barrier.py base/deploy/writers/publication.py base/deploy/writers/tests/test_barrier.py base/deploy/writers/tests/test_publication.py base/deploy/writers/tests/test_publication_admission.py

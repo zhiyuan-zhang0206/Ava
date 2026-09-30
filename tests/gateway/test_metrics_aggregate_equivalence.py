@@ -10,7 +10,7 @@ the text digest, the JSON `data` dict, and the per-agent rollups must stay
 exactly as pinned, so a regression in the Loki aggregation (counts, pctiles,
 position thirds, tie order, cost sums, since-compact cutoffs) fails here.
 
-The render math is locked by the pure unit tests in tests/base/test_metrics.py;
+The render math is locked by the pure unit tests in base/telemetry/metrics/tests/test_metrics.py;
 keep both green together.
 """
 

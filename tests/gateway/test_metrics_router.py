@@ -1,6 +1,6 @@
 """GET /api/metrics HTTP integration tests.
 
-The per-unit aggregation math is unit-tested in tests/base/test_metrics.py
+The per-unit aggregation math is unit-tested in base/telemetry/metrics/tests/test_metrics.py
 (pure functions over hand-built EventRow). This file locks the *endpoint
 contract*: the windowed Loki fetch wires `attributes.X` keys to the real emit
 field names, the `{meta, metrics}` envelope shape holds, and the `days` / `agent`

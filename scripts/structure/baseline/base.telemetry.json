@@ -3,7 +3,11 @@
     "base/telemetry/alerts.py::upsert_alert": 26,
     "base/telemetry/metrics/aggregate.py::_row_reductions": 24,
     "base/telemetry/metrics/aggregate.py::_sections_from_aggregate": 31,
+    "base/telemetry/metrics/core/tests/test_core_observability.py::test_pack_registers_all_metrics": 16,
     "base/telemetry/metrics/plugin_metrics.py::validate_metric_sql": 31,
     "base/telemetry/metrics/plugin_metrics_sql.py::_check_from_item": 20
+  },
+  "patch_targets": {
+    "base/telemetry/tests/test_observed_metrics.py::base.telemetry.metrics.observed_metrics._failures": 1
   }
 }

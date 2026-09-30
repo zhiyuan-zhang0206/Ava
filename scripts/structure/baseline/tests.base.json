@@ -1,41 +1,27 @@
 {
   "complexity": {
-    "tests/base/checkpoint/test_checkpoint_postgres_walks.py::test_historical_walk_page_boundary_and_compact_segment": 15,
-    "tests/base/pty/test_pty_sessions_cli.py::test_freeze_ack_has_no_later_session_start_during_concurrent_allocations": 19,
     "tests/base/subreaper_probe.py::ancestor": 16,
-    "tests/base/test_core_observability.py::test_pack_registers_all_metrics": 16,
     "tests/base/test_delivery.py::test_real_relay_uses_snapshotted_config_across_restart": 17,
     "tests/base/test_delivery.py::test_two_attempts_each_get_a_full_window_then_native_observes_expiry": 16,
     "tests/base/test_event_contract.py::test_payload_keys_are_the_declared_attribute_contract": 24,
     "tests/base/test_gateway_consumer_guard.py::_kind_closure": 18,
     "tests/base/test_gateway_consumer_guard.py::_repo_internal_import_closure": 15,
-    "tests/base/test_impersonation.py::test_operator_force_expire_closes_only_observed_session": 23,
-    "tests/base/test_provider_plugins.py::test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract": 17,
-    "tests/base/test_publication_admission.py::test_sync_async_decisions_and_lock_interoperate": 18,
     "tests/base/test_telemetry_otlp.py::test_log_mapping_full_record_shape": 18,
     "tests/base/test_telemetry_otlp.py::test_metric_mapping_int_counter_float_histogram": 17,
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 265
+    "tests/base": 80
   },
   "files": {
-    "tests/base/pty/test_pty_sessions_cli.py": 1436,
     "tests/base/test_config.py": 1705,
     "tests/base/test_dotenv_boot.py": 969,
     "tests/base/test_editable_install.py": 883,
-    "tests/base/test_health.py": 923,
-    "tests/base/test_impersonation.py": 1205,
-    "tests/base/test_machines.py": 849,
-    "tests/base/test_memory_repo.py": 846,
-    "tests/base/test_provider_plugins.py": 949,
     "tests/base/test_runner_role.py": 1035,
     "tests/base/test_telemetry_otlp.py": 1169
   },
   "nesting": {
     "tests/base/test_gateway_consumer_guard.py::_kind_closure": 6,
-    "tests/base/test_publication.py::test_pending_waits_for_admission_transaction": 6,
-    "tests/base/test_publication_admission.py::test_sync_async_decisions_and_lock_interoperate": 6,
     "tests/base/test_telemetry_otlp_exit_delivery.py::_sent_pairs": 6
   },
   "patch_targets": {
@@ -45,43 +31,25 @@
     "tests/base/log/test_log_batching.py::base.telemetry.emitter._jsonl_failures": 1,
     "tests/base/test_bare_ava.py::cli.commands.converge._steps": 1,
     "tests/base/test_boot_unit.py::base.host.system.boot_unit._systemctl": 3,
-    "tests/base/test_browser_deps.py::base.host.system.probes._platform_chrome_binary": 1,
     "tests/base/test_connect_helpers.py::base.db.code_version_gate._has_log_sink": 1,
     "tests/base/test_connect_helpers.py::base.db.code_version_gate._last_read_at": 2,
     "tests/base/test_connect_helpers.py::base.native_process.code_version._db_gate_exempt": 1,
     "tests/base/test_connect_helpers.py::base.native_process.code_version._version": 3,
     "tests/base/test_db.py::base.db.connections._restore_pooled_session": 1,
     "tests/base/test_exec_request_evidence.py::base.agents.incarnation.exec_request_evidence._bounded_disposition_enabled": 1,
-    "tests/base/test_health.py::base.daemon.health._health_payload": 3,
-    "tests/base/test_health.py::base.daemon.health._probe_daemon": 3,
-    "tests/base/test_health.py::base.daemon.health._probe_home": 1,
-    "tests/base/test_health.py::base.daemon.health._warned_windows_8106": 1,
-    "tests/base/test_impersonation.py::base.agents.impersonation._wake": 2,
-    "tests/base/test_lm_billing.py::base.telemetry.tracing._state": 1,
-    "tests/base/test_lm_call.py::base.telemetry.tracing._state": 1,
     "tests/base/test_logs_job.py::base.host.system.cron._home_slug": 1,
-    "tests/base/test_memory_repo.py::base.deploy.git.memory_repo._POOL_SNAPSHOT_MAX_BYTES": 2,
-    "tests/base/test_memory_repo.py::base.deploy.git.memory_repo._download_pool_snapshot": 4,
-    "tests/base/test_memory_repo.py::base.deploy.git.memory_repo._init_local_repo": 2,
-    "tests/base/test_memory_repo.py::base.deploy.git.memory_repo._run_git": 13,
     "tests/base/test_no_secrets_on_argv.py::ava.shell.sessions._next_session_index_from_db": 1,
     "tests/base/test_no_secrets_on_argv.py::ava.shell.sessions._record_ttl": 1,
     "tests/base/test_no_secrets_on_argv.py::ava.shell.sessions._shell_prefix": 1,
     "tests/base/test_no_secrets_on_argv.py::gateway.schedules.manager.ScheduleManager._close_null_runs": 1,
     "tests/base/test_no_secrets_on_argv.py::gateway.schedules.manager.ScheduleManager._set_status": 1,
-    "tests/base/test_observed_metrics.py::base.telemetry.metrics.observed_metrics._failures": 1,
     "tests/base/test_os_jobs_gate.py::base.host.system.autostart._home_slug": 1,
     "tests/base/test_os_jobs_gate.py::base.host.system.cron._home_slug": 1,
     "tests/base/test_packages_job.py::base.host.system.cron._home_slug": 1,
     "tests/base/test_pg_runtime.py::base.cluster.dataplane.pg_runtime._installed_server": 1,
     "tests/base/test_proc.py::base.host.proc._wait_owned": 1,
-    "tests/base/test_redis_listener.py::base.events.live.redis_listener.RedisInboundListener._consume_one": 3,
-    "tests/base/test_redis_listener.py::base.events.live.redis_listener.RedisInboundListener._ensure_subscribed": 3,
-    "tests/base/test_redis_listener.py::base.events.live.redis_listener.RedisInboundListener._redis": 1,
     "tests/base/test_runner_role.py::base.cluster.provision._checkpoint_schema_versions": 1,
     "tests/base/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 5,
-    "tests/base/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._build_providers": 3,
-    "tests/base/test_telemetry_otlp_child_defer.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 1,
-    "tests/base/test_turn_scoped_log_attribution.py::base.native_process.turn_identity._process_agent_id": 5
+    "tests/base/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._build_providers": 3
   }
 }
