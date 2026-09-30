@@ -138,7 +138,7 @@ def codex_app_server_socket(key: CodingSessionKey, generation: str) -> Path:
     The socket lives in a short per-user directory (``/private/tmp/ava-<uid>``
     on macOS, ``/tmp/ava-<uid>`` elsewhere), created 0700 and verified to be
     this user's real directory, so its length no longer depends on the cluster
-    home: a preview home under ``~/.ava-previews/<run>/home`` pushed a
+    home: a home under a long directory path pushed a
     ``<home>/run`` socket past the kernel limit and codex refused to listen.
     The name carries the key digest (cluster, workspace, tool) and the
     generation, so clusters never collide and a dying predecessor can never

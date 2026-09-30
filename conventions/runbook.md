@@ -2326,7 +2326,7 @@ inspection cannot certify the service. Application stop and persistent terminal
 stop are distinct operations, and native data-plane shutdown has its own verified
 boundary. A full destroy marks the home detached only after cleanup succeeds.
 
-Use the normal lifecycle through the [local preview controller](../scripts/preview/README.md)
-for branch validation. Root framework tests under `tests/services/test_ava_root_*`
-exercise supervision, custody, IPC and readiness; an isolated native cluster is
-still required to verify platform ancestry and actual application execution.
+Root framework tests under `tests/services/test_ava_root_*` exercise supervision,
+custody, IPC and readiness; an isolated native cluster is still required to verify
+platform ancestry and actual application execution. There is no local branch-preview
+controller: validate a branch with CI and the throwaway test clusters.

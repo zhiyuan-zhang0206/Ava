@@ -70,7 +70,7 @@ refuses a socket directory reached through the `/tmp` symlink) and
 `/tmp/ava-<uid>` elsewhere. It is created 0700 and refused unless it is this
 user's real directory. That keeps the path within the kernel's unix-socket
 limit (`sun_path`: 104 bytes on macOS, 108 on Linux) however long the cluster
-home is; a preview home under `~/.ava-previews/<run>/home` pushed a
+home is; a home under a long directory path pushed a
 `<home>/run` socket past it. The key digest keeps clusters apart, and the
 generation keeps a dying predecessor from unlinking a successor's socket. A path
 that would still not fit fails fast with `CodingSessionSocketError` before
