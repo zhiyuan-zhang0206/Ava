@@ -67,7 +67,7 @@ takeover additionally prints `codex_app_server=<endpoint>`.
 The socket sits in a short per-user directory, not under the cluster home:
 `/private/tmp/ava-<uid>` on macOS and `/tmp/ava-<uid>` elsewhere. The directory
 is created 0700 and refused unless it is this user's real directory. A long
-cluster home, such as a preview's `~/.ava-previews/<run>/home`, therefore cannot
+cluster home therefore cannot
 push the path past the unix-socket limit (`sun_path`); a path that still would
 not fit fails before launch instead of timing out.
 

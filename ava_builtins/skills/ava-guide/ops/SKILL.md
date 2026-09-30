@@ -127,9 +127,8 @@ its capability bundle.
 A production cluster runs every unit from its own source checkout and is updated
 by stopping every unit, switching every checkout and starting again:
 `python -m cli.fleet_update down` and `up`, attended and idempotent per half (the
-runbook's "Updating a networked cluster in source mode"). A branch preview may
-test an unmerged commit. That result does not replace CI, review or operator
-authorization for production.
+runbook's "Updating a networked cluster in source mode"). A result from anywhere
+else does not replace CI, review or operator authorization for production.
 
 Related local commands:
 
