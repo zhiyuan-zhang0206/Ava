@@ -72,8 +72,7 @@ def _git_aware(fake):
 class _FakeSessionBackend:
     """In-memory session backend: records new/kill, answers has_session from a set.
 
-    Stands in for the service backend (native supervisor on POSIX, winproc
-    on Windows).
+    Stands in for the native service supervisor.
     """
 
     def __init__(self) -> None:
@@ -134,8 +133,8 @@ def _fake_session_backends(
 ) -> tuple[_FakeSessionBackend, _FakeSessionBackend]:
     """The session backends, faked in-memory for every test in an importing module.
 
-    `ava start` / `ava stop` drive the service backend (native supervisor on
-    POSIX, winproc on Windows) for service sessions; it must not reach the
+    `ava start` / `ava stop` drive the native supervisor for service sessions;
+    they must not reach the
     real supervisor in unit tests (a real launch would fork a daemon, a real
     kill could touch the dev host's sessions). Returns (service, shell).
     """

@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Iterable
-from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -123,8 +122,6 @@ class OwnedProcess:
         exists while its start time cannot be read keeps the loud error.
         """
         try:
-            if sys.platform == "win32":
-                return _windows_live(self)
             process = psutil.Process(self.pid)
             # Branch on the recorded field first: a platform-first test lets
             # the Linux type check narrow it and flag the later comparison.
@@ -171,37 +168,6 @@ class OwnedProcess:
         finally:
             if descriptor is not None:
                 os.close(descriptor)
-
-
-def _windows_live(identity: OwnedProcess) -> bool:
-    """Observe native exit, then exact birth under one PID-retaining handle.
-
-    Windows keeps a terminated process object until all handles close. psutil's
-    Windows status is only a suspension check; a retained, exited PID can still
-    appear RUNNING. A zero-time handle wait distinguishes it without waiting
-    for PID disappearance or mistaking exit code 259 for STILL_ACTIVE.
-    """
-    from base.native_process.winjob import _get_last_error, _kernel32, last_error
-
-    api = _kernel32()
-    raw = api.OpenProcess(0x00100000, 0, identity.pid)  # SYNCHRONIZE, non-inheritable
-    if not raw:
-        code = _get_last_error()
-        if code == 87:  # ERROR_INVALID_PARAMETER: no process has this PID.
-            return False
-        raise last_error("open process for native liveness", code)
-    handle = wintypes.HANDLE(raw)
-    try:
-        outcome = api.WaitForSingleObject(handle, 0)
-        if outcome == 0:  # WAIT_OBJECT_0: exited, even with a retained PID.
-            return False
-        if outcome != 258:  # WAIT_TIMEOUT is the sole live observation.
-            raise last_error("observe native process exit")
-        # Keeping the process object open prevents PID reuse during this read.
-        return identity.birth_matches(psutil.Process(identity.pid))
-    finally:
-        if not api.CloseHandle(handle):
-            raise last_error("close native liveness handle")
 
 
 def _parent_edge(identity: OwnedProcess) -> tuple[OwnedProcess, int] | None:

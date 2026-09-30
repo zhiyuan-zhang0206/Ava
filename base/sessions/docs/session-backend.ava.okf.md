@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Session backend & process supervision"
-description: "How Ava supervises long-lived processes: the `base/sessions/backend.py` interface, its three entry points (`get_backend()` for services + orchestration, `get_shell_backend()` for agent shells/watchers, `native_proc()` for agent processes), the backends (posixproc / per-session pty hosts / winproc), and the macOS firewall audit. Stopping is its own node."
+description: "How Ava supervises long-lived processes: the `base/sessions/backend.py` interface, its three entry points (`get_backend()` for services + orchestration, `get_shell_backend()` for agent shells/watchers, `native_proc()` for agent processes), the POSIX backends, and the macOS firewall audit. Stopping is its own node."
 tags:
 - shared
 - process
@@ -12,13 +12,13 @@ tags:
 
 ## What it is
 
-`base/sessions/backend.py` is the interface every long-running named session goes through. It unifies three platform supervisors behind one protocol: **posixproc** (`base/sessions/posixproc.py`, POSIX native), the **per-session pty hosts** (`base/sessions/pty/`), and **winproc** (`base/sessions/windows/winproc.py`, Windows). The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` and its bulk counterpart `session_started_ats` (uptime; the base bulk implementation falls back to individual reads, and a backend without a timestamp source answers None so consumers render no uptime), and `session_log_path` (the file this backend redirects output to). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
+`base/sessions/backend.py` is the interface every long-running named session goes through. It unifies **posixproc** (`base/sessions/posixproc.py`, native service sessions), the macOS permissions-helper backend, and the **per-session pty hosts** (`base/sessions/pty/`) behind one protocol. The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` and its bulk counterpart `session_started_ats` (uptime; the base bulk implementation falls back to individual reads, and a backend without a timestamp source answers None so consumers render no uptime), and `session_log_path` (the file this backend redirects output to). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
 
 Three entry points, three session classes:
 
-- `get_backend()` — the **service/daemon + orchestration** backend: `ava start` launches, healthcheck respawns, pause/unpause, and the updater / rollout / cluster-restart orchestration sessions (S7 moved them onto this backend). `PosixProcSessionBackend` on POSIX, `WinprocSessionBackend` on Windows.
-- `get_shell_backend()` — **agent interactive shells / watchers**: `PtySessionBackend` (per-session pty hosts) on POSIX, the native supervisor on Windows. Never addresses service or orchestration sessions.
-- `native_proc()` — **agent processes** (non-interactive, no PTY needed): the posixproc or winproc module directly, used by `ops.agent_launch` (spawn / kill-stale) and the reap / force-terminate / status consumers.
+- `get_backend()` — the **service/daemon + orchestration** backend: `ava start` launches, healthcheck respawns, pause/unpause, and the updater / rollout / cluster-restart orchestration sessions (S7 moved them onto this backend). `PosixProcSessionBackend`, with the macOS helper backend when configured.
+- `get_shell_backend()` — **agent interactive shells / watchers**: `PtySessionBackend` (per-session pty hosts). Never addresses service or orchestration sessions.
+- `native_proc()` — **agent processes** (non-interactive, no PTY needed): the posixproc module, used by `ops.agent_launch` (spawn / kill-stale) and the reap / force-terminate / status consumers.
 
 **Platform-supervisor imports are method-local** so selecting one backend does
 not import every platform implementation. Current native service custody belongs
@@ -34,9 +34,6 @@ to the root service runtime; the backend remains for its surviving session users
 
 - **PosixProcSessionBackend** — the native supervisor for services: double-fork reparent to init, `SessionRecord` + logs under `$AVA_HOME/run/sessions/` / `$AVA_HOME/logs/`. No PTY is allocated, so the per-box PTY ceiling (`kern.tty.ptmx_max`) does not bound service count.
 - **PtySessionBackend** — agent shells / watchers. Each mutating op is a `python -m base.sessions.pty.cli` subprocess whose exit code maps to the interface shape; enumeration and bulk launch timestamps use one in-process record scan, with individual record reads as the I/O-failure fallback. Env rides a 0600 file, the launch command rides base64 (never argv), and the session's host submits it only once the login shell's prompt is ready. `login_shell=False` raises `NotImplementedError` (interactive login shells only); the kill timeout is owned by the host. See [[base/sessions/pty/docs/pty_sessions.ava.okf.md|pty sessions]].
-- **WinprocSessionBackend** — new Windows sessions use a private hidden console, explicit log handles and `control_mode=private-console-v1` in their record. `base/sessions/windows/console_signal.py` runs once via an absolute loaded-package path under isolated Python; it verifies exact PID/birth, record provenance and console members before a console-scoped Ctrl-Break. It never changes the daemon's console. Legacy/unknown records refuse graceful delivery; a successful send is OS acceptance, not proof of exit. Force cleanup preserves other session boundaries (`winproc._spared_pids`). Actual admitted agent PID remains separate from a verified venv redirector's native control PID.
-  Cross-session control (issue #1930) and the helper's Job containment are in
-  [[cross-session-control.ava.okf.md|cross-session control]].
 
 ### Stopping a session
 
@@ -50,7 +47,7 @@ and off-box reachability attribution (issue #949):
 ## Entry points
 
 - `base/sessions/backend.py:get_backend()` / `get_shell_backend()` / `native_proc()` — the three dispatch points
-- `base/sessions/posixproc.py` / `base/sessions/windows/winproc.py` — the native supervisors (agent processes + services)
+- `base/sessions/posixproc.py` — the native supervisor (agent processes + services)
 - `base/sessions/pty/` — the per-session pty hosts (host + CLI + screen) for agent shells
 - `base/sessions/record.py:SessionRecord` — single shape for persisted background session records (`.read()`/`.write()`)
 - `base/sessions/env_forwarding.py` — env forwarding + the envfile format shared by both POSIX backends

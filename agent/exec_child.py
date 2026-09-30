@@ -21,8 +21,8 @@ files + signals:
   from its own cancel/timeout flags.
 - POSIX signals: SIGINT -> KeyboardInterrupt, SIGTERM -> TimeoutError, both raised
   at the next bytecode boundary (the same semantics the old in-thread ctypes
-  injection had). POSIX gets a grace period before the parent closes the
-  process group; Windows cancel/timeout immediately closes the Job Object;
+  injection had). The parent allows a grace period before closing the
+  process group;
   a watchdog `os._exit(124)` bounds this child's life if the parent dies first.
 
 Identity: `ava.agent_identity.establish(agent_id, owns_loop=True)` — owns_loop stays
@@ -71,7 +71,6 @@ import base.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side eff
 # the child's early-import order intact.
 from agent.graph.exec.protocol import RequestPayload
 from base.log import init_subprocess_logger, logger
-from base.native_process.winjob import EXEC_JOB_GATE_ENV, await_parent_job_gate
 
 # Covers child runtime setup after initial module imports, ending immediately
 # before agent-authored code begins. The parent-owned exec duration includes
@@ -543,7 +542,6 @@ def main() -> None:
     semantics, not the exit code (a non-zero exit would add nothing the
     envelope does not already say, and the parent treats a missing envelope
     as the crash path anyway)."""
-    await_parent_job_gate(os.environ.get(EXEC_JOB_GATE_ENV))
     request_path = os.environ.get("AVA_EXEC_REQUEST_FILE")
     result_path = os.environ.get("AVA_EXEC_RESULT_FILE")
     if not request_path or not result_path:

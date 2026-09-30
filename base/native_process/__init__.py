@@ -6,9 +6,8 @@ or a session backend: OS platform flags (`os_platform`), native birth facts
 *running* process actually loaded (`loaded_commit`, as opposed to what the
 checkout is at right now) and the ordered code version derived from it
 (`code_version`), turn- and incarnation-scoped agent identity
-(`turn_identity`, `runtime_incarnation`), one POSIX process group's
-closure (`group_closure`) and its Windows Job Object
-equivalent (`winjob*`), managed-exec-domain ownership without the agent graph
+(`turn_identity`, `runtime_incarnation`), one bounded POSIX command's process
+group (`posix_command`, `group_closure`), managed-exec-domain ownership without the agent graph
 (`exec_domain`), child-process environment primitives (`child_env`), strict
 process-observation value types (`evidence`), and the root supervisor's local
 control contract (`root_control`). Moving the commit, platform and identity
@@ -50,7 +49,6 @@ def native_boot_id() -> str | None:
     """Bind durable POSIX process custody to one native boot, without Settings.
 
     A running observer cannot survive reboot, so its boot scope is immutable.
-    Windows process FILETIME is absolute and needs no boot-relative tick scope.
     Missing or malformed POSIX evidence refuses; it is never a legacy default.
     """
     if sys.platform == "linux":
@@ -59,8 +57,6 @@ def native_boot_id() -> str | None:
         value = subprocess.check_output(
             ["/usr/sbin/sysctl", "-n", "kern.bootsessionuuid"], text=True, timeout=5
         ).strip()
-    elif sys.platform == "win32":
-        return None
     else:
         raise RuntimeError(f"unsupported native boot identity platform: {sys.platform}")
     return str(UUID(value))

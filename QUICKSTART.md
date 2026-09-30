@@ -217,12 +217,12 @@ switching every checkout and starting again:
 See [the runbook](conventions/runbook.md#updating-a-networked-cluster-in-source-mode)
 for the two halves. Never `git pull` + `ava start` by hand on a production checkout.
 
-### Windows-specific
+### Windows hardware
 
-See [Windows setup guide](conventions/windows-setup.md). Common issues:
-- Agent goes offline after a restart → `ava start` registers a logon autostart task; check `schtasks /Query /TN \Ava\`
-- `ava start` refuses with "cannot host a per-cluster data plane" → this host was asked to serve the gateway capability; an enrolled agent-runner never sets `AVA_MACHINE_SERVE_GATEWAY`
-- Gateway reports the machine offline → it dials the address you passed as `ava start --machine-host`; confirm it is reachable *from the gateway*
+Native Windows Ava services are retired. Install Ava inside a WSL2 Linux
+distribution and follow the [Windows host guidance](conventions/windows-setup.md).
+For unattended gateway boot, use the separate WSL distribution anchor described
+there; `ava start` inside Linux uses the Linux service path.
 
 ---
 

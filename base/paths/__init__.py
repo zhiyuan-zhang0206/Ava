@@ -179,10 +179,8 @@ def otel_collector_dir() -> Path:
 
 
 def otel_collector_binary() -> Path:
-    """Path of the pinned otelcol-contrib binary (platform-appropriate name)."""
-    from base.native_process.os_platform import IS_WINDOWS
-
-    return otel_collector_dir() / ("otelcol-contrib.exe" if IS_WINDOWS else "otelcol-contrib")
+    """Path of the pinned otelcol-contrib binary."""
+    return otel_collector_dir() / "otelcol-contrib"
 
 
 def otel_collector_config() -> Path:

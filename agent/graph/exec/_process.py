@@ -1,8 +1,7 @@
 """Owned lifetime of one disposable ``execute_code`` process tree.
 
 Each run has exactly one direct-child reap task, one domain-close task, and one
-reader-join task. POSIX owns a process group. Windows owns a Job Object whose
-handle survives root exit and kills every non-breakaway member when closed.
+reader-join task. The direct child owns a POSIX process group.
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ import psutil
 
 from base.log import logger
 from base.native_process.exec_domain import ExecProcessDomain as ExecProcessDomain
-from base.native_process.os_platform import IS_WINDOWS
 
 _READER_JOIN_TIMEOUT_S = 5.0
 _EMERGENCY_SETTLE_TIMEOUT_S = 5.0
@@ -111,12 +109,9 @@ class DomainCloseOwner:
 
 
 def signal_child(proc: subprocess.Popen[bytes], sig: int, domain_close: DomainCloseOwner) -> None:
-    """Ask the owned tree to stop; Windows Job Objects only provide hard stop."""
+    """Ask the owned tree to stop."""
     if proc.pid != domain_close.pid:
         raise RuntimeError("exec signal belongs to another direct owner")
-    if IS_WINDOWS:
-        domain_close.request()
-        return
     domain_close.signal_now(sig)
 
 
@@ -125,14 +120,9 @@ def start_root_exit_observer(proc: subprocess.Popen[bytes]) -> asyncio.Task[None
 
     A gone POSIX process (``NoSuchProcess``) counts as exited.
     """
-    identity = None if IS_WINDOWS else psutil.Process(proc.pid)
+    identity = psutil.Process(proc.pid)
 
     async def _observe() -> None:
-        if IS_WINDOWS:
-            while proc.poll() is None:
-                await asyncio.sleep(_ROOT_EXIT_POLL_S)
-            return
-        assert identity is not None  # noqa: S101 — established by platform branch
         while True:
             try:
                 status = identity.status()
@@ -187,9 +177,8 @@ async def wait_with_grace(
 ) -> bool:
     """Give a POSIX signal its grace window; request hard stop on expiry.
 
-    Windows requests Job close when the signal decision is made, so this wait
-    only bounds direct-root reaping there. Resource errors are observed later
-    by ``settle_resources`` and never short-circuit another stage.
+    Resource errors are observed later by ``settle_resources`` and never
+    short-circuit another stage.
     """
     done, _pending = await asyncio.wait({root_exit_task}, timeout=grace_s)
     if done:

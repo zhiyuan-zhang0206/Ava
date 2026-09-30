@@ -1,7 +1,7 @@
 """Code provenance for a service session.
 
-The POSIX and Windows session backends share `$AVA_HOME/run/sessions/<name>.json`,
-which identifies the live process but intentionally carries no deployment state.
+Service session backends share `$AVA_HOME/run/sessions/<name>.json`, which
+identifies the live process but intentionally carries no deployment state.
 For daemons with the standard `/healthz` endpoint, that endpoint is the primary
 source: it reports the SHA frozen by the process itself, including sessions that
 predate this module. The local sidecar covers services without that endpoint and

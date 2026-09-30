@@ -10,5 +10,4 @@ The PR #1359 backward-compat shim that re-exported `ops.*` modules under
 `gateway.*` (via sys.modules aliasing) has been retired — no code imports the
 `gateway.<opsmodule>` aliases anymore; direct `ops.*` imports are the norm.
 
-Windows gateway support plan: `gateway/windows-gateway.md`.
 """

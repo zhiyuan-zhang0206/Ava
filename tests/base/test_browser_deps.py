@@ -20,7 +20,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
     [
         ("darwin", "brew"),
         ("linux", "apt-get"),
-        ("win32", "winget"),
         ("freebsd", "nodejs.org"),
     ],
 )
@@ -82,20 +81,6 @@ def test_install_nodejs_runs_the_shared_provisioner_and_rechecks_npx(
             {"capture_output": True, "text": True, "timeout": 900, "check": False},
         )
     ]
-
-
-def test_install_nodejs_does_not_silently_elevate_on_windows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Windows repair remains explicit because winget may require elevation."""
-    monkeypatch.setattr(browser_deps, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setattr(browser_deps.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        browser_deps.subprocess,
-        "run",
-        lambda *_args, **_kwargs: pytest.fail("Windows must not run a silent installer"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert browser_deps.install_nodejs() is False
 
 
 def test_ensure_browser_deps_returns_none_when_host_is_already_capable(

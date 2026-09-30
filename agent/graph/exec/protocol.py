@@ -12,10 +12,8 @@ logs it shares the home with):
   security findings, attachments, the run's SDK-call tally, and — for a crash —
   the child-formatted traceback text.
 
-On Windows the parent also creates a short-lived `<uuid>.job-ready.json` gate
-after attaching the child to its Job Object. The child cannot enter user code
-before that file exists. Request/gate leftovers are durable cleanup evidence
-and are never age-pruned; normal resource settlement removes them exactly.
+Request leftovers are durable cleanup evidence and are never age-pruned;
+normal resource settlement removes them exactly.
 
 The envelope itself is plain JSON (cat-able for postmortem). The two typed
 payloads — the state snapshot (parent -> child) and the state-update delta
@@ -189,8 +187,8 @@ def _prune_stale(agent_dir: Path) -> None:
     """Delete stale result envelopes and orphaned write temp files, never
     request/resource evidence.
 
-    Successful settlement removes each request, result, and Windows job gate
-    together. A leftover ``req-*`` file therefore represents uncertain cleanup
+    Successful settlement removes each request and result together. A leftover
+    ``req-*`` file therefore represents uncertain cleanup
     after a killed parent and must survive age-based hygiene so an exclusive
     hosted boot can fail closed. The `.*.tmp` siblings are the atomic-write
     scratch files (_write_json): a live writer renames its own within

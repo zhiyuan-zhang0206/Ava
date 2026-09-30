@@ -31,7 +31,6 @@ from base.native_process import code_version
 from base.native_process.os_platform import (
     LockTimeoutError,
     ensure_line_buffered_stdio,
-    ensure_utf8_stdio,
 )
 
 # The parser tree and every `_h_*` handler live in cli/parsers/ (settings-free — they
@@ -39,11 +38,6 @@ from base.native_process.os_platform import (
 # imported here; dispatch after parsing is `args.func(args)`, resolved by the
 # `set_defaults(func=...)` bindings the builders made against their own module globals.
 from cli.parsers import build_parser as _build_parser
-
-# Force UTF-8 stdio on Windows before any status glyph is printed (a cp1252
-# console raises UnicodeEncodeError on ✓/✗/→). No-op on POSIX. Also seeds
-# PYTHONUTF8 for every child interpreter (birth subprocess, daemons, agents).
-ensure_utf8_stdio()
 
 # Line-buffer stdout so a long command piped into `tee` (every detached rollout /
 # updater session) streams its own progress in real time instead of block-buffering

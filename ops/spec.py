@@ -48,7 +48,6 @@ from base.host.system.probes import (
     unix_sockets_available,
 )
 from base.log import logger
-from base.native_process.os_platform import IS_WINDOWS
 from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
 from ops.roster.service_spec import (
     ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
@@ -170,8 +169,7 @@ def _computer_mcp_gate_reason() -> str | None:
 
     Platform gates only: the daemon needs the permissions helper (the single
     TCC grant-holder it executes through), the AF_UNIX transport its socket
-    protocol uses, and a non-Windows host (Windows computer-use is the phase-3
-    pilot, task #1101). There is no governance gate — per-agent permission
+    protocol uses. There is no governance gate — per-agent permission
     division is a prompt-level peer convention, not code-enforced (user ruling
     2026-08-10).
     """
@@ -181,11 +179,6 @@ def _computer_mcp_gate_reason() -> str | None:
         return permissions_helper_incapability()
     if not unix_sockets_available():
         return "no AF_UNIX sockets (computer-mcp's transport is POSIX-only)"
-    if IS_WINDOWS:
-        # The Windows C# helper lacks screen_size/frontmost_app (the snapshot
-        # geometry needs them); Windows is the phase-3 pilot (task #1101) —
-        # enable it there with the helper methods added.
-        return "Windows computer-use is a phase-3 pilot (task #1101)"
     return None
 
 

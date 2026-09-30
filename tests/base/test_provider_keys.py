@@ -118,8 +118,8 @@ def test_agent_child_env_forwards_only_enabled_plugin_keys(
     monkeypatch.setenv("UNDECLARED_PROVIDER_KEY", "must-not-forward")
 
     provider_plugin()
-    assert child_env("agent", "posix")["TESTP_API_KEY"] == "sk-x"
-    assert "UNDECLARED_PROVIDER_KEY" not in child_env("agent", "posix")
+    assert child_env("agent")["TESTP_API_KEY"] == "sk-x"
+    assert "UNDECLARED_PROVIDER_KEY" not in child_env("agent")
 
 
 def test_agent_child_env_excludes_a_disabled_plugin_key(
@@ -134,4 +134,4 @@ def test_agent_child_env_excludes_a_disabled_plugin_key(
         '{"plugins": {"test_provider": {"enabled": false}}}'
     )
 
-    assert "TESTP_API_KEY" not in child_env("agent", "posix")
+    assert "TESTP_API_KEY" not in child_env("agent")

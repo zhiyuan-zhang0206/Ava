@@ -22,8 +22,6 @@ def node_install_command() -> str:
         return "brew install node  (or: brew install node@22 && brew link --force node@22)"
     if sys.platform.startswith("linux"):
         return "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs"
-    if sys.platform == "win32":
-        return "winget install OpenJS.NodeJS.LTS"
     return "install Node.js >= 20.9 (see https://nodejs.org)"
 
 
@@ -31,8 +29,6 @@ def install_nodejs() -> bool:
     """Best-effort Node.js install; return True only when npx is on PATH afterwards."""
     if shutil.which("npx") is not None:
         return True
-    if sys.platform == "win32":
-        return False
     if sys.platform == "darwin" or sys.platform.startswith("linux"):
         # base/host/converge/browser_deps.py -> repo root is three parents up.
         provisioner = Path(__file__).resolve().parents[3] / "scripts" / "provision" / "node.sh"

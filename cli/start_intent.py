@@ -109,8 +109,8 @@ def _roles(args: argparse.Namespace, stored: dict[str, str]) -> frozenset[str]:
             roles.add(cap)
     if not roles:
         raise ValueError("first start requires explicit --serve-* capabilities or --worktree")
-    if "gateway" in roles and IS_WINDOWS:
-        raise ValueError("native Windows cannot host gateway; use WSL2 or join a POSIX gateway")
+    if IS_WINDOWS:
+        raise ValueError("native Windows is unsupported; use WSL2 or a POSIX host")
     return frozenset(roles)
 
 
@@ -334,7 +334,7 @@ def _service_path(values: dict[str, str], home: Path) -> str:
         raise ValueError("existing home requires an explicit AVA_SERVICE_PATH declaration")
     if "AVA_SERVICE_PATH" in os.environ:
         return admit_service_path(os.environ["AVA_SERVICE_PATH"])
-    bin_name = "Scripts" if IS_WINDOWS else "bin"
+    bin_name = "bin"
     venvs = [_checkout() / ".venv"]
     if sys.prefix != sys.base_prefix:
         venvs.append(Path(sys.prefix))

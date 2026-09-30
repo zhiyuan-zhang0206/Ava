@@ -209,7 +209,7 @@ When disk pressure comes from dead agents' workspaces, the disposal playbook is 
 
 Ava's long-running processes (gateway, agent-runners, services, agent shells)
 run as named sessions on the platform session backend — the native process
-supervisor on POSIX (`base.sessions.posixproc`), `base.sessions.windows.winproc` on Windows, and
+supervisor (`base.sessions.posixproc`) and
 per-session detached pty hosts for agents' interactive shells. Key facts:
 
 ### Session naming

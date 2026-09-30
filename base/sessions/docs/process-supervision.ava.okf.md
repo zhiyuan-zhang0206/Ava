@@ -10,12 +10,12 @@ tags:
 
 # Process Supervision
 
-`base/sessions/posixproc.py`, `base/sessions/windows/winproc.py`, `base/sessions/backend.py`,
+`base/sessions/posixproc.py`, `base/sessions/backend.py`,
 `base/daemon/shutdown.py`, `base/daemon/health.py`,
 `base/deploy/lifecycle/start_serving.py`: services, orchestration sessions and agent
 processes are **native** sessions; agent shells run on per-session **PTY
-hosts** ([[base/sessions/pty/docs/pty_sessions.ava.okf.md]]); Windows uses
-winproc. Start-serving gates recovery until readiness passes. Daemon health
+hosts** ([[base/sessions/pty/docs/pty_sessions.ava.okf.md]]). Start-serving
+gates recovery until readiness passes. Daemon health
 accepts either one `Liveness` heartbeat or a worst-case `LivenessGroup` whose
 per-loop progress snapshots make concurrent-loop failures attributable. OS
 schedulers own health/watchdog probes, boot autostart, and daily
