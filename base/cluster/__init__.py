@@ -3,10 +3,8 @@ this host's machine identity and the machines roster, cluster auth,
 ports, and the per-cluster data-plane instances.
 
 A cluster is one logical deployment: its OWN Postgres+Redis instance (under its
-`$AVA_HOME`, on per-cluster ports), one outward gateway, one host-port
-assignment. Two clusters co-located on a box share no data plane — isolation is
-home-directory isolation, not an identifier kept correct inside one shared
-instance.
+`$AVA_HOME`, on the fixed port table), one outward gateway. A host runs one
+cluster; its ports are the fixed table every new home records at birth.
 
 **Identity IS the home path.** There is no cluster name: a unit's identity is
 the `$AVA_HOME` it runs from (single-machine self-reference), and a remote
@@ -22,8 +20,8 @@ whose data plane still uses a historical identifier (prod's `ava_main`) keeps
 working unchanged until an explicit ops rename rewrites its URLs. A newly-born
 cluster gets the fixed identifier `DATA_PLANE_IDENTITY` (`ava`): its instance
 is single-tenant, so the identifier needs no per-cluster distinction.
-The public namespace exports the home record, port allocation, URL derivation,
-Postgres provisioning and Redis ACL helpers. `ownership` provides the shared
+The public namespace exports the home record, the fixed port table, URL
+derivation, Postgres provisioning and Redis ACL helpers. `ownership` provides the shared
 native storage observer used before startup and maintenance effects.
 
 Membership and access live in member modules the door does not re-export:
@@ -31,7 +29,7 @@ Membership and access live in member modules the door does not re-export:
 `machine_exclusions` (the multi-machine roster and its operator exclusions),
 `auth` (cluster bearer auth), `rate_limit` (gateway login throttling),
 `transport_encryption` (the precondition for secret-bearing off-box listeners)
-and `port_preflight` (the expected-port set and bind probe).
+and `port_preflight` (the listener scan the ownership checks and health checks share).
 """
 
 from __future__ import annotations
@@ -109,28 +107,10 @@ from base.cluster.ports import (
     ClusterPorts as ClusterPorts,
 )
 from base.cluster.ports import (
-    allocate_ports as allocate_ports,
+    new_home_ports as new_home_ports,
 )
 from base.cluster.ports import (
     port_free as port_free,
-)
-from base.cluster.ports import (
-    record_app_port as record_app_port,
-)
-from base.cluster.ports import (
-    record_health_port as record_health_port,
-)
-from base.cluster.ports import (
-    record_memory_search_port as record_memory_search_port,
-)
-from base.cluster.ports import (
-    record_pgbouncer_port as record_pgbouncer_port,
-)
-from base.cluster.ports import (
-    record_postgres_port as record_postgres_port,
-)
-from base.cluster.ports import (
-    record_redis_port as record_redis_port,
 )
 from base.cluster.provision import (
     _adopt_database as _adopt_database,
@@ -174,20 +154,8 @@ from base.cluster.record import (
 from base.cluster.redis_acl import (
     ensure_cluster_redis_acl as ensure_cluster_redis_acl,
 )
-from base.host.env.port_block import (
-    BLOCK_MAX as BLOCK_MAX,
-)
-from base.host.env.port_block import (
-    BLOCK_SIZE as BLOCK_SIZE,
-)
-from base.host.env.port_block import (
-    BLOCK_START as BLOCK_START,
-)
-from base.host.env.port_block import (
-    LEGACY_AVA_PORTS as LEGACY_AVA_PORTS,
-)
-from base.host.env.port_block import (
-    PORT_OFFSETS as PORT_OFFSETS,
+from base.host.env.port_table import (
+    FIXED_PORTS as FIXED_PORTS,
 )
 from base.host.net.url_secret import url_with_port as url_with_port
 from base.host.net.url_secret import url_with_userinfo as url_with_userinfo

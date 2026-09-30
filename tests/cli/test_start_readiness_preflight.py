@@ -46,10 +46,6 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "cli.commands.lifecycle.root_driver._root_tree_roster",
         lambda *_a, **_k: (),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(
-        "cli.commands.converge.port_preflight.collect_port_conflicts",
-        lambda _ctx: [],  # pyright: ignore[reportUnknownArgumentType]
-    )
     monkeypatch.setattr("base.deploy.schema.migrations.unreadable_migration_files", list)
     return home
 

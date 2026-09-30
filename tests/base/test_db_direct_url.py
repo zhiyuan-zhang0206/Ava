@@ -1,7 +1,7 @@
 """The one-DB-URL design: AVA_DB_URL's port is chosen at generation by the
 pgbouncer toggle, the admin plane derives the direct URL from this home's
 cluster record, and the pooler port is a record fact only (no AVA_PGBOUNCER_PORT
-env key). Tests `base.db.direct_db_url` + the record port derivations.
+env key). Tests `base.db.direct_db_url`.
 """
 
 from __future__ import annotations
@@ -13,14 +13,7 @@ import pytest
 
 from base import cluster, config
 from base import db as db_module
-from base.cluster import (
-    ClusterPorts,
-    ClusterRecord,
-    record_memory_search_port,
-    record_pgbouncer_port,
-    record_postgres_port,
-    record_redis_port,
-)
+from base.cluster import ClusterPorts, ClusterRecord
 from base.config.data_plane import DataPlaneSettings
 from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
 
@@ -59,7 +52,7 @@ def _set(monkeypatch: pytest.MonkeyPatch, *, db_url: str, rec: ClusterRecord | N
 
 
 _HOME = "/x/.ava-t"
-# A legacy-shaped record (the prod default-home block): explicit pgbouncer key.
+# A record carrying the fixed table's data-plane ports.
 _PG_REC = _rec(_HOME, {"gateway": 8000, "postgres": 5433, "redis": 6380, "pgbouncer": 6433})
 
 
@@ -95,8 +88,8 @@ def test_direct_db_url_leaves_operator_standin_untouched(monkeypatch: pytest.Mon
     assert db_module.direct_db_url() == "postgresql://ava:dev@localhost:5432/ava"
 
 
-def test_direct_db_url_allocated_cluster_uses_block_ports(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An allocated cluster: pooler = base+13, pg = base+11."""
+def test_direct_db_url_uses_the_ports_the_record_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The swap follows whatever ports the record carries, not the table's."""
     rec = _rec(
         "/x/.ava-dev",
         {"gateway": 18000, "postgres": 18011, "redis": 18012, "pgbouncer": 18013},
@@ -193,61 +186,3 @@ def test_direct_db_url_unknown_port_stays_silent_when_pooling_off(
     got = db_module.direct_db_url()
     assert got == "postgresql://ava:dev@localhost:5432/ava"
     assert loguru_records == []
-
-
-# ── data-plane record ports: derive for records saved before a slot ───────────
-
-
-def test_record_pgbouncer_port_present_is_returned_verbatim() -> None:
-    rec = _rec(
-        "/x/.ava-dev", {"gateway": 18000, "postgres": 18011, "redis": 18012, "pgbouncer": 18099}
-    )
-    assert record_pgbouncer_port(rec) == 18099
-
-
-def test_record_pgbouncer_port_derived_for_default_home() -> None:
-    # The prod default home's saved record predates the slot -> the fixed legacy 6433.
-    rec = _rec(str(cluster.default_home()), {"gateway": 8000, "postgres": 5433, "redis": 6380})
-    assert record_pgbouncer_port(rec) == cluster.LEGACY_AVA_PORTS["pgbouncer"] == 6433
-
-
-def test_record_pgbouncer_port_missing_on_allocated_record_raises() -> None:
-    # An allocated record is born with the full block; a missing key is a
-    # corrupt record and fails loudly, never a guessed neighbour's port.
-    rec = _rec("/x/.ava-dev", {"gateway": 18000, "postgres": 18011, "redis": 18012})
-    with pytest.raises(KeyError):
-        record_pgbouncer_port(rec)
-
-
-def test_record_postgres_port_derived_for_default_home() -> None:
-    """Defensive derive (every real record carries postgres): the default home's
-    fixed legacy 5433."""
-    rec = _rec(str(cluster.default_home()), {"gateway": 8000})
-    assert record_postgres_port(rec) == 5433
-
-
-def test_record_postgres_port_missing_on_allocated_record_raises() -> None:
-    rec = _rec("/x/.ava-dev", {"gateway": 18000})
-    with pytest.raises(KeyError):
-        record_postgres_port(rec)
-
-
-def test_record_redis_port_is_a_record_fact() -> None:
-    """Redis's port is carried by the record, not inferred from a URL that may
-    use this host's reachable address while Redis remains loopback-only."""
-    rec = _rec("/x/.ava-dev", {"gateway": 18000, "redis": 18042})
-    assert record_redis_port(rec) == 18042
-
-
-def test_record_redis_port_missing_on_allocated_record_raises() -> None:
-    """The explicit strict decision: an allocated record lacking the slot is
-    corrupt — fail loudly rather than guess (only the default home falls back)."""
-    rec = _rec("/x/.ava-dev", {"gateway": 18000})
-    with pytest.raises(KeyError):
-        record_redis_port(rec)
-
-
-def test_record_memory_search_port_missing_on_allocated_record_raises() -> None:
-    rec = _rec("/x/.ava-dev", {"gateway": 18000})
-    with pytest.raises(KeyError):
-        record_memory_search_port(rec)

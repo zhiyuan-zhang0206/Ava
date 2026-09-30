@@ -60,7 +60,7 @@ class Born:
 
     @property
     def pooler_port(self) -> int:
-        return cluster.record_pgbouncer_port(self.record)
+        return self.record.ports["pgbouncer"]
 
     def endpoint(self) -> str:
         return self.values["AVA_DB_URL"]
@@ -122,7 +122,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
     home.mkdir(mode=0o700)
     monkeypatch.setattr(settings.general, "ava_home", str(home))
     monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
-    ports = dict(cluster.LEGACY_AVA_PORTS)
+    ports = dict(cluster.new_home_ports())
     ports.update(postgres=_free_port(), redis=_free_port(), pgbouncer=_free_port())
     record = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", ports), gateway_home=str(home), created_at="test"

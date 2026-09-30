@@ -80,7 +80,7 @@ from base.config import get_field
 from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
 from base.daemon.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
-from base.host.env.port_block import LEGACY_AVA_PORTS
+from base.host.env.port_table import FIXED_PORTS
 from base.host.env.registry import health_port_env_aliases
 from base.native_process import loaded_commit
 from base.paths import ava_home
@@ -89,26 +89,20 @@ from base.paths import ava_home
 
 _log = logging.getLogger("base.daemon.health")
 
-# ── Health-port single source (S4 isolation, F-s4-3) ──────────────────────────
-# Four tables used to describe the same fact (per-unit daemon health ports) and
-# drifted apart — `im_bridge` / `delivery_watchdog` were added to settings and
-# DEFAULT_PORTS but never to the env-var derive surface, so `--health-port-base`
-# did not move them (F-s4-2). The tables are now derived, never hand-maintained:
+# ── Health-port single source ─────────────────────────────────────────────────
+# Three tables describe the same fact (daemon health ports) and are derived,
+# never hand-maintained:
 #
-#   PORT_OFFSETS (base.host.env.port_block)          — service -> block offset (ONE table)
 #   health_port_env_aliases() (host.env.registry) — service -> env var, the derive surface
-#   DEFAULT_PORTS (below)                     — the legacy fallback = the LEGACY_AVA_PORTS
-#                                               subset for health daemons
-#   _HEALTH_PORT_OVERRIDES (below)            — service -> settings field
+#   DEFAULT_PORTS (below)                         — the fixed-table subset for health daemons
+#   _HEALTH_PORT_OVERRIDES (below)                — service -> settings field
 #
 # `tests/base/test_cluster_env.py` guards that they stay in sync.
 
-# The legacy shared-default segment (prod ~/.ava's fixed ports, 8102-8111) —
-# the LEGACY_AVA_PORTS subset for daemons serving /healthz. The curl_url of
-# ServiceSpec in cli/commands.py references the same ports. 8000 is reserved
-# for gateway, 3000 for frontend. A unit that never declared a per-unit block
-# binds these; `health_port()` warns on the fallback (F-s4-12).
-DEFAULT_PORTS: dict[str, int] = {svc: LEGACY_AVA_PORTS[svc] for svc in health_port_env_aliases()}
+# The health daemons' ports from the fixed table (base.host.env.port_table, 8103-8120).
+# The curl_url of ServiceSpec in cli/commands.py references the same ports. A
+# unit whose `.env` names no health port binds these.
+DEFAULT_PORTS: dict[str, int] = {svc: FIXED_PORTS[svc] for svc in health_port_env_aliases()}
 
 # Settings field mapping — name -> settings attribute. Every health daemon's
 # settings field follows `f"{name}_health_port"`, so the mapping is derived
@@ -122,12 +116,6 @@ _HEALTH_PORT_OVERRIDES: dict[str, str] = {
 MAX_BODY_BYTES = 64 * 1024
 
 
-# Daemons already warned about the shared-default fallback in THIS process.
-# A unit that never declared a per-unit block is a config gap worth one loud
-# line per daemon, not one per health_port() call (healthchecks call it every
-# round).
-_warned_shared_default: set[str] = set()
-
 # Daemons already warned about the Windows iphlpsvc 8106 collision (above).
 _warned_windows_8106: set[str] = set()
 
@@ -140,35 +128,10 @@ def health_port(name: str) -> int:
     the name is not registered, raises ``KeyError`` (fail fast; new
     daemons must register a port first; silent fallback is not
     allowed).
-
-    The fallback is deliberate but loud (F-s4-12): the 8100s are a SHARED
-    segment, so a unit that never declared a per-unit block (no
-    ``ava start --health-port-base``, no ``AVA_<NAME>_HEALTH_PORT`` in its own .env)
-    quietly joins whatever co-located units also fell back — the exact
-    2026-07-24/26 incident shape. The first fallback per daemon per process
-    logs a warning naming the fix.
     """
     override_attr = _HEALTH_PORT_OVERRIDES.get(name)
-    if override_attr is not None:
-        override = get_field(override_attr)
-        if override is not None:
-            port = int(override)
-        else:
-            port = DEFAULT_PORTS[name]
-            if name not in _warned_shared_default:
-                _warned_shared_default.add(name)
-                _log.warning(
-                    "health port for %s is not declared in this unit's .env — using the "
-                    "shared default %d (the 8100s are a shared segment; a co-located unit "
-                    "on this localhost namespace may already hold it). Pin a per-unit port "
-                    "with `ava start --health-port-base <block-base>` or set "
-                    "AVA_%s_HEALTH_PORT in this unit's .env",
-                    name,
-                    port,
-                    name.upper(),
-                )
-    else:
-        port = DEFAULT_PORTS[name]
+    override = None if override_attr is None else get_field(override_attr)
+    port = DEFAULT_PORTS[name] if override is None else int(override)
     if os.name == "nt" and port == 8106 and name not in _warned_windows_8106:
         # The Windows iphlpsvc service (svchost -k NetSvcs -s iphlpsvc) binds
         # 8106 at boot on Windows hosts; a daemon pointed there fails to bind
@@ -600,7 +563,7 @@ def _probe_daemon(
 
     HTTP 200 only proves *something* listens on that port. On 2026-07-24 a
     pytest-leaked restarter daemon — a different ``$AVA_HOME``, but fallen back
-    to prod's default 8102 because the test home allocated no health-port block —
+    to prod's default health port because the test session pinned none —
     answered 200 for 98 minutes while prod's own restarter was dead. The watchdog
     saw green every round, never respawned, and every `restarting` agent in the
     cluster stayed frozen. A status-code-only probe cannot distinguish that from

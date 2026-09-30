@@ -3,11 +3,11 @@
 ## Clusters, units, prod, and dev clone paths
 
 A **cluster** = one logical deployment. Every cluster — including `main` — owns its
-OWN Postgres + Redis instance (under its `$AVA_HOME`, on a per-cluster pg/redis
-port), so co-located clusters share no data plane at all: isolation is
+OWN Postgres + Redis instance (under its `$AVA_HOME`, on the fixed pg/redis
+ports), so a cluster shares no data plane at all: isolation is
 home-directory isolation, not a database name / redis logical-DB index / channel
 prefix kept correct inside one shared instance. A cluster also owns one outward
-gateway and a contiguous host-port block. (The rationale — and the remaining slice 3,
+gateway on the fixed port table. (The rationale — and the remaining slice 3,
 bundling the pg/redis binaries — is in
 `future/infra/embedded-per-cluster-data-plane.md`.) A data plane is **swappable**:
 URLs naming a foreign host (another machine or a SaaS provider) make the cluster
@@ -95,7 +95,7 @@ home. A split deployment starts a gateway with `--serve-gateway
 identity and environment bearer. Separate units use separate homes.
 
 **Cluster identity is bound by first start.** The settings-free entry validates
-home and capabilities, then durably records credentials and port reservations
+home and capabilities, then durably records credentials and the port table
 before publishing configuration or starting resources. The same `ava start`
 converges host prerequisites, starts owned PG/Redis, prepares the database and
 checkpoints, applies migrations and runner grants, starts PgBouncer, then waits
@@ -165,10 +165,13 @@ test infrastructure; see [CI](#ci-continuous-integration). Neither tests nor
 build tooling may target a production cluster home. Container assets elsewhere
 in the repository do not establish a cluster runtime dependency.
 
-**Port blocks** per cluster come from a contiguous `port_base + offset` block,
-scanned and allocated by `ava start`. The default (`main`) cluster keeps its
-current ports (gateway 8000, frontend 3000, daemon healthz 8101-8106, milvus 19530)
-as the legacy seed. Watchdog probe URLs + daemon/milvus/frontend ports derive from settings.
+**Ports** come from one fixed table (`base/host/env/port_table.py`: gateway 8000,
+frontend 3000, pg 5433, redis 6380, pgbouncer 6433, daemon healthz ports in
+8103-8120, milvus 19530). A new home records the table in its start intent at birth, and
+every later read is `rec.ports[...]` off that record; a unit whose `.env` names no
+port binds the same numbers. Watchdog probe URLs + daemon/milvus/frontend ports
+derive from settings. The table is closed: a record with more or fewer slots is
+refused at start. Tests never use these numbers (`tests/base/test_fixed_ports.py`).
 
 prod runtime and dev workspace are split at the filesystem level:
 
@@ -1594,13 +1597,7 @@ OP=$(uuidgen); echo "operation $OP"
 import sys
 from uuid import UUID
 
-from base.cluster import (
-    db_identity,
-    get_record,
-    ownership,
-    record_pgbouncer_port,
-    record_postgres_port,
-)
+from base.cluster import db_identity, get_record, ownership
 from base.cluster.authority import (
     OperationAuthority,
     activate,
@@ -1621,12 +1618,12 @@ record = get_record(home)
 with admin_session(record, database) as conn:
     revoke(conn, home, authority)  # ledger `revoking`, then the NOLOGIN sweep
     pooler.stop_pgbouncer(force=True)  # nothing may still hold the old pair
-    ownership.require_listener(None, record_pgbouncer_port(record), required=False)
+    ownership.require_listener(None, record.ports["pgbouncer"], required=False)
     close_revoked(conn, home, authority)  # terminate and count sessions; ledger `closed`
     prune(conn, home, authority)  # drop the closed logins
     mint_generation(conn, home, authority)  # secret, ledger `pending`, the two logins
     generation = require_ledger(home).unrevoked
-    direct = url_with_port(db_endpoint(), record_postgres_port(record))
+    direct = url_with_port(db_endpoint(), record.ports["postgres"])
     prove_generation_logins(home, generation, direct)
     print("active generation", activate(home, authority, verify_generation(conn, home)).number)
 PY

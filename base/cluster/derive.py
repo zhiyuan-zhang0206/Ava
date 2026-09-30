@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import shlex
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlsplit
 
 from base import cluster
@@ -356,7 +357,7 @@ def derive_env(
         "",
     )
     if pgbouncer_enabled:
-        db_url = url_with_port(db_url, cluster.record_pgbouncer_port(rec))
+        db_url = url_with_port(db_url, p["pgbouncer"])
     env = {
         "AVA_CLUSTER_SECRET": cluster_secret,
         "AVA_REDIS_ADMIN_PASSWORD": redis_default_password,
@@ -370,23 +371,23 @@ def derive_env(
         "AVA_GATEWAY_URL": f"http://localhost:{p['gateway']}",
         "AVA_GATEWAY_HEALTH_URL": f"http://localhost:{p['gateway']}/api/health",
         "AVA_FRONTEND_HEALTHCHECK_URL": f"http://localhost:{p['frontend']}",
-        "AVA_APP_PORT": str(cluster.record_app_port(rec)),
+        "AVA_APP_PORT": str(p["app"]),
         "AVA_MILVUS_PORT": str(p["milvus"]),
         "AVA_MILVUS_URI": f"http://127.0.0.1:{p['milvus']}",
-        "AVA_MEMORY_SEARCH_PORT": str(cluster.record_memory_search_port(rec)),
-        "AVA_MEMORY_SEARCH_URI": f"http://127.0.0.1:{cluster.record_memory_search_port(rec)}",
+        "AVA_MEMORY_SEARCH_PORT": str(p["memory_search"]),
+        "AVA_MEMORY_SEARCH_URI": f"http://127.0.0.1:{p['memory_search']}",
         "AVA_BROWSER_CDP_PORT": str(p["browser"]),
-        "AVA_PERMISSIONS_HELPER_PORT": str(cluster.record_health_port(rec, "permissions_helper")),
+        "AVA_PERMISSIONS_HELPER_PORT": str(p["permissions_helper"]),
         "AVA_DB_URL": db_url,
         "AVA_REDIS_URL": url_with_userinfo(
             base_redis_url, cluster.DATA_PLANE_IDENTITY, runtime_password
         ),
         "AVA_EVENTS_CHANNEL": "ava:events",
     }
-    # p is a ClusterPorts (all int values). Use record_health_port so old records
-    # that predate a health-port slot still resolve their port deterministically.
+    # The health-port services are a subset of the closed ClusterPorts keys.
+    by_service = cast("dict[str, int]", p)
     for svc, var in health_port_env_aliases().items():
-        env[var] = str(cluster.record_health_port(rec, svc))
+        env[var] = str(by_service[svc])
     return env
 
 

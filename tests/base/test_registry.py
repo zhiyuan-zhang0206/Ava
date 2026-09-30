@@ -368,10 +368,3 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-
-
-def _block_env(base: int) -> dict[str, str]:
-    """The full health-port env a block-style unit at `base` carries."""
-    from base.host.env.registry import health_port_env
-
-    return {alias: str(int(port)) for alias, port in health_port_env(base).items()}

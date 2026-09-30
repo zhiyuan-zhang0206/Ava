@@ -104,8 +104,8 @@ def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
     (`ops.spec`), built from the same `health_port(<daemon>)` call the daemon
     passes to `start_health_server` — so the URL probed and the port bound cannot
     disagree. The gateway (`/api/health`), the browser (CDP `/json/version`),
-    milvus (gRPC) and the frontend fall out by the same rule that keeps the
-    others in, and none of them is a port `--health-port-base` moves.
+    milvus (gRPC) and the frontend fall out by the same rule: none of them
+    serves a `/healthz` whose body names its home.
     """
     return spec.curl_url is not None and spec.curl_url.endswith("/healthz")
 

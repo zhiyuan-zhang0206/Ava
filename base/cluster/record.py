@@ -1,4 +1,4 @@
-"""A cluster home's own record: the port block and data-plane host it was born with.
+"""A cluster home's own record: the ports and data-plane host it was born with.
 
 The record lives in the home it describes, as the `record` of the home's start
 intent (`$AVA_HOME/start-intent.json`, written by `cli.start_identity` before

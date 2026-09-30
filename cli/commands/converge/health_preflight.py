@@ -1,12 +1,11 @@
 """Health preflight — warning-only data-plane + checkout self-check on `ava start`.
 
-The port-conflict preflight (#1205) bind-checks the cluster's ports before
-anything launches; this step extends it into the start-time cluster-health
-checklist (#607): it probes the data plane (Postgres + Redis, exactly the URLs
-the runtime dials) and the checkout (dirty marker).
+This step is the start-time cluster-health checklist (#607): it probes the data
+plane (Postgres + Redis, exactly the URLs the runtime dials) and the checkout
+(dirty marker).
 Every finding is printed and appended to `$AVA_HOME/logs/health_preflight.log`
 for after-the-fact inspection; nothing blocks — a start continues on any
-warning, the same contract as the port preflight. This is the first line of
+warning. This is the first line of
 defense for the "a cluster died and nobody knew" incident class (paired with
 the cross-cluster monitor): the next `ava start` / `ava converge` on the box
 leaves a dated trail of what was and was not reachable.
@@ -38,8 +37,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from base.cluster import port_free
-from base.cluster.port_preflight import expected_cluster_ports
+from base.cluster import get_record, port_free
 from base.config import settings
 from base.deploy.git.gitenv import git_env
 from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
@@ -150,12 +148,10 @@ def _data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
         return []
 
     if "gateway" in ctx.roles:
-        # postgres/redis are required ClusterPorts keys — `expected_cluster_ports`
-        # always returns them (the legacy block and every record shape carry them).
-        ports = expected_cluster_ports(ctx.ava_home)
-        pg_port = ports["postgres"]
-        redis_port = ports["redis"]
-        plane_up_at_all = not port_free(pg_port) or not port_free(redis_port)
+        rec = get_record(ctx.ava_home)
+        if rec is None:
+            raise RuntimeError(f"gateway home {ctx.ava_home} has no recorded ports")
+        plane_up_at_all = not port_free(rec.ports["postgres"]) or not port_free(rec.ports["redis"])
         if not plane_up_at_all:
             # Cold start: neither pg nor redis is bound, and the start sequence
             # brings the instance up right after converge. Probing now would

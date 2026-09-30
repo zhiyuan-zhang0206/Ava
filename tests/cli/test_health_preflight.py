@@ -1,14 +1,13 @@
 """Health preflight — the start-time data-plane + checkout self-check (#607).
 
-Extends the port-conflict preflight (#1205): `ava start` / `ava converge` now
-also probes the data plane (pg/redis, the URLs the runtime dials) and the
-checkout (dirty marker). Same contract as the port
-preflight — warning-only, logged to `$AVA_HOME/logs/health_preflight.log`,
-never failing a start.
+`ava start` / `ava converge` probe the data plane (pg/redis, the URLs the runtime
+dials) and the checkout (dirty marker). Warning-only, logged to
+`$AVA_HOME/logs/health_preflight.log`, never failing a start.
 """
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -128,8 +127,8 @@ def test_data_plane_gateway_cold_start_skipped(
     ctx = _preflight_ctx(tmp_path)
     monkeypatch.setattr(
         _hp,
-        "expected_cluster_ports",
-        lambda _home: {"postgres": _free_port(), "redis": _free_port()},  # pyright: ignore[reportUnknownArgumentType]
+        "get_record",
+        lambda _home: SimpleNamespace(ports={"postgres": _free_port(), "redis": _free_port()}),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert _hp._data_plane_warnings(ctx) == []
@@ -151,8 +150,8 @@ def test_data_plane_gateway_partial_up_probes(
     try:
         monkeypatch.setattr(
             _hp,
-            "expected_cluster_ports",
-            lambda _home: {"postgres": held, "redis": _free_port()},  # pyright: ignore[reportUnknownArgumentType]
+            "get_record",
+            lambda _home: SimpleNamespace(ports={"postgres": held, "redis": _free_port()}),  # pyright: ignore[reportUnknownArgumentType]
         )
         # The pg probe is replaced to fail; the redis probe stays the recorder,
         # proving both were dialed on a partially-up plane.

@@ -105,7 +105,7 @@ def redis_acl() -> DaemonProbe:
 
 
 def pgbouncer() -> DaemonProbe:
-    from base.cluster import get_record, ownership, record_pgbouncer_port
+    from base.cluster import get_record, ownership
     from base.cluster.authority import AuthorityRefusedError, read_pooler_admin
     from base.paths import ava_home
     from cli.commands.data_plane import pgbouncer as pooler
@@ -117,7 +117,7 @@ def pgbouncer() -> DaemonProbe:
     owner = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
     if owner is None:
         return DaemonProbe.down("no native PgBouncer generation in this home's PID record")
-    port = record_pgbouncer_port(record)
+    port = record.ports["pgbouncer"]
     try:
         admin_password = read_pooler_admin(ava_home().resolve()).password
     except AuthorityRefusedError as exc:

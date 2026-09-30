@@ -79,7 +79,7 @@ def _born_intent(home: Path) -> None:
     from dataclasses import asdict
 
     record = cluster.ClusterRecord(
-        ports=cast("cluster.ClusterPorts", dict(cluster.LEGACY_AVA_PORTS)),
+        ports=cluster.new_home_ports(),
         gateway_home=str(home),
         created_at="test",
     )
@@ -276,11 +276,9 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
 
     pg_port, redis_port = isolated_cluster
     home = Path(settings.general.ava_home)
-    ports = cluster.LEGACY_AVA_PORTS.copy()
+    ports = cluster.new_home_ports()
     ports.update(postgres=pg_port, redis=redis_port, pgbouncer=_free_port())
-    record = cluster.ClusterRecord(
-        ports=cast("cluster.ClusterPorts", ports), gateway_home=str(home), created_at="test"
-    )
+    record = cluster.ClusterRecord(ports=ports, gateway_home=str(home), created_at="test")
     values = _gateway_values(
         record,
         IdentityInput(

@@ -58,7 +58,6 @@ from base.host.env.config_lite_table import (
     FIELD_CAPABILITIES,
     FIELD_SCOPES,
 )
-from base.host.env.port_block import BLOCK_MAX, BLOCK_SIZE, PORT_OFFSETS
 
 # The process-profile roles `child_env` / the authority projections accept —
 # the existing AVA_PROCESS_PROFILE vocabulary (base/config/profiles.py), not
@@ -193,8 +192,8 @@ _PASSTHROUGH_ROWS = (
 # The health-port services (one Settings field each: `<svc>_health_port`,
 # alias `AVA_<SVC>_HEALTH_PORT`, scope=host). Adding a daemon with a health
 # port = one line here + the field in base/config/services.py; every
-# consumer (derive_env, daemon.health, start, port_preflight, dotenv_boot's
-# force set) follows automatically.
+# consumer (derive_env, daemon.health, start, dotenv_boot's force set) follows
+# automatically.
 _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     "labeler",
     "heartbeat",
@@ -206,13 +205,6 @@ _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     "pitr_base_backup",
     "memory_indexer",
     "ops",
-    # Added in the S4 isolation pass (F-s4-2): these two daemons predate the
-    # per-unit health-port model and kept static legacy ports (8110/8111),
-    # outside PORT_OFFSETS — `--health-port-base` did not move them, so two
-    # co-located units collided on the shared default. They now sit in the
-    # block (offsets 16/17) like every other health daemon: `ava start
-    # --health-port-base` writes them,
-    # preflight checks them, derive_env materializes them.
     "delivery_watchdog",
     "im_bridge",
     "page_server",
@@ -229,58 +221,6 @@ def health_port_env_aliases() -> dict[str, str]:
     declared service has no `<svc>_health_port` field), never hand-copied."""
     return {svc: FIELD_ALIASES[f"{svc}_health_port"] for svc in _HEALTH_PORT_SERVICES}
 
-
-def health_port_env(base: int) -> dict[str, str]:
-    """`{AVA_*_HEALTH_PORT: port}` for a unit whose port block starts at `base`.
-
-    `base` is a **block** base — the same number a cluster's registry record
-    carries as its `gateway` port — so each daemon lands at `base +
-    PORT_OFFSETS[svc]`, exactly where an allocated cluster would put it. Passing
-    a block base rather than "the first health port" is what keeps a hand-set
-    unit comparable to `ava cluster ls` output, and it means the ports stay
-    inside one reserved port-block window instead of drifting across whatever a
-    second convention would produce.
-
-    Raises:
-        ValueError: a derived port would fall outside the usable range. The
-            operator states this fact; a base that cannot produce a legal block
-            is a typo, and silently clamping it would bind ports nobody asked
-            for.
-    """
-    aliases = health_port_env_aliases()
-    ports = {var: base + PORT_OFFSETS[svc] for svc, var in aliases.items()}
-    out_of_range = sorted(p for p in ports.values() if not (1024 <= p <= 65535))
-    if out_of_range:
-        raise ValueError(
-            f"health-port base {base} derives ports outside 1024-65535: {out_of_range} "
-            f"(a base is a {BLOCK_SIZE}-port block base; the highest offset in use is "
-            f"{max(PORT_OFFSETS[svc] for svc in aliases)})"
-        )
-    return {var: str(port) for var, port in ports.items()}
-
-
-# The lowest base a real unit port block can sit on. The legacy shared segment
-# (LEGACY_AVA_PORTS, 8000-8120) ALSO satisfies offset-consistency by accident —
-# prod's fixed pins (restarter 8102 / labeler 8103 / memory_indexer 8105 / ops
-# 8106) line up with PORT_OFFSETS 3/4/6/7 onto one fake "base" (8099) — so
-# consistency alone cannot tell a legacy unit from a block unit. Every real
-# block base is operator-chosen or allocated at >= BLOCK_START (18000),
-# hand-pinned bases included (win: 18114, WSL2 default: 20027), so a
-# solved base below this floor is a legacy pin sequence, never a block.
-_HEALTH_PORT_BLOCK_FLOOR = 15000
-
-
-# The base `ava start` applies to a WSL2 host when --health-port-base is
-# omitted (issue #1152). WSL2 shares its physical machine's localhost namespace
-# with any co-located native Windows unit, and both otherwise fall back to the
-# SAME hardcoded shared default (`base.daemon.health.DEFAULT_PORTS`, the
-# legacy 8102-8111 segment) — so a first WSL2 start with no flag would
-# recreate the exact 2026-07-26 collision
-# (decisions/2026-07-31-a-health-port-belongs-to-a-unit.md).
-# This is a FIXED constant, not a scan: one slot past the birth allocator's own
-# grid (`base.host.env.port_block.BLOCK_START..BLOCK_MAX`), so a cluster later birthed
-# on this same box can never claim it by allocation.
-WSL_DEFAULT_HEALTH_PORT_BASE = BLOCK_MAX + BLOCK_SIZE
 
 # ── Derived sets (pure functions of the registry, memoized on first use) ──
 

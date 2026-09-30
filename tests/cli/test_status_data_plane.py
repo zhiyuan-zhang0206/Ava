@@ -1,7 +1,7 @@
 """`ava status` data-plane rendering (`print_data_plane_status`).
 
 The pgbouncer line must show the port the pooler actually LISTENS on — the
-registry-derived `record_pgbouncer_port(rec)`, the same value
+port recorded in the registry (`rec.ports["pgbouncer"]`), the same value
 `ensure_cluster_instance` starts it with. The pooler port is a registry fact
 only (AVA_PGBOUNCER_PORT is no longer materialized in `.env` — AVA_DB_URL
 carries the pooler port when pooling is on), so no `.env` cache can go stale;
@@ -43,9 +43,10 @@ def test_pgbouncer_line_uses_registry_port(
     )  # skip the real redis probe  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
 
-    fake_rec = cl.ClusterRecord(ports=cast("cl.ClusterPorts", {}), gateway_home="/x", created_at="")
+    fake_rec = cl.ClusterRecord(
+        ports=cast("cl.ClusterPorts", {"pgbouncer": 6433}), gateway_home="/x", created_at=""
+    )
     monkeypatch.setattr(cl, "get_record", lambda _home: fake_rec)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cl, "record_pgbouncer_port", lambda _rec: 6433)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(
         "base.cluster.authority.read_pooler_admin",

@@ -145,7 +145,7 @@ def _postgres_receiver_block(ava_home: Path) -> str:
     Everything comes from the home's registry record and identity; nothing is
     read from a database URL, so no credential can reach the rendered file.
     """
-    from base.cluster import db_identity, get_record, record_postgres_port
+    from base.cluster import db_identity, get_record
     from base.cluster.authority import MONITOR_ROLE
     from base.db.pg_admin import pg_socket_path
 
@@ -157,7 +157,7 @@ def _postgres_receiver_block(ava_home: Path) -> str:
         )
     socket_dir = pg_socket_path(ava_home).as_posix().lstrip("/")
     return _POSTGRES_RECEIVER_BLOCK.format(
-        pg_endpoint=_yaml_quote(f"{socket_dir}:{record_postgres_port(record)}"),
+        pg_endpoint=_yaml_quote(f"{socket_dir}:{record.ports['postgres']}"),
         pg_user=_yaml_quote(MONITOR_ROLE),
         pg_placeholder=_yaml_quote(_PEER_PLACEHOLDER),
         pg_database=_yaml_quote(db_identity()),

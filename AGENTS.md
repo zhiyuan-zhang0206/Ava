@@ -46,7 +46,7 @@ HTTP gateway) and/or `agent-runner` (agents + the ops server) and/or
 `observability-station` (owns the native LGTM observability backends — the
 declarative form of the `$AVA_HOME/lgtm-host` marker); a single box carries
 both gateway and agent-runner (home `~/.ava`). Every cluster owns its OWN Postgres + Redis
-instance under `$AVA_HOME` (per-cluster ports in its host-port block) **plus a
+instance under `$AVA_HOME` (on the fixed port table, `base/host/env/port_table.py`) **plus a
 PgBouncer pooler** (default on — `AVA_DB_URL` points at it; migrations/pg_dump
 dial the direct URL); isolation is home-directory isolation, so co-located
 clusters share no data plane. The data plane is **swappable**: URLs naming a

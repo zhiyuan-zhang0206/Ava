@@ -53,8 +53,7 @@ and launches its root-owned services. The gateway must reach the runner's
 `--machine-host` and ops port; a successful connection from the runner to the
 gateway alone does not establish that return path.
 
-Use a distinct health-port block when units share a loopback namespace. A
-runner does not cache the gateway's DB/Redis URLs or owner credentials; each
+A runner does not cache the gateway's DB/Redis URLs or owner credentials; each
 process fetches the configuration at startup and uses its installed unit
 capability for the database. Model-provider credentials
 remain local to the runner.
