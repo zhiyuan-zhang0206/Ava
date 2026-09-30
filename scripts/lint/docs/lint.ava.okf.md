@@ -70,6 +70,6 @@ The `lint_*.py` gates that take path arguments share one contract: a typo'd targ
 
 ## `loguru_format.py`
 
-loguru formats with `str.format`: a printf-style `logger.warning("x %s", x)` logs a literal `%s`, dropping its arguments. Flags a loguru level call whose literal message has a printf conversion while passing arguments, or passes arguments with no `{}` field. Only loguru loggers (`base.log` / `loguru`, and their `.bind` / `.opt` / `.patch`) are checked. Opt-out `# log-format-ok: <reason>`; scope `lint_common.FRAMEWORK_DIRS` + `scripts/`.
+Each logger keeps its own message format, told apart by variable, not by file. loguru formats with `str.format`: `logger.warning("x %s", x)` logs a literal `%s`, dropping its arguments. stdlib `logging` formats with `%`: `_log.info("x {}", x)` raises `TypeError` at emit. Flags both, on loguru loggers (`base.log` / `loguru`) and `logging.getLogger(...)` ones. Opt-out `# log-format-ok: <reason>`; scope `lint_common.FRAMEWORK_DIRS` + `scripts/`.
 
 Parent: [[scripts/docs/scripts.ava.okf.md|scripts]].

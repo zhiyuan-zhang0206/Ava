@@ -4,8 +4,8 @@ Each fixture here is autouse and either forbids a real host effect (native helpe
 converge, os.exec*, the bootstrap fetch, service readiness / health-port probes,
 the schedule manager's session backend, the label LLM) or restores process-global
 state a test may have leaked (metering wraps, the AVA_HOME_OVERRIDE exemption,
-OTLP export, the stdlib logging bridge, the database-authority refusal). Opt-outs
-are per-test markers documented on the fixture that honours them.
+OTLP export, the stdlib logging bridge and its logger levels, the database-authority
+refusal). Opt-outs are per-test markers documented on the fixture that honours them.
 
 Order matters and is kept: pytest sets same-scope autouse fixtures up in
 registration order, and within one module alphabetically, so this module is
@@ -16,7 +16,7 @@ in the root `conftest.py`.
 import contextlib
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from typing import Any
 
 import pytest
@@ -389,6 +389,50 @@ def _restore_db_authority_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dotenv_boot, "_db_authority_refusal", dotenv_boot._db_authority_refusal)
 
 
+# Loggers `base.log._install_stdlib_intercept()` gives a level of its own besides the
+# first-party names and the root: the psycopg pool gate and the uvicorn trio.
+_INTERCEPT_LEVELED_THIRD_PARTY = ("psycopg.pool", "uvicorn", "uvicorn.error", "uvicorn.access")
+
+
+@contextlib.contextmanager
+def stdlib_logging_isolated() -> Generator[None]:
+    """Run a block with the loguru->telemetry bridge off the root logger, then put stdlib
+    logging back as it was: the root handlers AND the level of every logger the intercept
+    sets.
+
+    `_install_stdlib_intercept()` sets the root to INFO and each first-party logger to
+    DEBUG (plus the psycopg pool and uvicorn loggers). Levels live on the process-global
+    `logging.Logger.manager`, so restoring only the handlers left them set for every later
+    test in the same xdist worker. A stdlib call whose format string cannot consume its
+    arguments raises out of pytest's capture handler only when the record passes the level
+    gate, so the leak made such a bug fail only in the runs where an intercept test had
+    come earlier in the worker.
+    """
+    import logging
+
+    from base.log import _FIRST_PARTY_LOGGER_NAMES, _StdlibInterceptHandler
+
+    root = logging.getLogger()
+    saved_handlers = root.handlers[:]
+    saved_levels = [
+        (logger, logger.level)
+        for logger in (
+            root,
+            *(
+                logging.getLogger(name)
+                for name in (*_FIRST_PARTY_LOGGER_NAMES, *_INTERCEPT_LEVELED_THIRD_PARTY)
+            ),
+        )
+    ]
+    root.handlers = [h for h in saved_handlers if not isinstance(h, _StdlibInterceptHandler)]
+    try:
+        yield
+    finally:
+        root.handlers = saved_handlers
+        for logger, level in saved_levels:
+            logger.setLevel(level)
+
+
 @pytest.fixture(autouse=True)
 def _no_stdlib_telemetry_bridge() -> Iterator[None]:
     """Keep stdlib logging off the loguru->telemetry bridge during tests.
@@ -401,14 +445,8 @@ def _no_stdlib_telemetry_bridge() -> Iterator[None]:
     (pgbouncer healthcheck tests, fixed 2026-08-09 via #2136). Tests that
     exercise the bridge itself re-install it inside their body
     (test_uvicorn_stdlib_intercept.py): the fixture runs first, the body's
-    install wins for the duration, and teardown restores the saved handlers.
+    install wins for the duration, and teardown restores the saved handlers and
+    the logger levels the install changed (`stdlib_logging_isolated`).
     """
-    import logging
-
-    from base.log import _StdlibInterceptHandler
-
-    root = logging.getLogger()
-    saved = root.handlers[:]
-    root.handlers = [h for h in saved if not isinstance(h, _StdlibInterceptHandler)]
-    yield
-    root.handlers = saved
+    with stdlib_logging_isolated():
+        yield

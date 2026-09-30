@@ -58,8 +58,8 @@ async def _run(pool: ConnectionPool, interval: float) -> None:
             else:
                 if report.touched or report.expired:
                     _log.info(
-                        "[delivery-outbox] flush pass: delivered={} buffered={} abandoned={} "
-                        "deferred={} unreadable={} expired={}",
+                        "[delivery-outbox] flush pass: delivered=%s buffered=%s abandoned=%s "
+                        "deferred=%s unreadable=%s expired=%s",
                         report.delivered,
                         report.buffered,
                         report.abandoned,
@@ -71,4 +71,4 @@ async def _run(pool: ConnectionPool, interval: float) -> None:
         try:
             interval = (await asyncio.to_thread(delivery_outbox.limits)).flush_interval_seconds
         except Exception:
-            _log.exception("[delivery-outbox] tick interval read failed; keeping {}s", interval)
+            _log.exception("[delivery-outbox] tick interval read failed; keeping %ss", interval)
