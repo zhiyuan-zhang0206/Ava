@@ -3,5 +3,8 @@
     "base/host/env/config_registry.py::_build_registry": 19,
     "base/host/env/dotenv_boot.py::_enforce_cluster_env_authority": 18,
     "base/host/env/runtime_config.py::write_fields": 22
+  },
+  "patch_targets": {
+    "base/host/converge/tests/test_browser_deps.py::base.host.system.probes._platform_chrome_binary": 1
   }
 }

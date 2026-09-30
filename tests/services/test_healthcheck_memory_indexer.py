@@ -3,7 +3,7 @@
 memory_indexer moved from pidfile to HTTP /healthz (#254 pattern) so the watchdog
 does not misjudge death during a tens-of-seconds cold-start embed and fall into a
 spawn race. The probe itself (identity verification) is covered in
-`tests/base/test_health.py`; here we pin that this healthcheck asks for
+`base/tests/test_health.py`; here we pin that this healthcheck asks for
 the right daemon name and pidfile, and that the restart path reports the probe's
 verdict rather than the spawn's.
 """

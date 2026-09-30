@@ -65,7 +65,7 @@ class ModelTuning:
 
     Field names MATCH the flat config field names (``base.config``) exactly —
     ``resolve_setting`` maps between the two by name, and
-    ``tests/base/test_model_registry.py`` asserts the alignment. ``None``
+    ``base/lm/tests/test_model_registry.py`` asserts the alignment. ``None``
     means "no per-model opinion; fall through to ``DEFAULT_TUNING``".
 
     Communication-style / prompt-section values are the per-model *behavior

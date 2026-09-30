@@ -159,7 +159,7 @@ _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
 # The parse kinds mirror pydantic's non-strict coercion for the field types the
 # table declares (bool strings, int from a trimmed integer literal or an
 # integral decimal, float, Path, the CSV split of the eval allowlist). The
-# parity test (tests/base/test_config_lite_parity.py) locks every kind
+# parity test (base/config/tests/test_config_lite_parity.py) locks every kind
 # against the eager sub-model construction, error for error.
 
 _BOOL_TRUE = frozenset({"1", "true", "yes", "on", "t", "y"})

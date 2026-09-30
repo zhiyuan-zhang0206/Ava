@@ -34,4 +34,4 @@ generation-independent MCP client tokens authenticate) change only by editing
 the gateway `.env` on its host. Otherwise any authenticated caller, a machine token included, could pick
 a credential that outlives its own admission. Writable secrets are outbound
 credentials (provider, search, chat and backup-store keys) only;
-`tests/base/test_config_editing.py` pins that classification.
+`base/config/tests/test_config_editing.py` pins that classification.
