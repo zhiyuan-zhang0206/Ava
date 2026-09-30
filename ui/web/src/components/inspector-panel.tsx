@@ -206,8 +206,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     if (viewport) viewport.scrollTop = 0;
   }, [agentId]);
 
-  // Open pages: SSE-driven cache (page_opened/page_closed fold in live), not a
-  // poll — see useAgentPages.
+  // Open pages: page events prompt a coalesced list read; see useAgentPages.
   const pages = useAgentPages(agentId);
 
   // The global notices fold exclusively invalidates the live query. This

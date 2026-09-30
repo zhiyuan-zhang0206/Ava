@@ -52,7 +52,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 
 - **QueryClient**: `staleTime` default 5min, `gcTime` 30min, `refetchOnWindowFocus` off (SSE-driven queries set `staleTime: Infinity`; bounded snapshots opt into polling explicitly). Sidebar stats consumers share one QueryClient-level 30s poll coordinator, so responsive/header/footer observers cannot mint independent intervals. A 401 is never retried and globally invalidates the session so `AuthGuard` redirects to `/login` and unmounts polling observers (Task #1326).
 - **EventStreamProvider** sits above the route tree: global `/api/system` broadcast persists across page navigation (one EventSource shared across routes; closed while the tab is hidden, reopened on return).
-- **Fold owner** (`useFoldOwner`, inside `EventStreamProvider`): the SOLE root writer — one subscriber folds every global-broadcast event into the query caches (`["agents", "live"]` + `["agents", "terminated"]` — both scopes always seeded, / `["notices"]` / `["agent-pages"]` / `["tasks"]` / `["fleet-graph"]` families, debounced per family) and runs the central reconnect reconcile. Hooks only read their keys now.
+- **Fold owner** (`useFoldOwner`, inside `EventStreamProvider`): one subscriber turns global-broadcast events into coalesced Query invalidations (`["agents", "live"]`, agent directory/detail, notices, `["agent-pages", id]`, `["all-pages"]`, tasks, fleet graph) and runs the central reconnect reconcile. Page events refetch existing list queries and trail a GET in flight; absent keys are never seeded. Hooks only read their keys.
 - **ToastHost**: root-level renderer for the store's toast slot, so error toasts reach the user on every route (not just Home).
 - **OpenTasksNoticeHost** (#3374): root-level renderer for the store's open-tasks notice slot — a terminate response carrying `open_tasks` (wire #2488) raises a dialog (count + up to five rows + "and N more"); dismissal is explicit; lazily imported.
 - **VisualViewportHeightSync** (#4779): with the on-screen keyboard up, pins `<html>` to `visualViewport.height` so the composer stays above it — the iOS half of the contract whose Android half is the `interactive-widget=resizes-content` viewport export.
@@ -60,7 +60,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 
 ## Core principles
 
-- **SSE first**: agents/timeline/token/pages are folded into React Query with no polling. Snapshot-only surfaces poll only while visible/enabled and share a page-level cadence where they have multiple consumers.
+- **SSE first**: timeline/token fold events locally; agent and page events trigger Query repair with no polling. Snapshot-only surfaces poll only while visible/enabled and share a page-level cadence where they have multiple consumers.
 - **No optimistic write**: state changes await SSE event confirmation; lifecycle actions only flip `isPending`.
 - **Single writer**: each cache/flag has exactly one writer.
 
