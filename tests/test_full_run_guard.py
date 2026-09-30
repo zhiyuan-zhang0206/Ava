@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tests import conftest
+from tests.fixtures import provisioning
 
 
 @pytest.mark.parametrize(
@@ -116,6 +116,6 @@ def test_full_run_guard_decision(
     selected_file.parent.mkdir(parents=True)
     selected_file.touch()
 
-    message = conftest._full_run_guard_message(rootpath, args, env, invocation_dir)
+    message = provisioning._full_run_guard_message(rootpath, args, env, invocation_dir)
 
     assert (message is not None) is blocked

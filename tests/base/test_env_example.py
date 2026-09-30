@@ -89,7 +89,7 @@ def test_env_example_loads_as_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """The template, loaded verbatim, must construct `Settings()`.
 
     Simulates a fresh install: scrub every env var Settings recognizes (the
-    test process carries real AVA_* values from conftest / the developer
+    test process carries real AVA_* values from the suite env pins / the developer
     shell), inject exactly the template's key/value pairs — including the
     present-but-empty `KEY=` lines — and instantiate. Any ValidationError here
     is a template bug that would abort `ava start` right after

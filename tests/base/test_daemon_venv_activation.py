@@ -35,10 +35,9 @@ pytestmark = [
         IS_WINDOWS or shutil.which("bash") is None,
         reason="needs a POSIX host with bash (the login-shell PATH rebuild is under test)",
     ),
-    # A real session IS the subject here, so opt out of the autouse guard that
-    # stubs respawn_service suite-wide (tests/conftest.py:_guard_service_respawn) —
-    # under the stub these assertions would pass without spawning anything. The
-    # session lands on this unit's own session home and each test kills its own.
+    # A real session IS the subject here: nothing stubs respawn_service, or these
+    # assertions would pass without spawning anything. The session lands on this
+    # unit's own session home and each test kills its own.
 ]
 
 _EXPECTED_BIN = str(repo_root() / ".venv" / "bin")

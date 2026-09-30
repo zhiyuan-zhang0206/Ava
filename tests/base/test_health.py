@@ -359,7 +359,7 @@ def test_health_port_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """With nothing overriding it, health_port falls back to DEFAULT_PORTS.
 
     The overrides have to be cleared to see that: the suite pins a free port per
-    daemon for the whole session (tests/conftest.py) precisely so no test can bind
+    daemon for the whole session (tests/fixtures/env_bootstrap.py) precisely so no test can bind
     or probe a prod default. Stubbing the settings lookup is what "unconfigured"
     means to `health_port`."""
     monkeypatch.setattr(health, "get_field", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]

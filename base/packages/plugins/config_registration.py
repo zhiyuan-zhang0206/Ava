@@ -603,7 +603,7 @@ def apply_config_overlay(
     Framework overlay: `base_config.set_field(field, value)` for each key —
     in-place mutation on the owning sub-model of the singleton instance. Every
     module that has captured `from base.config import settings` sees the change
-    (same sub-model object). Matches the pattern used by tests/conftest.py to point
+    (same sub-model object). Matches the pattern used by tests/fixtures/provisioning.py to point
     Settings at the per-session DB url.
     Plugin Config overlay: `_PLUGIN_CONFIGS[plugin] = cls(**merged)`, new
     frozen instance.

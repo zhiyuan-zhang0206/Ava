@@ -71,7 +71,7 @@ def _ensure_agents_meta_row(agent_id: int | None = None) -> None:
     # would pollute the main cluster — the 2026-08-12 incident wrote rows with
     # ids 900002-900010 into the production agents table. The rule lives in
     # base/db/test_db_guard.py (single source of truth, shared with the
-    # session-start guard in tests/conftest.py).
+    # session-start guard in tests/fixtures/provisioning.py).
     assert_test_db_url(str(DB_URL), context="_ensure_agents_meta_row")
 
     aid = agent_id if agent_id is not None else ava.self.AGENT_ID
@@ -96,7 +96,7 @@ def _pty_sessions_env() -> Iterator[None]:
 
     There is no supervisor daemon to bootstrap (each `new` spawns the
     session's own detached host, base/sessions/pty; the hosts inherit the
-    root conftest's `AVA_CONFIG_FETCH=skip` pin from this process's env). The
+    suite's `AVA_CONFIG_FETCH=skip` pin from this process's env). The
     one job left is teardown: kill every session still alive under the tmp
     test home — hosts are detached to init, so a leaked one would survive
     the tmp home and keep running (the 2026-07-24 leaked-daemon outage

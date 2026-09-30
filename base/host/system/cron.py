@@ -61,7 +61,7 @@ def os_jobs_enabled() -> bool:
     except the namespace it lands in.
 
     So the suite turns registration off wholesale (`AVA_OS_JOBS_ENABLED=false`,
-    set in `tests/conftest.py` and inherited by every subprocess it spawns)
+    set in `tests/fixtures/env_bootstrap.py` and inherited by every subprocess it spawns)
     instead of registering into the operator's namespace and unregistering
     afterwards: a job that is never armed cannot fire mid-run, and cannot survive
     a session that is SIGKILLed before its teardown.

@@ -26,7 +26,7 @@ def _findings(src: str, rel: str = "tests/sub/conftest.py", *, init: bool = Fals
     return [msg for _, msg in _lint.findings_in_source(src, rel, has_package_init=init)]
 
 
-# ---- Rule 1: session scope + a process-global mutation, outside the root conftest ----
+# ---- Rule 1: session scope + a process-global mutation, outside the provisioning plugin ----
 
 
 def test_session_scoped_env_write_in_a_subdirectory_conftest_is_flagged() -> None:
@@ -164,7 +164,7 @@ def test_a_function_scoped_fixture_may_mutate_the_environment() -> None:
     assert _findings(src) == []
 
 
-# ---- the root-conftest exemption is by LOCATION, not by name ----
+# ---- the provisioning-plugin exemption is by LOCATION, not by name ----
 
 
 _PROVISIONED_DB = (
@@ -177,14 +177,18 @@ _PROVISIONED_DB = (
 )
 
 
-def test_the_root_conftests_session_provisioning_is_not_flagged() -> None:
-    # `tests/conftest.py:_provisioned_db` mutates two process globals at session scope
-    # and never restores them. That is correct: it is the ROOT conftest, so "the
-    # session" and "my directory" are the same blast radius, and it is establishing the
-    # session's baseline rather than claiming to clean up after itself. A lint that
-    # failed here would be wrong about the one legitimate case in the repo.
+def test_the_provisioning_plugins_session_fixtures_are_not_flagged() -> None:
+    # `tests/fixtures/provisioning.py:_provisioned_db` mutates two process globals at
+    # session scope and never restores them. That is correct: the repo-root conftest.py
+    # loads it once per process, so "the session" and "my directory" are the same blast
+    # radius, and it is establishing the session's baseline rather than claiming to
+    # clean up after itself. A lint that failed here would be wrong about the one
+    # legitimate case in the repo.
     assert (
-        _lint.findings_in_source(_PROVISIONED_DB, "tests/conftest.py", has_package_init=False) == []
+        _lint.findings_in_source(
+            _PROVISIONED_DB, "tests/fixtures/provisioning.py", has_package_init=False
+        )
+        == []
     )
 
 

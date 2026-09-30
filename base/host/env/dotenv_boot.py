@@ -36,7 +36,7 @@ boots BARE, exactly like a CI checkout: no `.env` / `mirror.env` is
 read, the config source decision never fetches and the bootstrap transport
 refuses to dial (base/config/_lite.py, base/host/env/bootstrap.py), and
 `load_ava_env` plants `UNANCHORED_DB_SENTINEL` as AVA_DB_URL (the same sentinel
-tests/conftest.py plants for unprovisioned test runs) so a DB connection fails
+tests/fixtures/env_bootstrap.py plants for unprovisioned test runs) so a DB connection fails
 loudly (base/db.connect raises an actionable error). Lint scripts, codegen
 hooks and dev tools keep working from any checkout; every verb that would act
 on "this checkout's cluster" refuses (`checkout_anchored()`, cli/preflight.py).
@@ -99,7 +99,7 @@ _UNANCHORED_PREFIX = "ava-unanchored-"
 # Opt out of the AVA_HOME-vs-checkout contradiction check (`resolve_ava_home`).
 # For callers that redirect a checkout to a home it does not own ON PURPOSE and
 # accept running that checkout's code against it — the test suite's scratch home
-# (tests/conftest.py). Only the real process environment can open it: the check
+# (tests/fixtures/env_bootstrap.py). Only the real process environment can open it: the check
 # runs at this module's import, before any `.env` is loaded, so no cluster can grant itself
 # the exemption on disk.
 _HOME_OVERRIDE = "AVA_HOME_OVERRIDE"

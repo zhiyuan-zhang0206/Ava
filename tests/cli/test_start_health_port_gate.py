@@ -41,7 +41,7 @@ from tests.cli.test_start_readiness_gate import (
 )
 
 # The gate IS the subject here, so stand the global autouse net down for this
-# module (tests/conftest.py:_guard_health_port_gate reports every port free).
+# module (tests/fixtures/guards.py:_guard_health_port_gate reports every port free).
 pytestmark = pytest.mark.real_health_port_gate
 
 

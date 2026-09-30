@@ -39,7 +39,7 @@ from agent.graph.claim._dispatch import (
 from agent.graph.claim.node import claim_node
 from agent.messages import NoteTag
 from agent.state import AgentState
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 from .test_claim import _config, _insert_inbound_kind, _make_runtime  # reuse the claim harness
 

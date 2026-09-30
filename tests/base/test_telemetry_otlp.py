@@ -69,7 +69,7 @@ def otlp_backend(monkeypatch):
     module singleton so `export_batch()` / `shutdown()` hit the test instance.
     Yields (backend, log_exporter, metric_reader).
 
-    Re-enables AVA_TELEMETRY_OTLP_ENABLED (the root conftest turns the flag
+    Re-enables AVA_TELEMETRY_OTLP_ENABLED (`tests/fixtures/env_bootstrap.py` turns the flag
     off session-wide so event-emitting tests stay hermetic)."""
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import (

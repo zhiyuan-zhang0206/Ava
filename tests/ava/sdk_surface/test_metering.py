@@ -255,7 +255,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     side effect and nothing used to put it back, so one plugin-loading test silently
     rewrote the callables every later test in that xdist worker saw.
 
-    The autouse `_restore_metering` in `tests/conftest.py` is what closes that.
+    The autouse `_restore_metering` in `tests/fixtures/guards.py` is what closes that.
     It runs after this test body, where a self-test cannot observe it, so the two
     halves are pinned separately: the fixture is wired onto every test, and its one
     action reverses a *real* `load_extensions()` — not just the hand-built

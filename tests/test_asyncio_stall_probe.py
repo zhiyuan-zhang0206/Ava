@@ -142,7 +142,7 @@ def test_probe_window_cancels_its_timers_at_exit(monkeypatch: pytest.MonkeyPatch
 
 def test_the_probe_hook_is_wired_into_this_session(pytestconfig: pytest.Config) -> None:
     assert pytestconfig.pluginmanager.hasplugin("tests._asyncio_stall_probe"), (
-        "tests/conftest.py no longer loads tests/_asyncio_stall_probe via pytest_plugins"
+        "the repo-root conftest.py no longer loads tests/_asyncio_stall_probe via pytest_plugins"
     )
     impls = pytestconfig.hook.pytest_runtest_protocol.get_hookimpls()
     wired = [

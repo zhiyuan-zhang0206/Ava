@@ -1,7 +1,7 @@
 """The session-level leak guard's inventory (`tests/_os_jobs.py`).
 
 `pytest_sessionfinish` diffs `host_ava_os_jobs()` against the snapshot taken at
-conftest import and fails the run on anything new. These tests cover what that
+provisioning-plugin import and fails the run on anything new. These tests cover what that
 diff can see and what it is allowed to delete — the guard itself only runs at
 session end, where a self-test cannot observe it.
 """

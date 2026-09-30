@@ -26,10 +26,11 @@ the red had every reason to write it off as someone else's flake.
 
 Nothing caught it, and nothing would have caught the next one. Hence this lint.
 
-## Rule 1 — session scope outside the root conftest may not mutate a process global
+## Rule 1 — session scope outside the provisioning plugin may not mutate a process global
 
-`tests/conftest.py` is exempt, and it is the only exemption: it is the root conftest,
-so "the session" and "my directory" are the same blast radius. Its
+`tests/fixtures/provisioning.py` is exempt, and it is the only exemption: the repo-root
+`conftest.py` loads it once per pytest process, so "the session" and "my directory" are
+the same blast radius. Its
 `_provisioned_db` / `_provisioned_redis` assign `AVA_DB_URL` / `AVA_REDIS_URL` and
 never put them back, which is correct — they establish the session's baseline rather
 than claim to clean up after themselves.
@@ -37,8 +38,8 @@ than claim to clean up after themselves.
 Anywhere deeper, session scope plus a process-global mutation is a contradiction by
 construction: the fixture exists to serve one subtree and its teardown cannot fire
 when pytest leaves that subtree. Narrow the scope (`package` — see Rule 2 — or
-`module` / `function`), or hoist the value to the root conftest if it really is
-session-wide.
+`module` / `function`), or hoist the value to `tests/fixtures/provisioning.py` if it
+really is session-wide.
 
 A session-scoped fixture that mutates nothing process-global is fine and is not
 reported: `tests/e2e/conftest.py`'s `frontend_proc` / `playwright_runtime` /
@@ -99,10 +100,10 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # The one location where session scope and the fixture's own blast radius coincide.
-_ROOT_CONFTEST = "tests/conftest.py"
+_SESSION_PROVISIONING = "tests/fixtures/provisioning.py"
 
 # Fixture-level exemption, keyed `<relpath>::<fixture_name>`. Deliberately EMPTY:
-# a session-scoped fixture outside the root conftest that mutates a process global
+# a session-scoped fixture outside the provisioning plugin that mutates a process global
 # has no correct form, so the fix is always to narrow the scope or hoist the value —
 # not to record the exception here. Kept as a named seam so that a future case with
 # a real argument has somewhere to state it, next to the reason.
@@ -310,7 +311,7 @@ def findings_in_source(src: str, rel_path: str, *, has_package_init: bool) -> li
                     '`scope="module"`.',
                 )
             )
-        if effective != _SESSION or rel_path == _ROOT_CONFTEST:
+        if effective != _SESSION or rel_path == _SESSION_PROVISIONING:
             continue
         if f"{rel_path}::{node.name}" in _ALLOWED_SESSION_MUTATORS:
             continue
@@ -321,13 +322,13 @@ def findings_in_source(src: str, rel_path: str, *, has_package_init: bool) -> li
         out.append(
             (
                 node.lineno,
-                f"fixture `{node.name}` is session-scoped outside {_ROOT_CONFTEST} and "
+                f"fixture `{node.name}` is session-scoped outside {_SESSION_PROVISIONING} and "
                 f"mutates process globals ({listed}). Its teardown fires at end-of-SESSION, "
                 f"not when pytest leaves {Path(rel_path).parent.as_posix()}/ — so every test "
                 "collected after that directory in the same process keeps running with these "
                 "values installed. Narrow the scope to `package` (the directory needs an "
                 "__init__.py or the keyword silently means session) / `module` / `function`, "
-                f"or hoist the value to {_ROOT_CONFTEST}, where the session IS the blast "
+                f"or hoist the value to {_SESSION_PROVISIONING}, where the session IS the blast "
                 "radius.",
             )
         )
@@ -432,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"\n{total} fixture-scope violations. See the docstring at the top of "
             "scripts/lint/fixture_scope.py for the two rules and why session scope is "
-            "exempt only in the root conftest.",
+            "exempt only in the provisioning plugin.",
             file=sys.stderr,
         )
         return 1

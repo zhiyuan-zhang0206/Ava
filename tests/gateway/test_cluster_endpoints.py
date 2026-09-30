@@ -271,8 +271,6 @@ class TestPauseLocalCluster:
         assert pause_backend.killed == pause_backend.spawned == []
 
 
-# subprocess.run faked), so they opt out of the autouse guard that refuses them
-# suite-wide (tests/conftest.py:_guard_cluster_spawn).
 class TestUnpauseLocalCluster:
     @pytest.fixture(autouse=True)
     def _private_pause_owner(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -301,18 +299,6 @@ class TestUnpauseLocalCluster:
         cluster_pause.unpause_local_cluster()
         assert not cluster_pause.is_paused()
         assert pause_backend.spawned == pause_backend.killed == []
-
-
-# the session backend faked), so they opt out of the autouse guard that refuses
-# them suite-wide (tests/conftest.py:_guard_cluster_spawn).
-
-
-# the session backend faked), so they opt out of the autouse guard that refuses
-# them suite-wide (tests/conftest.py:_guard_cluster_spawn).
-
-
-# the session backend faked), so they opt out of the autouse guard that refuses
-# them suite-wide (tests/conftest.py:_guard_cluster_spawn).
 
 
 class TestLockHolderLiveness:
@@ -988,7 +974,7 @@ def _seed_agent_on_machine(
 ) -> int:
     """One live agent row homed on `machine` (test spawn helper + machine
     stamp; the row-creation path moved gateway-side, Task #1236 follow-up)."""
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     aid = spawn_agent(spawner="user")
     with db_conn.cursor() as cur:

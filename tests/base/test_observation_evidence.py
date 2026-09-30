@@ -14,7 +14,7 @@ from base.agents.observation.evidence import (
 from base.agents.observation.roster import AgentCard, select_roster
 from base.agents.observation.snapshot import select_one
 from base.db import create_agent
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 
 @pytest.mark.parametrize("probe_age", [None, 0, 600])

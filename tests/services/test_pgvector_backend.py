@@ -1,6 +1,6 @@
 """PGVectorBackend tests — real Postgres + pgvector against the session test DB.
 
-`tests/conftest.py` provisions an isolated `ava_test_<pid>_<ts>` database per
+`tests/fixtures/provisioning.py` provisions an isolated `ava_test_<pid>_<ts>` database per
 session and `base.db` dials it, so these tests run against the real engine
 the backend targets (CI's `install-pg-redis` action installs
 `postgresql-17-pgvector`). The table is a derived cache prepared at gateway

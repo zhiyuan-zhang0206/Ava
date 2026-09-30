@@ -233,7 +233,7 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
             "AVA_HOME": str(home),
             "AVA_PROCESS_PROFILE": "agent",
             # The explicit endpoint + enabled flag open the export gate
-            # (tests/conftest.py disables OTLP suite-wide).
+            # (tests/fixtures/env_bootstrap.py disables OTLP suite-wide).
             "AVA_TELEMETRY_OTLP_ENDPOINT": f"http://127.0.0.1:{otlp_receiver.server_address[1]}",
             "AVA_TELEMETRY_OTLP_ENABLED": "true",
         }

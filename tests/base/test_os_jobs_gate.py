@@ -70,7 +70,7 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> _RecordingBackend:
 
 @pytest.fixture()
 def gate_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The suite pins the gate OFF for every test (tests/conftest.py); the few
+    """The suite pins the gate OFF for every test (tests/fixtures/env_bootstrap.py); the few
     cases that assert the ENABLED behaviour turn it back on for themselves."""
     monkeypatch.setattr(settings.general, "os_jobs_enabled", True)
 

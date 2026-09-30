@@ -29,7 +29,7 @@ from services.heartbeat.daemon import (
     _send_heartbeat_checkin,
     _sweep_backoff_resets,
 )
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 # Explicit threshold so the assertions do not ride on the configured default.
 _THRESHOLD_S = 300.0

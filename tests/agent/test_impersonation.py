@@ -178,7 +178,7 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
     db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
 ) -> None:
     from agent.db import claim_inbound_batch
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent()
     for kind in ("chat", "compact_request", "cancel"):
@@ -215,7 +215,7 @@ async def test_control_claim_records_superseded_accepted_intent(
     from agent.db import claim_inbound_batch
     from agent.ownership.hosted import admit_hosted_runtime
     from base.cluster.machine import machine_name
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent()
     owner = await admit_hosted_runtime(
@@ -259,7 +259,7 @@ async def test_control_claim_preserves_unaccepted_intent(
     db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any], kind: str
 ) -> None:
     from agent.db import claim_inbound_batch
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent()
     db_conn.execute(
@@ -830,7 +830,7 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     from base.agents import impersonation as leases
     from base.agents.messages.caller_identity import CallerIdentity
     from base.cluster.machine import machine_name
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent()
     first = await admit_hosted_runtime(
@@ -884,7 +884,7 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     from base.agents import impersonation as leases
     from base.agents.messages.caller_identity import CallerIdentity
     from base.cluster.machine import machine_name
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent()
     first = await admit_hosted_runtime(

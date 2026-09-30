@@ -124,7 +124,7 @@ repos:
       # env layering disarmed tests/test_home_isolation.py on main while CI stayed
       # green. Also catches `scope="package"` in a directory with no __init__.py,
       # where pytest silently resolves the scope to the session node. Session scope
-      # is exempt only in tests/conftest.py; see the script header.
+      # is exempt only in tests/fixtures/provisioning.py; see the script header.
       - id: lint-fixture-scope
         name: lint fixture scope (no session-scoped mutation of a process global)
         entry: .venv/bin/python scripts/lint/fixture_scope.py

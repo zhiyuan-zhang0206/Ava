@@ -14,7 +14,7 @@ from base.agents.recovery_breaker import (
     halt_automatic_recovery,
     record_permanent_reject_turn,
 )
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 
 def test_clear_literal_matches_the_halt_threshold() -> None:

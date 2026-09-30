@@ -10,7 +10,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 
-# ava.self.AGENT_ID is set by top-level tests/conftest.py (=1), no override here.
+# ava.self.AGENT_ID is set by tests/fixtures/env_bootstrap.py (=1), no override here.
 from gateway.app import app
 
 # DB/Redis env (AVA_DB_URL / AVA_REDIS_URL) for spawned-subprocess inheritance is

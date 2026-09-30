@@ -570,7 +570,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     from agent.state import AgentState, checkpoint_msgpack_allowlist
     from base.agents.context import AvaContext
     from base.lm.context_budget import ContextBudget
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     def small_budget(_model: str) -> ContextBudget:
         return ContextBudget(10_000, 1, 1)

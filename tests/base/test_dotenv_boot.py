@@ -138,7 +138,7 @@ def test_resolve_empty_pointer_is_unanchored(
 
 # ── resolve_ava_home: AVA_HOME contradicting the checkout's own claim ──
 #
-# tests/conftest.py exports AVA_HOME_OVERRIDE=1 for the whole suite (its scratch
+# tests/fixtures/env_bootstrap.py exports AVA_HOME_OVERRIDE=1 for the whole suite (its scratch
 # home IS a deliberate contradiction on any installed worktree), so every test
 # below that expects a refusal has to drop it first.
 

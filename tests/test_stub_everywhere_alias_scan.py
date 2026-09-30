@@ -1,4 +1,4 @@
-"""`tests/conftest.py::_stub_everywhere`'s alias scan is static by contract.
+"""`tests/fixtures/guards.py::_stub_everywhere`'s alias scan is static by contract.
 
 The helper rebinds every already-imported frozen alias of a guarded function
 (the spawn/reap entry points). The scan that finds those aliases must read
@@ -24,7 +24,7 @@ import types
 
 import pytest
 
-from tests.conftest import _stub_everywhere
+from tests.fixtures.guards import _stub_everywhere
 
 
 def _stub(*args: object, **kwargs: object) -> None:
@@ -41,7 +41,7 @@ def test_alias_scan_does_not_probe_module_getattr(monkeypatch: pytest.MonkeyPatc
         touched.append(name)
         raise AttributeError(name)
 
-    dynamic = types.ModuleType("_conftest_alias_scan_probe")
+    dynamic = types.ModuleType("_stub_everywhere_alias_scan_probe")
     dynamic.__getattr__ = _dynamic
     monkeypatch.setitem(sys.modules, dynamic.__name__, dynamic)
 
@@ -78,7 +78,7 @@ def test_alias_scan_still_rebinds_a_frozen_alias(monkeypatch: pytest.MonkeyPatch
     import ops.cluster_pause
 
     real = ops.cluster_pause.unpause_local_cluster
-    holder = types.ModuleType("_conftest_alias_scan_holder")
+    holder = types.ModuleType("_stub_everywhere_alias_scan_holder")
     holder.__dict__["unpause_local_cluster"] = real
     monkeypatch.setitem(sys.modules, holder.__name__, holder)
 
