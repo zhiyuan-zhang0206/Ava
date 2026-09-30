@@ -1,12 +1,12 @@
 """Low-traffic-window VACUUM for the checkpoint tables (incremental reclamation).
 
-The checkpoint reaper deletes old rows every hour, but physical space only
-returns when a VACUUM reclaims the dead tuples — including the TOAST storage
+VACUUM reclaims dead tuples from checkpoint tables — including the TOAST storage
 that carries checkpoint blobs (a blob table can sit at hundreds of MB of
 physical size while holding a few thousand live rows: 2026-08-10 measured
 790 MB physical / 1.3 MB heap). Autovacuum eventually gets there, but on a
 small, append-heavy table its default thresholds fire late, so dead TOAST
-tuples accumulate between trims.
+tuples can accumulate. The checkpoint trim opt-in was retired on 2026-09-30;
+this physical reclamation does not delete live checkpoint history.
 
 This module runs a plain `VACUUM (ANALYZE)` (never FULL — FULL takes an
 ACCESS EXCLUSIVE lock and stalls agents, which the user explicitly ruled out)

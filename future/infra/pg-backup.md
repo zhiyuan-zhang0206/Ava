@@ -18,7 +18,8 @@
 > dump is encrypted before publication, and the restore drill validates a
 > decrypted artifact in an isolated Postgres instance. The measured full dump
 > is about 849 MiB and 6.3 minutes; `_DUMP_TIMEOUT_S` remains 60 minutes of
-> headroom. Checkpoint retention is owned separately by the checkpoint reaper.
+> headroom. The checkpoint reaper's trim opt-in was retired on 2026-09-30
+> under the never-delete ruling; its implementation remains unscheduled.
 >
 > **Update 2026-09-21:** the `events` table's frozen archive was dropped with
 > the archive cleanup (task #1281/#1823) — event history reads from Loki, and
