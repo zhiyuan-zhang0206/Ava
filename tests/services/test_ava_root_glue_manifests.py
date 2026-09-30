@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -152,25 +151,3 @@ def test_session_host_attach_table_matches_the_g6b_ruling() -> None:
         "orchestration-session": "ops",
         "exec-child": "agent-host",
     }
-
-
-def test_windows_manifest_is_direct_and_preserves_path_arguments(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import shlex
-
-    monkeypatch.setattr(gen, "sys", SimpleNamespace(platform="win32"))
-    repo = tmp_path / "checkout with spaces"
-    assert gen._exec_argv(".venv/bin/python -m services.agent_host.daemon", repo) == [
-        str(repo / ".venv/Scripts/python.exe"),
-        "-m",
-        "services.agent_host.daemon",
-    ]
-    executable, config = repo / "bin/collector.exe", repo / "config/collector config.yaml"
-    assert gen._exec_argv(shlex.join([str(executable), "--config", str(config)]), repo) == [
-        str(executable),
-        "--config",
-        str(config),
-    ]
-    with pytest.raises(ManifestError, match="direct command"):
-        gen._exec_argv(".venv/bin/python -m worker && other", repo)

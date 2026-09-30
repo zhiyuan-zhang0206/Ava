@@ -39,11 +39,6 @@ class ServiceCustody:
         self.path = directory / f"{unit}.json"
         self._body: dict[str, object] = {"version": 1, "unit": unit, "stage": "spawning"}
         self._expected = json.dumps(self._body)
-        if os.name == "nt":
-            from base.native_process.root_control.windows.storage import publish
-
-            publish(self.path, self._expected, exclusive=True)
-            return
         _flush_directory(directory.parent)
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
@@ -64,21 +59,11 @@ class ServiceCustody:
         from base.host.atomic_io import write_text_atomic
 
         self._expected = json.dumps(self._body)
-        if os.name == "nt":
-            from base.native_process.root_control.windows.storage import publish
-
-            publish(self.path, self._expected)
-            return
         write_text_atomic(self.path, self._expected, mode=0o600, sync_parent=True)
 
     def clear(self) -> None:
         """Remove only this owner's record after completed native cleanup."""
         self._require_unchanged()
-        if os.name == "nt":
-            from base.native_process.root_control.windows.storage import clear
-
-            clear(self.path)
-            return
         self.path.unlink()
         _flush_directory(self.path.parent)
 

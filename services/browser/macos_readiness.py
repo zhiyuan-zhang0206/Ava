@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import pwd
 import subprocess
 import time
 from dataclasses import dataclass
@@ -34,11 +35,6 @@ import base.host.proc
 import base.paths
 from base.native_process.os_platform import IS_MACOS
 from base.native_process.ownership import stable_create_time
-
-try:  # `pwd` is absent on Windows, where this module remains import-safe.
-    import pwd
-except ImportError:  # pragma: no cover - Windows-only import shape
-    pwd = None  # type: ignore[assignment]
 
 _log = logging.getLogger("services.browser.macos_readiness")
 
@@ -112,8 +108,6 @@ def _current_account() -> tuple[str, Path]:
     environment variables, which may describe the SSH caller rather than the
     launch context of the detached service.
     """
-    if pwd is None:  # Defensive only; callers gate on IS_MACOS first.
-        raise RuntimeError("macOS account lookup is unavailable")
     entry = pwd.getpwuid(os.getuid())
     return entry.pw_name, Path(entry.pw_dir)
 

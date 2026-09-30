@@ -208,7 +208,7 @@ os.environ.setdefault("AVA_CONFIG_BOOT", "eager")
 # ── OS-scheduled jobs: the suite never arms one ──
 #
 # launchd reads ONE ~/Library/LaunchAgents per OS user; `crontab` edits ONE table
-# per user; schtasks owns ONE \Ava\ folder per user. Unlike AVA_HOME / the DB /
+# per user. Unlike AVA_HOME / the DB /
 # the ports / the session namespace, that namespace is not addressed by a value a
 # process reads, so no redirect isolates it — a test-scoped $AVA_HOME still lands
 # its jobs in the operator's real scheduler.
@@ -1220,13 +1220,7 @@ def _peak_memory_mb() -> tuple[float, str]:
     the gauge that sees all of it; one subprocess, once, at session end. Linux has
     no compressor in the way, so peak RSS there is the whole story.
 
-    Windows has neither gauge in the stdlib (`resource` is POSIX-only), and is
-    neither where CI runs nor where the incident happened, so the guard reports
-    nothing there rather than growing a third implementation.
     """
-    if sys.platform == "win32":
-        return 0.0, "unavailable"
-
     import resource
 
     if sys.platform == "darwin":
@@ -1461,11 +1455,8 @@ def _guard_permissions_helper_native_io(
     """
     if request.node.get_closest_marker("native_permissions_helper") is not None:
         return
-    from types import SimpleNamespace
-
     from services import permissions_helper
     from services.permissions_helper import launchd_job, lifecycle
-    from services.permissions_helper.windows import lifecycle as windows_lifecycle
 
     def forbidden(*_args: object, **_kwargs: object) -> Any:
         pytest.fail(
@@ -1477,11 +1468,6 @@ def _guard_permissions_helper_native_io(
     _stub_everywhere(monkeypatch, permissions_helper, "converge", forbidden)
     monkeypatch.setattr(lifecycle, "run_bounded", forbidden)
     monkeypatch.setattr(launchd_job, "run_bounded", forbidden)
-    # Module-local proxy: guard Windows helper commands without replacing the
-    # shared subprocess module used by unrelated tests or disposable processes.
-    native = SimpleNamespace(**vars(windows_lifecycle.subprocess))
-    native.run = forbidden
-    monkeypatch.setattr(windows_lifecycle, "subprocess", native)
 
 
 @pytest.fixture(autouse=True)

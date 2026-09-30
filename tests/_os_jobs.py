@@ -22,8 +22,6 @@ import os
 import subprocess
 from pathlib import Path
 
-from base.native_process.os_platform import IS_WINDOWS
-
 # The crontab comment markers the registrars stamp their lines with
 # (`base.host.system.cron` / `autostart` / `os_watchdog_probe` / `os_hold_watchdog` / `logs_job`). A line carrying one
 # is an Ava job; anything else in the user's crontab is theirs and is ignored.
@@ -65,29 +63,6 @@ def _crontab_jobs() -> set[str]:
     }
 
 
-def _schtasks_jobs() -> set[str]:
-    """Task Scheduler entries under the `\\Ava\\` folder this repo owns."""
-    if not IS_WINDOWS:
-        return set()
-    try:
-        res = subprocess.run(
-            ["schtasks", "/Query", "/FO", "CSV", "/NH"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return set()
-    if res.returncode != 0:
-        return set()
-    names: set[str] = set()
-    for line in res.stdout.splitlines():
-        name = line.split(",")[0].strip('"') if line else ""
-        if name.startswith("\\Ava\\"):
-            names.add(f"schtasks:{name}")
-    return names
-
-
 def host_ava_os_jobs() -> frozenset[str]:
     """Every OS-scheduled job on this host that belongs to Ava, as opaque ids.
 
@@ -95,12 +70,12 @@ def host_ava_os_jobs() -> frozenset[str]:
     so the guard can report AND undo a leak without re-deriving which cluster the
     job claimed to belong to.
     """
-    return frozenset(_launchd_jobs() | _crontab_jobs() | _schtasks_jobs())
+    return frozenset(_launchd_jobs() | _crontab_jobs())
 
 
 # Basenames of the two throwaway homes a pytest session creates — the tmpfs home
 # in `tests/conftest.py` and the per-session e2e home in `tests/e2e/conftest.py`.
-# Every job id carries the home slug (launchd label / schtasks folder / the
+# Every job id carries the home slug (launchd label / the
 # crontab line's marker), so a substring test identifies a job this suite owns.
 _TEST_HOME_PREFIXES = ("ava_test_home_", "ava_e2e_home_")
 
@@ -142,8 +117,4 @@ def remove_os_job(job: str) -> None:
         kept = [line for line in res.stdout.splitlines() if line.strip() != value]
         subprocess.run(
             ["crontab", "-"], input="\n".join(kept) + "\n", capture_output=True, check=False
-        )
-    elif kind == "schtasks":
-        subprocess.run(  # noqa: S603 — name came from this host's own schtasks query
-            ["schtasks", "/Delete", "/TN", value, "/F"], capture_output=True, check=False
         )

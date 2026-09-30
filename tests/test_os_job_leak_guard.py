@@ -19,9 +19,8 @@ from tests import _os_jobs
 @pytest.fixture()
 def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(tmp_path))
-    # No crontab / schtasks on the fake host — this fixture isolates the launchd half.
+    # No crontab on the fake host — this fixture isolates the launchd half.
     monkeypatch.setattr(_os_jobs, "_crontab_jobs", set)
-    monkeypatch.setattr(_os_jobs, "_schtasks_jobs", set)
     return tmp_path
 
 
@@ -64,7 +63,6 @@ def test_no_launchagents_dir_is_not_an_error(fake_home: Path) -> None:
             "--auto-rollback --threshold 3 # ava-health-probe.ava-56a51359",
             False,
         ),
-        ("schtasks:\\Ava\\ava_e2e_home_1_2-abcd1234\\health-probe", True),
     ],
 )
 def test_only_this_suites_homes_are_sweepable(job: str, owned: bool) -> None:
