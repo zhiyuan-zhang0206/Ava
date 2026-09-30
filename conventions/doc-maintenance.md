@@ -90,11 +90,13 @@ level; lint rule E009 fires on one, layered or not. Links are not logical:
 `[[…]]` and relative markdown links name the real path, `docs/` included.
 
 Splitting an over-cap node follows the same rule: the child goes in the
-directory named after the parent's stem, so the parent edge is derived rather
-than asserted. That directory holds only documents when the code it describes
-lives elsewhere (`ava_builtins/plugins/ava_fleet/neighbors/`,
-`ui/web/src/frontend-components/`) — placing the child beside the code instead
-would leave it with no filesystem parent, and it would fall back to the root.
+directory named after the parent's stem — inside the `docs/` layer, so
+`docs/<stem>/` — and the parent edge is derived rather than asserted. That
+directory holds only documents when the code it describes lives elsewhere
+(`ava_builtins/plugins/ava_fleet/docs/neighbors/`,
+`ui/web/src/docs/frontend-components/`); a child placed beside its parent in the
+layer would attach to the directory's overview (or the root when there is none),
+not to the node it was split from.
 
 The one exception is the **index layer**: the apex and the cross-domain concept
 systems — plugins, skills, MCP integration, and the design-phase R1–R4 models —
@@ -121,7 +123,10 @@ in its resolution, while it is still only a wrong path.
 Format is enforced by `scripts/content_lint/lint_ava_okf.py`: YAML frontmatter with
 `type` / `title` / `description`, a line + character size ceiling (which forces
 hierarchy instead of long files), and `[[wikilink]]` targets that must resolve.
-The three thresholds are `MAX_LINES` / `MAX_CHARS` / `WARN_MARGIN` in that
+Every node sits in a `docs/` layer (`E014`; `okf/` and `.github/` are exempt), and
+the overview-position rule (`E009`) is judged on logical paths, so a directory
+whose nodes all sit in `docs/<sub>/` still has its overview there and no sibling
+`docs/<sub>.ava.okf.md`. The three thresholds are `MAX_LINES` / `MAX_CHARS` / `WARN_MARGIN` in that
 script, which is their only source of truth — read them there rather than
 trusting a number quoted in prose. In practice the character cap is the one that
 binds: no node has ever approached the line cap.
@@ -161,31 +166,31 @@ Reconcile in the same PR as the code.
 
 Structure changes → the OKF node in the `docs/` of the package you touched, plus
 its domain overview (the `<dir>/<dir>.ava.okf.md` node of the domain's
-directory) when the domain's shape changed. Paths below are logical paths — the
-file sits in that directory's `docs/` layer:
+directory) when the domain's shape changed. Paths below are the files' real
+paths, `docs/` layer included:
 
 | Change | Domain node |
 |---|---|
-| Agent lifecycle / crash-resurrect | `agent/agent.ava.okf.md` |
-| SDK surface (`ava/__init__.py`, new namespaces) | `ava/ava.ava.okf.md` |
-| Gateway routes / SSE / auth | `gateway/gateway.ava.okf.md` |
-| CLI commands / cluster lifecycle | `cli/cli.ava.okf.md` |
-| Frontend | `ui/web/web.ava.okf.md` |
-| Base library / LM providers / config / migrations | `base/base.ava.okf.md` |
-| Background services | `services/services.ava.okf.md` |
+| Agent lifecycle / crash-resurrect | `agent/docs/agent.ava.okf.md` |
+| SDK surface (`ava/__init__.py`, new namespaces) | `ava/docs/ava.ava.okf.md` |
+| Gateway routes / SSE / auth | `gateway/docs/gateway.ava.okf.md` |
+| CLI commands / cluster lifecycle | `cli/docs/cli.ava.okf.md` |
+| Frontend | `ui/web/docs/web.ava.okf.md` |
+| Base library / LM providers / config / migrations | `base/docs/base.ava.okf.md` |
+| Background services | `services/docs/services.ava.okf.md` |
 | GitHub Actions / CI workflows | `.github/.github.ava.okf.md` |
 | Plugins / extension points | `okf/plugins/plugins.ava.okf.md` |
 | Skills | `okf/skills/skills.ava.okf.md` |
 | MCP integrations | `okf/mcps/mcps.ava.okf.md` |
-| Test suite | `tests/tests.ava.okf.md` |
-| Ops scripts | `scripts/scripts.ava.okf.md` |
+| Test suite | `tests/docs/tests.ava.okf.md` |
+| Ops scripts | `scripts/docs/scripts.ava.okf.md` |
 Process, rule, and observed-behaviour changes → the doc that owns them:
 
 | Change | Doc |
 |---|---|
 | Operational procedures | `.agents/skills/` (one skill per procedure) |
 | Backup schedule / retention / restore | `.agents/skills/operating-ava-cluster/references/db-restore.md` — the `pg-backup` service's own behaviour moved with the restore procedure rather than staying in the runtime model |
-| PITR physical restore drill | `.agents/skills/operating-ava-cluster/references/physical-restore-drill.md` (procedure) + `cli/commands/data_plane/pitr.ava.okf.md` (the `ava pitr drill` surface) |
+| PITR physical restore drill | `.agents/skills/operating-ava-cluster/references/physical-restore-drill.md` (procedure) + `cli/commands/data_plane/docs/pitr.ava.okf.md` (the `ava pitr drill` surface) |
 | Runtime model (clusters, data plane, logging, CI) | `runbook.md` |
 | Dev environment setup | `dev-setup.md` |
 | PR process | `.agents/skills/write-a-pr-description/SKILL.md` |

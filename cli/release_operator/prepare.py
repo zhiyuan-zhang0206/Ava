@@ -1,7 +1,7 @@
 """`ava cluster release prepare` — build one inactive image on this host.
 
 Thin wiring to `cli.release_prepare.prepare_image` (see
-`cli/release_prepare/release_prepare.ava.okf.md`): this module resolves
+`cli/release_prepare/docs/release_prepare.ava.okf.md`): this module resolves
 `work`/`store` under `$AVA_HOME` and constructs the same `Preparation` request
 the standalone `python -m cli.release_prepare` entry point takes, then calls
 the same function. No release-preparation semantics are added or changed.

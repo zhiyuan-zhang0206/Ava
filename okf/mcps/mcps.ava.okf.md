@@ -11,7 +11,7 @@ tags:
 
 Ava speaks MCP in both directions. This node is the **outbound** half — Ava's
 agents as MCP clients. The inbound half, `ava mcp serve`, shares only the
-protocol (no daemon, no config layers, no socket): [[cli/mcp_server.ava.okf.md]].
+protocol (no daemon, no config layers, no socket): [[cli/docs/mcp_server.ava.okf.md]].
 
 ## What It Is
 MCP (Model Context Protocol) integrations let agents call external tool servers. Agents invoke tools as `ava.mcps.<server>.<tool>(...)` — calls serialize into **custom newline-delimited JSON** (`{id,method,params}` → `{id,ok,result|error}`, `ava/mcps/_daemon.py`) over a Unix socket to the **shared per-machine MCP daemon** (ops roster session "mcp-daemon", watchdog-managed) managing connections to each server. **Standard JSON-RPC is only used for the daemon↔MCP server hop** — over stdio for local servers (`command`) or Streamable HTTP for remote ones (`url`).
@@ -39,9 +39,9 @@ The four `.mcp.json` layers, `~/.ava/mcp_enabled.json` enable control, `requires
 Native vs installed (mirroring skills), the relative-path `.mcp.json` startup form, per-layer `server_cwd`, and why not `uv run`: [[okf/mcps/installation-startup.ava.okf.md]].
 
 ## Key Dependencies
-- [[cli/mcp_server.ava.okf.md]] — the inbound direction: this cluster AS an MCP server
+- [[cli/docs/mcp_server.ava.okf.md]] — the inbound direction: this cluster AS an MCP server
 - [[mcp-daemon.ava.okf.md]] — MCP daemon subprocess management
-- [[agent/state.ava.okf.md]] — agent identity for socket path
+- [[agent/docs/state.ava.okf.md]] — agent identity for socket path
 
 ## Entry Points
 - `ava/mcps/__init__.py` — agent-facing tool invocation interface

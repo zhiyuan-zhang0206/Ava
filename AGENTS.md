@@ -35,7 +35,7 @@ with no escape hell.
 | Package manager | uv |
 | Frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui |
 
-[Frontend OKF →](ui/web/web.ava.okf.md)
+[Frontend OKF →](ui/web/docs/web.ava.okf.md)
 
 ## Running
 
@@ -129,8 +129,8 @@ macOS through the home helper) with a local data plane and unchanged packaged
 SQL; its stop closes terminals and schedules, exactly as PITR activation does (Linux-only). Fleet/schema
 transitions and other platform adapters remain pre-cutover work; unsupported
 requests refuse before draining. See
-[`release preparation`](cli/release_prepare/release_prepare.ava.okf.md) and
-[`release transition`](cli/release_transition/release_transition.ava.okf.md).
+[`release preparation`](cli/release_prepare/docs/release_prepare.ava.okf.md) and
+[`release transition`](cli/release_transition/docs/release_transition.ava.okf.md).
 
 ```bash
 uv sync       # prepare the checkout dependencies and CLI; no cluster is created

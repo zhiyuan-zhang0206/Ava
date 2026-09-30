@@ -72,7 +72,7 @@ clusters apart *inside one instance* is unnecessary. The bulk is in
   carried was retired 2026-09-20). Each instance
   `initdb`s its own superuser; a NOLOGIN owner role owns the db, and processes
   dial write-generation logins over SCRAM
-  ([authority](../../base/cluster/authority/authority.ava.okf.md)).
+  ([authority](../../base/cluster/authority/docs/authority.ava.okf.md)).
 - **Shared-instance foreign/neighbour probes** — `_shared_infra_running`,
   `_foreign_redis_error`, `_redis_listening`. A per-cluster instance on its own
   port with its own data dir under `$AVA_HOME` is unambiguously this cluster's;

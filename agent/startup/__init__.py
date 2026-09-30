@@ -21,7 +21,7 @@
   transaction with a re-serve notice to the agent (deduped per 6h)
 
 The dead-page recovery writes and notifications live in the package-private
-`_page_reconcile.py`; the page restore contract is `page-restore.ava.okf.md`.
+`_page_reconcile.py`; the page restore contract is `docs/page-restore.ava.okf.md`.
 """
 
 from __future__ import annotations

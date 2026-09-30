@@ -70,7 +70,7 @@ def test_is_excluded_covers_frozen_axes_and_fixed_base_artifacts() -> None:
     assert gate._is_excluded("scripts/legacy_lkg/prepare.py") is True
     # Byte-frozen: its sha256 is the retained image's schema digest.
     assert gate._is_excluded("db/schema.sql") is True
-    assert gate._is_excluded("scripts/legacy_lkg/legacy-lkg.ava.okf.md") is False
+    assert gate._is_excluded("scripts/legacy_lkg/docs/legacy-lkg.ava.okf.md") is False
     assert gate._is_excluded("base/packages/docs/notes.py") is False
 
 

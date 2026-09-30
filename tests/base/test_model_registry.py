@@ -375,7 +375,7 @@ def test_qwen_roster_is_exactly_the_three_flat_tier_models() -> None:
     are registered because an account's own `GET /api/v1/models` reports
     `"range_name": "Default"` for each: a single flat tier, no boundary to
     guess. Adding a fourth Qwen means re-clearing that bar
-    (base/lm/pricing.ava.okf.md)."""
+    (base/lm/docs/pricing.ava.okf.md)."""
     assert sorted(SUPPORTED_MODELS["qwen"]) == [
         "qwen3.8-27b",
         "qwen3.8-flash",

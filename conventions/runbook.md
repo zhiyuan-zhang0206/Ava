@@ -110,7 +110,7 @@ selection. Unknown existing resources, conflicting inputs, missing reservations,
 and a terminal destroy intent refuse rather than reconstructing ownership.
 A home describes only itself: its record is its own start intent, and no host
 file lists clusters (host-level caches sit in `AVA_HOST_STATE_DIR`, default
-`~/.ava`). See [[cli/start_identity.ava.okf.md]].
+`~/.ava`). See [[cli/docs/start_identity.ava.okf.md]].
 
 A runner fetches the gateway's authenticated bootstrap configuration before
 recording local identity. Bootstrap serves no database login: `AVA_DB_URL` is the
@@ -163,7 +163,7 @@ rotate the write generation, issue every unit a new bundle and revoke the lost
 unit's enrollment; rotate the human secret (telemetry token), the Redis runtime
 password and the provider keys as well, by hand, in the order of
 [manual rotation after a credential leak](#manual-rotation-after-a-credential-leak).
-Detail: [[base/cluster/authority/unit-enrollment.ava.okf.md]].
+Detail: [[base/cluster/authority/docs/unit-enrollment.ava.okf.md]].
 
 Its DB/Redis connection facts are not cached locally: every runner process
 fetches them at Settings construction. Start the gateway first, then the
@@ -251,7 +251,7 @@ incident and escape analysis are in
 
 Production runtime transitions use a verified prepared release request. Editable
 installation repair is a development-checkout operation; see
-[Editable Install Guard](../cli/commands/editable-install-guard.ava.okf.md).
+[Editable Install Guard](../cli/commands/docs/editable-install-guard.ava.okf.md).
 
 A typical small deployment runs the **gateway as a single-box unit** on an
 always-on host (`gateway,agent-runner`, one home `~/.ava`, code `~/.ava/source`,
@@ -511,7 +511,7 @@ UI entry. It owns the public `frontend` port slot and proxies the Next.js app on
 the separate `app` slot. Root starts and stops it with the application tree;
 planned downtime includes the entry listener. Its dedicated `/__ava/healthz`
 protocol plus captured root listener ownership provide readiness independently of
-gateway/app availability. See [Fleet UI Gate](../services/gate/gate.ava.okf.md).
+gateway/app availability. See [Fleet UI Gate](../services/gate/docs/gate.ava.okf.md).
 **A rollout does not update built-in schedule scripts.** The `schedules` table is
 authoritative and boot-time provisioning only inserts rows that are missing, so a changed
 template in `schedules/` reaches a running cluster only through an explicit
@@ -575,7 +575,7 @@ Ordinary maintenance holds retain their separate operator procedures in
 to discard an external release journal, forge process closure, clear durable
 publication evidence or mutate the selected image. Preserve such evidence for
 the operation's owner; do not resurrect a removed updater or bootstrap entry.
-See [the release operation contract](../cli/release_transition/release_transition.ava.okf.md)
+See [the release operation contract](../cli/release_transition/docs/release_transition.ava.okf.md)
 for current continuation and retirement semantics.
 
 Commands in the "long-running processes" / "E2E tests" sections below default to cwd = `$AVA_HOME/source/` (prod context). Dev work goes through `~/Ava/.worktrees/<task>/`.
@@ -589,12 +589,12 @@ nodes of the packages that own the code:
 
 | What | Node |
 |---|---|
-| `$AVA_HOME` layout, what derives from the home | `base/paths/paths.ava.okf.md` |
-| plugin enable config (`plugins_config.json`) | `base/packages/plugins/enable_config.ava.okf.md` |
-| `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/install_registry.ava.okf.md` |
-| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages.ava.okf.md` |
-| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/machine.ava.okf.md` |
-| which services each capability contributes | `services/services.ava.okf.md` |
+| `$AVA_HOME` layout, what derives from the home | `base/paths/docs/paths.ava.okf.md` |
+| plugin enable config (`plugins_config.json`) | `base/packages/plugins/docs/enable_config.ava.okf.md` |
+| `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry.ava.okf.md` |
+| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/docs/packages.ava.okf.md` |
+| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/docs/machine.ava.okf.md` |
+| which services each capability contributes | `services/docs/services.ava.okf.md` |
 
 Three operational consequences worth stating here:
 
@@ -766,7 +766,7 @@ Activation is Ava-owned: use `ava cluster pitr status`, then
 disabled shadow posture, creates the mandatory verified logical recovery floor,
 persists every side-effect intent, applies archive settings with `ALTER SYSTEM`,
 and restarts the home's applications and data plane through its finite PITR
-operation executor ([release transition](../cli/release_transition/release_transition.ava.okf.md)).
+operation executor ([release transition](../cli/release_transition/docs/release_transition.ava.okf.md)).
 After restart readiness the same operation executes `pg_switch_wal()`, and requires
 `pg_stat_archiver`, the fsynced local ACK, and viewer-only exact
 generation/size/CRC metadata to agree within the persisted five-minute deadline.
@@ -1230,7 +1230,7 @@ while per-agent model/runtime caches remain bounded.
   cluster's Postgres so the connection count does not scale 1:1 with fleet
   size (hosted mode replaces per-agent pools with one bounded workload pool and
   one fixed four-connection control pool for the runner).
-  [`agent/db/db.ava.okf.md`](../agent/db/db.ava.okf.md).
+  [`agent/db/docs/db.ava.okf.md`](../agent/db/docs/db.ava.okf.md).
 
 None of this claims memory stops mattering — it is the honest current floor.
 The next walls once memory is handled: the heartbeat's
@@ -1330,7 +1330,7 @@ this home's first-ever image selection
 (`activate_release(expected_current=None)` plus the steady boot action, Linux
 only); every later transition goes through `request` then `update`. `exclude`
 leaves a unit out of a held operation; `status` is read-only — see
-[release operator surface](../cli/release_operator/release_operator.ava.okf.md).
+[release operator surface](../cli/release_operator/docs/release_operator.ava.okf.md).
 
 Release preparation completes before maintenance. The prepared request captures
 exact previous/candidate/executor image identities, home, configuration
@@ -1342,14 +1342,14 @@ ava cluster update --prepared /absolute/path/to/request.json
 
 The running CLI only verifies the request's executor image in this home's
 release store and hands off to that image's fixed entry point (the frozen v1
-[image-exec handoff](../cli/release_handoff/release_handoff.ava.okf.md)); the
+[image-exec handoff](../cli/release_handoff/docs/release_handoff.ava.okf.md)); the
 executor's code performs the submission. Submission reports native execution
 state. Completion comes from the operation journal, not a successful submission
 exit. Resubmit the same captured request to
 inspect or continue a positively closed attempt; uncertain native custody refuses.
 The executor lives outside the application root and retains its code throughout
 the transition. It is the fleet coordinator
-([coordinator](../cli/release_fleet/coordinator.ava.okf.md)): a failure before
+([coordinator](../cli/release_fleet/docs/coordinator.ava.okf.md)): a failure before
 the write-generation fence aborts and restarts the unchanged previous image; a
 candidate failure after it (start, readiness, the start barrier or the
 post-resume watch window) selects the captured predecessor once on a new
@@ -1363,10 +1363,10 @@ This is not a production cutover instruction. The remaining per-unit
 credential delivery, converge, migration barrier, PITR restart integration and
 platform proof are tracked in the
 [lifecycle plan](../future/infra/unified-cluster-lifecycle.md). The preparation and
-execution contracts live in [release preparation](../cli/release_prepare/release_prepare.ava.okf.md)
-and [release transition](../cli/release_transition/release_transition.ava.okf.md); the operator
+execution contracts live in [release preparation](../cli/release_prepare/docs/release_prepare.ava.okf.md)
+and [release transition](../cli/release_transition/docs/release_transition.ava.okf.md); the operator
 verbs above are documented in
-[release operator surface](../cli/release_operator/release_operator.ava.okf.md).
+[release operator surface](../cli/release_operator/docs/release_operator.ava.okf.md).
 
 **Health observations and release decisions.** `ava cluster health-probe` retries
 gateway liveness three times, 30 seconds apart, before declaring it unhealthy.
@@ -1633,7 +1633,7 @@ writes the new secret, and journals each step with fingerprints, never secrets.
 **The pinned file is backup-critical material**: nothing re-derives it, and losing it
 makes every logical backup of the home unreadable; escrow a copy with the gateway's
 backup keys ([decision](../decisions/2026-09-28-backup-passphrase-minted-at-birth.md),
-[passphrase](../services/gateway_side/backup/passphrase.ava.okf.md)). Restart the
+[passphrase](../services/gateway_side/backup/docs/passphrase.ava.okf.md)). Restart the
 gateway, then issue every remote unit a new capability bundle (its telemetry token
 derives from the secret). It does not change Postgres, Redis, ACLs, or PgBouncer.
 
@@ -1758,7 +1758,7 @@ operation id.
 Every pooled database session checks the code version of its own process against
 `deployment_state.min_code_version` and exits `78` when it is lower
 ([decision](../decisions/2026-09-30-client-side-code-version-gate.md),
-[design](../base/db/code-version-gate.ava.okf.md)). It keeps a unit that missed
+[design](../base/db/docs/code-version-gate.ava.okf.md)). It keeps a unit that missed
 an update (a closed laptop) from writing with old code when it wakes. A process's
 **code version** is the first-parent commit count of the commit it loaded; the
 gateway raises the stored minimum to its own version on every start.
@@ -1813,8 +1813,8 @@ hand, as updates did before; the gate protects from the following update on.
 Kernel-side LLM calls go through `llm.astream()`; a LangChain callback publishes
 chat / code / reasoning start + delta to the Redis `ava:events` channel on each
 chunk. The full role table (payload fields, publisher, when each fires) is in
-`base/events/live/live.ava.okf.md`; interrupt semantics for cancel / terminate are in
-`agent/graph/graph.ava.okf.md`.
+`base/events/live/docs/live.ava.okf.md`; interrupt semantics for cancel / terminate are in
+`agent/graph/docs/graph.ava.okf.md`.
 
 **Lifecycle command residue:** never hand-clean a stuck lifecycle command (a row
 left pending/claimed, or a live `agents_meta.lifecycle_command_id` pointing at a
@@ -1980,7 +1980,7 @@ and user systemd units on Linux amd64 run Loki, Prometheus (GOMEMLIMIT
 2GiB / 1GiB), and Grafana. Unit names include the home slug; Linux ownership
 also checks the loaded unit file and exact executable. Explicit host listen
 ports permit isolated homes; defaults remain 3100/9090/3003 plus Loki gRPC
-9095. See [native lifecycle](../cli/commands/observability/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
+9095. See [native lifecycle](../cli/commands/observability/docs/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
 override targets the remote WSL Tempo. No
 service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
@@ -2208,7 +2208,7 @@ Agent loguru JSONL (`agent-{N}.log`) is not scraped — it already reaches Loki
 structured via OTLP.
 
 The emitter wiring behind that stream, the unified `events` schema (and its
-legacy `agent_events` mirror), and the monthly partitioning are in `base/log/log.ava.okf.md`.
+legacy `agent_events` mirror), and the monthly partitioning are in `base/log/docs/log.ava.okf.md`.
 
 ## Git hooks: pre-commit / pre-push
 

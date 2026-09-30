@@ -12,7 +12,7 @@ extracted from the code and asserted against the doc that owns the fact:
      2026-08-03 telegram residual class).
   B. IM command set — every `/command` route in services/im_bridge/core.py
      must appear in the "Command set" line of
-     services/gateway_side/im_bridge.ava.okf.md (catches the 8/2-8/6 drift
+     services/docs/gateway_side/im_bridge.ava.okf.md (catches the 8/2-8/6 drift
      class: /spawn /commands /notice shipped, doc listed four commands).
   C. IM channels    — every adapter in services/im_bridge/adapters/ must be
      mentioned in im_bridge.ava.okf.md (channel aliases: weixin/wechat,
@@ -76,7 +76,7 @@ def check_im_command_set() -> list[str]:
     cmds = sorted(
         set(re.findall(r'cmd == "/([a-z]+)"', core) + re.findall(r'startswith\("/([a-z]+)"', core))
     )
-    doc_path = ROOT / "services/gateway_side/im_bridge.ava.okf.md"
+    doc_path = ROOT / "services/docs/gateway_side/im_bridge.ava.okf.md"
     doc = doc_path.read_text(errors="replace")
     cmd_line = next((ln for ln in doc.splitlines() if "Command set" in ln), "")
     missing = [c for c in cmds if f"/{c}" not in cmd_line]
@@ -89,7 +89,7 @@ def check_im_command_set() -> list[str]:
 
 def check_im_channels() -> list[str]:
     adapters_dir = ROOT / "services/im_bridge/adapters"
-    doc = (ROOT / "services/gateway_side/im_bridge.ava.okf.md").read_text(errors="replace")
+    doc = (ROOT / "services/docs/gateway_side/im_bridge.ava.okf.md").read_text(errors="replace")
     lower = doc.lower()
     problems = []
     if not adapters_dir.is_dir():
@@ -102,7 +102,7 @@ def check_im_channels() -> list[str]:
         if not any(a in lower for a in aliases):
             problems.append(
                 f"{adapters_dir}/{f.name} exists but the channel is not mentioned in "
-                f"services/gateway_side/im_bridge.ava.okf.md — "
+                f"services/docs/gateway_side/im_bridge.ava.okf.md — "
                 f"channel-convergence narrative drift"
             )
     return problems

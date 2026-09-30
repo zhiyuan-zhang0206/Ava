@@ -34,7 +34,7 @@ identifier-colliding families) and continues rather than blocking unattended
 startup.
 `cli/commands/converge/firewall.py` uses the reconciler proactively, and
 `ava firewall status` / `sync` run the same audit on demand — see
-[[cli/commands/commands.ava.okf.md]].
+[[cli/commands/docs/commands.ava.okf.md]].
 
 
 Parent: [[base/sessions/docs/session-backend.ava.okf.md|session backend]].

@@ -48,14 +48,14 @@ context notes (`agent/graph/context_notes.py:register_context_note`) and skill
 sources (`ava/skills.py:register_skill_source`) — each carrying the live
 signature of its entry point rather than a transcribed one. `ava plugins inspect`
 renders both halves, and `declared_vs_registered` is the read-only form of the
-plugin-spec-v2 S3 gate. [[cli/commands/extensions/packages.ava.okf.md|The verb]].
+plugin-spec-v2 S3 gate. [[cli/commands/extensions/docs/packages.ava.okf.md|The verb]].
 
 The ledger records what was REGISTERED; what actually FIRED is the runtime half,
 keyed by the same triple: [[activation-telemetry.ava.okf.md]].
 
 ## Key Dependencies
-- [[agent/graph/graph.ava.okf.md]] — hook container nodes call `make_hook_runner` at graph build time
-- [[agent/state.ava.okf.md]] — state field registration
+- [[agent/graph/docs/graph.ava.okf.md]] — hook container nodes call `make_hook_runner` at graph build time
+- [[agent/docs/state.ava.okf.md]] — state field registration
 - [[system-prompt.ava.okf.md]] — prompt injection
 - [[db.ava.okf.md]] — state persisted to Postgres checkpoint
 - [[agents-contract.ava.okf.md]] — `PluginContext` ContextVar ensures registration isolation

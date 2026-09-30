@@ -70,4 +70,4 @@ Invariants: D1 exactly one retry loop in the repo (grep-provable); D2 one error-
 
 ## Related as-is nodes
 
-[[../../../base/base.ava.okf.md]] · [[../../../ava/ava.ava.okf.md]] · [[okf/skills/skills.ava.okf.md]]
+[[../../../base/docs/base.ava.okf.md]] · [[../../../ava/docs/ava.ava.okf.md]] · [[okf/skills/skills.ava.okf.md]]
