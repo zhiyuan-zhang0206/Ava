@@ -43,5 +43,5 @@ unrelated daemon or shell processes.
 
 - [[lifecycle.ava.okf.md]] — agent control
 - [[env-vars.ava.okf.md]] — environment surface
-- [[base/sessions/pty/pty_sessions.ava.okf.md]] — PTY resource owner
-- [[base/deploy/maintenance/maintenance.ava.okf.md]] — cluster resource scopes
+- [[base/sessions/pty/docs/pty_sessions.ava.okf.md]] — PTY resource owner
+- [[base/deploy/maintenance/docs/maintenance.ava.okf.md]] — cluster resource scopes

@@ -660,8 +660,12 @@ def _counts_toward_budget(entry: Path) -> bool:
     """A .py/.pyi file, or a subdirectory with content. A directory holding
     nothing but `__pycache__` / hidden files (left behind locally when a package
     is renamed or removed) or nothing at all is not a tree CI checks out, so it
-    never counts."""
+    never counts. Neither does a `docs/` layer without `__init__.py`: it holds
+    the package's OKF documentation, not code structure (a `docs` directory
+    with `__init__.py` is a real Python package and counts)."""
     if entry.is_dir():
+        if entry.name == "docs" and not (entry / "__init__.py").exists():
+            return False
         return bool(_budget_entries(entry))
     return entry.is_file() and entry.suffix in {".py", ".pyi"}
 

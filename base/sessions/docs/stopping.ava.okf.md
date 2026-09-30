@@ -19,7 +19,7 @@ wait for actual process exit without implicit escalation. Their shared deadline
 reports an incomplete stop if resources remain. Persistent terminals are the
 exception: a stop, a release or a PITR activation HUPs/TERMs each shell's
 captured session and SIGKILLs what outlives a bounded grace
-([[base/sessions/pty/session-kill.ava.okf.md|session kill]];
+([[base/sessions/pty/docs/session-kill.ava.okf.md|session kill]];
 decisions/2026-09-28-stop-escalates-to-sigkill.md). Explicit force may use a
 backend's `kill_session`; non-session processes use `base/host/proc.py` primitives.
 The lower-level escalating APIs below retain their own explicit contracts.

@@ -584,7 +584,7 @@ Commands in the "long-running processes" / "E2E tests" sections below default to
 The `$AVA_HOME` directory tree, the `PluginsConfig` / `installed.json` schemas,
 the `ava plugins` / `ava skill` / `ava mcp` command surface, and the
 capability -> service model are structure, not procedure. They live in the OKF
-nodes co-located with their code:
+nodes of the packages that own the code:
 
 | What | Node |
 |---|---|

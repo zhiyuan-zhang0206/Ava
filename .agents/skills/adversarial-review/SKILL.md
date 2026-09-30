@@ -165,14 +165,14 @@ matters + suggested fix**. Match the diff against
 
 ### D9 OKF documentation sync
 
-Docs must track code — a feature that lands without a co-located
-`.ava.okf.md` update is an invisible feature (the zombie-escalation class:
+Docs must track code — a feature that lands without an OKF update in the
+package's `docs/` is an invisible feature (the zombie-escalation class:
 merged 2026-08-10, user ruled it out because no OKF record existed).
 Check, for every functional PR (feat / refactor / behavior change):
 
-- [ ] Does the diff include or update the co-located `.ava.okf.md` for the
-      touched domain (`<dir>.ava.okf.md` next to the code it describes, or
-      `okf/<domain>.ava.okf.md` for the domain overviews)?
+- [ ] Does the diff include or update the `.ava.okf.md` for the touched
+      domain (`<dir>/docs/<dir>.ava.okf.md` for the domain overview, or
+      `okf/<domain>.ava.okf.md` for the cross-domain ones)?
 - [ ] If not: is an exemption explicitly declared in the PR description?
       Legitimate exemptions only:
       - pure bug fix (no behavior / contract change)

@@ -10,7 +10,7 @@ from the path alone:
 
 | Where | Question it answers | Tense |
 |---|---|---|
-| `*.ava.okf.md` (next to the code) | what the system **is** — structure, responsibilities, terminology | now |
+| `*.ava.okf.md` (in the package's `docs/`) | what the system **is** — structure, responsibilities, terminology | now |
 | `decisions/` | **why** it was chosen this way — rejected alternatives, trade-offs | past, never rewritten |
 | `future/` | what we **plan** to do | future |
 | `conventions/` | **how** to work — rules, processes, operations | now |
@@ -31,7 +31,7 @@ checkpoints table and the observability stack.
 Do not re-create it. A question about what a run did is answered by querying
 that run — `.agents/skills/inspect-a-trace/SKILL.md` is the know-how for doing
 so across checkpoints, Loki, and Tempo. What generalizes out of a run belongs
-on an axis: a structural fact in the co-located OKF node, a rule in
+on an axis: a structural fact in the package's OKF node, a rule in
 `conventions/`, a rejected alternative in `decisions/`.
 
 ## Postmortems and defensive patterns
@@ -73,18 +73,21 @@ public-repo cutover are not reachable from public `main` and are labelled
 ## OKF is the source of truth for structure
 
 Anything derivable from the code — modules, endpoints, schemas, wiring, data
-flow — lives in the OKF graph, never in `conventions/`. The graph is
-**co-located**: most `.ava.okf.md` files sit inside the source trees they
-describe (`agent/`, `ava/`, `ava_builtins/`, `cli/`, `ui/web/`, `gateway/`,
-`services/`, `base/`); the rest are index-layer nodes in `okf/`.
+flow — lives in the OKF graph, never in `conventions/`. Each package keeps its
+`.ava.okf.md` files in its own `docs/` directory, beside its code and `tests/`
+(`agent/`, `ava/`, `ava_builtins/`, `cli/`, `ui/web/`, `gateway/`, `services/`,
+`base/`); the rest are index-layer nodes in `okf/`.
 
-Hierarchy is filesystem-derived (`base/packages/docs/okf_graph.py:compute_parent`):
-`<dir>/<dir>.ava.okf.md` is the overview node for `<dir>/`, and the other files
-inside `<dir>/` are its children (user ruling 2026-08-12: a directory's
+Hierarchy is filesystem-derived (`base/packages/docs/okf_graph.py:compute_parent`)
+and runs on **logical paths**: the `docs/` layer is transparent, so the last
+`docs` directory segment is dropped from a node's path (`logical_path`) —
+`agent/graph/docs/graph.ava.okf.md` sits at `agent/graph/graph.ava.okf.md`. On
+logical paths, `<dir>/<dir>.ava.okf.md` is the overview node for `<dir>/`, and
+the other files inside `<dir>/` are its children (user ruling 2026-08-12: a directory's
 overview lives *inside* the directory, not beside it at the parent level).
-The sibling position `<dir>.ava.okf.md` at the parent level was retired
-2026-08-13 (every nested overview moved inside; `compute_parent` no longer
-resolves it) — lint rule E009 fires on any surviving sibling.
+`compute_parent` does not resolve a sibling `<dir>.ava.okf.md` at the parent
+level; lint rule E009 fires on one, layered or not. Links are not logical:
+`[[…]]` and relative markdown links name the real path, `docs/` included.
 
 Splitting an over-cap node follows the same rule: the child goes in the
 directory named after the parent's stem, so the parent edge is derived rather
@@ -156,9 +159,10 @@ stranger reading this on GitHub?"
 
 Reconcile in the same PR as the code.
 
-Structure changes → the OKF node co-located with the code you touched, plus its
-domain overview (the `<dir>/<dir>.ava.okf.md` file inside the domain's
-directory) when the domain's shape changed:
+Structure changes → the OKF node in the `docs/` of the package you touched, plus
+its domain overview (the `<dir>/<dir>.ava.okf.md` node of the domain's
+directory) when the domain's shape changed. Paths below are logical paths — the
+file sits in that directory's `docs/` layer:
 
 | Change | Domain node |
 |---|---|

@@ -47,3 +47,30 @@ def test_subdirectories_ci_never_checks_out_do_not_count(
     _module(package / "real_pkg" / "module.py")
     assert lcs.main([]) == 1
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
+
+
+def test_docs_layer_without_init_does_not_count(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`docs/` is the OKF documentation layer, not code structure: a package
+    already at the cap must not overflow because it gained its documentation."""
+    package = tmp_path / "tests/package"
+    for index in range(20):
+        _module(package / f"entry_{index}.py")
+    (package / "docs").mkdir()
+    (package / "docs" / "package.ava.okf.md").write_text("# doc\n", encoding="utf-8")
+    assert lcs.main([]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_docs_package_with_init_counts(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A directory named `docs` that has `__init__.py` is a real Python package
+    (`base/packages/docs`) and takes a slot like any other subdirectory."""
+    package = tmp_path / "tests/package"
+    for index in range(20):
+        _module(package / f"entry_{index}.py")
+    _module(package / "docs" / "__init__.py")
+    assert lcs.main([]) == 1
+    assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
