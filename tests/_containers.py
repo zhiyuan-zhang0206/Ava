@@ -147,7 +147,7 @@ def redis_server() -> Generator[str]:
             r.ping()
             # A subprocess (e2e gateway / ops daemon) loads Settings fresh, which
             # re-derives the redis_url username to the test suite's cluster ACL user
-            # `ava_citest` (the suite's URL-carried identity, tests/conftest.py). This throwaway
+            # `ava_citest` (the suite's URL-carried identity, tests/fixtures/env_bootstrap.py). This throwaway
             # redis has only the `default` user, so add `ava_citest` as a nopass
             # full-access user (the redis analog of the throwaway pg's peer-superuser
             # `ava_citest`) — otherwise that connection is rejected (WRONGPASS / no
@@ -176,7 +176,7 @@ def redis_server() -> Generator[str]:
         except subprocess.TimeoutExpired:
             # A wedged redis-server must not leak (and must not mask the
             # test's original exception): kill it, mirroring the milvus
-            # fixture's terminate→wait→kill pattern in tests/conftest.py
+            # fixture's terminate→wait→kill pattern in tests/fixtures/milvus.py
             # (audit round-2 cc-docs-tests P2).
             proc.kill()
             proc.wait(timeout=10)

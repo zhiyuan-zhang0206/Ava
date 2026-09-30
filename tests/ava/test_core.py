@@ -17,7 +17,7 @@ import pytest
 
 import ava
 from base.config import set_field, settings
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 
 def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple]:

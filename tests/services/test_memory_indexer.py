@@ -2,7 +2,7 @@
 
 The embedding provider is mocked (a `_FakeProvider`); the storage tests use
 a session-scoped milvus-lite standalone server (`milvus_client` fixture in
-tests/conftest.py). The milvus-lite standalone server starts in ~3s, one
+tests/fixtures/milvus.py). The milvus-lite standalone server starts in ~3s, one
 shared per session; tests drop the collection between them for isolation.
 Same backing as prod (standalone server), no in-process mixing.
 

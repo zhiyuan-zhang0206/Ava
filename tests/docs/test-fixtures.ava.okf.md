@@ -1,0 +1,37 @@
+---
+type: doc
+title: "Test Fixtures — Root Plugins"
+description: "The suite's global fixtures, autouse host guards and session hooks: the plugin modules in `tests/fixtures/` that the repo-root `conftest.py` loads, their load order, and the isolation invariants that order protects."
+tags:
+- evaluation
+- quality-assurance
+---
+
+# Test Fixtures — Root Plugins
+
+## What it is
+
+Every test in the repository runs under the same isolation: a private `AVA_HOME`, a throwaway Postgres + Redis, and a set of autouse guards that keep a test off the host. It lives in plugin modules under `tests/fixtures/`, loaded by the repo-root `conftest.py` (which holds only `pytest_plugins`), so it applies to a test file in any package directory and not only under `tests/`. Overview of the suite: [[tests.ava.okf.md]].
+
+## Core mechanisms
+
+### Plugin roster and load order
+- `env_bootstrap` — import-time environment isolation and the session-wide runtime pins; loads **first**
+- `plugin_registrations` — per-test reset of plugin registrations
+- `provisioning` — throwaway pg/redis, `_clean_state`, the DB connection fixtures, and the session hooks (full-run guard, non-test-database refusal, leaked OS-job / runaway-memory / home cleanup)
+- `guards` — autouse host guards and the `_stub_everywhere` helper
+- `units` — gateway / runner unit, per-test unit home and workspace, write-generation ledger, `spawn_agent`
+- `milvus`, `log_capture` — opt-in `milvus_client` and `loguru_records`
+- `_asyncio_stall_probe`, `collection_guard` — hook-only plugins (stall forensics; one collector node per directory)
+- **List order is load order and is load-bearing.** Same-scope autouse fixtures are set up in registration order and, inside one module, alphabetically — which is why `provisioning` (`_clean_state`) precedes `guards` (`_guard_*`). Adding a plugin means checking its autouse names against that order.
+
+### Isolation invariants
+- **Per xdist worker / session** a pair of throwaway pg/redis + per-session databases; per-test isolation via autouse TRUNCATE + checkpoint re-setup (**not** a full instance per test)
+- A killed run (Ctrl-C, SIGKILL, an agent dying mid-run) leaks its throwaway **Postgres**, because the detached postmaster outlives an owner that ran no finalizer. It is bounded not by teardown but by a **sweep at the start of the next spin-up**: `base.cluster.dataplane.pg_tools.sweep_orphaned_throwaway_clusters` reaps the instances whose owner is provably gone, proof being an exclusive `flock` the owner held for the instance's whole life on an `owner.lock` inside that instance's own dir (so the proof shares the cluster's exact lifetime, and two UNIX users on one `/dev/shm` never contend for a shared registry). The throwaway **redis** leaks the same way and is not swept (a redis orphan costs RAM, not the System V segment that wedges the box)
+- **The env block at the top of `tests/fixtures/env_bootstrap.py` must stay above every project import, and that module must stay first in the root `conftest.py`'s `pytest_plugins`.** `base.host.env.dotenv_boot` resolves the home once at import and binds `AVA_ENV_PATH` from it, so AVA_HOME set after that import has no effect on it — the suite then boots from the checkout's own home (on the prod source checkout, the operator's real `~/.ava/.env`), and `_enforce_cluster_env_authority()` force-assigns the production cluster secret / db / redis / gateway URL over the sentinels the suite just set. `_assert_env_precedes_project_imports()` fails the run if a project module was imported early; `tests/test_home_isolation.py` asserts the outcome independently of mechanism
+- A family of autouse **host-resource guards** makes "don't touch the host" the
+  default: agent launch, permissions-helper native effects, OS cron, warm-up and
+  `os.exec*`. Tests of those boundaries explicitly supply their own doubles or
+  opt into an isolated native proof with owned cleanup. The `os.exec*` guard
+  protects the test runner itself from process replacement.
+- Plugin registrations (sections, namespaces, state fields) reset together after any test that loaded them: autouse guard in `tests/fixtures/plugin_registrations.py`, wired via `pytest_plugins`

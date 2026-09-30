@@ -49,7 +49,7 @@ from base.agents.context import AvaContext
 from base.config import settings
 from base.config.agent_compaction import AgentCompactionSettings
 from base.lm.context_budget import ContextBudget
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 # ── helpers ──
 

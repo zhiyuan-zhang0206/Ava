@@ -99,7 +99,7 @@ def _spawn(
             "AVA_EXEC_REQUEST_FILE": str(request_path),
             "AVA_EXEC_RESULT_FILE": str(result_path),
             # The explicit endpoint opens the export gate; the enabled flag
-            # answers the suite-wide disable (tests/conftest.py); the watchdog
+            # answers the suite-wide disable (tests/fixtures/env_bootstrap.py); the watchdog
             # margin keeps the watchdog out of the way.
             "AVA_TELEMETRY_OTLP_ENDPOINT": endpoint,
             "AVA_TELEMETRY_OTLP_ENABLED": "true",

@@ -105,7 +105,8 @@ durable marker. In the 2026-08-07 P0 (pre-cutover), a non-pytest
 debug script inherited the real environment and rewrote the production launchd
 health-probe plist, restarting the cluster.
 
-**Correct form.** Let `tests/conftest.py` redirect `$AVA_HOME`, database,
+**Correct form.** Let the suite's root plugins (`tests/fixtures/env_bootstrap.py`,
+`tests/fixtures/provisioning.py`) redirect `$AVA_HOME`, database,
 Redis, registry, ports, and session home. Patch durable-marker reads in the
 fixture owning the test, rather than inheriting worker state. Do not use a
 non-root, session-scoped fixture to mutate process globals. The OS scheduler
@@ -114,7 +115,7 @@ non-pytest script that imports `gateway.app` from a worktree.
 
 **Lintability — lintable now.** The
 [fixture-scope lint](../scripts/lint/fixture_scope.py) rejects session-scoped
-process-global mutation outside root `tests/conftest.py`, and the existing
+process-global mutation outside `tests/fixtures/provisioning.py`, and the existing
 `no_os_environ.py` catches source-side environment writes. Hermetic
 durable-marker reads remain a review heuristic and new-rule candidate; see
 [the testing guide](../tests/README.md#host-isolation-what-a-test-run-may-touch).

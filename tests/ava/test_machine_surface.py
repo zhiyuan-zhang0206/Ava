@@ -8,7 +8,7 @@ targets the one registered machine.
 
 These assert in-process (the surface is not chosen at import time, so there is
 nothing to vary across subprocess envs). `MACHINE_SPEC` / `SELF_MACHINE_NAME`
-resolve machine_name() lazily from the session $AVA_HOME (tests/conftest.py
+resolve machine_name() lazily from the session $AVA_HOME (tests/fixtures/env_bootstrap.py
 writes it), so the access succeeds.
 """
 

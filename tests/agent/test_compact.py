@@ -48,7 +48,7 @@ from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
 from base.lm.context_budget import ContextBudget
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 
 def _compact_tail(update: Any) -> list[AnyMessage]:

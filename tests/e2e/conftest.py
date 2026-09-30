@@ -99,8 +99,8 @@ def pytest_collection_modifyitems(
             )
 
 
-# Suffix: PID + microsecond timestamp. e2e reuses the root conftest's session
-# native Postgres + Redis (provisioned by its autouse fixtures); this suffix
+# Suffix: PID + microsecond timestamp. e2e reuses the suite's session
+# native Postgres + Redis (provisioned by the autouse fixtures in tests/fixtures/provisioning.py); this suffix
 # only scopes the per-session AVA_HOME and the Redis channel names so
 # concurrent e2e workers don't collide.
 _E2E_SUFFIX = f"{os.getpid()}_{int(time.time() * 1_000_000)}"
@@ -116,7 +116,7 @@ _GC_THRESHOLD_SECONDS = 3600
 
 def _gc_orphan_e2e() -> None:
     """GC orphan tmp AVA_HOME + frontend build dirs older than 1h, left by a
-    crashed session. The e2e Postgres is the root conftest's session cluster
+    crashed session. The e2e Postgres is the suite's session cluster
     (auto-removed), so there are no orphan databases to drop."""
     threshold_us = int((time.time() - _GC_THRESHOLD_SECONDS) * 1_000_000)
     # tmp dir GC
@@ -163,8 +163,8 @@ def _apply_e2e_seq_offset() -> None:
 
 @pytest.fixture(scope="package", autouse=True)
 def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:
-    """Layer e2e-specific process config on the root conftest's session Postgres +
-    Redis (provisioned by its autouse fixtures). The DB/Redis
+    """Layer e2e-specific process config on the suite's session Postgres +
+    Redis (provisioned by the autouse fixtures in tests/fixtures/provisioning.py). The DB/Redis
     URLs are already in settings + os.environ (AVA_DB_URL / AVA_REDIS_URL), so the
     gateway / agent subprocesses inherit them. This adds the e2e Redis channel
     names, AVA_HOME, machine files, and the agents_id_seq PID offset.
@@ -344,7 +344,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
 
 @pytest.fixture(scope="package")
 def e2e_db(_e2e_process_env: None) -> Iterator[None]:
-    """The e2e database is the root conftest's session Postgres (root conftest +
+    """The e2e database is the suite's session Postgres (tests/fixtures/provisioning.py +
     _e2e_process_env). Kept as a thin fixture because the e2e fixtures
     (truncated_db) depend on it to order after process-env setup.
 
@@ -581,7 +581,7 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
         # cross-worker session names stay disjoint.
         #
         # Retried on DeadlockDetected, same shape as the non-e2e suite's
-        # per-test truncate (tests/conftest.py `_clean_state` — keep the two in
+        # per-test truncate (tests/fixtures/provisioning.py `_clean_state` — keep the two in
         # sync): a process left over from a prior test (a spawned agent or
         # gateway still draining its work) can hold relation locks in the
         # opposite order to this TRUNCATE list, so Postgres aborts one side

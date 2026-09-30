@@ -31,7 +31,7 @@ def _make_hosted_running_agent(
     machine: str = "runner-a",
     age_s: float = _THRESHOLD_S + 60.0,
 ) -> int:
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent(spawner="user")
     db.execute(

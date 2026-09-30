@@ -5,7 +5,7 @@ Each case sets one env alias and compares, for the same field: the lite
 for value, and (for rejected values) error class for error class. Cases span
 every parse kind the manifest declares (bool / int / float / path / csv / iana /
 port / str), valid and invalid. Runs in a subprocess because a pytest process
-boots eager (tests/conftest.py) while these paths exist only in the default
+boots eager (tests/fixtures/env_bootstrap.py) while these paths exist only in the default
 boot-lite mode.
 """
 

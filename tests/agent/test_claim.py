@@ -40,7 +40,7 @@ from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
 from base.config import settings
 from base.db import insert_inbound_message
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 # Almost all claim tests are short-path dispatch: the inbound is INSERTed before
 # claim_node runs, so its first SELECT gets the batch — pure DB side-effect +

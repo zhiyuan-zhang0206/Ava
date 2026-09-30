@@ -30,7 +30,7 @@ from services.heartbeat.liveness import (
     _merge_liveness,
     run_liveness_pass,
 )
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 _MACHINE = "test-runner-1"
 

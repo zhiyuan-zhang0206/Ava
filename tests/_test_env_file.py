@@ -1,7 +1,7 @@
 """Test-home .env sync and early native LGTM host-env neutralization.
 
-This plain module is imported by conftest before project Settings; the env-file
-helper lives outside conftest's fixture collection.
+This plain module is imported by `tests.fixtures.env_bootstrap` before project Settings;
+the env-file helper lives outside the plugins' fixture collection.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 # PR #2481: key presence can matter. Pop the host LGTM port block before
-# conftest builds the eager Settings singleton; never pin default values here.
+# env_bootstrap builds the eager Settings singleton; never pin default values here.
 def _neutralize_lgtm_host_env() -> None:
     for key in [key for key in os.environ if key.startswith("AVA_LGTM_")]:
         os.environ.pop(key)

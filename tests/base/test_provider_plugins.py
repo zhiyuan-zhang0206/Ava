@@ -1,7 +1,7 @@
 """Provider plugin mechanism — the provider.py contract end to end.
 
 A fixture plugin directory is written into the session's tmp AVA_HOME
-(tests/conftest.py redirects AVA_HOME), so these tests exercise the real
+(tests/fixtures/env_bootstrap.py redirects AVA_HOME), so these tests exercise the real
 discovery path (base/plugins_config.discover_plugins) and the real loader
 (base/lm/plugin_providers). Every test restores the module-level
 registration state it mutated: MODELS + derived views, provider_api bindings,
