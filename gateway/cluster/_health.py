@@ -12,7 +12,6 @@ from psycopg_pool import PoolTimeout
 
 from base.cluster.machine import machine_name
 from base.daemon.health_schema import DEGRADED, OK, component, render
-from base.deploy.release.runtime_service_identity import normal_runtime_identity
 from base.native_process import loaded_commit
 from base.paths import ava_home
 
@@ -52,9 +51,6 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
         "sha": loaded_commit.get(),
         "liveness": OK,
     }
-    runtime = normal_runtime_identity(str(ava_home()))
-    if runtime is not None:
-        identity["runtime"] = runtime
     components = [component("http", OK, progress="serving")]
     try:
         with request.app.state.control_db_pool.connection() as conn, conn.cursor() as cur:

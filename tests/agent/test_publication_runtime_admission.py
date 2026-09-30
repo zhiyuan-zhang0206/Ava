@@ -93,7 +93,7 @@ async def test_deferred_admission_is_recorded_then_success_supersedes_it(
         "host-test",
         owner,
         expected_from="idling",
-        publication=_Deferred(None),
+        publication=_Deferred(),
     )
     assert refused is None
     refused_code, refused_at = _admission_observation(db_conn, agent_id)

@@ -23,9 +23,10 @@ import socket
 import sys
 import time
 from pathlib import Path
-from typing import cast
+from typing import Annotated, Self, cast
 
 import psutil
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
@@ -46,7 +47,50 @@ from cli.commands.lifecycle.service_stop import (
     remaining,
     wait_for_exit,
 )
-from cli.release_transition.pitr.evidence import DataOwner, DataStop
+
+
+class _Record(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+_Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
+class DataOwner(_Record):
+    """One native data-plane owner captured as durable stop custody."""
+
+    process: ExpectedProcess
+    tree: tuple[ExpectedProcess, ...]
+    directory: str
+    port: int = Field(gt=0, le=65535)
+    config_digest: _Digest | None = None
+
+    @property
+    def identity(self) -> OwnedProcess:
+        p = self.process
+        return OwnedProcess(p.pid, p.create_time, p.starttime)
+
+    @property
+    def identities(self) -> set[OwnedProcess]:
+        return {OwnedProcess(p.pid, p.create_time, p.starttime) for p in self.tree}
+
+    @model_validator(mode="after")
+    def captured_tree(self) -> Self:
+        if self.process not in self.tree or not Path(self.directory).is_absolute():
+            raise ValueError("data custody requires the exact leader tree and absolute resource")
+        return self
+
+
+class DataStop(_Record):
+    postgres: DataOwner
+    redis: DataOwner
+    pgbouncer: DataOwner | None
+
+    def owners(self) -> dict[str, DataOwner]:
+        result = {"postgres": self.postgres, "redis": self.redis}
+        if self.pgbouncer is not None:
+            result = {"pgbouncer": self.pgbouncer, **result}
+        return result
 
 
 def capture_postgres() -> OwnedProcess | None:

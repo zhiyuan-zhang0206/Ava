@@ -22,13 +22,20 @@ from pathlib import Path
 from typing import Any, NamedTuple
 from uuid import UUID
 
-from base.deploy.release.start_inputs import require_configuration
+from base.deploy.release.runtime_release import ReleaseRejectedError
+from base.deploy.release.start_inputs import configuration_digest
 from base.deploy.release.verified_file import regular_bytes
 
 _start: ContextVar[tuple[Path, str] | None] = ContextVar("release_start", default=None)
 _pitr: ContextVar[tuple[Path, Path, str, int, Callable[[bytes | None, bytes], None]] | None] = (
     ContextVar("pitr_record_writer", default=None)
 )
+
+
+def require_configuration(home: Path, expected: str) -> None:
+    """Refuse configuration drift without loading Settings or writing any state."""
+    if configuration_digest(home) != expected:
+        raise ReleaseRejectedError("release configuration changed after preparation")
 
 
 def require_pitr_authorized(home: Path) -> None:

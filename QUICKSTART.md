@@ -205,15 +205,17 @@ ava stop
 
 ### How to update
 
+A production cluster runs every unit from its own `$AVA_HOME/source` checkout and
+is updated from the operator's development checkout by stopping every unit,
+switching every checkout and starting again:
+
 ```bash
-ava cluster update --prepared /absolute/path/to/request.json
+.venv/bin/python -m cli.fleet_update down --new NEW_SHA --gateway GATEWAY --runner RUNNER --log-dir DIR
+.venv/bin/python -m cli.fleet_update up --gateway GATEWAY --runner RUNNER --log-dir DIR
 ```
 
-The prepared request captures the exact previous/candidate/executor image
-identities, home, configuration and operation generation to roll out;
-see [the runbook](conventions/runbook.md) for how to produce one. Never
-`git pull` + `ava start` on a production checkout — the update path is
-`ava cluster update --prepared REQUEST` only.
+See [the runbook](conventions/runbook.md#updating-a-networked-cluster-in-source-mode)
+for the two halves. Never `git pull` + `ava start` by hand on a production checkout.
 
 ### Windows-specific
 

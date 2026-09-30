@@ -1,7 +1,7 @@
 """`ava cluster` — whole-cluster verbs: argparse builder + its `_h_*` handlers.
 
-Every verb here operates on the cluster as a whole (roster, prepared release
-submission, recovery, health probes, home lifecycle) rather than a single host — the
+Every verb here operates on the cluster as a whole (roster, recovery, health
+probes, home lifecycle) rather than a single host — the
 host-level set lives in ``cli.parsers.host``. Handlers lazy-import their
 `cmd_*` implementation from ``cli.commands`` so parser building never loads
 Settings (see ``cli.main`` module docstring)."""
@@ -9,15 +9,8 @@ Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from base.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S, UNIT_BUNDLE_TTL_S
-
-
-def _h_cluster_update(args: argparse.Namespace) -> int:
-    from cli.release_handoff.handoff import run
-
-    return run(Path(args.prepared))
 
 
 def _h_cluster_status(_args: argparse.Namespace) -> int:
@@ -48,24 +41,6 @@ def _h_cluster_recover(_args: argparse.Namespace) -> int:
     from cli.commands.cluster.recover import cmd_cluster_recover
 
     return cmd_cluster_recover()
-
-
-def _h_cluster_pitr_activate(args: argparse.Namespace) -> int:
-    from cli.commands.data_plane.pitr_activation import cmd_pitr_activate
-
-    return cmd_pitr_activate(origin=args.origin)
-
-
-def _h_cluster_pitr_status(_args: argparse.Namespace) -> int:
-    from cli.commands.data_plane.pitr_activation import cmd_pitr_status
-
-    return cmd_pitr_status()
-
-
-def _h_cluster_pitr_rollback(_args: argparse.Namespace) -> int:
-    from cli.commands.data_plane.pitr_activation import cmd_pitr_rollback
-
-    return cmd_pitr_rollback()
 
 
 def _h_cluster_down(args: argparse.Namespace) -> int:
@@ -104,50 +79,6 @@ def _h_cluster_health_probe_unregister(_args: argparse.Namespace) -> int:
     from cli.commands.cluster.cron import cmd_cron_unregister
 
     return cmd_cron_unregister()
-
-
-def _h_cluster_release_prepare(args: argparse.Namespace) -> int:
-    from cli.release_operator.prepare import cmd_release_prepare
-
-    return cmd_release_prepare(
-        commit=args.commit,
-        inputs=Path(args.inputs),
-        repo=Path(args.repo) if args.repo is not None else None,
-    )
-
-
-def _h_cluster_release_request(args: argparse.Namespace) -> int:
-    from cli.release_operator.request import cmd_release_request
-
-    return cmd_release_request(
-        commit=args.commit,
-        out=Path(args.out),
-        exclude=tuple(args.exclude),
-        reason=args.reason,
-        receipt=Path(args.receipt) if args.receipt is not None else None,
-        watch_s=args.watch_s,
-        alert_agent=args.alert_agent,
-        alert_webhook_file=args.alert_webhook_file,
-        acknowledged_rejection=args.acknowledged_rejection,
-    )
-
-
-def _h_cluster_release_exclude(args: argparse.Namespace) -> int:
-    from cli.release_operator.exclude import cmd_release_exclude
-
-    return cmd_release_exclude(operation=args.operation, unit=args.unit, reason=args.reason)
-
-
-def _h_cluster_release_adopt(args: argparse.Namespace) -> int:
-    from cli.release_operator.adopt import cmd_release_adopt
-
-    return cmd_release_adopt(receipt=Path(args.receipt))
-
-
-def _h_cluster_release_status(args: argparse.Namespace) -> int:
-    from cli.release_operator.status import cmd_release_status
-
-    return cmd_release_status(operation=args.operation, as_json=args.json)
 
 
 def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
@@ -228,124 +159,6 @@ def _add_db_authority_parser(
     _add_enrollment_parsers(db_authority_sub)
 
 
-def _add_release_parser(cluster_sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    release_p = cluster_sub.add_parser(
-        "release",
-        help="[cluster] release-operator verbs: prepare an image, build the fleet release "
-        "request, adopt a first image, exclude a unit, read the release status",
-    )
-    release_sub = release_p.add_subparsers(dest="release_cmd", required=True)
-
-    prepare_p = release_sub.add_parser(
-        "prepare",
-        help="[cluster release] build one inactive image on this host from an already "
-        "acquired LocalInputs document; no outage",
-    )
-    prepare_p.add_argument("--commit", required=True, help="exact committed source SHA")
-    prepare_p.add_argument(
-        "--inputs",
-        required=True,
-        help="explicit LocalInputs JSON (see cli.release_prepare.acquire, or CI); this "
-        "verb does not auto-discover build inputs",
-    )
-    prepare_p.add_argument(
-        "--repo",
-        default=None,
-        help="source repository root (default: this checkout's own repo root)",
-    )
-    prepare_p.set_defaults(func=_h_cluster_release_prepare)
-
-    request_p = release_sub.add_parser(
-        "request",
-        help="[cluster release] on the gateway home: build the fleet release request from "
-        "this home's current selection, its prepared receipt and every registered unit; "
-        "write it for `ava cluster update --prepared`",
-    )
-    request_p.add_argument(
-        "--commit", required=True, help="candidate commit with an existing prepared receipt"
-    )
-    request_p.add_argument(
-        "--receipt",
-        default=None,
-        help="explicit PreparationReceipt JSON (default: this home's receipt for --commit)",
-    )
-    request_p.add_argument(
-        "--out", required=True, help="path to write the request JSON (0600; refuses if it exists)"
-    )
-    request_p.add_argument(
-        "--exclude",
-        action="append",
-        default=[],
-        metavar="MACHINE:HOME",
-        help="leave this registered unit out (it stays stale until it converges); repeatable",
-    )
-    request_p.add_argument("--reason", default=None, help="the recorded reason for every --exclude")
-    request_p.add_argument(
-        "--watch-s",
-        type=int,
-        default=None,
-        help="the post-resume watch window in seconds (default: the fleet policy's)",
-    )
-    request_p.add_argument(
-        "--alert-agent",
-        type=int,
-        default=None,
-        metavar="AGENT_ID",
-        help="also notify this observing agent of every fleet alert (it only observes)",
-    )
-    request_p.add_argument(
-        "--alert-webhook-file",
-        default=None,
-        metavar="NAME",
-        help="also POST every fleet alert to the webhook URL held in the owner-only "
-        "$AVA_HOME/secrets/NAME (0600); it reaches a person while the cluster is down",
-    )
-    request_p.add_argument(
-        "--acknowledged-rejection",
-        default=None,
-        metavar="OPERATION_ID",
-        help="request a candidate an earlier operation rejected: name that exact "
-        "(latest) rejecting operation",
-    )
-    request_p.set_defaults(func=_h_cluster_release_request)
-
-    exclude_p = release_sub.add_parser(
-        "exclude",
-        help="[cluster release] on the gateway home: leave one unit out of a held fleet "
-        "operation, or out of one that marked it failed or unknown (recorded)",
-    )
-    exclude_p.add_argument("--operation", required=True, help="the fleet operation id")
-    exclude_p.add_argument("--unit", required=True, metavar="MACHINE:HOME", help="the unit")
-    exclude_p.add_argument("--reason", required=True, help="the recorded reason")
-    exclude_p.set_defaults(func=_h_cluster_release_exclude)
-
-    adopt_p = release_sub.add_parser(
-        "adopt",
-        help="[cluster release] first image selection for a source-run home "
-        "(activate_release(expected_current=None) + the steady boot action); "
-        "requires a stopped root, Linux only",
-    )
-    adopt_p.add_argument(
-        "--receipt", required=True, help="PreparationReceipt JSON from `release prepare`"
-    )
-    adopt_p.set_defaults(func=_h_cluster_release_adopt)
-
-    status_p = release_sub.add_parser(
-        "status",
-        help="[cluster release] read-only view of this home's current release selection, "
-        "the published fleet release state and the fleet or unit operation journal",
-    )
-    status_p.add_argument(
-        "--operation",
-        default=None,
-        help="explicit operation id (default: this home's active operation, if any)",
-    )
-    status_p.add_argument(
-        "--json", action="store_true", default=False, help="machine-readable output"
-    )
-    status_p.set_defaults(func=_h_cluster_release_status)
-
-
 def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava cluster status` — list machines table + per-agent-runner status_probe op
     cluster_p = sub.add_parser(
@@ -359,34 +172,6 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "gateway assembles it + probes each agent-runner server-side)",
     )
     cluster_status_p.set_defaults(func=_h_cluster_status)
-    pitr_p = cluster_sub.add_parser(
-        "pitr",
-        help="[cluster] explicit physical-backup activation lifecycle",
-    )
-    pitr_sub = pitr_p.add_subparsers(dest="pitr_cmd", required=True)
-    pitr_status_p = pitr_sub.add_parser(
-        "status", help="show the durable activation phase and original start time"
-    )
-    pitr_status_p.set_defaults(func=_h_cluster_pitr_status)
-    pitr_activate_p = pitr_sub.add_parser(
-        "activate",
-        help=(
-            "journal env + ALTER SYSTEM archive settings, restart through a finite PITR "
-            "operation, prove WAL, then force and restore one exact base chain (default off)"
-        ),
-    )
-    pitr_activate_p.add_argument(
-        "--origin", default="cli", help="operator/agent identity recorded in the durable operation"
-    )
-    pitr_activate_p.set_defaults(func=_h_cluster_pitr_activate)
-    pitr_rollback_p = pitr_sub.add_parser(
-        "rollback",
-        help=(
-            "restore Ava-owned ALTER SYSTEM settings through the same finite PITR operation; "
-            "never delete backup objects"
-        ),
-    )
-    pitr_rollback_p.set_defaults(func=_h_cluster_pitr_rollback)
     for flag, help_text in (
         (
             "mark-staging",
@@ -433,25 +218,10 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         p_.set_defaults(func=_h_cluster_pause if verb == "pause" else _h_cluster_resume)
 
     _add_db_authority_parser(cluster_sub)
-    _add_release_parser(cluster_sub)
-
-    cluster_update_p = cluster_sub.add_parser(
-        "update",
-        help="[cluster] submit or resume one captured immutable release operation: verify "
-        "its executor image in this home's store and hand off to that image",
-    )
-    cluster_update_p.add_argument(
-        "--prepared",
-        metavar="REQUEST",
-        required=True,
-        help="captured release request; repeated submission reconciles the same operation",
-    )
-    cluster_update_p.set_defaults(func=_h_cluster_update)
 
     cluster_recover_p = cluster_sub.add_parser(
         "recover",
-        help="[cluster] recover an abandoned maintenance lease; refuses live ownership. "
-        "Prepared release operations continue by resubmitting their captured request",
+        help="[cluster] recover an abandoned maintenance lease; refuses live ownership",
     )
     cluster_recover_p.set_defaults(func=_h_cluster_recover)
 

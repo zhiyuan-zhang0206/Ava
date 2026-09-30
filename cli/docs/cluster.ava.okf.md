@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava cluster Subcommands
-description: '`ava cluster ...` — verbs that act on a cluster rather than on this host''s services. Addressed by home path (`--path`), never by name: roster, down/destroy, prepared release operations, health-probe, recover, and the OS-job registration verbs.'
+description: '`ava cluster ...` — verbs that act on a cluster rather than on this host''s services. Addressed by home path (`--path`), never by name: roster, down/destroy, health-probe, recover, and the OS-job registration verbs.'
 tags:
 - cli
 - cluster-lifecycle
@@ -26,14 +26,12 @@ describes only itself (`base/cluster/record.py`).
 | Command | Function |
 |---------|----------|
 | `status` | this cluster's multi-machine roster |
-| `update --prepared REQUEST` | submit or resume one captured release operation through the frozen image-exec handoff ([[cli/release_handoff/docs/release_handoff.ava.okf.md]]): the request's executor image, verified in this home's store, runs the submission; no implicit source checkout update or target-machine shortcut. [[cli/release_transition/docs/release_transition.ava.okf.md]] owns its input, native custody, and recovery contracts |
 | `db-authority issue-unit\|rotate-enrollment\|revoke-enrollment` | gateway only: seal one remote unit's capability bundle (its join, emergencies); replace or delete that unit's enrollment secret ([[base/cluster/authority/docs/wiring.ava.okf.md]]) |
 | `down --path <home>` | stop the cluster at the home, keeping its record + data (safe stop for worktrees) |
 | `destroy --path <home>` | stop, retire its OS jobs and checkout binding, mark the home detached; `--drop-db` deletes pg/redis data too; **refuses `~/.ava` (prod)** |
-| `health-probe` | Observation-only OS job (exit 0/1; wrong-checkout refusal is 2). Every outage episode persists its start in `$AVA_HOME/health_probe_alert`, stays silent through normal recovery, then grades WARNING → ERROR. A live deploy lease, or this home's in-flight release/PITR operation (named in the output) while its executor's heartbeat is fresh, pauses explained grading without resetting its start; a failed operation explains nothing, nor does the deploy lease it leaves behind, a lost executor explains nothing and fails the probe first (`operation executor lost`, graded from its last heartbeat), and disk pressure remains independent. Low agent population remains unhealthy during local maintenance and keeps global alert grading. The probe neither rolls back releases nor publishes known-good state. Provider balance and halted-agent checks remain part of health observation. |
+| `health-probe` | Observation-only OS job (exit 0/1; wrong-checkout refusal is 2). Every outage episode persists its start in `$AVA_HOME/health_probe_alert`, stays silent through normal recovery, then grades WARNING → ERROR. A live deploy lease pauses explained grading without resetting its start, and disk pressure remains independent. Low agent population remains unhealthy during local maintenance and keeps global alert grading. The probe neither rolls back releases nor publishes known-good state. Provider balance and halted-agent checks remain part of health observation. |
 | `recover` | clear a stranded update lock + pause; refuses while the holder pid lives |
 | `health-probe-register` / `health-probe-unregister` | Register/remove the observation-only OS job; registration accepts its interval, with no rollback threshold |
-| `pitr status\|activate\|rollback` | durable physical-backup activation lifecycle; the first delivery validates shadow readiness and creates the mandatory logical recovery floor, then stops before PostgreSQL mutation |
 
 ## Notes
 

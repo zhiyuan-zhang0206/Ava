@@ -133,6 +133,10 @@ they are not cluster initialization or release-promotion entrypoints.
 
 ## Scripted model in a sealed image
 
+The image release path this section drives is unreachable from the CLI (its
+`ava cluster update` and `ava cluster release` verbs are removed) and is deleted
+with the rest of that path; the section below is retained until then.
+
 `release_fixture.build_fixture` packages the existing message-flow model and
 scenario from the exact captured source archive into a separate proof-only wheel.
 Only those files and their package markers are included. The offline build uses
@@ -232,7 +236,7 @@ CAS requires no existing image) and starts it through the same home's ordinary
 systemd boot unit and pinned boot entry. Each transition's request is built at
 its dispatch by the public `ava cluster release request` (the fleet of one,
 with a short captured watch window), run by the then-admitted image: A builds
-A→B, B builds B→A. Public `ava cluster update --prepared`, run by that same
+A→B, B builds B→A. Public `ava cluster update`, run by that same
 admitted image, then performs it: the previous image's half of the handoff
 receives the database login and execs the executor image's `submit` entry with
 it. Each transition must finish in the requested candidate

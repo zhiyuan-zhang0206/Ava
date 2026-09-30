@@ -5,7 +5,7 @@ envelope field is held to its exact JSON spelling now: `version` is the JSON
 integer 1 (not `true`, `1.0` or `"1"`), `id` is a canonical lowercase UUID
 string, and every other field has its exact type. Fields the reader does not
 know stay ignored by design: a later release adds request kinds and fields
-without a second release (`test_cli_handoff`).
+without a second release.
 """
 
 from __future__ import annotations

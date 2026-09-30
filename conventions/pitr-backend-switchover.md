@@ -23,7 +23,7 @@ Ops agent (#1818) executes the procedure; #405 observes each gate.
 
 - `pitr-uploader` + `pitr-base-candidate` services healthy (`/healthz` on
   :8117 / :8118).
-- No in-flight activation: `ava cluster pitr status` shows a terminal phase
+- No in-flight activation: `$AVA_HOME/physical-backup/activation/operation.json` shows a terminal phase
   (`protected` / `rolled_back`). The migration script refuses anything else.
 - Baidu app credentials + token files in place at the configured
   `AVA_PITR_BAIDU_CREDENTIALS_FILE` / `AVA_PITR_BAIDU_TOKEN_FILE` paths.

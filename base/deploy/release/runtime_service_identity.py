@@ -13,7 +13,7 @@ from pathlib import Path
 
 import psutil
 
-from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
+from base.deploy.release.loaded_image import WHEEL_RUNTIME, runtime_venv
 from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
 from base.native_process import pid_starttime_ticks
 from base.native_process.evidence import Digest, EvidenceModel, ExpectedProcess

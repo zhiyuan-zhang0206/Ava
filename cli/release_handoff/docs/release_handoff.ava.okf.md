@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Image-exec handoff
-description: The only contract that crosses release versions (frozen v1) — the previous image verifies a prepared image and runs that image's fixed entry point, from the CLI and as the release_image_exec ops kind.
+description: The only contract that crosses release versions (frozen v1) — the previous image verifies a prepared image and runs that image's fixed entry point, as a CLI entry no verb registers; the unit-side ops kind is removed.
 tags: [cluster-lifecycle, release]
 ---
 
@@ -43,7 +43,7 @@ installed image requires an explicit home). `ENTRY` is one of `receipt`,
 `preflight`, `submit`; `SOURCE` is the request path or `-` for the exact bytes
 on stdin.
 
-- **CLI** (`handoff.run`): `ava cluster update --prepared REQUEST` reads the
+- **CLI** (`handoff.run`; no CLI verb registers it): reads the
   envelope without loading Settings, refuses a request whose home is not the
   home this CLI resolves (explicit `AVA_HOME`, production source, or the
   checkout's `.ava_home`), verifies the executor, takes its own database
@@ -67,13 +67,9 @@ on stdin.
   the submission launches receives none of this: its launch environment is
   fixed, and it dials as the OS-user administrator
   ([[cli/release_transition/docs/write-generations.ava.okf.md]]).
-- **Ops** (`release_image_exec`, `ops/cluster.py`): `{entry, image,
-  request}` with the request base64-encoded. The unit's ops server requires
-  the envelope to name its own home and machine and `image` as executor,
-  verifies it in its own store, runs the entry on stdin with a 120 s bound (the
-  child is killed on expiry) and returns `{entry, result}`: the entry's one
-  JSON object. A nonzero exit, non-JSON output or a timeout is a failed op. The
-  op changes nothing else; the entry owns its own journaling.
+- **Ops**: the `release_image_exec` kind that served the same contract from a
+  unit's ops server is removed from the ops vocabulary; a unit no longer runs
+  an image entry on request.
 
 ## Candidate entry (`__main__.py`)
 

@@ -212,7 +212,6 @@ def tree_manifest(
     repo: Path,
     *,
     roles: MachineRoles,
-    runtime: StartRuntime | None = None,
 ) -> dict[str, object]:
     """Prepare launch inputs without changing any running generation's seed."""
     from services.ava_root_glue.manifests import build_manifest
@@ -222,7 +221,6 @@ def tree_manifest(
         repo_root=repo,
         specs=roster,
         environments={spec.session: _service_extra_env(spec) for spec in roster},
-        release=None if runtime is None else runtime.release,
     )
 
 
@@ -473,7 +471,6 @@ def admit_live_start(
     roles: MachineRoles,
     *,
     reconcile: bool,
-    runtime: StartRuntime | None = None,
 ) -> bool:
     """Observe before any converge/schema write; reuse only identical inputs."""
     from cli.commands.lifecycle.start_generation import launch_digest
@@ -483,12 +480,10 @@ def admit_live_start(
         require_root_absent()
         return False
     _require_root_owner(status)
-    manifest = tree_manifest(roster, repo, roles=roles, runtime=runtime)
+    manifest = tree_manifest(roster, repo, roles=roles)
     from base.paths import ava_home
 
-    manifest["launch_digest"] = launch_digest(
-        repo, root_child_env(), home=ava_home(), runtime=runtime
-    )
+    manifest["launch_digest"] = launch_digest(repo, root_child_env(), home=ava_home())
     _require_same_generation(manifest, status, roster, reconcile=reconcile)
     return True
 
@@ -507,12 +502,12 @@ def _ensure_root_service_tree(
 
     run_dir = root_run_dir()
     if runtime is not None:
-        runtime.validate(ava_home())
+        runtime.validate()
     env = root_child_env()
-    manifest = tree_manifest(roster, repo, roles=roles, runtime=runtime)
+    manifest = tree_manifest(roster, repo, roles=roles)
     from cli.commands.lifecycle.start_generation import launch_digest
 
-    manifest["launch_digest"] = launch_digest(repo, env, home=ava_home(), runtime=runtime)
+    manifest["launch_digest"] = launch_digest(repo, env, home=ava_home())
     manifests = root_manifests_path()
     client = _root_client()
     try:
@@ -525,7 +520,7 @@ def _ensure_root_service_tree(
             unit = units.get(spec.session)
             if unit is not None and unit.get("state") == "running":
                 continue
-            if spec.session == "frontend" and (runtime is None or runtime.release is None):
+            if spec.session == "frontend":
                 from cli.commands._repo import _ensure_frontend_deps
 
                 _ensure_frontend_deps(repo)

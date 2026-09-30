@@ -150,32 +150,6 @@ def test_rotate_and_revoke_commands_print_ids_never_secrets(
     assert "holds no enrollment" in capsys.readouterr().err
 
 
-def test_enrollment_commands_refuse_while_a_release_operation_is_incomplete(
-    gateway: Path,
-    identity: unit.UnitIdentity,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """The operation captured the units it releases; their identity stays put."""
-
-    def incomplete(_home: Path) -> None:
-        raise RuntimeError("a release operation is incomplete")
-
-    enrolled = unit.ensure_enrollment(gateway, identity)
-    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: True)
-    monkeypatch.setattr("base.paths.ava_home", lambda: gateway)
-    monkeypatch.setattr(
-        "base.deploy.release.operation.require_configuration_write_authorized", incomplete
-    )
-    for command in (
-        cluster_cmd.cmd_db_authority_rotate_enrollment,
-        cluster_cmd.cmd_db_authority_revoke_enrollment,
-    ):
-        assert command(machine=_MACHINE, home=identity.home) == 1
-        assert "a release operation is incomplete" in capsys.readouterr().err
-    assert unit.load_enrollment(gateway, identity) == enrolled
-
-
 # ── coordinator channel ─────────────────────────────────────────────────────
 
 

@@ -1,8 +1,7 @@
 """Read-only source identity for a development root generation.
 
 The snapshot includes dirty and untracked source, not just HEAD. Ignored build
-outputs and the editable environment are not sealed by this development check;
-production release admission must verify its complete immutable artifact.
+outputs and the editable environment are not sealed by this check.
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ from pathlib import Path
 from base.deploy.release import start_inputs
 from base.deploy.release.runtime_interpreter import source_digest
 from base.host.env.registry import launch_input_keys
-from cli.start_runtime import StartRuntime
 
 
 def _write_generation(home: Path) -> dict[str, object] | None:
@@ -32,9 +30,7 @@ def _write_generation(home: Path) -> dict[str, object] | None:
     return {"number": ledger.active.number, "credential_digest": ledger.active.credential_digest}
 
 
-def launch_digest(
-    repo: Path, environment: dict[str, str], *, home: Path, runtime: StartRuntime | None = None
-) -> str:
+def launch_digest(repo: Path, environment: dict[str, str], *, home: Path) -> str:
     """Bind source, the declared launch inputs of the transport environment,
     authoritative on-disk configuration and the delivered write generation (its
     number and credential digest only).
@@ -45,13 +41,7 @@ def launch_digest(
     """
     inputs = launch_input_keys()
     payload = {
-        "source": source_digest(repo)
-        if runtime is None or runtime.release is None
-        else {
-            "artifact": runtime.release.digest,
-            "manifest": runtime.release.manifest_digest,
-            "commit": runtime.source_commit,
-        },
+        "source": source_digest(repo),
         "environment": {key: value for key, value in environment.items() if key in inputs},
         "configuration": start_inputs.configuration_digest(home),
         "write_generation": _write_generation(home),

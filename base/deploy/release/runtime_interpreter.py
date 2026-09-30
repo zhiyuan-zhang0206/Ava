@@ -1,8 +1,7 @@
-"""Interpreter paths for the currently imported code, never a moving selector.
+"""Interpreter paths for the currently imported source checkout, never a moving selector.
 
-Editable development keeps its checkout venv. A wheel consumes the interpreter
-that loaded it, not an imaginary site-packages/.venv. Release verification and
-activation remain the deployment owner's responsibility; this is not admission.
+The checkout keeps its own venv (`.venv`); a wheel-loaded runtime is the retained
+image path (`base.deploy.release.loaded_image`), which production never imports.
 """
 
 from __future__ import annotations
@@ -16,75 +15,33 @@ from typing import Literal, Self
 
 from pydantic import model_validator
 
-from base.deploy.release.identity import (
-    IDENTITY_MEMBER,
-    ApplicationIdentity,
-    read_application_identity,
-)
-from base.deploy.release.runtime_release import (
-    ReleaseRejectedError,
-    VerifiedRelease,
-    verify_release,
-)
-from base.deploy.release.verified_file import regular_bytes
 from base.native_process.evidence import Digest, EvidenceModel
 from base.native_process.os_platform import IS_WINDOWS
-from base.runtime_abi import current_abi
-
-_PREFIX = Path(sys.prefix).resolve()
-WHEEL_RUNTIME = Path(__file__).resolve().is_relative_to(_PREFIX)
 
 
 def runtime_venv(*, checkout: Path | None = None) -> Path:
-    """Return the current runtime environment or an explicitly targeted checkout."""
+    """Return the current checkout's environment or an explicitly targeted checkout."""
     if checkout is not None:
         return checkout / ".venv"
-    if WHEEL_RUNTIME:
-        if sys.prefix == sys.base_prefix:
-            raise RuntimeError("installed Ava requires an isolated virtual environment")
-        return _PREFIX
     from base.paths import repo_root
 
     return repo_root() / ".venv"
 
 
 def runtime_python() -> Path:
-    """Absolute Python path anchored to the loaded wheel or development checkout."""
+    """Absolute Python path anchored to the loaded development checkout."""
     return runtime_venv() / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
-
-
-def runtime_frontend_dir() -> Path:
-    """Bind the frontend to the same loaded generation; admission verifies assets."""
-    if not WHEEL_RUNTIME:
-        raise RuntimeError("retained frontend paths require wheel runtime")
-    return runtime_venv().parent / "frontend"
-
-
-def runtime_plugins_dir() -> Path:
-    """Read-only external plugin root of the already loaded generation."""
-    if not WHEEL_RUNTIME:
-        raise RuntimeError("retained plugin paths require wheel runtime")
-    return runtime_venv().parent / "plugins"
 
 
 def external_plugin_read_root() -> Path:
     """Shared discovery source; never use this as an installer destination."""
-    if WHEEL_RUNTIME:
-        return runtime_plugins_dir()
     from base.paths import plugins_dir
 
     return plugins_dir()
 
 
-def runtime_otel_binary() -> Path:
-    """Resolve only the loaded image's collector, never mutable home storage."""
-    if not WHEEL_RUNTIME:
-        raise RuntimeError("retained collector paths require wheel runtime")
-    return (
-        runtime_venv().parent
-        / "otel"
-        / ("otelcol-contrib.exe" if IS_WINDOWS else "otelcol-contrib")
-    )
+class LoadedRuntimeError(ValueError):
+    """The loaded modules are not one canonical installation of this checkout."""
 
 
 _STABLE_STAT = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
@@ -133,7 +90,11 @@ def source_digest(repo: Path) -> str:
 
 
 class LoadedRuntimeIdentity(EvidenceModel):
-    """Loaded code identity; no selector, publication or maintenance permission."""
+    """Loaded code identity; no selector, publication or maintenance permission.
+
+    ``kind="release"`` is produced only by the retained-image path
+    (`base.deploy.release.loaded_image`); the persisted shape is unchanged.
+    """
 
     kind: Literal["source", "release"]
     code_root: str
@@ -176,7 +137,7 @@ def loaded_runtime() -> tuple[Path, Path, Path, bool]:
             and module.__file__ is not None
             and Path(module.__file__).resolve().parent.parent != package
         ):
-            raise ReleaseRejectedError("loaded modules belong to different installations")
+            raise LoadedRuntimeError("loaded modules belong to different installations")
     return (
         Path(sys.prefix).resolve(),
         Path(sys.executable).resolve(),
@@ -193,7 +154,7 @@ def verify_loaded_source(checkout: Path) -> LoadedRuntimeIdentity:
         or package != checkout
         or package.is_relative_to(prefix)
     ):
-        raise ReleaseRejectedError("development runtime differs from its loaded canonical checkout")
+        raise LoadedRuntimeError("development runtime differs from its loaded canonical checkout")
     return LoadedRuntimeIdentity(
         kind="source",
         code_root=str(package),
@@ -204,63 +165,7 @@ def verify_loaded_source(checkout: Path) -> LoadedRuntimeIdentity:
     )
 
 
-def verify_loaded_image(
-    home: Path, image: VerifiedRelease, *, schema_digest: str, source_commit: str
-) -> LoadedRuntimeIdentity:
-    """Verify immutable origin without granting start, selection, or migration."""
-    if not home.is_absolute() or home.resolve(strict=True) != home:
-        raise ReleaseRejectedError("release start requires a canonical existing home")
-    if image.root != home / "releases" / image.digest:
-        raise ReleaseRejectedError("release start image belongs to another home")
-    verified = verify_release(
-        image.root.parent,
-        image.digest,
-        manifest_digest=image.manifest_digest,
-        host_abi=current_abi(),
-        schema_digest=schema_digest,
-    )
-    if verified != image:
-        raise ReleaseRejectedError("captured release paths differ from verified inventory")
-    prefix, executable, package, isolated = loaded_runtime()
-    if (
-        prefix != image.root / "venv"
-        or executable != image.interpreter
-        or not package.is_relative_to(prefix)
-        or not isolated
-    ):
-        raise ReleaseRejectedError(
-            "release start requires its actual isolated -I -B interpreter/modules"
-        )
-    read_application_identity(image, source_commit)
-    return LoadedRuntimeIdentity(
-        kind="release",
-        code_root=str(package),
-        interpreter=str(executable),
-        prefix=str(prefix),
-        cwd=str(image.cwd),
-        artifact_digest=image.digest,
-        manifest_digest=image.manifest_digest,
-        schema_digest=schema_digest,
-        source_commit=source_commit,
-    )
-
-
-def capture_loaded_runtime(home: Path) -> LoadedRuntimeIdentity:
-    """Capture the current source or image, never infer it from a moving selector."""
-    prefix, _executable, package, _isolated = loaded_runtime()
-    if not package.is_relative_to(prefix):
-        return verify_loaded_source(package)
-    identity = ApplicationIdentity.model_validate_json(regular_bytes(package / IDENTITY_MEMBER))
-    root = prefix.parent
-    image = verify_release(
-        home / "releases",
-        root.name,
-        manifest_digest=hashlib.sha256(
-            regular_bytes(root / "manifest.json", max_bytes=32 * 1024 * 1024)
-        ).hexdigest(),
-        host_abi=current_abi(),
-        schema_digest=identity.schema_digest,
-    )
-    return verify_loaded_image(
-        home, image, schema_digest=identity.schema_digest, source_commit=identity.source_commit
-    )
+def capture_loaded_runtime() -> LoadedRuntimeIdentity:
+    """Capture the checkout that is executing this code."""
+    _prefix, _executable, package, _isolated = loaded_runtime()
+    return verify_loaded_source(package)

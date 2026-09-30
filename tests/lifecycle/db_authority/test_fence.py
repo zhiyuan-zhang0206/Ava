@@ -19,19 +19,17 @@ from base.cluster.authority import (
     OperationAuthority,
     activate,
     check_invariant,
-    close_revoked,
     ensure_groups,
     fenced_roles,
     mint_generation,
-    prove_closure,
     prune,
     require_ledger,
-    revoke,
     sweep,
 )
 from base.cluster.authority import fence as fence_module
 from base.cluster.authority import ledger as ledger_module
 from base.cluster.authority import roles as roles_module
+from base.cluster.authority.fence import close_revoked, prove_closure, revoke
 from base.cluster.authority.model import SurvivingSession
 from tests.lifecycle.db_authority.conftest import AuthorityCluster
 
@@ -469,7 +467,7 @@ def test_prune_retry_after_crash_before_recording_the_drop(
 def test_stale_sessions_is_the_closure_census_without_termination(
     authority_postgres: AuthorityCluster,
 ) -> None:
-    from base.cluster.authority import stale_sessions
+    from base.cluster.authority.fence import stale_sessions
 
     cluster = authority_postgres
     authority = _operation()

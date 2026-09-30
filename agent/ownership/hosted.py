@@ -36,7 +36,6 @@ from base.deploy.writers.runtime_admission import (
     CurrentAdmission,
     PublicationAdmissionDeferredError,
     RuntimeAdmission,
-    process_runtime_admission,
     require_current_for_managed,
 )
 from base.events.live.announce import publish_agent_updated
@@ -432,9 +431,7 @@ async def admit_hosted_runtime(
     native = psutil.Process()
     host_identity = ResourceProcess.capture(native)
     if publication is None:
-        publication = await asyncio.to_thread(process_runtime_admission)
-    else:
-        await asyncio.to_thread(publication.revalidate)
+        publication = RuntimeAdmission()
     legacy_adoption = await _legacy_dead_host_adoption(pool, agent_id, machine, owner)
     try:
         async with async_write_transaction(pool) as conn:

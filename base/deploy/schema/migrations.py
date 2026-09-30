@@ -77,7 +77,6 @@ import psycopg
 
 from base.cluster.machine import MachineNameMissing, machine_name
 from base.db import connect_url
-from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME as WHEEL_RUNTIME
 from base.deploy.schema.migration_errors import CodeBehindSchema as CodeBehindSchema
 from base.deploy.schema.migration_errors import (
     MigrationAuthorityMismatch as MigrationAuthorityMismatch,
@@ -114,10 +113,6 @@ from base.deploy.schema.migration_layout import (
 )
 from base.deploy.schema.migration_layout import (
     validate_migrations_at_ref as validate_migrations_at_ref,
-)
-from base.deploy.schema.runtime_migration import ReleaseMigrationContext
-from base.deploy.schema.runtime_migration import (
-    installed_migration_paths as installed_migration_paths,
 )
 from base.host.env.dotenv_boot import checkout_anchored_home
 from base.log import logger
@@ -299,9 +294,7 @@ def _gateway_units(conn: psycopg.Connection) -> list[tuple[str, str]]:
         return [(name, home) for name, home in cur.fetchall()]
 
 
-def _assert_migration_authority(
-    conn: psycopg.Connection, release: ReleaseMigrationContext | None = None
-) -> None:
+def _assert_migration_authority(conn: psycopg.Connection) -> None:
     """Refuse unless this checkout is the gateway unit of the cluster it is about
     to migrate. Raises MigrationAuthorityMismatch naming both identities.
 
@@ -312,9 +305,9 @@ def _assert_migration_authority(
     and is refused on that ground.
     """
     units = _gateway_units(conn)
-    if not units and release is None:
+    if not units:
         return
-    home, anchored = (release.home, True) if release else checkout_anchored_home()
+    home, anchored = checkout_anchored_home()
     try:
         this_machine = machine_name()
     except MachineNameMissing:
@@ -342,9 +335,7 @@ def _squash_history(conn: psycopg.Connection, names: set[str]) -> None:
         cur.execute("DELETE FROM schema_migrations WHERE name = ANY(%s)", (sorted(names),))
 
 
-def apply_pending_migrations(
-    conn: psycopg.Connection, *, release: ReleaseMigrationContext | None = None
-) -> list[str]:
+def apply_pending_migrations(conn: psycopg.Connection) -> list[str]:
     """Apply every git-tracked migration file whose name is not yet in the DB's
     applied set, in name (≈ chronological) order; return the list of names
     actually applied. Untracked files in migrations/ are warned about and
@@ -374,11 +365,7 @@ def apply_pending_migrations(
         MigrationAuthorityMismatch: this checkout does not own the cluster.
     """
     with _schema_mutation_lock(conn):
-        if release is not None:
-            release.assert_operation(conn)
-            release.validate(MIGRATIONS_DIR)
-            _assert_migration_authority(conn, release)
-        files = _list_migration_files() if release is None else _list_migration_files(release)
+        files = _list_migration_files()
         applied = _applied_migration_set(conn)
         required = {_BASELINE_NAME} | {name for name, _ in files}
 
@@ -395,10 +382,7 @@ def apply_pending_migrations(
         # schema (a squash is a mutation too).
         pending = [(name, path) for name, path in files if name not in applied]
         if pending or squash:
-            if release is None:
-                _assert_migration_authority(conn)
-            else:
-                _assert_migration_authority(conn, release)
+            _assert_migration_authority(conn)
 
         resetting = _RESET_ANCHOR in required - applied
         if squash and not resetting:

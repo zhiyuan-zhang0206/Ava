@@ -54,8 +54,7 @@ from base.cluster.authority.model import (
     generation_names,
     origin_of,
 )
-from base.deploy.release.runtime_release import ReleaseRejectedError
-from base.deploy.release.verified_file import regular_bytes
+from base.deploy.release.verified_file import RegularFileReadError, regular_bytes
 from base.host.private_storage import ensure_private_dir, write_private_bytes
 from base.native_process.os_platform import file_lock
 
@@ -101,7 +100,7 @@ def _read_private(path: Path) -> bytes:
     _require_private(path, path.lstat(), directory=False)
     try:
         return regular_bytes(path, max_bytes=_MAX_FILE_BYTES)
-    except ReleaseRejectedError as exc:
+    except RegularFileReadError as exc:
         raise LedgerRefusedError(f"database authority file {path} is not stable: {exc}") from exc
 
 

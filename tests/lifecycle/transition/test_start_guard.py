@@ -18,6 +18,7 @@ from base.deploy.release.operation import (
 )
 from base.deploy.release.runtime_release import ReleaseRejectedError
 from base.deploy.release.start_inputs import configuration_digest
+from base.deploy.release.verified_file import RegularFileReadError
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.journal import create
 from cli.release_transition.request import ReleaseRef
@@ -108,7 +109,7 @@ def test_symlink_active_pointer_refuses_without_following_or_removing_it(
         outside.write_bytes(pointer.read_bytes())
     pointer.unlink()
     pointer.symlink_to(outside)
-    with pytest.raises(ReleaseRejectedError):
+    with pytest.raises(RegularFileReadError):
         require_start_authorized(_home(operation_path))
     assert pointer.is_symlink()
     assert outside.exists() == target_exists
@@ -302,74 +303,6 @@ def test_complete_phase_with_unresolved_error_does_not_release_startup(
     _set_state(operation_path, phase="complete", error="cleanup remains uncertain")
     with authorized_start(operation_path), pytest.raises(RuntimeError):
         require_start_authorized(_home(operation_path))
-
-
-@pytest.mark.parametrize("result", [0, 4])
-def test_operation_start_preserves_exact_hold_after_service_result(
-    operation_path: Path, monkeypatch: pytest.MonkeyPatch, result: int
-) -> None:
-    from base.deploy.lifecycle import start_serving
-    from base.deploy.maintenance import admission
-    from cli.commands.lifecycle._pause_resume import resume_after_start
-
-    _set_state(operation_path, phase="starting")
-    _hold(operation_path, monkeypatch)
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-    calls: list[str] = []
-    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", lambda: calls.append("resume"))
-
-    @resume_after_start
-    def start() -> int:
-        assert admission.start_authorized()
-        calls.append("start")
-        return result
-
-    with authorized_start(operation_path):
-        assert start() == result
-    assert calls == ["start"]
-    assert admission.held() and not admission.start_authorized()
-
-
-def _hold(path: Path, monkeypatch: pytest.MonkeyPatch, *, kind: str = "exact") -> None:
-    from base import paths
-    from base.deploy.maintenance.state import MaintenanceHold
-
-    home = _home(path)
-    (home / "run").mkdir(exist_ok=True)
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setattr(paths, "run_dir", lambda: home / "run")
-    if kind == "missing":
-        return
-    request = json.loads(path.read_bytes())["request"]
-    payload = {
-        "state": "paused",
-        "holder": "other" if kind == "holder" else request["id"],
-        "acquired_at": "2000-01-01T00:00:00+00:00"
-        if kind == "timestamp"
-        else request["created_at"],
-        "maintenance": MaintenanceHold(
-            phase="starting", failures={1: "unclosed child"} if kind == "unsettled" else {}
-        ).encode(),
-    }
-    (home / "run/deploy-pause-owner.json").write_text(json.dumps(payload))
-
-
-@pytest.mark.parametrize("kind", ["missing", "holder", "timestamp", "unsettled"])
-@pytest.mark.parametrize("ambient_authority", [False, True])
-def test_operation_start_cannot_bypass_missing_changed_or_unsettled_hold(
-    operation_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, ambient_authority: bool
-) -> None:
-    from base.deploy.maintenance import admission
-    from cli.commands.lifecycle._pause_resume import resume_after_start
-
-    _set_state(operation_path, phase="starting")
-    _hold(operation_path, monkeypatch, kind=kind)
-    monkeypatch.setattr(admission, "start_authorized", lambda: ambient_authority)
-    calls: list[str] = []
-    start = resume_after_start(lambda: calls.append("started") or 0)
-    with authorized_start(operation_path), pytest.raises(RuntimeError):
-        start()
-    assert calls == []
 
 
 def test_operation_start_rejects_naive_maintenance_timestamp(operation_path: Path) -> None:

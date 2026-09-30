@@ -49,9 +49,7 @@ def _checkout() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _home(*, worktree: bool, runtime: StartRuntime | None = None) -> Path:
-    if runtime is not None and runtime.release is not None:
-        return _release_home(runtime, worktree=worktree)
+def _home(*, worktree: bool) -> Path:
     checkout = _checkout()
     pointer = checkout / ".ava_home"
     explicit = os.environ.get("AVA_HOME")
@@ -69,16 +67,6 @@ def _home(*, worktree: bool, runtime: StartRuntime | None = None) -> Path:
             "unanchored start requires AVA_HOME or --worktree; it cannot select production implicitly"
         )
     return _validate_home(target, claimed, checkout, default, worktree=worktree)
-
-
-def _release_home(runtime: StartRuntime, *, worktree: bool) -> Path:
-    if worktree or runtime.home is None:
-        raise ValueError("verified release start cannot create a worktree identity")
-    explicit = os.environ.get("AVA_HOME")
-    if explicit and Path(explicit).expanduser().resolve() != runtime.home:
-        raise ValueError("AVA_HOME contradicts the admitted release home")
-    runtime.validate(runtime.home)
-    return runtime.home
 
 
 def _validate_home(
@@ -334,13 +322,7 @@ def _inputs(
             "--db-capability is for agent-runner units; a gateway unit keeps its own "
             "write-generation ledger"
         )
-    checkout = _checkout()
-    if runtime is not None and runtime.release is not None:
-        intent = read_intent(home)
-        if intent is None:
-            raise ValueError("release start has no existing home identity")
-        checkout = Path(intent["checkout"])
-    return IdentityInput(home, checkout, args.worktree, roles, values, digest, runtime)
+    return IdentityInput(home, _checkout(), args.worktree, roles, values, digest, runtime)
 
 
 def _service_path(values: dict[str, str], home: Path) -> str:
@@ -415,17 +397,11 @@ def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) 
     try:
         if runtime is None:
             runtime = StartRuntime.development(_checkout())
-        home = _home(worktree=args.worktree, runtime=runtime)
-        runtime.validate(home)
-        from base.deploy.release.operation import require_start_authorized
-
-        if runtime.release is not None:
-            require_start_authorized(home)
+        home = _home(worktree=args.worktree)
+        runtime.validate()
         ensure_private_dir(home)
         with file_lock(home / "start-intent.lock", timeout_s=30):
             _prepare_start_locked(args, home, runtime)
-            if runtime.release is not None:
-                require_start_authorized(home)
             from cli.main import _init_cli_logging
 
             _init_cli_logging(["start"])

@@ -6,49 +6,13 @@ stop custody. They cannot discover or adopt a process during recovery.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Literal, Self
+from typing import Literal
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field
 
 from base.native_process.evidence import ExpectedProcess
-from base.native_process.ownership import OwnedProcess
+from cli.commands.data_plane.maintenance_stop import DataStop
 from cli.release_transition.request import Digest, Record
-
-
-class DataOwner(Record):
-    process: ExpectedProcess
-    tree: tuple[ExpectedProcess, ...]
-    directory: str
-    port: int = Field(gt=0, le=65535)
-    config_digest: Digest | None = None
-
-    @property
-    def identity(self) -> OwnedProcess:
-        p = self.process
-        return OwnedProcess(p.pid, p.create_time, p.starttime)
-
-    @property
-    def identities(self) -> set[OwnedProcess]:
-        return {OwnedProcess(p.pid, p.create_time, p.starttime) for p in self.tree}
-
-    @model_validator(mode="after")
-    def captured_tree(self) -> Self:
-        if self.process not in self.tree or not Path(self.directory).is_absolute():
-            raise ValueError("data custody requires the exact leader tree and absolute resource")
-        return self
-
-
-class DataStop(Record):
-    postgres: DataOwner
-    redis: DataOwner
-    pgbouncer: DataOwner | None
-
-    def owners(self) -> dict[str, DataOwner]:
-        result = {"postgres": self.postgres, "redis": self.redis}
-        if self.pgbouncer is not None:
-            result = {"pgbouncer": self.pgbouncer, **result}
-        return result
 
 
 class PitrSeal(Record):

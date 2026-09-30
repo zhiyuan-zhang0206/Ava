@@ -108,125 +108,6 @@ assert 'base.config' not in sys.modules
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("boot_mode", ["lite", "eager"])
-@pytest.mark.parametrize("direction", ["candidate", "previous"])
-def test_release_stage_prepares_identity_before_loading_config(
-    tmp_path: Path, boot_mode: str, direction: str
-) -> None:
-    """Exercise the cold stage/boot/start chain, stopping at service effects."""
-    repo = Path(__file__).resolve().parents[2]
-    code = r"""
-import json
-import os
-import sys
-import types
-from datetime import UTC, datetime
-from pathlib import Path
-from uuid import uuid4
-sys.path.insert(0, sys.argv[1])
-from cli import main, start_intent, start_runtime
-from cli.parsers import build_parser
-from cli.release_transition import stage
-from cli.release_transition.journal import Operation
-from cli.release_fleet.request import FleetRequest
-from cli.release_transition.request import ReleaseRef
-from base import cluster
-from base.deploy.maintenance.state import MaintenanceHold
-from base.deploy.release.start_inputs import configuration_digest
-from tests.lifecycle._start_identity import prepare_start_identity
-
-home = Path(os.environ["AVA_HOME"])
-checkout = home.parent / "checkout"
-checkout.mkdir()
-start_intent._checkout = lambda: checkout
-cluster.port_free = lambda _port: True
-prepare_start_identity(build_parser().parse_args(["start", "--worktree"]))
-before = (home / ".env").read_bytes()
-reference = ReleaseRef(artifact_digest="a"*64, manifest_digest="b"*64,
-    schema_digest="c"*64, source_commit="d"*40)
-request = FleetRequest(id=uuid4(), home=str(home), created_at=datetime.now(UTC),
-    machine="test",
-    previous=reference.model_copy(update={"artifact_digest":"e"*64, "source_commit":"c"*40}),
-    candidate=reference, executor=reference,
-    configuration_digest=configuration_digest(home))
-# The start delivers the ledger's active generation: it is this direction's issue.
-from tests.lifecycle.transition.phases import at_phase, seed_active
-issued = seed_active(home, 1 if sys.argv[2] == "candidate" else 2)
-operation = at_phase("starting", issued=issued, request=request, direction=sys.argv[2])
-request.path.parent.mkdir(parents=True)
-request.path.write_text(operation.model_dump_json())
-(home / "updates/active").write_text(str(request.path))
-pause = home / "run/deploy-pause-owner.json"
-pause.parent.mkdir()
-pause.write_text(json.dumps({"state":"paused", "holder":str(request.id),
-    "acquired_at":request.created_at.isoformat(),
-    "maintenance":MaintenanceHold(phase="starting").encode()}))
-
-# Only native-manager placement and installed-image bytes are fixtures.
-# Stage, boot, identity preparation, config boot, and pause authorization are real.
-from base.host.system import boot_unit
-boot_unit.in_boot_unit = lambda value: value == home
-ReleaseRef.verify = lambda self, *args: self
-start_runtime.admit_release = lambda *args, **kwargs: start_runtime.StartRuntime.development(checkout)
-prepare = start_intent._prepare_start_locked
-def prepared(*args):
-    assert "base.config" not in sys.modules, "configuration loaded before identity"
-    assert "base.host.env.dotenv_boot" not in sys.modules, "home resolved before identity"
-    prepare(*args)
-start_intent._prepare_start_locked = prepared
-main._init_cli_logging = lambda _args: None
-commands = types.ModuleType("cli.commands.lifecycle.start")
-sys.modules["cli.commands.lifecycle.start"] = commands
-calls = []
-def effects(**kwargs):
-    from cli.commands.lifecycle._pause_resume import resume_after_start
-    from base.deploy.lifecycle import start_serving
-    from base.deploy.maintenance import admission
-    from base.config import get_field
-    from dotenv import dotenv_values
-    expected = dotenv_values(home / ".env")
-    @resume_after_start
-    def start():
-        assert admission.start_authorized()
-        assert get_field("machine_serve_gateway") is True
-        assert get_field("machine_serve_agent_runner") is True
-        assert get_field("machine_serve_observability_station") is False
-        for key in ("AVA_DB_URL", "AVA_REDIS_URL", "AVA_GATEWAY_PORT"):
-            assert os.environ[key] == expected[key], key
-        calls.append("start")
-        return 0
-    start_serving.is_serving = lambda: True
-    return start()
-commands.cmd_start = effects
-sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
-assert stage.start_operation(request.path) == 0
-assert calls == ["start"]
-assert json.loads(pause.read_text())["state"] == "paused"
-assert (home / ".env").read_bytes() == before
-"""
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env.update(
-        AVA_HOME=str(tmp_path.resolve() / "home"),
-        AVA_HOME_OVERRIDE="1",
-        AVA_HOST_STATE_DIR=str(tmp_path.resolve()),
-        AVA_DB_URL="postgresql://foreign.invalid/forbidden",
-        AVA_GATEWAY_URL="http://foreign.invalid",
-        AVA_MACHINE_SERVE_GATEWAY="false",
-    )
-    if boot_mode == "eager":
-        env["AVA_CONFIG_BOOT"] = boot_mode
-    result = subprocess.run(  # noqa: S603 — fixed interpreter and literal probe
-        [sys.executable, "-I", "-B", "-c", code, str(repo), direction],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-
-
 # Each top-level (and nested) ava sub-command maps to a _h_* handler defined
 # in its own cli.parsers.<domain> module.
 _HANDLERS: tuple[tuple[list[str], object, str], ...] = (
@@ -236,7 +117,6 @@ _HANDLERS: tuple[tuple[list[str], object, str], ...] = (
     (["pty", "freeze", "--holder", "operator", "--reason", "cleanup"], _pty, "_h_pty_freeze"),
     (["pty", "status"], _pty, "_h_pty_status"),
     (["pty", "resume", "generation"], _pty, "_h_pty_resume"),
-    (["cluster", "update", "--prepared", "/private/request.json"], _cluster, "_h_cluster_update"),
     (["converge"], _host, "_h_converge"),
     (["firewall", "status"], _host, "_h_firewall_status"),
     (["firewall", "sync"], _host, "_h_firewall_sync"),
@@ -334,15 +214,20 @@ def test_migrations_subcommand_removed() -> None:
         _main._build_parser().parse_args(["migrations", "apply"])
 
 
-def test_cluster_update_requires_a_captured_request(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """No implicit mutable-checkout or moving-main update remains in the CLI."""
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["cluster", "update", "--prepared", "/private/request.json"],
+        ["cluster", "release", "status"],
+        ["cluster", "pitr", "activate"],
+    ],
+)
+def test_image_release_and_pitr_activation_verbs_are_removed(argv: list[str]) -> None:
+    """The retained-image release and PITR-activation operator verbs no longer parse."""
     with pytest.raises(SystemExit) as exited:
-        _main._build_parser().parse_args(["cluster", "update"])
+        _main._build_parser().parse_args(argv)
 
     assert exited.value.code == 2
-    assert "--prepared" in capsys.readouterr().err
 
 
 def test_logs_retention_parser_accepts_the_public_flags() -> None:
@@ -729,8 +614,8 @@ assert not hasattr(cli.commands, '__all__')
 if sys.argv[1] == 'parser':
     from cli.parsers import build_parser
     parser = build_parser()
-    args = parser.parse_args(['cluster', 'update', '--prepared', '/unused/request'])
-    assert args.prepared == '/unused/request'
+    args = parser.parse_args(['cluster', 'db-authority', 'issue-unit', '--machine', 'unit', '--home', '/unit', '--out', '/unused/bundle'])
+    assert args.machine == 'unit'
 elif sys.argv[1] == 'config':
     import cli.commands.management.config
 assert 'base.config' not in sys.modules

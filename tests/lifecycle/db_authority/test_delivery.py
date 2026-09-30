@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -115,29 +114,11 @@ def test_a_pending_generation_is_never_delivered(home: Path) -> None:
 
 def test_source_runtime_must_be_the_home_checkout(home: Path, tmp_path: Path) -> None:
     _intent(home, _REPO)
-    delivery.require_admitted_runtime(home, code_root=_REPO, prefix=Path(sys.prefix))
+    delivery.require_admitted_runtime(home, code_root=_REPO)
     other = tmp_path / "other-checkout"
     other.mkdir()
     with pytest.raises(authority.AuthorityRefusedError, match="not the home's source checkout"):
-        delivery.require_admitted_runtime(home, code_root=other, prefix=Path(sys.prefix))
-
-
-def test_release_runtime_must_be_the_selected_image(home: Path) -> None:
-    selected, stale = "a" * 64, "b" * 64
-    releases = home / "releases"
-    for digest in (selected, stale):
-        (releases / digest / "venv" / "site-packages").mkdir(parents=True)
-    (releases / "current-release").write_text(
-        json.dumps({"artifact_digest": selected, "manifest_digest": "c" * 64})
-    )
-    image = releases / selected / "venv"
-    delivery.require_admitted_runtime(home, code_root=image / "site-packages", prefix=image)
-    old = releases / stale / "venv"
-    with pytest.raises(authority.AuthorityRefusedError, match="selected release image"):
-        delivery.require_admitted_runtime(home, code_root=old / "site-packages", prefix=old)
-    # A source checkout never receives a release home's authority.
-    with pytest.raises(authority.AuthorityRefusedError, match="selected release image"):
-        delivery.require_admitted_runtime(home, code_root=_REPO, prefix=Path(sys.prefix))
+        delivery.require_admitted_runtime(home, code_root=other)
 
 
 # ── the boot pass ────────────────────────────────────────────────────────────

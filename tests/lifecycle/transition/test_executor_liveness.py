@@ -1,11 +1,9 @@
-"""An incomplete operation explains an outage only while its executor provably lives.
+"""An incomplete operation is in flight only while its executor provably lives.
 
 The finite executor stamps a heartbeat beside its journal while it runs
-(`base.deploy.release.operation.executor_heartbeat`). The health probe lets an
-incomplete release or PITR operation pause alert grading only while that
-stamp is fresh (`operation_in_flight`); a killed, OOM'd or rebooted executor,
-or one that never launched, stops stamping, so its operation explains nothing
-and the probe reports the executor lost.
+(`base.deploy.release.operation.executor_heartbeat`); `operation_in_flight`
+reads that stamp. A killed, OOM'd or rebooted executor, or one that never
+launched, stops stamping, so its operation is no longer alive.
 """
 
 from __future__ import annotations
@@ -24,8 +22,6 @@ from base import paths
 from base.deploy.progress_timeout import EXECUTOR_HEARTBEAT_TTL_S
 from base.deploy.release.operation import InFlight, executor_heartbeat, operation_in_flight
 from base.deploy.release.start_inputs import configuration_digest
-from cli.commands.cluster import health as cluster_health
-from cli.commands.cluster import health_alerts
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal as journal_module
 from cli.release_transition import launcher_linux as linux
@@ -33,12 +29,6 @@ from cli.release_transition import native, submit
 from cli.release_transition.journal import create
 from cli.release_transition.native import LINUX
 from cli.release_transition.request import ReleaseRef
-from tests.cli.test_cluster_health import _all_checks_pass as _all_checks_pass
-from tests.cli.test_cluster_health import _home as _home
-from tests.cli.test_cluster_health import _no_deploy_in_flight as _no_deploy_in_flight
-from tests.cli.test_cluster_health import _provider_guard_healthy as _provider_guard_healthy
-from tests.cli.test_cluster_health import _sent_alerts as _sent_alerts
-from tests.cli.test_cluster_health import _write_aged_alert_state
 from tests.lifecycle.transition.test_launcher_linux import _properties, _readback_seams
 from tests.lifecycle.transition.test_launcher_linux import planned as planned
 
@@ -122,7 +112,7 @@ def test_the_launch_grace_runs_from_submission_not_from_the_request(
     grace runs from the submission: a probe in that window finds nothing lost."""
     home = tmp_path.resolve()
     request = _request(home, created_at=datetime.now(UTC) - timedelta(minutes=11))
-    at_dispatch: list[tuple[InFlight | None, object]] = []
+    at_dispatch: list[InFlight | None] = []
 
     class Inputs:
         def __init__(self, _request: FleetRequest) -> None:
@@ -139,7 +129,7 @@ def test_the_launch_grace_runs_from_submission_not_from_the_request(
         return {}
 
     def launch(_record: dict[str, JsonValue]) -> SimpleNamespace:
-        at_dispatch.append((operation_in_flight(home), health_alerts.executor_lost()))
+        at_dispatch.append(operation_in_flight(home))
         return SimpleNamespace(model_dump=no_receipt)
 
     def this_host(_request: FleetRequest) -> SimpleNamespace:
@@ -150,9 +140,8 @@ def test_the_launch_grace_runs_from_submission_not_from_the_request(
     monkeypatch.setattr(submit, "GatewayUnit", Inputs)
     submitted = datetime.now(UTC)
     submit.submit_request(request)
-    [(launching, lost)] = at_dispatch
+    [launching] = at_dispatch
     assert launching is not None and launching.alive and launching.last_seen >= submitted
-    assert lost is None
 
 
 def test_a_native_dispatch_restarts_the_launch_grace(
@@ -197,78 +186,6 @@ def test_the_executor_heartbeat_stamps_while_it_runs_and_leaves_with_it(tmp_path
     assert left is not None and not left.alive
 
 
-def test_a_dead_executor_stops_pausing_grading_and_the_probe_reports_it_lost(
-    _all_checks_pass: None,
-    _home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
-) -> None:
-    """A journal stuck at `stopping` with no executor is an incident: the
-    cluster stays down while nothing will ever finish the release."""
-    created = datetime.now(UTC) - timedelta(hours=1)
-    path = _journal(_home, created_at=created, phase="stopping")
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
-    _write_aged_alert_state(_home, _LIVENESS_FAILURE, age=timedelta(minutes=30))
-
-    assert cluster_health.run_health_probe() == 1
-    [alert] = _sent_alerts
-    assert "operation executor lost" in alert
-    assert f"release operation {path.parent.name} at stopping" in alert
-
-
-def test_a_live_executor_still_pauses_grading(
-    _all_checks_pass: None,
-    _home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
-) -> None:
-    path = _journal(_home, created_at=datetime.now(UTC) - timedelta(hours=1), phase="stopping")
-    _beat(path, datetime.now(UTC))
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
-    _write_aged_alert_state(_home, _LIVENESS_FAILURE, age=timedelta(minutes=30))
-
-    assert cluster_health.run_health_probe() == 1
-    assert _sent_alerts == []
-
-
-def test_an_executor_killed_during_a_recovery_is_reported_lost(
-    _all_checks_pass: None,
-    _home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
-) -> None:
-    """A `recover` decision records its reason as the journal's error until
-    the recovery's next phase, and the executor keeps running. Killed in that
-    window (SIGKILL, OOM, reboot), it leaves its stamp behind, stale: only a
-    leaving executor removes it, so that error is no hold and the executor
-    is lost."""
-    path = _journal(_home, created_at=datetime.now(UTC) - timedelta(hours=1), phase="stopping")
-    payload = json.loads(path.read_bytes())
-    payload["direction"] = "previous"
-    payload["error"] = "candidate failed"
-    decided = datetime.now(UTC) - timedelta(minutes=31)
-    payload["fleet"]["decisions"] = [
-        {
-            "kind": "recover",
-            "phase": "starting",
-            "reason": "candidate failed",
-            "at": decided.isoformat(),
-        }
-    ]
-    path.write_text(json.dumps(payload) + "\n")
-    _beat(path, datetime.now(UTC) - timedelta(minutes=30))
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
-    _write_aged_alert_state(_home, _LIVENESS_FAILURE, age=timedelta(minutes=30))
-
-    assert cluster_health.run_health_probe() == 1
-    [alert] = _sent_alerts
-    assert "operation executor lost" in alert
-    assert f"release operation {path.parent.name} at stopping" in alert
-
-
 def test_a_held_operation_whose_executor_left_is_not_lost(tmp_path: Path) -> None:
     """A hold's executor records the error and exits on purpose, removing its
     stamp; a completed operation is no longer in flight at all."""
@@ -284,35 +201,3 @@ def test_a_held_operation_whose_executor_left_is_not_lost(tmp_path: Path) -> Non
     completed = held | {"phase": "complete", "error": None}
     path.write_text(json.dumps(completed) + "\n")
     assert operation_in_flight(home) is None
-
-
-def test_a_recovering_operation_explains_nothing_past_its_first_phase(
-    _all_checks_pass: None,
-    _home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
-) -> None:
-    """A recovery's hold is itself worth an alert. The decision records an
-    error, but the recovery's first `advance` clears it; the journaled
-    decision is what keeps the operation from explaining the outage."""
-    path = _journal(_home, created_at=datetime.now(UTC) - timedelta(hours=1), phase="fencing")
-    payload = json.loads(path.read_bytes())
-    payload["direction"] = "previous"
-    decided = datetime.now(UTC) - timedelta(minutes=20)
-    payload["fleet"]["decisions"] = [
-        {
-            "kind": "recover",
-            "phase": "starting",
-            "reason": "candidate failed",
-            "at": decided.isoformat(),
-        }
-    ]
-    path.write_text(json.dumps(payload) + "\n")
-    _beat(path, datetime.now(UTC))
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
-    _write_aged_alert_state(_home, _LIVENESS_FAILURE, age=timedelta(minutes=30))
-
-    assert cluster_health.run_health_probe() == 1
-    [alert] = _sent_alerts
-    assert "gateway liveness" in alert

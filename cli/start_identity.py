@@ -294,12 +294,6 @@ def prepare_identity(inputs: IdentityInput) -> None:
     data = read_intent(inputs.home)
     if data is not None:
         _validate_repeat(inputs, data)
-    if inputs.runtime is not None and inputs.runtime.release is not None:
-        inputs.runtime.validate(inputs.home)
-        if data is None:
-            raise RuntimeError("release start cannot create a fresh home identity")
-        _prepare_reserved_identity(inputs, data)
-        return
     with file_lock(inputs.checkout / ".ava_home.lock", timeout_s=30):
         _require_checkout_binding(inputs.checkout, inputs.home)
         _prepare_reserved_identity(inputs, data)

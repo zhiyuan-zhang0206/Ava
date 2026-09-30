@@ -19,7 +19,8 @@ below is complete and tested in process through that gate.
 
 While a unit's root is up, the coordinator reaches it only through FC-5's
 frozen handoff: `release_image_exec` at the URL the unit's `machine_units`
-row advertises, running the unit's candidate image on the unit's own
+row advertises (a unit's ops server no longer serves this kind, so no dispatch
+completes), running the unit's candidate image on the unit's own
 `UnitRequest` document. `preflight` (at `prepared`) must answer
 `{"ready": true}`; `submit` (at `dispatching`) creates the unit journal and
 launches the unit's finite executor. `entries.py` holds the two read-only

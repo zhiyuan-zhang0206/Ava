@@ -125,14 +125,14 @@ the external effect but before its result becomes durable.
 
 ## Updating and moving the data plane
 
-`ava cluster update --prepared REQUEST` submits one captured operation to the
-external release executor. The current adapter supports a single Linux gateway
-with a local data plane and identical packaged SQL. A running schedule or PTY
-can retain old code and DB access outside application root, so root exit alone
-is not a writer barrier: the release's stop phase gives persistent terminals a
-bounded completed-work wait, then closes every one (SIGKILL only over captured
-births), and each busy owner receives the same closure notice as `ava stop`.
-Terminal state does not survive a release; schedules are re-armed after start.
+`python -m cli.fleet_update down` stops every unit with `ava stop -y` and `up`
+starts them again (the runbook's "Updating a networked cluster in source mode").
+A running schedule or PTY can retain old code and DB access outside application
+root, so root exit alone is not a writer barrier: the stop gives persistent
+terminals a bounded completed-work wait, then closes every one (SIGKILL only over
+captured births), and each busy owner receives the same closure notice as
+`ava stop`. Terminal state does not survive an update; schedules are re-armed
+after start.
 
 For a move, stop all participating runners, then stop the gateway last. Check
 each command's exit status before taking the final snapshots. PostgreSQL uses
@@ -229,13 +229,9 @@ does not expire. There is no pause-controller or OS hold-watchdog recovery job.
 A failed or unreadable ownership observation never permits an independent
 restart or release of admission.
 
-First identify the operation that owns the home. For a captured release, inspect
-`$AVA_HOME/updates/active` and its operation journal, then submit the same
-`ava cluster update --prepared REQUEST`. Submission joins a live executor or
-continues only after its prior native ownership is positively closed. The
-captured images, phase and recovery direction remain fixed. Native retirement
-is verified outside the executor; a CLI return code alone is not completion.
-Do not apply the manual table below over an incomplete release operation.
+First identify what owns the home: `ava maintenance status` names the operation
+and phase. Do not apply the manual table below over a `cli.fleet_update` half
+that is still running; rerun that half after its failure is fixed instead.
 
 For ordinary maintenance, read the exact generation and phase:
 

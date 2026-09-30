@@ -10,13 +10,6 @@ tags:
 
 # Schema Migrations (baseline + deltas)
 
-`ReleaseMigrationContext` is explicit SQL authority consumed by the shared
-migration applier. It does not grant start permission. Startup independently
-validates its captured `StartRuntime`, selected image and initialized home before
-setup or service effects. There is no candidate receipt journal or receipt-based
-start argument. The current prepared release adapter is limited to the same SQL
-schema; schema-changing rollout remains planned work.
-
 ## Two places, one schema
 
 - **`db/schema.sql`** — the squashed **baseline**: the full current schema a
@@ -83,22 +76,6 @@ manifest-bound packaged SQL inventory, and a nonempty matching gateway roster
 before any migration. It does not obtain authority from an
 environment override. Ordinary checkout enumeration remains Git-bound.
 Integer-keyed migration history is unsupported and fails before mutation.
-
-Installed wheel startup can compare schema versions without Git using the loaded
-distribution's hash-declared SQL members. The distribution must correspond to the
-loaded module, must not be editable, and changed or undeclared SQL is rejected.
-This RECORD check is package integrity for read-only comparison, not deployment
-authority: an ordinary unanchored wheel still cannot migrate the database.
-
-`scripts/release_proofs/prove_runtime_migration.py` consumes a verified installed image and calls
-`base.deploy.schema.migrations.apply_pending_migrations` directly with its typed context and
-native Postgres connection. It checks wrong home, unit, operation, target,
-manifest and SQL refusal, unchanged history, and a current-schema no-op. The
-loaded interpreter/module identity is checked independently. An inactive image
-with valid migration authority must still fail real startup before setup; the
-proof creates no selector, start identity, or writer barrier. The installed-wheel
-proof runs only through CI's isolated runtime-preparation fixture; source-level
-pytest cases are not evidence that this installed-wheel proof executed.
 
 Rationale and the rejected alternatives:
 [2026-07-31-migrations-are-gateway-only](../../../../decisions/2026-07-31-migrations-are-gateway-only.md).

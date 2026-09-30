@@ -12,10 +12,8 @@ from typing import Any
 
 import psycopg
 
-from base.deploy.schema.runtime_migration import ReleaseMigrationContext
 
-
-def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> list[str]:
+def cmd_migrations_apply() -> list[str]:
     """Apply Ava migrations and verify checkpoint schema; `ava start` step 2.5.
 
     Ava SQL files run on every host (a runner normally has nothing pending and
@@ -55,7 +53,7 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
     if settings.data_plane.is_remote:
         # A remote-managed plane's provider URL is its only authority.
         with base.db.connect(direct=True, unbounded=True) as conn:
-            done = _apply(conn, release)
+            done = _apply(conn)
         cluster.assert_checkpoint_schema_current(base.db.direct_db_url())
     else:
         # A locally owned plane migrates as the administrator acting as the
@@ -63,7 +61,7 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
         # the owner's own login is never used.
         authority = pg_admin.local_owner_authority()
         with authority.session() as conn:
-            done = _apply(conn, release)
+            done = _apply(conn)
         cluster.assert_checkpoint_schema_current(
             authority.conninfo, expected_data_dir=authority.data_dir
         )
@@ -71,9 +69,7 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
     return done
 
 
-def _apply(conn: psycopg.Connection[Any], release: ReleaseMigrationContext | None) -> list[str]:
+def _apply(conn: psycopg.Connection[Any]) -> list[str]:
     from base.deploy.schema.migrations import apply_pending_migrations
 
-    if release is None:
-        return apply_pending_migrations(conn)
-    return apply_pending_migrations(conn, release=release)
+    return apply_pending_migrations(conn)

@@ -40,7 +40,7 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     from base.paths import ava_home
 
     home = ava_home().resolve(strict=True)
-    identity = capture_loaded_runtime(home)
+    identity = capture_loaded_runtime()
     if Path.cwd().resolve() != Path(identity.cwd):
         raise RuntimeError("root cwd differs from its loaded runtime")
     context.supervisor.bind_runtime(identity, home=home)

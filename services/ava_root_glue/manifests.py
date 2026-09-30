@@ -32,10 +32,6 @@ shell with the service itself, keeping the unit's pid a direct child of root
 (chain discipline, I2); a compound command keeps its own shape (the frontend
 command already ends in `exec npm ...`).
 
-An explicitly admitted release uses direct argv under the captured image cwd.
-Its executable and Python module must belong to the image; Python argv retains
-`-I -B -X utf8`, and shell compound commands are rejected before root launch.
-
 Output is always validated BEFORE anything consumes it — in memory via the
 same `UnitManifest.from_mapping` validators `load_manifests` uses, and again
 by re-reading the written file with `load_manifests` itself (the fail-fast
@@ -54,7 +50,6 @@ from pathlib import Path
 from typing import cast, get_args
 
 from base.cluster.machine import MachineRole
-from base.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease
 from ops.roster import build_services
 from ops.roster.service_spec import ServiceSpec
 from services.ava_root.inputs import InputSeal
@@ -105,55 +100,6 @@ def _exec_argv(cmd: str, repo_root: Path) -> list[str]:
     return ["/bin/sh", "-c", f"{cd} && {cmd}"]
 
 
-def _direct_command(cmd: str) -> tuple[list[str], dict[str, str]]:
-    tokens = shlex.split(cmd)
-    environment: dict[str, str] = {}
-    while tokens and "=" in tokens[0]:
-        key, value = tokens.pop(0).split("=", 1)
-        if key not in {"NODE_ENV", "HOSTNAME", "PORT"}:
-            raise ReleaseRejectedError("release command has an unsupported environment prefix")
-        environment[key] = value
-    if tokens and tokens[0] == "exec":
-        tokens.pop(0)
-    if not tokens or any(token in {";", "&&", "||", "|", ">", "<", "&"} for token in tokens):
-        raise ReleaseRejectedError("release service requires a direct executable command")
-    return tokens, environment
-
-
-def _release_command(
-    cmd: str, image: VerifiedRelease, package: Path
-) -> tuple[list[str], dict[str, str]]:
-    """Admit direct image commands; never interpret a release command in a shell."""
-    tokens, environment = _direct_command(cmd)
-    executable = Path(tokens[0])
-    if executable == Path(".venv/bin/python"):
-        if len(tokens) < 3 or tokens[1] != "-m":
-            raise ReleaseRejectedError("release Python service requires a module entry point")
-        tokens = list(image.module_argv(tokens[2], *tokens[3:]))
-        executable = image.interpreter
-    if not executable.is_absolute() or not executable.resolve(strict=True).is_relative_to(
-        image.root
-    ):
-        raise ReleaseRejectedError("release executable escapes the verified image")
-    if executable == image.interpreter:
-        _require_release_module(tokens, image, package)
-    elif "-m" in tokens:
-        raise ReleaseRejectedError("release module requires the captured interpreter")
-    return tokens, environment
-
-
-def _require_release_module(tokens: list[str], image: VerifiedRelease, package: Path) -> None:
-    if len(tokens) < 7 or tokens[:6] != [str(image.interpreter), "-I", "-B", "-X", "utf8", "-m"]:
-        raise ReleaseRejectedError("release Python service requires captured -I -B module argv")
-    module = tokens[6]
-    image.module_argv(module)  # Validate the module grammar before resolving its retained file.
-    relative = Path(*module.split("."))
-    members = [package / relative.with_suffix(".py"), package / relative / "__main__.py"]
-    found = [path for path in members if path.is_file()]
-    if len(found) != 1 or not found[0].resolve(strict=True).is_relative_to(image.root):
-        raise ReleaseRejectedError("release module has no unique retained entry point")
-
-
 def _validated_capabilities(capabilities: Iterable[str]) -> frozenset[str]:
     caps = frozenset(capabilities)
     if not caps:
@@ -172,7 +118,6 @@ def build_units(
     capabilities: Iterable[str],
     repo_root: Path,
     environments: Mapping[str, dict[str, str]] | None = None,
-    release: VerifiedRelease | None = None,
 ) -> list[dict[str, object]]:
     """K2 unit rows for every spec whose capabilities intersect `capabilities`."""
     chosen = tuple(build_services()) if specs is None else tuple(specs)
@@ -181,17 +126,12 @@ def build_units(
     for spec in chosen:
         if not (spec.capabilities & caps):
             continue
-        argv, prefix_env = (
-            (_exec_argv(spec.cmd, repo_root), {})
-            if release is None
-            else _release_command(spec.cmd, release, repo_root)
-        )
         unit: dict[str, object] = {
             "id": spec.session,
-            "exec": argv,
+            "exec": _exec_argv(spec.cmd, repo_root),
             "restart": "always",
             "attach": "root",
-            "env": prefix_env | ({} if environments is None else environments[spec.session]),
+            "env": {} if environments is None else environments[spec.session],
             "inputs": [InputSeal.capture(path).as_mapping() for path in spec.config_inputs],
         }
         if spec.stop_ceiling_s is not None:
@@ -223,7 +163,6 @@ def build_manifest(
     repo_root: Path | None = None,
     specs: Iterable[ServiceSpec] | None = None,
     environments: Mapping[str, dict[str, str]] | None = None,
-    release: VerifiedRelease | None = None,
 ) -> dict[str, object]:
     """Build and validate a K2 manifest document (fail-fast, in memory).
 
@@ -240,7 +179,6 @@ def build_manifest(
             capabilities=caps,
             repo_root=resolved_repo,
             environments=environments,
-            release=release,
         )
     }
     _validate(manifest)

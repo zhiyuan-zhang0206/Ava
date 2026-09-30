@@ -97,11 +97,7 @@ and the coordinator channel's authentication:
 - **Launch**: the root launcher delivers `AVA_DB_URL` + `AVA_DB_GENERATION` per
   service class; `base/dotenv_boot` keeps a delivery naming this home's
   endpoint and consumes the gateway login for an admitted operator process;
-  otherwise the first dial raises `NoDatabaseAuthorityError`. The release
-  handoff (`ava cluster update --prepared`) builds no Settings: it takes the
-  same operator login itself and hands it, in the exec environment only, to
-  the executor image's submission, which is not admitted until selected
-  ([[cli/release_handoff/docs/release_handoff.ava.okf.md]]).
+  otherwise the first dial raises `NoDatabaseAuthorityError`.
 - **Monitoring** is not delivered: the collector's PostgreSQL receiver
   (`cli/commands/observability/otel_collector.py`) dials the owner-only socket as
   `ava_monitor` by `peer`, so its rendered config names no credential and a

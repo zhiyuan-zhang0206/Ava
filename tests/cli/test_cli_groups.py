@@ -49,7 +49,7 @@ def test_core_verbs_exist() -> None:
 
 def test_cluster_group_has_down_and_destroy_and_no_listing() -> None:
     choices = _cluster_choices()
-    assert {"status", "update", "down", "destroy"} <= choices
+    assert {"status", "down", "destroy"} <= choices
     # No host-level list of clusters exists to print (each home describes only itself).
     assert "ls" not in choices
     # The whole-cluster bounce left with the retired updater; `ava restart` is per unit.

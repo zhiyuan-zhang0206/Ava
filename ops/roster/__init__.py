@@ -31,12 +31,6 @@ _GATEWAY_LIFESPAN_ALLOWANCE_S = 10.0
 # a module-initialization cycle when either side is imported first.
 
 
-def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
-    from ops.spec import _bind_runtime_command as bind_runtime_command
-
-    return bind_runtime_command(spec)
-
-
 def _plugin_services() -> tuple[ServiceSpec, ...]:
     from ops.spec import plugin_services
 
@@ -496,4 +490,4 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # unique for the watchdog/status derivations keyed on `session`.
     plugin = _plugin_services()
     _assert_unique_sessions(core, plugin)
-    return tuple(_bind_runtime_command(_bind_owned_probe(spec)) for spec in core + plugin)
+    return tuple(_bind_owned_probe(spec) for spec in core + plugin)

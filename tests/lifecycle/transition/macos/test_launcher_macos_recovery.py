@@ -126,7 +126,7 @@ def test_executor_receipt_is_computed_under_the_lock_for_its_own_attempt(
     # that write away from this test process.
     monkeypatch.setattr(execute, "os", SimpleNamespace(environ={}, getpid=os.getpid))
     monkeypatch.setattr(
-        "base.deploy.release.runtime_interpreter.verify_loaded_image", lambda *_a, **_k: None
+        "base.deploy.release.loaded_image.verify_loaded_image", lambda *_a, **_k: None
     )
     real = journal.exclusive
 

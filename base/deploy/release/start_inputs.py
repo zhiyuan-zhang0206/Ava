@@ -6,7 +6,6 @@ import hashlib
 import json
 from pathlib import Path
 
-from base.deploy.release.runtime_release import ReleaseRejectedError
 from base.deploy.release.verified_file import regular_bytes
 
 
@@ -34,9 +33,3 @@ def _file_digest(path: Path) -> str | None:
     # A dangling symlink is an invalid declaration, never an omitted/default
     # value. Disappearance or replacement after lstat also refuses this read.
     return hashlib.sha256(regular_bytes(path)).hexdigest()
-
-
-def require_configuration(home: Path, expected: str) -> None:
-    """Refuse configuration drift without loading Settings or writing any state."""
-    if configuration_digest(home) != expected:
-        raise ReleaseRejectedError("release configuration changed after preparation")

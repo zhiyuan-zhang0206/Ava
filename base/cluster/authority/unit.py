@@ -52,7 +52,6 @@ import hashlib
 import json
 import os
 import secrets
-import sys
 import time
 import uuid
 from collections.abc import Callable
@@ -639,7 +638,7 @@ def consume_unit(home: Path) -> UnitCapability:
     """The installed runner login for a process the launcher did not inject,
     only while it runs this home's admitted runtime."""
     code_root = Path(__file__).resolve().parents[3]
-    require_admitted_runtime(home, code_root=code_root, prefix=Path(sys.prefix))
+    require_admitted_runtime(home, code_root=code_root)
     return require_unit_capability(home)
 
 

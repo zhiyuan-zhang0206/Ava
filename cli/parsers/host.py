@@ -199,10 +199,9 @@ def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "--keep-infra",
         action="store_true",
         help="do not stop THIS cluster's own Postgres/Redis instance (every "
-        "cluster owns one, under its $AVA_HOME). Used by the `ava cluster update` "
-        "orchestrator: the migrate step that follows still needs the database, so "
-        "tearing the data plane down first would give it connect-refused. A plain "
-        "`ava stop` means 'fully stop' and leaves this off.",
+        "cluster owns one, under its $AVA_HOME). Used by `ava restart`, whose start "
+        "leg still needs the database. A plain `ava stop` means 'fully stop' and "
+        "leaves this off.",
     )
     stop_p.add_argument(
         "-y",

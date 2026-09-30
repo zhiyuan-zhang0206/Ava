@@ -31,7 +31,7 @@ def main() -> None:
 
     rejected_home = home / "must-not-be-created"
     with patch(
-        "base.deploy.release.runtime_interpreter.runtime_otel_binary",
+        "base.deploy.release.loaded_image.runtime_otel_binary",
         return_value=home / "missing",
     ):
         try:

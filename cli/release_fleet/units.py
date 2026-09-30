@@ -51,6 +51,8 @@ _POLL_S = 1.0
 # again: answers sent while the coordinator was away were never received, and
 # a unit re-sends its journaled answer on every poll (`follower.POLL_S`).
 _REANSWER_S = 30.0
+# The bound of one image entry on a unit; the coordinator's wait adds a transport margin.
+RELEASE_ENTRY_TIMEOUT_S = 120.0
 
 
 class Transport(Protocol):
@@ -73,7 +75,6 @@ class OpsTransport:
             ReleaseImageExecResult,
             ReleaseImageRef,
         )
-        from ops.cluster import RELEASE_ENTRY_TIMEOUT_S
         from ops.cluster_rpc import dispatch_to_machine
 
         payload = ReleaseImageExecPayload(
