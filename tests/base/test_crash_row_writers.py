@@ -38,7 +38,11 @@ _UPDATE_AGENTS_META = "UPDATE agents_meta"
 def _python_files() -> list[Path]:
     files: list[Path] = []
     for directory in _SCAN_DIRS:
-        files.extend(sorted((_REPO / directory).rglob("*.py")))
+        files.extend(
+            path
+            for path in sorted((_REPO / directory).rglob("*.py"))
+            if "tests" not in path.relative_to(_REPO).parts
+        )
     return files
 
 

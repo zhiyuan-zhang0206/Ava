@@ -209,6 +209,8 @@ class SourceGraph:
         # `gateway/inspect/`, ...), all mounted by gateway/app.py — so every
         # gateway module is scanned for route decorators.
         for path in (self.root / "gateway").rglob("*.py"):
+            if "tests" in path.relative_to(self.root).parts:
+                continue  # a gateway test's throwaway routes are not the wire schema
             parts = path.relative_to(self.root).with_suffix("").parts
             module = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
             for func in self.nodes(module):

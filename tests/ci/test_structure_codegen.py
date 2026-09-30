@@ -112,6 +112,28 @@ def test_closure_follows_new_and_moved_definitions_without_name_collisions(tmp_p
         assert_sources_covered(sources, r"^gateway/")
 
 
+def test_closure_ignores_routes_declared_by_a_gateway_tests_directory(tmp_path: Path) -> None:
+    files = {
+        "gateway/routers/probe.py": (
+            "from gateway.schemas import WireModel\n"
+            "@router.get('/probe')\ndef route() -> WireModel: ...\n"
+        ),
+        "gateway/schemas/__init__.py": "from gateway.schemas.probe import WireModel\n",
+        "gateway/schemas/probe.py": "class WireModel: pass\n",
+        "gateway/tests/test_probe.py": (
+            "class WireModel: pass\nclass FakeModel: pass\n"
+            "@router.get('/fake')\ndef route() -> FakeModel: ...\n"
+        ),
+    }
+    for name, content in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    assert SourceGraph(tmp_path).schema_sources({"WireModel"}, set()) == {
+        "gateway/schemas/probe.py"
+    }
+
+
 def test_events_closure_follows_payload_moves_outside_package(tmp_path: Path) -> None:
     sources = {
         "base/events/contract.py": "from .payloads import Spawn\n",

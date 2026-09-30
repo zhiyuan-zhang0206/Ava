@@ -414,6 +414,8 @@ def _production_sources() -> dict[str, str]:
     sources: dict[str, str] = {}
     for directory in _SCAN_DIRS:
         for path in sorted((_REPO / directory).rglob("*.py")):
+            if "tests" in path.relative_to(_REPO).parts:
+                continue  # a package's own `tests/` is not production code
             sources[path.relative_to(_REPO).as_posix()] = path.read_text(encoding="utf-8")
     return sources
 

@@ -653,6 +653,8 @@ def test_only_the_cli_entry_point_declares_the_database_gate_exemption() -> None
         if top.name.startswith(".") or top.name in skipped or not top.is_dir():
             continue
         for path in sorted(top.rglob("*.py")):
+            if "tests" in path.relative_to(root).parts:
+                continue  # a package's own `tests/` is not production code
             text = path.read_text()
             if "exempt_from_db_gate" not in text:
                 continue
