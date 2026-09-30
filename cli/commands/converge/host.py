@@ -330,9 +330,9 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         requires_unit_config=True,
     ),
     # Warning-only health preflight: data-plane reachability (pg/redis, local on
-    # gateway / remote on runner) + checkout state (HEAD vs cluster pin, dirty
-    # marker). Findings are printed and appended to $AVA_HOME/logs/health_preflight.log,
-    # never blocking — the same contract as the port preflight above.
+    # gateway / remote on runner) + checkout state (dirty marker). Findings are
+    # printed and appended to $AVA_HOME/logs/health_preflight.log, never blocking —
+    # the same contract as the port preflight above.
     ConvergeStep(
         "health preflight",
         _ensure_health_preflight,

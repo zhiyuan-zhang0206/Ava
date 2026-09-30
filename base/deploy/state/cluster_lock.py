@@ -50,8 +50,8 @@ orchestration that ends with hosts still converging holds the lease instead of
 releasing it — a **settle hold**: the lease stays held, on its own TTL, with the
 settle fields recording who it is waiting for. See `SETTLE_TTL_S`. (The old
 phase-based orchestration this was written for is retired; no current caller
-takes a settle hold. The read side — `DeployLease.is_settle_hold`/`awaits`,
-`release_settle_hold` — stays live for a future writer.)
+takes a settle hold. The read side — `DeployLease.is_settle_hold`/`awaits` —
+stays live for a future writer.)
 
 **A settle hold is not the same instruction to a healer as a running rollout, and the
 settle fields are what tell them apart.** "A deploy is mutating the cluster" means stand
@@ -170,8 +170,8 @@ class DeployLease:
         posture, which covers host-local work that takes no lease — must still
         consult it: a True here is not a verdict that nothing is running on this host.
         A lease carrying no settle fact — an orchestration executing right now — is
-        never permitted, the same line `release_settle_hold` and `renew_update_lock`
-        are scoped on, and the recorded set must actually name the machine: a hold
+        never permitted, the same line `renew_update_lock` is scoped on, and the
+        recorded set must actually name the machine: a hold
         that names nobody must never read as permission.
         """
         return machine in (self.settle_hosts or ())
@@ -325,11 +325,10 @@ def acquire_update_lock(
     hold still reads as "a deploy is in progress" to every consumer). The row
     enters `phase='updating'` on acquire.
 
-    **`settle_hosts = NULL` here is load-bearing, not hygiene.** `release_settle_hold`
-    is scoped `settle_hosts IS NOT NULL` precisely so it can only ever clear a *settle*
-    hold and never a lease an orchestration is executing under. An absent settle fact
-    is therefore what marks "a rollout is running"; giving a run lease one for
-    diagnostics would silently make live rollouts eligible for convergence-release.
+    **`settle_hosts = NULL` here is load-bearing, not hygiene.** An absent settle fact
+    is what marks "a rollout is running" (`DeployLease.is_settle_hold`,
+    `renew_update_lock`'s settle-hold refusal); giving a run lease one for
+    diagnostics would make it read as a settle hold.
     """
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
@@ -607,44 +606,6 @@ def claim_recovery_lock(
             holder=recovery_holder,
         )
     return RecoveryClaim(acquired=acquired, previous_holder=previous_holder)
-
-
-def release_settle_hold(holder: str) -> bool:
-    """End a **settle hold** early because the cluster has finished converging.
-    Returns True if this call is what released it.
-
-    Scoped two ways, and both matter. `holder = %s` is the same guard
-    `release_update_lock` uses: a hold reclaimed past its TTL by a new owner must not
-    be cleared by a straggler. `settle_hosts IS NOT NULL` is the stronger one — it
-    releases only a *settle* hold, never a lease an orchestration is actively
-    executing under.
-    Without it a convergence check that ran at the wrong moment could unlock a live
-    rollout, which is the failure this whole module exists to prevent.
-
-    Why early release exists at all: a hold that can only expire on a timer is a
-    state that outlives the condition it represents, and a settle hold whose hosts
-    converged in the first thirty seconds would otherwise block the next deploy —
-    and suppress auto-rollback — for the rest of `SETTLE_TTL_S`. The caller
-    (`ops.deploy_window`) establishes convergence; this is only the write.
-    A durable pending publication must be resolved by the cutover repair first;
-    generic settle release cannot remove only its lease authority.
-    """
-    with write_transaction() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, "
-            "    expires_at = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
-            "    phase = 'stable', kind = NULL "
-            "WHERE id = 1 AND holder = %s AND settle_hosts IS NOT NULL "
-            "AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb",
-            (holder,),
-        )
-        released = cur.rowcount == 1
-    if released:
-        logger.info(
-            "[cluster-lock] settle hold by {holder} released early — the cluster converged",
-            holder=holder,
-        )
-    return released
 
 
 def _read_update_lease_with_conn(conn: Any) -> DeployLease | None:

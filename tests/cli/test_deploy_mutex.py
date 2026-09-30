@@ -94,21 +94,3 @@ def test_an_unreadable_lease_does_not_suppress(
     monkeypatch.setattr(health, "_ingest_alert", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert health.run_health_probe() == 1
-
-
-# ─── the orchestration converts its lease into a settle hold ─────────────────
-
-
-def test_release_settle_hold_never_touches_an_executing_lease() -> None:
-    """`settle_hosts IS NOT NULL` in the WHERE clause is what stops a convergence
-    check from unlocking a rollout that is actively executing."""
-    import inspect
-
-    from base.deploy.state import cluster_lock
-
-    sql = inspect.getsource(cluster_lock.release_settle_hold)
-    assert "settle_hosts IS NOT NULL" in sql
-    assert "holder = %s" in sql
-
-
-# ─── the poll renews the lease it is running under ───────────────────────────

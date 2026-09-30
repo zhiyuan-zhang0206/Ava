@@ -59,8 +59,8 @@ describes only itself (`base/cluster/record.py`).
   live `deployment_state` lease and explains a refused lease acquire. Its absence
   is not proof no deploy runs — native admission and maintenance holds are
   separate facts. The roster reads the lease row rather than
-  `ops.deploy_window.deploy_in_flight()`, which probes every machine and releases
-  a converged hold.
+  `ops.deploy_window.deploy_in_flight()`, which also reads every machine's posture
+  row.
 
 ## Key dependencies
 

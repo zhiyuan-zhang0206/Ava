@@ -404,23 +404,6 @@ def _quiet_status(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     monkeypatch.setattr("base.paths.ava_home", lambda: home)
 
 
-def test_cmd_status_prints_no_frozen_cluster_pin(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    """The cluster pin has no writer; a historical value must not be presented
-    as the current target, nor a bare `ava cluster update` offered as a remedy."""
-    _quiet_status(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        "base.deploy.state.cluster_pin.get_cluster_target_sha",
-        lambda **_kw: "a" * 40,  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    assert _status_commands.cmd_status() == 0
-    out = capsys.readouterr().out
-    assert "cluster pin" not in out
-    assert "ava cluster update" not in out
-
-
 def test_cmd_status_names_the_source_checkout_it_runs(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:

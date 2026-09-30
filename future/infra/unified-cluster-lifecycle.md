@@ -77,9 +77,8 @@ retired-storage cleanup.
    - `$AVA_HOME/deploy-state.json`, the retired updater's Gate marker, has no
      reader or writer; Gate never renders an update page. Delete it in the
      cutover record.
-   - The `cluster_pin` row keeps frozen legacy values that no surface shows;
-     only `ops.deploy_window` still reads its target to release a legacy settle
-     hold. Retire it with the controller storage below.
+   - The `cluster_pin` row keeps frozen legacy values that nothing reads.
+     Retire it with the controller storage below.
 
 ## Planned: remove retired controller storage
 

@@ -447,12 +447,10 @@ def _read_deploy_lease() -> DeployLease | None:
     taking the roster down, while any other failure is a real bug and is logged
     loudly first.
 
-    Deliberately NOT `ops.deploy_window.deploy_in_flight()`. That call probes every
-    machine and, on a converged cluster, *releases* the settle hold — neither belongs
-    on a read-only roster GET, and its per-host probes would also answer under the
-    permissive polarity (an unreachable host reads "not deploying"). Rendering the
-    lease row keeps the roster a display of state rather than a second derivation
-    of it.
+    Deliberately NOT `ops.deploy_window.deploy_in_flight()`. That call also reads
+    every machine's posture row, which does not belong on a read-only roster GET.
+    Rendering the lease row keeps the roster a display of state rather than a
+    second derivation of it.
     """
     import psycopg
 

@@ -24,8 +24,7 @@ It is held two ways, and the split matters:
    operation whose process dies still releases within one TTL because renewal
    dies with it.
 2. **After the operation stops executing** with hosts still mid-transition, the
-   lease converts to a bounded settle hold (`SETTLE_TTL_S`) that
-   `ops.deploy_window` ends the moment those hosts converge.
+   lease converts to a bounded settle hold (`SETTLE_TTL_S`) that lapses on its TTL.
 
 ## Why 900 s
 
