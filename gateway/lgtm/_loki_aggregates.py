@@ -100,7 +100,7 @@ def _count_attribute_slices(
     group_by: str | None,
     timeout_s: float | None,
 ) -> float | list[tuple[str, float]]:
-    """Count each cutover slice and add scalar or group totals."""
+    """Count the live read slice and return scalar or group totals."""
 
     group_stage = (
         f' | json {_loki_logql._escape_label(group_by)}="attributes.{_loki_logql._escape_label(group_by)}"'
@@ -647,15 +647,13 @@ def count_events_series(
     step = max(1, step_s)
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range"
     values_by_group: dict[str, dict[int, int]] = {"": {}} if group_by is None else {}
-    for era, legacy_unlabeled, indexed_labeled in _loki_logql._range_eras(window):
-        pipeline = _loki_logql._agg_pipeline(
-            era=era,
-            legacy_unlabeled=legacy_unlabeled,
-            indexed_labeled=indexed_labeled,
-            event_names=event_names,
-            cluster=cluster,
-            attribute_filters=attribute_filters,
-        )
+    for _slice, base_pipeline in _loki_logql._agg_pipelines(
+        window,
+        event_names=event_names,
+        cluster=cluster,
+        attribute_filters=attribute_filters,
+    ):
+        pipeline = base_pipeline
         if group_by is not None and from_attributes:
             pipeline += f' | json {key}="attributes.{key}"'
         if key:
@@ -710,14 +708,11 @@ def attribute_max_series(
     step = max(1, step_s)
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range"
     maxima: dict[int, float] = {}
-    for era, legacy_unlabeled, indexed_labeled in _loki_logql._range_eras(window):
-        pipeline = _loki_logql._agg_pipeline(
-            era=era,
-            legacy_unlabeled=legacy_unlabeled,
-            indexed_labeled=indexed_labeled,
-            event_names=event_names,
-            attribute_filters=attribute_filters,
-        )
+    for _slice, pipeline in _loki_logql._agg_pipelines(
+        window,
+        event_names=event_names,
+        attribute_filters=attribute_filters,
+    ):
         logql = f'max(max_over_time(({pipeline} | json {key}="attributes.{key}" | unwrap {key})[{step}s]))'
         payload = _loki_transport._get_json(
             url,

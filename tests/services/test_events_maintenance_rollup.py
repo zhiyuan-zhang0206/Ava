@@ -24,7 +24,7 @@ import pytest
 from pydantic import ValidationError
 
 from base.config.daemon import DaemonSettings
-from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT, LokiReadEra, LokiReadSlice
+from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT, LokiReadEra
 from services.events_maintenance import rollup
 from services.events_maintenance.rollup import MetricsRow, RollupResult, TokensRow, compute_rollup
 
@@ -593,12 +593,8 @@ def test_rollup_settings_defaults_aliases_and_lookback_bound() -> None:
         DaemonSettings.model_validate({"AVA_EVENTS_ROLLUP_LATE_WRITE_LOOKBACK_DAYS": 0})
 
 
-@pytest.mark.parametrize(
-    ("era", "indexed_labeled"),
-    [(LokiReadEra.LEGACY, False), (LokiReadEra.INDEXED, True)],
-)
-def test_tokens_queries_shapes(era: LokiReadEra, indexed_labeled: bool) -> None:
-    q = rollup._tokens_queries(era=era, indexed_labeled=indexed_labeled)
+def test_tokens_queries_shapes() -> None:
+    q = rollup._tokens_queries(era=LokiReadEra.INDEXED)
     assert set(q) == {
         "calls",
         "costed_calls",
@@ -652,69 +648,3 @@ def test_source_count_query_uses_the_union_body_truth_pipeline(
     logql, _at = calls[0]
     assert logql.startswith("sum(count_over_time((") and logql.endswith(")[86400s]))")
     assert 'event_name_extracted=~"llm_usage|turn_end|exec|exec_.+|exec\\\\(.*"' in logql
-
-
-def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.MonkeyPatch) -> None:
-    day = date(2026, 8, 10)  # time-bomb-ok: explicit fixture day feeding a pinned rollup window
-    day_start = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
-    cutover = day_start + timedelta(hours=12)
-    day_end = day_start + timedelta(days=1)
-    slices = (
-        LokiReadSlice(LokiReadEra.LEGACY, day_start, cutover),
-        LokiReadSlice(LokiReadEra.INDEXED, cutover, day_end),
-    )
-    calls: list[tuple[str, datetime]] = []
-
-    def _query(logql: str, at: datetime) -> list[tuple[dict[str, str], float]]:
-        calls.append((logql, at))
-        value = 1.0 if at == cutover else 2.0
-        labels = {"agent_id": "7"}
-        if "llm_usage" in logql:
-            labels["model"] = "m"
-        if 'pattern "<bucket>"' in logql:
-            labels["bucket"] = "1" if at == cutover else "2"
-            return [(labels, value), ({**labels, "bucket": "not-an-integer"}, value)]
-        return [(labels, value)]
-
-    def _slices(_start: datetime, _end: datetime) -> tuple[LokiReadSlice, ...]:
-        return slices
-
-    monkeypatch.setattr(rollup, "split_index_label_window", _slices)
-    monkeypatch.setattr(rollup, "_query_instant", _query)
-
-    aggregates = rollup._day_aggregates(day)
-    assert aggregates is not None
-    tokens, metrics = aggregates
-
-    assert tokens == [
-        TokensRow(
-            agent_id=7,
-            model="m",
-            calls=3,
-            costed_calls=3,
-            unpriced_calls=0,
-            tokens_in=3,
-            tokens_out=3,
-            tokens_cached=3,
-            tokens_reasoning=3,
-            cost_usd=3.0,
-        )
-    ]
-    assert metrics == [
-        MetricsRow(
-            agent_id=7,
-            turn_total=3,
-            turn_ok=3,
-            turn_dur_sum=3.0,
-            turn_dur_min=1.0,
-            turn_dur_max=2.0,
-            turn_dur_hist={1: 1, 2: 2},
-            exec_ok=3,
-            exec_failed=3,
-        )
-    ]
-    assert all('event_name=""' not in logql for logql, _at in calls)
-    assert any(
-        'event_name!=""' in logql and 'event_name="llm_usage"' in logql and _at == day_end
-        for logql, _at in calls
-    )
