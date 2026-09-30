@@ -528,7 +528,7 @@ never updates them (above), and a stale copy only surfaces at its next fire
 verify and redeploy: run a full dry-import sweep over every in-store copy
 (py_compile + top-level imports only — never a real fire) and redeploy drifted
 copies through the same `ava schedules update <name> --script-file <template>`
-path. Tooling lives on the runner host (`~/.ava/sched-dry-import/run_dry.sh`;
+path. Tooling lives on the host that runs the weekly sweep (`~/.ava/sched-dry-import/run_dry.sh`;
 the weekly `sched-dry-import-weekly` backstop schedule red-reports to its
 operator).
 On agent-runners it also runs capability preflights: a headed Chrome (when the browser
