@@ -30,7 +30,4 @@ native process identity. Service health imports them without loading rollout
 leases or managed-writer controllers. This evidence grants no startup or mutation
 authority.
 
-The normal ops daemon has no bootstrap observation mode, restricted `/ops`
-allowlist or one-shot dispatch child. Unknown daemon arguments, including the
-retired bootstrap option, refuse before ordinary imports. The generic transport
-mounts only routes explicitly supplied by a caller.
+The generic transport mounts only routes explicitly supplied by a caller.

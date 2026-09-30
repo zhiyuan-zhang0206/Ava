@@ -188,9 +188,8 @@ def begin_maintenance(
     """Close admission durably; a new deploy cannot overwrite this capability.
 
     `driver` is the shepherding identity minted by an operator-side entry (task
-    #3270). Daemon-driven pauses leave it None on purpose: their ownership
-    evidence is the updater handoff / outcome, never a caller daemon that
-    outlives the ladder and would mask a dead shepherd.
+    #3270). Daemon-driven pauses leave it None on purpose: they are never bound
+    to a caller daemon that outlives the ladder and would mask a dead shepherd.
 
     Creation ownership is returned under the journal lock: compensation must
     never infer it from a separately read snapshot.

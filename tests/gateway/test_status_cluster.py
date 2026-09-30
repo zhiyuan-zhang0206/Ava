@@ -1135,16 +1135,11 @@ class TestPanelCarriesNoFrozenPin:
         stub_machine_identity: None,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Nothing writes the cluster pin or the known-good anchor any more; the
-        panel reports each node's checkout and never reads those historical
-        values, so they cannot be presented as the cluster's current target."""
+        """The panel reports each node's checkout and carries no cluster target or
+        known-good verdict."""
         _ = fake_flag, stub_machine_identity
         _insert_machine(db_conn, "cloud-test", "https://ava.example.com", "gateway")
 
-        def _forbidden(**_kw: object) -> str:
-            raise AssertionError("the status panel must not read the retired pin")
-
-        monkeypatch.setattr("base.deploy.state.cluster_pin.get_cluster_target_sha", _forbidden)
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
             panel = status_router._get_cluster_status(cur)

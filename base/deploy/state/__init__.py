@@ -1,6 +1,5 @@
-"""Durable deploy state: the cluster deploy lease, host deploy posture, legacy pin.
+"""Durable deploy state: the cluster deploy lease and host deploy posture.
 
 ``cluster_lock`` is the cluster-wide "a deploy owns this cluster" lease;
-``host_deploy_state`` the per-host deploy posture and updater lease;
-``cluster_pin`` the legacy pin row no current lifecycle writes.
+``host_deploy_state`` the per-host deploy posture and updater lease.
 """

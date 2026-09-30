@@ -2,23 +2,22 @@
 
 The bootstrap endpoint serves no database credential. A remote agent-runner
 unit receives the cluster's runner login only through an explicit operator
-step (the plan's manual delivery, "F1"), used for a new runner's join and
-emergencies; routine networked rollouts keep refusing until the automated
-exchange exists.
+step, used for a new runner's join and emergencies; no automated exchange
+exists.
 
 - The gateway operator issues a **bundle** (`issue_bundle`): the ACTIVE write
-  generation's runner login, the endpoint bootstrap serves, the unit's
-  enrollment secret, and a binding to one unit (machine name + unit home),
-  one generation (number + credential digest), a nonce and an expiry. The
-  bundle is sealed with AES-256-GCM under a fresh 32-byte transport key that
-  is shown to the operator once and never written anywhere: the file alone
-  discloses nothing, and any change to it fails authentication.
+  generation's runner login, the endpoint bootstrap serves, and a binding to one
+  unit (machine name + unit home), one generation (number + credential digest),
+  a nonce and an expiry. The bundle is sealed with AES-256-GCM under a fresh
+  32-byte transport key that is shown to the operator once and never written
+  anywhere: the file alone discloses nothing, and any change to it fails
+  authentication.
 - The unit opens it with that key (`open_bundle`) and installs it
   (`install_bundle`) only when it names this unit, this gateway's served
   endpoint, a generation not older than the installed one, has not expired,
   and the cluster accepts its login. Installation writes
-  `$AVA_HOME/db-authority/unit.json` and `enrollment.json` (0600); nothing
-  else on the unit holds the login.
+  `$AVA_HOME/db-authority/unit.json` (0600); nothing else on the unit holds the
+  login.
 - The unit's root launcher delivers that login per service
   (`unit_delivery`), an admitted operator process consumes it
   (`consume_unit`), and the launch digest binds its non-secret reference.
@@ -28,32 +27,21 @@ exchange exists.
   gateway token its ops server accepts, and the telemetry relay token. The
   unit never holds the human cluster secret.
 
-A bundle is bound to one unit, but only its enrollment secret is that unit's
-own: the runner login and API token are the write generation's, shared by
-every runner unit, and the telemetry token is the cluster's. The binding
-guards against installing on the wrong unit by mistake, not against theft;
-what a lost bundle exposes and how to contain it:
-`base/cluster/authority/docs/unit-enrollment.ava.okf.md`.
-
-The enrollment secret is the unit's durable identity toward the gateway: it
-keys the release coordinator channel (`base.cluster.authority.channel`). The
-gateway keeps its copy in `$AVA_HOME/db-authority/units/<key>.json`, minted
-when the unit first receives a bundle and reused by later bundles. Only an explicit operator command changes it:
-`rotate_enrollment` replaces the secret (the next bundle delivers it) and
-`revoke_enrollment` deletes the record; neither touches the generation's login
-or API token.
+A bundle is bound to one unit, but nothing in it is that unit's own: the runner
+login and API token are the write generation's, shared by every runner unit, and
+the telemetry token is the cluster's. The binding guards against installing on
+the wrong unit by mistake, not against theft; what a lost bundle exposes and how
+to contain it: `base/cluster/authority/docs/unit-bundle.ava.okf.md`.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import json
 import os
 import secrets
 import time
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -77,14 +65,12 @@ from base.cluster.authority.delivery import (
 )
 from base.cluster.authority.ledger import (
     _locked,
-    _publish_exclusive,
     _read_private,
     authority_dir,
     read_secret,
 )
 from base.cluster.authority.model import AuthorityRefusedError, Digest, RoleName
 from base.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S
-from base.host.atomic_io import fsync_parent
 from base.host.net.url_secret import url_with_userinfo
 from base.host.private_storage import write_private_bytes
 
@@ -100,8 +86,8 @@ MachineName = Annotated[
     str, StringConstraints(min_length=1, max_length=255, pattern=r"^[^\x00-\x1f\x7f]+$")
 ]
 Hex32 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
-# repr=False covers every field typed `Secret` in one place (`Enrollment.secret`,
-# `UnitApi.token`, `UnitApi.telemetry`, `UnitCapability.password`).
+# repr=False covers every field typed `Secret` in one place (`UnitApi.token`,
+# `UnitApi.telemetry`, `UnitCapability.password`).
 Secret = Annotated[str, Field(min_length=32, max_length=256, repr=False)]
 
 
@@ -139,22 +125,8 @@ class UnitIdentity(_Record):
             raise ValueError("a unit home is an absolute path on the unit's machine")
         return self
 
-    @property
-    def key(self) -> str:
-        """The gateway store's file stem for this unit (names are never parsed back)."""
-        return hashlib.sha256(f"{self.machine}\0{self.home}".encode()).hexdigest()[:32]
-
     def describe(self) -> str:
         return f"{self.machine}:{self.home}"
-
-
-class Enrollment(_Record):
-    """The unit's durable identity secret toward the gateway (FC-5 channel key)."""
-
-    version: Literal[1]
-    enrollment_id: Hex32
-    unit: UnitIdentity
-    secret: Secret
 
 
 class GenerationRef(_Record):
@@ -197,7 +169,7 @@ class UnitCapability(_Record):
 
 
 class Bundle(_Record):
-    """The sealed payload: one capability plus the unit's enrollment."""
+    """The sealed payload: one capability."""
 
     version: Literal[1]
     purpose: Literal["db-capability"]
@@ -206,12 +178,9 @@ class Bundle(_Record):
     issued_at: float
     expires_at: float
     capability: UnitCapability
-    enrollment: Enrollment
 
     @model_validator(mode="after")
     def coherent(self) -> Self:
-        if self.enrollment.unit != self.capability.unit:
-            raise ValueError("the enrollment belongs to another unit")
         if self.expires_at <= self.issued_at:
             raise ValueError("a bundle expires after it is issued")
         return self
@@ -265,13 +234,6 @@ def credential_free(url: str) -> str:
     return url_with_userinfo(url, unquote(parts.username or ""), "")
 
 
-# ── gateway: enrollment store and issuance ──────────────────────────────────
-
-
-def enrollment_record_path(home: Path, unit: UnitIdentity) -> Path:
-    return authority_dir(home) / "units" / f"{unit.key}.json"
-
-
 def _parse[M: BaseModel](model: type[M], body: bytes, path: Path) -> M:
     try:
         return model.model_validate_json(body)
@@ -279,82 +241,7 @@ def _parse[M: BaseModel](model: type[M], body: bytes, path: Path) -> M:
         raise UnitCapabilityError(f"{path} is corrupt: {exc}") from exc
 
 
-def _new_enrollment(unit: UnitIdentity) -> Enrollment:
-    return Enrollment(
-        version=1,
-        enrollment_id=uuid.uuid4().hex,
-        unit=unit,
-        secret=secrets.token_urlsafe(32),
-    )
-
-
-def _recorded_enrollment(path: Path, unit: UnitIdentity) -> Enrollment:
-    """The gateway record at `path`; FileNotFoundError passes through."""
-    enrollment = _parse(Enrollment, _read_private(path), path)
-    if enrollment.unit != unit:
-        raise UnitCapabilityError(f"{path} records another unit")
-    return enrollment
-
-
-def ensure_enrollment(home: Path, unit: UnitIdentity) -> Enrollment:
-    """The unit's enrollment on this gateway, minted once and then reused."""
-    with _locked(home):
-        path = enrollment_record_path(home, unit)
-        try:
-            return _recorded_enrollment(path, unit)
-        except FileNotFoundError:
-            enrollment = _new_enrollment(unit)
-            _publish_exclusive(path, _canonical(enrollment) + b"\n")
-            return enrollment
-
-
-def load_enrollment(home: Path, unit: UnitIdentity) -> Enrollment | None:
-    """The gateway's record for `unit`, or None when it is not enrolled."""
-    try:
-        return _recorded_enrollment(enrollment_record_path(home, unit), unit)
-    except FileNotFoundError:
-        return None
-
-
-def _not_enrolled(home: Path, unit: UnitIdentity) -> UnitCapabilityError:
-    return UnitCapabilityError(
-        f"{unit.describe()} holds no enrollment on the gateway home {home}; "
-        "`ava cluster db-authority issue-unit` enrolls it"
-    )
-
-
-def rotate_enrollment(home: Path, unit: UnitIdentity) -> Enrollment:
-    """Replace an enrolled unit's secret and id; the old secret stops authenticating.
-
-    The unit keeps its old copy until its next bundle (`issue_bundle` carries
-    the current record), so the channel refuses it in between.
-    """
-    with _locked(home):
-        path = enrollment_record_path(home, unit)
-        try:
-            _recorded_enrollment(path, unit)
-        except FileNotFoundError:
-            raise _not_enrolled(home, unit) from None
-        enrollment = _new_enrollment(unit)
-        write_private_bytes(path, _canonical(enrollment) + b"\n")
-        return enrollment
-
-
-def revoke_enrollment(home: Path, unit: UnitIdentity) -> Enrollment:
-    """Delete an enrolled unit's gateway record; returns what was revoked.
-
-    A later `issue_bundle` for the same unit mints a new enrollment: re-enrolling
-    is an explicit operator step, never automatic.
-    """
-    with _locked(home):
-        path = enrollment_record_path(home, unit)
-        try:
-            revoked = _recorded_enrollment(path, unit)
-        except FileNotFoundError:
-            raise _not_enrolled(home, unit) from None
-        path.unlink()
-        fsync_parent(path)
-        return revoked
+# ── gateway: issuance ───────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -425,7 +312,6 @@ def issue_bundle(
         issued_at=issued_at,
         expires_at=issued_at + ttl_s,
         capability=capability,
-        enrollment=ensure_enrollment(home, unit),
     )
     key = secrets.token_bytes(_KEY_BYTES)
     return IssuedBundle(_seal(bundle, key), _b64(key), unit, generation.number, bundle.expires_at)
@@ -503,22 +389,6 @@ def unit_capability_path(home: Path) -> Path:
     return authority_dir(home) / "unit.json"
 
 
-def unit_enrollment_path(home: Path) -> Path:
-    return authority_dir(home) / "enrollment.json"
-
-
-def load_unit_enrollment(home: Path) -> Enrollment | None:
-    """The unit's installed enrollment, bound to `home`; None when none is installed."""
-    path = unit_enrollment_path(home)
-    try:
-        enrollment = _parse(Enrollment, _read_private(path), path)
-    except FileNotFoundError:
-        return None
-    if enrollment.unit.home != str(home):
-        raise UnitCapabilityError(f"{path} belongs to another home")
-    return enrollment
-
-
 def load_unit_capability(home: Path) -> UnitCapability | None:
     """The installed capability, bound to `home`; None when none is installed."""
     path = unit_capability_path(home)
@@ -588,7 +458,6 @@ def install_bundle(
             f"(a revoked generation, or an unreachable endpoint): {exc}"
         ) from exc
     with _locked(home):
-        write_private_bytes(unit_enrollment_path(home), _canonical(bundle.enrollment) + b"\n")
         write_private_bytes(unit_capability_path(home), _canonical(capability) + b"\n")
     return capability
 

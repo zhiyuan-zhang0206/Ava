@@ -130,37 +130,25 @@ one unit (machine + home), the endpoint bootstrap serves, the active write
 generation and an expiry (`--ttl-hours`, default 24, at most 72). Start refuses
 an altered bundle, the wrong key, another unit's bundle, an expired one, an
 older generation than the installed one, and a login the cluster rejects (a
-revoked generation); it then writes `$AVA_HOME/db-authority/unit.json` and
-`enrollment.json` (0600) and deletes the bundle. A runner without a capability
-refuses to start and names the issue command. Issue is refused on a
-remote-managed plane. A new generation reaches remote units only by a new
-bundle (join, emergency).
+revoked generation); it then writes `$AVA_HOME/db-authority/unit.json` (0600)
+and deletes the bundle. A runner without a capability refuses to start and names
+the issue command. Issue is refused on a remote-managed plane. A new generation
+reaches remote units only by a new bundle (join, emergency).
 
-The bundle also carries the unit's enrollment secret (minted at its first
-bundle, then reused). Change it only on the gateway; both commands print the enrollment id, never the secret:
-
-```bash
-ava cluster db-authority rotate-enrollment --machine <name> --home <unit $AVA_HOME>
-# then issue-unit again: the unit authenticates only after installing the new bundle
-ava cluster db-authority revoke-enrollment --machine <name> --home <unit $AVA_HOME>
-# a later issue-unit re-enrolls it with a new secret
-```
-
-**Guard a bundle like the generation it carries.** Only the enrollment secret
-is the unit's own. The runner login and runner API token are the write
-generation's, shared by every runner unit, and the telemetry token is the
-cluster's until the human secret rotates. A bundle with its transport key
-therefore gives its holder every runner unit's database and API admission for
-that generation (bootstrap, with its Redis runtime URL and provider keys, and
-every unit's `/ops` included). Its machine binding only stops an install on
-the wrong unit by mistake: the installer asserts its own machine name, and the
-credentials work without installing. `revoke-enrollment` changes the
-enrollment secret only. When a unit is compromised or a bundle and its key are lost,
-rotate the write generation, issue every unit a new bundle and revoke the lost
-unit's enrollment; rotate the human secret (telemetry token), the Redis runtime
-password and the provider keys as well, by hand, in the order of
+**Guard a bundle like the generation it carries.** Nothing in it is the unit's
+own. The runner login and runner API token are the write generation's, shared by
+every runner unit, and the telemetry token is the cluster's until the human
+secret rotates. A bundle with its transport key therefore gives its holder every
+runner unit's database and API admission for that generation (bootstrap, with its
+Redis runtime URL and provider keys, and every unit's `/ops` included). Its
+machine binding only stops an install on the wrong unit by mistake: the
+installer asserts its own machine name, and the credentials work without
+installing. When a unit is compromised or a bundle and its key are lost, rotate
+the write generation and issue every unit a new bundle; rotate the human secret
+(telemetry token), the Redis runtime password and the provider keys as well, by
+hand, in the order of
 [manual rotation after a credential leak](#manual-rotation-after-a-credential-leak).
-Detail: [[base/cluster/authority/docs/unit-enrollment.ava.okf.md]].
+Detail: [[base/cluster/authority/docs/unit-bundle.ava.okf.md]].
 
 Its DB/Redis connection facts are not cached locally: every runner process
 fetches them at Settings construction. Start the gateway first, then the
@@ -1661,8 +1649,7 @@ PY
    [Clusters, units, prod, and dev clone paths](#clusters-units-prod-and-dev-clone-paths)).
    The runner's old login was revoked in step 4, so its previous bundle cannot
    start it. A runner also fetches its Redis URL from the gateway at start, so
-   this step is what delivers the rotated Redis password. If a unit's enrollment
-   secret leaked too, `ava cluster db-authority rotate-enrollment` first.
+   this step is what delivers the rotated Redis password.
 7. **Provider keys**: mint each in its console, then `ava config set KEY=VALUE`
    (the table above); the command says whether a restart is needed.
 8. **Verify.** `ava status` on every unit; `active.number` in `ledger.json`

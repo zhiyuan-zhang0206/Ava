@@ -72,14 +72,17 @@ retired-storage cleanup.
      cluster-restart or hold-recovery session may still be alive there. No
      current code spawns such a session, so recovery no longer probes for one:
      a legacy session is invisible to it until it takes its database lease. The
-     remaining guards (updater handoff, deploy-lease holder PID probe, host
-     updater lease, maintenance admission) cover every current owner.
+     remaining guards (deploy-lease holder PID probe, host updater lease,
+     maintenance admission) cover every current owner.
+   - `$AVA_HOME/run/updater-handoff.json`, `updater-handoff.lock`,
+     `updater-bootstrap-recovery.json` and `updater-spawn/` have no reader or
+     writer: recovery no longer refuses on them. Delete them in the cutover
+     record.
    - `$AVA_HOME/deploy-state.json`, the retired updater's Gate marker, has no
      reader or writer; Gate never renders an update page. Delete it in the
      cutover record.
-   - The `cluster_pin` row keeps frozen legacy values that no surface shows;
-     only `ops.deploy_window` still reads its target to release a legacy settle
-     hold. Retire it with the controller storage below.
+   - The `cluster_pin` row keeps frozen legacy values that nothing reads.
+     Retire it with the controller storage below.
 
 ## Planned: remove retired controller storage
 
@@ -225,7 +228,7 @@ admitted operator CLI consumes the gateway login. Bootstrap serves no database
 credential; a remote agent-runner installs a sealed, unit-bound capability the
 gateway operator issues (`ava cluster db-authority issue-unit`,
 `ava start --db-capability`), carrying the active generation's runner login,
-its API admission and the unit's enrollment secret
+and its API admission
 ([unit capability](../../base/cluster/authority/docs/wiring.ava.okf.md#remote-agent-runner-units)).
 API admission is a generation boundary too: every generation carries one
 machine API token per class; the gateway admits the human secret or the ACTIVE
@@ -262,7 +265,7 @@ alerts remain active; removing an old decision path is not evidence that a
 replacement is complete. A networked cluster has no in-band way to rotate its
 write generation, so a compromised unit or a lost capability bundle is
 contained by the manual procedure in the runbook
-([what a bundle exposes](../../base/cluster/authority/docs/unit-enrollment.ava.okf.md#what-a-bundle-exposes)).
+([what a bundle exposes](../../base/cluster/authority/docs/unit-bundle.ava.okf.md)).
 
 No real-process test runs a gateway with its cluster secret set against a
 runner's real `/ops` and spawns an agent through it. The e2e stack blanks the

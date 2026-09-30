@@ -26,7 +26,7 @@ describes only itself (`base/cluster/record.py`).
 | Command | Function |
 |---------|----------|
 | `status` | this cluster's multi-machine roster |
-| `db-authority issue-unit\|rotate-enrollment\|revoke-enrollment` | gateway only: seal one remote unit's capability bundle (its join, emergencies); replace or delete that unit's enrollment secret ([[base/cluster/authority/docs/wiring.ava.okf.md]]) |
+| `db-authority issue-unit` | gateway only: seal one remote unit's capability bundle (its join, emergencies) ([[base/cluster/authority/docs/wiring.ava.okf.md]]) |
 | `down --path <home>` | stop the cluster at the home, keeping its record + data (safe stop for worktrees) |
 | `destroy --path <home>` | stop, retire its OS jobs and checkout binding, mark the home detached; `--drop-db` deletes pg/redis data too; **refuses `~/.ava` (prod)** |
 | `health-probe` | Observation-only OS job (exit 0/1; wrong-checkout refusal is 2). Every outage episode persists its start in `$AVA_HOME/health_probe_alert`, stays silent through normal recovery, then grades WARNING → ERROR. A live deploy lease pauses explained grading without resetting its start, and disk pressure remains independent. Low agent population remains unhealthy during local maintenance and keeps global alert grading. The probe neither rolls back releases nor publishes known-good state. Provider balance and halted-agent checks remain part of health observation. |
@@ -59,8 +59,8 @@ describes only itself (`base/cluster/record.py`).
   live `deployment_state` lease and explains a refused lease acquire. Its absence
   is not proof no deploy runs — native admission and maintenance holds are
   separate facts. The roster reads the lease row rather than
-  `ops.deploy_window.deploy_in_flight()`, which probes every machine and releases
-  a converged hold.
+  `ops.deploy_window.deploy_in_flight()`, which also reads every machine's posture
+  row.
 
 ## Key dependencies
 

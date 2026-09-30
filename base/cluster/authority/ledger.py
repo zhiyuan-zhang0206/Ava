@@ -365,7 +365,7 @@ def begin_revoke(home: Path, authority: OperationAuthority) -> tuple[Revoked, ..
     """Record the unrevoked generation as revoking; return every revoking entry.
 
     Idempotent: with no unrevoked generation it records nothing. The authority
-    argument is the active operation's capability.
+    argument is the rotation's capability.
     """
     del authority
     with _locked(home):

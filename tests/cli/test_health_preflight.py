@@ -265,17 +265,10 @@ def test_checkout_dirty_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert any("dirty (1 changed file" in w for w in warnings)
 
 
-def test_checkout_clean_is_silent_off_a_frozen_legacy_pin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A clean checkout whose HEAD differs from the historical cluster pin warns
-    nothing: no current writer advances that pin, so comparing against it (and
-    telling the operator to run a bare `ava cluster update`) is a stale verdict."""
-    ctx, _head, first = _git_repo(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        "base.deploy.state.cluster_pin.get_cluster_target_sha",
-        lambda **_kw: first,  # pyright: ignore[reportUnknownArgumentType]
-    )
+def test_checkout_clean_is_silent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A clean checkout at any commit warns nothing: there is no cluster target
+    commit to compare its HEAD against."""
+    ctx, _head, _first = _git_repo(tmp_path, monkeypatch)
 
     assert _hp._checkout_warnings(ctx) == []
 

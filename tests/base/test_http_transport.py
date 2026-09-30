@@ -31,7 +31,6 @@ class Deny(importlib.abc.MetaPathFinder):
             raise AssertionError(fullname)
 sys.meta_path.insert(0, Deny())
 import base.daemon.http_transport
-import base.deploy.writers.observation
 print('TRANSPORT_ONLY')
 """,
             str(root),

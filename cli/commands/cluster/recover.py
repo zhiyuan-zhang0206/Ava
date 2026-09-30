@@ -4,9 +4,9 @@ A deploy lease or a paused host posture can outlive the process that took it.
 This verb runs `ops.cluster.cluster_recover_op` in-process, so it needs only
 the data plane, not the gateway HTTP API that is often down in the same incident.
 
-The op clears nothing while any owner may still act: it refuses on an unresolved
-updater handoff, on a deploy-lease holder whose process is still running
-(pid-probed when the holder is this host), and on this host's live updater lease.
+The op clears nothing while any owner may still act: it refuses on a deploy-lease
+holder whose process is still running (pid-probed when the holder is this host),
+and on this host's live updater lease.
 Only then does it claim the stale lease by compare-and-set, unpause this host and
 release the lease.
 

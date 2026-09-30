@@ -66,7 +66,8 @@ class BirthAuthority:
 
 @dataclass(frozen=True)
 class OperationAuthority:
-    """Granted by the home's active finite operation under its operation lock."""
+    """Presented by the operator rotating the write generation (the runbook's manual
+    procedure), under one operation id."""
 
     operation: UUID
     direction: Direction

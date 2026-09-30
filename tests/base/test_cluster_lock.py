@@ -29,7 +29,6 @@ from base.deploy.state.cluster_lock import (
     claim_recovery_lock,
     holder_process_gone,
     read_update_lease,
-    release_settle_hold,
     release_update_lock,
     renew_update_lock,
     self_holder,
@@ -43,9 +42,9 @@ def _seed_settle_hold(
 ) -> None:
     """Land a settle hold directly, mirroring the write the retired
     `settle_update_lock` (no production caller — removed as dead code) used to
-    perform, so tests of the still-live read side (`release_settle_hold`,
-    `DeployLease.is_settle_hold`/`awaits`, `renew_update_lock`'s settle-hold
-    refusal) do not need that production function to exist."""
+    perform, so tests of the still-live read side (`DeployLease.is_settle_hold`/
+    `awaits`, `renew_update_lock`'s settle-hold refusal) do not need that
+    production function to exist."""
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state "
@@ -172,33 +171,6 @@ def test_expired_lock_with_pending_publication_requires_publication_recovery(
         assert all("durable pending publication refuses the transition" in m for m in refusals)
         assert not any("reclaimed past TTL" in m for m in refusals)
 
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE deployment_state SET phase='settling', "
-                "settle_note='waiting for runner', settle_hosts=ARRAY['runner'], "
-                "settle_started_at=now() WHERE id=1"
-            )
-        db_conn.commit()
-        before = db_conn.execute(
-            "SELECT holder, phase, settle_note, settle_hosts, "
-            "settle_started_at IS NOT NULL, managed_writer_evidence->'pending' "
-            "FROM deployment_state WHERE id=1"
-        ).fetchone()
-        assert before is not None
-        assert before[:4] == (
-            "gateway:pid123",
-            "settling",
-            "waiting for runner",
-            ["runner"],
-        )
-        assert before[4] is True
-        assert release_settle_hold("gateway:pid123") is False
-        after = db_conn.execute(
-            "SELECT holder, phase, settle_note, settle_hosts, "
-            "settle_started_at IS NOT NULL, managed_writer_evidence->'pending' "
-            "FROM deployment_state WHERE id=1"
-        ).fetchone()
-        assert after == before
     finally:
         with db_conn.cursor() as cur:
             cur.execute(
@@ -577,37 +549,6 @@ def test_release_returns_to_stable_and_clears_kind() -> None:
         assert phase == "stable"
         assert kind is None
         assert holder is None
-
-
-def test_release_settle_hold_returns_to_stable(db_conn: psycopg.Connection) -> None:
-    assert acquire_update_lock("A") is True
-    _seed_settle_hold(db_conn, "A", ["wsl"])
-    assert release_settle_hold("A") is True
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT phase, settle_hosts, settle_started_at FROM deployment_state WHERE id=1"
-        )
-        phase, hosts, settle_started_at = cur.fetchone()  # type: ignore[misc]
-        assert phase == "stable"
-        assert hosts is None
-        assert settle_started_at is None  # the telemetry anchor clears with the hold
-
-
-def test_release_settle_hold_refuses_a_plain_executing_lease() -> None:
-    """Behavioral pin for the `settle_hosts IS NOT NULL` scope (the 6479 battery's
-    C1 mutant — the source-substring guard in tests/cli/test_deploy_mutex.py cannot
-    bite a predicate change). A plain lease is an orchestration actively executing:
-    the early release must not unlock it, and the row must stay as acquired."""
-    assert acquire_update_lock("A", kind="rollout") is True
-
-    assert release_settle_hold("A") is False
-
-    lease = read_update_lease()
-    assert lease is not None
-    assert lease.holder == "A"
-    assert lease.kind == "rollout"
-    assert lease.settle_hosts is None
-    assert update_lock_holder() == "A"
 
 
 def test_read_lease_carries_kind(db_conn: psycopg.Connection) -> None:

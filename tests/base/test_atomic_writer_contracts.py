@@ -16,22 +16,11 @@ from base.agents.messages import delivery_outbox
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
 from base.deploy.maintenance import pause_owner
 from base.deploy.release import editable_install
-from base.deploy.updater import handoff
 from base.host import atomic_io
 from base.sessions import coding_session_owner_record
 from base.sessions.pty import allocation_freeze
 from cli.commands.observability import grafana_render, observatory_urls, otel_collector
 from ops import pty_close_notices
-from tests.base.test_handoff import (
-    _isolated as _isolated,
-)
-from tests.base.test_handoff import (
-    _isolated_attempts as _isolated_attempts,
-)
-from tests.base.test_handoff import (
-    _normal_journal,
-    _retained_bootstrap,
-)
 
 _START_GENERATION = "00000000-0000-4000-8000-000000000001"
 
@@ -363,17 +352,3 @@ def test_atomic_pointer_replacement_restores_read_only_mode(tmp_path: Path) -> N
 
     assert path.read_text() == "new"
     assert stat.S_IMODE(path.stat().st_mode) == 0o444
-
-
-# ── the #4117 S5 flip: INJ-14 half-completed unlink (relocated under the 800-line ceiling) ──
-
-
-def test_clear_completes_across_a_half_completed_unlink() -> None:
-    """INJ-14: a crash between the two unlinks must not strand the state file."""
-    _retained_bootstrap(
-        "candidate_ready", normal_release_planned=True, normal=_normal_journal("committed")
-    )
-    handoff.bootstrap_state_path().unlink()
-    assert handoff.clear("bootstrap")
-    assert not handoff.state_path().exists()
-    assert not handoff.clear("bootstrap")
