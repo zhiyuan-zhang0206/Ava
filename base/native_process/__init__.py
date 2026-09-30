@@ -4,7 +4,8 @@ Everything a process can know about itself without Settings, a database read,
 or a session backend: OS platform flags (`os_platform`), native birth facts
 (PID plus kernel start ticks in an explicit boot scope), the commit a
 *running* process actually loaded (`loaded_commit`, as opposed to what the
-checkout is at right now), turn- and incarnation-scoped agent identity
+checkout is at right now) and the ordered code version derived from it
+(`code_version`), turn- and incarnation-scoped agent identity
 (`turn_identity`, `runtime_incarnation`), one bounded POSIX command's process
 group (`posix_command`, `group_closure`) and its Windows Job Object
 equivalent (`winjob*`), managed-exec-domain ownership without the agent graph

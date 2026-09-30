@@ -22,7 +22,8 @@ from base.config import settings
 from base.db import connections
 from base.events.live.redis_listener import RedisInboundListener
 from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
-from base.telemetry import Event
+from base.native_process import code_version
+from base.telemetry import Event, process_name
 
 
 def test_connect_refuses_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,11 +49,13 @@ def test_async_pool_refuses_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch)
 def test_async_pool_fixes_the_transport_posture(monkeypatch: pytest.MonkeyPatch) -> None:
     """The async pool carries `pool()`'s posture: autocommit, no prepared
     statements, keepalives, the configured sslmode when the URL is silent, and
-    the pooled-session scrub on every borrow. It comes back unopened (the
-    caller's event loop opens it), and the caller's subclass gets its own
-    arguments."""
+    the pooled-session scrub on every borrow, and the process/version name
+    PgBouncer shows. It comes back unopened (the caller's event loop opens it),
+    and the caller's subclass gets its own arguments."""
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u@127.0.0.1:1/x")
     monkeypatch.setattr(settings.data_plane, "db_sslmode", "require")
+    monkeypatch.setattr(code_version, "get", lambda: 7)
+    monkeypatch.setattr(code_version, "db_gate_applies", lambda: True)
     captured: dict[str, object] = {}
 
     class _FakePool:
@@ -70,6 +73,7 @@ def test_async_pool_fixes_the_transport_posture(monkeypatch: pytest.MonkeyPatch)
             "autocommit": True,
             "prepare_threshold": None,
             "sslmode": "require",
+            "application_name": f"ava:{process_name()}:v7",
             **db.PG_KEEPALIVE_KWARGS,
         },
         "check": connections._restore_pooled_session_async,

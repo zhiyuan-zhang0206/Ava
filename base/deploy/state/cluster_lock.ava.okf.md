@@ -27,6 +27,10 @@ does not remove these SQL guards.
   TTL let `ops.deploy_window` clear a converged settle hold without releasing an
   executing operation's lease.
 
+`deployment_state.min_code_version` is the same singleton row's other job and no
+part of the lease: the lowest code version allowed to write, raised at every
+gateway start ([[base/db/code-version-gate.ava.okf.md|code version gate]]).
+
 ## Dependencies and cutover
 
 `base/deploy/progress_timeout.py` supplies the retained no-progress bound;

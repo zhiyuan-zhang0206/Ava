@@ -15,6 +15,7 @@ import uvicorn
 from base.cluster.machine import is_gateway
 from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import settings
+from base.db.code_version_gate import raise_min_code_version
 from base.deploy.schema.migrations import assert_schema_current
 from base.log import init_gateway_process
 from base.native_process.os_platform import raise_fd_limit
@@ -48,6 +49,13 @@ def main() -> None:
     raise_fd_limit(65536)
 
     init_gateway_process()
+
+    # Raise the cluster's minimum code version to this gateway's own: a process
+    # left running older code (a runner offline during the update) then refuses
+    # to write. After the schema assertion and the logger init, so a refusal or
+    # a failure is logged; a runner's local gateway holds no write on the row.
+    if is_gateway():
+        raise_min_code_version()
 
     # Thread dump on SIGUSR1: the watchdog's gateway healthcheck sends this
     # before respawning a frozen gateway, so a stall lands a stack trace in

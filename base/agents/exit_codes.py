@@ -37,3 +37,10 @@ RESTART_DECLINED_EXIT_CODE = 3
 # decline branch would leave a half-down host untouched; the correct response to
 # this code is the idempotent `ava start`.
 SERVICES_NOT_READY_EXIT_CODE = 4
+
+# A service process found the cluster's `deployment_state.min_code_version` above
+# its own code version and exited at once (`base.db.code_version_gate`): it is
+# stale code that must not write. Its own code so an operator reading a unit's
+# last exit tells "refused by the gate, update this host" apart from a crash. It
+# is neither 3 (the host is still serving) nor 4 (the start sequence completed).
+CODE_BEHIND_MINIMUM_EXIT_CODE = 78

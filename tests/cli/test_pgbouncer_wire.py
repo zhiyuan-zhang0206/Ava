@@ -655,3 +655,33 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
             assert row[4] is False
         finally:
             pool.close()
+
+
+def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pooled `base.db.connect()` whose borrow also reads the cluster's minimum
+    code version (the restore's combined statement) still bounds the backend, and
+    the pooler's own client list names the connection `ava:<process>:v<version>`:
+    the observability half of the code-version gate."""
+    from base import config
+    from base.db import code_version_gate as gate
+    from base.native_process import code_version
+    from base.telemetry import process_name
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+        monkeypatch.setattr(code_version, "_version", 4321)
+        monkeypatch.setattr(code_version, "_db_gate_exempt", False)
+        monkeypatch.setattr(gate, "_last_read_at", None)  # the minimum is read on this dial
+
+        import base.db
+
+        with base.db.connect() as conn:
+            assert gate.min_read_due() is False  # the dial did read it
+            assert _statement_timeout(conn) == "1min"
+            with psycopg.connect(_admin_console_url(pooled), autocommit=True) as console:
+                cursor = console.execute("SHOW CLIENTS")
+                columns = [column.name for column in cursor.description or ()]
+                names = {row[columns.index("application_name")] for row in cursor.fetchall()}
+    assert f"ava:{process_name()}:v4321" in names

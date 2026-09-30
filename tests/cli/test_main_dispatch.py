@@ -11,6 +11,7 @@ to record routing without invoking real cmd_start / cmd_cluster_status / etc.
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from typing import cast
 
 import pytest
 
+from base.native_process import code_version
 from cli import main as _main
 from cli.parsers import agents as _agents
 from cli.parsers import build_parser
@@ -744,3 +746,37 @@ assert 'base.config' not in sys.modules
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_main_declares_the_cli_exempt_from_the_database_code_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ava stop` writes to the database to drain agents, so a host left on stale
+    code must still be able to run it: the CLI entry point exempts itself first."""
+    monkeypatch.setattr(code_version, "_db_gate_exempt", False)
+    with pytest.raises(SystemExit):
+        _main.main(["--help"])
+    assert code_version.db_gate_applies() is False
+
+
+def test_only_the_cli_entry_point_declares_the_database_gate_exemption() -> None:
+    """A service that declared it would be the writer the gate exists to stop,
+    running unchecked. Services start with `python -m <module>`, never through here."""
+    root = Path(__file__).resolve().parents[2]
+    skipped = {"tests", "ui", "docs", "node_modules", "assets", "demos"}
+    callers: set[str] = set()
+    for top in sorted(root.iterdir()):
+        if top.name.startswith(".") or top.name in skipped or not top.is_dir():
+            continue
+        for path in sorted(top.rglob("*.py")):
+            text = path.read_text()
+            if "exempt_from_db_gate" not in text:
+                continue
+            for node in ast.walk(ast.parse(text)):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "exempt_from_db_gate"
+                ):
+                    callers.add(path.relative_to(root).as_posix())
+    assert callers == {"cli/main.py"}
