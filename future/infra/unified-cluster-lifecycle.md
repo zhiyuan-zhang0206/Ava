@@ -72,8 +72,12 @@ retired-storage cleanup.
      cluster-restart or hold-recovery session may still be alive there. No
      current code spawns such a session, so recovery no longer probes for one:
      a legacy session is invisible to it until it takes its database lease. The
-     remaining guards (updater handoff, deploy-lease holder PID probe, host
-     updater lease, maintenance admission) cover every current owner.
+     remaining guards (deploy-lease holder PID probe, host updater lease,
+     maintenance admission) cover every current owner.
+   - `$AVA_HOME/run/updater-handoff.json`, `updater-handoff.lock`,
+     `updater-bootstrap-recovery.json` and `updater-spawn/` have no reader or
+     writer: recovery no longer refuses on them. Delete them in the cutover
+     record.
    - `$AVA_HOME/deploy-state.json`, the retired updater's Gate marker, has no
      reader or writer; Gate never renders an update page. Delete it in the
      cutover record.

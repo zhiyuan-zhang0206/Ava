@@ -1,6 +1,5 @@
 {
   "complexity": {
-    "ops/cluster.py::cluster_recover_op": 16,
     "ops/host_config.py::config_write_op": 24
   }
 }
