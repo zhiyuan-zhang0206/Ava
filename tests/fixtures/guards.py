@@ -314,8 +314,8 @@ def _guard_process_exec(monkeypatch: pytest.MonkeyPatch) -> None:
     dedicated `__main__` that runs in a subprocess (`base._reparent`,
     `services.browser.daemon`, `services.milvus.daemon`) or a CLI re-exec. Tests
     that assert an exec *would* have happened patch `os.exec*` themselves
-    inside the test body (`tests/lifecycle/transition/test_pitr_execution.py`)
-    — last-write-wins over this default, restored LIFO at teardown.
+    inside the test body — last-write-wins over this default, restored LIFO at
+    teardown.
 
     `os._exit` is deliberately NOT guarded: it is the correct call in a forked
     child (`base._reparent`), and hijacking it there would resurrect a pytest
