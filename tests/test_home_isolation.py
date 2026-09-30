@@ -1,16 +1,16 @@
 """The test process must never hold the operator's real home or credentials.
 
-`tests/conftest.py` redirects AVA_HOME to a tmpfs dir *before* the first project
+`tests/fixtures/env_bootstrap.py` redirects AVA_HOME to a tmpfs dir *before* the first project
 import, because `base.host.env.dotenv_boot` binds `AVA_ENV_PATH` once at import time and
 `_enforce_cluster_env_authority()` then force-assigns every `derived_env_keys()`
 entry from whatever `.env` that path resolved to. Get the ordering wrong and the
 suite silently runs against `~/.ava` — production cluster secret, db/redis URLs
 and gateway URL all live in the test process.
 
-The conftest assertion catches the specific mistake of importing a project module
+The env_bootstrap assertion catches the specific mistake of importing a project module
 too early. These tests catch the *outcome* regardless of mechanism, so a future
 change that reintroduces the leak by some other route (a plugin that imports
-early, a new `.env` reader, a pytest plugin loaded ahead of conftest) still fails
+early, a new `.env` reader, a pytest plugin loaded ahead of env_bootstrap) still fails
 loudly. Both halves matter: the assertion says "you broke the rule", these say
 "the rule stopped being true".
 
@@ -41,6 +41,8 @@ import importlib
 import os
 from collections.abc import Mapping
 from pathlib import Path
+
+import pytest
 
 import base.host.env.dotenv_boot
 
@@ -83,7 +85,7 @@ def test_env_path_is_not_the_operators_real_dotenv() -> None:
     bound = Path(base.host.env.dotenv_boot.AVA_ENV_PATH)
     assert bound != _real_home_env(), (
         f"base.host.env.dotenv_boot.AVA_ENV_PATH is the operator's real .env ({bound}). "
-        "AVA_HOME was set too late — see the env block at the top of tests/conftest.py."
+        "AVA_HOME was set too late — see the env block at the top of tests/fixtures/env_bootstrap.py."
     )
     assert bound.parent == Path(os.environ["AVA_HOME"])
 
@@ -94,7 +96,7 @@ def test_cluster_secret_is_the_test_secret_not_the_real_one() -> None:
     `AVA_CLUSTER_SECRET` is in `derived_env_keys()`, which
     `_enforce_cluster_env_authority()` assigns unconditionally (`os.environ[key] =
     val`) — so a real `.env` on the resolved path does not merely win a tie, it
-    overwrites the value conftest set moments earlier.
+    overwrites the value env_bootstrap set moments earlier.
     """
     assert os.environ["AVA_CLUSTER_SECRET"] == "test-cluster-secret"  # noqa: S105 — the fixture value
 
@@ -119,10 +121,37 @@ def test_config_fetch_is_skipped() -> None:
     would call `inject_config_from_gateway()` and make a real authenticated GET
     to whatever gateway URL leaked into the env — at import, before any fixture
     exists, so the autouse `_guard_bootstrap_fetch` cannot reach it. The suite
-    pins AVA_CONFIG_FETCH=skip in the conftest env block; asserting it here is
+    pins AVA_CONFIG_FETCH=skip in the env_bootstrap env block; asserting it here is
     the guard that the pin stays.
     """
     assert os.environ.get("AVA_CONFIG_FETCH") == "skip"
+
+
+def test_the_native_root_conftest_defers_to_the_repo_root_conftest(
+    pytestconfig: pytest.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`tests/lifecycle/native_root/conftest.py` rewrites os.environ when it is
+    registered, unless it finds the repo-root conftest already registered.
+
+    It finds it by path, so moving or renaming the root conftest silently turns the
+    rewrite on for every run that collects `tests/` (the hook fires while the tree is
+    collected, before any test): AVA_HOME becomes a throwaway dir while the settings
+    singleton keeps the session home, and every test that reads one and spawns a child
+    that reads the other disagrees with itself (pty sessions the test cannot list, a
+    gateway `.env` that does not exist). Run against a private copy of the environment
+    so a regression here reports itself without leaking into the tests that follow.
+    """
+    native_root = importlib.import_module("tests.lifecycle.native_root.conftest")
+    repo_conftest = Path(native_root.__file__ or "").parents[3] / "conftest.py"
+    assert repo_conftest.is_file()
+    assert pytestconfig.pluginmanager.get_plugin(str(repo_conftest)) is not None
+
+    before = dict(os.environ)
+    private_env = dict(before)
+    monkeypatch.setattr(os, "environ", private_env)
+    native_root.pytest_configure(pytestconfig)
+
+    assert private_env == before, "native_root's configure hook rewrote the environment"
 
 
 def test_the_e2e_env_fixture_tears_down_when_pytest_leaves_its_package() -> None:
@@ -228,7 +257,7 @@ def test_no_e2e_value_for_a_restored_key_survives_into_this_file(
     — that is the correct behavior, not a gap, because the two order-independent tests
     above cover that job.
 
-    Baseline is `pristine_env` from the root conftest rather than literal expected
+    Baseline is `pristine_env` from env_bootstrap rather than literal expected
     values: the assertion then holds for keys added to `_env_keys` later without this
     test being edited, and it names the actual divergence instead of a guess at one.
     """

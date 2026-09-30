@@ -346,7 +346,7 @@ turn their work into an accidental fake.
 
 Pre-existing aliases that cannot be converted away — a facade's own re-exports, and
 consumers that from-import from it at module top level — are what
-`tests/conftest.py`'s `_stub_everywhere` is for. The two mechanisms do not overlap:
+`tests/fixtures/guards.py`'s `_stub_everywhere` is for. The two mechanisms do not overlap:
 this rule prevents new frozen aliases, that helper reaches the ones already frozen.
 
 ## Role-scope check for per-machine surfaces

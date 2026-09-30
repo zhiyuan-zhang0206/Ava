@@ -42,12 +42,12 @@ def native_env(tmp_path: Path) -> dict[str, str]:
 
 def pytest_configure(config: pytest.Config) -> None:
     # Before any Ava import, for native CI that selects only this folder with
-    # --confcutdir and so runs without the repo conftest. When the repo conftest
-    # is loaded it already isolates the whole session; this hook runs before
-    # every collected test, so rewriting os.environ here would leak into every
-    # other directory (its home, data plane and host state) in a combined run.
-    # pytest registers parent conftests first, keyed by their path.
-    repo_conftest = Path(__file__).parents[2] / "conftest.py"
+    # --confcutdir and so runs without the repo-root conftest. When that
+    # conftest is loaded it already isolates the whole session; this hook runs
+    # before every collected test, so rewriting os.environ here would leak into
+    # every other directory (its home, data plane and host state) in a combined
+    # run. pytest registers parent conftests first, keyed by their path.
+    repo_conftest = Path(__file__).parents[3] / "conftest.py"
     if config.pluginmanager.get_plugin(str(repo_conftest)) is not None:
         return
     # Do not trust a caller's existing AVA_HOME_OVERRIDE as test isolation.

@@ -35,7 +35,7 @@ tests/
 ├── factories/             # Test data factories (to be created)
 │   ├── messages.py
 │   └── state.py
-└── conftest.py            # Global fixtures (DB/Redis isolation)
+└── fixtures/              # Global fixture plugins (DB/Redis isolation, guards), loaded by the repo-root conftest.py
 ```
 
 ### Directory Mapping
@@ -168,7 +168,9 @@ bot-PR pattern for manual refreshes too.
 
 ## Host isolation: what a test run may touch
 
-`tests/conftest.py` redirects every host resource the suite could otherwise
+The repo-root `conftest.py` loads the suite's global fixtures as plugins from `tests/fixtures/`
+(`env_bootstrap.py` first, then `provisioning.py`, `guards.py`, ...), so they apply to every test in the
+repository. Together they redirect every host resource the suite could otherwise
 share with the operator's live cluster: `$AVA_HOME` (tmpfs), the database and
 Redis (throwaway per-worker instances), the host state dir, every daemon health
 port, and the session home. Each of those works because the resource is addressed
@@ -182,7 +184,7 @@ So the suite does not redirect it — it
 refuses to write to it at all, via `AVA_OS_JOBS_ENABLED=false`
 (`base.host.system.cron.os_jobs_enabled` gates all four registrars; the unregister paths
 stay live). `pytest_sessionfinish` then diffs the host's Ava jobs against a
-snapshot taken at conftest import and fails the run on anything new, removing the
+snapshot taken when the provisioning plugin is imported and fails the run on anything new, removing the
 jobs that name this suite's own homes and reporting anything else.
 
 Adding a new registrar, or a new subprocess that could reach one, means checking
@@ -197,11 +199,11 @@ tests that follow it: everything collected after its directory, in the same proc
 keeps running with the layered values. Enforced by
 `scripts/lint/fixture_scope.py` (hook `lint-fixture-scope`), two rules:
 
-1. **`scope="session"` outside `tests/conftest.py` may not mutate a process global**
-   (`os.environ`, a `settings` field, a module global). The root conftest is the one
-   exemption — there, "the session" and "my directory" are the same blast radius,
+1. **`scope="session"` outside `tests/fixtures/provisioning.py` may not mutate a process global**
+   (`os.environ`, a `settings` field, a module global). That plugin is the one
+   exemption — the repo-root conftest loads it once per process, so "the session" and "my directory" are the same blast radius,
    which is why `_provisioned_db` may set `AVA_DB_URL` and never put it back. Deeper
-   than that, narrow the scope or hoist the value up to the root conftest. A session
+   than that, narrow the scope or hoist the value up to `tests/fixtures/provisioning.py`. A session
    fixture that owns only an expensive resource (`playwright_browser`,
    `frontend_proc`) and hands it back through the return value is fine and is not
    flagged.

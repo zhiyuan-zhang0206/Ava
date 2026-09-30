@@ -49,7 +49,7 @@ def _make_idling_agent(db: psycopg.Connection) -> int:
     is the spawn path's job); the alert filter reads owner status, so tests
     spawn then park the agent 'idling' (same pattern as the heartbeat daemon
     tests)."""
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     aid = spawn_agent(spawner="user")
     with db.cursor() as cur:
@@ -59,7 +59,7 @@ def _make_idling_agent(db: psycopg.Connection) -> int:
 
 
 def _make_running_agent(db: psycopg.Connection) -> int:
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     aid = spawn_agent(spawner="user")
     with db.cursor() as cur:
@@ -749,7 +749,7 @@ class TestSelectPendingIds:
 
 
 def _make_terminated_agent(db: psycopg.Connection) -> int:
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     aid = spawn_agent(spawner="user")
     with db.cursor() as cur:
@@ -2094,7 +2094,7 @@ def _make_crash_marked_agent(db: psycopg.Connection) -> int:
     """An idling row with the corpse marker set — the corpse reaper's own
     predicate (`last_turn_fatal_at IS NOT NULL` on an idling row).
     spawn_agent leaves the marker NULL, so the scenario stamps it."""
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
 
     aid = spawn_agent(spawner="user")
     with db.cursor() as cur:

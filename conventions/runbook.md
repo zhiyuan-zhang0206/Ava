@@ -290,7 +290,7 @@ identical no matter where a bare script is launched. Precedence:
    any checkout; every verb that acts on "this checkout's cluster" (`start`,
    `stop`, `restart`, `converge`, `config` writes, service launches)
    refuses and points at `ava start --worktree`. `pytest` is unaffected:
-   `tests/conftest.py` sets its own `AVA_HOME` before import.
+   `tests/fixtures/env_bootstrap.py` sets its own `AVA_HOME` before import.
 
 Rule 1 only outranks rules 2-3 while they agree. When `AVA_HOME` names one home
 and the checkout claims another, resolution **refuses** with
@@ -1342,7 +1342,7 @@ load-bearing:
   next external converge apply any pending spec change.
 - **`AVA_OS_JOBS_ENABLED=false` disables registration for a process.** The
   scheduler is one namespace per OS user, so a test-scoped `$AVA_HOME` cannot
-  isolate it — the pytest suite sets this and `tests/conftest.py` fails any run
+  isolate it — the pytest suite sets this and `tests/fixtures/provisioning.py` fails any run
   that leaves a job behind. Deregistration is never gated. Operators do not set
   this: a prod cluster with it off silently loses its health probe, its watchdog
   probes, daily log maintenance, and its ability to come back after a reboot.

@@ -246,7 +246,7 @@ class TestSpawnPrechecksBlocking:
 async def test_restart_agent_op_terminated_short_circuits(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from tests.conftest import spawn_agent
+    from tests.fixtures.units import spawn_agent
     from tests.gateway.test_agents_internals import _test_pool
 
     agent_id = spawn_agent()

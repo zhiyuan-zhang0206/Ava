@@ -1,6 +1,6 @@
 """Host OS-scheduled job inventory — the eyes of the session-level leak guard.
 
-`tests/conftest.py` snapshots this at import and re-reads it in
+`tests/fixtures/provisioning.py` snapshots this at import and re-reads it in
 `pytest_sessionfinish`: anything that appeared in between is a job some test
 handed to the platform scheduler and left running on the developer's machine.
 
@@ -74,7 +74,7 @@ def host_ava_os_jobs() -> frozenset[str]:
 
 
 # Basenames of the two throwaway homes a pytest session creates — the tmpfs home
-# in `tests/conftest.py` and the per-session e2e home in `tests/e2e/conftest.py`.
+# in `tests/fixtures/env_bootstrap.py` and the per-session e2e home in `tests/e2e/conftest.py`.
 # Every job id carries the home slug (launchd label / the
 # crontab line's marker), so a substring test identifies a job this suite owns.
 _TEST_HOME_PREFIXES = ("ava_test_home_", "ava_e2e_home_")

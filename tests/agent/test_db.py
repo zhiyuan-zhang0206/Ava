@@ -23,7 +23,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import db as agent_db
 from base.db import agent_exists, create_agent, list_agents
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 # Redis pub/sub wake-latency discrimination, used by the tests that prove a wake
 # rode a real publish, not the defensive SELECT-recheck fallback. `wait_one`

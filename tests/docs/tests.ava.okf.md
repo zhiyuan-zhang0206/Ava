@@ -52,7 +52,7 @@ suite and the post-deploy visual gate consume it so their definitions cannot dri
   lint script tests also live at `tests/` root `test_lint_*.py`
 - `tests/ui/` — deterministic tests for applying the shell's Kotlin/XML/signing overlay to Tauri's generated Android project
 - `tests/plugins/` — plugin tests (`test_ava_memory_lint.py` / `test_ava_memory_notes.py` for the ava_memory plugin, `ava_fleet/` subtree)
-- `tests/fixtures/` + `tests/factories/` — test fixture data and data factories
+- `tests/fixtures/` — the suite's global fixture plugins (see "Global fixtures" below) plus event fixture data; `tests/factories/` — data factories
 
 - `tests/scripts/test_test_selector.py` — synthetic-checkout contracts for
   the static PR test selector, including queue, blind-file, duration, and
@@ -61,17 +61,9 @@ suite and the post-deploy visual gate consume it so their definitions cannot dri
   test-selection routing: the single mode switch, the enforced-subset gate,
   the shadow fallback, and the matching non-flaky pytest comparison
 
-### Global fixture (`conftest.py`, ~70KB)
-- **Per xdist worker / session** a pair of throwaway pg/redis + per-session databases; per-test isolation via autouse TRUNCATE + checkpoint re-setup (**not** a full instance per test)
-- A killed run (Ctrl-C, SIGKILL, an agent dying mid-run) leaks its throwaway **Postgres**, because the detached postmaster outlives an owner that ran no finalizer. It is bounded not by teardown but by a **sweep at the start of the next spin-up**: `base.cluster.dataplane.pg_tools.sweep_orphaned_throwaway_clusters` reaps the instances whose owner is provably gone, proof being an exclusive `flock` the owner held for the instance's whole life on an `owner.lock` inside that instance's own dir (so the proof shares the cluster's exact lifetime, and two UNIX users on one `/dev/shm` never contend for a shared registry). The throwaway **redis** leaks the same way and is not swept (a redis orphan costs RAM, not the System V segment that wedges the box)
+### Global fixtures (repo-root `conftest.py` → `tests/fixtures/` plugins)
+- The repo-root `conftest.py` holds only `pytest_plugins`; the suite's global fixtures, host guards and session hooks are plugin modules in `tests/fixtures/`, so they apply to every test file in the repository rather than only the `tests/` tree. Plugin roster, load order and the isolation invariants: [[test-fixtures.ava.okf.md]]
 - Standalone `conftest.py` only in 6 subdirectories: `agent` / `ava` / `cli` / `gateway` / `integration` / `e2e` (**not** "each module")
-- **The env block at the top of `conftest.py` must stay above every project import.** `base.host.env.dotenv_boot` resolves the home once at import and binds `AVA_ENV_PATH` from it, so AVA_HOME set after that import has no effect on it — the suite then boots from the checkout's own home (on the prod source checkout, the operator's real `~/.ava/.env`), and `_enforce_cluster_env_authority()` force-assigns the production cluster secret / db / redis / gateway URL over the sentinels conftest just set. `_assert_env_precedes_project_imports()` fails the run if a project module was imported early; `tests/test_home_isolation.py` asserts the outcome independently of mechanism
-- A family of autouse **host-resource guards** makes "don't touch the host" the
-  default: agent launch, permissions-helper native effects, OS cron, warm-up and
-  `os.exec*`. Tests of those boundaries explicitly supply their own doubles or
-  opt into an isolated native proof with owned cleanup. The `os.exec*` guard
-  protects the test runner itself from process replacement.
-- Plugin registrations (sections, namespaces, state fields) reset together after any test that loaded them: autouse guard in `tests/fixtures/plugin_registrations.py`, wired via `pytest_plugins`
 
 ### CI integration
 - `.github/workflows/` — GitHub Actions runs the full suite automatically
@@ -96,5 +88,5 @@ suite and the post-deploy visual gate consume it so their definitions cannot dri
 
 - **Test strategy**: commit fast + CI full. Locally only run relevant tests, CI is the merge gate
 - **Isolation**: each test gets isolated DB/Redis, avoiding parallel conflicts
-- **Do not** run the full suite locally — Mac mini resources are limited (conftest header docstring specifically designed for concurrency isolation: per-session database names + random free ports + Redis channel suffixes, **concurrent sessions will not conflict**, just resource-intensive)
+- **Do not** run the full suite locally — Mac mini resources are limited (the `provisioning` and `env_bootstrap` plugins are designed for concurrency isolation: per-session database names + random free ports + Redis channel suffixes, **concurrent sessions will not conflict**, just resource-intensive)
 - `tests/test_agent_error_wire_equivalence.py` parametrized verification of agent ↔ gateway error wire protocol consistency

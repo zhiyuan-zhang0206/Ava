@@ -12,7 +12,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 import ava
 from base.agents.lifecycle import SystemHalt
 from base.events.live import redis_client
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 
 class _BoomSyncClient:

@@ -2,7 +2,7 @@
 lifecycle pair).
 
 Uses the native session DB (settings.data_plane.db_url, provisioned by
-_provisioned_db in tests/conftest.py). The admin URL is derived by replacing
+_provisioned_db in tests/fixtures/provisioning.py). The admin URL is derived by replacing
 the database path component with 'postgres', matching the pattern used in
 tests/ava/test_migrations.py.
 """

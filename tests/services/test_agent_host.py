@@ -650,7 +650,7 @@ class TestConcurrentAgentIsolation:
         pass by running to completion before the other starts — which is exactly
         how a process-per-agent assumption would sneak through.
         """
-        # Ids 11/22, never 1: tests/conftest.py pins the session-global process
+        # Ids 11/22, never 1: tests/fixtures/env_bootstrap.py pins the session-global process
         # slot `ava.agent_identity._agent_id = 1` as a placeholder, so an agent numbered 1
         # would read back correctly even if the turn bind did nothing at all.
         rows = {
@@ -691,7 +691,7 @@ class TestConcurrentAgentIsolation:
 
         Asserted on the turn contextvar rather than `ava.agent_identity.agent_id()`,
         because that read legitimately falls through to the process bootstrap
-        slot — which tests/conftest.py pins to 1 for the whole session, and which
+        slot — which tests/fixtures/env_bootstrap.py pins to 1 for the whole session, and which
         the real host never sets at all (it never calls `establish`).
         """
         from base.native_process.turn_identity import current_turn_agent_id

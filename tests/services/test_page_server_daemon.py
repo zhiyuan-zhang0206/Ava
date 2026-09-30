@@ -18,7 +18,7 @@ from psycopg_pool import ConnectionPool
 import services.page_server.daemon as psd
 import services.page_server.degradation as page_degradation
 from base.cluster.machine import reset_identity, set_identity
-from tests.conftest import spawn_agent
+from tests.fixtures.units import spawn_agent
 
 _HOST = "127.0.0.1"
 

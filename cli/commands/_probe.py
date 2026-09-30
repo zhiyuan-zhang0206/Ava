@@ -177,7 +177,7 @@ class ReadinessWait(NamedTuple):
     unready: tuple[ServiceSpec, ...]
     elapsed_s: float
     sessions_gone: bool
-    # Defaulted so existing constructions (tests/conftest.py's guard included)
+    # Defaulted so existing constructions (tests/fixtures/guards.py's guard included)
     # keep meaning "nothing non-critical failed".
     non_critical_unready: tuple[ServiceSpec, ...] = ()
 

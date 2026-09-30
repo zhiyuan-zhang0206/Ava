@@ -44,7 +44,7 @@ posture anywhere in this codebase, so there is nothing to opt out of.
 
 Exempt: test code under `tests/`, `test_*.py`, `*_test.py` — pytest fixtures
 that mount a throwaway loguru sink against a captured list have no secret in
-their local frames to leak, and several such sinks in `tests/conftest.py` and
+their local frames to leak, and several such sinks in `tests/fixtures/log_capture.py` and
 elsewhere predate this rule.
 
 Error format `file:line: <message>` + non-zero exit.

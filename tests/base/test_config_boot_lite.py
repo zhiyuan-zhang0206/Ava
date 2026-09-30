@@ -1,7 +1,7 @@
 """Runtime battery for the boot-lite config chain (#3621).
 
 Every test that must observe the DEFAULT boot (a lite process) runs in a
-subprocess: this pytest process boots eager (`tests/conftest.py`). The child
+subprocess: this pytest process boots eager (`tests/fixtures/env_bootstrap.py`). The child
 env is scrubbed of the surrounding process's `AVA_*` projection so each child
 sees the CI-clean environment.
 """
