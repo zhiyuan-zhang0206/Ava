@@ -1,0 +1,276 @@
+"""A package's own `tests/` directory under the structure gate.
+
+Tests live either in the top-level `tests/` or beside the code they prove, in
+`<pkg>/**/tests/`. Every rule that treats `tests/` specially must treat both
+places alike, or the tests that move into a package silently change what the
+gate does to them: budgets, the AST rules, and the rename-carried baseline keys.
+"""
+
+from __future__ import annotations
+
+import ast
+import pathlib
+import subprocess
+
+import pytest
+
+from scripts.lint import code_structure as lcs
+from scripts.structure import baseline_shards, path_imports
+
+_SECTIONS = ("directories", "files", "complexity", "nesting", *lcs._SITE_SECTIONS)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each main() call scans only its own temporary root, with an empty baseline."""
+    monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
+    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
+    _write_baseline(tmp_path, {section: {} for section in _SECTIONS})
+
+
+def _write_baseline(root: pathlib.Path, data: dict[str, dict[str, int]]) -> None:
+    directory = root / baseline_shards.SHARD_DIR
+    if directory.is_dir():
+        for path in directory.glob("*.json"):
+            path.unlink()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
+    for name, shard in baseline_shards.split(data).items():
+        pathlib.Path(f"{directory}/{name}.json").write_text(
+            baseline_shards.render(shard), encoding="utf-8"
+        )
+
+
+def _module(path: pathlib.Path, body: str = "x = 1\n") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+
+
+def _fill(directory: pathlib.Path, count: int) -> None:
+    for index in range(count):
+        _module(directory / f"entry_{index}.py")
+
+
+def _git(root: pathlib.Path, *args: str) -> None:
+    subprocess.run(  # noqa: S603 — fixed test commands, never external input
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Structure gate test",
+            "-c",
+            "user.email=structure-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+# ── budgets ─────────────────────────────────────────────────────────────────
+
+
+def test_tests_layer_takes_no_slot_in_its_parent(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A package already at the 20-entry cap keeps its tests beside the code."""
+    package = tmp_path / "base/pkg"
+    _fill(package, 20)
+    _module(package / "tests/test_pkg.py")
+    assert lcs.main([]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_tests_package_with_init_takes_a_slot(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A `tests` directory with `__init__.py` is a real Python package: budgeted like code."""
+    package = tmp_path / "base/pkg"
+    _fill(package, 20)
+    _module(package / "tests/__init__.py")
+    assert lcs.main([]) == 1
+    assert "base/pkg: directory has 21 direct entries" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("location", ["tests", "base/pkg/tests", "ava_builtins/skills/x/tests"])
+def test_tests_layer_has_no_entry_cap_of_its_own(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], location: str
+) -> None:
+    """The top-level `tests/` and a package's tests are flat by nature: 30 files, no finding."""
+    _fill(tmp_path / location, 30)
+    assert lcs.main([]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_directory_below_a_tests_layer_is_still_capped(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _fill(tmp_path / "base/pkg/tests/area", 21)
+    assert lcs.main([]) == 1
+    assert "base/pkg/tests/area: directory has 21 direct entries" in capsys.readouterr().out
+
+
+def test_tests_package_with_init_keeps_its_own_cap(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _module(tmp_path / "base/pkg/tests/__init__.py")
+    _fill(tmp_path / "base/pkg/tests", 21)
+    assert lcs.main([]) == 1
+    assert "base/pkg/tests: directory has 22 direct entries" in capsys.readouterr().out
+
+
+def test_test_files_keep_the_line_ceiling(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _module(tmp_path / "base/pkg/tests/test_big.py", "x = 1\n" * 801)
+    assert lcs.main([]) == 1
+    assert "base/pkg/tests/test_big.py:801: file is 801 lines" in capsys.readouterr().out
+
+
+# ── AST rules ───────────────────────────────────────────────────────────────
+
+_BREAKS_EVERY_AST_RULE = """\
+import sys
+from typing import TYPE_CHECKING
+
+from base.cluster.machine import machine_role
+from base.other._private import hidden
+
+if TYPE_CHECKING:
+    import decimal
+
+sys.path.insert(0, "/somewhere")
+machine_role()
+hidden()
+"""
+
+
+def _private_owner(root: pathlib.Path) -> None:
+    """A real package with a private module, so Rule 4 has something to reach into."""
+    _module(root / "base/other/__init__.py")
+    _module(root / "base/other/_private.py", "def hidden() -> None: ...\n")
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "base/pkg/tests/test_x.py",
+        "gateway/agents/tests/test_x.py",
+        "ava_builtins/plugins/p/tests/test_x.py",
+    ],
+)
+def test_ast_rules_do_not_govern_a_package_tests_directory(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], location: str
+) -> None:
+    _private_owner(tmp_path)
+    _module(tmp_path / location, _BREAKS_EVERY_AST_RULE)
+    assert lcs.main([]) == 0
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("location", ["base/pkg/mod.py", "ava_builtins/plugins/p/run.py"])
+def test_the_same_source_outside_tests_is_governed(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], location: str
+) -> None:
+    """The control: the exemption is the location, not a weakened rule."""
+    _private_owner(tmp_path)
+    _module(tmp_path / location, _BREAKS_EVERY_AST_RULE)
+    assert lcs.main([]) == 1
+    out = capsys.readouterr().out
+    assert "`if TYPE_CHECKING:` is banned" in out
+    assert "machine_role() may only be called" in out
+    assert "reaches private `base.other._private`" in out  # Rule 4
+
+
+def test_path_import_rule_skips_test_files_at_any_depth() -> None:
+    tree = ast.parse('import sys\nsys.path.insert(0, "/somewhere")\n')
+    assert path_imports.measure(tree, "ava_builtins/skills/gmail/scripts/tests/test_gmail.py") == {}
+    assert path_imports.measure(tree, "ava_builtins/tests/test_goal_watch_filter.py") == {}
+    assert path_imports.measure(tree, "ava_builtins/skills/gmail/scripts/run.py") == {
+        "ava_builtins/skills/gmail/scripts/run.py::sys.path": [2]
+    }
+
+
+# ── frozen baseline keys follow a test into its package ─────────────────────
+
+
+def _freeze_big_test(tmp_path: pathlib.Path, path: str) -> None:
+    """Commit a repo whose baseline freezes one test file: its length and one complexity key."""
+    body = "def f(x):\n" + "    if x: pass\n" * 15 + "    return x\n" + "y = 1\n" * 800
+    _module(tmp_path / path, body)
+    _write_baseline(
+        tmp_path,
+        {
+            "directories": {},
+            "files": {path: 817},
+            "complexity": {f"{path}::f": 16},
+            "nesting": {},
+            "private_imports": {},
+            "owner_bypasses": {},
+            "path_imports": {},
+        },
+    )
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "--quiet", "-m", "Freeze one test file")
+
+
+def test_a_test_moved_into_its_package_carries_its_frozen_keys(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Moving `tests/agent/test_big.py` to `agent/graph/tests/` needs its keys in the same commit."""
+    old, new = "tests/agent/test_big.py", "agent/graph/tests/test_big.py"
+    _freeze_big_test(tmp_path, old)
+    (tmp_path / new).parent.mkdir(parents=True)
+    _git(tmp_path, "mv", old, new)
+
+    assert lcs.main([]) == 1
+    out = capsys.readouterr().out
+    assert f"entry {old} was not migrated after its file moved to {new}" in out
+    assert f"entry {old}::f was not migrated after its file moved to {new}" in out
+
+    _write_baseline(
+        tmp_path,
+        {
+            "directories": {},
+            "files": {new: 817},
+            "complexity": {f"{new}::f": 16},
+            "nesting": {},
+            "private_imports": {},
+            "owner_bypasses": {},
+            "path_imports": {},
+        },
+    )
+    capsys.readouterr()
+    assert lcs.main([]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_a_migrated_key_cannot_grow_at_the_new_location(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The frozen value still caps the moved file: moving it is not a way to raise it."""
+    old, new = "tests/agent/test_big.py", "agent/graph/tests/test_big.py"
+    _freeze_big_test(tmp_path, old)
+    (tmp_path / new).parent.mkdir(parents=True)
+    _git(tmp_path, "mv", old, new)
+    with (tmp_path / new).open("a", encoding="utf-8") as handle:
+        handle.write("z = 1\n" * 5)
+    _write_baseline(
+        tmp_path,
+        {
+            "directories": {},
+            "files": {new: 822},
+            "complexity": {f"{new}::f": 16},
+            "nesting": {},
+            "private_imports": {},
+            "owner_bypasses": {},
+            "path_imports": {},
+        },
+    )
+    assert lcs.main([]) == 1
+    assert f"raised files entry {new} from 817 to 822" in capsys.readouterr().out

@@ -15,7 +15,7 @@ guards are a separate group: [[scripts/content_lint/docs/content_lint.ava.okf.md
 
 ## The linters
 
-- `code_structure.py` + `../../structure/{quality_budget,locality,path_imports,baseline_shards}.py` — 800-line/20-entry/CC/nesting budgets plus locality (package doors, single owners, no `ava_builtins/` path imports; see `python-conventions.md`). The `../../structure/baseline/*.json` shards also freeze the three locality sections as exact `path::target -> site count` maps — growth or shrinkage both fail until edited. CC 10-14 warns; `--complexity-warnings-full` unfolds counts.
+- `code_structure.py` + `../../structure/{quality_budget,locality,path_imports,baseline_shards,directory_budget}.py` — 800-line/20-entry/CC/nesting budgets plus locality (package doors, single owners, no `ava_builtins/` path imports; see `python-conventions.md`). The `../../structure/baseline/*.json` shards also freeze the three locality sections as exact `path::target -> site count` maps — growth or shrinkage both fail until edited. CC 10-14 warns; `--complexity-warnings-full` unfolds counts.
 - `../../lint_pool_keepalives.py` — a psycopg pool in `scripts/` or in a module the `postgres-dial` decision allows must carry `PG_KEEPALIVE_KWARGS` (AST-based, sees through `AsyncConnectionPool[T](...)` subscripts and `LoggingConnectionPool` subclasses); elsewhere Rule 5 already routes every pool through `base.db.pool()` / `async_pool()`. Stays at `scripts/` root, not this directory, pending the Postgres-dial locality work.
 - `no_emoji.py`, `no_os_environ.py`, `no_script_sibling_imports.py` — Python conventions; sibling imports work with PYTHONSAFEPATH=1.
 - Ruff S110 checks lone-pass handlers in production code, including typed exceptions.
