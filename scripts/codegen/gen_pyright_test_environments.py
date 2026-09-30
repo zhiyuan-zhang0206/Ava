@@ -43,7 +43,7 @@ import sys
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -77,10 +77,9 @@ def _covers(root: str, directory: str) -> bool:
 
 def _covering_environment(config: dict[str, Any], directory: str) -> dict[str, Any]:
     """The first `executionEnvironments` entry whose root contains `directory`, else {}."""
-    return next(
-        (env for env in config.get("executionEnvironments", []) if _covers(env["root"], directory)),
-        {},
-    )
+    environments: list[dict[str, Any]] = config.get("executionEnvironments", [])
+    none: dict[str, Any] = {}
+    return next((env for env in environments if _covers(env["root"], directory)), none)
 
 
 def effective_rules(config: dict[str, Any], directory: str) -> dict[str, str]:
@@ -104,8 +103,10 @@ def _toml_value(value: object) -> str:
         return "true" if value else "false"
     if isinstance(value, str):
         return json.dumps(value)
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        return "[" + ", ".join(json.dumps(item) for item in value) + "]"
+    if isinstance(value, list):
+        items = cast("list[object]", value)
+        if all(isinstance(item, str) for item in items):
+            return json.dumps(items)
     raise SystemExit(
         f"cannot repeat a {type(value).__name__} setting in a generated entry: {value!r}"
     )
@@ -168,7 +169,7 @@ def _tracked_python_files(repo_root: Path) -> list[str]:
 
 
 def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     parser.add_argument(
         "--check", action="store_true", help="exit 1 if pyproject.toml is stale; write nothing"
     )
