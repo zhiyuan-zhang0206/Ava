@@ -15,6 +15,27 @@ ensure_provider_plugins_loaded()
 
 
 class TestGpt6Builds:
+    def test_gpt6_1_sol_clamps_disabled_and_none_to_low(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        from langchain_openai import ChatOpenAI
+
+        model = build_chat_model("gpt-6.1-sol")
+        assert isinstance(model, ChatOpenAI)
+        assert model.use_responses_api is True
+        assert model.reasoning == {"effort": "medium", "summary": "auto"}
+
+        model = build_chat_model("gpt-6.1-sol", thinking={"type": "disabled"})
+        assert isinstance(model, ChatOpenAI)
+        assert model.reasoning == {"effort": "low"}
+
+        monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
+        model = build_chat_model("gpt-6.1-sol")
+        assert isinstance(model, ChatOpenAI)
+        assert model.reasoning == {"effort": "low", "summary": "auto"}
+
     def test_gpt6_astra_defaults_to_medium_effort(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """gpt-6-astra builds on the Responses API with the OpenAI default
         effort pinned per model, like the gpt-5.6 tiers."""
@@ -80,6 +101,15 @@ class TestGpt6Builds:
 
 
 class TestClaudeAlwaysOnBuilds:
+    def test_claude_sonnet_5_5_ignores_disabled_thinking(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        llm = build_chat_model("claude-sonnet-5-5", thinking={"type": "disabled"})
+        assert isinstance(llm, ChatAnthropic)
+        assert llm.effort == "high"
+        assert llm.thinking == {"type": "adaptive", "display": "summarized"}
+
     def test_claude_opus_5_5_default_effort_and_thinking(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

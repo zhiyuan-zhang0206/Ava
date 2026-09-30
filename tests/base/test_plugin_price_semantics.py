@@ -42,7 +42,7 @@ def test_qa_pricing_scenarios_use_plugin_runtime_semantics() -> None:
 def test_all_plugin_models_match_archive_at_four_instant_classes() -> None:
     archive = _archive_catalog()
 
-    assert len(pricing._PLUGIN_PRICES) == 29
+    assert len(pricing._PLUGIN_PRICES) == 31
     for model, plugin_price in sorted(pricing._PLUGIN_PRICES.items()):
         assert model in archive
         input_tokens = 200_001 if model == "gemini-3.1-pro-preview" else 1_000_000
@@ -55,8 +55,10 @@ def test_all_plugin_models_match_archive_at_four_instant_classes() -> None:
 
 def test_new_model_rates_and_272k_boundary() -> None:
     assert rates_at("claude-opus-5-5", _FUTURE, 1_000_000) == Rates(4.0, 0.20, 20.0)
+    assert rates_at("claude-sonnet-5-5", _FUTURE, 1_000_000) == Rates(2.0, 0.20, 10.0)
     for model, tier1, tier2 in (
         ("gpt-6-sol", Rates(2.0, 0.20, 10.0), Rates(4.0, 0.40, 15.0)),
+        ("gpt-6.1-sol", Rates(2.0, 0.10, 10.0), Rates(4.0, 0.20, 15.0)),
         ("gpt-6-luna", Rates(0.10, 0.01, 0.50), Rates(0.20, 0.02, 0.75)),
     ):
         assert rates_at(model, _FUTURE, 272_000) == tier1

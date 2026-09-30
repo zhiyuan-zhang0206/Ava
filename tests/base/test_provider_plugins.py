@@ -63,6 +63,7 @@ _REPO_MODEL_VENDORS = {
     "claude-opus-5": "anthropic",
     "claude-opus-5-5": "anthropic",
     "claude-sonnet-5": "anthropic",
+    "claude-sonnet-5-5": "anthropic",
     "deepseek-flash": "deepseek",
     "gemini-3.1-pro-preview": "google",
     "gemini-3.5-flash": "google",
@@ -78,6 +79,7 @@ _REPO_MODEL_VENDORS = {
     "gpt-5.6-terra": "openai",
     "gpt-6-astra": "openai",
     "gpt-6-sol": "openai",
+    "gpt-6.1-sol": "openai",
     "gpt-6-luna": "openai",
     "kimi-k3": "moonshot",
     "mimo-v2.5-pro": "xiaomi",
@@ -284,8 +286,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
-
-    assert len(_REPO_MODEL_VENDORS) == 29
+    assert len(_REPO_MODEL_VENDORS) == 31
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
     # what remains is the catalog-only services plus models the registry no
@@ -324,7 +325,6 @@ def test_repo_plugin_prices_equal_archive_at_frozen_instant(
     monkeypatch.setattr(pricing, "_CATALOG", pricing._parse_catalog(archive_raw))
     monkeypatch.setattr(pricing, "_PLUGIN_PRICES", {})
     frozen_instant = datetime(2026, 9, 5, tzinfo=UTC)
-
     assert set(plugin_prices) == _REPO_MODEL_VENDORS.keys()
     for model, plugin_price in plugin_prices.items():
         plugin_rates = plugin_price.rates_at(frozen_instant, input_tokens=0)
