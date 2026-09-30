@@ -12,9 +12,10 @@ The mechanism reached into the hold journal (`reaped` receipts), the drain
 certification, the interrupt read on the claim hot path, the agent-host turn
 classifier, the boot settle, four telemetry events and two settings.
 
-The drain enabled it only through `drain(reap=True)`. Its one caller,
-`pause_local_cluster`, served the lease-bound cluster-stop op and then the
-release drain; both are gone with the
+The drain enabled it only through `drain(reap=True)`. Its callers were the
+lease-bound cluster-stop op (through `pause_local_cluster`, gone with the
+unified lifecycle) and the release drain and the PITR activation transition
+(directly), which went with the
 [release/image update path](2026-09-30-remove-release-image-path.md). A cluster
 is now updated by `python -m cli.fleet_update`, whose stop is
 `ava stop -y --timeout N`: a member in a long turn holds the stop until the
