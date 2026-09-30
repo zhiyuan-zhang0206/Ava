@@ -179,3 +179,26 @@ def test_case_alias_spelling_finds_anchors(tmp_path: Path) -> None:
     finally:
         sleeper.kill()
         sleeper.wait()
+
+
+def test_a_python_without_psutil_gets_its_own_exit_code_and_says_what_to_run(
+    tmp_path: Path,
+) -> None:
+    """A system python lacks psutil. That is no verdict: exit 1 reads as REFUSE, which
+    is what the crash used to look like."""
+    script = Path(__file__).resolve().parents[2] / "scripts" / "check_worktree_remove.py"
+    launch = (
+        "import runpy, sys; sys.modules['psutil'] = None; "
+        "sys.argv = [sys.argv[1], sys.argv[2]]; "
+        "runpy.run_path(sys.argv[0], run_name='__main__')"
+    )
+    result = subprocess.run(  # noqa: S603 - test-owned interpreter and fixture path
+        [sys.executable, "-c", launch, str(script), str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert result.stdout == ""
+    assert "MISSING DEPENDENCY psutil" in result.stderr
+    assert ".venv/bin/python scripts/check_worktree_remove.py" in result.stderr
