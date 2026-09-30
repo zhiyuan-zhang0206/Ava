@@ -1,8 +1,9 @@
 """ava.skills unit tests — single load dir: `~/.agents/skills/` (+ provider roots).
 
-Uses monkeypatch to point `_skills_dir` at tmpdir, leaving the real directory
-untouched. Repo / plugin skills are synced into the load dir by converge (see
-tests/cli/test_skills_sync.py); here we only test the scan itself.
+Uses the `unit_home` fixture so the load dir (`<home>/skills`) is a per-test tmp
+dir and the real directory stays untouched. Repo / plugin skills are synced into
+the load dir by converge (see tests/cli/test_skills_sync.py); here we only test
+the scan itself.
 """
 
 from collections.abc import Iterator
@@ -12,41 +13,35 @@ import pytest
 
 import ava.skills as skills_mod
 from base.packages.extensions import install_registry
+from base.paths import skills_dir
 
-
-@pytest.fixture(autouse=True)
-def _isolate_load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """All tests: point _skills_dir to a non-existent path by default so the
-    real ~/.agents/skills/ never leaks into a scan; the fake_skills_dir fixture
-    re-points it at a per-test dir."""
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: tmp_path / "no-skills")
+# Every test runs in a per-test unit home whose `skills/` does not exist by
+# default, so the real ~/.agents/skills/ never leaks into a scan; the
+# fake_skills_dir fixture creates the load dir.
+pytestmark = pytest.mark.usefixtures("unit_home")
 
 
 @pytest.fixture(autouse=True)
 def _overlay_all_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default: treat every directory in the (monkeypatched) ~/.agents/skills/
-    overlay as a tracked+enabled skill, so the parse/merge tests below stay
+    """Default: treat every directory in the per-test load dir (`<home>/skills`)
+    as a tracked+enabled skill, so the parse/merge tests below stay
     focused on scanning rather than the install-registry reservation.
 
     The reservation behavior gets its own tests that re-patch `loadable_skill_names` to a
     controlled set (a per-test setattr overrides this autouse one)."""
 
     def _all_enabled() -> set[str]:
-        d = skills_mod._skills_dir()
+        d = skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
     monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
 
 
 @pytest.fixture
-def fake_skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    d = tmp_path / "skills"
+def fake_skills_dir(unit_home: Path) -> Path:
+    d = skills_dir()
     d.mkdir()
-    # Restore discovery before the global SDK-metering teardown rescans public
-    # names: collision tests intentionally leave a tree that cannot be scanned.
-    with monkeypatch.context() as patch:
-        patch.setattr(skills_mod, "_skills_dir", lambda: d)
-        yield d
+    return d
 
 
 def _write_skill(root: Path, dirname: str, frontmatter: str, body: str = "") -> None:
@@ -80,9 +75,9 @@ def test_clean_skill_still_mounts(fake_skills_dir: Path) -> None:
 # ─── names() / module __dir__ ────────────────────────────────────────────
 
 
-def test_names_empty_when_no_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_names_empty_when_no_dir() -> None:
     """skills directory does not exist → returns empty list, does not raise."""
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: tmp_path / "nope")
+    assert not skills_dir().exists()
     assert skills_mod.names() == []
 
 
@@ -1227,6 +1222,10 @@ def test_files_read_skill_md_attribution_deduped_per_run(
     ava.files.read(path)
     ava.help(ava.skills.alpha)  # the same skill through the proxy — one row total
     assert attempts == [1]
+
+    skills_mod.clear_recorded_skill_invocations()  # the public reset starts the run over
+    ava.files.read(path)
+    assert attempts == [1, 1]
 
 
 def test_files_read_skill_md_silent_outside_agent(fake_skills_dir: Path) -> None:

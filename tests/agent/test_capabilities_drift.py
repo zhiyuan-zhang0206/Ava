@@ -6,13 +6,14 @@ mechanism that keeps the two from drifting apart without waiting for a
 compaction: the membership snapshot recorded at build time, the diff against it,
 and the one note that names what appeared.
 
-Skills are faked by pointing `ava.skills._skills_dir` at a tmpdir, same shape as
+Skills are faked by running in a per-test unit home (`unit_home`), same shape as
 tests/agent/test_capabilities_index.py.
 """
 
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -29,6 +30,7 @@ from agent.graph.capabilities import (
 from agent.hooks._registry import HOOKS
 from agent.hooks.capabilities import _newly_installed_skills, register_capabilities_hooks
 from agent.state import AgentState, CapabilitiesState
+from base import paths
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
@@ -49,17 +51,18 @@ def _runtime(*, container: bool = False) -> Runtime[AvaContext]:
 
 
 @pytest.fixture(autouse=True)
-def _fresh_attribution_dedup(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_recorded_skill_invocations` is per-agent-RUN state in a module global,
-    so it leaks between tests — see tests/agent/test_capabilities_index.py."""
-    monkeypatch.setattr(skills_mod, "_recorded_skill_invocations", set())  # pyright: ignore[reportUnknownArgumentType]
+def _fresh_attribution_dedup() -> Iterator[None]:
+    """The attribution dedup is per-agent-RUN state in a module global, so it
+    leaks between tests — see tests/agent/test_capabilities_index.py."""
+    skills_mod.clear_recorded_skill_invocations()
+    yield
+    skills_mod.clear_recorded_skill_invocations()
 
 
 @pytest.fixture
-def skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    d = tmp_path / "skills"
+def skills_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    d = paths.skills_dir()
     d.mkdir()
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
         "base.packages.extensions.install_registry.loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},

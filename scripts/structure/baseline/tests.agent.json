@@ -47,11 +47,6 @@
     "tests/agent/test_ava_fleet_plugin.py::ava.gateway_client.transport._client": 1,
     "tests/agent/test_build_with_extensions.py::base.packages.plugins.enable_config._dangling_reported": 1,
     "tests/agent/test_cancel.py::agent.graph.exec.node._run_in_subprocess": 10,
-    "tests/agent/test_capabilities_drift.py::ava.skills._recorded_skill_invocations": 1,
-    "tests/agent/test_capabilities_drift.py::ava.skills._skills_dir": 1,
-    "tests/agent/test_capabilities_index.py::ava.skills._insert_skill_events": 1,
-    "tests/agent/test_capabilities_index.py::ava.skills._recorded_skill_invocations": 1,
-    "tests/agent/test_capabilities_index.py::ava.skills._skills_dir": 2,
     "tests/agent/test_claim.py::agent.graph.claim._dispatch": 2,
     "tests/agent/test_claim.py::agent.graph.claim.node._claim_node_impl": 1,
     "tests/agent/test_claim.py::ava.security._pending_findings": 3,
@@ -61,7 +56,6 @@
     "tests/agent/test_exec_domain_confirmation.py::base.native_process.exec_domain._process_group_has_live_member": 2,
     "tests/agent/test_exec_node_timeout.py::agent.graph.exec.node._run_in_subprocess": 2,
     "tests/agent/test_exec_subprocess.py::agent.graph.exec._process": 1,
-    "tests/agent/test_fork_notes.py::ava.skills._skills_dir": 1,
     "tests/agent/test_graph_stream.py::agent.graph.exec.output._overflow_dir": 1,
     "tests/agent/test_hosted_compact_failure.py::agent.graph.claim._dispatch": 1,
     "tests/agent/test_hosted_failure_settlement_recovery.py::agent.graph.claim._dispatch": 1,
@@ -78,7 +72,6 @@
     "tests/agent/test_impersonation_integration.py::agent.impersonation._spawn_codex_relay": 1,
     "tests/agent/test_inbound_ownership.py::agent.db._CLAIM_DB_LOCK_TIMEOUT": 1,
     "tests/agent/test_init_context.py::agent.graph._init_context": 1,
-    "tests/agent/test_init_context.py::ava.skills._skills_dir": 3,
     "tests/agent/test_interrupt.py::agent.graph._init_context": 2,
     "tests/agent/test_interrupt.py::agent.graph.interrupt._INTERRUPT_POLL_S": 3,
     "tests/agent/test_interrupt.py::agent.graph.interrupt._WATCHER_EXIT_TIMEOUT_S": 3,
@@ -95,12 +88,9 @@
     "tests/agent/test_maintenance_receipt_grading.py::ops.agent_pause._wake": 3,
     "tests/agent/test_maintenance_receipt_grading.py::ops.cluster_pause._unpause_local_cluster": 1,
     "tests/agent/test_multiple_tool_calls.py::agent.graph.exec.node._run_agent_code": 7,
-    "tests/agent/test_preloaded_skills.py::ava.skills._skills_dir": 2,
     "tests/agent/test_reconcile_after_abort.py::base.agents.history.inbound_sideload._committed_ids_from_all_settled_writes": 1,
     "tests/agent/test_resource_admission.py::agent.graph.exec._owned_run": 7,
     "tests/agent/test_startup_restore_pages.py::agent.startup._last_reconcile_at": 7,
-    "tests/agent/test_startup_restore_pages.py::agent.startup._page_server_alive": 9,
-    "tests/agent/test_system_prompt.py::ava.skills._insert_skill_events": 2,
-    "tests/agent/test_system_prompt.py::ava.skills._recorded_skill_invocations": 1
+    "tests/agent/test_startup_restore_pages.py::agent.startup._page_server_alive": 9
   }
 }
