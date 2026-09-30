@@ -1,8 +1,8 @@
 """Host-wide, generation-owned admission freeze for new PTY sessions.
 
 Every co-located Ava cluster consumes the same host PTY pool, so the marker and
-its lock live beside the host-level cluster registry rather than under one
-``$AVA_HOME``. The allocation gate affects only absent session -> new detached
+its lock live in the host state dir (``AVA_HOST_STATE_DIR``) rather than under
+one ``$AVA_HOME``. The allocation gate affects only absent session -> new detached
 PTY host; desired-state reconcilers reap existing exact sessions that belong to
 an earlier generation.
 
@@ -62,15 +62,11 @@ def _invalid(message: str) -> Never:
 
 
 def _host_state_dir() -> Path:
-    """Directory shared by every cluster home on this host.
+    """Directory shared by every cluster home on this host (``AVA_HOST_STATE_DIR``);
+    a test or custom installation isolates it by setting that variable."""
+    from base.paths import host_state_dir
 
-    ``AVA_CLUSTER_REGISTRY`` is already Ava's declared host-level path. Using
-    its parent keeps test and custom installations isolated without inventing a
-    second host-root setting.
-    """
-    from base.config import settings
-
-    return Path(settings.general.cluster_registry).expanduser().parent
+    return host_state_dir()
 
 
 def state_path() -> Path:

@@ -38,7 +38,7 @@ def _context(tmp_path: Path) -> BootUnitContext:
         user="ava-user",
         group="ava-group",
         home_dir=tmp_path / "user-home",
-        registry=tmp_path / "private-registry.json",
+        host_state_dir=tmp_path / "private-host-state",
     )
 
 
@@ -64,7 +64,7 @@ def test_render_unit_states_the_boot_policy(ctx: BootUnitContext) -> None:
     assert f"PIDFile={boot_unit.root_pid_path(ctx.home)}" in unit
 
 
-def test_render_unit_binds_home_checkout_and_registry(ctx: BootUnitContext) -> None:
+def test_render_unit_binds_home_checkout_and_host_state_dir(ctx: BootUnitContext) -> None:
     unit = render_unit(ctx)
     # Boot ordering + identity: the unit runs as the cluster's user, in the
     # checkout, with the checkout venv on PATH.
@@ -76,7 +76,7 @@ def test_render_unit_binds_home_checkout_and_registry(ctx: BootUnitContext) -> N
     # while the literal rest-of-line form keeps spaces working.
     assert f'WorkingDirectory="{ctx.repo}"' not in unit
     assert f'Environment="AVA_HOME={ctx.home}"' in unit
-    assert f'Environment="AVA_CLUSTER_REGISTRY={ctx.registry}"' in unit
+    assert f'Environment="AVA_HOST_STATE_DIR={ctx.host_state_dir}"' in unit
     assert f'Environment="HOME={ctx.home_dir}"' in unit
     assert f'Environment="PATH={ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"' in unit
     # `:` disables $-expansion in the Exec line; the script path is quoted.
@@ -85,7 +85,7 @@ def test_render_unit_binds_home_checkout_and_registry(ctx: BootUnitContext) -> N
 
 def test_render_unit_quotes_without_shell_expansion(ctx: BootUnitContext) -> None:
     odd = BootUnitContext(
-        ctx.home, Path('/repo "odd" % $x'), ctx.user, ctx.group, ctx.home_dir, ctx.registry
+        ctx.home, Path('/repo "odd" % $x'), ctx.user, ctx.group, ctx.home_dir, ctx.host_state_dir
     )
     unit = render_unit(odd)
     assert 'ExecStart=:"/repo \\"odd\\" %% $x/.venv/bin/python" "-m" "cli.main" "start"' in unit
@@ -94,7 +94,12 @@ def test_render_unit_quotes_without_shell_expansion(ctx: BootUnitContext) -> Non
 
 def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
     bad = BootUnitContext(
-        ctx.home, Path("/repo\nExecStart=/bad"), ctx.user, ctx.group, ctx.home_dir, ctx.registry
+        ctx.home,
+        Path("/repo\nExecStart=/bad"),
+        ctx.user,
+        ctx.group,
+        ctx.home_dir,
+        ctx.host_state_dir,
     )
     with pytest.raises(ValueError, match="control characters"):
         render_unit(bad)
@@ -124,7 +129,7 @@ def test_release_stage_uses_same_native_root_owner(ctx: BootUnitContext) -> None
     assert "cli.main" not in unit
 
 
-@pytest.mark.parametrize("key", ["HOME", "AVA_HOME", "AVA_CLUSTER_REGISTRY"])
+@pytest.mark.parametrize("key", ["HOME", "AVA_HOME", "AVA_HOST_STATE_DIR"])
 def test_boot_action_cannot_change_context_identity(ctx: BootUnitContext, key: str) -> None:
     source = boot_unit.source_start_action(ctx)
     action = boot_unit.BootStartAction(
@@ -448,11 +453,16 @@ def test_unchanged_enabled_unit_never_restarts_or_rewrites(
     assert recorded == []
 
 
-def test_default_context_carries_the_resolved_registry(
+def test_default_context_carries_the_resolved_host_state_dir(
     ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(boot_unit, "registry_path", lambda: ctx.registry)
-    assert boot_unit._default_context().registry == ctx.registry
+    import base.paths as paths_module
+
+    def _host_state_dir() -> Path:
+        return ctx.host_state_dir
+
+    monkeypatch.setattr(paths_module, "host_state_dir", _host_state_dir)
+    assert boot_unit._default_context().host_state_dir == ctx.host_state_dir
 
 
 @pytest.mark.parametrize("verb", ["install", "uninstall", "status"])

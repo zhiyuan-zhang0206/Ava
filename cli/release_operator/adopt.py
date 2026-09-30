@@ -3,7 +3,7 @@
 Wires `base.deploy.release.runtime_release.activate_release(expected_current=None)` plus
 `cli.release_transition.root_service.install_steady` — exactly the sequence
 `scripts/preview/release_cycle_runtime.py::initial` already exercises for the
-preview's own captured bundle — to a real home/registry and a real
+preview's own captured bundle — to a real home and a real
 `PreparationReceipt` file produced by `ava cluster release prepare`. No
 release-transition semantics are added: this is the same first-activation
 effect, generalized off the preview's private fixture shape.
@@ -74,7 +74,6 @@ def _adopt(receipt: Path) -> tuple[ReleaseRef, VerifiedRelease]:
 
 
 def _select_and_install(home: Path, reference: ReleaseRef, receipt: Path) -> VerifiedRelease:
-    from base.cluster import registry_path
     from base.deploy.release.operation import require_start_authorized
     from base.host.private_storage import ensure_private_dir
     from cli.commands.lifecycle.root_driver import require_root_absent
@@ -104,7 +103,7 @@ def _select_and_install(home: Path, reference: ReleaseRef, receipt: Path) -> Ver
             schema_digest=reference.schema_digest,
         )
     try:
-        install_steady(home, registry_path(), reference, image)
+        install_steady(home, reference, image)
     except (ValueError, OSError, RuntimeError) as exc:
         raise RuntimeError(
             f"{exc}; the selection of commit {reference.source_commit} stands, so fix the "

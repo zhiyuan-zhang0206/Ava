@@ -57,7 +57,6 @@ _CANDIDATE = _ref("e", "9")
 def _spec(unit: UnitKey = _RUNNER, **changes: Any) -> UnitSpec:
     fields: dict[str, Any] = {
         "unit": unit,
-        "registry": "/Users/zzy/.ava/clusters.json",
         "roles": ("agent-runner",),
         "adapter": "darwin-launchd-v1",
         "previous": _ref("1", "d"),
@@ -74,7 +73,6 @@ def _request(**changes: Any) -> FleetRequest:
     fields: dict[str, Any] = {
         "id": uuid4(),
         "home": _GATEWAY_HOME,
-        "registry": "/home/zzy/.ava/clusters.json",
         "created_at": _WHEN,
         "machine": "ubuntu",
         "previous": _PREVIOUS,

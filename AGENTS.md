@@ -99,9 +99,9 @@ remote agent-runner joins through the same entry with `--gateway-url` and its
 capability bundle (`--db-capability`, the transport key in `AVA_DB_CAPABILITY_KEY`),
 which also authenticates it; it creates no gateway or local data plane. Networked
 release operations keep refusing until capability delivery is automated.
-Registry records are keyed by absolute home path in `~/.ava/clusters.json`
-(or an explicit private `AVA_CLUSTER_REGISTRY`). First configuration may be
-supplied with `--config-file`; credentials and identity survive retries.
+A home describes only itself: its ports live in its own start intent, and no host
+file lists clusters (host caches: `AVA_HOST_STATE_DIR`, default `~/.ava`). First
+configuration may come from `--config-file`; credentials and identity survive retries.
 
 Application processes have one supervisor: `ava-root`. On macOS the ancestry
 is `launchd -> signed permissions helper -> ava-root -> services / agent-host`.
@@ -150,9 +150,9 @@ ava cluster db-authority issue-unit --machine NAME --home UNIT_HOME --out BUNDLE
 ava start --no-serve-gateway --serve-agent-runner --gateway-url URL --machine-name NAME --machine-host HOST --db-capability BUNDLE
               # first start of a remote runner; supply AVA_DB_CAPABILITY_KEY in the
               # environment; the bundle is consumed
-ava cluster ls / status             # list all registered clusters (label = home basename) / full multi-machine roster
-ava cluster down --path PATH        # stop the cluster at a home path, keep its slot (data stays on disk)
-ava cluster destroy --path PATH     # stop + free its slot + deregister its OS jobs (refused for ~/.ava)
+ava cluster status                 # full multi-machine roster of this cluster
+ava cluster down --path PATH        # stop the cluster at a home path (data stays on disk)
+ava cluster destroy --path PATH     # stop + deregister its OS jobs + mark the home detached (refused for ~/.ava)
 ```
 
 Agent processes are **not started directly** — they always go through the

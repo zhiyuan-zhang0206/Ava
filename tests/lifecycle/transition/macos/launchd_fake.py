@@ -180,8 +180,6 @@ def operation(
     tmp_path = tmp_path.resolve()
     home = tmp_path / "home"
     home.mkdir(mode=0o700)
-    registry = tmp_path / "clusters.json"
-    registry.write_text("{}")
     old = ReleaseRef(
         artifact_digest="a" * 64,
         manifest_digest="b" * 64,
@@ -192,7 +190,6 @@ def operation(
     request = FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(registry),
         created_at=datetime.now(UTC),
         machine="test",
         previous=old,

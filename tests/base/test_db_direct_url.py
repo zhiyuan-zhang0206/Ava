@@ -1,7 +1,7 @@
 """The one-DB-URL design: AVA_DB_URL's port is chosen at generation by the
-pgbouncer toggle, the admin plane derives the direct URL from the registry
-record, and the pooler port is a registry fact only (no AVA_PGBOUNCER_PORT env
-key). Tests `base.db.direct_db_url` + the record port derivations.
+pgbouncer toggle, the admin plane derives the direct URL from this home's
+cluster record, and the pooler port is a record fact only (no AVA_PGBOUNCER_PORT
+env key). Tests `base.db.direct_db_url` + the record port derivations.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def test_pgbouncer_enabled_defaults_on() -> None:
 
 
 def test_no_pgbouncer_port_field_on_the_settings_surface() -> None:
-    """F8b: the pooler port is a registry fact, not a Settings field — a normal
+    """F8b: the pooler port is a record fact, not a Settings field — a normal
     process sees only AVA_DB_URL (whose port the toggle chose at generation)."""
     assert "pgbouncer_port" not in DataPlaneSettings.model_fields
 
@@ -54,7 +54,7 @@ def _set(monkeypatch: pytest.MonkeyPatch, *, db_url: str, rec: ClusterRecord | N
     from base import paths
 
     monkeypatch.setattr(config.settings.data_plane, "db_url", db_url)
-    monkeypatch.setattr(cluster, "load_registry", lambda: {_HOME: rec} if rec is not None else {})
+    monkeypatch.setattr(cluster, "get_record", lambda home: rec if str(home) == _HOME else None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(paths, "ava_home", lambda: Path(_HOME))
 
 
@@ -82,8 +82,8 @@ def test_direct_db_url_never_rewrites_unanchored_sentinel(monkeypatch: pytest.Mo
     assert db_module.direct_db_url() == UNANCHORED_DB_SENTINEL
 
 
-def test_direct_db_url_falls_back_without_registry_record(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No record (an unusual host) -> AVA_DB_URL as-is rather than guessing."""
+def test_direct_db_url_keeps_the_url_without_a_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No record (a home without the gateway) -> AVA_DB_URL as-is rather than guessing."""
     _set(monkeypatch, db_url=_POOLED, rec=None)
     assert db_module.direct_db_url() == _POOLED
 
@@ -138,13 +138,13 @@ def test_direct_db_url_already_direct_names_a_local_pg_port(
     assert db_module.direct_db_url() == _DIRECT
 
 
-def test_direct_db_url_remote_host_ignores_local_registry(
+def test_direct_db_url_remote_host_ignores_the_home_record(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,
 ) -> None:
     """A URL naming a REMOTE host (a split runner dialing the gateway, or a
-    remote/SaaS plane — Task #1752) must not be resolved against local records
-    even when a local record's port happens to collide — the swap would
+    remote/SaaS plane — Task #1752) must not be resolved against this home's
+    record even when its port happens to collide — the swap would
     mis-route to this box's own Postgres. The URL passes through SILENTLY: a
     foreign host has no local pooler, so the "routes through PgBouncer"
     warning would be factually wrong noise on every admin-plane dial."""
@@ -164,8 +164,8 @@ def test_direct_db_url_split_runner_falls_back_loudly(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,
 ) -> None:
-    """The split-runner case: no local record explains the URL's port (the
-    gateway's pooler port is a fact of the GATEWAY box's registry). The URL is
+    """The split-runner case: this home's record does not explain the URL's port
+    (the gateway's pooler port is a fact of the GATEWAY home's record). The URL is
     returned as-is — runner boot must not break — but the degraded dial is
     logged, never silent. The runner's URL names its own gateway
     (AVA_GATEWAY_URL), which keeps this distinct from a remote/SaaS plane —
@@ -179,7 +179,7 @@ def test_direct_db_url_split_runner_falls_back_loudly(
     )
     got = db_module.direct_db_url()
     assert got == "postgresql://ava_main:sek@10.0.0.9:6433/ava_main"
-    assert any("no local registry" in r["message"] for r in loguru_records)
+    assert any("this home's record" in r["message"] for r in loguru_records)
 
 
 def test_direct_db_url_unknown_port_stays_silent_when_pooling_off(
@@ -232,7 +232,7 @@ def test_record_postgres_port_missing_on_allocated_record_raises() -> None:
         record_postgres_port(rec)
 
 
-def test_record_redis_port_is_a_registry_fact() -> None:
+def test_record_redis_port_is_a_record_fact() -> None:
     """Redis's port is carried by the record, not inferred from a URL that may
     use this host's reachable address while Redis remains loopback-only."""
     rec = _rec("/x/.ava-dev", {"gateway": 18000, "redis": 18042})

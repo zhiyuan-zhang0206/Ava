@@ -59,7 +59,7 @@ def _require_context(run: Path) -> None:
     )
     for key, expected in (
         ("AVA_HOME", run / "home"),
-        ("AVA_CLUSTER_REGISTRY", run / "clusters.json"),
+        ("AVA_HOST_STATE_DIR", run),
     ):
         actual = os.environ.get(key)
         _require(actual and Path(actual).resolve() == expected, f"{key} names another preview")
@@ -79,8 +79,13 @@ def _command(argv: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _detached(home: Path) -> bool:
+    """Whether `ava cluster destroy` marked this home detached."""
+    marker = home / "destroy-intent.json"
+    return marker.is_file() and json.loads(marker.read_text())["state"] == "detached"
+
+
 def _base_observations(run: Path, result: Report) -> dict[str, int]:
-    from base.cluster import load_registry
     from base.cluster.port_preflight import strict_listeners_on
     from base.host.system.boot_unit import unit_name, unit_path
 
@@ -99,9 +104,9 @@ def _base_observations(run: Path, result: Report) -> dict[str, int]:
         home / name
         for name in (".env", "start-intent.json", "service-selection.json", "installed.json")
     ]
-    paths.extend((run / "clusters.json", source / ".ava_home"))
+    paths.extend((home / "destroy-intent.json", source / ".ava_home"))
     result["hashes"] = {str(path.relative_to(run)): _digest(path) for path in paths}
-    result["registry_contains_home"] = str(home) in load_registry(path=run / "clusters.json")
+    result["home_detached"] = _detached(home)
     result["listeners"] = {
         name: [_capture(pid) for pid in sorted(strict_listeners_on(port))]
         for name, port in ports.items()
@@ -334,8 +339,8 @@ def _observe_running(
     result["stored_agents"] = _stored_agents(run)
     result["write_generation"] = release_generation.observe(home)
     _require(
-        result["registry_contains_home"] and result["hashes"]["source/.ava_home"],
-        "running preview lost its registry or checkout pointer",
+        not result["home_detached"] and result["hashes"]["source/.ava_home"],
+        "running preview is detached or lost its checkout pointer",
     )
     if mode == "manager-running":
         _require(
@@ -350,8 +355,8 @@ def _observe_running(
         )
         result["unit_text"] = unit_path(home).read_text()
         _require(
-            f"AVA_CLUSTER_REGISTRY={run}/clusters.json" in result["unit_text"],
-            "systemd unit names another registry",
+            f"AVA_HOST_STATE_DIR={run}" in result["unit_text"],
+            "systemd unit names another host state dir",
         )
 
 
@@ -472,10 +477,8 @@ def _observe_stopped(run: Path, mode: Mode, ports: dict[str, int], result: Repor
     if mode == "destroyed":
         pointer = run / "source/.ava_home"
         _require(
-            not result["registry_contains_home"]
-            and not pointer.exists()
-            and not pointer.is_symlink(),
-            "destroy retained the registry or checkout binding",
+            result["home_detached"] and not pointer.exists() and not pointer.is_symlink(),
+            "destroy did not detach the home or retained its checkout binding",
         )
         _require(
             not result["unit_exists"] and result["manager"]["LoadState"] == "not-found",
@@ -483,8 +486,8 @@ def _observe_stopped(run: Path, mode: Mode, ports: dict[str, int], result: Repor
         )
     else:
         _require(
-            result["registry_contains_home"] and result["hashes"]["source/.ava_home"],
-            "ordinary stop removed the registry or checkout binding",
+            not result["home_detached"] and result["hashes"]["source/.ava_home"],
+            "ordinary stop detached the home or removed its checkout binding",
         )
 
 

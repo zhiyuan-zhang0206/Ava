@@ -53,7 +53,7 @@ def test_plan_is_pure_and_renders_the_exact_private_job(harness: Harness) -> Non
     assert Path(launch.plist).parent == harness.path.parent / "executor" / "a0"
     assert "LaunchAgents" not in launch.plist
     assert launch.helper == HELPER
-    assert set(launch.environment) == {"HOME", "AVA_HOME", "AVA_CLUSTER_REGISTRY", "PATH"}
+    assert set(launch.environment) == {"HOME", "AVA_HOME", "AVA_HOST_STATE_DIR", "PATH"}
     arguments = launch.program_arguments()
     assert arguments[:5] == [HELPER.executable, "--finite-executor", "v1", "--cwd", launch.cwd]
     assert arguments[arguments.index("--") + 1 :] == launch.argv

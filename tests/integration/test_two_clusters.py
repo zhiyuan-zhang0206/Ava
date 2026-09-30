@@ -1,11 +1,11 @@
 """Two-cluster isolation: ports (including each cluster's own pg/redis instance).
 
 Simulates two sequential first-start cluster births on a single host (via the
-real `ensure_record`) and asserts the core isolation guarantee: the two
-home-keyed records are completely disjoint — distinct port blocks, so distinct
-pg/redis instances. (There are no per-cluster db names to compare: every
-cluster's own single-tenant instance uses the fixed `ava` identifier, carried by
-its `.env` URLs as data.)
+real `prepare_identity`). A home knows no other cluster, so allocation only
+probes which ports are bound right now: a second birth beside a running cluster
+gets a disjoint block, so a distinct pg/redis instance. (There are no
+per-cluster db names to compare: every cluster's own single-tenant instance
+uses the fixed `ava` identifier, carried by its `.env` URLs as data.)
 
 The full end-to-end verification (real data planes + a runner's first start +
 agent spawn through the ops server) is a manual step documented in the runbook;
@@ -22,50 +22,52 @@ from base.host.env.port_block import BLOCK_SIZE
 from cli.start_identity import IdentityInput, prepare_identity
 
 
-def test_two_clusters_disjoint_ports_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Two non-default clusters allocated sequentially get disjoint resources."""
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
-        cluster, "registry_path", lambda: tmp_path / "clusters.json"
-    )
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
-        cluster,
-        "port_free",
-        lambda _p: True,  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    h1, h2 = tmp_path / ".ava-t1", tmp_path / ".ava-t2"
-    for home in (h1, h2):
-        prepare_identity(
-            IdentityInput(
-                home,
-                tmp_path / "clusters.json",
-                tmp_path,
-                False,
-                frozenset({"gateway", "agent-runner"}),
-                {"AVA_MACHINE_NAME": home.name},
-            )
+def _birth(home: Path, checkout: Path) -> dict[str, int]:
+    prepare_identity(
+        IdentityInput(
+            home,
+            checkout,
+            False,
+            frozenset({"gateway", "agent-runner"}),
+            {"AVA_MACHINE_NAME": home.name},
         )
-    records = cluster.load_registry()
-    r1, r2 = records[str(h1)], records[str(h2)]
-    p1 = cast("dict[str, int]", r1.ports)
-    p2 = cast("dict[str, int]", r2.ports)
+    )
+    rec = cluster.get_record(home)
+    assert rec is not None
+    return cast("dict[str, int]", rec.ports)
+
+
+def test_birth_beside_a_running_cluster_gets_a_disjoint_block(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The first cluster's bound ports push the second birth to the next block."""
+    bound: set[int] = set()
+    monkeypatch.setattr(cluster, "port_free", lambda port: port not in bound)  # pyright: ignore[reportUnknownArgumentType]
+
+    p1 = _birth(tmp_path / ".ava-t1", tmp_path)
+    bound.update(p1.values())  # t1 starts: its whole block is now listening
+    p2 = _birth(tmp_path / ".ava-t2", tmp_path)
 
     # Ports: the two service maps must share no port numbers.
     assert set(p1.values()).isdisjoint(set(p2.values())), (
         f"port overlap: {set(p1.values()) & set(p2.values())}"
     )
-
     # Each cluster's own pg/redis ports are distinct — separate data-plane instances.
     assert p1["postgres"] != p2["postgres"]
     assert p1["redis"] != p2["redis"]
+    # Port blocks differ by exactly BLOCK_SIZE: t1 gets base 18000, t2 the next block.
+    assert min(p2.values()) - min(p1.values()) == BLOCK_SIZE
 
-    # Port blocks differ by exactly BLOCK_SIZE (20): t1 gets base 18000, t2 gets 18020.
-    base1 = min(p1.values())
-    base2 = min(p2.values())
-    assert base2 - base1 == BLOCK_SIZE, f"expected block gap {BLOCK_SIZE}, got {base2 - base1}"
 
-    # Both records survive round-trip through the home-keyed registry.
-    final = cluster.load_registry()
-    assert final.keys() == {str(h1), str(h2)}
-    assert final[str(h1)] == r1
-    assert final[str(h2)] == r2
+def test_birth_beside_a_stopped_cluster_may_reuse_its_block(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Nothing lists the stopped cluster, so its unbound block looks free and is
+    handed out again; `ava start`'s port preflight then refuses whichever of the
+    two starts second (user ruling: probe at birth, refuse at start)."""
+    monkeypatch.setattr(cluster, "port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    p1 = _birth(tmp_path / ".ava-t1", tmp_path)
+    p2 = _birth(tmp_path / ".ava-t2", tmp_path)
+
+    assert p1 == p2

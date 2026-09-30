@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from contextlib import suppress
+from pathlib import Path
 from typing import cast
 
 import psutil
@@ -33,7 +34,7 @@ def terminal_backend(native_env, monkeypatch):
     from base.sessions.windows.terminal.backend import WindowsTerminalBackend
 
     monkeypatch.setattr(settings.general, "ava_home", native_env["AVA_HOME"])
-    monkeypatch.setattr(settings.general, "cluster_registry", native_env["AVA_CLUSTER_REGISTRY"])
+    monkeypatch.setattr(settings.general, "host_state_dir", Path(native_env["AVA_HOST_STATE_DIR"]))
     return WindowsTerminalBackend()
 
 

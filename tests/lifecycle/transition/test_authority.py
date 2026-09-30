@@ -88,7 +88,6 @@ def request_record(tmp_path: Path) -> FleetRequest:
     return FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(home.parent / "registry.json"),
         created_at=datetime.now(UTC),
         machine="test",
         previous=previous,
@@ -577,7 +576,7 @@ def test_executor_dials_the_owner_socket_as_the_gateway_group(
     from urllib.parse import parse_qs, unquote, urlsplit
 
     from base import cluster
-    from base.cluster.registry import ClusterRecord
+    from base.cluster.record import ClusterRecord
     from base.db import connections
 
     home = Path(request_record.home)
@@ -650,7 +649,6 @@ def test_stage_start_refuses_a_generation_other_than_the_issued_one(
     # start_operation exports the captured home into the live environment; the
     # raw-env seam restores this process's own values afterwards.
     monkeypatch.setitem(os.environ, "AVA_HOME", request_record.home)
-    monkeypatch.setitem(os.environ, "AVA_CLUSTER_REGISTRY", request_record.registry)
     monkeypatch.setattr(stage, "read_operation", lambda _path: starting)
     monkeypatch.setattr(stage, "_require_inputs", lambda _operation: None)
     monkeypatch.setattr(stage, "_require_native_root_owner", lambda _operation, _home: None)

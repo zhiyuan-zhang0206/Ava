@@ -92,7 +92,7 @@ class Preview:
             raise ValueError("Preview paths must not be symlinks")
         self.env = clean_env() | {
             "AVA_HOME": str(self.home),
-            "AVA_CLUSTER_REGISTRY": str(self.run / "clusters.json"),
+            "AVA_HOST_STATE_DIR": str(self.run),
         }
 
     def save(self) -> None:

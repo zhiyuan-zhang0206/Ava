@@ -509,8 +509,10 @@ def test_start_action_runs_the_selected_image_stage_as_a_bounded_finite_tool(
     assert call["cwd"] == world.image.cwd and call["timeout"] == root_macos.START_TIMEOUT_S
     # Start and observation share one fixed environment: the launch digest repeats.
     account = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    from base.paths import host_state_dir
+
     assert call["env"] == dict(
-        root_service.stage_environment(world.home, Path(operation.request.registry), account)
+        root_service.stage_environment(world.home, host_state_dir(), account)
     )
 
 

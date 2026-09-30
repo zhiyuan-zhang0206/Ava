@@ -52,7 +52,7 @@ a helper. This controller uses POSIX process and lock APIs.
 
 A run normally stops in `finally`; `--keep` retains only a successful preview.
 Teardown calls normal stop and destroy, then independently checks for surviving
-processes, listeners and registry reservations. A failed cleanup stays failed in
+processes, listeners and a born home left undetached. A failed cleanup stays failed in
 `run.json`; the observer never deletes evidence to manufacture a clean result.
 Logs and data remain for inspection. Concurrent lifecycle actions on one run are
 rejected by the operation lock. Recorded foreground commands are reaped on
@@ -120,7 +120,7 @@ current native platform, the complete image inventory, and the builder's source
 identity. It never chooses an expected image from `current-release`. Omission
 of the flag retains the source-runtime contract.
 
-Both modes require exact root argv, executable, cwd, home/registry/virtualenv
+Both modes require exact root argv, executable, cwd, home/host-state/virtualenv
 environment and admitted PATH, alongside native birth, ancestry and listener
 custody. Image argv must retain its isolation flags. Other environment values
 are represented only by a digest; this does not independently attest arbitrary

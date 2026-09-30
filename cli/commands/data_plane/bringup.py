@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 import psycopg
 
 from base.cluster.authority.model import Generation
-from base.cluster.registry import ClusterRecord
+from base.cluster.record import ClusterRecord
 from base.config import settings
 from base.host.net.url_secret import url_host
 from base.log import logger

@@ -87,7 +87,7 @@ not account rights or a successful cold boot.
 ## Install only during the coordinated host change
 
 First verify the Linux owner's installed home, `systemd=true`, enabled/active
-systemd home unit, and its exact checkout/home/registry binding. Confirm that the gateway
+systemd home unit, and its exact checkout/home binding. Confirm that the gateway
 home will be the sole active data-plane owner before any automatic bring-up.
 Use an elevated PowerShell **as the distribution owner** if registering the boot
 trigger requires administrator rights; do not run as a different account.

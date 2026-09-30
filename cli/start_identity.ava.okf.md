@@ -11,13 +11,15 @@ tags:
 
 `cli/start_intent.py` resolves and validates first-start inputs without importing
 runtime Settings. `cli/start_identity.py` persists the complete private intent
-under the home, checkout binding, and registry locks (in that order) before
-publishing the registry record or `.env`. The checkout lock serializes different
-homes even when they use separate registries; stale first-start inputs cannot
-replace an existing binding. Pointer publication and retirement share that lock.
-Registry paths cannot alias lifecycle data or locks, and registry lock waits are
-bounded so contention cannot indefinitely consume a lifecycle operation.
-An interrupted claim resumes the same ports and credentials: the intent carries
+under the home and checkout binding locks (in that order) before publishing
+`.env`. The intent is the home's record of itself: a gateway's port block and
+data-plane host live in its `record` (`base/cluster/record.py`), and no host
+file lists clusters. A new block is the first one with no port bound right now;
+a stopped cluster's block can be handed out again, and the start port preflight
+then refuses whichever home starts second. The checkout lock serializes
+different homes; stale first-start inputs cannot replace an existing binding.
+Pointer publication and retirement share that lock. An interrupted claim
+resumes the same ports and credentials: the intent carries
 the `.env` payload only while claiming and drops it once `.env` is published, so
 no stale copy of a credential outlives a rotation there. A gateway claim
 also pins a minted logical-backup passphrase before it publishes `.env`
@@ -107,9 +109,9 @@ This phase journal preserves initialization authority; it is not evidence of cur
 process health. Current readiness is freshly observed from the owned generation.
 
 Destroy retains the home lock while closing native custody, then retires only
-the worktree `.ava_home` pointer bound by the durable start intent before freeing
-the registry slot. A changed or symlink pointer is preserved and refuses release;
+the worktree `.ava_home` pointer bound by the durable start intent before marking
+the home detached. A changed or symlink pointer is preserved and refuses release;
 a missing pointer permits an interrupted retirement to finish. Ordinary stop
-retains that binding, credentials and the reservation.
+retains that binding, credentials and the record.
 
 Parent: [[cli.ava.okf.md]].

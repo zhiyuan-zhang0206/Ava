@@ -192,36 +192,24 @@ def test_per_cluster_base_urls_blank_host_falls_back_to_loopback(tmp_path: Path)
     assert redis == "redis://127.0.0.1:18012/0"
 
 
-def test_registry_round_trip_preserves_data_plane_host(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """`data_plane_host` is a durable registry fact: save → load returns it, and
-    an old-shape record (no field on disk) loads with the loopback default — the
-    compat rule every existing cluster depends on."""
+def test_get_record_round_trip_preserves_data_plane_host(tmp_path: Path):
+    """`data_plane_host` lives on a home's own record, inside its start intent:
+    round-tripping through `get_record` returns it, and a record with no
+    `data_plane_host` key at all (an old on-disk shape) loads with the loopback
+    default — the compat rule every existing cluster depends on."""
     import json
-    from dataclasses import replace
+    from dataclasses import asdict, replace
 
-    from base import cluster as cl
-
-    reg = tmp_path / "clusters.json"
-    monkeypatch.setattr(cl, "registry_path", lambda: reg)
+    home = tmp_path / ".ava-t1"
+    home.mkdir()
     rec = replace(_rec(tmp_path), data_plane_host="10.0.0.7")
-    cl.save_record(rec)
-    assert cl.get_record(tmp_path / ".ava-t1") == rec
-    # Old-shape on-disk record without the field loads with the "" default.
-    reg.write_text(
-        json.dumps(
-            {
-                ".ava-t1": {
-                    "name": ".ava-t1",
-                    "ports": dict(rec.ports),
-                    "gateway_home": str(tmp_path / ".ava-t1"),
-                    "created_at": "x",
-                }
-            }
-        )
-    )
-    loaded = cl.get_record(tmp_path / ".ava-t1")
+    (home / cluster.INTENT_NAME).write_text(json.dumps({"record": asdict(rec)}))
+    assert cluster.get_record(home) == rec
+    # A record with no `data_plane_host` key at all loads with the "" default.
+    old_shape = asdict(rec)
+    del old_shape["data_plane_host"]
+    (home / cluster.INTENT_NAME).write_text(json.dumps({"record": old_shape}))
+    loaded = cluster.get_record(home)
     assert loaded is not None
     assert loaded.data_plane_host == ""
 
@@ -331,39 +319,13 @@ def test_health_port_tables_in_sync():
     assert set(registry.health_port_env_aliases().values()) <= registry.derived_env_keys()
 
 
-def test_allocate_ports_skips_blocks_overlapping_existing_records(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """A pre-existing record may occupy a block from any birth-era BLOCK_SIZE
-    (e.g. a 16-port block at 18016) — and a candidate inside such a block
-    would overlap it. allocate_ports must skip overlapping blocks, not just
-    exact bases, or a DOWN cluster's block gets re-allocated while its record
-    still owns it (silent collision when both start).
-
-    The expected base below is concrete on purpose and MOVES whenever
-    BLOCK_SIZE does: growing the block changes which candidates clear a legacy
-    record, so a block growth should force someone to re-check allocation
-    rather than slide past a derived assertion."""
-    from base import cluster as cl
-    from base.host.env.port_block import BLOCK_SIZE, BLOCK_START
-
-    monkeypatch.setattr(cl, "port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType]
-
-    # Existing record at 18016 occupies 18016..18031. At BLOCK_SIZE 27,
-    # candidates 18000 and 18027 overlap it; the first legal base is 18054.
-    ports = cl.allocate_ports({18016})
-    assert ports["gateway"] == 18054
-    assert set(ports) == set(cl.PORT_OFFSETS)
-    # without any existing record, the allocator starts at BLOCK_START
-    assert cl.allocate_ports(set())["gateway"] == BLOCK_START
-    # an exact-base record is of course skipped too
-    assert cl.allocate_ports({BLOCK_START})["gateway"] == BLOCK_START + BLOCK_SIZE
-    # A record whose base sits in the (base-26, base-15) gap is reached only by
-    # the conservative ±(BLOCK_SIZE-1) window: at 18010 the old ±15 lookback
-    # took 18027 (a 16-wide block [18010,18025] does not reach it), while the
-    # ±26 window skips 18027 — the record could be a 27-wide block
-    # [18010,18036] — and lands on 18054. Pins the window, not just the skip.
-    assert cl.allocate_ports({18010})["gateway"] == 18054
+# The overlap-against-other-records behavior this test once pinned
+# (`allocate_ports` skipping a block another host record occupied) no longer
+# exists: `allocate_ports` takes no arguments now and consults no registered
+# record, only live port bind-ability (`base.cluster.port_free`) — a home
+# knows no other cluster. That surviving behavior (skip a block with a bound
+# port, land on the next) is covered by
+# `tests/base/test_cluster_alloc.py::test_allocate_ports_skips_a_block_with_a_bound_port`.
 
 
 @pytest.mark.parametrize("missing", ["redis_admin_password", "redis_password"])

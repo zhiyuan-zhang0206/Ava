@@ -2,7 +2,7 @@
 
 The bring-up verbs collapsed into a single `ava start` (which births the cluster
 on first run); the standalone `infra`/`gateway`/`host` groups are gone, and
-cluster registry management lives under `ava cluster`.
+cluster-level verbs live under `ava cluster`.
 """
 
 from __future__ import annotations
@@ -47,9 +47,11 @@ def test_core_verbs_exist() -> None:
     assert {"start", "stop", "status", "pty", "cluster"} <= _top_choices()
 
 
-def test_cluster_group_has_ls_down_and_destroy() -> None:
+def test_cluster_group_has_down_and_destroy_and_no_listing() -> None:
     choices = _cluster_choices()
-    assert {"status", "update", "ls", "down", "destroy"} <= choices
+    assert {"status", "update", "down", "destroy"} <= choices
+    # No host-level list of clusters exists to print (each home describes only itself).
+    assert "ls" not in choices
     # The whole-cluster bounce left with the retired updater; `ava restart` is per unit.
     assert "restart" not in choices
 

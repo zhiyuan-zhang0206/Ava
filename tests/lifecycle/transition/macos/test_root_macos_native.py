@@ -277,7 +277,7 @@ def _wait(condition: Callable[[], bool], what: str, timeout: float = 30) -> None
 @dataclass
 class NativeHome:
     home: Path
-    registry: Path
+    host_state_dir: Path
     label: str
     images: dict[str, ReleaseRef]
     births: list[OwnedProcess] = field(default_factory=list)
@@ -319,7 +319,7 @@ class NativeHome:
         import pwd
 
         account = Path(pwd.getpwuid(os.getuid()).pw_dir)
-        return dict(root_service.stage_environment(self.home, self.registry, account))
+        return dict(root_service.stage_environment(self.home, self.host_state_dir, account))
 
     def stage(self, tag: str) -> None:
         """Start one image's root directly (the steady state before an operation)."""
@@ -440,8 +440,6 @@ def native(
     for directory in (home, home / "run", home / "run/ava-root"):
         directory.chmod(0o700)
     (home / "releases").mkdir(mode=0o700)
-    registry = base / "clusters.json"
-    registry.write_text("{}")
     label = f"com.ava.release-start-fixture.{uuid4().hex[:16]}"
     monkeypatch.setattr(settings.general, "ava_home", home)
     monkeypatch.setattr(settings.services, "permissions_helper_artifact_dir", helper_app.parent)
@@ -449,7 +447,7 @@ def native(
         monkeypatch.setattr(lifecycle, "_expected_dr", lambda: native_fixture.BUNDLE_REQUIREMENT)
     # The fixture home has no data plane; the bracket itself is unit-tested.
     monkeypatch.setattr(root_macos, "_data_plane", dict)
-    native = NativeHome(home, registry, label, {tag: _image(home, tag) for tag in ("A", "B")})
+    native = NativeHome(home, base, label, {tag: _image(home, tag) for tag in ("A", "B")})
     plist = base / f"{label}.plist"
     plist.write_bytes(
         plistlib.dumps(
@@ -500,7 +498,6 @@ def _operation(native: NativeHome, previous: str, candidate: str) -> FleetReques
     request = FleetRequest(
         id=uuid4(),
         home=str(native.home),
-        registry=str(native.registry),
         created_at=datetime.now(UTC),
         machine="fixture",
         previous=native.images[previous],

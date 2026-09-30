@@ -18,7 +18,7 @@ from cli import main as cli_main
 
 @pytest.fixture(autouse=True)
 def _isolated_host_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.general, "cluster_registry", tmp_path / "host" / "clusters.json")
+    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path / "host")
 
 
 def test_operator_round_trip_needs_no_gateway_or_data_plane(

@@ -67,9 +67,9 @@ Everything per-session lives under `$AVA_HOME/run/pty/`:
 - `<name>.sock` — the session's socket (sun_path-bounded names fall back to
   a hashed tempdir path, computed identically by host and CLI).
 
-Allocation control is deliberately outside every per-home namespace. Beside
-the host-level cluster registry are `pty-allocation-freeze.json` and the stable
-`pty-allocation.lock`; changing `$AVA_HOME` therefore cannot bypass a freeze.
+Allocation control is deliberately outside every per-home namespace. In the
+host state dir (`AVA_HOST_STATE_DIR`) are `pty-allocation-freeze.json` and the
+stable `pty-allocation.lock`; changing `$AVA_HOME` therefore cannot bypass a freeze.
 The marker stores schema version, random generation, holder, reason, and UTC
 creation time. A malformed marker means frozen, never inactive.
 

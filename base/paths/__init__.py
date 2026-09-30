@@ -23,6 +23,13 @@ def ava_home() -> Path:
     return ensure_private_dir(root)
 
 
+def host_state_dir() -> Path:
+    """Host-level state shared by every unit on this host (`AVA_HOST_STATE_DIR`,
+    default `~/.ava`): the Postgres template, runtime binaries, coding-session
+    owner records and the PTY allocation freeze. It lists no clusters."""
+    return settings.general.host_state_dir.expanduser().resolve()
+
+
 def run_dir() -> Path:
     """Runtime directory for pid/sock files ($AVA_HOME/run); create if missing.
 

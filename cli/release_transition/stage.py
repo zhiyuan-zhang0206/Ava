@@ -30,7 +30,6 @@ def start_operation(path: Path) -> int:
     _require_inputs(operation)
     home = Path(request.home)
     os.environ["AVA_HOME"] = request.home
-    os.environ["AVA_CLUSTER_REGISTRY"] = request.registry
     _require_native_root_owner(operation, home)
     from base.deploy.release.operation import authorized_start
     from cli.release_transition.authority import require_issued
@@ -41,7 +40,7 @@ def start_operation(path: Path) -> int:
 
     release = operation.reference
     with authorized_start(path):
-        result = start_image(home, Path(request.registry), release)
+        result = start_image(home, release)
         _require_inputs(operation)
         return result
 
@@ -100,7 +99,6 @@ def preflight_operation(path: Path, *, previous: bool = False) -> int:
     request = operation.request
     _require_inputs(operation)
     os.environ["AVA_HOME"] = request.home
-    os.environ["AVA_CLUSTER_REGISTRY"] = request.registry
     from cli.release_transition.request import PitrRequest
     from cli.start_runtime import StartRuntime
 
@@ -164,7 +162,6 @@ def observe_operation(path: Path) -> int:
     request = operation.request
     _require_inputs(operation)
     os.environ["AVA_HOME"] = request.home
-    os.environ["AVA_CLUSTER_REGISTRY"] = request.registry
     from cli.start_runtime import admit_release
 
     reference = operation.reference

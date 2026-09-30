@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from base.cluster.registry import ClusterRecord
+from base.cluster.record import ClusterRecord
 from base.daemon.health import DaemonProbe
 from services.ava_root_glue.diagnostic_probes import pgbouncer
 
@@ -71,7 +71,7 @@ def test_pooler_protocol_requires_native_custody_and_both_listeners(
     repair.assert_not_called()
 
 
-def test_unknown_pooler_registry_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unknown_pooler_record_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fake_get_record(_home: Path) -> ClusterRecord | None:
         return None
 

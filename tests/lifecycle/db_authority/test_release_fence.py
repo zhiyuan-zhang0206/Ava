@@ -78,7 +78,6 @@ def release(born: Born) -> FleetRequest:
     request = FleetRequest(
         id=uuid4(),
         home=str(born.home),
-        registry=str(born.home.parent / "clusters.json"),
         created_at=datetime.now(UTC),
         machine="test",
         previous=_PREVIOUS,

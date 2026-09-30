@@ -201,7 +201,7 @@ def test_profile_survives_bare_start_without_controller_environment(
     monkeypatch.setattr(start_intent, "_checkout", lambda: preview.source)
     # First-start input parsing precedes Settings and reads the caller environment.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(preview.home))
-    monkeypatch.setitem(os.environ, "AVA_CLUSTER_REGISTRY", str(preview.run / "clusters.json"))
+    monkeypatch.setitem(os.environ, "AVA_HOST_STATE_DIR", str(preview.run))
     monkeypatch.delitem(os.environ, "AVA_SERVICE_PATH", raising=False)
     git_executable = shutil.which("git")
     assert git_executable is not None
@@ -236,7 +236,8 @@ def test_profile_survives_bare_start_without_controller_environment(
     assert persisted["AVA_MACHINE_HOST"] == "127.0.0.1"
     # The gateway derives the direct browser origin from the app port start
     # reserved; the preview configuration names no origin of its own.
-    (record,) = cluster.load_registry(path=preview.run / "clusters.json").values()
+    record = cluster.get_record(preview.home)
+    assert record is not None
     assert persisted["AVA_APP_PORT"] == str(cluster.record_app_port(record))
     assert "AVA_GATEWAY_CORS_ALLOWED_ORIGINS" not in persisted
     monkeypatch.setenv("PATH", str(tmp_path / "manager-tools"))

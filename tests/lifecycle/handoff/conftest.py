@@ -124,7 +124,6 @@ class Store:
         request = FleetRequest(
             id=uuid4(),
             home=str(self.home),
-            registry=str(self.home.parent / "clusters.json"),
             created_at=datetime.now(UTC),
             machine="unit-a",
             previous=self.previous,

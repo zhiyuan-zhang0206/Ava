@@ -2,17 +2,12 @@
 
 from pathlib import Path
 
-from base import cluster
 from cli.release_transition.request import HomeRequest
 from cli.start_identity import read_intent
 
 
-def require_reservation(request: HomeRequest, *, active_registry: Path) -> None:
-    registry = Path(request.registry)
-    if registry.resolve(strict=True) != registry or registry != active_registry.resolve(
-        strict=True
-    ):
-        raise ValueError("release request does not name the active registry authority")
+def require_reservation(request: HomeRequest) -> None:
+    """The home must be an initialized gateway: its own start intent carries its record."""
     intent = read_intent(Path(request.home))
     if (
         intent is None
@@ -20,8 +15,3 @@ def require_reservation(request: HomeRequest, *, active_registry: Path) -> None:
         or intent["record"] is None
     ):
         raise ValueError("release requires an initialized gateway reservation")
-    records = cluster.load_registry(path=registry)
-    if request.home not in records or records[request.home] != cluster.ClusterRecord(
-        **intent["record"]
-    ):
-        raise ValueError("release home reservation differs from persisted start identity")

@@ -120,9 +120,11 @@ def redis_data_dir() -> Path:
 
 def _pg_template_dir() -> Path:
     """Host-level cached `initdb` output, copied per cluster so a new instance is
-    a directory copy rather than a multi-second init. Beside the cluster registry
+    a directory copy rather than a multi-second init. In the host state dir
     (independent of any one `$AVA_HOME`), so every co-located cluster shares it."""
-    return Path(settings.general.cluster_registry).expanduser().parent / "pg-template-17"
+    from base.paths import host_state_dir
+
+    return host_state_dir() / "pg-template-17"
 
 
 def _redis_bin(name: str) -> str:

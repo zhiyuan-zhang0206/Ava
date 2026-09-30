@@ -302,13 +302,13 @@ def file_lock(path: Path, *, timeout_s: float | None = None) -> Generator[None]:
 
     POSIX: `fcntl.flock(LOCK_EX)` — the historical behaviour, unchanged.
     Windows: `msvcrt.locking(LK_LOCK)` over one byte, which blocks-with-retry
-    until the range is free. Both serialize the host-level registry read-modify-
-    write the same way; the lock is released (and the fd closed) on exit.
+    until the range is free. Both serialize a read-modify-write the same way;
+    the lock is released (and the fd closed) on exit.
 
     `timeout_s` bounds the wait and raises `LockTimeoutError` on expiry, instead
     of blocking indefinitely (`_bounded_file_lock`). **The unbounded default is
     the historical behaviour and is kept for the callers that have it** (the
-    cluster registry, `crontab_lock`), but a bound is the better answer wherever
+    `crontab_lock`), but a bound is the better answer wherever
     the holder is a long-lived daemon rather than a short CLI section: a wait
     with no bound is how one wedged holder becomes every writer wedged behind
     it. Expiry raises rather than proceeding — a caller that could not take the

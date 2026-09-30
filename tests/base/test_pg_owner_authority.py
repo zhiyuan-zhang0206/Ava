@@ -125,11 +125,11 @@ def _free_port() -> int:
 @pytest.fixture()
 def owned_pg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
     """A home-owned Postgres (native launch receipt, owner-only socket) whose
-    registry record `local_owner_authority` resolves; yields its port."""
+    cluster record `local_owner_authority` resolves; yields its port."""
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(settings.general, "ava_home", str(home))
-    monkeypatch.setattr(settings.general, "cluster_registry", str(tmp_path / "clusters.json"))
+    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     pg_port = _free_port()
     record = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", {"postgres": pg_port}),
@@ -392,7 +392,7 @@ def test_owner_conninfo_refuses_what_startup_options_cannot_carry() -> None:
 def test_local_owner_authority_reads_record_and_url_as_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Socket port from the registry record; owner and database from the URL's
+    """Socket port from the cluster record; owner and database from the URL's
     database name."""
     home = tmp_path / "home"
     monkeypatch.setattr(settings.general, "ava_home", str(home))

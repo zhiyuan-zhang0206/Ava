@@ -147,7 +147,7 @@ def _expected(run: Path, *, image: bool) -> runtime.ExpectedRuntime:
         "cwd",
         "executable",
         "AVA_HOME",
-        "AVA_CLUSTER_REGISTRY",
+        "AVA_HOST_STATE_DIR",
         "VIRTUAL_ENV",
         "AVA_SERVICE_PATH",
         "PATH",

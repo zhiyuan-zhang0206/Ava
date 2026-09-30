@@ -283,7 +283,7 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
     env.update(
         AVA_HOME=str(home),
         AVA_HOME_OVERRIDE="1",
-        AVA_CLUSTER_REGISTRY=str(tmp_path / "clusters.json"),
+        AVA_HOST_STATE_DIR=str(tmp_path / "host-state"),
     )
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
         [sys.executable, "-I", "-B", "-c", _SETTINGS_BUILD_WARNING, str(_REPO_ROOT), init],

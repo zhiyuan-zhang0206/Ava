@@ -250,7 +250,7 @@ def pitr_admin_url() -> str:
 
     record = get_record(ava_home())
     if record is None:
-        raise RuntimeError("cluster registry record is missing")
+        raise RuntimeError("cluster record is missing")
     return pg_admin_url(record_postgres_port(record))
 
 

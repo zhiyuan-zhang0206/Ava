@@ -61,7 +61,7 @@ def test_ava_start_writes_a_loguru_warning_to_stderr_and_its_log(tmp_path: Path)
     env.update(
         AVA_HOME=str(home),
         AVA_HOME_OVERRIDE="1",
-        AVA_CLUSTER_REGISTRY=str(tmp_path / "clusters.json"),
+        AVA_HOST_STATE_DIR=str(tmp_path / "host-state"),
     )
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
         [sys.executable, "-I", "-B", "-c", _FIRST_START, str(_REPO_ROOT)],

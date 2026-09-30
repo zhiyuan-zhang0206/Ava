@@ -132,7 +132,7 @@ class ReleaseCycle:
         # retained Settings instance or inherited provider/Python overrides.
         self.preview.env = local.clean_env() | {
             "AVA_HOME": str(self.preview.home),
-            "AVA_CLUSTER_REGISTRY": str(self.preview.run / "clusters.json"),
+            "AVA_HOST_STATE_DIR": str(self.preview.run),
         }
         self.preview.command(name, argv, cwd=cwd, timeout=timeout)
 

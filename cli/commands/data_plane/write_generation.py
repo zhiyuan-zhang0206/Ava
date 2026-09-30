@@ -21,7 +21,7 @@ from base.cluster.authority import (
     Generation,
     OperationAuthority,
 )
-from base.cluster.registry import ClusterRecord
+from base.cluster.record import ClusterRecord
 from base.config import settings
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane.pgbouncer import PoolerStop

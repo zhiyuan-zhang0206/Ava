@@ -22,7 +22,7 @@ NOW = dt.datetime(2026, 9, 2, 0, 0, tzinfo=dt.UTC)
 
 @pytest.fixture(autouse=True)
 def _isolated_host_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.general, "cluster_registry", tmp_path / "host" / "clusters.json")
+    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path / "host")
 
 
 def _key(tmp_path: Path, workspace: str = "workspace") -> owner.CodingSessionKey:

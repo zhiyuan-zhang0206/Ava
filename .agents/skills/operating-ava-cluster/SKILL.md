@@ -30,9 +30,9 @@ CLI verb (see `conventions/runbook.md`); for the CLI verbs see
 
 Start with `ava agents ls`: its ID, status, machine, and label columns map the
 sibling agent to its execution context. For an agent owned by this host, its
-workspace is `<cluster-home>/workspaces/<id>`. Resolve the cluster home through
-`ava cluster ls` and the checkout-anchored `ava` CLI; the default production
-home is `~/.ava`. A remote agent's workspace lives on its owning machine — never
+workspace is `<cluster-home>/workspaces/<id>`. The cluster home is the
+`AVA_HOME` your own environment carries (the host keeps no list of clusters);
+the default production home is `~/.ava`. A remote agent's workspace lives on its owning machine — never
 infer it by joining the ID to the gateway's home.
 
 Inside a workspace, read `memory/MEMORY.md` first and follow only the entries it

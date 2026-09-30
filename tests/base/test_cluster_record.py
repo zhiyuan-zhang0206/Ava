@@ -1,3 +1,5 @@
+import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import cast
 
@@ -5,169 +7,39 @@ import pytest
 
 from base import cluster
 from base.cluster import port_preflight
-from base.native_process.os_platform import LockTimeoutError, file_lock
 
 
-def test_registry_lock_contention_has_a_bounded_wait(tmp_path: Path) -> None:
-    registry = tmp_path / "clusters.json"
-    with (
-        file_lock(registry.with_suffix(".lock"), timeout_s=1),
-        pytest.raises(LockTimeoutError),
-        cluster.registry_lock(path=registry, timeout_s=0.02),
-    ):
-        pytest.fail("A contended registry lock must not be entered")
-
-
-def test_save_and_get_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    reg = tmp_path / "clusters.json"
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    home = tmp_path / ".ava-t1"
-    rec = cluster.ClusterRecord(
+def _record(home: Path) -> cluster.ClusterRecord:
+    return cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", {"gateway": 18000, "frontend": 18001}),
         gateway_home=str(home),
         created_at="2026-06-01T00:00:00Z",
+        data_plane_host="db.internal",
     )
-    cluster.save_record(rec)
-    got = cluster.get_record(home)
-    assert got == rec
-    assert cluster.get_record(tmp_path / "missing") is None
 
 
-def test_load_registry_rekeys_legacy_name_keyed_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """A registry written pre-path-only is keyed by cluster NAME and carries
-    retired fields (`name` / `db_name` / `redis_db_index` / `redis_prefix`).
-    load_registry re-keys rows in memory by their own gateway_home and drops
-    the fields the dataclass no longer declares, instead of crashing on
-    ClusterRecord(**v)."""
-    import json
+def test_get_record_reads_the_homes_own_start_intent(tmp_path: Path) -> None:
+    """A home describes itself: its record is the `record` of its start intent,
+    and nothing outside the home is read."""
+    home = tmp_path / ".ava-t1"
+    home.mkdir()
+    rec = _record(home)
+    (home / cluster.INTENT_NAME).write_text(json.dumps({"record": asdict(rec), "phase": "ready"}))
 
-    reg = tmp_path / "clusters.json"
-    reg.write_text(
-        json.dumps(
-            {
-                "main": {
-                    "name": "main",
-                    "db_name": "ava_main",
-                    "redis_db_index": 0,
-                    "redis_prefix": "ava",
-                    "ports": {"gateway": 8000, "postgres": 5433, "redis": 6380},
-                    "gateway_home": "/home/x/.ava",
-                    "created_at": "2026-06-01T00:00:00Z",
-                }
-            }
-        )
-    )
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    rec = cluster.get_record(Path("/home/x/.ava"))
-    assert rec is not None
-    assert rec.gateway_home == "/home/x/.ava"
-    assert rec.ports["postgres"] == 5433
-    # Retired fields (never declared by the current dataclass) are dropped.
-    assert not hasattr(rec, "name")
-    assert not hasattr(rec, "redis_db_index")
+    assert cluster.get_record(home) == rec
 
 
-def test_delete_record_by_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    reg = tmp_path / "clusters.json"
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    home = tmp_path / ".ava-t2"
-    cluster.save_record(
-        cluster.ClusterRecord(
-            ports=cast("cluster.ClusterPorts", {"gateway": 18016}),
-            gateway_home=str(home),
-            created_at="t",
-        )
-    )
-    assert cluster.delete_record(home) is True
+def test_get_record_is_none_for_a_home_without_a_start_intent(tmp_path: Path) -> None:
+    assert cluster.get_record(tmp_path / "never-born") is None
+
+
+def test_get_record_is_none_for_a_unit_without_the_gateway(tmp_path: Path) -> None:
+    """A remote agent-runner owns no data plane, so its intent carries no record."""
+    home = tmp_path / ".ava-runner"
+    home.mkdir()
+    (home / cluster.INTENT_NAME).write_text(json.dumps({"record": None, "phase": "ready"}))
+
     assert cluster.get_record(home) is None
-    assert cluster.delete_record(home) is False
-
-
-def test_load_registry_accepts_mixed_name_and_home_keys(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """A half-migrated file (one legacy name-keyed row + one home-keyed row)
-    loads to two home-keyed records — every row is re-keyed by its own
-    gateway_home regardless of the JSON key shape."""
-    import json
-
-    reg = tmp_path / "clusters.json"
-    reg.write_text(
-        json.dumps(
-            {
-                "t1": {
-                    "name": "t1",
-                    "ports": {"gateway": 18000},
-                    "gateway_home": "/h/.ava-t1",
-                    "created_at": "t",
-                },
-                "/h/.ava-t2": {
-                    "ports": {"gateway": 18016},
-                    "gateway_home": "/h/.ava-t2",
-                    "created_at": "t",
-                },
-            }
-        )
-    )
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    loaded = cluster.load_registry()
-    assert set(loaded) == {"/h/.ava-t1", "/h/.ava-t2"}
-
-
-def test_load_registry_refuses_two_records_for_one_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """Two records claiming one gateway_home would silently last-win (and the
-    converge migration would persist the loss, freeing a possibly-live port
-    block) — load must refuse, naming both source keys."""
-    import json
-
-    import pytest
-
-    reg = tmp_path / "clusters.json"
-    reg.write_text(
-        json.dumps(
-            {
-                "t1": {
-                    "name": "t1",
-                    "ports": {"gateway": 18000},
-                    "gateway_home": "/h/.ava-dup",
-                    "created_at": "t",
-                },
-                "/h/.ava-dup": {
-                    "ports": {"gateway": 18016},
-                    "gateway_home": "/h/.ava-dup",
-                    "created_at": "t",
-                },
-            }
-        )
-    )
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    with pytest.raises(RuntimeError, match="two records claiming home"):
-        cluster.load_registry()
-
-
-def test_load_registry_refuses_record_without_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """The home path IS the identity — a record with no gateway_home is
-    unaddressable and must fail loudly, not load as an empty-keyed row."""
-    import json
-
-    import pytest
-
-    reg = tmp_path / "clusters.json"
-    reg.write_text(
-        json.dumps({"t1": {"ports": {"gateway": 18000}, "gateway_home": "", "created_at": "t"}})
-    )
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    with pytest.raises(RuntimeError, match="no gateway_home"):
-        cluster.load_registry()
-
-
-def test_load_registry_empty_when_no_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    monkeypatch.setattr(cluster, "registry_path", lambda: tmp_path / "nope.json")
-    assert cluster.load_registry() == {}
 
 
 # --- port preflight helpers (issue: ava start port preflight) ---
@@ -241,8 +113,8 @@ def test_expected_cluster_ports_missing_key_raises(monkeypatch: pytest.MonkeyPat
 def test_expected_cluster_ports_falls_back_to_legacy_without_record(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    """A record-less default home (a pre-registry install) binds the fixed legacy
-    block — its ports ARE its record."""
+    """A record-less default home binds the fixed legacy block — its ports ARE
+    its record."""
     monkeypatch.setattr(port_preflight, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     assert port_preflight.expected_cluster_ports(tmp_path / "x") == port_preflight.LEGACY_AVA_PORTS
 
@@ -301,8 +173,8 @@ def test_env_port_drift_reports_mismatched_keys_only(
     )
     drift = port_preflight.env_port_drift(home, rec)
     assert drift == [
-        "AVA_GATEWAY_PORT: .env='8001' vs registry=8000",
-        "AVA_REDIS_URL: url port=9999 vs registry=6380",
+        "AVA_GATEWAY_PORT: .env='8001' vs record=8000",
+        "AVA_REDIS_URL: url port=9999 vs record=6380",
     ]
 
 
@@ -330,7 +202,7 @@ def test_env_port_drift_pooled_url_expects_pooler_port(
     (home / ".env").write_text(
         "AVA_DB_URL=postgresql://ava:sek@127.0.0.1:5433/ava\n"  # pre-cutover direct port
     )
-    assert pp.env_port_drift(home, rec) == ["AVA_DB_URL: url port=5433 vs registry=6433"]
+    assert pp.env_port_drift(home, rec) == ["AVA_DB_URL: url port=5433 vs record=6433"]
 
     (home / ".env").write_text(
         "AVA_DB_URL=postgresql://ava:sek@127.0.0.1:6433/ava\n"  # normalized pooler port
@@ -338,31 +210,10 @@ def test_env_port_drift_pooled_url_expects_pooler_port(
     assert pp.env_port_drift(home, rec) == []
 
     # an operator stand-in naming neither port still warns (it dials something
-    # the registry does not own) — converge leaves it alone, the warning does not
+    # the record does not own) — converge leaves it alone, the warning does not
     # (the strict compare matches the pre-F8b behavior for off-cluster ports).
     (home / ".env").write_text("AVA_DB_URL=postgresql://ava:dev@localhost:5432/ava\n")
-    assert pp.env_port_drift(home, rec) == ["AVA_DB_URL: url port=5432 vs registry=6433"]
-
-
-def test_registry_disk_form_is_home_keyed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """The on-disk registry is keyed by home path — the record identity — so
-    two records can never collide on a name key."""
-    reg = tmp_path / "clusters.json"
-    monkeypatch.setattr(cluster, "registry_path", lambda: reg)
-    reg_map = {
-        "/home/x/.ava-t1": cluster.ClusterRecord(
-            ports=cast("cluster.ClusterPorts", {"gateway": 18000, "frontend": 18001}),
-            gateway_home="/home/x/.ava-t1",
-            created_at="2026-06-01T00:00:00Z",
-        ),
-        "/home/x/.ava-t2": cluster.ClusterRecord(
-            ports=cast("cluster.ClusterPorts", {"gateway": 18032, "frontend": 18033}),
-            gateway_home="/home/x/.ava-t2",
-            created_at="2026-06-01T00:00:00Z",
-        ),
-    }
-    disk = cluster._registry_disk_form(reg_map)
-    assert set(disk) == {"/home/x/.ava-t1", "/home/x/.ava-t2"}
+    assert pp.env_port_drift(home, rec) == ["AVA_DB_URL: url port=5432 vs record=6433"]
 
 
 def test_unit_port_map_overlays_health_ports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
