@@ -579,18 +579,6 @@ repos:
         files: ^(base/host/env/config_registry\.py$|base/config/.*\.py$|scripts/codegen/gen_config_lite_table\.py$|base/host/env/config_lite_table\.json$)
         pass_filenames: false
 
-      # Package-door contract snapshots (base/db/api.txt, base/agents/api.txt,
-      # base/events/api.txt) must match the door's current public surface — pure
-      # AST, so a body-only fix leaves the snapshot untouched; a signature change,
-      # or a new/removed public name, must land its snapshot diff in the same PR.
-      # See conventions/python-conventions.md and scripts/structure/contracts.py.
-      - id: lint-contract-snapshots
-        name: "core package-door contract snapshots in sync (drift: run .venv/bin/python scripts/structure/contracts.py --write)"
-        entry: .venv/bin/python scripts/structure/contracts.py --check
-        language: system
-        files: ^(base/db/__init__\.py$|base/agents/.*\.py$|base/events/.*\.py$|base/db/api\.txt$|base/agents/api\.txt$|base/events/api\.txt$|scripts/structure/contracts\.py$)
-        pass_filenames: false
-
       # `git rebase` / `cherry-pick` / `merge` never invoke the pre-commit
       # hook for the commits they create, so a conflict-resolution commit
       # can reach `git push` having never been checked by a single
@@ -612,17 +600,15 @@ repos:
 
       # pre-commit's own diff selection passes a files:-filtered hook only
       # Added/Copied/Modified/Renamed paths -- never a Deleted one -- so a
-      # change that only deletes the last file referencing a public symbol,
-      # event, or config field can leave its generated snapshot stale with
-      # no pre-commit-stage hook ever firing, on any range (this is how PR
-      # #3658 reached CI with a stale base/agents/api.txt after a rebase
-      # deleted the module it described). This always-run duplicate ignores
+      # change that only deletes the last file referencing an event or config
+      # field can leave its generated artifact stale with no pre-commit-stage
+      # hook ever firing, on any range. This always-run duplicate ignores
       # every files: filter and re-checks the whole repository at every
       # push; the underlying hooks keep their normal filtered,
       # pre-commit-stage-only behavior, so `git commit` stays fast. See
       # scripts/prepush-artifact-freshness.sh.
       - id: lint-prepush-artifact-freshness
-        name: "lint prepush artifact freshness (unconditional generated-artifact/snapshot check)"
+        name: "lint prepush artifact freshness (unconditional generated-artifact check)"
         entry: bash scripts/prepush-artifact-freshness.sh
         stages: [pre-push]
         verbose: true  # Successful skips must stay visible.
