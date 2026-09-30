@@ -30,9 +30,8 @@ force-terminated while no incarnation owned it: the force records
 `unowned_termination` on its own command, but only when the row's unowned
 state has a lifecycle origin. That origin is the spawn's birth epoch
 (`last_resurrect_inbound_id = 0`), or a `lifecycle_release` receipt on the
-resurrection, applied restart or straggler settlement that left the row
-unowned. The receipt must belong to the current life, that is, have an id
-above the epoch fence
+resurrection or applied restart that left the row unowned. The receipt must
+belong to the current life, that is, have an id above the epoch fence
 (`decisions/2026-09-29-unowned-termination-resurrects.md`).
 Historical process runtimes, unknown runtime kinds, incomplete hosted
 identities and resources the current model cannot decode refuse resurrection

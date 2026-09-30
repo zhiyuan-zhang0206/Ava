@@ -108,7 +108,7 @@ def test_is_paused_without_an_argument_still_reads_fresh(
 def test_pause_holds_admission_without_closing_dependencies(
     posture: list[str], local_runtime: _StubBackend
 ) -> None:
-    cluster_pause.pause_local_cluster()
+    agent_pause.pause_agents()
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.phase == "drained"
@@ -117,7 +117,7 @@ def test_pause_holds_admission_without_closing_dependencies(
 
 
 def test_unpause_writes_idle_posture(posture: list[str]) -> None:
-    cluster_pause.pause_local_cluster()
+    agent_pause.pause_agents()
 
     cluster_pause.unpause_local_cluster()
 
@@ -135,9 +135,9 @@ def test_unpause_without_pause_is_a_noop(posture: list[str]) -> None:
 def test_pause_twice_then_unpause_once_clears(posture: list[str]) -> None:
     """Idempotent pause: a second pause (e.g. a repeat Phase-A delivery) must not
     leave the host paused after a single unpause."""
-    cluster_pause.pause_local_cluster()
+    agent_pause.pause_agents()
     first = pause_owner.read()
-    cluster_pause.pause_local_cluster()
+    agent_pause.pause_agents()
     assert pause_owner.read() == first
     cluster_pause.unpause_local_cluster()
     assert posture == ["idle"]
@@ -155,7 +155,7 @@ def test_pause_preserves_unclaimed_work_and_terminated_intent(
     db_conn.commit()
     message = insert_inbound_message(db_conn, agent, "queued work", "user")
 
-    cluster_pause.pause_local_cluster()
+    agent_pause.pause_agents()
 
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
@@ -191,10 +191,9 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
         (agent, machine_name(), owner, generation),
     )
     db_conn.commit()
-    monkeypatch.setattr("base.config.settings.gateway.update_quiesce_timeout_seconds", 0.01)
 
     with pytest.raises(TimeoutError, match="without force") as raised:
-        cluster_pause.pause_local_cluster()
+        agent_pause.pause_agents(0.01)
 
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None

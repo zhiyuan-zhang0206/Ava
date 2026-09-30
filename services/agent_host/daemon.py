@@ -74,7 +74,6 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import pool_release
 from base.deploy.maintenance import admission
-from base.deploy.maintenance.straggler_reap import settle_stranded_reaps_async
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
 from base.log import init_gateway_process, logger
@@ -495,10 +494,6 @@ async def run() -> None:
         # a stuck agent has really been silent.
         scheduler = TurnScheduler(host.run_turn, activity_clock=host.last_active_at)
         beat = asyncio.create_task(_beat_forever(liveness, host, scheduler, local_machine))
-        # Straggler-reap marks settle before anything else may look at the row
-        # (task #4016): a predecessor boot reaped mid-wave left rows unrunnable;
-        # their first-admission wakes are injected after the scheduler exists.
-        settled_reaps = await settle_stranded_reaps_async(control_pool, local_machine)
         settled = await settle_stale_running_rows(control_pool, local_machine)
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
 
@@ -525,10 +520,6 @@ async def run() -> None:
         # no per-agent page_reconcile_loop (loop.py:main() is process-only).
         background = _spawn_background_tasks(workload_pool)
         try:
-            # Settled reap rows need one admission each: the cold build's
-            # reconcile re-delivers the claimed ordinary work the reap cut
-            # short, and the dangling-tool repair closes the truncated turn.
-            host.arm_settled_reaps(settled_reaps)
             await InboundWakeDispatcher(
                 settings.data_plane.redis_url,
                 scheduler,

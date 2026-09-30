@@ -144,5 +144,5 @@ def unit_already_stopped() -> bool:
         current.status == "paused"
         and current.maintenance is not None
         and current.maintenance.phase == "stopped"
-        and not current.maintenance.unsettled_failures()
+        and not current.maintenance.failures
     )

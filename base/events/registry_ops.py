@@ -6,8 +6,6 @@ from base.events.payloads import (
     PauseLifecycleWait,
     PauseOrphanClaimSettled,
     SilentIdle,
-    UpdateStragglerReaped,
-    UpdateStragglerReapSettled,
 )
 from base.events.registry import _audit as _audit
 from base.events.registry import _telemetry as _telemetry
@@ -77,38 +75,6 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "preparation settled an ordinary claim without a live runtime",
         payload=PauseOrphanClaimSettled,
         tier="anomaly",
-    ),
-    # straggler reap (task #4016): the drain truncates + releases an un-landed
-    # cohort member; the successor boot/resume settles the mark.
-    "update_straggler_reaped": _telemetry(
-        "update_straggler_reaped",
-        "drain reaped straggler cohort agent(s) past their restart window",
-        payload=UpdateStragglerReaped,
-        tier="anomaly",
-    ),
-    "update_straggler_reap_settled": _telemetry(
-        "update_straggler_reap_settled",
-        "successor boundary settled stranded straggler-reap marks",
-        payload=UpdateStragglerReapSettled,
-        tier="anomaly",
-    ),
-    # The reap's quiet close (tasks #4164/#4156): the truncated turn/wake stops
-    # through the classification instead of the crash path — the mark is a
-    # deliberate truncation, not an ownership loss.
-    "host_turn_truncated": _telemetry(
-        "host_turn_truncated",
-        "the update drain's straggler reap ended this hosted turn on purpose — the "
-        "row was CAS-marked 'restarting' mid-turn and the turn's fail-closed guard "
-        "read refused; no corpse marker, no error event, no failure receipt. The "
-        "successor boundary settles the mark and re-delivers the claimed work",
-        tier="observation",
-    ),
-    "host_held_wake_truncated": _telemetry(
-        "host_held_wake_truncated",
-        "a held-controls wake stopped quietly because the update straggler reap had "
-        "marked its row 'restarting' — the successor boundary owns the row and its "
-        "un-applied restart, so the wake had nothing left to do; not a failure",
-        tier="observation",
     ),
     # The force-termination quiet close (task #4180): an externally commanded
     # force terminate (delivery-watchdog wedge recovery / CLI force / machine

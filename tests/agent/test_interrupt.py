@@ -27,8 +27,7 @@ from base.db import create_agent
 # they depend on real DB IO timing.
 _TIMEOUT_S = 5.0
 
-# The maintenance restart payload key (`payload ? 'maintenance'`) is part of
-# the reap shape (task #4027): a restart without it is not the drain's signal.
+# The payload a maintenance drain stamps on its restart command.
 _MAINTENANCE_PAYLOAD: dict[str, object] = {
     "maintenance": {"holder": "ops:test:interrupt", "acquired_at": "2026-09-19T00:00:00+00:00"}
 }
@@ -114,32 +113,11 @@ class TestHasPendingInterrupt:
         _insert(db_conn, tid, "terminate", source="agent:9")  # pyright: ignore[reportUnknownArgumentType]
         assert await has_pending_interrupt(aops_pool, tid) is True
 
-    async def test_true_on_straggler_reap_mark(self, db_conn, aops_pool: AsyncConnectionPool):
-        # Task #4016: the drain CAS-marked the row 'restarting' while its
-        # un-applied maintenance restart is still pending/claimed — that pair
-        # IS the durable truncation signal for this agent's in-flight turn.
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(
-            db_conn,  # pyright: ignore[reportUnknownArgumentType]
-            tid,
-            "restart",
-            source="system:maintenance",
-            payload=_MAINTENANCE_PAYLOAD,
-        )
-        db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
-            "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
-            "VALUES(%s,'restarting',%s,'hosted')",
-            (tid, machine_name()),
-        )
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-        assert await has_pending_interrupt(aops_pool, tid) is True
-        assert await pending_interrupt_reason(aops_pool, tid) is InterruptReason.SYSTEM
-
     async def test_false_on_unmarked_maintenance_restart(
         self, db_conn, aops_pool: AsyncConnectionPool
     ):
-        # The pre-#4016 drain waits for the turn boundary: a pending restart
-        # alone never aborts in-flight work.
+        # The drain waits for the turn boundary: a pending restart alone never
+        # aborts in-flight work.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(
             db_conn,  # pyright: ignore[reportUnknownArgumentType]
@@ -156,11 +134,12 @@ class TestHasPendingInterrupt:
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         assert await has_pending_interrupt(aops_pool, tid) is False
 
-    async def test_false_on_reap_mark_with_a_resolved_command(
+    async def test_false_on_a_restarting_row_with_a_pending_maintenance_restart(
         self, db_conn, aops_pool: AsyncConnectionPool
     ):
-        # A mark whose command already applied is not a truncation signal —
-        # the turn reached its boundary; the settle face owns such a row.
+        # A row's status alone is never an abort signal: a 'restarting' hosted
+        # row whose maintenance restart is still pending waits for its turn
+        # boundary like any other.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(
             db_conn,  # pyright: ignore[reportUnknownArgumentType]
@@ -169,15 +148,6 @@ class TestHasPendingInterrupt:
             source="system:maintenance",
             payload=_MAINTENANCE_PAYLOAD,
         )
-        from uuid import uuid4
-
-        owner, generation = uuid4(), uuid4()
-        db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
-            "UPDATE inbound_messages SET status='claimed', claimed_at=clock_timestamp(), "
-            "target_generation=%s, target_owner=%s, applied_at=clock_timestamp() "
-            "WHERE agent_id=%s AND kind='restart'",
-            (generation, owner, tid),
-        )
         db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
             "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
             "VALUES(%s,'restarting',%s,'hosted')",
@@ -185,21 +155,7 @@ class TestHasPendingInterrupt:
         )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         assert await has_pending_interrupt(aops_pool, tid) is False
-
-    async def test_false_on_reap_mark_with_a_non_maintenance_restart(
-        self, db_conn, aops_pool: AsyncConnectionPool
-    ):
-        # Only the maintenance restart names the reap shape (task #4027): a
-        # 'restarting' row with any other un-applied restart must not fire.
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "restart")  # pyright: ignore[reportUnknownArgumentType]
-        db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
-            "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
-            "VALUES(%s,'restarting',%s,'hosted')",
-            (tid, machine_name()),
-        )
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-        assert await has_pending_interrupt(aops_pool, tid) is False
+        assert await pending_interrupt_reason(aops_pool, tid) is None
 
 
 class TestSubscribeInterrupt:
@@ -449,12 +405,10 @@ class TestWatcherExitBounded:
         assert not any("abandoning" in r["message"] for r in loguru_records)
 
 
-@pytest.mark.parametrize("maintenance", [False, True])
 async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
-    maintenance: bool,
 ) -> None:
     import json
     from unittest.mock import MagicMock
@@ -499,15 +453,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     )
     try:
         await asyncio.wait_for(started.wait(), timeout=3)
-        if maintenance:
-            db_conn.execute(
-                "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
-                "VALUES(%s,'restarting',%s,'hosted')",
-                (tid, machine_name()),
-            )
-            _insert(db_conn, tid, "restart", source="system:update", payload=_MAINTENANCE_PAYLOAD)
-        else:
-            _insert(db_conn, tid, "cancel")
+        _insert(db_conn, tid, "cancel")
         result = await asyncio.wait_for(invocation, timeout=3)
     finally:
         invocation.cancel()

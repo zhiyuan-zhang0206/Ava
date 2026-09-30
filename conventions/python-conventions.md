@@ -339,7 +339,7 @@ does **not** rescue you — and every `base.…` above that line then raises
 ```python
 import base.paths          # module scope — irrelevant to the function below
 
-def pause_local_cluster():
+def is_paused():
     state = base.deploy.state.host_deploy_state.read()     # UnboundLocalError
     import base.db                            # <- makes `base` local for the whole body
 ```

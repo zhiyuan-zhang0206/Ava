@@ -82,9 +82,7 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
     ) -> tuple[MachineRoles, frozenset[str], frozenset[str]]:
         return frozenset({"gateway"}), frozenset(), frozenset()
 
-    def _fake_pause_agents(
-        timeout: float = 0, *, driver: HoldDriver | None = None, reap: bool = False
-    ) -> None:
+    def _fake_pause_agents(timeout: float = 0, *, driver: HoldDriver | None = None) -> None:
         pytest.fail("unstarted home has no work to drain")
 
     def _fake_services_phase_action(
