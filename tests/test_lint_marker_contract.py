@@ -92,34 +92,43 @@ def test_note_tag_and_frontend_dispatch_sets_agree() -> None:
     )
 
 
+def _note_writer_sources() -> list[Path]:
+    """Every production `.py` under the framework note writers' directories."""
+    return [
+        path
+        for directory in _SYSTEM_NOTE_WRITER_DIRS
+        for path in (_REPO_ROOT / directory).rglob("*.py")
+        if "tests" not in path.relative_to(_REPO_ROOT).parts
+    ]
+
+
 def test_system_note_writers_use_notetag_values() -> None:
     """Framework note writers must use the closed NoteTag vocabulary."""
-    for directory in _SYSTEM_NOTE_WRITER_DIRS:
-        for path in (_REPO_ROOT / directory).rglob("*.py"):
-            tree = ast.parse(path.read_text(), filename=path)
-            for node in ast.walk(tree):
-                if not (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id == "system_note_message"
-                ):
-                    continue
-                tag = next((kw.value for kw in node.keywords if kw.arg == "tag"), None)
-                assert tag is not None, f"{path.relative_to(_REPO_ROOT)}:{node.lineno} lacks tag="
-                is_member = (
-                    isinstance(tag, ast.Attribute)
-                    and isinstance(tag.value, ast.Name)
-                    and tag.value.id == "NoteTag"
-                )
-                is_validated_inbound_tag = (
-                    isinstance(tag, ast.Call)
-                    and isinstance(tag.func, ast.Name)
-                    and tag.func.id == "_system_note_tag"
-                )
-                assert is_member or is_validated_inbound_tag, (
-                    f"{path.relative_to(_REPO_ROOT)}:{node.lineno} must pass tag=NoteTag.<member> "
-                    "or the validated inbound NoteTag helper"
-                )
+    for path in _note_writer_sources():
+        tree = ast.parse(path.read_text(), filename=path)
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "system_note_message"
+            ):
+                continue
+            tag = next((kw.value for kw in node.keywords if kw.arg == "tag"), None)
+            assert tag is not None, f"{path.relative_to(_REPO_ROOT)}:{node.lineno} lacks tag="
+            is_member = (
+                isinstance(tag, ast.Attribute)
+                and isinstance(tag.value, ast.Name)
+                and tag.value.id == "NoteTag"
+            )
+            is_validated_inbound_tag = (
+                isinstance(tag, ast.Call)
+                and isinstance(tag.func, ast.Name)
+                and tag.func.id == "_system_note_tag"
+            )
+            assert is_member or is_validated_inbound_tag, (
+                f"{path.relative_to(_REPO_ROOT)}:{node.lineno} must pass tag=NoteTag.<member> "
+                "or the validated inbound NoteTag helper"
+            )
 
 
 def test_send_system_note_default_tag_is_live_notetag_value() -> None:

@@ -53,8 +53,10 @@ def _audit_roots(root: Path) -> set[str]:
     found: set[str] = set()
     for path in root.rglob("*.py"):
         relative = path.relative_to(root)
-        if relative.parts[0] in {"tests", "scripts", ".venv"} or relative == Path(
-            "base/telemetry/audit_events.py"
+        if (
+            relative.parts[0] in {"scripts", ".venv"}
+            or "tests" in relative.parts
+            or relative == Path("base/telemetry/audit_events.py")
         ):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -253,6 +255,21 @@ def test_an_unclassified_new_audit_construction_root_fails(tmp_path: Path) -> No
     )
     with pytest.raises(AssertionError, match=r"new_producer\.py::emit"):
         _assert_classified(_audit_roots(root), {})
+
+
+def test_a_package_local_tests_directory_is_not_a_production_audit_root(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    (root / "pkg" / "tests").mkdir(parents=True)
+    emitter = (
+        "from base.telemetry.audit_events import insert_event_log\n"
+        "def emit():\n"
+        "    insert_event_log(event_type='send_message', agent_id=1, source='agent:1')\n"
+    )
+    (root / "pkg" / "producer.py").write_text(emitter, encoding="utf-8")
+    (root / "pkg" / "tests" / "test_producer.py").write_text(emitter, encoding="utf-8")
+    (root / "tests").mkdir()
+    (root / "tests" / "test_top.py").write_text(emitter, encoding="utf-8")
+    assert _audit_roots(root) == {"pkg/producer.py::emit"}
 
 
 def test_an_unclassified_aliased_direct_audit_emitter_fails(tmp_path: Path) -> None:

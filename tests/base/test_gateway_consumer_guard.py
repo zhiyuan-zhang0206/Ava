@@ -64,16 +64,22 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _production_py_files(root: Path, prefix: str) -> list[Path]:
+    """Every .py file under one source root, a package's own `tests/` excluded."""
+    target = root / prefix
+    if not target.is_dir():
+        return []
+    return [py for py in target.rglob("*.py") if "tests" not in py.relative_to(root).parts]
+
+
 def _gateway_py_files() -> list[Path]:
     """Every .py file under gateway-side source roots (excluding tests)."""
     root = _repo_root()
     files: list[Path] = []
     for prefix in _GATEWAY_SOURCE_ROOTS:
-        target = root / prefix
-        if target.is_dir():
-            for py_file in target.rglob("*.py"):
-                if "test_" not in str(py_file) and not str(py_file).endswith("_test.py"):
-                    files.append(py_file)
+        for py_file in _production_py_files(root, prefix):
+            if "test_" not in str(py_file) and not str(py_file).endswith("_test.py"):
+                files.append(py_file)
     return files
 
 
@@ -280,10 +286,7 @@ def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
 
     frontier: list[str] = []
     for prefix in roots:
-        target = root / prefix
-        if target.is_dir():
-            for py in target.rglob("*.py"):
-                frontier.append(module_of(py))
+        frontier.extend(module_of(py) for py in _production_py_files(root, prefix))
     seen: set[str] = set()
     closure: set[Path] = set()
     while frontier:
@@ -458,10 +461,7 @@ def _kind_closure(roots: tuple[str, ...]) -> set[Path]:
 
     frontier: list[str] = []
     for prefix in roots:
-        target = root / prefix
-        if target.is_dir():
-            for py in target.rglob("*.py"):
-                frontier.append(module_of(py))
+        frontier.extend(module_of(py) for py in _production_py_files(root, prefix))
     seen: set[str] = set()
     closure: set[Path] = set()
     while frontier:
