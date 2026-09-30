@@ -38,7 +38,6 @@ _SOURCE_ROOTS = frozenset(
         "ops",
         "services",
         "base",
-        "shared",
         "ava_builtins",
         "evals",
         "ui",

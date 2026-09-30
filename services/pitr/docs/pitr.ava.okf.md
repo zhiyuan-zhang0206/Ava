@@ -12,7 +12,7 @@ tags: []
 The physical recovery plane: continuous WAL archiving plus weekly pg_basebackup
 chains that together restore the database to any point, and the retention side
 that trims both remote object pools once an operator decides to. Five boolean
-gates default off; PITR activation explicitly opens the first three.
+gates default off; an operator opens the first three with `ava config set`.
 It sits beside — and does not replace — the daily logical dumps
 ([[services/gateway_side/backup/docs/backup.ava.okf.md|daily backup]]), which stay
 mandatory.
@@ -40,13 +40,10 @@ Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`
 - Physical PITR is disabled by default: converge publishes a private
   per-home spool and a source-independent, self-checked shim, while
   `AVA_PITR_ENABLED` defaults false and PostgreSQL `archive_mode` stays untouched.
-  `ava cluster pitr activate` first validates that shadow posture and creates a
-  verified encrypted logical snapshot under the reserved
-  [home operation authority](../../../cli/release_transition/docs/release_transition.ava.okf.md),
-  then closes and starts root plus the native data plane using one captured image. Protection requires exact PostgreSQL/local ACK/
-  viewer WAL evidence, an operation-scoped base candidate, and its isolated
-  restore proof. Explicit rollback restores frozen settings under that same authority
-  and never deletes backup data.
+  No command activates it: the activation verbs and their release
+  operation were removed. Protection requires exact PostgreSQL/local ACK/viewer
+  WAL evidence, an operation-scoped base candidate, and its isolated restore
+  proof.
 - A local archived segment is not a remote ACK. When explicitly enabled, the
   GCS uploader encrypts each spooled segment, conditionally creates one immutable
   object, verifies its generation/CRC32C/metadata, and only then fsyncs an ACK
@@ -65,11 +62,6 @@ Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`
   and only then publishes a new immutable `protected=true` manifest. It never
   edits the candidate, touches live PGDATA, selects a latest object, or deletes
   remote data.
-- `ava cluster pitr activate` writes `AVA_PITR_ENABLED`,
-  `AVA_PITR_BASE_BACKUP_ENABLED` and `AVA_PITR_RESTORE_PROOF_ENABLED` true
-  in the home `.env`; it writes `AVA_PITR_RETENTION_PLANNER_ENABLED=false`
-  and leaves `AVA_PITR_RETENTION_DELETE_ARMED` off and
-  `AVA_PITR_RETENTION_DELETE_APPROVED_DIGEST` unset.
 - The second gate also requires an explicit local least-privilege replication
   URL; the ordinary cluster owner remains `NOSUPERUSER` without `REPLICATION`.
 - Database dials never use a write-generation login. Capture facts, the

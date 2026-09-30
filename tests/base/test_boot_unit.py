@@ -105,23 +105,23 @@ def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
         render_unit(bad)
 
 
-def test_release_stage_uses_same_native_root_owner(ctx: BootUnitContext) -> None:
+def test_custom_start_action_uses_same_native_root_owner(ctx: BootUnitContext) -> None:
     action = boot_unit.BootStartAction(
         (
-            "/image/venv/bin/python",
+            "/custom/venv/bin/python",
             "-I",
             "-m",
-            "cli.release_transition.stage",
+            "cli.custom.stage",
             "--operation",
             "/private/$x%/operation.json",
         ),
-        Path("/image/site"),
+        Path("/custom/site"),
         boot_unit.source_start_action(ctx).environment,
         restart_on_failure=False,
     )
     unit = render_unit(ctx, action=action)
-    assert '"cli.release_transition.stage" "--operation" "/private/$x%%/operation.json"' in unit
-    assert "WorkingDirectory=/image/site" in unit
+    assert '"cli.custom.stage" "--operation" "/private/$x%%/operation.json"' in unit
+    assert "WorkingDirectory=/custom/site" in unit
     assert "Type=forking" in unit
     assert f"PIDFile={boot_unit.root_pid_path(ctx.home)}" in unit
     assert "Restart=no\n" in unit

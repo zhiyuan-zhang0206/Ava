@@ -106,7 +106,6 @@ TOP_LEVEL_FILES = frozenset(
         # Real-process integration proofs with their own CI wiring.
         "tests/integration/test_grafana_native_runtime.py",
         "tests/integration/test_cluster_instance.py",
-        "tests/integration/test_release_build.py",
         "tests/integration/test_schedule_runner_cleanup.py",
     }
 )
@@ -579,7 +578,7 @@ def _patch_only_names(nodes: Sequence[ast.AST]) -> set[str]:
 
 
 def _has_strong(refs: Iterable[Ref]) -> bool:
-    return any(ref.kind in STRONG_KINDS and ref.unit != "shared" for ref in refs)
+    return any(ref.kind in STRONG_KINDS for ref in refs)
 
 
 def without_patch_evidence(nodes: Sequence[ast.AST], refs: list[Ref]) -> list[Ref]:
@@ -669,7 +668,7 @@ def _unit_named_after(
 ) -> str | None:
     """The unit of the referenced module the file is named after (`test_<module>.py`)."""
     for ref in refs:
-        legal = ref.unit in unique and ref.kind in STRONG_KINDS and ref.unit != "shared"
+        legal = ref.unit in unique and ref.kind in STRONG_KINDS
         if legal and not any(graph.blocked(ref.unit, v) for v in unique if v != ref.unit):
             leaf = ref.module.split(".")[-1].lstrip("_")
             named = stem == leaf or stem.endswith("_" + leaf) or stem.startswith(leaf + "_")
@@ -712,7 +711,7 @@ def place(
     if is_top_level(rel_path):
         return Placement(None)
     found, fallback = placement_references(tree, index, nodes)
-    refs = [ref for ref in found if ref.unit != "shared"]
+    refs = list(found)
     basis = [ref for ref in refs if ref.kind in STRONG_KINDS] or refs  # loose evidence last
     if not basis:
         return Placement(None)

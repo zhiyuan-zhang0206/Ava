@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Process-group closure core
-description: The one standard-library primitive that proves a launched process group closed (SIGKILL rounds, a non-reaping leader-exit wait, a kernel group listing), shared by exec domains, PITR custody, release preparation and ava-root unit stop.
+description: The one standard-library primitive that proves a launched process group closed (SIGKILL rounds, a non-reaping leader-exit wait, a kernel group listing), shared by exec domains, PITR custody and ava-root unit stop.
 tags:
 - shared
 - process
@@ -9,9 +9,8 @@ tags:
 
 # Process-group closure core
 
-`process_group_closure.py` imports only the standard library (a bare
-interpreter runs it; `tests/lifecycle/images/test_stdlib_boundary.py` guards
-that), so every group closure in the repo shares it.
+`process_group_closure.py` imports only the standard library, so every group
+closure in the repo shares it.
 
 ## Contract
 
@@ -52,10 +51,7 @@ This is trusted-tool cleanup, not a fence: a member that calls `setsid()` or
 |---|---|
 | `ExecProcessDomain.close_confirmed` | `confirm_closure` with its own round signal: under the domain lock and `Popen`'s wait lock, only while the root's native birth and parentage hold; EPERM passes only when no member is live |
 | PITR unadmitted launch (`ExecDomainBirthError`, held retries) | `confirm_closure` with the default signal |
-| Release preparation (`runtime_prepare._run`) | `wait_group_finished`, then `close_unadmitted` |
-| `posix_command.run_owned_command` | `wait_group_finished`, then the exec domain's close |
 | ava-root unit stop | `group_empty` and `group_members`, after the unit leader is reaped |
 
 Consumers: [[agents/incarnation/incarnation-resources.ava.okf.md|exec incarnation resources]],
-[[services/pitr/docs/operation-custody.ava.okf.md|PITR operation custody]],
-[[runtime_prepare.ava.okf.md|runtime preparation]].
+[[services/pitr/docs/operation-custody.ava.okf.md|PITR operation custody]].

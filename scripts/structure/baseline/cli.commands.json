@@ -5,7 +5,6 @@
     "cli/commands/agents/notices.py::cmd_notices_clear": 20,
     "cli/commands/agents/notices.py::cmd_notices_list": 21,
     "cli/commands/data_plane/pgbouncer.py::ensure_pgbouncer_step": 16,
-    "cli/commands/data_plane/pitr_activation.py::_validate_secrets": 31,
     "cli/commands/extensions/_claude_code_plugin.py::materialize": 22,
     "cli/commands/extensions/_external_skill_cleanup.py::_cleanup_garbage_item": 15,
     "cli/commands/extensions/_external_skill_ledger.py::_load_ledger": 34,
@@ -26,9 +25,7 @@
     "cli/commands/extensions/skills_sync.py::_sync_one": 23,
     "cli/commands/lifecycle/_temporary_stop.py::stop": 22,
     "cli/commands/lifecycle/start.py::_cmd_start_body": 34,
-    "cli/commands/observability/logs.py::cmd_logs_retention": 23,
-    "cli/commands/release_inventory.py::_launchd": 17,
-    "cli/commands/release_inventory.py::collect_inventory": 15
+    "cli/commands/observability/logs.py::cmd_logs_retention": 23
   },
   "nesting": {
     "cli/commands/observability/trace.py::_post_line": 6

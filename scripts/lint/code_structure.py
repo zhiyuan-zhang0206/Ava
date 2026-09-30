@@ -110,16 +110,6 @@ itself, or anything under `ava_builtins/plugins/`) is still a violation, and so
 is any file-loader call, even with an in-skill `__file__`-derived argument — a
 loader is a package-door bypass regardless of where it points.
 
-### Rule 7: the `shared/` release-probe shell stays a shell
-
-`scripts/structure/shared_shell.py`: the `shared` package was renamed `base`;
-`shared/` keeps only the three files of a time-boxed release-probe shell
-(shared/__init__.py says why and when it retires). The directory must hold
-exactly those files, no Python file may import `shared`, and outside tests a
-string literal may name it only at the enumerated `ALLOWED_MENTIONS` sites (the
-two release probes and the identity member), each with its exact count. Checked
-repo-wide on every run, whatever the targets.
-
 ### Structure budgets: 800 lines per file, 20 direct entries per directory
 
 Budgets cover the governed packages in `_SCAN_DIRS`, plus tests/ and scripts/.
@@ -168,7 +158,6 @@ from scripts.structure import (  # noqa: E402 — standalone script
     lint_common,
     locality,
     path_imports,
-    shared_shell,
 )
 from scripts.structure import quality_budget as quality  # noqa: E402 — standalone script
 
@@ -186,9 +175,6 @@ _STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts")
 # A call site not listed here fails the lint; a listed module whose calls
 # disappear fails too (stale entry). See the module docstring.
 _MACHINE_ROLE_ALLOWED: dict[str, str] = {
-    "cli/release_transition/stage.py": "Read the local ordinary root roster for captured-image preflight and readiness; does not route a cluster request.",
-    "cli/release_fleet/inventory.py": "Refuse a fleet of one whose home does not serve the gateway before effects; never dispatch by role.",
-    "cli/release_fleet/entries.py": "Report which capabilities this unit serves in its release receipt; never dispatch by role.",
     "cli/commands/lifecycle/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit pause/stop? No execution is routed elsewhere.",
     "ops/agent_pause/__init__.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
     "cli/commands/lifecycle/maintenance.py": "Which services/data plane does this explicitly local, DB-offline-capable stop/start own? Fleet transport is operator-coordinated.",
@@ -201,7 +187,6 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "services/agent_ops/_boot.py": "what do I advertise in register_self (what do I serve)",
     "ops/inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
     "gateway/routers/config.py": "for the gateway itself, local role is authoritative (what do I serve)",
-    "cli/commands/release_inventory.py": "verified installed image reads the real annotated service roster for the unit receipt (read-only, WHEEL_RUNTIME-guarded; no serve decision)",
 }
 
 
@@ -768,7 +753,6 @@ def main(argv: list[str] | None = None) -> int:
     errors = _baseline_guard(baseline, renames=renames)
     errors.extend(_check_budgets(targets, baseline))
     errors.extend(_check_ast_and_quality(argv, targets, baseline, full=full, renames=renames))
-    errors.extend(shared_shell.repository_errors(_REPO_ROOT))
     for error in errors:
         print(error)
     if errors:

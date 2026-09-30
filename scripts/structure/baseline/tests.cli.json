@@ -12,8 +12,7 @@
     "tests/cli/test_cluster_health.py": 2115,
     "tests/cli/test_config_cmd.py": 804,
     "tests/cli/test_converge_otel_collector.py": 1249,
-    "tests/cli/test_impersonation_bridge.py": 965,
-    "tests/cli/test_pitr_activation.py": 1780
+    "tests/cli/test_impersonation_bridge.py": 965
   },
   "patch_targets": {
     "tests/cli/_commands_helpers.py::cli.commands.lifecycle.root_driver._launch_service_tree": 1,

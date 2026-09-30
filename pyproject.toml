@@ -49,11 +49,8 @@ dependencies = [
     # Lite 3.0 was the 1 - similarity outlier, so the backend ranks similarity descending
     # after task #3164. Keep 3.2.x off while upstream #369 remains open.
     "milvus-lite==3.1.1; sys_platform != 'win32'",  # mirrors pymilvus's extra marker
-    # The runtime startup-hook gate retains the original locked setuptools
-    # wheel — its distutils-precedence .pth is the one non-editable helper the
-    # release admits (base/deploy/release/runtime_release.py). It rode in transitively via
-    # pymilvus until pymilvus 3.0.1 dropped the requirement; declared
-    # explicitly so the lock always carries exactly one wheel.
+    # It rode in transitively via pymilvus until pymilvus 3.0.1 dropped the
+    # requirement; declared explicitly so the lock always carries exactly one wheel.
     "setuptools>=82",
     "pyte>=0.8.0",  # terminal emulation screen model for PTY sessions (S6 step 2)
     "traceloop-sdk>=0.61",
@@ -120,9 +117,7 @@ build-backend = "hatchling.build"
 # Include the application kernel, not only its SDK and CLI. A non-editable
 # installation must resolve exec children and service modules without a checkout.
 # This packaging step does not activate wheel-based production deployments.
-# `shared` is the time-boxed release-probe shell (shared/__init__.py): a new image must still
-# answer `import shared.runtime_abi` and carry the shared/release-build.json identity member.
-packages = ["ava", "cli", "agent", "base", "shared", "ops", "gateway", "services", "ava_builtins"]
+packages = ["ava", "cli", "agent", "base", "ops", "gateway", "services", "ava_builtins"]
 # Tests live beside the code they prove (`<pkg>/**/tests/`); a runtime image ships none of them.
 exclude = ["**/tests/**"]
 
@@ -177,7 +172,7 @@ dev = [
 # `plugins` is left ungoverned (the built-in ava_compact is intentionally
 # coupled to the agent kernel, so agent <-> plugins is cyclic by design).
 [tool.importlinter]
-root_packages = ["base", "shared", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
+root_packages = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
 
 [[tool.importlinter.contracts]]
 name = "Layered architecture (base < ava < agent < gateway < cli)"
@@ -278,92 +273,6 @@ name = "base must not import services"
 type = "forbidden"
 source_modules = ["base"]
 forbidden_modules = ["services"]
-
-# `shared` is the time-boxed release-probe shell (see shared/__init__.py): it
-# re-exports two names from `base` and nothing else, and no repository package
-# may import it — only the release-probe strings in
-# base/deploy/release/runtime_prepare.py name it (scripts/structure/shared_shell.py
-# enforces the file whitelist and the no-import rule on every tracked file).
-[[tool.importlinter.contracts]]
-name = "shared (release-probe shell) imports only base"
-type = "forbidden"
-source_modules = ["shared"]
-forbidden_modules = ["ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
-
-[[tool.importlinter.contracts]]
-name = "No package imports the shared release-probe shell"
-type = "forbidden"
-source_modules = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
-forbidden_modules = ["shared"]
-
-# The retained-image release path (image preparation and verification, the
-# frozen image-exec handoff, the fleet coordinator, the release transition and
-# its PITR operation, write-generation rotation, per-unit enrollment channel)
-# is a self-contained island: nothing else may import it, at module level or
-# inside a function. It is imported only by itself; every production entry
-# point, including `ava start` and `ava stop`, runs without it. The list is
-# also the module set `tests/base/test_release_path_boundary.py` proves absent
-# from `sys.modules` after each production entry point imports. `ignore_imports`
-# exempts the island's own imports (its members import each other and the
-# production modules they build on).
-[[tool.importlinter.contracts]]
-name = "Production must not import the release/image path"
-type = "forbidden"
-source_modules = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
-forbidden_modules = [
-    "cli.release_build",
-    "cli.release_fleet",
-    "cli.release_handoff",
-    "cli.release_operator",
-    "cli.release_prepare",
-    "cli.release_transition",
-    "cli.commands._release_plugin_probe",
-    "cli.commands.release_inventory",
-    "cli.commands.data_plane.write_generation",
-    "cli.commands.data_plane.pitr_activation",
-    "cli.commands.data_plane._pitr_activation_config",
-    "base.deploy.release.identity",
-    "base.deploy.release.operation",
-    "base.deploy.release.loaded_image",
-    "base.deploy.release.runtime_release",
-    "base.deploy.release.runtime_prepare",
-    "base.deploy.release.runtime_publication_input",
-    "base.deploy.release.runtime_service_identity",
-    "base.deploy.schema.runtime_migration",
-    "base.api_contracts.release_handoff",
-    "base.cluster.authority.fence",
-    "base.cluster.authority.channel",
-    "base.runtime_abi",
-    "base.runtime_plugins",
-    "shared",
-]
-ignore_imports = [
-    "cli.release_build -> **",
-    "cli.release_fleet.** -> **",
-    "cli.release_handoff.** -> **",
-    "cli.release_operator.** -> **",
-    "cli.release_prepare -> **",
-    "cli.release_prepare.** -> **",
-    "cli.release_transition.** -> **",
-    "cli.commands._release_plugin_probe -> **",
-    "cli.commands.release_inventory -> **",
-    "cli.commands.data_plane.write_generation -> **",
-    "cli.commands.data_plane.pitr_activation -> **",
-    "cli.commands.data_plane._pitr_activation_config -> **",
-    "base.deploy.release.identity -> **",
-    "base.deploy.release.operation -> **",
-    "base.deploy.release.loaded_image -> **",
-    "base.deploy.release.runtime_release -> **",
-    "base.deploy.release.runtime_prepare -> **",
-    "base.deploy.release.runtime_publication_input -> **",
-    "base.deploy.release.runtime_service_identity -> **",
-    "base.deploy.schema.runtime_migration -> **",
-    "base.api_contracts.release_handoff -> **",
-    "base.cluster.authority.fence -> **",
-    "base.cluster.authority.channel -> **",
-    "base.runtime_plugins -> **",
-    "shared.** -> **",
-]
 
 # Ops layer: base < ops < {gateway, cli}. The ops module (Spec / Status /
 # controllers) sits above base and is consumed by gateway + cli (and by the
@@ -511,8 +420,6 @@ check-typed-exception = true
 # updater code as part of this cleanup.
 "scripts/codegen/gen_config_lite_table.py" = ["S110"]
 "scripts/legacy_lkg/cold_boot.py" = ["S110"]
-"scripts/release_proofs/prove_release_inventory.py" = ["S110"]
-"scripts/release_proofs/prove_runtime_publication_input.py" = ["S110"]
 "tests/ava/mcps/test_daemon.py" = ["S110"]
 "tests/ava/test_core.py" = ["S110"]
 "tests/ava/test_migration_reset.py" = ["S110"]
@@ -707,7 +614,6 @@ include = [
     "ava_builtins",
     "services",
     "base",
-    "shared",
     "scripts",
     "tests",
 ]
