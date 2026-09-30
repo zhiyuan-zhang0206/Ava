@@ -6,7 +6,6 @@ the retained release operation.
 
 - macOS: launchd User LaunchAgent plist in ~/Library/LaunchAgents/
 - Linux: user crontab entry
-- Windows: a Task Scheduler job (see base/host/system/schtasks.py)
 
 This module is in the base layer so both the gateway lifespan (primary
 registration path) and the CLI converge step (belt-and-suspenders fallback) can
@@ -58,8 +57,7 @@ def os_jobs_enabled() -> bool:
     the service ports, the session records — is addressed by a value the process
     reads, so redirecting the value redirects the resource. The platform
     scheduler is not: launchd reads ONE `~/Library/LaunchAgents` per OS user,
-    `crontab` edits ONE table per user, schtasks owns ONE `\\Ava\\` folder per
-    user. A test-scoped home therefore isolates everything about a registered job
+    `crontab` edits ONE table per user. A test-scoped home therefore isolates everything about a registered job
     except the namespace it lands in.
 
     So the suite turns registration off wholesale (`AVA_OS_JOBS_ENABLED=false`,
@@ -224,11 +222,10 @@ def ava_binary_path() -> str:
     `repo_root()` makes binary, `$AVA_HOME` and label come from one checkout.
     """
     from base.host.system.backend import get_backend
-    from base.native_process.os_platform import IS_WINDOWS
     from base.paths import repo_root
 
     scripts = repo_root() / ".venv" / get_backend().venv_bin_dir_name()
-    candidate = scripts / ("ava.exe" if IS_WINDOWS else "ava")
+    candidate = scripts / "ava"
     if candidate.exists():
         return str(candidate)
 
@@ -537,36 +534,6 @@ def _unregister_linux(slug: str) -> int:
     )
 
 
-# Windows-only: how long ONE health-probe invocation may run before Task Scheduler
-# ends it (launchd and cron bound nothing, so there is no equivalent to mirror).
-# A bound is needed because a task's instance policy is `IgnoreNew`, so a wedged
-# invocation blocks every later one — three days of it, at the scheduler's 72h
-# default.
-#
-# Keep the existing bound for observation and alert delivery. IgnoreNew prevents
-# overlapping probes; release transitions never run beneath this scheduled job.
-# Gateway is POSIX-only today, so this applies if Windows gains that capability.
-_WINDOWS_TIME_LIMIT_S = 1800
-
-
-def _register_windows(interval_s: int) -> str | None:
-    """Register the observation-only health probe as a Windows task."""
-    from base.host.system.schtasks import create_minute_task
-
-    return create_minute_task(
-        "health-probe",
-        ("cluster", "health-probe"),
-        interval_s // 60,
-        time_limit_s=_WINDOWS_TIME_LIMIT_S,
-    )
-
-
-def _unregister_windows(slug: str) -> int:
-    from base.host.system.schtasks import delete_task
-
-    return delete_task("health-probe", slug)
-
-
 def register_os_cron(
     interval_s: int = DEFAULT_INTERVAL_SECONDS,
 ) -> None:
@@ -587,8 +554,7 @@ def register_os_cron(
     must be too: same rule as ``ava start`` (``prod_service_checkout_error``).
 
     Raises:
-        RuntimeError: on registration failure (POSIX). The Windows backend
-        degrades to a loud warning instead — see `WindowsPlatformBackend`.
+        RuntimeError: on registration failure.
     """
     if not os_jobs_enabled():
         skip_os_job("health-probe")

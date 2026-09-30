@@ -10,8 +10,7 @@ boot-time dependency (DNS, a not-yet-mounted volume, a gateway still starting)
 has that same shape.
 
 The policy: **re-run `ava start` every ``BOOT_RETRY_INTERVAL_S`` seconds until
-it exits 0, with no attempt limit.** Identical on every platform; only the
-mechanism differs, because only some schedulers can retry a job on our behalf:
+it exits 0, with no attempt limit.** Identical on both supported platforms; the scheduler supplies the retry:
 
 - **macOS** — launchd does the retrying (`KeepAlive` → `SuccessfulExit: false`,
   `ThrottleInterval` = the interval). Preferred where it exists: launchd is a
@@ -23,8 +22,6 @@ mechanism differs, because only some schedulers can retry a job on our behalf:
   readiness. Type=forking adopts the birth-validated root PID after ordinary
   start exits successfully; no resident wrapper or root runtime cap exists.
   Automatic boot requires systemd. Interactive start may launch root directly.
-- **Windows** — Task Scheduler cannot repeat an ONLOGON trigger with `/RI`,
-  so `cli.boot_retry` (`ava boot`) owns the startup retry operation.
 
 
 **Why no attempt cap.** Dependencies can recover after an arbitrary outage.
@@ -45,6 +42,6 @@ reaches must not build `Settings()`.
 from __future__ import annotations
 
 # Seconds between two `ava start` attempts — launchd's ThrottleInterval on
-# macOS, the sleep between iterations of the owned loop elsewhere. There is
+# macOS and systemd RestartSec on Linux. There is
 # deliberately no companion attempt cap; see the module docstring.
 BOOT_RETRY_INTERVAL_S = 60

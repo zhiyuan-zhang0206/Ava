@@ -25,7 +25,7 @@ The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` builds
 | `ava cluster update --prepared REQUEST` | hand the captured release operation to its verified executor image ([[cli/release_handoff/release_handoff.ava.okf.md]]), which submits or resumes it through a retained native executor ([[cli/release_transition/release_transition.ava.okf.md]]) |
 | `ava converge` | replays idempotent host wiring (symlink/PATH/dirs/plugin images and the macOS Redis bridge), usually via `ava start`; it never touches the memory pool |
 | `ava firewall status` / `ava firewall sync` | macOS Application Firewall allowlist manifest: `status` renders each manifest purpose, glob, resolved path, and Allow/Block/Missing state; `sync` applies it (repair + prune stale rules). Unprivileged mutation was empirically verified on the macmini running macOS 15.3.1, then falls back to non-interactive `sudo -n` and finally reports the exact manual commands on platforms that still require elevation |
-| `ava boot` | what the OS boot job runs on platforms whose scheduler cannot retry a failed job (Linux cron / Windows schtasks); uncapped retry of `ava start` |
+| `ava boot` | manual uncapped retry of `ava start` while boot dependencies become available |
 
 Inactive image preparation lives in [[cli/release_prepare/release_prepare.ava.okf.md]].
 It binds captured committed source and explicit artifact inputs to a verified
