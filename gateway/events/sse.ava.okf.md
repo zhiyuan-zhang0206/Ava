@@ -46,13 +46,13 @@ Agent process ──▶ Redis pub/sub (ava:events)
 
 - **Two wire formats**: `event_stream` each frame is a `events.Event.model_dump_json()`; `throttled_event_stream` each frame is a JSON array of raw payloads.
 - **Heartbeat**: every 15 seconds without events, sends `data: {"role":"heartbeat"}` (drives client watchdog); otherwise sends `: hb` comment (keeps TCP/proxy alive but invisible to browser `onmessage`).
-- **Subscribe-before-yield**: `pubsub.subscribe()` executed before first frame; failure results in 500 (EventSource `onerror` fires, rather than a zombie state of "connected but no events").
+- **Subscription failure**: `StreamingResponse` sends HTTP 200 before it iterates either generator. If `pubsub.subscribe()` then fails with a Redis IO or ACL error, the stream sends one `error` data frame and closes; the per-event endpoint sends an object, while the throttled endpoint sends a one-element array.
 - **Disconnect detection**: polls `request.is_disconnected()` (`AVA_SSE_DISCONNECT_POLL_SECONDS`, default 1s).
 - **Lifecycle metrics**: successful subscriptions increment the per-mode `ava_sse_active_connections` gauge and `ava_sse_opened_total`; generator teardown decrements active depth and increments `ava_sse_closed_total`. Gateway startup publishes zero depth for both modes.
 
 ## Fault Tolerance
 
-- Redis IO exceptions (`ConnectionError`/`TimeoutError`/`OSError`) → push an `error` event frame then exit generator; frontend shows a toast rather than just console noise.
+- Redis IO or ACL exceptions during subscription or reading → push an `error` event frame then exit the generator; the frontend can show the failure instead of silently receiving an empty stream.
 - In finally, each cleanup step (unsubscribe / pubsub.aclose / client.aclose) is independently suppressed and logged; one failure does not swallow others.
 
 ## Entry Points
