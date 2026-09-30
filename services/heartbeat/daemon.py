@@ -210,9 +210,9 @@ def _select_idle_agents_needing_heartbeat(
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
-    # Consecutive-failure backoff: skip agents whose backoff deadline (monotonic
-    # wall clock) has not arrived — a wedged agent must not be poked on the
-    # normal cadence. The deadline dict is empty in the common case, so the
+    # Consecutive-failure backoff: skip agents whose absolute backoff deadline
+    # has not arrived — a wedged agent must not be poked on the normal cadence.
+    # The deadline dict is empty in the common case, so the
     # filter is a fast no-op. The limit is applied AFTER the backoff filter so
     # backed-off agents never consume the per-step wake-rate slots.
     if backoff_until:
@@ -348,8 +348,8 @@ def _reconcile_checkin_outcomes(
                 failure_streak.pop(agent_id, None)
             elif sent_at is not None:
                 failure_streak[agent_id] = failure_streak.get(agent_id, 0) + 1
-            # Not pending and not recovered: keep the existing streak — the
-            # backoff deadline just extends by another window.
+            # Not pending and not recovered: keep the existing streak and
+            # its previously assigned backoff deadline.
 
             # B7 no-op nudge streak — independent of the failure streak above.
             if paused or real_inbound:
@@ -425,17 +425,30 @@ def _sweep_backoff_resets(pool: ConnectionPool) -> None:
             )
 
 
-def _backoff_deadlines(failure_streak: dict[int, int], idle_threshold_s: float) -> dict[int, float]:
-    """Monotonic-wall-clock deadline (seconds) before which each streaking agent
-    must not be checked in on: `now + min(2^streak, _BACKOFF_MAX_WINDOWS) *
+def _backoff_deadlines(
+    failure_streak: dict[int, int],
+    idle_threshold_s: float,
+    deadline_state: dict[int, tuple[int, float]] | None = None,
+) -> dict[int, float]:
+    """Keep each absolute deadline until its agent's failure streak changes.
+
+    A new streak gets `now + min(2^streak, _BACKOFF_MAX_WINDOWS) *
     idle_threshold`. A streak of 1 doubles the normal interval; the cap bounds
     the longest silence (~5.3h at a 5min threshold) so the daemon still probes
-    a wedged agent occasionally."""
+    a wedged agent occasionally. The state is in-process only.
+    """
+    deadline_state = {} if deadline_state is None else deadline_state
+    for agent_id in deadline_state.keys() - failure_streak.keys():
+        del deadline_state[agent_id]
     now = time.time()
-    return {
-        agent_id: now + min(2**streak, _BACKOFF_MAX_WINDOWS) * idle_threshold_s
-        for agent_id, streak in failure_streak.items()
-    }
+    for agent_id, streak in failure_streak.items():
+        previous = deadline_state.get(agent_id)
+        if previous is None or previous[0] != streak:
+            deadline_state[agent_id] = (
+                streak,
+                now + min(2**streak, _BACKOFF_MAX_WINDOWS) * idle_threshold_s,
+            )
+    return {agent_id: deadline for agent_id, (_, deadline) in deadline_state.items()}
 
 
 def _write_pidfile() -> None:
@@ -500,6 +513,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     # daemon restart re-probes everyone at the normal cadence.
     pending_checkin: dict[int, float] = {}
     failure_streak: dict[int, int] = {}
+    deadline_state: dict[int, tuple[int, float]] = {}
     # B7 no-op-nudge counter: in-process only; the raised level itself persists
     # in agents_meta.heartbeat_backoff_level.
     noop_streak: dict[int, int] = {}
@@ -521,7 +535,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
                 heartbeat_interval_s=heartbeat_interval,
                 jitter_span_s=JITTER_SPAN_S,
                 limit=_MAX_CHECKINS_PER_STEP,
-                backoff_until=_backoff_deadlines(failure_streak, idle_threshold),
+                backoff_until=_backoff_deadlines(failure_streak, idle_threshold, deadline_state),
             )
             for agent_id, idle_minutes in rows:
                 try:
