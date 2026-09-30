@@ -42,7 +42,7 @@ from base.sessions.record import SessionRecord
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 
 
 def _run_cli(home: Path, *args: str) -> subprocess.CompletedProcess[str]:
