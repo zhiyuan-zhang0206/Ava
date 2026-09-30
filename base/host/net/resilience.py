@@ -40,6 +40,7 @@ import time
 import urllib.error
 from collections.abc import Awaitable, Callable
 from collections.abc import Set as AbstractSet
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Protocol, TypeVar
 
@@ -156,22 +157,18 @@ def extract_retry_after(exc: Exception) -> float | None:
         headers = getattr(exc, "headers", None)
     if headers is None or not hasattr(headers, "get"):
         return None
-    try:
+    with suppress(TypeError, ValueError):  # unparseable header = absent; try the next form
         raw_ms = headers.get("retry-after-ms")
         if raw_ms:
             seconds = float(raw_ms) / 1000.0
             if 0 < seconds <= MAX_RETRY_AFTER_RESPECT_S:
                 return seconds
-    except (TypeError, ValueError):
-        pass  # fail-fast-ok: unparseable header = absent; try the next form
-    try:
+    with suppress(TypeError, ValueError):  # unparseable header = absent (SDK parse semantics)
         raw = headers.get("retry-after")
         if raw:
             seconds = float(raw)
             if 0 < seconds <= MAX_RETRY_AFTER_RESPECT_S:
                 return seconds
-    except (TypeError, ValueError):
-        pass  # fail-fast-ok: unparseable header = absent (SDK parse semantics)
     return None
 
 

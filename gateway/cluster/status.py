@@ -473,7 +473,7 @@ def _local_resource_sample() -> ResourceSample | None:
         from base.host.resource_sample import resource_sample
 
         return resource_sample()
-    except Exception:  # fail-fast-ok: psutil may not be installed; degrade gracefully
+    except Exception:  # psutil may not be installed; degrade gracefully
         return None
 
 

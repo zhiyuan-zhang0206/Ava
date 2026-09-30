@@ -52,8 +52,8 @@ the stale `plugins/` path was corrected 2026-09-23 — no such tracked dir exist
 comments. False positives in config-defaults and external boundaries are
 expected — flag candidates, the human decides.
 
-`except ...: pass` silent swallows are now enforced mechanically by
-`scripts/lint/fail_fast.py` in pre-commit — do not re-flag them here.
+`except ...: pass` silent swallows are enforced by Ruff S110 in pre-commit —
+do not re-flag them here.
 
 ### 4. inline-marker (whole-repo)
 

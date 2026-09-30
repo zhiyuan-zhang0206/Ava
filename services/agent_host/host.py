@@ -144,7 +144,7 @@ def kill_terminating_agent_shells(agent_id: int) -> None:
 
     try:
         killed = kill_agent_shells(agent_id)
-    except Exception:  # fail-fast-ok: logged at ERROR; the termination must still apply
+    except Exception:  # logged at ERROR; the termination must still apply
         logger.opt(exception=True).error(
             "terminate could not kill every shell session of agent {agent_id}",
             agent_id=agent_id,

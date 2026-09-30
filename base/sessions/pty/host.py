@@ -595,7 +595,9 @@ def _schedule_initial_command(session: PtySession, cmd: str) -> None:
     """
 
     def _submit() -> None:
-        try:
+        # A just-dead session must not crash the host; the write is best-effort.
+        # A runner that never started is covered by schedule reconcile/breaker.
+        with contextlib.suppress(OSError):
             deadline = time.monotonic() + _INITIAL_CMD_READY_TIMEOUT_S
             while time.monotonic() < deadline:
                 if session.dead:
@@ -606,8 +608,6 @@ def _schedule_initial_command(session: PtySession, cmd: str) -> None:
                 time.sleep(0.1)
             time.sleep(_INITIAL_CMD_SETTLE_S)
             os.write(session.master_fd, cmd.encode() + b"\r")
-        except OSError:  # fail-fast-ok: a just-dead session must not crash the host — the write is best-effort; a runner that never started is covered by the schedule reconcile/breaker
-            pass
 
     threading.Thread(target=_submit, daemon=True).start()
 

@@ -311,12 +311,10 @@ def _spawn_codex_relay(
         start_new_session=True,
         env=relay_env,
     )
-    try:
+    with contextlib.suppress(BrokenPipeError, OSError):  # child already gone; poll reports it
         assert process.stdin is not None  # noqa: S101 — PIPE requested above
         with process.stdin:
             process.stdin.write(relay_token.encode() + b"\n")
-    except (BrokenPipeError, OSError):  # fail-fast-ok: child already gone; poll reports it
-        pass
     return process
 
 
