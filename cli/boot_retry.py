@@ -63,7 +63,7 @@ def _open_boot_log() -> IO[bytes] | int:
     home whose logs dir is unwritable — the child's `ava start` will then fail
     loudly on that same broken home, which is the diagnosable signal.
     """
-    log = resolve_ava_home()[0] / "logs" / "boot.log"
+    log = resolve_ava_home() / "logs" / "boot.log"
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
         return log.open("wb")

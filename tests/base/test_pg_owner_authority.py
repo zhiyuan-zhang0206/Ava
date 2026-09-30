@@ -40,6 +40,7 @@ from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
 from base.db.pg_admin import OwnerAuthority, local_owner_authority, owner_conninfo
 from base.deploy.schema.migrations import apply_pending_migrations, required_migration_set
+from base.host.env.dotenv_boot import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
@@ -128,7 +129,7 @@ def owned_pg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
     cluster record `local_owner_authority` resolves; yields its port."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr(settings.general, "ava_home", str(home))
+    monkeypatch.setenv("AVA_HOME", str(home))
     monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     pg_port = _free_port()
     record = cluster.ClusterRecord(
@@ -146,7 +147,7 @@ def owned_pg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
         yield pg_port
     finally:
         # Re-pin the temp home: teardown must never resolve the operator's home.
-        monkeypatch.setattr(settings.general, "ava_home", str(home))
+        monkeypatch.setenv("AVA_HOME", str(home))
         subprocess.run(  # noqa: S603 — private test-owned postgres
             [ci._pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
             check=False,
@@ -155,7 +156,7 @@ def owned_pg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
 
 
 def _data_dir() -> Path:
-    return Path(settings.general.ava_home) / "pg"
+    return resolve_ava_home() / "pg"
 
 
 def _admin_on(pg_port: int, database: str) -> str:
@@ -395,7 +396,7 @@ def test_local_owner_authority_reads_record_and_url_as_data(
     """Socket port from the cluster record; owner and database from the URL's
     database name."""
     home = tmp_path / "home"
-    monkeypatch.setattr(settings.general, "ava_home", str(home))
+    monkeypatch.setenv("AVA_HOME", str(home))
     record = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", {"postgres": 5999, "pgbouncer": 6999}),
         gateway_home=str(home),

@@ -2,7 +2,7 @@
 
 Generic dev procedures that sit on top of [`runbook.md`](runbook.md): the
 platform-specific traps (WSL2's private-network identity), the first-time
-agent-runner enrollment flow, and the per-worktree cluster dev loop. The
+agent-runner enrollment flow, and development in a worktree. The
 runbook stays role-agnostic; this doc covers the per-developer setup steps.
 
 A specific deployment's concrete machine roster, SSH access pattern, cloud-host
@@ -59,13 +59,11 @@ selected root services.
 Every runner process fetches current connection facts at Settings construction.
 Use bare start thereafter; conflicting identity flags refuse.
 
-## Per-worktree cluster dev flow
+## Development in a worktree
 
-A worktree is a complete isolated deployment addressed by its checkout. Use its
-own real `.venv`, never a symlink to another checkout's environment. The host's
-bare `ava` runs the cluster `$AVA_HOME` names (a dev cluster's converge links its
-own `$AVA_HOME/ava` but skips the host-global launcher/PATH wiring); development
-invokes `.venv/bin/ava` directly.
+A worktree is a checkout, not a deployment: it owns no cluster. Use its own real
+`.venv`, never a symlink to another checkout's environment. Development invokes
+`.venv/bin/ava` directly; the host's bare `ava` runs the cluster `$AVA_HOME` names.
 Package acquisition and Git hooks are separate from starting a cluster.
 
 Before a manual worktree dependency operation, clear inherited `VIRTUAL_ENV`
@@ -75,55 +73,39 @@ guard and prepares development dependencies without creating a cluster.
 ```bash
 cd ~/Ava/.worktrees/<name>
 scripts/setup-worktree.sh
-.venv/bin/ava start --worktree
-.venv/bin/ava status
-.venv/bin/ava cluster down --path ~/.ava-<name>
+.venv/bin/pytest <selected test files>
 ```
 
-First start selects `~/.ava-<worktree-dir>` by default, records the checkout's
-`.ava_home` pointer, and durably binds identity, credentials, and a private port
-block before resource effects. It defaults to gateway plus runner, creates
-private native storage, and waits for the selected root tree to be ready. Port
-allocation probes live host listeners only (no host file lists clusters); a
-stopped cluster's block can be reused, and start refuses the collision. No
-production secrets or agent data are copied. Explicit `AVA_HOME` remains subject
-to the checkout identity and override rules described in the runbook.
+**Which home a worktree reads.** With `AVA_HOME` unset the home is `~/.ava`; on a
+development machine that also runs production, that is the production cluster. A
+worktree's CLI may read it (`status`, `ls`, `get`), but a home that carries its own
+`<home>/source` checkout is started, stopped and reconfigured only by that
+checkout's CLI: every other verb refuses and names the CLI to run. A script,
+subagent or tool that imports application code must not reach that home at all —
+set a home of your own first, once, at the top of the process tree:
 
-Add needed model-provider credentials to this home's private `.env`; do not
-replace its generated identity or storage URLs. A first-start `--config-file`
-can supply supported Settings fields from a file outside the home. Its exact
-bytes are bound to the initialization and cannot change on a retry.
+```bash
+export AVA_HOME="$(mktemp -d)" AVA_CONFIG_FETCH=skip   # a throwaway home: no .env, no gateway fetch
+```
 
-Bare start preserves desired service selection. Use repeatable `--only-service`
-for an allowlist, repeatable `--disable-service` for exclusions, or explicit
-`--all-services` to reset. Stop before replacing a running root generation.
+The test harness does this itself (a temporary home before any import), and so does
+every lint, codegen and docs tool the git hooks run (`dotenv_boot.enter_scratch_home()`).
 
-`cluster down` performs normal local stop including this home's private storage,
-retaining data and its reservation. `cluster destroy` additionally retires this
-home's OS jobs and macOS helper and frees the reservation only after verified
-cleanup. `--drop-db` explicitly removes private storage. The default production
-home cannot be destroyed. A destroyed home refuses startup rather than silently
-claiming a new identity over retained data.
-
-Do not rebase or rewrite a checkout under a running cluster: its root manifest
-and loaded source must remain coherent. Stop the dev cluster first. Source
-checkout editing is development work; it is not a production update mechanism.
+Do not rebase or rewrite a checkout while a cluster runs from it: its root manifest
+and loaded source must remain coherent. Source checkout editing is development work;
+it is not a production update mechanism.
 
 **Choose the check that proves the change:**
 
 - Targeted tests need no running cluster. The test harness uses private native
   Postgres/Redis and isolated configuration. Never use a real cluster home for
   test imports or a production endpoint as a test fixture.
-- A DB/SDK script requires the intended home to be initialized and explicitly
-  bound (`ava start --worktree` for a worktree). Until then the checkout is
-  *unanchored* and boots bare on a private scratch home: it never reads
-  `~/.ava/.env`, never fetches from a gateway and never writes under `~/.ava`,
-  and its `AVA_DB_URL` is the unanchored sentinel, so a connection fails fast
-  with `UnanchoredHomeError`. Imports, lint scripts and codegen hooks work there
-  as they do in CI.
-- End-to-end agent/frontend behavior needs a private running cluster and actual
-  gateway scheduling. Start services first, then request agents through the
-  gateway.
+- A DB/SDK script needs a home that has been started and explicitly named with
+  `AVA_HOME`. A throwaway home carries no `.env`: its `AVA_DB_URL` is the
+  placeholder URL, so a connection fails fast with `PlaceholderDbUrlError`.
+  Imports, lint scripts and codegen hooks work there as they do in CI.
+- End-to-end agent/frontend behavior runs in CI's e2e job (a real gateway, agent
+  subprocess and browser against throwaway Postgres and Redis).
 
 See [AGENTS.md](../AGENTS.md) for the worktree and PR workflow.
 

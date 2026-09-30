@@ -36,6 +36,7 @@ from base.native_process.os_platform import (
     descends_from_launchd_job,
     launchd_job_label,
 )
+from base.paths import ava_home
 
 DEFAULT_INTERVAL_SECONDS = 300  # 5 minutes
 
@@ -239,12 +240,11 @@ def job_home() -> str:
     Redundancy, not the primary defence: `ava_binary_path()` already resolves to
     the checkout that owns this home, and that binary's own boot resolves the
     same home (`resolve_ava_home`). Pinning it in the spec makes the job
-    self-describing — it no longer depends on the checkout's `.ava_home` pointer
-    still being on disk — and it removes the one path by which a stale job could
-    reach the prod home: an `ava` that resolved through PATH with no `AVA_HOME`
-    set falls back to the prod source.
+    self-describing, and it removes the one path by which a stale job could reach
+    the prod home: an `ava` that resolved through PATH with no `AVA_HOME` set
+    falls back to `~/.ava`.
     """
-    return str(Path(settings.general.ava_home))
+    return str(ava_home())
 
 
 def launchd_env_block(indent: str = "    ", extra: dict[str, str] | None = None) -> str:
@@ -349,7 +349,7 @@ def _launchd_plist_content(interval_s: int) -> str:
     """Generate the observation-only health-probe launchd job."""
     ava_path = ava_binary_path()
     label = _health_probe_label(_home_slug())
-    log_dir = Path(settings.general.ava_home) / "logs"
+    log_dir = ava_home() / "logs"
     log_file = log_dir / "health-probe.log"
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>

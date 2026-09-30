@@ -235,7 +235,7 @@ def test_is_per_agent_field_metadata(isolated_registry):
 def _setup_overlayable_plugin():
     """Register a frozen Config with per_agent=True fields, run bind_from_disk.
 
-    Requires the `unit_home` fixture active in the calling test (settings.general.ava_home
+    Requires the `unit_home` fixture active in the calling test (AVA_HOME
     pointing at a per-test tmp dir) so bind_from_disk writes the disk image there,
     not into the shared session home — callers must declare `unit_home`.
     """

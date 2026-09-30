@@ -29,7 +29,7 @@ from typing import ClassVar
 
 import pytest
 
-from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
 _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
 
@@ -50,7 +50,6 @@ def _base_env(home: Path) -> dict[str, str]:
         }
     }
     env["AVA_HOME"] = str(home)
-    env["AVA_HOME_OVERRIDE"] = "1"
     return env
 
 
@@ -83,7 +82,7 @@ def test_lite_settings_build_plants_placeholders(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     lines = result.stdout.strip().splitlines()
-    assert lines[0] == UNANCHORED_DB_SENTINEL
+    assert lines[0] == PLACEHOLDER_DB_URL
     assert lines[1] == _LITE_REDIS_URL
 
 
@@ -99,7 +98,7 @@ def test_unenrolled_runner_constructs_locally(tmp_path: Path) -> None:
         "import base.config as c; print(c.settings.data_plane.db_url)",
     )
     assert result.returncode == 0, result.stderr
-    assert UNANCHORED_DB_SENTINEL in result.stdout
+    assert PLACEHOLDER_DB_URL in result.stdout
 
 
 def test_bare_checkout_constructs_locally(tmp_path: Path) -> None:
@@ -111,7 +110,7 @@ def test_bare_checkout_constructs_locally(tmp_path: Path) -> None:
         "import base.config as c; print(c.settings.data_plane.db_url)",
     )
     assert result.returncode == 0, result.stderr
-    assert UNANCHORED_DB_SENTINEL in result.stdout
+    assert PLACEHOLDER_DB_URL in result.stdout
 
 
 def test_leaked_machine_identity_flags_do_not_flip_config_source(
@@ -142,7 +141,6 @@ def test_leaked_machine_identity_flags_do_not_flip_config_source(
         }
     }
     env["AVA_HOME"] = str(tmp_path)
-    env["AVA_HOME_OVERRIDE"] = "1"
     # The leak: prod's identity + data-plane values riding in via the shell.
     env["AVA_MACHINE_SERVE_GATEWAY"] = "true"
     env["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
@@ -153,7 +151,7 @@ def test_leaked_machine_identity_flags_do_not_flip_config_source(
         "import base.config as c; print(c.settings.data_plane.db_url)",
     )
     assert result.returncode == 0, result.stderr
-    assert UNANCHORED_DB_SENTINEL in result.stdout
+    assert PLACEHOLDER_DB_URL in result.stdout
 
 
 def test_enrolled_runner_with_unreachable_gateway_fails_fast(tmp_path: Path) -> None:

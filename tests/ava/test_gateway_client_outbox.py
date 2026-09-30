@@ -17,7 +17,6 @@ import pytest
 
 from base.agents import AgentNotFound, GatewayUnavailable
 from base.agents.messages import delivery_outbox as outbox
-from base.config import settings
 
 
 @pytest.mark.parametrize(
@@ -56,7 +55,7 @@ def _limits(**overrides: object) -> outbox.DeliveryOutboxLimits:
 
 @pytest.fixture()
 def journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(outbox, "limits", _limits)
     outbox._reset_caches_for_tests()
     yield tmp_path

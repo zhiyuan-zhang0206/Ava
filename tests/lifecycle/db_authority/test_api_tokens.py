@@ -73,7 +73,11 @@ def gateway(
     home = (tmp_path / "gateway").resolve()
     home.mkdir(mode=0o700)
     seed_write_generation(home)
-    monkeypatch.setattr(settings.general, "ava_home", str(home))
+    # The gateway's bootstrap serves the connection facts its home's `.env` declares.
+    (home / ".env").write_text(
+        f"AVA_DB_URL={settings.data_plane.db_url}\nAVA_REDIS_URL={settings.data_plane.redis_url}\n"
+    )
+    monkeypatch.setenv("AVA_HOME", str(home))
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     return home
@@ -488,7 +492,7 @@ def runner_home(tmp_path: Path, gateway: Path, monkeypatch: pytest.MonkeyPatch) 
         served_endpoint=_ENDPOINT,
         probe=lambda _dsn: None,
     )
-    monkeypatch.setattr(settings.general, "ava_home", str(home))
+    monkeypatch.setenv("AVA_HOME", str(home))
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     return home
 

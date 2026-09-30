@@ -19,7 +19,6 @@ from contextlib import AbstractContextManager, contextmanager
 import psutil
 import pytest
 
-from base.config import settings
 from base.deploy.lifecycle import service_selection as ds
 from base.native_process.ownership import OwnedProcess
 from base.paths import run_dir
@@ -58,7 +57,7 @@ def as_machine(
 
     A "machine" in these tests IS its `$AVA_HOME`: `skills_dir()`, the
     `installed.json` install registry and `machine_name` all hang off it, so
-    pointing `settings.general.ava_home` at a second directory gives a genuinely
+    pointing `AVA_HOME` at a second directory gives a genuinely
     distinct machine to every path under test while the Postgres URL is
     untouched. Two homes, one PG.
 
@@ -77,7 +76,7 @@ def as_machine(
         home.mkdir(parents=True, exist_ok=True)
         (home / "machine_name").write_text(home.name, encoding="utf-8")
         with monkeypatch.context() as m:
-            m.setattr(settings.general, "ava_home", home)
+            m.setenv("AVA_HOME", str(home))
             reset_identity()
             try:
                 yield home

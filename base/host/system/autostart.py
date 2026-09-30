@@ -47,7 +47,6 @@ from pathlib import Path
 
 from loguru import logger
 
-from base.config import settings
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 from base.host.system.cron import (
     LAUNCHD_LABEL_PREFIX,
@@ -57,6 +56,7 @@ from base.host.system.cron import (
     skip_os_job,
 )
 from base.native_process.os_platform import IS_MACOS
+from base.paths import ava_home
 
 
 def _home_slug() -> str:
@@ -92,7 +92,7 @@ def _autostart_plist_content() -> str:
     """
     label = _autostart_label(_home_slug())
     ava = ava_binary_path()
-    log_file = Path(settings.general.ava_home) / "logs" / "autostart.log"
+    log_file = ava_home() / "logs" / "autostart.log"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

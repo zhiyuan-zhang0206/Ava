@@ -48,7 +48,6 @@ POLL_SECONDS = 30
 BATCH_DEADLINE = timedelta(minutes=25)
 PROBE_LABEL = "doc-worker"
 COLLEAGUE_LABEL = "doc-colleague"
-DATA_ROOT = Path(ava_home()) / "adversarial_eval"
 
 
 class BatchMarker(TypedDict):
@@ -89,7 +88,7 @@ class ScenarioServer:
 
 def data_root() -> Path:
     """Return the schedule's cluster-local durable state directory."""
-    return DATA_ROOT
+    return Path(ava_home()) / "adversarial_eval"
 
 
 def start_scenario_server() -> ScenarioServer:

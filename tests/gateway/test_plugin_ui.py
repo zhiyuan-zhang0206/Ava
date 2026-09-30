@@ -12,7 +12,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base import paths
-from base.config import settings
 from base.packages.plugins.enable_config import write_local
 from gateway.app import app
 
@@ -26,7 +25,7 @@ def _isolate_plugin_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
     monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path / "ava"))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
 
 
 def _write_plugin(name: str, *, files: dict[str, str] | None = None) -> Path:

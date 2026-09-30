@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import replace
 from pathlib import Path
-from threading import Event
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -39,7 +37,6 @@ def inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> identity.Identity
     return identity.IdentityInput(
         tmp_path / "home",
         checkout,
-        True,
         frozenset({"gateway", "agent-runner"}),
         {"AVA_MACHINE_NAME": "preview"},
     )
@@ -66,7 +63,6 @@ def test_fresh_identity_committed_before_native_work(inputs: identity.IdentityIn
     assert redis_admin and redis_runtime and redis_admin != redis_runtime
     redis_url = urlsplit(env["AVA_REDIS_URL"] or "")
     assert (redis_url.username, redis_url.password) == ("ava", redis_runtime)
-    assert (inputs.checkout / ".ava_home").read_text().strip() == str(inputs.home)
     assert not (inputs.home / "pg").exists()
 
 
@@ -141,65 +137,12 @@ def test_a_published_claim_keeps_no_copy_of_its_credentials(
     assert not [value for value in credentials if value and value in raw]
 
 
-def test_stale_inputs_cannot_rebind_checkout_to_another_home(
-    inputs: identity.IdentityInput,
-) -> None:
-    other = replace(inputs, home=inputs.home.with_name("other"))
-    identity.prepare_identity(inputs)
-    with pytest.raises(RuntimeError, match="bound to another home"):
-        identity.prepare_identity(other)
-    assert (inputs.checkout / ".ava_home").read_text().strip() == str(inputs.home)
-    assert identity.read_intent(other.home) is None
-
-
-def test_birth_writes_nothing_outside_the_home_and_checkout(
-    inputs: identity.IdentityInput,
-) -> None:
-    """A home describes only itself: no host-level file lists the cluster."""
+def test_birth_writes_nothing_outside_the_home(inputs: identity.IdentityInput) -> None:
+    """A home describes only itself: no host-level file and no file in the
+    checkout lists the cluster."""
     identity.prepare_identity(inputs)
     assert sorted(p.name for p in inputs.home.parent.iterdir()) == ["checkout", "home"]
-
-
-def test_checkout_lock_serializes_independent_home_publication(
-    inputs: identity.IdentityInput,
-) -> None:
-    entered = Event()
-
-    def start() -> None:
-        entered.set()
-        identity.prepare_identity(inputs)
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        with file_lock(inputs.checkout / ".ava_home.lock", timeout_s=3):
-            pending = executor.submit(start)
-            assert entered.wait(3)
-            with pytest.raises(FutureTimeout):
-                pending.result(timeout=0.2)
-            assert identity.read_intent(inputs.home) is None
-        pending.result(timeout=5)
-    assert (inputs.checkout / ".ava_home").read_text().strip() == str(inputs.home)
-
-
-def test_retirement_excludes_rebinding_until_pointer_is_removed(
-    inputs: identity.IdentityInput,
-) -> None:
-    identity.prepare_identity(inputs)
-    other = replace(inputs, home=inputs.home.with_name("other"))
-    entered = Event()
-
-    def start() -> None:
-        entered.set()
-        identity.prepare_identity(other)
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        with file_lock(inputs.checkout / ".ava_home.lock", timeout_s=3):
-            pending = executor.submit(start)
-            assert entered.wait(3)
-            with pytest.raises(FutureTimeout):
-                pending.result(timeout=0.2)
-            identity._retire_checkout_pointer(inputs.checkout, inputs.home)
-        pending.result(timeout=5)
-    assert (inputs.checkout / ".ava_home").read_text().strip() == str(other.home)
+    assert list(inputs.checkout.iterdir()) == []
 
 
 def test_crash_after_intent_before_env_resumes_same_claim(
@@ -221,43 +164,50 @@ def test_crash_after_intent_before_env_resumes_same_claim(
     assert dict(dotenv_values(inputs.home / ".env")) == pending["env"]
 
 
-def test_bare_repeat_preserves_recorded_checkout_binding(inputs: identity.IdentityInput) -> None:
-    identity.prepare_identity(inputs)
-    paths = [inputs.home / ".env", inputs.home / identity.INTENT_NAME]
-    before = [path.read_bytes() for path in paths]
-    identity.prepare_identity(replace(inputs, worktree=False))
-    with pytest.raises(RuntimeError, match="another checkout"):
-        identity.prepare_identity(
-            replace(inputs, worktree=False, checkout=inputs.checkout.parent / "other")
-        )
-    assert [path.read_bytes() for path in paths] == before
-
-
-def test_worktree_flag_cannot_change_existing_identity_mode(inputs: identity.IdentityInput) -> None:
-    identity.prepare_identity(replace(inputs, worktree=False))
-    with pytest.raises(RuntimeError, match="without worktree identity"):
-        identity.prepare_identity(inputs)
-
-
-def test_crash_after_env_before_pointer_recovers_own_home(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+def test_an_intent_carrying_the_retired_worktree_key_is_refused_by_name(
+    inputs: identity.IdentityInput,
 ) -> None:
-    write = identity.write_text_atomic
-
-    def crash(path: Path, data: str, **kwargs: Any) -> None:
-        if path.name == ".ava_home":
-            raise OSError("power loss")
-        write(path, data, **kwargs)
-
-    monkeypatch.setattr(identity, "write_text_atomic", crash)
-    with pytest.raises(OSError, match="power loss"):
-        identity.prepare_identity(inputs)
-    before = (inputs.home / ".env").read_bytes()
-    monkeypatch.setattr(identity, "write_text_atomic", write)
+    """The `worktree` flag an older start recorded is not read, migrated or
+    ignored: a home whose intent still carries it fails loudly at its next start,
+    naming the key, until the operator removes it."""
     identity.prepare_identity(inputs)
-    assert (inputs.home / ".env").read_bytes() == before
-    persisted = identity.read_intent(inputs.home)
-    assert persisted is not None and persisted["phase"] == "configured"
+    path = inputs.home / identity.INTENT_NAME
+    data = json.loads(path.read_text())
+    data["worktree"] = False
+    path.write_text(json.dumps(data))
+    with pytest.raises(RuntimeError, match=r"unexpected keys \[.*'worktree'"):
+        identity.read_intent(inputs.home)
+
+
+# The one-line rollout step for a home born before that key was retired. It is
+# quoted verbatim in the pull request that retires it.
+_STRIP_RETIRED_INTENT_KEY = (
+    "python3 -c 'import json,os,sys;p=sys.argv[1];d=json.load(open(p));"
+    'd.pop("worktree",None);t=p+".tmp";'
+    "f=os.open(t,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600);os.fchmod(f,0o600);"
+    'os.write(f,(json.dumps(d,sort_keys=True)+"\\n").encode());os.fsync(f);os.close(f);'
+    "os.replace(t,p)' "
+)
+
+
+def test_the_rollout_step_makes_an_old_intent_readable_idempotently(
+    inputs: identity.IdentityInput,
+) -> None:
+    identity.prepare_identity(inputs)
+    path = inputs.home / identity.INTENT_NAME
+    born_before = json.loads(path.read_text()) | {"worktree": True}
+    path.write_text(json.dumps(born_before, sort_keys=True) + "\n")
+    path.chmod(0o600)
+    with pytest.raises(RuntimeError, match="unexpected keys"):
+        identity.read_intent(inputs.home)
+
+    command = _STRIP_RETIRED_INTENT_KEY + f"'{path}'"
+    for _ in range(2):  # the second run changes nothing
+        subprocess.run(command, shell=True, check=True, capture_output=True)  # noqa: S602 — the quoted rollout line
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert not path.with_name(path.name + ".tmp").exists()
+        data = identity.read_intent(inputs.home)
+        assert data == {k: v for k, v in born_before.items() if k != "worktree"}
 
 
 def test_configured_home_missing_its_intent_is_not_reborn(inputs: identity.IdentityInput) -> None:
@@ -281,14 +231,19 @@ def _args(*extra: str):
     return build_parser().parse_args(["start", *extra])
 
 
-def test_worktree_start_uses_explicit_home_not_ambient_projection(
+def _single_box(*extra: str):
+    """A first start of a single-box home: gateway and agent-runner, named."""
+    return _args("--serve-gateway", "--serve-agent-runner", "--machine-name", "preview", *extra)
+
+
+def test_start_uses_explicit_home_not_ambient_projection(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     monkeypatch.setenv("AVA_DB_URL", "postgresql://foreign@foreign.invalid/production")
     monkeypatch.setenv("AVA_CLUSTER_SECRET", "foreign-secret")
-    prepare_start_identity(_args("--worktree"))
+    prepare_start_identity(_single_box())
     env = dotenv_values(inputs.home / ".env")
     db_url = env["AVA_DB_URL"]
     assert db_url is not None and "foreign" not in db_url
@@ -318,13 +273,13 @@ def test_interrupted_start_keeps_admitted_tool_path(
 
     monkeypatch.setattr(identity, "upsert_env", crash)
     with pytest.raises(OSError, match="power loss"):
-        prepare_start_identity(_args("--worktree"))
+        prepare_start_identity(_single_box())
     pending = identity.read_intent(inputs.home)
     assert pending is not None and pending["phase"] == "claiming"
     assert pending["env"]["AVA_SERVICE_PATH"] == tools
     monkeypatch.setattr(identity, "upsert_env", write)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "different-tools"))
-    prepare_start_identity(_args("--worktree"))
+    prepare_start_identity(_single_box())
     assert dotenv_values(inputs.home / ".env")["AVA_SERVICE_PATH"] == tools
 
 
@@ -345,7 +300,7 @@ def test_lossy_tool_path_is_rejected_before_identity_publication(
     monkeypatch.delenv("AVA_SERVICE_PATH", raising=False)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "tools #1"))
     with pytest.raises(ValueError, match="round-trip literally"):
-        prepare_start_identity(_args("--worktree"))
+        prepare_start_identity(_single_box())
     assert identity.read_intent(inputs.home) is None
 
 
@@ -458,9 +413,7 @@ def test_gateway_start_refuses_a_capability_bundle(
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     with pytest.raises(ValueError, match="agent-runner units"):
-        prepare_start_identity(
-            _args("--worktree", "--db-capability", str(tmp_path / "unit.bundle"))
-        )
+        prepare_start_identity(_single_box("--db-capability", str(tmp_path / "unit.bundle")))
     assert identity.read_intent(inputs.home) is None
 
 
@@ -552,7 +505,7 @@ def test_config_retry_keeps_first_snapshot_and_rejects_changed_input(
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     config = inputs.home.parent / "config.env"
     config.write_text("AVA_LLM_OVERRIDE=fixture:model\n")
-    args = _args("--worktree", "--config-file", str(config))
+    args = _single_box("--config-file", str(config))
     prepare_start_identity(args)
     first = (inputs.home / ".env").read_bytes()
     prepare_start_identity(args)
@@ -588,7 +541,7 @@ def _remote_config(
     config.write_text(
         f"AVA_DB_URL=postgresql://owner:provider@{host}:6543/app{query}\nAVA_REDIS_URL=rediss://acl:provider@redis.invalid:6381/0\nAVA_RUNNER_DB_PASSWORD=external-runner\n"
     )
-    return _args("--worktree", "--config-file", str(config))
+    return _single_box("--config-file", str(config))
 
 
 def test_remote_start_preserves_provider_urls_and_runner_credential(
@@ -631,7 +584,7 @@ def test_public_start_holds_home_lock_through_runtime_start(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    from base.native_process.os_platform import LockTimeoutError, file_lock
+    from base.native_process.os_platform import LockTimeoutError
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
@@ -645,7 +598,7 @@ def test_public_start_holds_home_lock_through_runtime_start(
         return 0
 
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
-    assert start_intent.run_start(_args("--worktree")) == 0
+    assert start_intent.run_start(_single_box()) == 0
 
 
 def test_start_parser_rejects_retired_updater_telemetry() -> None:
@@ -671,7 +624,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
 
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     monkeypatch.setattr(root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
-    assert start_intent.run_start(_args("--worktree")) == result
+    assert start_intent.run_start(_single_box()) == result
     assert calls == ["complete wrapped start"] + (["publish PID"] if result == 0 else [])
 
 
@@ -696,5 +649,5 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
         raise RuntimeError("manager refused native custody")
 
     monkeypatch.setattr(root_driver, "complete_boot_start", fail)
-    assert start_intent.run_start(_args("--worktree")) == 1
+    assert start_intent.run_start(_single_box()) == 1
     assert calls == ["cleared"]

@@ -42,7 +42,6 @@ def _probe(home: Path, system_bin: Path, *, inherited: str = "") -> dict[str, An
         "HOME": str(home.parent),
         "PATH": str(system_bin),
         "AVA_HOME": str(home),
-        "AVA_HOME_OVERRIDE": "1",
         "AVA_CONFIG_FETCH": "skip",
         "AVA_PROCESS_PROFILE": "gateway",
         "AVA_REDIS_BIN_DIR": inherited,

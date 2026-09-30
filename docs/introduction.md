@@ -207,9 +207,8 @@ it goes red"*, *"what is agent 42 doing?"*, *"tell it to skip the flaky test"*.
 | `terminate_agent` | end an agent (destructive: it stops working) |
 | `cluster_status` | is the cluster up, and is it paused for maintenance |
 
-Which cluster it drives is not a flag: the server dials the gateway of the
-checkout its `ava` belongs to, with that cluster's own secret. A bare `ava` means
-the cluster `$AVA_HOME` names; a worktree's `.venv/bin/ava` means that worktree's cluster. Nothing
+Which cluster it drives is not a flag: the server dials the gateway of the home it
+resolves (`$AVA_HOME`, else `~/.ava`), with that cluster's own secret. Nothing
 new is exposed — every tool is the authenticated gateway route the web UI
 already calls.
 
@@ -220,9 +219,9 @@ already calls.
 
 ## CLI
 
-One entry point — `ava`. Every verb acts on the cluster the checkout anchors:
-a bare `ava` means the cluster `$AVA_HOME` names (`~/.ava` for prod); a worktree's
-`.venv/bin/ava` means that worktree's cluster. Run `ava --help` for the full surface.
+One entry point — `ava`. Every verb acts on the home `$AVA_HOME` names (`~/.ava`
+for prod when it is unset); a home with its own `source` checkout is changed only by
+that checkout's `ava`. Run `ava --help` for the full surface.
 
 | Verb | Does |
 |---|---|

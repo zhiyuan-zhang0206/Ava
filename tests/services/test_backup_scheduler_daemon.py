@@ -54,7 +54,6 @@ def test_module_entrypoint_runs_the_scheduler(tmp_path: Path) -> None:
     env.update(
         {
             "AVA_HOME": str(tmp_path),
-            "AVA_HOME_OVERRIDE": "1",
             "AVA_CONFIG_FETCH": "skip",
         }
     )

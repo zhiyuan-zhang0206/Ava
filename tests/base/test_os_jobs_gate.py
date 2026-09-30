@@ -163,7 +163,7 @@ def test_ava_binary_path_falls_back_to_path_without_a_venv(
 
 def test_health_probe_plist_pins_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """An OS probe observes its owning home and carries no release policy."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path / ".ava-x")
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
     monkeypatch.setattr(cron, "ava_binary_path", lambda: "/x/ava")
     monkeypatch.setattr(cron, "_home_slug", lambda: "ava-x")
     body = cron._launchd_plist_content(300)
@@ -188,7 +188,7 @@ def test_health_probe_plist_pins_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_p
 def test_every_launchagent_pins_ava_home(
     render: object, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path / ".ava-x")
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
     monkeypatch.setattr(cron, "ava_binary_path", lambda: "/x/ava")
     monkeypatch.setattr(autostart, "ava_binary_path", lambda: "/x/ava")
     monkeypatch.setattr(autostart, "_home_slug", lambda: "ava-x")
@@ -204,7 +204,7 @@ def test_cron_env_prefix_scopes_to_one_command(
     """`AVA_HOME=<home> <cmd>` and not a bare `AVA_HOME=` line: cron applies a
     standalone assignment to the WHOLE crontab, which would silently retarget a
     co-located cluster's entries."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path / ".ava-x")
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
     prefix = cron.cron_env_prefix()
     assert prefix == f"AVA_HOME={tmp_path / '.ava-x'} "
     assert not prefix.startswith("\n")

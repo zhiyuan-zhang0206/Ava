@@ -129,7 +129,7 @@ def test_the_child_never_inherits_the_parents_stdio_handles(
     to `$AVA_HOME/logs/boot.log`, truncated per attempt (bounded size — a
     wedged host retrying for days keeps only the attempt a diagnostician
     needs), and closed once the attempt returns."""
-    monkeypatch.setattr(boot_retry, "resolve_ava_home", lambda: (tmp_path, True))
+    monkeypatch.setattr(boot_retry, "resolve_ava_home", lambda: tmp_path)
     stdio_seen: list[tuple[object, object]] = []
     _stub_run_capturing_stdio(monkeypatch, stdio_seen)
 
@@ -151,7 +151,7 @@ def test_an_unwritable_home_degrades_to_devnull_not_a_crash(
     whose logs dir cannot even be created — the child still gets valid stdio."""
     not_a_dir = tmp_path / "occupied"
     not_a_dir.write_text("a file where the home should be")
-    monkeypatch.setattr(boot_retry, "resolve_ava_home", lambda: (not_a_dir, True))
+    monkeypatch.setattr(boot_retry, "resolve_ava_home", lambda: not_a_dir)
     stdio_seen: list[tuple[object, object]] = []
     _stub_run_capturing_stdio(monkeypatch, stdio_seen)
 

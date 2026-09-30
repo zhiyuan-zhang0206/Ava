@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from pydantic import Field, field_validator, model_validator
 
 from base.config.base import EnvSettings, _unit_home
-from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL, resolve_ava_home
 from base.host.net.predicates import is_ipv4_literal, is_loopback_host
 from base.host.net.url_secret import url_host, url_with_host, url_with_query_param
 
@@ -23,13 +23,11 @@ def _self_machine_host() -> str:
     """This host's reachable address, mirroring `base.cluster.machine.reachable_host`
     (env `AVA_MACHINE_HOST` > `$AVA_HOME/machine_host` file > `localhost`).
     Duplicated at this leaf because base.cluster.machine imports settings — a config
-    sub-model cannot import it back. `load_ava_env` pins AVA_HOME into os.environ
-    before any sub-model constructs, so the file branch resolves against the same
-    home the `.env` came from."""
+    sub-model cannot import it back."""
     env = os.environ.get("AVA_MACHINE_HOST", "").strip()
     if env:
         return env
-    path = Path(os.environ.get("AVA_HOME", "~/.ava")).expanduser() / "machine_host"
+    path = resolve_ava_home() / "machine_host"
     if path.exists():
         host = path.read_text().strip()
         if host:
@@ -57,7 +55,7 @@ def _is_runner_db_url(url: str) -> bool:
 def _loopback_if_self(url: str) -> str:
     """Return `url` with its host swapped to `127.0.0.1` when it names this
     machine's own reachable address; any other host — and an already-loopback
-    host — passes through verbatim. The unanchored sentinel is skipped
+    host — passes through verbatim. The placeholder URL is skipped
     explicitly (the connect guard matches it byte-for-byte).
 
     External-migration semantics (Task #1752): this rewrite is the SELF-DIAL
@@ -66,7 +64,7 @@ def _loopback_if_self(url: str) -> str:
     through here untouched — the rewrite must never be extended to foreign
     hosts, because its job is the opposite: keep this box's own traffic on
     loopback, not route it to where the URL happens to point."""
-    if url == UNANCHORED_DB_SENTINEL:
+    if url == PLACEHOLDER_DB_URL:
         return url
     host = urlsplit(url).hostname or ""
     if not host or is_loopback_host(host):
@@ -482,14 +480,14 @@ class DataPlaneSettings(EnvSettings):
         At the default home with a bearer set, anything else on a loopback URL is
         a missing projection, refused here by name instead of failing later as an
         unexplained authentication error. Non-default homes are test/e2e clusters
-        that deliberately keep other topologies. The unanchored sentinel and a
+        that deliberately keep other topologies. The placeholder URL and a
         FOREIGN host (a remote/SaaS plane: the URL is the provider's) are exempt.
 
         Runs after `_dial_self_host_via_loopback` (declared above it), so the
         local/foreign decision sees the dial host the cluster will actually use.
         """
         local_owner_url = (
-            self.db_url != UNANCHORED_DB_SENTINEL
+            self.db_url != PLACEHOLDER_DB_URL
             and not _is_runner_db_url(self.db_url)
             and is_loopback_host(urlsplit(self.db_url).hostname or "")
         )
@@ -535,10 +533,10 @@ class DataPlaneSettings(EnvSettings):
         whatever host that rewrite already settled on (loopback or a peer's
         address) rather than a pre-rewrite value. A hostname db_url (nothing
         to pin — normal resolution already reaches the right place) and the
-        unanchored sentinel (must stay byte-identical for the connect guard)
+        placeholder URL (must stay byte-identical for the connect guard)
         are untouched.
         """
-        if self.db_url != UNANCHORED_DB_SENTINEL:
+        if self.db_url != PLACEHOLDER_DB_URL:
             host = urlsplit(self.db_url).hostname or ""
             if is_ipv4_literal(host):
                 self.db_url = url_with_query_param(self.db_url, "hostaddr", host)
@@ -553,8 +551,8 @@ class DataPlaneSettings(EnvSettings):
         URL is the switch: a local self-built instance keeps loopback URLs (and a
         self-named host is rewritten to loopback), while an external host on the
         private network (the `data_plane_host` birth knob) or a SaaS provider's
-        URL names another machine and passes through untouched. The unanchored
-        boot sentinel and a host-less (unix-socket) URL read as local, so this
+        URL names another machine and passes through untouched. The
+        placeholder URL and a host-less (unix-socket) URL read as local, so this
         predicate can never misfire on the pre-install or admin-socket paths.
 
         The management plane keys off this one fact: a remote data plane has no

@@ -35,9 +35,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from base.deploy.git import host_version
-from base.host.proc import run_bounded
-from base.packages.plugins import manifest as pm
+from base.host.env.dotenv_boot import enter_scratch_home
+
+enter_scratch_home()
+
+from base.deploy.git import host_version  # noqa: E402
+from base.host.proc import run_bounded  # noqa: E402
+from base.packages.plugins import manifest as pm  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 

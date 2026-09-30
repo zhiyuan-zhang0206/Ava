@@ -30,9 +30,9 @@ from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
 def isolated_host_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect runtime_config._ava_home to a fresh per-test tmp dir.
 
-    unit_home patches settings.general.ava_home but runtime_config._ava_home reads
-    os.environ["AVA_HOME"] directly, so tests that read/write this machine's .env
-    need this extra patch for proper isolation.
+    Tests that read/write this machine's .env pin `runtime_config._ava_home`
+    directly, so the `.env` they touch is this tmp dir's whatever else the test
+    does with `AVA_HOME`.
     """
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
     return tmp_path

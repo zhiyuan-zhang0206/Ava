@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
-from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import cast
 from unittest.mock import Mock
@@ -21,18 +22,15 @@ def _detached(home: Path) -> bool:
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A born worktree gateway home, bound to its checkout."""
-    from cli.start_identity import IdentityInput, prepare_identity
-
+    """A born gateway home: its start intent records the cluster."""
     home = tmp_path / "home"
-    checkout = tmp_path / "checkout"
-    checkout.mkdir()
-
-    def port_free(_port: int) -> bool:
-        return True
-
-    monkeypatch.setattr(cluster, "port_free", port_free)
-    prepare_identity(IdentityInput(home, checkout, True, frozenset({"gateway"}), {}))
+    home.mkdir()
+    record = cluster.ClusterRecord(
+        ports=cluster.new_home_ports(), gateway_home=str(home), created_at="test"
+    )
+    (home / cluster.INTENT_NAME).write_text(
+        json.dumps({"record": asdict(record), "phase": "ready"})
+    )
 
     def down(**_kw: object) -> int:
         return 0
@@ -144,95 +142,24 @@ def test_down_uses_target_home_environment(home: Path, monkeypatch: pytest.Monke
     assert "AVA_DB_URL" not in seen[0]
 
 
-@pytest.fixture
-def bound_checkout(home: Path) -> Path:
-    return home.parent / "checkout"
-
-
-def _on_detach(monkeypatch: pytest.MonkeyPatch, action: Callable[[], None]) -> None:
-    """Run `action` just before destroy writes the detached marker."""
-    import base.host.private_storage as storage
-
-    write = storage.write_private_bytes
-
-    def hooked(path: Path, data: bytes, *args: object, **kwargs: object) -> None:
-        if b'"detached"' in data:
-            action()
-        write(path, data, *args, **kwargs)  # pyright: ignore[reportArgumentType]
-
-    monkeypatch.setattr(storage, "write_private_bytes", hooked)
-
-
-def test_destroy_retires_exact_checkout_before_detaching(
-    home: Path, bound_checkout: Path, monkeypatch: pytest.MonkeyPatch
+def test_interrupted_cleanup_retries_to_completion(
+    home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pointer = bound_checkout / ".ava_home"
+    """A cleanup that could not finish leaves the home attached with its destroy
+    intent retained; running destroy again completes it."""
+    target = "services.permissions_helper.launchd_job.unregister_helper"
 
-    def retired() -> None:
-        assert not pointer.exists()
-
-    _on_detach(monkeypatch, retired)
-    assert lifecycle.cmd_cluster_destroy(path=str(home)) == 0
-    assert not pointer.exists()
-    assert _detached(home)
-
-
-@pytest.mark.parametrize("change", ["foreign-home", "symlink", "missing"])
-def test_destroy_never_guesses_a_changed_checkout_binding(
-    home: Path, bound_checkout: Path, change: str
-) -> None:
-    pointer = bound_checkout / ".ava_home"
-    pointer.unlink()
-    foreign = home.parent / "foreign-pointer"
-    if change == "foreign-home":
-        pointer.write_text(str(home.parent / "neighbor") + "\n")
-    elif change == "symlink":
-        foreign.write_text(str(home) + "\n")
-        pointer.symlink_to(foreign)
-    result = lifecycle.cmd_cluster_destroy(path=str(home))
-    if change == "missing":
-        assert result == 0 and _detached(home)
-    else:
-        assert result == 1 and not _detached(home)
-        assert pointer.exists()
-        if change == "symlink":
-            assert pointer.is_symlink() and foreign.read_text() == str(home) + "\n"
-        else:
-            assert pointer.read_text() == str(home.parent / "neighbor") + "\n"
-
-
-def test_interrupted_pointer_retirement_retries_without_recreating_binding(
-    home: Path, bound_checkout: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def fail() -> None:
+    def interrupted(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("interrupted detach")
 
-    with monkeypatch.context() as patched:
-        _on_detach(patched, fail)
-        with pytest.raises(RuntimeError, match="interrupted detach"):
-            lifecycle.cmd_cluster_destroy(path=str(home))
-    assert not (bound_checkout / ".ava_home").exists()
-    assert not _detached(home)
-    assert lifecycle.cmd_cluster_destroy(path=str(home)) == 0
-    assert not (bound_checkout / ".ava_home").exists()
-    assert _detached(home)
+    def recovered(*_args: object, **_kwargs: object) -> None:
+        return None
 
-
-def test_destroy_preserves_pointer_replaced_during_observation(
-    home: Path, bound_checkout: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    pointer = bound_checkout / ".ava_home"
-    read = Path.read_text
-    foreign = str(home.parent / "neighbor") + "\n"
-
-    def replace_while_reading(path: Path, **kwargs: object) -> str:
-        value = read(path)
-        if path == pointer:
-            path.unlink()
-            path.write_text(foreign)
-        return value
-
-    monkeypatch.setattr(Path, "read_text", replace_while_reading)
+    monkeypatch.setattr(target, interrupted)
     assert lifecycle.cmd_cluster_destroy(path=str(home)) == 1
     assert not _detached(home)
-    assert read(pointer) == foreign
+    assert (home / "destroy-intent.json").exists()
+
+    monkeypatch.setattr(target, recovered)
+    assert lifecycle.cmd_cluster_destroy(path=str(home)) == 0
+    assert _detached(home)

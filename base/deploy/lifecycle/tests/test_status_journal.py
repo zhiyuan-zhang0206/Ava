@@ -17,13 +17,12 @@ from pathlib import Path
 import psutil
 import pytest
 
-from base.config import settings
 from base.deploy.lifecycle import status_journal as journal
 
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     return tmp_path
 
 

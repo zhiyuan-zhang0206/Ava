@@ -9,11 +9,9 @@ never navigate_page on a shared current page), the [selected] page-id parse, and
 the one-shot close (a finished ask closes its tab; keep_tab / wait=False keep
 it). The chrome MCP seam is mocked so nothing drives a browser.
 
-The `_utils._cluster` tests below (2026-09-28 fix, PR #3550 follow-up P2-2)
-lock its home-derived download label to `base.host.env.dotenv_boot.resolve_ava_home`
-instead of a raw `os.environ.get("AVA_HOME", "~/.ava")` guess — the same
-anti-pattern flagged for `_source_root` / the `web-sources` feed adapters,
-just for a cosmetic label rather than a write or credential target.
+The `_utils._cluster` tests below lock its home-derived download label to the
+shared resolver (`base.host.env.dotenv_boot.resolve_ava_home`) rather than a
+private `os.environ` read.
 """
 
 from __future__ import annotations
@@ -545,28 +543,17 @@ def test_check_login_confirms_logged_in_when_composer_present(
 
 
 # --------------------------------------------------------------------------- #
-# `_utils._cluster` — never guesses `~/.ava` (P2-2)
+# `_utils._cluster` — labels from the resolved home
 # --------------------------------------------------------------------------- #
 
 
 def test_cluster_label_strips_leading_dots(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_utils, "resolve_ava_home", lambda: (Path("/home/user/.ava-t1"), True))
+    monkeypatch.setattr(_utils, "resolve_ava_home", lambda: Path("/home/user/.ava-t1"))
     assert _utils._cluster() == "ava-t1"
 
 
 def test_cluster_label_defaults_to_ava_when_home_name_is_all_dots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(_utils, "resolve_ava_home", lambda: (Path("/home/user/.ava"), True))
+    monkeypatch.setattr(_utils, "resolve_ava_home", lambda: Path("/home/user/.ava"))
     assert _utils._cluster() == "ava"
-
-
-def test_cluster_label_never_guesses_the_default_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Locks the fix: an unanchored checkout's scratch home (never a hardcoded
-    `~/.ava` guess) is what `_cluster` labels from when `resolve_ava_home`
-    itself resolves there."""
-    scratch = tmp_path / "unanchored-scratch-home"
-    monkeypatch.setattr(_utils, "resolve_ava_home", lambda: (scratch, False))
-    assert _utils._cluster() == (scratch.name.lstrip(".") or "ava")

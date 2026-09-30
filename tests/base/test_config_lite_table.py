@@ -112,7 +112,6 @@ def test_lite_fields_match_the_registry() -> None:
             "literal",
             "none",
             "factory_empty_list",
-            "path_home_ava",
             "otel_endpoint_from_port",
         }
         assert check in {None, "iana", "port", "eval_allowlist"}

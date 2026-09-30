@@ -174,7 +174,6 @@ def _shell_children(shell: OwnedProcess) -> list[psutil.Process]:
 
 def _stop_env(monkeypatch: pytest.MonkeyPatch, home: Path, terminal: PtySessionBackend) -> None:
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)
     for name in ("stop_permissions_helper",):
@@ -573,7 +572,6 @@ def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
     name = "ava-agent-987-shell-2053-lingering"
     listing = SimpleNamespace(list_sessions=lambda: [name])
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setattr(strict, "get_shell_backend", lambda: listing)
 
     with pytest.raises(StopIncompleteError) as excinfo:
@@ -592,7 +590,6 @@ def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
     clearing its record before the deadline is a closed terminal, not a
     failed stop."""
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setattr(strict, "_TERMINAL_KILL_WAIT_S", 0.2)
     monkeypatch.setattr(strict, "capture_terminals", lambda: strict.TerminalInventory(()))
     cleared_at = time.monotonic() + 0.6

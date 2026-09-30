@@ -12,8 +12,7 @@ gateway-capable unit keeps the cluster's config in its own `$AVA_HOME/.env` and
 never fetches; which side a unit is on is derived from its serve flags (see
 `config_source_is_local` / `should_fetch_from_gateway`), not from an env var
 (AVA_CONFIG_SOURCE deleted). A bare checkout with no role flags (CI, lint
-scripts), an unanchored checkout (no cluster of its own) and a not-yet-enrolled
-runner resolve locally with no fetch — the preflight gate refuses an unenrolled
+scripts) and a not-yet-enrolled runner resolve locally with no fetch — the preflight gate refuses an unenrolled
 `ava start`, not the Settings import. The
 bytes travel the private network; an authenticated gateway requires a bearer,
 which this presents from the unit's machine API token (`AVA_API_TOKEN`, from
@@ -118,12 +117,8 @@ def _serve_flag(env_key: str, file_name: str) -> bool:
     later, so the config-source decision can never silently disagree with the
     machine role.
 
-    `$AVA_HOME` here is `dotenv_boot.resolve_ava_home()[0]`, not an independent
-    `AVA_HOME env > ~/.ava` guess: at this point in boot the env var may not be
-    pinned yet (see above), and a bare guess read (and, on a fresh HOME,
-    created) `~/.ava` for an unanchored checkout, the prod source's own home
-    (#3520 P2-1). `resolve_ava_home()` still honors an explicit `AVA_HOME` env
-    var; it only replaces the bare fallback for when that is unset.
+    `$AVA_HOME` here is `dotenv_boot.resolve_ava_home()`: at this point in boot
+    the env var may not be pinned yet (see above).
     """
     raw = os.environ.get(env_key)
     if raw is not None and raw.strip():
@@ -135,7 +130,7 @@ def _serve_flag(env_key: str, file_name: str) -> bool:
         return raw.strip().lower() in _TRUTHY
     from base.host.env.dotenv_boot import resolve_ava_home
 
-    path = resolve_ava_home()[0] / file_name
+    path = resolve_ava_home() / file_name
     if path.exists():
         return path.read_text().strip().lower() in _TRUTHY
     return False
@@ -174,21 +169,13 @@ def should_fetch_from_gateway() -> bool:
       not-yet-enrolled runner (flag on, no URL) construct Settings from their
       local env/.env with no fetch and no error — `ava start`'s preflight gate
       is what refuses an unenrolled runner, not the Settings import, so any
-      tool that imports base.config keeps working on any machine;
-    - an unanchored checkout (`base.host.env.dotenv_boot.checkout_anchored()` False:
-      no AVA_HOME, not the prod source, no `.ava_home` pointer) never fetches,
-      whatever flags or gateway URL its environment carries — it owns no
-      cluster, so no gateway's config or bearer is its to use.
+      tool that imports base.config keeps working on any machine.
 
     Reads os.environ only: by the time base.config calls this, load_ava_env
     has loaded (and `_enforce_cluster_env_authority` forced) the unit's .env,
     so the flag and the URL are both present in the environment when they
     exist on disk.
     """
-    from base.host.env.dotenv_boot import checkout_anchored
-
-    if not checkout_anchored():
-        return False
     return _serve_flag("AVA_MACHINE_SERVE_AGENT_RUNNER", "machine_serve_agent_runner") and bool(
         os.environ.get("AVA_GATEWAY_URL")
     )
@@ -262,22 +249,10 @@ def fetch_bootstrap_config(
     Settings import.
 
     Raises:
-        BootstrapFetchError: this checkout is unanchored — it owns no cluster,
-            so it never dials a gateway or presents a bearer (the one transport
-            gate behind `should_fetch_from_gateway`'s decision).
         httpx.HTTPError: every attempt failed (gateway unreachable / non-2xx, e.g.
             401 when the machine token is missing, revoked or wrong).
         TypeError: the response body is not a flat ``{str: str}`` map.
     """
-    from base.host.env.dotenv_boot import checkout_anchored
-
-    if not checkout_anchored():
-        raise BootstrapFetchError(
-            f"refusing GET {base_url.rstrip('/')}/api/bootstrap: this checkout claims "
-            "no cluster (no AVA_HOME, not the prod source, no .ava_home pointer), so "
-            "no gateway's config or bearer is its to use. Birth its own cluster first: "
-            "ava start --worktree"
-        )
     import httpx
 
     from base.cluster.auth import bearer_header, delivered_token
@@ -314,13 +289,11 @@ def fetch_bootstrap_config(
     return retry(policy)(_fetch_once)
 
 
-def _snapshot_path() -> Path | None:
-    """The unit's config snapshot path, or None when this process has no
-    AVA_HOME (bare checkout / CI — the snapshot only exists on an enrolled unit)."""
-    home = os.environ.get("AVA_HOME")
-    if not home:
-        return None
-    return Path(home) / "run" / _SNAPSHOT_NAME
+def _snapshot_path() -> Path:
+    """The unit's config snapshot path, under this process's home."""
+    from base.host.env.dotenv_boot import resolve_ava_home
+
+    return resolve_ava_home() / "run" / _SNAPSHOT_NAME
 
 
 def _read_config_snapshot(base_url: str) -> tuple[dict[str, str], float] | None:
@@ -331,8 +304,6 @@ def _read_config_snapshot(base_url: str) -> tuple[dict[str, str], float] | None:
     current version, and hold a flat ``{str: str}`` map. Absent / unreadable /
     malformed reads as None — the caller falls through to the fetch."""
     path = _snapshot_path()
-    if path is None:
-        return None
     try:
         raw = json.loads(path.read_text())
     except (OSError, ValueError):
@@ -361,8 +332,6 @@ def _write_config_snapshot(base_url: str, values: dict[str, str]) -> None:
     the unit's private storage. It never raises and never fails the boot: it
     is a cache, and the worst case of losing it is one extra fetch next time."""
     path = _snapshot_path()
-    if path is None:
-        return
     payload = json.dumps(
         {
             "v": _SNAPSHOT_VERSION,

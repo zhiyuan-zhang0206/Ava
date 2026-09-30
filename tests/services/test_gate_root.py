@@ -57,7 +57,7 @@ async def test_gate_native_child_readiness_restart_and_stop(
         (sys.executable, "-m", "services.gate.daemon", "--port", str(port)),
         RestartPolicy.ALWAYS,
         "root",
-        (("AVA_HOME_OVERRIDE", "1"), ("AVA_TELEMETRY_OTLP_ENABLED", "false")),
+        (("AVA_TELEMETRY_OTLP_ENABLED", "false"),),
     )
     owner = Supervisor(
         UnitRegistry([unit]), run_dir=short_tmp, config=SupervisorConfig(stop_timeout_s=3)

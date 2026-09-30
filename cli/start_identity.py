@@ -10,9 +10,7 @@ over it; explicit reattachment is required.
 from __future__ import annotations
 
 import json
-import os
 import secrets
-import stat
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,10 +19,9 @@ from typing import Any, cast
 from dotenv import dotenv_values
 
 from base import cluster
-from base.host.atomic_io import fsync_parent, write_text_atomic
+from base.host.atomic_io import write_text_atomic
 from base.host.env.dotenv_file import upsert_env
 from base.host.private_storage import ensure_private_dir, ensure_private_file
-from base.native_process.os_platform import file_lock
 from cli.start_runtime import StartRuntime
 
 INTENT_NAME = cluster.INTENT_NAME
@@ -36,7 +33,6 @@ _PHASES = ("claiming", "configured", "provisioned", "ready")
 class IdentityInput:
     home: Path
     checkout: Path
-    worktree: bool
     roles: frozenset[str]
     values: dict[str, str]
     config_digest: str | None = None
@@ -54,22 +50,15 @@ def read_intent(home: Path) -> dict[str, Any] | None:
         return None
     ensure_private_file(path)
     data = json.loads(path.read_text())
-    required = {
-        "version",
-        "home",
-        "checkout",
-        "worktree",
-        "roles",
-        "config_digest",
-        "phase",
-        "record",
-        "env",
-    }
+    required = {"version", "home", "checkout", "roles", "config_digest", "phase", "record", "env"}
     if not isinstance(data, dict):
         raise TypeError("invalid start identity shape")
     data = cast("dict[str, Any]", data)
     if set(data) != required:
-        raise RuntimeError("invalid start identity shape")
+        raise RuntimeError(
+            f"invalid start identity shape: unexpected keys {sorted(set(data) - required)}, "
+            f"missing keys {sorted(required - set(data))}"
+        )
     if data["version"] != 1 or data["home"] != str(home):
         raise RuntimeError("start identity version/home mismatch")
     if data["phase"] not in _PHASES:
@@ -81,8 +70,6 @@ def read_intent(home: Path) -> dict[str, Any] | None:
 def _validate_intent_fields(data: dict[str, Any], home: Path) -> None:
     if not isinstance(data["checkout"], str) or not Path(data["checkout"]).is_absolute():
         raise RuntimeError("invalid start checkout")
-    if type(data["worktree"]) is not bool:
-        raise RuntimeError("invalid start worktree flag")
     raw_roles = data["roles"]
     if not isinstance(raw_roles, list):
         raise TypeError("invalid start capabilities")
@@ -133,46 +120,6 @@ def _validate_intent_record(raw: Any, home: Path, *, gateway: bool) -> None:
         raise RuntimeError("invalid start port number")
     if len(set(ports.values())) != len(ports):
         raise RuntimeError("duplicate start port reservation")
-
-
-def retire_checkout_binding(home: Path) -> None:
-    """Retire only the checkout pointer authenticated by this home's start intent.
-
-    Caller holds the home lifecycle lock and has closed native ownership. A
-    changed pointer is ambiguous custody: preserve it and retain the reservation.
-    """
-    data = read_intent(home)
-    if data is None or not data["worktree"]:
-        return
-    checkout = Path(data["checkout"])
-    if checkout.resolve() != checkout:
-        raise RuntimeError("start checkout changed its canonical identity")
-    if not checkout.exists():
-        return
-    with file_lock(checkout / ".ava_home.lock", timeout_s=30):
-        _retire_checkout_pointer(checkout, home)
-
-
-def _retire_checkout_pointer(checkout: Path, home: Path) -> None:
-    """The checkout binding lock excludes cooperating publication/rebinding."""
-    pointer = checkout / ".ava_home"
-    try:
-        before = pointer.lstat()
-    except FileNotFoundError:
-        return
-    if not stat.S_ISREG(before.st_mode) or pointer.read_text().strip() != str(home):
-        raise RuntimeError("checkout home pointer changed; reservation retained")
-    after = pointer.lstat()
-    if (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_ctime_ns) != (
-        after.st_dev,
-        after.st_ino,
-        after.st_mtime_ns,
-        after.st_ctime_ns,
-    ):
-        raise RuntimeError("checkout home pointer changed during retirement")
-    pointer.unlink()
-    if os.name != "nt":
-        fsync_parent(pointer)
 
 
 def mark_phase(home: Path, phase: str) -> None:
@@ -257,9 +204,6 @@ def _publish_claim(inputs: IdentityInput, data: dict[str, Any]) -> None:
 
             passphrase.ensure_minted(inputs.home)
         upsert_env(inputs.home / ".env", data["env"])
-        if data["worktree"]:
-            pointer = inputs.checkout / ".ava_home"
-            write_text_atomic(pointer, str(inputs.home) + "\n", sync_parent=True)
         data["phase"] = "configured"
         # `.env` now holds the payload, credentials included; the intent keeps
         # no copy that a later rotation would leave stale.
@@ -270,17 +214,12 @@ def _publish_claim(inputs: IdentityInput, data: dict[str, Any]) -> None:
 def _validate_repeat(inputs: IdentityInput, data: dict[str, Any]) -> None:
     if data["roles"] != sorted(inputs.roles):
         raise RuntimeError("start capability set differs from the persisted identity")
-    if data["worktree"] and data["checkout"] != str(inputs.checkout):
-        raise RuntimeError("worktree home belongs to another checkout")
-    if inputs.worktree and not data["worktree"]:
-        raise RuntimeError("home was initialized without worktree identity")
 
 
 def prepare_identity(inputs: IdentityInput) -> None:
     """Persist one complete identity before any process or database effect.
 
-    Lock order is home, then checkout binding. The checkout lock also serializes
-    pointer retirement.
+    The caller holds the home's `start-intent.lock`.
     """
     ensure_private_dir(inputs.home)
     if (inputs.home / "destroy-intent.json").exists():
@@ -288,19 +227,7 @@ def prepare_identity(inputs: IdentityInput) -> None:
     data = read_intent(inputs.home)
     if data is not None:
         _validate_repeat(inputs, data)
-    with file_lock(inputs.checkout / ".ava_home.lock", timeout_s=30):
-        _require_checkout_binding(inputs.checkout, inputs.home)
-        _prepare_reserved_identity(inputs, data)
-
-
-def _require_checkout_binding(checkout: Path, home: Path) -> None:
-    pointer = checkout / ".ava_home"
-    try:
-        observed = pointer.lstat()
-    except FileNotFoundError:
-        return
-    if not stat.S_ISREG(observed.st_mode) or pointer.read_text().strip() != str(home):
-        raise RuntimeError("checkout is bound to another home or has an invalid binding")
+    _prepare_reserved_identity(inputs, data)
 
 
 def _prepare_reserved_identity(inputs: IdentityInput, data: dict[str, Any] | None) -> None:
@@ -341,20 +268,12 @@ def _create_claim(inputs: IdentityInput) -> None:
     rec = _new_record(inputs) if "gateway" in inputs.roles else None
     if rec is not None:
         values = _gateway_values(
-            rec,
-            IdentityInput(
-                inputs.home,
-                inputs.checkout,
-                inputs.worktree,
-                inputs.roles,
-                values,
-            ),
+            rec, IdentityInput(inputs.home, inputs.checkout, inputs.roles, values)
         )
     data = {
         "version": 1,
         "home": str(inputs.home),
         "checkout": str(inputs.checkout),
-        "worktree": inputs.worktree,
         "roles": sorted(inputs.roles),
         "config_digest": inputs.config_digest,
         "phase": "claiming",

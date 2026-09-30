@@ -1,6 +1,6 @@
 """base.packages.extensions.install_registry unit tests — file-based ~/.ava/installed.json read/write + query.
 
-Use `unit_home` fixture to point settings.general.ava_home to tmp, isolating the real registry file.
+Use `unit_home` fixture to point AVA_HOME to tmp, isolating the real registry file.
 """
 
 import subprocess

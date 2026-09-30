@@ -113,14 +113,6 @@
       4318,
       "port"
     ],
-    "ava_home": [
-      "general",
-      "AVA_HOME",
-      "path",
-      "path_home_ava",
-      null,
-      null
-    ],
     "timezone": [
       "general",
       "AVA_TIMEZONE",
@@ -186,7 +178,6 @@
     "auto_resurrect_backoff_seconds": "daemon",
     "auto_resurrect_enabled": "daemon",
     "auto_resurrect_max_attempts": "daemon",
-    "ava_home": "general",
     "backup_hour": "services",
     "backup_keep": "services",
     "billing_recovery_balance_timeout_s": "daemon",
@@ -696,7 +687,6 @@
     "auto_resurrect_backoff_seconds": "AVA_AUTO_RESURRECT_BACKOFF_SECONDS",
     "auto_resurrect_enabled": "AVA_AUTO_RESURRECT_ENABLED",
     "auto_resurrect_max_attempts": "AVA_AUTO_RESURRECT_MAX_ATTEMPTS",
-    "ava_home": "AVA_HOME",
     "backup_hour": "AVA_BACKUP_HOUR",
     "backup_keep": "AVA_BACKUP_KEEP",
     "billing_recovery_balance_timeout_s": "AVA_BILLING_RECOVERY_BALANCE_TIMEOUT_S",
@@ -1206,7 +1196,6 @@
     "auto_resurrect_backoff_seconds": "cluster-pinned",
     "auto_resurrect_enabled": "host",
     "auto_resurrect_max_attempts": "cluster-pinned",
-    "ava_home": "host",
     "backup_hour": "cluster-pinned",
     "backup_keep": "cluster-pinned",
     "billing_recovery_balance_timeout_s": "cluster-pinned",
@@ -1716,7 +1705,6 @@
     "auto_resurrect_backoff_seconds": "agent-runner",
     "auto_resurrect_enabled": "agent-runner",
     "auto_resurrect_max_attempts": "agent-runner",
-    "ava_home": "common",
     "backup_hour": "gateway",
     "backup_keep": "gateway",
     "billing_recovery_balance_timeout_s": "gateway",

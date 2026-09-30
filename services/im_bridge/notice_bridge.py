@@ -30,6 +30,7 @@ from typing import Any
 
 from base.config import settings
 from base.db.transaction import write_transaction
+from base.paths import ava_home
 from services.im_bridge import copy
 
 _log = logging.getLogger("services.im_bridge.notice_bridge")
@@ -43,7 +44,7 @@ _PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
 def _state_dir() -> Path:
-    return Path(settings.general.ava_home) / "state" / "im_bridge"
+    return ava_home() / "state" / "im_bridge"
 
 
 # Direct-DB reads (R3 door ④, decision 2): the notice bridge reads

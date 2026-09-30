@@ -3,9 +3,9 @@
 Each fixture here is autouse and either forbids a real host effect (native helper
 converge, os.exec*, the bootstrap fetch, service readiness / health-port probes,
 the schedule manager's session backend, the label LLM) or restores process-global
-state a test may have leaked (metering wraps, the AVA_HOME_OVERRIDE exemption,
-OTLP export, the stdlib logging bridge and its logger levels, the database-authority
-refusal). Opt-outs are per-test markers documented on the fixture that honours them.
+state a test may have leaked (metering wraps, OTLP export, the stdlib logging
+bridge and its logger levels, the database-authority refusal). Opt-outs are per-test
+markers documented on the fixture that honours them.
 
 Order matters and is kept: pytest sets same-scope autouse fixtures up in
 registration order, and within one module alphabetically, so this module is
@@ -44,19 +44,6 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     the case; a lifecycle test that wants the refusal patches this back.
     """
     monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: None)
-
-
-@pytest.fixture(autouse=True)
-def _restore_ava_home_override() -> Iterator[None]:
-    """Restore the checkout-contradiction exemption after every test.
-
-    The suite establishes AVA_HOME_OVERRIDE=1 before project imports, but tests
-    that exercise a real stop path may consume it. Tests that monkeypatch this
-    key restore the same original value ("1"), so both teardowns reassert the
-    session invariant regardless of their order.
-    """
-    yield
-    os.environ["AVA_HOME_OVERRIDE"] = "1"
 
 
 @pytest.fixture(autouse=True)

@@ -12,6 +12,10 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
+from base.host.env.dotenv_boot import enter_scratch_home  # noqa: E402
+
+enter_scratch_home()
+
 
 from base.deploy.release.python_lock import violations  # noqa: E402 — dependency-free entry
 

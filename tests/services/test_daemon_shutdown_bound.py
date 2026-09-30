@@ -202,7 +202,7 @@ def _spawn_child(tmp_path: Path, slug: str) -> _Child:
     # The child inherits the suite's provisioned $AVA_HOME (machine identity,
     # .env-declared cluster keys, live URL values): a fresh bare home would be
     # treated as a not-yet-installed unit by the boot authority pass, which
-    # drops the cluster-scope env keys and plants the unanchored sentinel.
+    # drops the cluster-scope env keys and plants the placeholder URL.
     env = os.environ.copy()
     env[_MARKERS_ENV] = str(markers_path)
     env[_CASE_ENV] = slug

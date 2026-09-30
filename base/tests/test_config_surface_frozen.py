@@ -23,7 +23,6 @@ _FROZEN_ALIASES = {
     "labeler_model": "AVA_LABELER_MODEL",
     "deepseek_api_key": "DEEPSEEK_API_KEY",
     "exec_timeout_seconds": "AVA_EXEC_TIMEOUT_SECONDS",
-    "ava_home": "AVA_HOME",
     "telegram_bot_token": "AVA_TELEGRAM_BOT_TOKEN",
     "skills_to_inject_into_system_prompt": "AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT",
     "gateway_port": "AVA_GATEWAY_PORT",

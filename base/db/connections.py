@@ -9,7 +9,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.config import settings
 from base.db.code_version_gate import application_name, min_read_due, observe_minimum
-from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.url_secret import url_with_port
 from base.log import logger
 
@@ -22,13 +22,13 @@ from base.log import logger
 # the deferred import is a sys.modules hit at call time.
 
 
-class UnanchoredHomeError(RuntimeError):
-    """A DB connection was attempted from a dev checkout that resolved no home.
+class PlaceholderDbUrlError(RuntimeError):
+    """A DB connection was attempted by a process that holds no cluster connection facts.
 
-    The process's db_url is the unanchored sentinel rather than a real cluster
-    database: this checkout is not the prod source, carries no `.ava_home`
-    pointer, and AVA_HOME is unset, so it booted bare on a scratch home with no
-    database (see base/host/env/dotenv_boot.py). Raised instead of dialing anything.
+    The process's db_url is the never-dialed placeholder rather than a real
+    cluster database: its home declares none (no `.env` with AVA_DB_URL), or it
+    built settings-lite and never fetched them (see base/config/_lite.py).
+    Raised instead of dialing anything.
     """
 
 
@@ -225,19 +225,18 @@ def _statement_kwargs(url: str) -> dict[str, Any]:
     return {**PG_STATEMENT_TIMEOUT_KWARGS, "options": f"{own} {PG_STATEMENT_TIMEOUT_OPTIONS}"}
 
 
-def _refuse_unanchored(url: str) -> None:
+def _refuse_placeholder(url: str) -> None:
     """Refuse the never-dialed placeholder, whichever entry point was handed it.
 
     Raises:
-        UnanchoredHomeError: url is the unanchored sentinel.
+        PlaceholderDbUrlError: url is the placeholder.
     """
-    if url == UNANCHORED_DB_SENTINEL:
-        raise UnanchoredHomeError(
+    if url == PLACEHOLDER_DB_URL:
+        raise PlaceholderDbUrlError(
             "refusing to open a DB connection: AVA_DB_URL is the never-dialed "
-            "placeholder. Two ways to land here: this checkout resolved no AVA_HOME "
-            "(not the prod source, no .ava_home pointer, AVA_HOME unset) — run "
-            "`ava start --worktree` from this checkout (births its cluster and writes "
-            "its .ava_home pointer) or export AVA_HOME=<unit home>; or this "
+            "placeholder. Two ways to land here: this process's home "
+            "($AVA_HOME, else ~/.ava) has no .env declaring a cluster — start a "
+            "cluster there, or set AVA_HOME to a home that has one; or this "
             "process built settings-lite "
             "(AVA_CONFIG_FETCH=skip, the maintenance verbs' gateway-down mode) and "
             "this operation needs the cluster config a fetch would have provided."
@@ -245,17 +244,17 @@ def _refuse_unanchored(url: str) -> None:
 
 
 def _guard_db_url(url: str) -> str:
-    """Refuse the unanchored sentinel and an undelivered credential-free endpoint;
+    """Refuse the placeholder URL and an undelivered credential-free endpoint;
     return the url otherwise. The single point every settings-resolved connection
     passes through, so both footguns are caught once here rather than at each
     call site.
 
     Raises:
-        UnanchoredHomeError: url is the unanchored sentinel.
+        PlaceholderDbUrlError: url is the placeholder.
         NoDatabaseAuthorityError: this home keeps a write-generation ledger, no
             login was delivered to this process, and url carries no password.
     """
-    _refuse_unanchored(url)
+    _refuse_placeholder(url)
     from base.host.env import dotenv_boot
 
     refusal = dotenv_boot.db_authority_refusal()
@@ -295,7 +294,7 @@ def direct_db_url() -> str:
     migration authority model keeps a runner from mutating the schema in
     practice, but the exemption itself is unavailable and must not be silent).
 
-    The unanchored sentinel passes through byte-identical (the connect guard
+    The placeholder URL passes through byte-identical (the connect guard
     matches it byte-for-byte), and a home with no record (no gateway capability)
     keeps `AVA_DB_URL` as-is rather than guessing.
     """
@@ -306,7 +305,7 @@ def direct_db_url() -> str:
     from base.paths import ava_home
 
     url = settings.data_plane.db_url
-    if url == UNANCHORED_DB_SENTINEL:
+    if url == PLACEHOLDER_DB_URL:
         return url
     try:
         parts = urlsplit(url)
@@ -398,7 +397,7 @@ def connect(
     ceiling must actually be off.
 
     Raises:
-        UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
+        PlaceholderDbUrlError: the resolved db_url is the placeholder.
         NoDatabaseAuthorityError: this home keeps a write-generation ledger and
             the resolved db_url is a credential-free endpoint this process was
             given no login for (see `_guard_db_url`).
@@ -463,9 +462,9 @@ def connect_url(
     the cluster's pooled URL runs only read-only statements).
 
     Raises:
-        UnanchoredHomeError: url is the unanchored sentinel.
+        PlaceholderDbUrlError: url is the placeholder.
     """
-    _refuse_unanchored(url)
+    _refuse_placeholder(url)
     transport: dict[str, Any] = {
         **_transport_kwargs(url, unbounded=unbounded),
         "connect_timeout": connect_timeout,
@@ -520,7 +519,7 @@ def pool(
     SET from failing this borrower's writes. See _restore_pooled_session.
 
     Raises:
-        UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
+        PlaceholderDbUrlError: the resolved db_url is the placeholder.
         NoDatabaseAuthorityError: this home keeps a write-generation ledger and
             the resolved db_url is a credential-free endpoint this process was
             given no login for (see `_guard_db_url`).
@@ -597,7 +596,7 @@ def async_pool(
     parameter). See _restore_pooled_session.
 
     Raises:
-        UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
+        PlaceholderDbUrlError: the resolved db_url is the placeholder.
         NoDatabaseAuthorityError: this home keeps a write-generation ledger and
             the resolved db_url is a credential-free endpoint this process was
             given no login for (see `_guard_db_url`).

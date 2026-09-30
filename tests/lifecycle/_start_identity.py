@@ -19,7 +19,7 @@ from cli.start_runtime import StartRuntime
 
 
 def prepare_start_identity(args: argparse.Namespace) -> Path:
-    home = start_intent._home(worktree=args.worktree)
+    home = start_intent._home()
     StartRuntime.development(start_intent._checkout()).validate()
     ensure_private_dir(home)
     with file_lock(home / "start-intent.lock", timeout_s=30):

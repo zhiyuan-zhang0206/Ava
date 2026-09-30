@@ -28,6 +28,9 @@ from pathlib import Path
 
 # Put project root on sys.path so `from base.events.live.projection import ...` finds the module
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from base.host.env.dotenv_boot import enter_scratch_home
+
+enter_scratch_home()
 
 
 def _samples() -> dict[str, dict]:

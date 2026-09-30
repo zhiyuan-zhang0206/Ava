@@ -346,22 +346,19 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
 
 
 def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """`status` / `cluster` / `agents` / `config` / `logs` set AVA_CONFIG_FETCH=skip
     before dispatch (settings-lite: they must work while the gateway is down);
     start and normal pause/stop need the real cluster configuration."""
     import os as _os
 
-    import cli.preflight as _preflight
-
-    # Blanking os.environ drops AVA_HOME, which makes this checkout read as
-    # unanchored — so `stop` would hit the anchored-home gate. Neutralize it the
-    # same way the parser handlers are stubbed below: this test asserts env
-    # pinning, not gate behaviour.
-    monkeypatch.setattr(_preflight, "require_anchored_home", lambda _verb: None)  # pyright: ignore[reportUnknownArgumentType]
+    # Blanking os.environ drops AVA_HOME, which would make the home `~/.ava` —
+    # and on a host that runs a cluster its own checkout gate would refuse `stop`
+    # from this checkout. Name a home with no `source` of its own: this test
+    # asserts env pinning, not gate behaviour.
     for verb in ("status", "cluster", "agents", "config", "logs"):
-        env = {"PATH": "/usr/bin"}
+        env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(_main, "_build_parser", lambda v=verb: _noop_parser(v))
         assert _main.main([verb]) == 0
@@ -369,7 +366,7 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
 
     # Starting and graceful draining both need data-plane configuration.
     for verb in ("start", "pause", "stop"):
-        env = {"PATH": "/usr/bin"}
+        env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(_main, "_build_parser", lambda v=verb: _noop_parser(v))
         assert _main.main([verb]) == 0
@@ -407,41 +404,45 @@ def test_settings_load_failure_prints_env_template(
     assert "AVA_DB_URL" in captured.err
 
 
-# -- anchored-home gate on the destructive verbs -------------------------------
+# -- checkout gate on the state-changing verbs --------------------------------
 
 
-def _unanchored(monkeypatch: pytest.MonkeyPatch, home: str = "/scratch/ava-unanchored-0f") -> None:
-    """Make this process read as a checkout that claims no cluster — the shape
-    `resolve_ava_home` resolves to a private scratch home with anchored=False."""
-
-    import base.host.env.dotenv_boot as _boot
-
-    monkeypatch.setattr(_boot, "resolve_ava_home", lambda: (Path(home), False))
-
-
-def _anchored(monkeypatch: pytest.MonkeyPatch, home: str = "/Users/x/.ava-worktree") -> None:
-
-    import base.host.env.dotenv_boot as _boot
-
-    monkeypatch.setattr(_boot, "resolve_ava_home", lambda: (Path(home), True))
+def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A home that carries its own `source` checkout, named by AVA_HOME. This
+    checkout is not it, so the gate must refuse every verb that changes it."""
+    home = tmp_path / ".ava"
+    (home / "source").mkdir(parents=True)
+    monkeypatch.setenv("AVA_HOME", str(home))
+    return home
 
 
 @pytest.mark.parametrize(
     "argv",
     [
+        ["start"],
         ["stop", "-y"],
+        ["pause"],
         ["restart"],
         ["converge"],
-        ["cluster", "db-authority", "issue-unit"],
+        ["maintenance", "stop"],
+        ["cluster", "down", "--path", "/somewhere"],
+        ["cluster", "destroy", "--path", "/somewhere"],
+        ["config", "set", "KEY=VALUE"],
         ["logs", "retention"],
+        ["agents", "send", "1", "hello"],
+        ["boot"],
     ],
 )
-def test_unanchored_checkout_is_refused_before_dispatch(
-    argv: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_foreign_checkout_is_refused_before_dispatch(
+    argv: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A dev worktree that never ran the install owns no cluster, so these verbs
-    have nothing to act on. They must refuse instead of dispatching."""
-    _unanchored(monkeypatch)
+    """A checkout that is not the home's own must not change that home: every
+    verb outside the read-only list is refused before anything dispatches (and
+    before `ava boot` could retry a start)."""
+    home = _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
     monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording(argv[0], dispatched))
 
@@ -450,27 +451,28 @@ def test_unanchored_checkout_is_refused_before_dispatch(
     assert rc == 1
     assert dispatched == [], "the handler must never run"
     err = capsys.readouterr().err
-    assert "/scratch/ava-unanchored-0f" in err, "the message must name the home it resolved"
-    assert "ava start --worktree" in err
+    assert str(home) in err, "the message must name the home it acts on"
+    assert str(home / "source") in err, "and the checkout that may act on it"
+    assert "AVA_HOME" in err
 
 
 @pytest.mark.parametrize(
     "argv",
     [
         ["status"],
-        ["cluster", "ls"],
         ["cluster", "status"],
-        ["cluster", "down", "--path", "/somewhere"],
-        ["cluster", "destroy", "--path", "/somewhere"],
-        ["agents"],
+        ["maintenance", "status"],
+        ["agents", "ls"],
+        ["config", "get"],
+        ["schedules", "ls"],
+        ["pitr", "operations", "status"],
     ],
 )
-def test_unanchored_checkout_still_runs_the_ungated_verbs(
-    argv: list[str], monkeypatch: pytest.MonkeyPatch
+def test_foreign_checkout_still_runs_the_read_only_verbs(
+    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Read-only verbs, and the two that name their target with --path, never act
-    on the current home — gating them would break addressing another cluster."""
-    _unanchored(monkeypatch)
+    """Reading a home changes nothing, so any checkout may do it."""
+    _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
     monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording(argv[0], dispatched))
 
@@ -478,10 +480,28 @@ def test_unanchored_checkout_still_runs_the_ungated_verbs(
     assert dispatched == [argv[0]]
 
 
-def test_anchored_checkout_runs_the_gated_verbs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The gate is about anchoring, nothing else: prod's own `ava` (and any
-    installed worktree) still stops its own cluster."""
-    _anchored(monkeypatch)
+def test_the_homes_own_checkout_runs_the_state_changing_verbs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The home's `source` IS this checkout (here: a link to it), so its own CLI
+    stops its own cluster — the production path."""
+    home = tmp_path / ".ava"
+    home.mkdir()
+    (home / "source").symlink_to(Path(_main.__file__).resolve().parents[1])
+    monkeypatch.setenv("AVA_HOME", str(home))
+    dispatched: list[str] = []
+    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording("stop", dispatched))
+
+    assert _main.main(["stop", "-y"]) == 0
+    assert dispatched == ["stop"]
+
+
+def test_a_home_with_no_source_accepts_any_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A test or scratch home has no checkout of its own: any checkout may
+    start, stop and reconfigure it."""
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     dispatched: list[str] = []
     monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording("stop", dispatched))
 
@@ -490,11 +510,11 @@ def test_anchored_checkout_runs_the_gated_verbs(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_help_is_never_gated(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`ava stop --help` is a parse-only invocation: it must reach argparse (which
     prints help and exits 0) rather than be refused by the gate."""
-    _unanchored(monkeypatch)
+    _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
     monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording("stop", dispatched))
 
@@ -502,7 +522,7 @@ def test_help_is_never_gated(
         _main.main(["stop", "--help"])
 
     assert exc.value.code == 0
-    assert "claims no cluster" not in capsys.readouterr().err
+    assert "source checkout" not in capsys.readouterr().err
 
 
 def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParser:
@@ -566,14 +586,13 @@ sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(
 sys.modules["base.deploy.lifecycle.start_serving"] = types.SimpleNamespace(
     clear_serving=lambda: calls.append("clear-serving")
 )
-assert main.main(["start", "--worktree"]) == 0
+assert main.main(["start", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"]) == 0
 assert calls == ["logging", "runtime", "boot-complete"]
 assert "base.config" not in sys.modules
 """
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.update(
         AVA_HOME=str(tmp_path / "home"),
-        AVA_HOME_OVERRIDE="1",
         AVA_HOST_STATE_DIR=str(tmp_path),
         AVA_DB_URL="postgresql://foreign.invalid/forbidden",
         AVA_GATEWAY_URL="http://foreign.invalid",

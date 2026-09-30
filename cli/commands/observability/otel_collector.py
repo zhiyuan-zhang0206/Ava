@@ -178,9 +178,9 @@ def _data_plane_receivers(roles: MachineRoles | None, ava_home: Path) -> tuple[s
     if roles is None or "gateway" not in roles:
         return "", ""
     from base.config import settings
-    from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+    from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
-    if settings.data_plane.db_url == UNANCHORED_DB_SENTINEL:
+    if settings.data_plane.db_url == PLACEHOLDER_DB_URL:
         return "", ""
     redis_url = settings.data_plane.redis_url
     from base.cluster import redis_admin_url

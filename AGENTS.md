@@ -82,16 +82,17 @@ home born before this model (no ledger) is refused; no conversion exists.
 | Path | Role |
 |---|---|
 | `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions; always the default home's cluster (its own pg 5433 / redis 6380 + prod service ports) |
-| `~/Ava/` (this checkout) | **dev clone** — worktree dev under `.worktrees/<task>/` (branch from `main`, PR into `main`) (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool); each worktree gets its own cluster via `ava start --worktree` (home `~/.ava-<worktree-dir>` by default), isolated db/redis/ports/sessions |
+| `~/Ava/` (this checkout) | **dev clone** — worktree dev under `.worktrees/<task>/` (branch from `main`, PR into `main`) (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool); a worktree owns no cluster: it verifies with selected tests and CI, and a process tree that imports application code sets its own temporary `AVA_HOME` |
 
 `ava start` is the single idempotent initialization and startup entry. Before
 runtime Settings or native effects, it persists `start-intent.json` (home,
-capabilities, checkout, ports; credentials until `.env` holds them); repeats retain that identity and
-service selection, an interrupted one resumes, and an ambiguous home or
-contradictory pointer refuses. The home is checkout-anchored: explicit `AVA_HOME`,
-the production source path, or the checkout's `.ava_home` pointer (`--worktree`
-supplies a development home); a checkout with none owns no cluster and boots
-bare on a scratch home — no `.env`, no gateway fetch, never `~/.ava`.
+capabilities, admitted checkout, ports; credentials until `.env` holds them); repeats retain that identity and
+service selection, and an interrupted one resumes. The home is `AVA_HOME`
+when set, else `~/.ava`, read whenever it is needed — production does not depend
+on the variable; a test session, a hook or a tool that imports application code
+sets it once at its top and every descendant inherits it. A home that carries its
+own `<home>/source` checkout is changed only by that checkout's CLI: any other
+checkout's verbs that change state are refused (read-only verbs are not).
 
 First start takes the machine name, capability flags and reachable host. A
 remote agent-runner joins through the same entry with `--gateway-url` and its
@@ -109,8 +110,8 @@ Native data-plane custody is separate so application shutdown can retain the
 database for migrations. Readiness requires a real protocol response from the
 captured process generation; missing evidence cannot become success.
 
-A checkout's own `.venv/bin/ava` acts on **the checkout it belongs to** (where its `cli`
-source lives), not the current directory; first start runs it. The host's bare `ava`
+A checkout's own `.venv/bin/ava` runs **the checkout it belongs to** (where its `cli`
+source lives), not the current directory, against the home above; first start runs it. The host's bare `ava`
 (`~/.local/bin/ava`, linked by production start converge) is `scripts/ava-launcher.sh`: it
 runs `$AVA_HOME/ava`, the CLI link every converge keeps in its own home, and refuses without
 `AVA_HOME` — there is no default cluster. Host wiring + each plugin's `scaffold()` are
@@ -124,7 +125,6 @@ starting again, scripted as `python -m cli.fleet_update down` and `up`
 
 ```bash
 uv sync       # prepare the checkout dependencies and CLI; no cluster is created
-ava start --worktree  # initialize or resume a private development cluster
 ava start     # reconcile the established home and desired service roster
               # --only-service NAME is an allowlist; --disable-service NAME is an exclusion
               # --all-services explicitly resets selection; omitted flags retain it

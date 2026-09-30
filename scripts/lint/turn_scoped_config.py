@@ -61,6 +61,10 @@ import re
 import sys
 from pathlib import Path
 
+from base.host.env.dotenv_boot import enter_scratch_home
+
+enter_scratch_home()
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 _SCAN_DIRS = (

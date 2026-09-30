@@ -82,11 +82,8 @@ def _cluster() -> str:
     resolved without importing settings (no DB touch).
 
     Resolves `$AVA_HOME` via `base.host.env.dotenv_boot.resolve_ava_home` — the same
-    checkout-anchored resolution every other Ava process uses, still without
-    touching `Settings` — rather than guessing `~/.ava` when the env var is
-    unset (2026-09-28, PR #3550's P2 follow-up)."""
-    home, _anchored = resolve_ava_home()
-    return home.name.lstrip(".") or "ava"
+    resolution every other Ava process uses, still without touching `Settings`."""
+    return resolve_ava_home().name.lstrip(".") or "ava"
 
 
 def downloads_root(capability: str) -> Path:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from base.config import settings
+from base.host.env.dotenv_boot import resolve_ava_home
 from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.lifecycle import start as start_mod
@@ -58,7 +59,7 @@ def _fake_record(monkeypatch: pytest.MonkeyPatch) -> None:
                     "pg_backup": 18021,
                 },
             ),
-            gateway_home=str(settings.general.ava_home),
+            gateway_home=str(resolve_ava_home()),
             created_at="now",
         )
 
@@ -199,7 +200,7 @@ def test_stop_remote_warns_about_orphaned_local_instance(
                 "pg_backup": 18021,
             },
         ),
-        gateway_home=str(settings.general.ava_home),
+        gateway_home=str(resolve_ava_home()),
         created_at="now",
     )
     monkeypatch.setattr(cluster, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType]

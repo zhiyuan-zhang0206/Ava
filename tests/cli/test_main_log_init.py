@@ -27,7 +27,7 @@ import cli.main as _main
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-# The real `ava start --worktree` dispatch into a fresh home: identity
+# The real `ava start` dispatch into a fresh home: identity
 # preparation, then the sinks, then a service phase replaced by the real
 # pgvector pre-create against a port nothing listens on.
 _FIRST_START = r"""
@@ -51,7 +51,9 @@ def start(**kwargs):
     return 0
 sys.modules["cli.commands.lifecycle.start"] = types.SimpleNamespace(cmd_start=start)
 sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
-raise SystemExit(main.main(["start", "--worktree"]))
+raise SystemExit(
+    main.main(["start", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"])
+)
 """
 
 
@@ -60,7 +62,6 @@ def test_ava_start_writes_a_loguru_warning_to_stderr_and_its_log(tmp_path: Path)
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.update(
         AVA_HOME=str(home),
-        AVA_HOME_OVERRIDE="1",
         AVA_HOST_STATE_DIR=str(tmp_path / "host-state"),
     )
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
@@ -100,10 +101,6 @@ def _dispatching(sink: list[str]) -> argparse.ArgumentParser:
     return parser
 
 
-def _anchored(_verb: str) -> int | None:
-    return None
-
-
 @pytest.mark.parametrize(
     ("argv", "name"),
     [
@@ -120,7 +117,6 @@ def test_only_the_verbs_that_bring_a_unit_up_open_sinks_before_dispatch(
     monkeypatch: pytest.MonkeyPatch, cli_log_sinks: list[str], argv: list[str], name: str | None
 ) -> None:
     monkeypatch.setattr(_main, "_build_parser", lambda: _dispatching(cli_log_sinks))
-    monkeypatch.setattr("cli.preflight.require_anchored_home", _anchored)
 
     assert _main.main(argv) == 0
 
@@ -141,7 +137,6 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
     dispatched: list[str] = []
     monkeypatch.setattr(base.log, "init_cli_process", unreachable)
     monkeypatch.setattr(_main, "_build_parser", lambda: _dispatching(dispatched))
-    monkeypatch.setattr("cli.preflight.require_anchored_home", _anchored)
 
     assert _main.main(["restart"]) == 1
 

@@ -49,7 +49,6 @@ _SERVICE_DIR = Path(__file__).resolve().parent
 _SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 _INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
 _LOCALES = _SERVICE_DIR / "helper" / "locales"
-_BUILD_DIR = base.paths.permissions_helper_app_dir()
 _HELPER_PING_ATTEMPTS = 10
 _HELPER_PING_SETTLE_S = 0.5
 _IDENTITY_RE = re.compile(
@@ -471,8 +470,9 @@ def _build_directory(destination: Path | None) -> Path:
     """Choose an immutable artifact destination outside the installed bundle tree."""
     from base.cluster import default_home
 
-    build_dir = _BUILD_DIR if destination is None else destination
-    protected = {_BUILD_DIR.resolve(), (default_home() / "helper").resolve()}
+    installed = base.paths.permissions_helper_app_dir()
+    build_dir = installed if destination is None else destination
+    protected = {installed.resolve(), (default_home() / "helper").resolve()}
     if destination is not None and (
         not destination.is_absolute()
         or destination.resolve() != destination

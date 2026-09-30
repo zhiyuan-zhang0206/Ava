@@ -7,9 +7,10 @@ check and rejected every agent boot.
 
 The identity the DB carries is `machine_units` (gateway-capable rows, written by
 `register_self`); the identity the executing side claims is
-`checkout_anchored_home()` — deliberately NOT the env-resolved home, since a
-worktree process that inherited `AVA_HOME=~/.ava` has a prod DB URL *and* a
-prod-looking `ava_home()`, so only the checkout's own claim separates them.
+its home (`resolve_ava_home()`) together with the rule that a home carrying its
+own `<home>/source` checkout is changed only by that checkout: a worktree process
+that inherited `AVA_HOME=~/.ava` has a prod DB URL *and* a prod-looking
+`ava_home()`, so the checkout rule is what separates them.
 
 The exemptions that must keep working are covered here too: a fresh birth (no
 identity recorded yet), and a non-gateway host whose apply is a no-op (an
@@ -85,14 +86,10 @@ def _register_gateway_unit(machine: str, home: str) -> None:
         )
 
 
-def _claim_checkout(
-    monkeypatch: pytest.MonkeyPatch, machine: str, home: str, *, anchored: bool = True
-) -> None:
-    """Make the executing checkout claim `machine:home`."""
+def _claim_checkout(monkeypatch: pytest.MonkeyPatch, machine: str, home: str) -> None:
+    """Make the executing process claim `machine:home`."""
     monkeypatch.setattr("base.deploy.schema.migrations.machine_name", lambda: machine)
-    monkeypatch.setattr(
-        "base.deploy.schema.migrations.checkout_anchored_home", lambda: (Path(home), anchored)
-    )
+    monkeypatch.setenv("AVA_HOME", home)
 
 
 def _as_git_worktree(tmp_path: Path) -> None:
@@ -199,15 +196,17 @@ def test_allows_a_non_gateway_host_with_nothing_to_apply(
         assert apply_pending_migrations(conn) == []
 
 
-def test_refuses_an_unanchored_checkout_even_at_the_owning_home(
+def test_refuses_a_foreign_checkout_even_at_the_owning_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A dev worktree with no `.ava_home` pointer falls back to ~/.ava, which
-    *looks* like the gateway's home. Ownership is a claim it cannot make, so the
-    unanchored flag alone must refuse — this is the inherited-`AVA_HOME` path
-    that reaches prod with a worktree's migrations."""
-    _register_gateway_unit(*_GATEWAY)
-    _claim_checkout(monkeypatch, _GATEWAY[0], _GATEWAY[1], anchored=False)
+    """A dev worktree that inherited the gateway's `AVA_HOME` resolves the very
+    home the database names, yet its `migrations/` are not the ones the home's own
+    `source` checkout carries. The checkout rule alone must refuse — this is the
+    inherited-`AVA_HOME` path that reaches prod with a worktree's migrations."""
+    home = tmp_path / "gateway-home"
+    (home / "source").mkdir(parents=True)
+    _register_gateway_unit(_GATEWAY[0], str(home))
+    _claim_checkout(monkeypatch, _GATEWAY[0], str(home))
     _pending_migration(monkeypatch, tmp_path)
 
     with (
@@ -216,7 +215,7 @@ def test_refuses_an_unanchored_checkout_even_at_the_owning_home(
     ):
         apply_pending_migrations(conn)
 
-    assert "unanchored checkout" in str(exc.value)
+    assert "foreign checkout" in str(exc.value)
     assert not _synthetic_table_exists()
 
 

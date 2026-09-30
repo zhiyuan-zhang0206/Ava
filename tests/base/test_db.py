@@ -21,28 +21,28 @@ from base import db
 from base.config import settings
 from base.db import connections
 from base.events.live.redis_listener import RedisInboundListener
-from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.native_process import code_version
 from base.telemetry import Event, process_name
 
 
-def test_connect_refuses_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch) -> None:
-    """connect() raises UnanchoredHomeError when db_url is the unanchored sentinel,
-    rather than letting an unanchored dev checkout reach a real database."""
-    monkeypatch.setattr(settings.data_plane, "db_url", UNANCHORED_DB_SENTINEL)
-    with pytest.raises(db.UnanchoredHomeError):
+def test_connect_refuses_placeholder_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """connect() raises PlaceholderDbUrlError when db_url is the placeholder URL,
+    rather than letting a bare process reach a real database."""
+    monkeypatch.setattr(settings.data_plane, "db_url", PLACEHOLDER_DB_URL)
+    with pytest.raises(db.PlaceholderDbUrlError):
         db.connect()
 
 
-def test_pool_refuses_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.data_plane, "db_url", UNANCHORED_DB_SENTINEL)
-    with pytest.raises(db.UnanchoredHomeError):
+def test_pool_refuses_placeholder_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.data_plane, "db_url", PLACEHOLDER_DB_URL)
+    with pytest.raises(db.PlaceholderDbUrlError):
         db.pool()
 
 
-def test_async_pool_refuses_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.data_plane, "db_url", UNANCHORED_DB_SENTINEL)
-    with pytest.raises(db.UnanchoredHomeError):
+def test_async_pool_refuses_placeholder_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.data_plane, "db_url", PLACEHOLDER_DB_URL)
+    with pytest.raises(db.PlaceholderDbUrlError):
         db.async_pool(AsyncConnectionPool, min_size=0, max_size=1, timeout=1.0)
 
 
@@ -154,9 +154,9 @@ def test_connect_unbounded_keeps_the_keepalives(monkeypatch: pytest.MonkeyPatch)
     ]
 
 
-def test_connect_url_refuses_unanchored_sentinel() -> None:
-    with pytest.raises(db.UnanchoredHomeError):
-        db.connect_url(UNANCHORED_DB_SENTINEL)
+def test_connect_url_refuses_placeholder_url() -> None:
+    with pytest.raises(db.PlaceholderDbUrlError):
+        db.connect_url(PLACEHOLDER_DB_URL)
 
 
 def _seed_agent(db_conn: psycopg.Connection, status: str, *, live_lease: bool = True) -> int:

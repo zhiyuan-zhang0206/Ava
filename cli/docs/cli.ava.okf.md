@@ -17,7 +17,7 @@ The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` builds
 ### Cluster Lifecycle
 | Command | Function |
 |---------|----------|
-| `ava start` | Idempotent first, repeated, and interrupted startup. Settings-free identity admission precedes host convergence, owned storage/schema provisioning, root launch, and all-selected-service readiness. Exit 0 means ready, 4 means readiness failed, and 1 means a step failed. `--worktree` selects an isolated dev home; first-start capabilities and runner join inputs use this same entry |
+| `ava start` | Idempotent first, repeated, and interrupted startup. Settings-free identity admission precedes host convergence, owned storage/schema provisioning, root launch, and all-selected-service readiness. Exit 0 means ready, 4 means readiness failed, and 1 means a step failed. first-start capabilities and runner join inputs use this same entry |
 | `ava pause` | Normal native drain and service stop; retain infrastructure, browser and persistent PTYs. Default timeout 300 seconds, no implicit force |
 | `ava stop` | Same drain, then full local stop including terminals, browser, extras and private pg/redis; `--keep-infra` / repeatable `--keep-service` preserve selected resources; `--force` is explicit |
 | `ava restart` | Pause + start on this unit, retaining PTYs and infrastructure |
@@ -85,6 +85,6 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 
 ## Notes
 
-- Bare `ava` = `~/.local/bin/ava` → `scripts/ava-launcher.sh`: runs `$AVA_HOME/ava` (the home's CLI link) or refuses; a checkout's `.venv/bin/ava` acts on its own cluster (`.ava_home` pointer).
+- Bare `ava` = `~/.local/bin/ava` → `scripts/ava-launcher.sh`: runs `$AVA_HOME/ava` (the home's CLI link) or refuses; a checkout's `.venv/bin/ava` runs that checkout's code against the home `AVA_HOME` names (else `~/.ava`). A home that carries its own `<home>/source` is changed only by that checkout's CLI: `cli.preflight.require_own_checkout` refuses every verb outside a read-only list from any other checkout, before anything loads the home.
 - Each cluster has its own pg/redis; isolation is home-directory isolation (instances under `$AVA_HOME` on the fixed port table), not db names / redis indexes in a shared instance.
 - Children: [[cli/docs/cluster.ava.okf.md]] (the `ava cluster` verb group) · [[cli/docs/start_identity.ava.okf.md]] (idempotent cluster start) · [[cli/commands/docs/commands.ava.okf.md]] (the module split) · [[cli/commands/extensions/docs/packages.ava.okf.md]] (the plugins / skill / mcp package surface) · [[cli/docs/mcp_server.ava.okf.md]] (`ava mcp serve` — this cluster AS an MCP server).

@@ -122,11 +122,8 @@ def test_squash_authority_checked_even_without_pending(
     try:
         # Point the checkout identity somewhere that is NOT the DB's gateway
         # unit; _assert_migration_authority must fire even though pending == [].
-        import base.deploy.schema.migrations as _m
 
-        monkeypatch.setattr(
-            _m, "checkout_anchored_home", lambda: (Path("/nonexistent/home"), False)
-        )
+        monkeypatch.setenv("AVA_HOME", str(tmp_path / "not-the-gateways-home"))
         from base.deploy.schema.migrations import MigrationAuthorityMismatch
 
         with psycopg.connect(settings.data_plane.db_url) as fresh:

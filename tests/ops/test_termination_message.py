@@ -531,11 +531,10 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     from ops import lifecycle
     from ops.rpc_schemas.terminate import ShellSessionsKill
 
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     # The PTY CLI runs as a child process: it resolves its home from the
     # environment it inherits, not from this process's settings.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path))
-    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(tmp_path))
 
     async def _noop_cancel(_aid: int, _command_id: int) -> None:

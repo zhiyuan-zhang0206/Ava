@@ -37,7 +37,6 @@ _CASES: list[tuple[str, str, str]] = [
     ("timezone", "AVA_TIMEZONE", "Bogus/Zone"),
     ("telemetry_otlp_port", "AVA_TELEMETRY_OTLP_PORT", "3200"),
     ("telemetry_otlp_port", "AVA_TELEMETRY_OTLP_PORT", "70000"),
-    ("ava_home", "AVA_HOME", "~/parity-home"),
     ("machine_serve_gateway", "AVA_MACHINE_SERVE_GATEWAY", "true"),
 ]
 

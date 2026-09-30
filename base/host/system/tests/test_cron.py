@@ -426,16 +426,16 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 def test_register_refused_for_worktree_checkout_against_prod_home(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Task #1025: a worktree process (prod home + non-prod checkout) must not
-    register the prod health-probe plist — the 2026-08-07 accident where a
-    worktree-venv debug script rewrote the plist and the probe auto-rolled-back
-    the cluster."""
-    prod_home = Path("~/.ava").expanduser()
-    worktree = Path("~/Ava/.worktrees/ava-2890-r4").expanduser()
-    monkeypatch.setattr("base.paths.ava_home", lambda: Path(prod_home))
-    monkeypatch.setattr("base.paths.repo_root", lambda: Path(worktree))
+    """Task #1025: a worktree process (a home with its own `source` + another
+    checkout) must not register that home's health-probe plist — the 2026-08-07
+    accident where a worktree-venv debug script rewrote the plist and the probe
+    auto-rolled-back the cluster."""
+    prod_home = tmp_path / ".ava"
+    (prod_home / "source").mkdir(parents=True)
+    monkeypatch.setenv("AVA_HOME", str(prod_home))
+    monkeypatch.setattr("base.paths.repo_root", lambda: tmp_path / "Ava" / ".worktrees" / "r4")
     monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     calls = _fake_backend(monkeypatch)
 
@@ -444,14 +444,14 @@ def test_register_refused_for_worktree_checkout_against_prod_home(
     assert calls == []  # backend never called; registration refused
 
 
-def test_register_allowed_from_prod_anchored_checkout(
-    monkeypatch: pytest.MonkeyPatch,
+def test_register_allowed_from_the_homes_own_source_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The prod home's own anchored checkout registers normally."""
-    prod_home = Path("~/.ava").expanduser()
-    prod_source = Path("~/.ava/source").expanduser()
-    monkeypatch.setattr("base.paths.ava_home", lambda: Path(prod_home))
-    monkeypatch.setattr("base.paths.repo_root", lambda: Path(prod_source))
+    """A home's own `source` checkout registers normally."""
+    prod_home = tmp_path / ".ava"
+    (prod_home / "source").mkdir(parents=True)
+    monkeypatch.setenv("AVA_HOME", str(prod_home))
+    monkeypatch.setattr("base.paths.repo_root", lambda: prod_home / "source")
     monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     calls = _fake_backend(monkeypatch)
 
@@ -460,12 +460,11 @@ def test_register_allowed_from_prod_anchored_checkout(
     assert calls == ["300"]
 
 
-def test_register_allowed_for_non_prod_home(
+def test_register_allowed_for_a_home_without_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A dev cluster's own home + checkout is its own business — allowed."""
-    dev_home = tmp_path / ".ava-dev"
-    monkeypatch.setattr("base.paths.ava_home", lambda: dev_home)
+    """A home with no checkout of its own runs whichever checkout registers it."""
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-dev"))
     monkeypatch.setattr("base.paths.repo_root", lambda: tmp_path / "dev-src")
     monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     calls = _fake_backend(monkeypatch)

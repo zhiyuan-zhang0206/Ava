@@ -12,7 +12,7 @@ the origin module as a re-export facade. The AST byte-identity check that
 proves moved definitions unchanged covers def/class bodies only — module-level
 constants (and other names) are not in that diff. A missed re-export is an
 ImportError that only surfaces at runtime, in a burst (PR #1729 QA BLOCK:
-`UNANCHORED_DB_SENTINEL` missed by `base.db`'s re-export list failed 11
+`PLACEHOLDER_DB_URL` missed by `base.db`'s re-export list failed 11
 shards). This script is the split's reference-completeness gate.
 
 ## What it checks

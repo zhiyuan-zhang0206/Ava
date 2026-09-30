@@ -399,7 +399,7 @@ def test_restore_subscriptions_rebuilds_after_restart(
     """A fresh core (daemon restart) rebuilds SSE subscriptions from the
     persisted switch_state — agent replies must flow again without the user
     re-running /switch (Task #804)."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)
     state = ChatState("telegram", "12345")
@@ -418,7 +418,7 @@ def test_restore_subscriptions_rebuilds_after_restart(
 def test_handle_chat_ensures_subscription(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     """Sending a chat message must (re)create the push subscription even if
     it was lost (e.g. daemon restarted since the last /switch)."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     gateway = FakeGateway()
     core = _core(gateway)
     state = ChatState("telegram", "12345")
@@ -433,7 +433,7 @@ def test_handle_chat_ensures_subscription(monkeypatch: pytest.MonkeyPatch, tmp_p
 def test_switch_persists_across_restart(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     """The switched agent survives a core restart: state is read back from
     the switch_state file when the chat is next seen."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)
     state = ChatState("telegram", "12345")
@@ -450,7 +450,7 @@ def test_switch_persists_across_restart(monkeypatch: pytest.MonkeyPatch, tmp_pat
 def test_switch_state_cleared_when_agent_vanishes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)
     state = ChatState("telegram", "12345")
@@ -1225,7 +1225,7 @@ def test_restore_subscriptions_skips_disabled_channels(
     """Disabled channels (AVA_IM_DISABLED_ADAPTERS) get no restored
     subscription — stale switch_state bindings are skipped so the bridge
     stops pushing snapshots to a channel with no adapter (Task #855)."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(settings.services, "im_disabled_adapters", [])
     gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
     core = _core(gateway)  # nothing disabled: both subscribe
@@ -1302,7 +1302,7 @@ def test_handle_inbound_outboxes_when_gateway_down(
     """Regression #1032: when the gateway enqueue fails after every retry the
     user message used to be silently dropped (AtLeastOnce broken). It must be
     persisted to the outbox and the user told it is queued."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     gateway = FakeGateway(send_failures=10)
     core = _core(gateway)
     adapter = FakeTypingAdapter()
@@ -1328,7 +1328,7 @@ def test_outbox_replay_delivers_and_clears(monkeypatch: pytest.MonkeyPatch, tmp_
     outboxed message with its persisted Idempotency-Key (AtLeastOnce) and
     clears the file. The key must be replayed unchanged so the gateway dedups
     a lost-response retry server-side."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     gateway = FakeGateway(send_failures=1)
     core = _core(gateway)
     adapter = FakeTypingAdapter()
@@ -1357,7 +1357,7 @@ def test_outbox_round_trip_keeps_unicode_line_separators(
     splitlines() split the JSONL line there, the reload skipped the entry
     ("skipping malformed outbox line"), and the next full rewrite erased it
     from disk — the drop #1032 exists to prevent."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     gateway = FakeGateway(send_failures=10)
     core = _core(gateway)
     adapter = FakeTypingAdapter()

@@ -59,43 +59,35 @@ import tests._test_env_file  # noqa: F401  # pyright: ignore[reportUnusedImport]
 if sys.platform == "darwin":
     os.environ.setdefault("LC_ALL", "en_US.UTF-8")
 
-# ── The unit's home: redirected here, not further down ──
+# ── The unit's home: redirected here, before anything can read it ──
 #
-# `base.host.env.dotenv_boot` resolves the home ONCE at import (`resolve_ava_home()` ->
-# `_HOME` -> `AVA_ENV_PATH`, module constants) and `resolve_ava_home` reads
-# AVA_HOME first. So whichever runs first wins permanently: set AVA_HOME before
-# that import and the whole boot is redirected; set it after and the constant is
-# already the operator's real `~/.ava/.env`, with no later assignment able to
-# move it.
+# `base.host.env.dotenv_boot.resolve_ava_home` reads `AVA_HOME` (else `~/.ava`)
+# every time it is asked; nothing captures it at import. What this block must
+# still precede is `Settings`: it reads about twenty-five other variables at
+# import, and its boot (`load_ava_env`) loads `$AVA_HOME/.env` and force-assigns
+# every derived_env_keys() entry (`os.environ[key] = val`, overriding what is
+# already there). With the home left at the operator's `~/.ava`:
 #
-# It used to be set after `import ava`, and the consequences were not academic:
-#
-#   - `load_ava_env()` read the operator's REAL `~/.ava/.env`, and
-#     `_enforce_cluster_env_authority()` force-assigns every derived_env_keys()
-#     entry (`os.environ[key] = val`, overriding what is already there). So the
-#     production AVA_CLUSTER_SECRET, AVA_DB_URL and AVA_REDIS_URL landed in the
-#     test process, overwriting the sentinels set a few lines earlier. A test
-#     suite holding production credentials is the real severity here; the file
-#     write below is the visible symptom, not the problem.
-#   - (pre-2026-08-01) AVA_CONFIG_SOURCE=gateway came in with them, which was
-#     the condition `base/config/__init__.py` checked before calling
-#     `inject_config_from_gateway()`. Every pytest run on an enrolled box made a
-#     real authenticated GET to the production gateway at import — before any
-#     fixture exists, so no fixture-based guard can reach it. Today the source
-#     is role-derived and the suite pins AVA_CONFIG_FETCH=skip (above), which
-#     closes the same hole.
-#   - the CLI's `.env` writers bind AVA_ENV_PATH from the same module, so
-#     `tests/cli` rewrote the operator's real `~/.ava/.env`. That happened
-#     three times on one dev box in a single night (2026-07-28/29), during a
-#     production rollout, and was non-damaging only because the gateway happened
-#     to be healthy each time.
+#   - `load_ava_env()` reads the operator's REAL `~/.ava/.env`, so the
+#     production AVA_CLUSTER_SECRET, AVA_DB_URL and AVA_REDIS_URL land in the
+#     test process, overwriting the sentinels set a few lines below. A test
+#     suite holding production credentials is the real severity here.
+#   - every Settings read (`Settings` field defaults, the gateway config fetch)
+#     would follow the operator's cluster; the suite pins AVA_CONFIG_FETCH=skip
+#     (below) so no Settings construction may dial a gateway.
+#   - the CLI's `.env` writers resolve the home from the same variable, so
+#     `tests/cli` would rewrite the operator's real `~/.ava/.env` (that happened
+#     three times on one dev box in a single night, 2026-07-28/29, during a
+#     production rollout).
 #
 # The general rule, and it predicts the next one: the suite isolates everything
 # addressed by a value a process reads AT USE TIME, and leaks everything fixed
 # BEFORE isolation takes effect. Two ways to be fixed-before: a value bound at
-# import (this block's problem) and a host-global namespace with no value to
-# redirect at all (the scheduler, below — same lesson, no fix available beyond
-# not acting).
+# import (Settings' own snapshot, which this block precedes) and a host-global
+# namespace with no value to redirect at all (the scheduler, below — same
+# lesson, no fix available beyond not acting). The variable is exported, not
+# set on a fixture, so the subprocesses tests spawn (`ava` CLI, e2e gateway)
+# inherit the same home.
 _SESSION_SUFFIX = f"{os.getpid()}_{int(time.time() * 1_000_000)}"
 _TEST_AVA_HOME = Path(tempfile.mkdtemp(prefix=f"ava_test_home_{_SESSION_SUFFIX}_"))
 os.environ["AVA_HOME"] = str(_TEST_AVA_HOME)
@@ -113,16 +105,6 @@ os.environ["AVA_EVENTS_CHANNEL"] = _TEST_EVENTS_CHANNEL
 # this env block; subprocess tests that spawn real daemons/agents re-derive or
 # re-pin their own env per test.
 os.environ["AVA_CONFIG_FETCH"] = "skip"
-
-# The redirect above is exactly the shape `resolve_ava_home` refuses: AVA_HOME
-# naming one home while the executing checkout's `.ava_home` claims another. It
-# refuses because a fleet agent hitting that shape migrated prod (#1059) — but
-# here it is the whole point, so the suite says so explicitly. Without this, the
-# suite would import-error on any worktree that ran `ava start --worktree` (i.e.
-# every worktree with its own dev cluster) while passing on a fresh CI clone,
-# which has no pointer. Exported, not set on a fixture, so the subprocesses tests
-# spawn from this checkout (`ava` CLI, e2e gateway) inherit the same permission.
-os.environ["AVA_HOME_OVERRIDE"] = "1"
 
 # ── Pre-compact history dump: pinned OFF for the suite, like a cluster that
 # configures the flag off ──
@@ -424,7 +406,7 @@ def _assert_env_precedes_project_imports() -> None:
 
     So assert the precondition instead of documenting it. `tests` itself is
     excluded (it is the package this module lives in); `base` is the one that
-    matters, since it is what binds AVA_ENV_PATH.
+    matters, since it is what loads `$AVA_HOME/.env`.
     """
     leaked = sorted(
         name
@@ -436,9 +418,8 @@ def _assert_env_precedes_project_imports() -> None:
             "tests/fixtures/env_bootstrap.py: a project module was imported before the env block "
             f"finished: {leaked[:5]}{'...' if len(leaked) > 5 else ''}. Everything above "
             "this line sets env vars that are read at IMPORT time — AVA_HOME decides "
-            "which .env `base.host.env.dotenv_boot` binds AVA_ENV_PATH to, permanently. An "
-            "import above it silently pins the suite to the operator's real ~/.ava, "
-            "production credentials included. Move the import below this assertion, or "
+            "which .env the config boot loads. An import above it silently pins the "
+            "suite to the operator's real ~/.ava, production credentials included. Move the import below this assertion, or "
             "list the plugin that imports it after tests.fixtures.env_bootstrap in the "
             "repo-root conftest.py."
         )
@@ -521,10 +502,8 @@ ava.agent_identity._owns_loop = True
 os.environ.pop("AVA_AGENT_ID", None)
 
 # `_TEST_AVA_HOME` is created and exported as AVA_HOME in the env block at the
-# top of this file. Mirror it onto the settings singleton too: the env var is what
-# the import-time boot reads, this is what in-process `settings.general.ava_home`
-# readers get. Both point at the same tmpfs dir, removed in `pytest_sessionfinish`.
-settings.general.ava_home = _TEST_AVA_HOME
+# top of this file — the one source of the home; it is removed in
+# `pytest_sessionfinish`.
 # The host state dir is independent of AVA_HOME and defaults to the real `~/.ava`;
 # redirect it into the tmpfs home too so tests never read or write the operator's
 # host-level state (Postgres template, runtime binaries, PTY freeze).

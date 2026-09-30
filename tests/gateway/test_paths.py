@@ -5,13 +5,12 @@ from pathlib import Path
 import pytest
 
 from base import paths
-from base.config import settings
 
 
 @pytest.fixture(autouse=True)
 def _isolate_ava_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Each test points settings.general.ava_home at tmp_path to avoid polluting ~/.ava."""
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path / "ava")
+    """Each test points AVA_HOME at tmp_path to avoid polluting ~/.ava."""
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
 
 
 def test_ava_home_reads_settings(tmp_path: Path):

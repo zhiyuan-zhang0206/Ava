@@ -40,6 +40,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
 from base.log import init_gateway_process
+from base.paths import ava_home
 from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
 from base.sessions.page_session import page_session_name
 from base.sessions.record import SessionRecord
@@ -362,7 +363,7 @@ def _reclaim_occupants(
 ) -> None:
     """Kill detached legacy/orphan servers while preserving live page shells."""
     wanted_ports = {row.port for row in rows}
-    own_home = str(settings.general.ava_home)
+    own_home = str(ava_home())
     for port, (pid, home) in occupants.items():
         if _page_session_owner(pid, shell_pids) is not None:
             continue

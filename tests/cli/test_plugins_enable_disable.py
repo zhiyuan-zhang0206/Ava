@@ -15,12 +15,11 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     plugins_config.json left in `$AVA_HOME` changes what later tests in the same
     worker see. Same redirection `test_plugin_scaffold.py` uses."""
     from base import paths
-    from base.config import settings
 
     home = tmp_path / "ava_home"
     monkeypatch.setattr(paths, "plugins_dir", lambda: home / "plugins")
     monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setattr(settings.general, "ava_home", str(home))
+    monkeypatch.setenv("AVA_HOME", str(home))
 
 
 def test_cmd_enable_then_disable(tmp_path: Path, capsys):
