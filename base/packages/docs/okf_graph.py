@@ -73,8 +73,9 @@ def find_root(all_paths: Iterable[str]) -> str | None:
 
     In this repo the apex lives in the index layer (`okf/index.ava.okf.md`),
     which holds only cross-domain nodes — the domain overviews live with their
-    code, in the `docs/` layer of the directory they describe (logical path
-    `agent/agent.ava.okf.md` for `agent/`). The shallowest `*/index.ava.okf.md`
+    code, in the `docs/` layer of the directory they describe
+    (`agent/docs/agent.ava.okf.md`, logical path `agent/agent.ava.okf.md`,
+    for `agent/`). The shallowest `*/index.ava.okf.md`
     wins; ties break lexically, keeping the choice deterministic.
 
     `None` when a bundle carries no index at all — every node is then a root of
@@ -144,7 +145,7 @@ def compute_parent(path: str, all_paths: set[str], root: str | None) -> str | No
         return root
 
     # The overview file inside the parent directory, named after it
-    # (`agent/agent.ava.okf.md` is the overview of `agent/`).
+    # (logically `agent/agent.ava.okf.md` is the overview of `agent/`).
     internal = posix(str(Path(parent_dir) / (Path(parent_dir).name + EXT)))
     if internal != logical and internal in physical:
         return physical[internal]

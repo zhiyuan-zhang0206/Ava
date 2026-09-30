@@ -8,7 +8,7 @@ description: Adds, changes, and rolls back Ava database migrations safely. Use w
 The model itself — baseline vs post-baseline deltas, the applied **set** keyed by
 migration name, the mandatory `.down.sql` pairing, expand-contract for lossy
 operations, and the bidirectional `assert_schema_current` check — is in
-`base/deploy/schema/migrations.ava.okf.md`. What follows is how you operate it.
+`base/deploy/schema/docs/migrations.ava.okf.md`. What follows is how you operate it.
 
 ## Applying migrations
 

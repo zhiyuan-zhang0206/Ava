@@ -142,7 +142,7 @@ The connected executor currently supports one initialized local Linux gateway
 with equal migration inventories. Its stop phase closes persistent terminals
 and schedules; they do not survive a release. Fleet/schema transitions and the
 workload rollback policy remain explicit pre-cutover work.
-Consult `cli/release_transition/release_transition.ava.okf.md` and
+Consult `cli/release_transition/docs/release_transition.ava.okf.md` and
 `future/infra/unified-cluster-lifecycle.md` before claiming broader support.
 
 Related local commands:

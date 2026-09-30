@@ -304,12 +304,13 @@ repos:
       # Runbook daemon roster <-> build_services() must agree (both directions).
       # Catches "deleted a daemon but left it documented" (#728's scheduler row)
       # and "added a daemon, forgot the roster". Parses the table under the
-      # <!-- lint:roster-table --> sentinel; reads both sides itself.
+      # <!-- lint:roster-table --> sentinel; reads both sides itself. Also pins the
+      # healthcheck roster (check-roster.ava.okf.md) to the healthcheck modules.
       - id: lint-doc-roster
         name: lint-doc-roster
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_roster.py
-        files: ^(cli/commands/_repo\.py|conventions/runbook\.md)$
+        files: ^(cli/commands/_repo\.py|conventions/runbook\.md|scripts/content_lint/lint_doc_roster\.py|services/healthchecks/docs/check-roster/check-roster\.ava\.okf\.md)$
         pass_filenames: false
 
       # Every `ava.<name>` reference in the procedural docs — conventions and
@@ -322,7 +323,7 @@ repos:
         name: lint-doc-symbols
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_symbols.py
-        files: ^(conventions/.*\.md|\.agents/skills/.*\.md|ava/__init__\.py)$
+        files: ^(conventions/.*\.md|\.agents/skills/.*\.md|ava/__init__\.py|scripts/content_lint/lint_doc_symbols\.py)$
         pass_filenames: false
 
       # The other half of the same guard: every `path/to/file.py:symbol` anchor

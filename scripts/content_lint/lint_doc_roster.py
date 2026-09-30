@@ -18,7 +18,7 @@ Two tables are checked, both by set equality in both directions:
    - a service registered in `build_services()` but missing from the roster
      -> "added a daemon, forgot to document it".
 
-2. the healthcheck roster (`services/healthchecks/check-roster/check-roster.ava.okf.md`)
+2. the healthcheck roster (`services/healthchecks/docs/check-roster/check-roster.ava.okf.md`)
    against the healthcheck module directory plus the ServiceSpec
    `healthcheck_module` fields and root diagnostic adapter imports — the
    2026-08-21 audit (issue #192) found the table documenting a phantom module
@@ -156,7 +156,7 @@ _HEALTHCHECK_SENTINEL = "<!-- lint:healthcheck-roster-table -->"
 # healthchecks overview — 2026-08-30 split); the modules it lists live
 # directly in `services/healthchecks/`.
 _HEALTHCHECK_DIR = _REPO_ROOT / "services" / "healthchecks"
-_HEALTHCHECK_ROSTER = _HEALTHCHECK_DIR / "check-roster" / "check-roster.ava.okf.md"
+_HEALTHCHECK_ROSTER = _HEALTHCHECK_DIR / "docs" / "check-roster" / "check-roster.ava.okf.md"
 
 _DIAGNOSTIC_PROBES = _REPO_ROOT / "services" / "ava_root_glue" / "diagnostic_probes.py"
 

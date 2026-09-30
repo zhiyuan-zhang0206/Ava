@@ -12,7 +12,7 @@
 >   worse than none. The release record is the retained release journal: `ava
 >   status` prints each home's selected image (or the source checkout it runs),
 >   and `ava cluster status` shows each host's running commit. See
->   [`../../cli/release_transition/release_transition.ava.okf.md`](../../cli/release_transition/release_transition.ava.okf.md).
+>   [`../../cli/release_transition/docs/release_transition.ava.okf.md`](../../cli/release_transition/docs/release_transition.ava.okf.md).
 > - **Increment B (health-probe + rollback) — superseded.** There is no
 >   `ava cluster rollback --to <tag|sha>` verb (only the unrelated
 >   `ava cluster pitr rollback`). Releases now go through one immutable prepared

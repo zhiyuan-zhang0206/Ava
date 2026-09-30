@@ -33,7 +33,7 @@ User-installed packages (origin=user): `ava skill install` drops directly into
 `ava skill register`.
 
 **The content channel adds two more pieces to this contract** (design §5.5 /
-§5.6; [[cli/commands/extensions/update-policy.ava.okf.md|update policy &
+§5.6; [[cli/commands/extensions/docs/update-policy.ava.okf.md|update policy &
 channels]]):
 
 - the **refresh pass** is the load directory's fourth bulk writer (after

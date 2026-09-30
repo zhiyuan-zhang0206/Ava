@@ -2,8 +2,8 @@
 
 This is the remaining implementation plan for the September 25 architecture
 revision. Current implemented behavior belongs in
-[Ava Root](../../services/ava_root/ava_root.ava.okf.md) and
-[start identity](../../cli/start_identity.ava.okf.md). The earlier
+[Ava Root](../../services/ava_root/docs/ava_root.ava.okf.md) and
+[start identity](../../cli/docs/start_identity.ava.okf.md). The earlier
 [decision](../../decisions/2026-09-12-process-lifecycle-final-state.md) remains a
 historical record; its same-PID replacement and intermediate migration paths
 are not implementation requirements for this revision.
@@ -50,7 +50,7 @@ are not implementation requirements for this revision.
    workloads are in the writer inventory: a schedule runner can outlive
    application root and access the database through its own process. The
    one-host stop phase closes them (see
-   [release execution](../../cli/release_transition/execution.ava.okf.md));
+   [release execution](../../cli/release_transition/docs/execution.ava.okf.md));
    each fleet unit must run the same closure at `stopping`.
 5. Exercise upgrade and recovery in disposable clusters, including paired
    migrations and writes made after upgrade. A down migration alone does not
@@ -242,7 +242,7 @@ the OS-user administrator by `peer` and every other role by SCRAM; PgBouncer
 always uses SCRAM against the active generation's verifier userlist and
 restarts on a userlist change. The schema owner is `NOLOGIN`, the capability
 groups carry every grant, birth mints write generation 0
-([authority](../../base/cluster/authority/authority.ava.okf.md)), an ordinary
+([authority](../../base/cluster/authority/docs/authority.ava.okf.md)), an ordinary
 start re-grants, sweeps and checks the catalog invariant, the root launcher
 delivers each service its class login bound into the launch digest, and an
 admitted operator CLI consumes the gateway login. Bootstrap serves no database
@@ -250,24 +250,24 @@ credential; a remote agent-runner installs a sealed, unit-bound capability the
 gateway operator issues (`ava cluster db-authority issue-unit`,
 `ava start --db-capability`), carrying the active generation's runner login,
 its API admission and the unit's enrollment secret
-([unit capability](../../base/cluster/authority/wiring.ava.okf.md#remote-agent-runner-units)).
+([unit capability](../../base/cluster/authority/docs/wiring.ava.okf.md#remote-agent-runner-units)).
 API admission is a generation boundary too: every generation carries one
 machine API token per class; the gateway admits the human secret or the ACTIVE
 generation's tokens, a unit's ops server its generation's two tokens, and the
 launcher delivers each service its class token (`AVA_API_TOKEN`) only while the
 API is authenticated. Remote units never hold the human secret (bootstrap does
 not serve it); their OTLP relay uses a telemetry token derived from it
-([API tokens](../../base/cluster/authority/api-tokens.ava.okf.md)).
+([API tokens](../../base/cluster/authority/docs/api-tokens.ava.okf.md)).
 A home born before this model is refused; no conversion exists
 ([credential split](../../conventions/data-plane-secret-split.md#homes-born-before-this-model)).
 
 The unit enrollment secret (minted at a unit's first bundle) has operator
 rotation and revocation and keys the coordinator
 channel's request authentication and sealing
-([enrollment](../../base/cluster/authority/unit-enrollment.ava.okf.md)).
+([enrollment](../../base/cluster/authority/docs/unit-enrollment.ava.okf.md)).
 The only cross-release contract, the frozen v1 image-exec handoff (CLI and the
 `release_image_exec` ops kind), and the port block's reserved `coordinator`
-slot exist ([handoff](../../cli/release_handoff/release_handoff.ava.okf.md)).
+slot exist ([handoff](../../cli/release_handoff/docs/release_handoff.ava.okf.md)).
 
 The single-box release transition fences and admits generations: `fencing`
 revokes the active generation, stops the owned pooler and proves closure by
@@ -275,7 +275,7 @@ census; `authorizing` mints the next number for the selected image; start
 births a fresh pooler serving it under the root boot owner, and start and
 observation bind exactly that generation; the finite executor dials the
 owner-only socket as the administrator acting as the gateway group
-([release write generations](../../cli/release_transition/write-generations.ava.okf.md)).
+([release write generations](../../cli/release_transition/docs/write-generations.ava.okf.md)).
 A recovery fences the failed candidate's generation before the predecessor
 gets a new one. The Linux preview's release A/B/A records the generation
 sequence and proves each fence with a stale writer outside root custody
@@ -291,7 +291,7 @@ refusing.
 
 Typed release and PITR operations now use the same home journal and finite
 executor. The connected implementation is documented in
-[retained release transition](../../cli/release_transition/release_transition.ava.okf.md).
+[retained release transition](../../cli/release_transition/docs/release_transition.ava.okf.md).
 PITR reserves the home before configuration mutation and uses the ordinary
 retained-image start boundary; the retired cluster-update restart seam is not
 its fallback.
@@ -310,7 +310,7 @@ launch boundary now retains the actual child handle and refuses reaping after
 uncertain closure; its PITR and logical-backup consumers retain unresolved
 evidence. Each PITR/backup operation is now one directly owned worker process
 group with no subgroups
-([PITR operation custody](../../services/pitr/operation-custody.ava.okf.md)).
+([PITR operation custody](../../services/pitr/docs/operation-custody.ava.okf.md)).
 The remaining custody gaps: controller death on plain POSIX/macOS has no
 platform owner (for example a Linux cgroup) able to prove closure without the
 original controller, so retirement past that point still needs a human. Group
@@ -323,7 +323,7 @@ from another process census.
 
 ## Remaining: macOS finite executor
 
-Implemented (see [macOS executor custody](../../cli/release_transition/launcher_macos.ava.okf.md)):
+Implemented (see [macOS executor custody](../../cli/release_transition/docs/launcher_macos.ava.okf.md)):
 one finite launchd job per operation attempt runs `--finite-executor` of the
 same stably signed helper artifact the live home helper runs, admitted by
 `codesign -R` against the stable requirement, the hardened runtime on the file
@@ -344,7 +344,7 @@ reboot, or a new login session with the recorded owners gone and the group
 empty, is positive closure.
 
 Release start through the persistent home helper is connected (see
-[macOS release root start](../../cli/release_transition/root_macos.ava.okf.md)),
+[macOS release root start](../../cli/release_transition/docs/root_macos.ava.okf.md)),
 so macOS admits a same-schema release for one local gateway home, closing its
 persistent terminal writers at the stop phase. The executor runs the selected
 image's ordinary start as a finite tool; the keeper births root outside the
@@ -408,7 +408,7 @@ the alert recipient does not become the automatic recovery authority.
 The independent health-probe rollback and known-good writers are removed.
 The new executor's frozen-cohort workload threshold, alert routing and
 known-good publication are the fleet workload policy
-([fleet workload policy](../../cli/release_fleet/release_fleet.ava.okf.md)),
+([fleet workload policy](../../cli/release_fleet/docs/release_fleet.ava.okf.md)),
 executed by the fleet coordinator for a fleet of one; networked fleets wait
 for per-unit credential delivery (dbgen-8) and converge (FC-9). Health alerts
 remain active; removing an old decision path is not evidence that its
@@ -416,7 +416,7 @@ replacement is complete.
 
 Until then a networked cluster has no in-band way to rotate its write
 generation, so a compromised unit or a lost capability bundle cannot be
-contained ([what a bundle exposes](../../base/cluster/authority/unit-enrollment.ava.okf.md#what-a-bundle-exposes)).
+contained ([what a bundle exposes](../../base/cluster/authority/docs/unit-enrollment.ava.okf.md#what-a-bundle-exposes)).
 This is a known gap, and closing it is a required deliverable of dbgen-8
 (user ruling, 2026-09-28): dbgen-8 does not land until a networked cluster can
 rotate its write generation and re-issue every unit's capability.

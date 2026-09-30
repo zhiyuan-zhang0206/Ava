@@ -38,6 +38,13 @@ description: A node built to an exact character count.
 """
 
 
+@pytest.fixture(autouse=True)
+def _layout_is_not_under_test(monkeypatch):
+    """These tests exercise other rules on constructed trees whose layout is not the
+    subject; rule 14 (docs layer) has its own tests in tests/scripts/test_lint_ava_okf.py."""
+    monkeypatch.setattr(_lint, "_layer_error", lambda *_args: None)
+
+
 def _node_of_size(tmp_path, char_count: int) -> None:
     """Write an otherwise-valid OKF node whose decoded length is exactly
     `char_count`, padded with prose-shaped filler so no other rule can fire."""

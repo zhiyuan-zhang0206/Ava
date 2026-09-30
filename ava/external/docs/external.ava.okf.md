@@ -1,0 +1,63 @@
+---
+type: doc
+title: External SDK Attachment
+description: Local external Python processes borrow a leased agent identity and journal plugin state while the native graph owns checkpoints.
+tags:
+- sdk
+- agents
+---
+
+# External SDK Attachment
+
+`ava.external.attach(session_id, agent_id=...)` binds one active, same-machine controller
+lease to a Python process. The external model keeps its own tools; SDK calls execute
+in that external process. The attachment is a context manager with explicit `flush`
+and `close` methods, and never starts or renews a lease.
+
+Closing an attachment first flushes its plugin delta, then—only if the process
+emitted telemetry—synchronously drains the event pipeline and finalizes OTLP
+while the interpreter is still live. This gives a short `ava impersonate exec`
+process the same tail-record delivery boundary as an exec child; a last SDK call
+keeps its stable event identity, borrowed-agent attribution, and one export.
+The close-time pipeline and OTLP worker barriers are bounded: a timeout leaves
+the JSONL mirror and its delivery diagnostic intact rather than silently blocking
+or claiming an export that did not finish.
+
+`ava.agent_identity.validate_external_identity` checks the lease, the caller's presence in
+the recorded controller tree, and the state version on SDK
+identity paths, including provenance and MCP requests. `PluginStateHandle.read` and
+`update` perform the same check; raw `ava.state` remains a local snapshot rather
+than a lease-aware proxy. Native runtime identity paths remain unchanged
+when no external attachment exists. The attachment temporarily overrides an
+external caller profile so peer operations carry `agent:N`, then restores the
+ordinary profile when closed.
+
+Plugins load through the existing extension loader. Framework and plugin config
+views bind the agent's stored configuration, while `ava.external.state.load_snapshot`
+reads its checkpoint without writing it. Pending journal entries are replayed
+through their registered reducers after the checkpoint's applied receipt.
+
+Plugin updates use the checkpoint serializer and its registered type allowlist,
+encoded into JSON envelopes without coercing reducer inputs. Flushing appends one
+ordered delta under a lease version comparison. The native graph alone checkpoints
+that journal and records an applied receipt, preventing repeat application after
+a crash between checkpoint persistence and database acknowledgment.
+
+The external journal permits ordinary message appends under the existing message
+reducer rules. Encoding, decoding, and applying a delta reject
+`RemoveMessage(REMOVE_ALL_MESSAGES)`, including equivalent message dictionaries,
+before changing any state. Full-history resets remain exclusive to native
+compaction and crash repair; external controllers request compaction in their
+handoff summary.
+
+User-visible replies use `ava impersonate say` with a stable retry key. They
+are recorded immediately in permanent session history and rendered on the normal
+timeline, independently of plugin-state flush.
+
+Peer messages carry the same borrowed identity: `ava impersonate send
+<session_id> --agent <agent_id> --to <target> --content '...'` from the CLI, or
+`ava.agents.send_message` inside the attachment — both deliver source
+`agent:<agent_id>` (task #4102).
+
+The usage procedure and CLI commands live in
+[External agent impersonation](../../../conventions/agent-impersonation.md).

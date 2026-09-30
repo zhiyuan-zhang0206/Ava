@@ -21,9 +21,12 @@ Rules (source of truth):
      position — <dir>/<dir>.ava.okf.md, inside the directory it describes
      (user ruling: "put it inside the folder"), judged on the logical path,
      so a node in a package's docs/ layer counts as sitting where the layer
-     sits. compute_parent does not resolve the sibling position
-     <dir>.ava.okf.md at the parent level; E009 fires on any sibling —
-     merge or move it into the directory (one concept, one node).
+     sits. A directory counts as existing when it is on disk or when any
+     node's logical path lies under it: the nodes of a doc-only directory
+     sit in <package>/docs/<dir>/, where no <package>/<dir>/ exists.
+     compute_parent does not resolve the sibling position <dir>.ava.okf.md
+     at the parent level; E009 fires on any sibling — merge or move it
+     into the directory (one concept, one node).
  10. Headroom (warn): a node whose remaining room under the character ceiling is
      below WARN_MARGIN reports W010 — non-blocking, so the author sees the wall
      while there is still room to plan a split, instead of discovering it only
@@ -49,6 +52,12 @@ Rules (source of truth):
  13. Duplicate consecutive headers (block): the same header line appearing
      twice in a row (blank lines between are fine) — the other shape the same
      campaign produced.
+ 14. Docs layer (block): every node sits in a `docs/` layer — a directory
+     segment named `docs` in its path — beside the code it describes, so the
+     source tree holds code and its `tests/` and `docs/`, nothing else. `okf/`
+     (the index layer) and `.github/` are exempt. E014 names the location the
+     node belongs in: `docs/` under the nearest directory above it that holds
+     code, or under the node's own directory when none does.
 
 Usage:
     .venv/bin/python scripts/content_lint/lint_ava_okf.py [--fix] [paths...]
@@ -92,10 +101,17 @@ WARN_MARGIN = 800
 # The ceiling exists to force hierarchy, so the message names the remedy and
 # where it goes: children of the overview `<stem>/<stem>.ava.okf.md` are the
 # files in `<stem>/`, because compute_parent derives the edge from the path.
+# The docs/ layer counts as the package directory, so on disk that is `{home}`.
 _SPLIT_HINT = (
     "Split a section into its own node under '{stem}/' (the filesystem derives "
-    "the parent edge) — see conventions/doc-maintenance.md."
+    "the parent edge; the docs/ layer stands for its package directory, so here "
+    "that is '{home}') — see conventions/doc-maintenance.md."
 )
+# The index layer and the CI overview keep their nodes outside a docs/ layer.
+_LAYER_EXEMPT = ("okf/", ".github/")
+# A directory "holds code" (rule 14's anchor) when it directly contains one of these.
+_CODE_SUFFIXES = frozenset({".py", ".pyi", ".ts", ".tsx"})
+_CODE_NAMES = frozenset({"SKILL.md", "package.json"})
 # Same syntax as build_okf_data.WIKILINK_RE: [[target]] or [[target|label]]
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 
@@ -188,7 +204,7 @@ def collect_all_paths(repo_root: Path) -> set[str]:
     return {f.relative_to(repo_root).as_posix() for f in find_files([str(repo_root)])}
 
 
-def _dual_node_error(filepath: Path, repo_root: Path) -> LintError | None:
+def _dual_node_error(filepath: Path, repo_root: Path, all_paths: set[str]) -> LintError | None:
     """Rule 9: the two positions of a directory's overview node must not coexist.
 
     The canonical position is inside the directory — `<dir>/<dir>.ava.okf.md`
@@ -199,25 +215,36 @@ def _dual_node_error(filepath: Path, repo_root: Path) -> LintError | None:
     sibling, layered or not — move it inside (or merge it, when the internal
     file already exists).
 
+    `<dir>` exists when it is a directory on disk or when any node's logical
+    path lies under it: a doc-only directory keeps its nodes in
+    `<package>/docs/<dir>/`, so no `<package>/<dir>/` exists, and a sibling
+    `<package>/docs/<dir>.ava.okf.md` would otherwise slip through.
+
     Matching is done on the repo-relative path only, so the checkout
     directory's own name cannot misfire (CI checks out to .../ava/ava; the
-    file `ava/ava.ava.okf.md` is the internal overview of `ava/`, not a
+    file `ava/docs/ava.ava.okf.md` is the internal overview of `ava/`, not a
     duplicate of itself).
     """
     stem = filepath.name[: -len(".ava.okf.md")]
     try:
-        rel = filepath.resolve().relative_to(repo_root)
+        rel = filepath.resolve().relative_to(repo_root).as_posix()
     except ValueError:
         return None
-    logical = logical_path(rel.as_posix())
-    layer = "docs/" if logical != rel.as_posix() else ""
+    logical = logical_path(rel)
     # `<parent>/<stem>/` is the directory this file would be the overview of.
     parent = Path(logical).parent
-    if not (repo_root / parent / stem).is_dir():
-        return None
     # A repo-root file's parent is `.`, whose prefix is empty.
     prefix = "" if parent == Path() else f"{parent.as_posix()}/"
-    internal = f"{prefix}{stem}/{layer}{stem}.ava.okf.md"
+    on_disk = (repo_root / parent / stem).is_dir()
+    in_graph = any(logical_path(p).startswith(f"{prefix}{stem}/") for p in all_paths if p != rel)
+    if not (on_disk or in_graph):
+        return None
+    if on_disk:
+        layer = "docs/" if logical != rel else ""
+        internal = f"{prefix}{stem}/{layer}{stem}.ava.okf.md"
+    else:
+        # The directory exists only in logical space, in this file's own layer.
+        internal = posixpath.join(posixpath.dirname(rel), stem, f"{stem}.ava.okf.md")
     return LintError(
         str(filepath),
         1,
@@ -227,6 +254,66 @@ def _dual_node_error(filepath: Path, repo_root: Path) -> LintError | None:
         f"docs/ layer when layered). Move the file inside — or merge it, if "
         f"'{internal}' exists.",
     )
+
+
+def _holds_code(directory: Path) -> bool:
+    return any(
+        entry.is_file() and (entry.suffix in _CODE_SUFFIXES or entry.name in _CODE_NAMES)
+        for entry in directory.iterdir()
+    )
+
+
+def _layer_home(rel: str, repo_root: Path) -> str:
+    """Where a node outside any docs/ layer belongs: `docs/` under the nearest
+    directory above it that holds code, else under its own directory."""
+    directories = posixpath.dirname(rel).split("/") if "/" in rel else []
+    for depth in range(len(directories), 0, -1):
+        anchor = "/".join(directories[:depth])
+        if _holds_code(repo_root / anchor):
+            return f"{anchor}/docs/{posixpath.relpath(rel, anchor)}"
+    head, name = posixpath.split(rel)
+    return posixpath.join(head, "docs", name)
+
+
+def _layer_error(filepath: Path, repo_root: Path) -> LintError | None:
+    """Rule 14: a node outside `okf/` and `.github/` sits in a `docs/` layer."""
+    try:
+        rel = filepath.resolve().relative_to(repo_root).as_posix()
+    except ValueError:
+        return None
+    if rel.startswith(_LAYER_EXEMPT) or logical_path(rel) != rel:
+        return None
+    return LintError(
+        str(filepath),
+        1,
+        "E014",
+        f"Node outside a docs/ layer: OKF nodes live in a docs/ directory beside "
+        f"the code they describe (okf/ and .github/ are exempt). Move it to "
+        f"'{_layer_home(rel, repo_root)}'.",
+    )
+
+
+def _placement_errors(filepath: Path, repo_root: Path, all_paths: set[str]) -> list[LintError]:
+    """Rule 9 (overview position) and rule 14 (docs layer) for one node."""
+    found = (_dual_node_error(filepath, repo_root, all_paths), _layer_error(filepath, repo_root))
+    return [error for error in found if error is not None]
+
+
+def _repo_rel(filepath: Path, repo_root: Path) -> str:
+    """The node's repo-relative posix path; its bare name outside the repo."""
+    try:
+        return filepath.resolve().relative_to(repo_root).as_posix()
+    except ValueError:
+        return filepath.name
+
+
+def _split_home(rel: str, stem: str) -> str:
+    """The directory, on disk, that a split-out child of `rel` belongs in: an
+    overview's children sit beside it, any other node's in `<stem>/` next to it."""
+    directory = posixpath.dirname(rel)
+    if posixpath.basename(posixpath.dirname(logical_path(rel))) == stem:
+        return f"{directory}/"
+    return posixpath.join(directory, stem) + "/"
 
 
 def _non_node_target(target: str, repo_root: Path) -> str | None:
@@ -433,10 +520,8 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
         errors.append(LintError(path_str, 1, "E001", "File must end with .ava.okf.md"))
         return errors
 
-    # Rule 9: overview position (see _dual_node_error).
-    dual = _dual_node_error(filepath, repo_root)
-    if dual is not None:
-        errors.append(dual)
+    # Rules 9 + 14: where the node sits.
+    errors.extend(_placement_errors(filepath, repo_root, all_paths))
 
     try:
         text = filepath.read_text(encoding="utf-8")
@@ -447,7 +532,9 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
     # Rule 7: file size
     line_count = text.count("\n") + 1
     char_count = len(text)
-    hint = _SPLIT_HINT.format(stem=filepath.name[: -len(".ava.okf.md")])
+    rel_path = _repo_rel(filepath, repo_root)
+    stem = filepath.name[: -len(".ava.okf.md")]
+    hint = _SPLIT_HINT.format(stem=stem, home=_split_home(rel_path, stem))
     if line_count > MAX_LINES:
         errors.append(
             LintError(
@@ -521,10 +608,6 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
     errors.extend(_forbidden_key_errors(path_str, fm))
 
     # Rules 8 + 11: wikilink targets (warn level) — same resolution as the graph builder
-    try:
-        rel_path = filepath.resolve().relative_to(repo_root).as_posix()
-    except ValueError:
-        rel_path = filepath.name
     for m in WIKILINK_RE.finditer(body):
         err = _wikilink_error(path_str, rel_path, m.group(1).strip(), all_paths, repo_root)
         if err is not None:
