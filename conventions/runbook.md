@@ -235,7 +235,7 @@ independently assert and auto-repair both prod records. Converge no longer
 marks site-packages, `ava-*.dist-info`, or `.venv/bin` read-only itself; a
 directory still carrying an earlier converge's `0o555` opens automatically
 inside the repair's own write window
-(`shared/editable_install.py:protected_editable_paths` /
+(`base/deploy/release/editable_install.py:protected_editable_paths` /
 `editable_pth_write_window`), or by a one-time manual `chmod u+w` on that
 directory — after either, `uv sync` behaves normally again.
 Every `execute_code` spawn also checks

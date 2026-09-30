@@ -241,7 +241,7 @@ class GeneralSettings(EnvSettings):
     track_branch: str = Field(
         default="main",
         alias="AVA_TRACK_BRANCH",
-        description="Git branch the agent-runner memory pool tracks; `shared.memory_repo.pull_main()` fast-forwards the gateway's consolidated memory checkout from origin/<this>, and branch-status reporting diffs against it. Override for preview/staging clusters.",
+        description="Git branch the agent-runner memory pool tracks; `base.deploy.git.memory_repo.pull_main()` fast-forwards the gateway's consolidated memory checkout from origin/<this>, and branch-status reporting diffs against it. Override for preview/staging clusters.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
