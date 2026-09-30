@@ -18,7 +18,6 @@ import os
 import shutil
 import subprocess
 import sys
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,7 +29,6 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.conninfo import conninfo_to_dict
 
-from base import cluster
 from base.cluster import authority
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
@@ -140,22 +138,6 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     assert report.agents_owner == "ava"
 
 
-def test_pre_activation_snapshot_dumps_the_frozen_owner_target(maintenance: Born) -> None:
-    from cli.commands.data_plane import pitr_activation as activation
-    from services.gateway_side.backup import snapshot
-
-    state = activation.read_pg_state()
-    _assert_owner_dial(state["dump_conninfo"])
-    lines: list[str] = []
-    artifact = snapshot.create_pre_activation_snapshot(
-        operation_id=str(uuid.uuid4()), db_url=state["dump_conninfo"], progress=lines.append
-    )
-    assert artifact.name.endswith(".dump.enc") and backup._is_activation(artifact)
-    assert lines[-1] == f"{artifact} (verified)"
-    # The frozen face is stable, so the snapshot's before/during checks hold.
-    activation._require_same_pg_state(state, "after snapshot")
-
-
 def test_rollback_snapshot_exports_and_retires_as_the_owner(
     maintenance: Born, tmp_path: Path
 ) -> None:
@@ -210,7 +192,6 @@ print(json.dumps({"user": row[0], "system": row[1], "agents": agents[0]}))
 def test_pitr_probes_dial_the_home_authority(
     maintenance: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands.data_plane import _pitr_activation_config as activation_config
     from services.pitr.activation import runtime
     from services.pitr.base_backup import candidate
     from services.pitr.base_backup.candidate import BaseCandidateError
@@ -247,17 +228,10 @@ def test_pitr_probes_dial_the_home_authority(
     with pytest.raises(BaseCandidateError, match="physical-replication rule"):
         candidate._validate_replication_hba({"user": "ava_pitr_repl", "host": "127.0.0.1"})
 
-    # Activation: the privilege probe, the WAL-switch capture and the config reader.
+    # Activation: the privilege probe and the WAL-switch capture.
     runtime.probe_switch_privilege()
     evidence = runtime.prepare_wal_switch()
     assert evidence["timeline"] == "1" and len(evidence["segment"]) == 24
-
-    def _record(_home: Path) -> cluster.ClusterRecord:
-        return maintenance.record
-
-    monkeypatch.setattr(activation_config, "get_record", _record)  # bound at its import
-    settings_now = activation_config._persistent_archive_settings(maintenance.home)
-    assert settings_now["archive_mode"] == "__ABSENT__"
 
     # Custody binds each admin session to this home: the same socket read as
     # another home's server refuses before any statement.

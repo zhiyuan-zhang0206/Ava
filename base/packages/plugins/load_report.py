@@ -7,10 +7,8 @@ a loguru ERROR carrying the traceback plus one `plugin_load_failed` telemetry
 event (anomaly tier), so ops sees which plugin broke and why wherever it broke.
 
 Call it through the module attribute (`plugin_load_report.report_plugin_load_failure`),
-never a ``from ... import report_plugin_load_failure`` alias: the release probe
-(`cli/commands/_release_plugin_probe.py`) substitutes this function to turn the
-containment back into a hard release rejection, and only an attribute-level
-call observes the substitution.
+never a ``from ... import report_plugin_load_failure`` alias: a test substitutes
+this function, and only an attribute-level call observes the substitution.
 """
 
 from __future__ import annotations

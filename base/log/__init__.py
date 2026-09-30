@@ -639,9 +639,7 @@ def init_gateway_process(name: str = "gateway") -> None:
 
 
 def init_cli_process(*, name: str) -> None:
-    """Called once by the CLI verbs that bring a unit up, by the finite release
-    executor (``cli.release_transition.execute``, name ``release-executor``),
-    whose native launcher keeps its stderr, and by the PITR base worker
+    """Called once by the CLI verbs that bring a unit up and by the PITR base worker
     (``pitr-base-worker``). Identical sink set to ``init_gateway_process``,
     minus its ``service_started`` row: stderr (human) + file (``<name>.log``)
     + unified event pipeline (agent_id NULL).

@@ -9,18 +9,16 @@
 >   `cluster_target_sha` any more: the `cluster_pin` row
 >   (`base/deploy/state/cluster_pin.py`) holds the value the retired updater last wrote, and
 >   no operator surface shows it — a frozen value presented as current would be
->   worse than none. The release record is the retained release journal: `ava
->   status` prints each home's selected image (or the source checkout it runs),
->   and `ava cluster status` shows each host's running commit. See
->   [`../../cli/release_transition/docs/release_transition.ava.okf.md`](../../cli/release_transition/docs/release_transition.ava.okf.md).
+>   worse than none. There is no release record: a unit runs its source
+>   checkout at the commit `cli/fleet_update.py` switched it to, `ava status`
+>   prints that checkout, and `ava cluster status` shows each host's running
+>   commit.
 > - **Increment B (health-probe + rollback) — superseded.** There is no
->   `ava cluster rollback --to <tag|sha>` verb (only the unrelated
->   `ava cluster pitr rollback`). Releases now go through one immutable prepared
->   image (`ava cluster update --prepared REQUEST`); a rollback is a transition
->   back to the previous retained image through that same operation, not a
->   health-probe-triggered auto-rollback — the independent health-probe rollback
->   was removed (health checks and alerts remain), and `last_known_good_sha` has
->   no writer.
+>   `ava cluster rollback --to <tag|sha>` verb. An update is
+>   `python -m cli.fleet_update`; a rollback is the same script given the
+>   previous SHA, not a health-probe-triggered auto-rollback — the independent
+>   health-probe rollback was removed (health checks and alerts remain), and
+>   `last_known_good_sha` has no writer.
 > - **Drift response — retired.** `ops/controllers/pin.py` (the SHA-drift
 >   watchdog this bullet used to describe) was deleted along with the rest of
 >   `ops/controllers/` in the old in-place updater's removal; nothing
