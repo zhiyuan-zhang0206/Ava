@@ -26,10 +26,10 @@ Split by kind: code/AST/Python-convention guards in [[scripts/lint/docs/lint.ava
 `build_okf_data.py` (bundle → `graph_data.json`), `serve_okf_viz.py` (local viewer, `okf-d3-template.html` — also read by `gateway/routers/okf_graph.py`'s `/api/okf/graph`) — OKF tooling. `build_app_update_manifest.py` (Tauri archives → `latest.json`), `build_hierarchy_once.py`, `dump_event_fixtures.py`, `dump_frontend_constants.py`, `dump_openapi.py`, `gen_config_lite_table.py`, `gen_event_registry.py`, `generate-ui-page.py` — one generator per artifact, each with a matching `check-*-fresh.sh` or pre-commit drift gate.
 
 ### `ci/` — CI job / test / release-cut infrastructure
-`accounting.py`, `job_rerun.py`, `runs_export.py` — CI-minute attribution and job/workflow tooling; `coverage_gates.py` — backend coverage gates; `qa_gate.py` + `qa_receipt.py` — exact-head QA evidence evaluation (see [receipt contract](../../conventions/qa-approval-receipt.md)); `test_selector.py` — static-import PR test selection feeding `ci.yml`; `refresh_test_durations.py` — `.test_durations` refresh; `migration_smoke.py`, `pgvector_runtime_smoke.py`, `two_section_chain_smoke.py`, `verify_runtime_wheel.py` — smoke/verification gates; `release_cut.py`, `tag_latest.py` — dated release tagging.
+`accounting.py`, `job_rerun.py`, `runs_export.py` — CI-minute attribution and job/workflow tooling; `coverage_gates.py` — backend coverage gates; `qa_gate.py` + `qa_receipt.py` — exact-head QA evidence evaluation (see [receipt contract](../../conventions/qa-approval-receipt.md)); `test_selector.py` — static-import PR test selection feeding `ci.yml`; `refresh_test_durations.py` — `.test_durations` refresh; `migration_smoke.py`, `pgvector_runtime_smoke.py`, `two_section_chain_smoke.py` — smoke/verification gates; `release_cut.py`, `tag_latest.py` — dated release tagging.
 
-### `release_proofs/` — release-prepare / retained-image verification (CI-only)
-`prepare_plugin_fixture.py` plus the `prove_runtime_*` / `prove_release_inventory.py` / `prove_exec_owner_installed.py` / `prove_native_launcher_reads.py` family: each is copied into an isolated scratch interpreter (`-I`, no checkout visible) to prove a captured release image is self-contained. Invoked from `.github/workflows/runtime-*.yml`.
+### `release_proofs/` — native launcher read proof (CI-only)
+`prove_native_launcher_reads.py` reads the OS scheduler's job state without installing or changing a job; invoked from `.github/workflows/native-launcher-proof.yml`.
 
 ### Startup / Deployment / Multi-host
 - `start_agent.py` (derives an agent via gateway `/api/agents`), `start_gateway.py` (directly starts the gateway FastAPI body, ≈ `.venv/bin/python -m gateway`) — **the latter does not derive an agent**
