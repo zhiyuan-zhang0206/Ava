@@ -242,7 +242,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     would reach no dispatch and fail the assert. A `closed_at` stamp left by
     the retired closed-agent concept gates nothing
     (decisions/2026-09-27-terminate-has-no-closed-state.md)."""
-    from ops import lifecycle
+    from ops import cluster_rpc, lifecycle
 
     agent_id = _make_hosted_running_agent(db_conn)
     db_conn.execute(
@@ -269,7 +269,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
         dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})
         return {"status": "spawned"}
 
-    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", fake_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)
 
     wedge = watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), False)
     await watchdog._recover_hosted_turn(pool, wedge)

@@ -230,7 +230,6 @@ def test_get_remote_machine_composes_host_from_dispatch(
 
     enqueue = AsyncMock(return_value=canned)
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
-    monkeypatch.setattr(config_router._cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/config?machine={REMOTE}")
@@ -292,7 +291,6 @@ def test_get_offline_machine_503(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpUnreachable("no ack"))
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
-    monkeypatch.setattr(config_router._cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/config?machine={REMOTE}")
@@ -305,7 +303,6 @@ def test_get_remote_failed_503(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpFailed({"error": "boom"}))
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
-    monkeypatch.setattr(config_router._cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/config?machine={REMOTE}")
@@ -320,10 +317,8 @@ def test_get_local_unreachable_503_no_in_process_fallback(
     The router has NO in-process fallback — a silent local read would mask the
     outage (the old behavior). This overrides the conftest's in-process stand-in
     for the local ops daemon."""
-    from gateway.routers import config as config_router
-
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpUnreachable("no ack"))
-    monkeypatch.setattr(config_router._cluster_rpc, "dispatch_to_machine", enqueue)
+    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.get("/api/config")  # machine absent -> the local machine
@@ -732,7 +727,6 @@ def test_put_remote_host_field_dispatches_config_write(
     }
     enqueue = AsyncMock(return_value=stub_result)
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
-    monkeypatch.setattr(config_router._cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
@@ -764,7 +758,6 @@ def test_put_remote_rejects_writable_non_remote_host_field(
     _seed_machine(REMOTE)
     dispatched = AsyncMock()
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatched)
-    monkeypatch.setattr(config_router._cluster_rpc, "dispatch_to_machine", dispatched)
     with TestClient(app) as client:
         resp = client.put(
             f"/api/config?machine={REMOTE}", json={"cross_machine_transfer_backend": "none"}
@@ -784,7 +777,6 @@ def test_put_remote_rejects_oss_credential_fields(
     _seed_machine(REMOTE)
     dispatched = AsyncMock()
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatched)
-    monkeypatch.setattr(config_router._cluster_rpc, "dispatch_to_machine", dispatched)
     with TestClient(app) as client:
         for field in ("pitr_oss_credentials_file", "pitr_oss_viewer_credentials_file"):
             resp = client.put(
@@ -801,7 +793,6 @@ def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, _clean_override
     _seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpUnreachable("no ack"))
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
-    monkeypatch.setattr(config_router._cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
@@ -814,7 +805,6 @@ def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, _clean_overrides
     _seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpFailed({"error": "boom"}))
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
-    monkeypatch.setattr(config_router._cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})

@@ -116,10 +116,9 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     through to the real dispatch (tests stub it per-test). The router itself has
     NO in-process fallback — an unreachable ops server is a 503, uniform with
     every other machine."""
-    from gateway.routers import config as _config_router
-    from ops import host_config
+    from ops import cluster_rpc, host_config
 
-    real_dispatch = _config_router._cluster_rpc.dispatch_to_machine
+    real_dispatch = cluster_rpc.dispatch_to_machine
 
     async def _in_process_config(
         target_machine: str,
@@ -157,4 +156,4 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
             idempotency_key=idempotency_key,
         )
 
-    monkeypatch.setattr(_config_router._cluster_rpc, "dispatch_to_machine", _in_process_config)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _in_process_config)  # pyright: ignore[reportUnknownArgumentType]

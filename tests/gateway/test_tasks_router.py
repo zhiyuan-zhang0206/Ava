@@ -28,9 +28,9 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from base.agents import AgentStatus
-from gateway.agents import state as _agents_state
 from gateway.app import app
 from gateway.routers.tasks import get_tasks
+from ops import lifecycle as ops_lifecycle
 
 
 def _make_agent(db: psycopg.Connection) -> int:
@@ -222,7 +222,7 @@ class TestOwner:
             resurrection_calls.append((agent_id, trigger_inbound_kind))
             return cast("AgentStatus", "idling")
 
-        monkeypatch.setattr(_agents_state._ops, "resurrect_if_terminated", _record_resurrection)
+        monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _record_resurrection)
         with TestClient(app) as client:
             resp = client.patch(f"/api/tasks/{tid}", json={"owner": new_owner})
         assert resp.status_code == 200
