@@ -1,6 +1,7 @@
-"""Forbid printf-style placeholders in loguru log calls — their arguments are silently dropped.
+"""Forbid log calls whose message format does not match their logger's formatter.
 
-Run: `.venv/bin/python scripts/lint/loguru_format.py [path ...]` (defaults to
+Two mirror-image rules, one per formatter. Run:
+`.venv/bin/python scripts/lint/loguru_format.py [path ...]` (defaults to
 the framework dirs plus `scripts/`; an explicit path that does not exist is an
 error (stderr + exit 1) rather than a silent no-op). Also run automatically via
 pre-commit hook.
@@ -19,7 +20,19 @@ failure reads as if it did, minus every detail. The stdlib `logging` module is
 the opposite — `%s` is its placeholder — so the same line is correct there,
 which is exactly how the habit slips into loguru code.
 
-## The rule
+The habit slips the other way too. A loguru-style call on a stdlib logger,
+
+    _log.info("flush pass: delivered={} expired={}", report.delivered, report.expired)
+
+leaves `{}` in the text and hands `msg % args` two arguments it cannot consume:
+`TypeError: not all arguments converted during string formatting`, raised while
+the record is formatted. In production the root handler swallows that into a
+"Logging error" traceback on stderr, so the line — a dead-letter redelivery
+summary, a scheduler refusal — never reaches the log file or the event stream;
+under pytest the capture handler re-raises it, which is how it stayed hidden
+until a test happened to run with the root logger at INFO.
+
+## Rule 1: loguru loggers
 
 A call `<logger>.<level>(message, *args, **kwargs)` — level one of `trace`,
 `debug`, `info`, `success`, `warning`, `error`, `critical`, `exception`, or
@@ -37,12 +50,31 @@ or a name assigned from one of those through `.bind(...)` / `.opt(...)` /
 `.patch(...)`; calls through a `.bind/.opt/.patch` chain are checked too. A
 name that the module also binds any other way (a stdlib
 `logging.getLogger(...)`, a parameter, a loop target) is ambiguous and is not
-checked, so a stdlib logger — whose `%s` is correct — is never flagged.
+checked by this rule.
+
+## Rule 2: stdlib loggers
+
+A call `<logger>.<level>(message, *args)` — level one of `debug`, `info`,
+`warning`, `warn`, `error`, `critical`, `fatal`, `exception`, or
+`log(level, message, ...)` — on a stdlib logger is flagged when `message` is a
+string literal (or an f-string, checked on its literal parts) that has a `{}`
+field (`{}`, `{0}`, `{name}`, `{:.2f}`; `{{` is not one) and no printf
+conversion, and the call passes positional arguments. Keyword arguments
+(`exc_info=`, `extra=`) are not format arguments and do not count.
+
+A stdlib logger is a name every binding of which, in the module, is an
+assignment from `logging.getLogger(...)` (or a `from logging import getLogger`
+alias, or `.getChild(...)` of a stdlib logger), the call expression itself
+(`logging.getLogger(__name__).warning(...)`), or the root-logger shortcut
+`logging.info(...)`. The distinction is by variable, not by file, so a module
+that holds both a loguru `logger` and a stdlib `_log` is checked correctly on
+both; a name the module also binds any other way (a `from base.log import
+logger as _log`, a parameter, a loop target) is ambiguous and is not checked.
 
 ## Exemption
 
 `# log-format-ok: <reason>` on any line of the call, for a deliberate literal
-`%` sequence (for example a test that proves the drop).
+`%` or `{}` sequence (for example a test that proves the drop).
 
 Error format `file:line: <message>` + non-zero exit.
 """
@@ -66,11 +98,18 @@ _LEVEL_METHODS = frozenset(
     {"trace", "debug", "info", "success", "warning", "error", "critical", "exception"}
 )
 _CHAIN_METHODS = frozenset({"bind", "opt", "patch"})
+# stdlib `logging.Logger` has no trace/success; it does have the `warn` / `fatal` aliases.
+_STDLIB_LEVEL_METHODS = frozenset(
+    {"debug", "info", "warning", "warn", "error", "critical", "fatal", "exception"}
+)
 _EXEMPT_MARKER = "# log-format-ok:"
 
 # One printf conversion: %[(key)][flags][width][.precision]type. The space flag
 # is left out on purpose so prose such as "100% done" is not read as `% d`.
 _PRINTF_RE = re.compile(r"%(?:\([^)]*\))?[#0+\-]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[diouxXeEfFgGcrsa]")
+
+# One `str.format` replacement field once the `{{` / `}}` escapes are removed.
+_BRACE_FIELD_RE = re.compile(r"\{[^{}]*\}")
 
 
 def _bound_names(target: ast.expr) -> list[str]:
@@ -168,6 +207,77 @@ class _Bindings:
         return False
 
 
+class _StdlibBindings:
+    """Which names in one module are stdlib loggers, and which names are the `logging` module."""
+
+    def __init__(self, tree: ast.Module) -> None:
+        self.modules: set[str] = set()  # `import logging [as lg]`
+        self.factories: set[str] = set()  # `from logging import getLogger [as g]`
+        imported = self._scan_imports(tree)
+        self.names: set[str] = set()
+        derivations = self._add_derived_loggers(tree)
+        other = set(imported)
+        for node in ast.walk(tree):
+            if id(node) not in derivations:
+                other.update(_names_bound_by(node))
+        self.names -= other
+
+    def _scan_imports(self, tree: ast.Module) -> set[str]:
+        """Record the `logging` aliases and return every name any import binds."""
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imported.add(alias.asname or alias.name.partition(".")[0])
+                    self._note_module_alias(alias)
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    imported.add(alias.asname or alias.name)
+                    if node.level == 0 and node.module == "logging" and alias.name == "getLogger":
+                        self.factories.add(alias.asname or alias.name)
+        return imported
+
+    def _note_module_alias(self, alias: ast.alias) -> None:
+        """`import logging [as lg]` and `import logging.handlers` bind the `logging` module."""
+        if alias.name == "logging":
+            self.modules.add(alias.asname or "logging")
+        elif alias.asname is None and alias.name.startswith("logging."):
+            self.modules.add("logging")
+
+    def _add_derived_loggers(self, tree: ast.Module) -> set[int]:
+        """Add names assigned from a stdlib logger (`_log = logging.getLogger(...)`), to a
+        fixed point; return the ids of those deriving assignments."""
+        assigns = [n for n in ast.walk(tree) if isinstance(n, (ast.Assign, ast.AnnAssign))]
+        derivations: set[int] = set()
+        grew = True
+        while grew:
+            before = len(self.names)
+            for node in assigns:
+                if node.value is not None and self.is_stdlib(node.value):
+                    derivations.add(id(node))
+                    self.names.update(_names_bound_by(node))
+            grew = len(self.names) > before
+        return derivations
+
+    def is_stdlib(self, expr: ast.expr) -> bool:
+        """A stdlib logger, or a `logging.getLogger(...)` / `<logger>.getChild(...)` call."""
+        if isinstance(expr, ast.Name):
+            return expr.id in self.names
+        if not isinstance(expr, ast.Call):
+            return False
+        func = expr.func
+        if isinstance(func, ast.Name):
+            return func.id in self.factories
+        if isinstance(func, ast.Attribute):
+            if func.attr == "getLogger":
+                return isinstance(func.value, ast.Name) and func.value.id in self.modules
+            return func.attr == "getChild" and self.is_stdlib(func.value)
+        return False
+
+    def is_logging_module(self, expr: ast.expr) -> bool:
+        return isinstance(expr, ast.Name) and expr.id in self.modules
+
+
 def _literal_text(node: ast.expr) -> str | None:
     """The literal text of a str constant, or the literal parts of an f-string."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -208,13 +318,44 @@ def _call_problem(node: ast.Call, bindings: _Bindings) -> str | None:
     return None
 
 
+def _stdlib_message_index(node: ast.Call, bindings: _StdlibBindings) -> int | None:
+    """Position of the message argument of a stdlib log call, or None. The receiver is a
+    stdlib logger or the `logging` module itself (the root-logger shortcuts)."""
+    func = node.func
+    if not isinstance(func, ast.Attribute):
+        return None
+    if not (bindings.is_stdlib(func.value) or bindings.is_logging_module(func.value)):
+        return None
+    index = 0 if func.attr in _STDLIB_LEVEL_METHODS else 1 if func.attr == "log" else None
+    return index if index is not None and len(node.args) > index else None
+
+
+def _stdlib_call_problem(node: ast.Call, bindings: _StdlibBindings) -> str | None:
+    index = _stdlib_message_index(node, bindings)
+    text = None if index is None else _literal_text(node.args[index])
+    if index is None or text is None or len(node.args) <= index + 1:
+        return None  # not a stdlib call with a literal message and positional arguments
+    if _PRINTF_RE.search(text.replace("%%", "")):
+        return None  # a printf conversion consumes the arguments
+    field = _BRACE_FIELD_RE.search(text.replace("{{", "").replace("}}", ""))
+    if field is None:
+        return None
+    return (
+        f"stdlib logging call uses the `str.format` field {field.group(0)!r} with positional "
+        "arguments; logging formats with `%`, so the field is left in the text and the "
+        "arguments raise TypeError at emit — use `%s` placeholders"
+    )
+
+
 def _is_exempt(node: ast.Call, lines: list[str]) -> bool:
     call_lines = lines[node.lineno - 1 : node.end_lineno or node.lineno]
     return any(_EXEMPT_MARKER in line for line in call_lines)
 
 
 def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int, str]]:
-    """Return [(lineno, message), ...] for loguru calls that drop their arguments.
+    """Return [(lineno, message), ...] for log calls whose message format does not match
+    their logger: loguru calls that drop their arguments, stdlib calls that cannot
+    consume them.
 
     Takes source rather than a path so the lint's own tests can drive it with
     literal snippets.
@@ -223,12 +364,13 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
         tree = ast.parse(src, filename=filename)
     except SyntaxError as exc:
         return [(exc.lineno or 1, f"could not parse: {exc}")]
-    bindings = _Bindings(tree)
+    loguru = _Bindings(tree)
+    stdlib = _StdlibBindings(tree)
     lines = src.splitlines()
     out: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            problem = _call_problem(node, bindings)
+            problem = _call_problem(node, loguru) or _stdlib_call_problem(node, stdlib)
             if problem is not None and not _is_exempt(node, lines):
                 out.append((node.lineno, problem))
     return sorted(out)
@@ -258,8 +400,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if total:
         print(
-            f"\n{total} loguru call(s) that drop their arguments. Use `{{}}` fields; see "
-            "the docstring at the top of scripts/lint/loguru_format.py.",
+            f"\n{total} log call(s) whose message format does not match the logger: loguru takes "
+            "`{}` fields, stdlib logging takes `%s`; see the docstring at the top of "
+            "scripts/lint/loguru_format.py.",
             file=sys.stderr,
         )
         return 1
