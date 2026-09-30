@@ -1,7 +1,8 @@
 # Verification boundaries: containers and Tart VMs in place of a local preview
 
-**Status: the Linux container recipe is built and has run; the Tart recipe is an
-experiment whose result is not in.** This is slice 6 of
+**Status: the Linux container recipe is built and has run; the Tart clone-inheritance
+experiment (Experiment B, below) has run and its result is in; `ava start` end to end
+inside a macOS guest has not been run.** This is slice 6 of
 [one cluster per host](one-cluster-per-host.md); the ruling and its reasons are in
 [one cluster per host](../../decisions/2026-09-30-one-cluster-per-host.md). The native
 local preview is deleted. This doc says what replaces it: which isolation boundaries
@@ -19,8 +20,10 @@ User rulings on this slice (2026-10-01):
 1. **The container recipe comes first.** It needs no new host software and no
    download beyond package installs, and it restores the one claim no CI job carries
    (a fresh `ava start` from source).
-2. **The Tart experiment runs in parallel** with it; its result is not in. Until it is,
-   the Tart sections below are design, not a recipe.
+2. **The Tart experiment runs in parallel** with it. Its result is in (Experiment B): a
+   clone of a granted image keeps the helper's signing identity and both grants, so the
+   Tart recipe is clone-per-run. What the experiment did not exercise, a full `ava start`
+   in a guest, stays design.
 3. **Tart uses the `base` image** (SIP disabled), not `vanilla`.
 4. **The model is scripted.** No verification boundary carries a provider key: the
    scripted scenario executes real code through the real gateway and agent host, and
@@ -38,7 +41,7 @@ source checkout `~/.ava/source`, the fixed port table. Two kinds are in this sli
 | Boundary | Status | Carries |
 |---|---|---|
 | Linux container (Recipe A) | built, `scripts/verify/` | source start, real agent execution with a scripted model, frontend and CORS over loopback |
-| Tart macOS VM (Recipe C) | experiment open | signed helper chain, launchd custody, desktop and headed-browser capabilities |
+| Tart macOS VM (Recipe C) | clone inheritance measured; `ava start` in a guest not run | signed helper chain, launchd custody, desktop and headed-browser capabilities |
 
 A Linux VM with systemd is a third form, used only when boot custody is the subject;
 it exists in CI (see "Other Linux forms").
@@ -253,7 +256,8 @@ to the hosted runners.
 
 ## Recipe C: Tart macOS VM
 
-**Design; the experiment that decides its shape is open.**
+**Design, with one measured result: Experiment B (below) measured whether a clone keeps the
+helper's identity and grants. A full `ava start` in a guest has not been run.**
 
 ### Prior art
 
@@ -268,15 +272,36 @@ grants, clones per run
 clone-inheritance claims differ and none uses a self-signed helper). Writing a
 virtualization layer directly would repeat Tart.
 
-### Numbers (known, measured against registry manifests and releases on 2026-10-01)
+### Numbers (known, measured against registry manifests and releases on 2026-10-01, and by the run in Experiment B)
 
-- Tart release archive: 22.9 MB (2.40.1). Install: `brew install openai/tools/tart`.
+- **Install Tart from the release archive, with its sha256 checked.** Download
+  `tart.tar.gz` from the release page of `github.com/openai/tart` (22.9 MB for 2.40.1;
+  `cirruslabs/tart` redirects to it), compare its sha256 with the digest the release
+  publishes (`tart_<version>_checksums.txt`; `363e2701154a8155cbc1bb6d845430c9b42697d2a186bc49574471ca2877db46`
+  for 2.40.1), extract `tart.app`, and put a one-line `exec` wrapper on `PATH`: the binary
+  runs from inside its bundle, which is also what Homebrew's own wrapper does. The app is
+  signed with a Developer ID and notarized (`codesign --verify --deep --strict` and
+  `spctl -a -vv` accept it).
+- **Why not Homebrew.** Homebrew 7 refuses a formula from a tap it was not told to trust
+  until `brew trust` runs, and that edits Homebrew's trust configuration. The
+  `openai/tools` tap also lagged the latest release (formula 2.38.0 while the release was
+  2.40.1) and its formula depends on `softnet`, which default NAT networking does not
+  need. The Tart documentation's quick start still names the older `cirruslabs/cli` tap.
+- **Pin the image by digest, not by tag.** The experiment used
+  `ghcr.io/cirruslabs/macos-tahoe-base@sha256:1b093499716409d29e8b5336844528e1cae375db97d2ad8e5aeff78cf0da201e`
+  (what `latest` resolved to on 2026-10-01; 96 layers; guest macOS 26.6.2).
+  `tart clone <image>@sha256:<digest> <name>` pulls and clones in one step.
 - Images `ghcr.io/cirruslabs/macos-tahoe-{vanilla,base}`: layers total 24.0 GB and 27.3 GB
-  compressed; logical disk 50 GB, sparse. On-disk size after pull is not measured. Clones
-  are copy-on-write and claim space only as they diverge.
+  compressed; logical disk 50 GB, sparse. **Measured disk use:** the pulled `base` image
+  plus its first clone took about 35 GB of the volume (free space fell by 35 GiB). Setting
+  up the golden image, taking three clones and booting each added about 4 GiB in total, so
+  a clone costs on the order of 1 GiB. `du` reports about 31 GB for every VM directory
+  because the shared APFS blocks are counted in each; `tart list` shows the logical size.
+  The pull took about 75 minutes, limited by the network.
 - `vanilla`: SIP on, auto-login, SSH, passwordless sudo, no guest agent. `base`: vanilla
-  plus Homebrew, git, Node, the Tart guest agent (`tart exec`), **SIP disabled**, and
-  pre-written TCC rows for ssh, osascript, python and the guest agent
+  plus Homebrew, git, Node, the Command Line Tools (`swiftc` is present), the Tart guest
+  agent (`tart exec`), **SIP disabled**, and pre-written TCC rows for ssh, osascript,
+  python and the guest agent, including a Screen Recording grant for the guest agent
   ([templates](https://github.com/cirruslabs/macos-image-templates/blob/main/scripts/update-tcc-database.sh)).
   Credentials `admin` / `admin`. **The decision is `base`** (see Decisions).
 - Licensing: at most two macOS VMs per Apple host, from the macOS license (section
@@ -284,7 +309,9 @@ virtualization layer directly would repeat Tart.
   testing) and enforced by the kernel
   ([Tart discussion](https://github.com/cirruslabs/tart/discussions/1054),
   [kernel quota](https://khronokernel.com/macos/2023/08/08/AS-VM.html)). Whether Linux
-  guests count toward that quota is not established by these sources. Tart itself is
+  guests count toward that quota is not established by these sources. **Two guests at 4 GB
+  each ran at once** on a host with 24 GB of memory (known), so the ceiling is the license's
+  two, not memory. Tart itself is
   FSL-1.1-ALv2 (no fee; Competing Use excluded; converts to Apache-2.0 two years after
   each release). The Cirrus Labs team joined OpenAI in April 2026 and the dedicated team
   moved on to other work
@@ -295,41 +322,141 @@ virtualization layer directly would repeat Tart.
   ([FAQ](https://tart.run/faq/)); `tart run --no-graphics`, `tart exec` (guest agent),
   `tart run --dir=name:path:ro` (macOS guests mount it under
   `/Volumes/My Shared Files/name`).
+- **A headless guest has no display device.** `--no-graphics` removes it. The guest still
+  has an auto-login session and a launchd-loaded helper, and both `ping` booleans
+  (`preflight_screen`, `ax_trusted`) and the TCC rows are readable (known: the second boots
+  of R1 and R2 were headless). But `screencapture` has no screen to read, so a failed
+  capture in a headless guest cannot tell a missing grant from a missing display. Every
+  check that needs a capture boots with graphics (a window on the host's display; `--vnc`
+  was not tried).
 
 ### Golden image (one-time, user present)
 
-From `macos-tahoe-base`: add the toolchain (`uv`, Node 22, `redis@8.2`, `pgbouncer`,
-`pgvector`), then, with the same code the start path uses, create the signing identity
-(`services.permissions_helper.lifecycle.ensure_signing_cert`), build and sign the helper,
-load it, and grant Screen Recording and Accessibility in System Settings. Record the
-identity's SHA-1, the designated requirement and the TCC rows. Leave no cluster home in
-the golden image.
+From `macos-tahoe-base` pinned by digest, 4 CPUs and 8 GB (`tart set <name> --cpu 4 --memory 8192`).
+Steps 1 to 4 prepare a signed, loaded helper; the experiment ran them (known), except the
+toolchain for a full start, which is design.
 
-Grant routes: (1) click once in the golden image, then clone (the route under test); (2)
-on the SIP-off `base`, write the rows into `TCC.db` with a code requirement compiled from
-the helper's designated requirement (the Cirrus script does this for other clients; Ava's
-own notes call direct writes unverified on macOS 26; the user database moves into a
-per-user container in macOS 27); (3) MDM cannot grant Screen Recording, only deny it or
-let a standard user approve
+1. **Toolchain.** `swiftc` is already in the image. Add `uv` at the release CI pins,
+   installed from the release archive with its sha256 checked, and a checkout of the commit
+   at `~/.ava/source` (a checkout at that path anchors the home to `~/.ava`), then
+   `uv sync --frozen`. A full start also needs `redis@8.2`, `pgbouncer`, `pgvector` and Node
+   22 (design).
+2. **Identity.** With the same code the start path uses,
+   `services.permissions_helper.lifecycle.ensure_signing_cert()` imports the self-signed
+   identity with `-T /usr/bin/codesign -A`.
+3. **Key access: the one step the start path does not do.** On a headless guest the first
+   `lifecycle.converge()` fails in the signing probe: signing with the new identity blocks on
+   an interactive dialog nobody can answer, the probe times out after 20 seconds and
+   converge raises `PermissionsHelperSigningUnavailableError`. The keychain is not locked;
+   what blocks is the private key's partition list, which the import leaves short of
+   `codesign`. Set it once, with the remedy `services/permissions_helper/lifecycle.py` names:
+
+   ```
+   security set-key-partition-list -S apple-tool:,apple: -s \
+     -l 'Ava Permissions Helper Code Signing' -k <account password> <login keychain>
+   ```
+
+   The key's access control lives in the keychain file, so a clone signs without a dialog:
+   each of the five clone boots of the experiment (three with graphics, two headless) passed
+   a signing probe before any unlock.
+4. **Build, sign, load.** `lifecycle.converge()` builds the helper with `swiftc`, signs it
+   with the hardened runtime, pins the designated requirement to the identity's SHA-1,
+   writes the LaunchAgent, bootstraps it and pings. At this point the helper answers with
+   both booleans false.
+
+No cluster is started in the golden image, so it carries no cluster state; the helper
+artifact under `~/.ava/helper` and its LaunchAgent stay in it (route R1 below).
+
+### First grant (user present, once)
+
+1. Boot the golden image with graphics (`tart run`, no `--no-graphics`). At start the helper
+   registers itself in both lists (`registerPermissions` in
+   `services/permissions_helper/helper/main.swift`), so both entries already exist and need
+   only a toggle.
+2. System Settings > Privacy & Security > Screen & System Audio Recording: turn on
+   AvaPermissionsHelper. Accessibility: turn on AvaPermissionsHelper. Authenticate with the
+   account password.
+3. **Restart the helper after the toggles.** Either choose "Quit & Reopen" when macOS offers
+   it (never "Later"), or run `launchctl kickstart -k gui/<uid>/<label>` in the guest. macOS
+   applies a Screen Recording grant to a process only if the process started after it: in
+   the experiment the helper that was already running reported `preflight_screen` false for
+   as long as it lived, while the system TCC row already said allowed and the `screencapture`
+   child it spawns already worked. `ax_trusted` flipped to true in the same process about a
+   minute after its first false reading. After the restart both were true.
+4. Verify, in the golden image, before anything is cloned: `ping` reports both booleans
+   true; the two rows for `com.ava.permissions-helper` in the system `TCC.db` have
+   `auth_value` 2 and a code requirement that embeds the identity's SHA-1; a real capture
+   through the helper is not a uniform image. Record the identity's SHA-1, the designated
+   requirement (`codesign -d -r-`) and the rows.
+5. Shut the guest down with `sudo /sbin/shutdown -h now` (plain `shutdown` is not on sudo's
+   `PATH`) and wait for `tart run` to exit. `tart exec` reports "Transport became inactive"
+   at that moment, which is normal. Clone only from a stopped image.
+
+Grant routes: (1) click once in the golden image, then clone (taken; it works, see
+Experiment B); (2) on the SIP-off `base`, write the rows into `TCC.db` with a code
+requirement compiled from the helper's designated requirement (the Cirrus script does this
+for other clients; Ava's own notes call direct writes unverified on macOS 26; the user
+database moves into a per-user container in macOS 27); (3) MDM cannot grant Screen
+Recording, only deny it or let a standard user approve
 ([PPPC overview](https://www.iru.com/blog/archive/changes-to-pppc-in-macos-big-sur)).
+Routes (2) and (3) are not needed while route (1) holds.
 
 ### Per run
 
-`tart clone` the golden image; `tart run --no-graphics --dir=src:<repo>:ro`; `tart exec` to
-unlock the guest login keychain (the signing probe refuses or hangs on a locked one),
-clone the commit from the shared directory into `~/.ava/source` (local disk, not the
-virtio-fs share), sync dependencies, start, observe, copy evidence out, stop and delete
-the clone. Observation runs in the guest; a host browser pointed at a forwarded guest port
-has the same port-number problem as in Recipe A. The container's observer is reusable in
-the guest: it reads only the home and the checkout.
+`tart clone` the golden image; `tart run --no-graphics --dir=src:<repo>:ro` (add graphics
+only for a check that needs a capture); wait until `tart exec <vm> true` succeeds (5 to 15
+seconds in the experiment). The LaunchAgent loads at login and the helper answers `ping`
+with both booleans true about a minute after boot, while the guest is still busy starting.
+The login keychain needs no unlock in the boots tried (auto-login opens it); keep
+`security show-keychain-info` as a guard and unlock only if it fails. Clone the commit from
+the shared directory into `~/.ava/source` (local disk, not the virtio-fs share), sync
+dependencies, start, observe, copy evidence out, stop and delete the clone. Observation
+runs in the guest; a host browser pointed at a forwarded guest port has the same
+port-number problem as in Recipe A. The container's observer is reusable in the guest: it
+reads only the home and the checkout.
+
+**A helper rebuild inside a used home needs the job retired first.** When the commit under
+test changes the helper's inputs, the start rebuilds it, and replacing an installed, loaded
+helper is refused by design (read in the code, not triggered in the run: `install_and_load`
+raises "loaded helper differs from the requested artifact"; `require_retired_helper`
+demands no loaded job, no plist and no live process). The order R2 followed, and that
+worked: `launchctl bootout gui/<uid>/<label>` from outside the helper's tree, delete the
+LaunchAgent plist, delete the home, re-clone, sync, then `lifecycle.converge()`. A build
+that changes nothing is skipped, so most runs never reach this.
+
+### Observing a guest
+
+- **`ping`** through the real client: `preflight_screen` and `ax_trusted`. Readable
+  headless.
+- **TCC rows**, read-only: `sqlite3 -readonly` on the system database
+  (`/Library/Application Support/com.apple.TCC/TCC.db`). The Screen Recording and
+  Accessibility rows for `com.ava.permissions-helper` live there, not in the user database.
+  `auth_value` 2 is allowed, 0 is denied; the helper writes the denied rows itself at its
+  first start, and its csreq embeds the identity's SHA-1. Never write these rows to make a
+  check pass.
+- **A real capture through the helper** (graphics only), judged by pixel statistics (distinct
+  colors and the share of the commonest one) and by looking at the image, copied out as
+  base64 over `tart exec` output.
+- **The guest agent as a second observer.** The `base` image pre-grants Screen Recording to
+  the guest agent, so `tart exec <vm> screencapture -x <file>` shows the screen whatever the
+  helper holds. That is how a dialog in an ungranted clone is seen without touching it.
+- **What shows on screen after boot.** Every granted guest shows an "App Background
+  Activity" banner for the LaunchAgent (the background item is `[enabled, allowed,
+  notified]` in `sfltool dumpbtm`). It is informational, needs no click, and is not a
+  consent dialog; a screenshot check for dialogs must tell it apart. An ungranted clone
+  shows a real Accessibility consent dialog (Open System Settings / Deny); do not answer
+  it, because answering writes the TCC row.
 
 ### Limits
 
-Two macOS VMs at a time, golden image included while it runs. The helper's grants are keyed
-to the bundle id and the certificate's designated requirement. The onboarding note records
-that a same-identity rebuild kept the Screen Recording and folder grants, an identity change
-drops them, and other notes say a rebuild resets Accessibility and some extended rows
-(unknown 2). A rebuild is skipped when the source and the requirement hash are unchanged.
+Two macOS VMs at a time, golden image included while it runs (known: two guests ran at
+once). The helper's grants are keyed to the bundle id and the certificate's designated
+requirement. The onboarding note records that a same-identity rebuild kept the Screen
+Recording and folder grants, an identity change drops them, and other notes say a rebuild
+resets Accessibility and some extended rows. In R2 a same-identity, same-source rebuild
+reproduced the same CDHash and kept both grants; it did not change the code, so whether a
+rebuild that changes the CDHash resets Accessibility is untested (unknown 2). A rebuild is
+skipped when the source and the requirement hash are unchanged.
 
 ## Surfaces only macOS can verify, and what CI keeps
 
@@ -349,22 +476,30 @@ in the helper, so they stay on the VM.
 
 ## Not yet known
 
-Tart (the open experiment):
+Tart. Items 1 to 3 are answered by Experiment B and stay here so the numbers used above
+keep their meaning:
 
-1. **Does a clone of a granted image keep the signing identity and the grants?** Inferred
-   yes: a clone copies config, NVRAM and disk and regenerates only the MAC address
-   (`VMDirectory.clone`), so the keychain file and both TCC databases are byte-identical.
-   Untested for this helper.
-2. Whether a helper rebuilt in a clone (fresh home, same identity) keeps Accessibility; the
-   client's own diagnostic says a rebuild resets it once.
-3. Whether the helper chain and signing work under `tart exec` and the auto-login session
-   with no extra approval, and whether the keychain needs unlocking each boot.
+1. **Answered: a clone of a granted image keeps the signing identity and both grants.** The
+   SHA-1, the designated requirement, the CDHash and the TCC rows were identical in the
+   golden image and in every clone, both helper booleans were true on the first boot, and
+   the ungranted control reported false. One clone per verification is enough; no click per
+   clone.
+2. **Answered in part: a helper rebuilt in a clone (fresh home, same identity, same source)
+   keeps both grants** and reproduces the CDHash. Still untested: a rebuild that changes the
+   CDHash (a source change), which is the case the client's own diagnostic says resets
+   Accessibility once.
+3. **Answered: the helper chain and signing work under `tart exec` and the auto-login
+   session with no approval at clone time**, once the key's partition list is set in the
+   golden image; the keychain needed no unlock at any of the five clone boots. Two things the
+   design missed:
+   the partition list (not a locked keychain) is what stops signing, and a Screen
+   Recording grant reaches a helper only after it restarts (see "First grant").
 4. Whether Screen Recording re-prompts on a schedule in a long-lived golden image (macOS 15
    prompts monthly per app; state lives in
    `~/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist`; macOS
    26 behavior not checked).
 5. Whether Linux guests count toward the two-VM kernel quota, and whether the Linux
-   container runtime's VM does.
+   container runtime's VM does. (Two macOS guests at once is known to work.)
 
 Container:
 
@@ -377,22 +512,73 @@ Container:
 8. A browser UI check (Chromium in the image) and real provider behavior are not carried;
    each needs its own decision.
 
-## Experiment B: clone inheritance, outside the repository
+## Experiment B: clone inheritance, outside the repository (run 2026-10-01)
 
-Answers unknowns 1 to 4 and decides whether the Tart recipe is clone-per-run or
-click-per-run. Runs in parallel with Recipe A; result not in.
+Answered unknowns 1 to 3 and decided that the Tart recipe is clone-per-run, not
+click-per-run. It ran in parallel with Recipe A. The protocol, as run:
 
-1. Clone `macos-tahoe-base` to `ava-golden`; 4 CPUs, 8 GB.
-2. In the golden image, with a scratch checkout: create the identity, build and load the
-   helper, grant Screen Recording and Accessibility by hand. Record: identity SHA-1;
-   `codesign -d -r-` output; TCC rows for `com.ava.permissions-helper` (user and system
-   databases, including the code requirement blob); helper `ping` fields `preflight_screen`
-   and `ax_trusted`; a real capture that is not uniform.
-3. Take two clones of the golden image: R1 with the helper artifact present, R2 with `~/.ava`
-   removed before cloning (first start rebuilds the helper). A third clone taken before the
-   grants is the negative control.
-4. Boot each headless, unlock the keychain, repeat the recording.
-5. Stop and start R1 again; run R1 and R2 at once.
-6. Pass: R1 and R2 report the same SHA-1 and requirement and both grants true with no dialog;
-   control reports false. R1 only: bake the helper artifact outside the home. Neither: try
-   route 2, else count the clicks per clone (two toggles and a password).
+1. Clone `macos-tahoe-base` (by digest) to `ava-golden`; 4 CPUs, 8 GB.
+2. In the golden image: check out the commit at `~/.ava/source`, create the identity, set the
+   key's partition list, build and load the helper, and (user present) grant Screen Recording
+   and Accessibility by hand, then restart the helper ("Golden image" and "First grant").
+   Record: identity SHA-1; `codesign -d -r-` output; TCC rows for
+   `com.ava.permissions-helper` (user and system databases, including the code requirement
+   blob); helper `ping` fields `preflight_screen` and `ax_trusted`; a real capture that is not
+   uniform. Shut the golden image down.
+3. A clone taken **before** the grants is the negative control (taken while the golden image
+   was stopped, never booted before the grants). After the grants, two more clones: R1 keeps
+   the helper artifact in its home. R2 is booted once, then its helper job is retired
+   (`launchctl bootout`, plist deleted), `~/.ava` (source included) is deleted, the same
+   commit is cloned again, and `lifecycle.converge()` rebuilds the helper.
+4. Boot each one at a time, with graphics so a capture is possible, and repeat the recording.
+   The login keychain was checked and unlocked first.
+5. Stop and start R1 again headless; then run R1 and R2 at once, headless, at 4 GB each.
+6. Pass: R1 and R2 report the same SHA-1 and requirement and both grants true with no
+   consent dialog; the control reports false. R1 only: bake the helper artifact outside the
+   home. Neither: try route 2, else count the clicks per clone (two toggles and a password).
+
+### Results (known)
+
+Every guest, control included, carried one identity and one designated requirement
+(`identifier "com.ava.permissions-helper" and certificate leaf = H"<the identity's SHA-1>"`),
+and one CDHash (read directly in the golden image, in R2 after its rebuild and in the
+concurrent run; the other guests carry the byte-identical helper file).
+
+| Guest | `preflight_screen` / `ax_trusted` | system TCC `auth_value` (Screen Recording, Accessibility) | Real capture | Consent dialog |
+|---|---|---|---|---|
+| golden, helper started before the grant | false / false, then false / true | 2, 2 | not uniform | none seen |
+| golden, helper restarted | true / true | 2, 2 | not uniform | none |
+| R1, first boot | true / true | 2, 2 | not uniform | none |
+| R1, second boot (headless) | true / true | 2, 2 | no display | not observable |
+| R2 before the rebuild | true / true | 2, 2 | not uniform | none |
+| R2 after the rebuild | true / true | 2, 2 | not uniform | none |
+| R2, second boot (headless) | true / true | 2, 2 | no display | not observable |
+| control (clone taken before the grants) | false / false | 0, 0 | failed (`screencapture` exit 1, with graphics) | Accessibility consent dialog |
+
+Two more boots ran at the same time (R1 and R2, headless, 4 GB each) and both reported
+true / true with the rows above.
+
+What the run showed:
+
+- **The clone keeps identity and grants.** The SHA-1, the designated requirement, the CDHash
+  and both TCC rows (auth value and code requirement blob) were identical in the golden
+  image and in both clones. Helpers that started at clone boot reported both booleans true
+  at their first `ping`, with no restart and no dialog seen. The result is the pass case:
+  clone-per-run, and the R1 route (helper artifact left in the image) is enough.
+- **The keychain file hash is not an invariant.** It differs after every unlock or boot
+  (macOS rewrites the file), so compare the identity, the designated requirement and the
+  code requirement in the TCC rows instead.
+- **R2's rebuild kept the grants.** The rebuilt helper has the same CDHash and the same
+  source hash as the original; its file sha256 differs only because the signing time is
+  inside the Mach-O. Both booleans were true at once, with no dialog.
+- **The negative control shows the prompt path works.** Without the grant the helper
+  reported false / false, its capture failed even with a display, and macOS put up the
+  Accessibility consent dialog. It also shows why a failed capture in a headless guest
+  proves nothing: here, with a display, the failure is the missing grant.
+- **Timing.** Guest agent ready in 5 to 15 seconds; helper answering `ping` with both
+  booleans true about a minute after boot; `converge()` 39 seconds for the first build in
+  the golden image (identity already present) and 5.5 seconds for R2's rebuild.
+
+Not exercised: a rebuild that changes the CDHash; `ava start` (services, data plane, root)
+inside a guest; a capture from a headless guest with the grants held (no display); `--vnc`;
+the golden image drifting over days (unknown 4); Linux guests against the two-VM quota.
