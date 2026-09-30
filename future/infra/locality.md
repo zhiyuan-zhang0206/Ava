@@ -7,11 +7,9 @@ and 5 (`scripts/lint/code_structure.py`, `scripts/structure/locality.py`); how t
 work with them is in [python-conventions](../../conventions/python-conventions.md).
 The principle itself lives in the serious-engineering skill
 (`principles/complexity-management`, "Locality is information hiding made
-observable"). Two instruments complement the gate: contract snapshots of the
-core doors (`scripts/structure/contracts.py`, `lint-contract-snapshots`) make a
-contract change visible in review, and the sweeper's `locality` class
-(`scripts/structure/cochange.py`) indexes per-change package spread and
-cross-package co-change pairs. This page tracks what is **left**.
+observable"). The sweeper's `locality` class (`scripts/structure/cochange.py`)
+indexes per-change package spread and cross-package co-change pairs. This page
+tracks what is **left**.
 
 ## Calibration snapshot (2026-09-26)
 

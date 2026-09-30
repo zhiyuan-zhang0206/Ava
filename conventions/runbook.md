@@ -2296,13 +2296,13 @@ they create:
   under its own `branch-lint` lock) when `origin/main` is not locally
   resolvable — fetch first for full local coverage.
 - `lint-prepush-artifact-freshness` unconditionally (`always_run: true`)
-  re-checks the generated-artifact/snapshot family (contract snapshots,
-  types/constants codegen, the events registry, the config-lite table, OKF
-  lint, doc references) on every push, ignoring every `files:` filter. A
+  re-checks the generated-artifact family (types/constants codegen, the events
+  registry, the config-lite table, OKF lint, doc references) on every push,
+  ignoring every `files:` filter. A
   `files:`-filtered hook never sees a purely deleted path on any range —
   pre-commit's own diff selection passes it only Added/Copied/Modified/Renamed
-  paths — so a change that only deletes the last file behind a public symbol,
-  event, or config field can otherwise reach `git push` with a stale snapshot
+  paths — so a change that only deletes the last file behind an event or config
+  field can otherwise reach `git push` with a stale artifact
   and nothing local catching it. It is cheap (whole-repo, no DB/network) and
   does not skip under load; `types-codegen-fresh` alone still skips when
   `ui/web/node_modules` is missing, same as the frontend pre-push hooks.

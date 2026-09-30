@@ -39,7 +39,7 @@ OTHER_CI = {
 PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint", "frontend-vitest"}
 # Pre-push-stage-only hooks with no direct 1:1 CI job duplicate: local
 # safety nets that re-run the pre-commit stage over the real branch diff, and
-# an unconditional rerun of the generated-artifact/snapshot family. Unlike
+# an unconditional rerun of the generated-artifact family. Unlike
 # PREPUSH, CI does not run these by name -- it already covers the same
 # ground unconditionally via backend-structure's / merged-tree-structure's own
 # `--all-files` runs of the underlying (filtered) hooks, so no CI job needs a
