@@ -12,8 +12,7 @@ release the lease.
 
 A holder on *another* machine cannot be pid-probed from here and is conservatively
 treated as live (refuse rather than risk clobbering a real owner); wait out its
-TTL or run this on that host. Prepared release operations are not recovered here:
-they continue by resubmitting their captured request.
+TTL or run this on that host.
 """
 
 from __future__ import annotations

@@ -3,8 +3,8 @@
 Owns the public entry port (the `frontend` slot), serves the login and
 unavailable pages, and proxies the Next.js app on the separate `app` slot. Root
 starts, monitors, and stops Gate with the selected application services. Planned
-root shutdown — a release transition included — closes the entry listener, so
-Gate never describes a transition it is not running through.
+root shutdown closes the entry listener, so Gate never describes a transition
+it is not running through.
 
 Auth is the gateway's session cookie (host-only, shared across ports). The gate
 forwards Cookie to `GET /api/auth/check` and serves login/app. Every transport

@@ -66,12 +66,9 @@ PORT_OFFSETS: dict[str, int] = {
     # an existing cluster's registry record pins its block base, so renumbering a
     # live offset would move a running daemon's port out from under it.
     "agent_host": 19,
-    # The fleet release coordinator's authenticated listener, bound only while
-    # a release operation runs (units pull instructions from it while the
-    # gateway application is down). It takes offset 20, which the removed
-    # idle-shell-reminder daemon vacated on 2026-08-27: nothing binds it on an
-    # existing cluster, so reusing it moves no live port and keeps every block
-    # (and BLOCK_SIZE) unchanged.
+    # Retired service slot (the fleet release coordinator's listener, removed
+    # with the release path): reserved for existing home records, whose
+    # reservation names it; never reused.
     "coordinator": 20,
     # The backup scheduler is a first-class health daemon. Append its slot so
     # existing cluster records retain their assigned ports.
@@ -151,6 +148,6 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     # The memory search service's TCP port (like milvus's 19530, not a health
     # port — its healthcheck probes the real /search endpoint).
     "memory_search": 19531,
-    # The release coordinator listener (not a health port; see PORT_OFFSETS).
+    # Retired: the release coordinator listener's slot (see PORT_OFFSETS).
     "coordinator": 8121,
 }
