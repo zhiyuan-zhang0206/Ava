@@ -1476,6 +1476,44 @@ does not deploy it or change a running operation's captured decision. `ava stop`
 asks for confirmation unless `-y` is supplied.
 
 
+### Updating a networked cluster in source mode
+
+A cluster whose units span machines, each running from `$HOME/.ava/source`, is
+updated by stopping every unit, switching every checkout and starting again
+([decision](../decisions/2026-09-30-networked-cluster-stays-on-source-updates.md)).
+`python -m cli.fleet_update` runs it from the operator's development checkout
+over key-based SSH, in two halves; any manual step the release needs goes in
+between:
+
+```bash
+.venv/bin/python -m cli.fleet_update down --new NEW_SHA \
+  --gateway GATEWAY --runner RUNNER [--runner ...] --log-dir DIR
+# manual release steps, if any
+.venv/bin/python -m cli.fleet_update up --gateway GATEWAY --runner RUNNER [--runner ...] --log-dir DIR
+```
+
+- `down` refuses (exit 2, nothing changed) when a checkout has a
+  `post-checkout` hook, uncommitted changes or `$HOME/.ava/updates/active`,
+  when a host holds maintenance other than a completed stop, when the hosts
+  disagree on HEAD, when `.python-version` changes without
+  `--allow-python-change`, or when it runs inside an Ava agent's shell. It
+  prints `git diff --stat OLD..NEW` over migrations, helper sources and locks,
+  fetches NEW on every host, runs `ava stop -y --timeout 600` on each runner and
+  then the gateway (each must leave phase `stopped` with no failures), then on
+  every host checks out NEW detached, repairs legacy read-only venv
+  directories and runs `uv sync --frozen`.
+- `up` runs `ava start` on the gateway (its cold start applies migrations),
+  then on each runner; on macOS as a one-time LaunchAgent in `gui/<uid>`,
+  because signing the helper needs the login keychain (the user must be
+  logged in to the GUI). Each start must release its hold; every roster
+  machine must be online with checkout and running code on one commit; then
+  the gateway smoke-tests each agent-runner with a real agent, reading its own
+  address and bearer in place.
+- The first failure stops a half and nothing rolls back: fix the cause and
+  rerun the whole half, which is idempotent. `--dry-run` runs only the
+  read-only checks and prints the effects. Output is redacted and tee'd to
+  `DIR`.
+
 ### Agent recovery after a provider billing stoppage
 
 A provider balance exhaustion (e.g. DeepSeek HTTP 402) classifies as a
