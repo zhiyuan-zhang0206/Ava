@@ -3,7 +3,7 @@ type: doc
 title: Process Supervision
 description: Native sessions, PTY-hosted agent shells, start-serving readiness gating, daemon health/liveness, and OS-scheduler-owned watchdog/log maintenance.
 tags:
-- shared
+- base
 - library
 - process-supervision
 ---

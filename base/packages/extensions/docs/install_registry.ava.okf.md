@@ -3,7 +3,7 @@ type: doc
 title: Install Registry (`installed.json`)
 description: '`base/packages/extensions/install_registry.py` — the machine-local, NOT DB-backed registry of externally installed skills / plugins / MCP packages. It is also the gate: `$AVA_HOME/skills/` is the single skill load dir, and only registered + enabled entries are scanned.'
 tags:
-- shared
+- base
 - library
 - packaging
 ---

@@ -3,7 +3,7 @@ type: doc
 title: "PTY session kill — the whole membership, frozen then killed"
 description: "Killing a PTY session takes the shell, its descendants and every process in the shell's POSIX session, pinned by birth identity, frozen with SIGSTOP and SIGKILLed children first; the session id is used only while a live captured member (or a proof under a second old) shows it still names the shell's session; a setsid'd process that left the tree is sovereign and survives."
 tags:
-- shared
+- base
 - pty
 - sessions
 ---

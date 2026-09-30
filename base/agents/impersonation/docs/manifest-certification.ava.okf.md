@@ -3,7 +3,7 @@ type: doc
 title: Impersonation manifest certification
 description: Producer-led delivery certification, trusted controller boundary, and operator evidence.
 tags:
-- shared
+- base
 - impersonation
 - observability
 ---

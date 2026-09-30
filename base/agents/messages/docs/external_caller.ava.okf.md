@@ -3,7 +3,7 @@ type: doc
 title: "External Caller Profiles"
 description: "Explicit subprocess provenance for external tools, separate from authenticated credentials and gated by consumer compatibility."
 tags:
-- shared
+- base
 - identity
 ---
 

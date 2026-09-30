@@ -3,7 +3,7 @@ type: doc
 title: "OTLP exit flush"
 description: "Both SDK providers build with `shutdown_on_exit=False`; `base.telemetry._drain_on_exit` is the single ordered exit seam, and the short-process / hard-exit semantics stay accepted."
 tags:
-- shared
+- base
 - telemetry
 - otlp
 - observability

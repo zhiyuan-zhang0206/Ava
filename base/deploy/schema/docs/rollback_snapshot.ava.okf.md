@@ -3,7 +3,7 @@ type: doc
 title: Rollback Snapshot Convention
 description: Shared naming predicate for finite migration recovery tables and their archival retirement guard.
 tags:
-- shared
+- base
 - migrations
 ---
 

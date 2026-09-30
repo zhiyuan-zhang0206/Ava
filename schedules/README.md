@@ -115,8 +115,8 @@ as before.
   dry-imports every schedule's DB-embedded script — stopped rows included —
   against the checkout it runs from: `py_compile` plus a top-level-imports-only
   execution in the checkout's runner venv. Nothing is started, stopped, or
-  written, and the drift class that bit twice (a module move — e.g.
-  `shared.watcher` -> `base.daemon.schedules.watcher` — leaving stale in-store
+  written, and the drift class that bit twice (a module move — e.g. the
+  watcher module's move to `base.daemon.schedules.watcher` — leaving stale in-store
   imports that crash-loop the next (re)start, task #4800) is caught by its
   `RED id=<id> name=<name> missing=<module|compile-error:<l>:<m>|...>` lines
   before it can fire. Exit codes: 0 clean / 1 red / 2 tool error. Run it on the

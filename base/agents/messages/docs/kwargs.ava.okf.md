@@ -3,7 +3,7 @@ type: doc
 title: Message Metadata Contract
 description: '`base/agents/messages/kwargs.py` — the message-level contract: strongly-typed `ava_*` metadata carried inside a LangChain message''s `additional_kwargs`. A leaf both the agent and the gateway import, so writers and readers of that dict share one vocabulary without an agent↔gateway cycle.'
 tags:
-- shared
+- base
 - library
 - agent-lifecycle
 ---

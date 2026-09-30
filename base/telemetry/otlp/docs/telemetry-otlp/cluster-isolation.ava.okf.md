@@ -3,7 +3,7 @@ type: doc
 title: "Telemetry cluster isolation"
 description: "The home-derived cluster identity and lgtm-host gates that keep co-located Ava homes from sharing observability by accident."
 tags:
-- shared
+- base
 - telemetry
 - otlp
 - observability

@@ -3,7 +3,7 @@ type: doc
 title: PTY session liveness
 description: Matching process identity does not make an unreaped zombie executable.
 tags:
-- shared
+- base
 - pty
 ---
 

@@ -2,7 +2,7 @@
 type: doc
 title: Agent observation evidence
 description: Independent machine-probe and runtime-lease clocks, without changing lifecycle intent.
-tags: [shared, observability]
+tags: [base, observability]
 ---
 
 # Agent observation evidence

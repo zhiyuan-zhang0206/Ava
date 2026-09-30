@@ -3,7 +3,7 @@ type: doc
 title: Log sinks
 description: 'The three loguru sink types the `base/log/__init__.py` init entry points assemble — stderr, the JSONL file and the unified event pipeline — how every sink is registered with `diagnose` off, and the stdlib interception that routes `logging.getLogger` records into them.'
 tags:
-- shared
+- base
 - library
 - observability
 ---

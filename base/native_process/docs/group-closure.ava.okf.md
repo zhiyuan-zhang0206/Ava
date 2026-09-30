@@ -3,7 +3,7 @@ type: doc
 title: Process-group closure core
 description: The one standard-library primitive that proves a launched process group closed (SIGKILL rounds, a non-reaping leader-exit wait, a kernel group listing), shared by exec domains, PITR custody and ava-root unit stop.
 tags:
-- shared
+- base
 - process
 ---
 

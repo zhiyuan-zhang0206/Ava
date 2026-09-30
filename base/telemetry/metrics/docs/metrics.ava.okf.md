@@ -3,7 +3,7 @@ type: doc
 title: Metrics
 description: '`base/telemetry/metrics/report.py` is the core of system-level metric calculation over the unified `events` stream (categories telemetry + log): a single windowed query fetches N days of events, then runs a set of pluggable metric units (pure function `list[EventRow] -> MetricSection` registered with `@metric_unit`). CLI and gateway share this core.'
 tags:
-- shared
+- base
 - library
 - observability
 ---

@@ -3,7 +3,7 @@ type: doc
 title: "Session backend & process supervision"
 description: "How Ava supervises long-lived processes: the `base/sessions/backend.py` interface, its three entry points (`get_backend()` for services + orchestration, `get_shell_backend()` for agent shells/watchers, `native_proc()` for agent processes), the POSIX backends, and the macOS firewall audit. Stopping is its own node."
 tags:
-- shared
+- base
 - process
 - supervision
 ---

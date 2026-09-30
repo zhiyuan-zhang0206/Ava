@@ -3,7 +3,7 @@ type: doc
 title: Closed predecessor
 description: Retired-shape resource values, the closed-predecessor form, drained resource sets, never-admitted resurrection and minted identities of legacy terminated rows.
 tags:
-- shared
+- base
 - lifecycle
 ---
 

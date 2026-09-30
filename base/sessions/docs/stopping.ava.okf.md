@@ -3,7 +3,7 @@ type: doc
 title: "Stopping a process — the kill contract and the non-session trio"
 description: "How Ava stops what it started: `kill_session`'s (ok, mode) contract and its graceful/forced escalation for named sessions, `base/host/proc.py`'s `process_alive` / `request_stop` / `force_kill` trio for processes that are not sessions, how a stop converges a service tree whose leader already died, and what the deadline report names when convergence fails."
 tags:
-- shared
+- base
 - process
 - supervision
 - stop

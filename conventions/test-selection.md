@@ -76,7 +76,7 @@ modules are omitted.
 Only importer files named test_*.py or *_test.py outside tests/e2e/ are
 collectable. Test helpers are still inspected but do not add selected tests.
 Resolution considers these source roots: agent, ava, cli, gateway, ops,
-services, base, shared, ava_builtins, evals, ui, scripts, and schedules.
+services, base, ava_builtins, evals, ui, scripts, and schedules.
 
 This is intentionally a direct static map, not a coverage claim. About 280 of
 roughly 970 source files have no static test reachability, including
