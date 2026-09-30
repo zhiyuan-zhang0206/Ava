@@ -54,9 +54,7 @@ lifecycle; those items wait for it to land and are then designed on its code.
    entry points on its version.
 2. **Reach-in burn-down** (`private_imports`, 23 keys / 25 sites / 20 files).
    Every remaining key sits in a file #3479 rewrites. Highest yield once it
-   lands: `base.agents.impersonation._store` (5 sites), then
-   `base.deploy.writers.publication` (3) — it gets a verdict: contract (export it) or internal (route
-   callers through a door). `ava` carries no frozen reach-ins: agent
+   lands: `base.agents.impersonation._store` (5 sites). `ava` carries no frozen reach-ins: agent
    visibility there is the `__all_for_ava__` whitelist (which
    `agent_docstrings` keys on too), not the underscore, so every
    framework module or name another package needs took a public name without

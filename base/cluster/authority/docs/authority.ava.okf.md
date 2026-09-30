@@ -33,8 +33,8 @@ Both groups hold `CONNECT` (PUBLIC loses it) and `USAGE` on `public`.
 `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` covers objects later migrations
 create; `groups.ensure_groups` re-runs the point-in-time `ALL` grants after a
 migration. A login's privileges equal its group's. The runner group also holds
-`EXECUTE` on the publication-admission lock while that function exists (it
-goes with the publication graph).
+`EXECUTE` on the retired publication-admission lock function while it exists;
+no admission calls it, and a later migration drops it.
 
 `groups.vacuum_or_fail` turns PostgreSQL 17's VACUUM skip warning (missing
 `MAINTAIN`) into a failure.

@@ -80,8 +80,7 @@ work resumes near-field instead of waiting for the next scheduled wake
 
 Hosted admission records a coarse, durable `last_admission_outcome` and
 `last_admission_at` on the agent row. Refusals distinguish maintenance hold,
-publication deferral, resource evidence, and an unresolved guarded-update
-refusal; the guard code never invents which predicate failed. The observation
+resource evidence, and an unresolved guarded-update refusal; the guard code never invents which predicate failed. The observation
 is stamped only if the row still matches the attempted status and no later
 admission superseded it. Successful admission stamps `admitted` in the same
 transaction as the owner/lease update. These observations explain an unstarted

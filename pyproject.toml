@@ -770,11 +770,6 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "base/deploy/writers/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "base/events/live/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

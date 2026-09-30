@@ -162,9 +162,9 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
             _grant(conn, f"GRANT {privileges} ON {{}} TO {{}}", table, runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
     grant_manifest_runner_access(conn, runner)
-    # Hosted runtime admission still takes the publication row lock through this
-    # narrow security-definer function; the grant goes with the publication
-    # graph, which deletes the function. Granted only while it exists.
+    # No admission calls the legacy publication row-lock function any more; the
+    # grant goes with the function, which a later migration drops. Granted only
+    # while it exists.
     row = conn.execute(
         "SELECT to_regprocedure('public.lock_runtime_publication_admission()') IS NOT NULL"
     ).fetchone()

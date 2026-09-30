@@ -10,12 +10,6 @@
     "base/deploy/maintenance/cold.py::require_persisted_end": 17,
     "base/deploy/maintenance/state.py::MaintenanceHold.decode": 15,
     "base/deploy/release/editable_install.py::editable_import_gate": 15,
-    "base/deploy/schema/migrations.py::apply_pending_migrations": 15,
-    "base/deploy/writers/publication.py::WriterPublication.unique_units": 21,
-    "base/deploy/writers/tests/test_publication_admission.py::test_sync_async_decisions_and_lock_interoperate": 18
-  },
-  "nesting": {
-    "base/deploy/writers/tests/test_publication.py::test_pending_waits_for_admission_transaction": 6,
-    "base/deploy/writers/tests/test_publication_admission.py::test_sync_async_decisions_and_lock_interoperate": 6
+    "base/deploy/schema/migrations.py::apply_pending_migrations": 15
   }
 }

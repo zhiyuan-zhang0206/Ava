@@ -559,8 +559,7 @@ each half of `python -m cli.fleet_update` is idempotent
 
 Ordinary maintenance holds retain their separate operator procedures in
 [graceful maintenance](graceful-maintenance.md). Generic recovery is not a way
-to forge process closure or clear durable publication evidence; do not resurrect
-a removed updater or bootstrap entry.
+to forge process closure; do not resurrect a removed updater or bootstrap entry.
 
 Commands in the "long-running processes" / "E2E tests" sections below default to cwd = `$AVA_HOME/source/` (prod context). Dev work goes through `~/Ava/.worktrees/<task>/`.
 

@@ -31,16 +31,9 @@ from base.deploy.progress_timeout import (
     AGENT_LEASE_TTL_S,
     LEGACY_HOST_ADOPTION_SILENCE_S,
 )
-from base.deploy.writers.runtime_admission import (
-    AdmissionDecision,
-    CurrentAdmission,
-    PublicationAdmissionDeferredError,
-    RuntimeAdmission,
-    require_current_for_managed,
-)
 from base.events.live.announce import publish_agent_updated
 from base.log import logger
-from base.native_process.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import ava_home
 from base.telemetry.audit_events import insert_event_log_async
 
@@ -410,13 +403,15 @@ async def admit_hosted_runtime(
     owner: UUID,
     *,
     expected_from: str,
-    publication: RuntimeAdmission | None = None,
 ) -> RuntimeIncarnation | None:
     """Keep this owner's logical incarnation across turns; reject live others.
 
     A local legacy NULL row (no stored resource evidence) may be replaced
     before its lease expires only through the evidence-gated proposal of
     ``_legacy_dead_host_adoption``, re-checked under this row lock.
+
+    Admission reads and locks no deployment-wide state, and the row it writes
+    advertises protocol zero.
     """
     from base.agents.incarnation.exec_owner_recovery import recover_local_resources
 
@@ -430,28 +425,9 @@ async def admit_hosted_runtime(
     await asyncio.to_thread(recover_local_resources, agent_id, machine)
     native = psutil.Process()
     host_identity = ResourceProcess.capture(native)
-    if publication is None:
-        publication = RuntimeAdmission()
     legacy_adoption = await _legacy_dead_host_adoption(pool, agent_id, machine, owner)
     try:
         async with async_write_transaction(pool) as conn:
-            publication_decision: AdmissionDecision | None
-            try:
-                publication_decision = await publication.decide_async(conn)
-            except PublicationAdmissionDeferredError:
-                # A pending publication / non-stable deployment phase freezes
-                # ordinary *births*. A pending maintenance command is not one:
-                # the held gates above already proved this boot owns the row
-                # and has a command to consume, and the continuation runs no
-                # graph work — it applies exactly that agent's restart after
-                # the checkpoint flush. Deferring it here silently starved the
-                # 2026-09-10 rollout's own drain: every held wake returned
-                # without a receipt until the 300s timeout retained the hold
-                # (issue #2159). The alternative fence below (a successor
-                # boot) stays in force.
-                if admission.pending_command(agent_id) is None:
-                    _refuse_hosted_admission(AdmissionOutcome.PUBLICATION_DEFERRED)
-                publication_decision = None
             previous = await (
                 await conn.execute(
                     "SELECT runtime_generation,runtime_owner,runtime_kind,machine,"
@@ -469,9 +445,11 @@ async def admit_hosted_runtime(
                 # A host crash during drain therefore retains the hold and
                 # requires explicit cancellation/recovery, never a fake ACK.
                 _refuse_hosted_admission()
-            if publication_decision is not None:
+            if previous[4] is not None:
+                # A stored value the current model cannot decode (a retired
+                # writer's shape) refuses under every admission.
                 try:
-                    require_current_for_managed(publication_decision, previous[4])
+                    decode_resources(previous[4])
                 except ResourceEvidenceError as exc:
                     _refuse_hosted_admission(AdmissionOutcome.RESOURCE_FENCE, str(exc))
             generation = (
@@ -493,16 +471,6 @@ async def admit_hosted_runtime(
                 host_identity,
                 exited_predecessor=exited_predecessor,
             )
-            # Protocol v1 is advertised exactly when this admission is the
-            # current managed publication: decide_async already ran its
-            # activation checks and the resource fence above bound the decision
-            # to this locked row, so re-judging here (a second
-            # require_activation call) would only introduce drift. A held
-            # continuation (decision None, issue #2159) and every legacy or
-            # deferred state advertise zero.
-            advertised_protocol = (
-                RUNTIME_PROTOCOL_V1 if isinstance(publication_decision, CurrentAdmission) else 0
-            )
             # Exact local host death and resource closure are stronger than
             # its remaining lease; the same row lock protects both proofs. A
             # legacy NULL row has no exact process to prove: its re-pinned
@@ -513,7 +481,7 @@ async def admit_hosted_runtime(
                     "runtime_generation = CASE WHEN runtime_owner = %s AND runtime_kind = 'hosted' "
                     "AND runtime_generation IS NOT NULL "
                     "THEN runtime_generation ELSE %s END, runtime_owner = %s, "
-                    "runtime_protocol_version = %s, "
+                    "runtime_protocol_version = 0, "
                     "last_admission_outcome = 'admitted', "
                     "last_admission_at = clock_timestamp(), "
                     "last_launch_failure_reason = NULL, last_launch_failure_at = NULL, "
@@ -532,7 +500,6 @@ async def admit_hosted_runtime(
                         owner,
                         generation,
                         owner,
-                        advertised_protocol,
                         AGENT_LEASE_TTL_S,
                         agent_id,
                         machine,

@@ -54,8 +54,8 @@ The client and daemon reject unknown kinds before machine lookup, maintenance
 admission, dedupe, or dispatch. Retired updater fetch, prepare, bootstrap, and
 continuation requests have no wire registration or handler. Their handlers, schemas, command producers and session/log status projections
 are absent. Callers import live pause, status and recovery definitions directly.
-The shared database publication and maintenance fences still enforce admission;
-removing an updater command does not remove those guards.
+The maintenance fences still enforce admission; removing an updater command
+does not remove them.
 Cluster identity remains the installed home path, resolved before runtime
 configuration construction.
 

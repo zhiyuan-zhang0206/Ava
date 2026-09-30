@@ -79,4 +79,4 @@ live native generation before permitting recovery. Replacing root, changing its
 launch/runtime identity, or losing observable custody invalidates the receipt.
 Generic supervisor fixtures without deployment wiring have no runtime identity
 and cannot publish a production serving receipt. This local evidence adds no
-fleet publication or managed-writer protocol authority.
+fleet authority.
