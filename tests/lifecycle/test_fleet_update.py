@@ -42,6 +42,15 @@ class Cluster:
         self.fail: dict[tuple[str, str], int] = {}
         self.stop_failures: dict[str, str] = {}
         self.output = ""
+        self.roster_lag = 0  # roster reads that still show every machine offline (heartbeat)
+        self.roster_reads = 0
+        self.now = 0.0  # a fake clock: `fleet_update.time` is patched to this object
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
 
     def _runners_up(self) -> bool:
         return any(h["up"] for a, h in self.hosts.items() if a != "gw")
@@ -55,11 +64,14 @@ class Cluster:
             host["up"], host["hold"] = False, ("paused", "stopped", self.stop_failures)
         elif kind == "switch":
             assert not host["up"] and self.new in command
+            assert fleet_update._CLEAN in shlex.split(command)[2]
             host["head"] = self.new
         elif kind in ("start", "oneshot"):
             assert (kind == "oneshot") == (host["os"] == "Darwin")
             assert self.hosts["gw"]["up"] if alias != "gw" else not self._runners_up()
             host["up"], host["hold"] = True, ("resumed", None, {})
+        elif kind == "refresh":
+            assert "--force" not in command  # human-only
         return 0
 
     def ssh(self, alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
@@ -82,8 +94,11 @@ class Cluster:
             return 0
         if " - roster" in command:
             assert stdin == fleet_update._GATEWAY_PROGRAM
+            online = self.roster_lag <= 0
+            self.roster_reads, self.roster_lag = self.roster_reads + 1, self.roster_lag - 1
             values = [
-                (a, h["up"], False, h["head"], h["head"], True) for a, h in self.hosts.items()
+                (a, h["up"] and online, False, h["head"], h["head"], True)
+                for a, h in self.hosts.items()
             ]
             emit(json.dumps([dict(zip(_ROW, row, strict=True)) for row in values]))
             return 0
@@ -94,8 +109,12 @@ class Cluster:
             "launchctl bootstrap": "oneshot",
             'ava" start': "start",
             " - smoke": "smoke",
+            "packages refresh": "refresh",
         }
-        return self._effect(next(k for s, k in kinds.items() if s in command), alias, host, command)
+        kind = next(k for s, k in kinds.items() if s in command)
+        if kind == "refresh":
+            emit("  summary: applied 2, conflict 1")
+        return self._effect(kind, alias, host, command)
 
 
 @pytest.fixture
@@ -111,6 +130,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Calla
     cluster = Cluster(_git(repo, "rev-parse", "HEAD~1"), _git(repo, "rev-parse", "HEAD"))
     monkeypatch.setattr(fleet_update, "_REPO", repo)
     monkeypatch.setattr(fleet_update, "ssh", cluster.ssh)
+    monkeypatch.setattr(fleet_update, "time", cluster)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     hosts = [
         *shlex.split("--gateway gw --runner mac --runner lin --log-dir"),
@@ -134,7 +154,8 @@ def test_runners_stop_first_and_start_last(env: tuple[Cluster, Callable[..., int
         i for i, k in enumerate(kinds) if k == "stop"
     )
     assert [a for k, a in cluster.effects if k in ("start", "oneshot")] == ["gw", "mac", "lin"]
-    assert kinds[-3:] == ["smoke"] * 3
+    assert kinds[-6:] == ["smoke"] * 3 + ["refresh"] * 3
+    assert [a for k, a in cluster.effects if k == "refresh"] == ["gw", "mac", "lin"]
 
 
 def test_macos_start_is_a_gui_one_shot() -> None:
@@ -150,18 +171,80 @@ def test_macos_start_is_a_gui_one_shot() -> None:
     assert shlex.split(f"zsh -lc {shlex.quote(script)}")[2] == script and 'rm -rf "$D"' in script
 
 
-def test_the_first_failure_stops_the_half(env: tuple[Cluster, Callable[..., int]]) -> None:
+_STOP_RETRY = 'retry "ava stop -y --timeout 600"'
+
+
+def test_the_first_failure_stops_the_half(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
     cluster, run = env
     cluster.fail[("stop", "mac")] = 1
     assert run("down") == 1
     assert [k for k, _ in cluster.effects if k != "fetch"] == ["stop"]
+    assert _STOP_RETRY in capsys.readouterr().out
 
 
-def test_a_stop_that_leaves_failures_fails(env: tuple[Cluster, Callable[..., int]]) -> None:
+def test_a_stop_that_leaves_failures_fails(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
     cluster, run = env
     cluster.stop_failures = {"5": "wake failed"}
     assert run("down") == 1
     assert [a for k, a in cluster.effects if k == "stop"] == ["mac"]
+    out = capsys.readouterr().out
+    assert "stop left paused/stopped" in out and _STOP_RETRY in out
+
+
+def test_the_roster_is_re_read_while_heartbeats_catch_up(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.roster_lag = 3
+    assert run("up") == 0
+    assert (cluster.roster_reads, cluster.now) == (4, 3 * fleet_update._POLL_S)
+
+
+def test_a_roster_that_never_agrees_fails_with_its_last_state(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.roster_lag = 10**6
+    assert run("up", "--roster-timeout", "30") == 1
+    assert cluster.roster_reads == 30 // fleet_update._POLL_S + 1
+    assert "roster after 30s: offline ['gw', 'mac', 'lin']" in capsys.readouterr().out
+    assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
+
+
+def test_packages_refresh_reports_and_never_forces(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, run = env
+    assert run("down") == 0
+    assert run("up") == 0
+    out = capsys.readouterr().out
+    assert out.count("packages refresh [") == 3
+    assert "packages refresh [mac] summary: applied 2, conflict 1" in out
+
+
+def test_a_dirty_tree_is_shown_not_cleaned(tmp_path: Path) -> None:
+    repo = tmp_path / "dirty"
+    repo.mkdir()
+    _git(repo, "init", "-q", "--initial-branch=main")
+
+    def check() -> subprocess.CompletedProcess[str]:
+        argv = ["bash", "-c", fleet_update._CLEAN]
+        return subprocess.run(argv, cwd=repo, capture_output=True, text=True, check=False)  # noqa: S603
+
+    assert check().returncode == 0
+    for n in range(25):
+        (repo / f"stray-{n:02}.txt").write_text("x")
+    dirty = check()
+    assert dirty.returncode == 1
+    assert dirty.stdout.count("?? stray-") == 20 and "?? stray-00.txt" in dirty.stdout
+    assert "move them away (do not delete)" in dirty.stdout
+    assert len(list(repo.glob("stray-*.txt"))) == 25
 
 
 _UNSAFE: list[tuple[str, object]] = [("hook", "yes"), ("active", "yes"), ("dirty", 3)]
