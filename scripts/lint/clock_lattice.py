@@ -9,7 +9,7 @@ via pre-commit hook.
 
 The clock lattice (`base/deploy/timing.py`) is the single authority for every timing
 constant that must hold an ORDER relative to its neighbours — boot stall < launch
-confirm < boot budget < reap grace, NO_PROGRESS < LOCK_TTL, the lease TTLs, the
+confirm < boot budget < reap grace, NO_PROGRESS < schedule stall, the lease TTLs, the
 controller scan cadence, the wedged derivation. The orderings are load-bearing:
 the 2026-07-30 spawn incident happened because a launch-confirm window was raised
 without its neighbouring reap grace, and the relation existed only in prose.
@@ -22,15 +22,13 @@ vocabulary may only appear where the lattice can see it.
 ## The rule
 
 A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`,
-`REAP`, `BUDGET`, `WEDGED`, `NO_PROGRESS`, `LOCK_TTL`, `UPDATER_LEASE`,
-`SETTLE_TTL`, `LAUNCH_CONFIRM`, `LEASE_TTL`, `LEASE_RENEW`, `SCAN_INTERVAL`,
-`REAP_INTERVAL`) must be one of:
+`REAP`, `BUDGET`, `WEDGED`, `NO_PROGRESS`, `LAUNCH_CONFIRM`, `LEASE_TTL`,
+`LEASE_RENEW`, `SCAN_INTERVAL`, `REAP_INTERVAL`) must be one of:
 
 1. **Defined in a lattice family module** — `base/deploy/timing.py`,
    `base/deploy/progress_timeout.py`, `base/deploy/stop_timing.py`,
-   `base/daemon/schedules/timing.py`, `base/deploy/state/cluster_lock.py`.
-   These are the lattice's homes; registering a
-   new clock there and in `CLOCKS` is the correct way to add one.
+   `base/daemon/schedules/timing.py`. These are the lattice's homes; registering
+   a new clock there and in `CLOCKS` is the correct way to add one.
 2. **An alias of a registered clock** — the assignment's value is a bare
    reference to a clock registered in `base.deploy.timing.CLOCKS`
    (e.g. `_ROLLOUT_STALL_TIMEOUT_S: float = NO_PROGRESS_TIMEOUT_S`). The value is
@@ -82,9 +80,6 @@ _LATTICE_TERMS = (
     "BUDGET",
     "WEDGED",
     "NO_PROGRESS",
-    "LOCK_TTL",
-    "UPDATER_LEASE",
-    "SETTLE_TTL",
     "LAUNCH_CONFIRM",
     "LEASE_TTL",
     "LEASE_RENEW",
@@ -93,13 +88,12 @@ _LATTICE_TERMS = (
 )
 
 # The lattice family modules: lattice vocabulary may be DEFINED here (and only
-# here). `base/deploy/state/cluster_lock.py` holds the deploy-lease clocks.
+# here).
 _FAMILY_MODULES = (
     "base/deploy/timing.py",
     "base/deploy/progress_timeout.py",
     "base/deploy/stop_timing.py",
     "base/daemon/schedules/timing.py",
-    "base/deploy/state/cluster_lock.py",
 )
 
 _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")

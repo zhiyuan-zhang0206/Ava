@@ -146,9 +146,10 @@ _EXEMPT: dict[str, str] = {
     "cluster_last_update": "cluster singleton outcome row — infra (mirrored into "
     "deployment_state by the R1 migration)",
     "cluster_defaults": "cluster singleton defaults — infra, not test data",
-    "deployment_state": "R1 singleton (id=1, CHECK) — UPDATE-only consumers "
-    "(base/deploy/state/cluster_lock.py), row seeded by the migration; truncating it would "
-    "delete the row mid-session. Tests self-clean via acquire/release pairs",
+    "deployment_state": "R1 singleton (id=1, CHECK) — its live consumer is the "
+    "code-version gate (base/db/code_version_gate.py); the row is seeded by the "
+    "migration and truncating it would delete the row mid-session. Tests that write "
+    "it restore it",
 }
 
 

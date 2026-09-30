@@ -245,14 +245,11 @@ def _schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
     """Hold a Postgres advisory lock for a whole schema-mutation loop (forward
     apply or rollback).
 
-    Serializes *every* path that mutates the schema — a rollout's
-    `_run_gateway_local_update`, a manual / watchdog `ava start`, a recovery
-    `rollback_to` — on one key, so a second mutator blocks until the first
-    finishes instead of racing and losing on the `schema_migrations` primary key.
-    Independent of the TTL'd cluster-update lock (`base.deploy.state.cluster_lock`): that one
-    serializes whole rollout orchestrations; this one guards the mutation step
-    itself, so even non-orchestration mutators (the bootstrap `ava start`) are safe
-    without entangling bootstrap with the rollout lock.
+    Serializes *every* path that mutates the schema — a manual / watchdog
+    `ava start`, a recovery `rollback_to` — on one key, so a second mutator blocks
+    until the first finishes instead of racing and losing on the
+    `schema_migrations` primary key. It guards the mutation step itself, so even
+    the bootstrap `ava start` is safe without a wider orchestration lock.
 
     Taken on the **writer connection itself** (`pg_advisory_lock`, session-level),
     so the lock's lifetime is exactly the connection doing the writes: it cannot be

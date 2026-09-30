@@ -226,39 +226,6 @@ def _read_only_default_pooler(pg_url: str, pool_size: int = 2) -> Generator[str]
         yield pooled
 
 
-def test_finalize_writes_override_a_read_only_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Finalizer posture and lock writes must override a read-only session default.
-
-    The tail's two compensating writes must start explicit read-write
-    transactions before DML, so a read-only default (the rollout-finalizer
-    failure's posture) cannot fail them.
-    """
-    from base import config
-    from base.deploy.state import host_deploy_state
-    from base.deploy.state.cluster_lock import release_update_lock
-
-    with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        host_deploy_state.set_posture("idle")
-        release_update_lock("pgbouncer-finalizer-test")
-
-
-def test_recovery_claim_overrides_a_read_only_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Recovery can lock a lease in a session that defaults to read-only."""
-    from base import config
-    from base.deploy.state.cluster_lock import claim_recovery_lock
-
-    with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        claim = claim_recovery_lock("pgbouncer-recovery-test", observed=None)
-
-    assert claim.acquired is True
-
-
 def _direct_writer(pg_url: str) -> psycopg.Connection:
     """A direct setup/verify connection that writes despite a read-only default."""
     return psycopg.connect(pg_url, options="-c default_transaction_read_only=off")
@@ -275,15 +242,18 @@ def _insert_agent(pg_url: str) -> int:
 def test_write_transaction_overrides_a_read_only_default_on_connect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Rule A writes (`base.deploy.state.cluster_lock`'s update-lock acquire/release)
-    land in sessions that default to read-only."""
+    """Rule A writes (`set_posture`'s upsert, opened by `write_transaction()` on its
+    own dial) land in sessions that default to read-only."""
     from base import config
-    from base.deploy.state.cluster_lock import acquire_update_lock, release_update_lock
+    from base.deploy.state import host_deploy_state
 
-    with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
+    with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        assert acquire_update_lock("pgbouncer-wire-test") is True
-        release_update_lock("pgbouncer-wire-test")
+        host_deploy_state.set_posture("paused")
+
+        with psycopg.connect(pg_url) as verify:
+            row = verify.execute("SELECT posture FROM host_deploy_state").fetchone()
+        assert row is not None and row[0] == "paused"
 
 
 def test_schedule_provision_overrides_a_read_only_default(

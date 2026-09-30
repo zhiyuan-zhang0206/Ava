@@ -376,18 +376,6 @@ def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured.get("check") is None
 
 
-def test_write_transaction_direct_refuses_a_pool() -> None:
-    """`direct=True` names the dial, so it cannot combine with a pool — a pool
-    owns its own dial (and the refusal keeps a silent no-op from shipping)."""
-    from base.db.transaction import write_transaction
-
-    with (
-        pytest.raises(ValueError, match="cannot take a pool"),
-        write_transaction(object(), direct=True),  # pyright: ignore[reportArgumentType]
-    ):
-        pass
-
-
 def test_list_chat_inbound_facts_windows_and_filters_kind(
     db_conn: psycopg.Connection,
 ) -> None:

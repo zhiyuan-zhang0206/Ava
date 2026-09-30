@@ -28,6 +28,12 @@ and the matching GitHub Releases, cut by `scripts/ci/release_cut.py`.
 - The managed-writer publication fence (`base/deploy/writers/`): hosted admission
   no longer locks `deployment_state` or defers a birth on its phase, and always
   advertises protocol zero ([decision](decisions/2026-09-30-remove-publication.md)).
+- The cluster deploy lease (`base.deploy.state.cluster_lock`), `ava cluster
+  recover`, the roster's `deploy_hold` field and banner, and the lease readers in
+  the deploy window, heartbeat, log sink, package refresh and `ava stop`. A
+  stranded pause is read with `ava maintenance status` and ended with
+  `ava maintenance resume --cancel` or `repair`; an unreadable journal is removed
+  by hand ([decision](decisions/2026-09-30-remove-deployment-lease.md)).
 
 ### Changed
 - The bottom-layer package `shared` is now `base` (`base < ava < agent <
