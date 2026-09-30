@@ -2,7 +2,8 @@
 global it mutates.
 
 Run: `.venv/bin/python scripts/lint/fixture_scope.py [path ...]` (defaults to
-scanning `tests/`; an explicit path that does not exist is an error (stderr +
+scanning every `tests/` directory: the top-level `tests/` and each package's own
+`<pkg>/**/tests/`; an explicit path that does not exist is an error (stderr +
 exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
 
 ## Why
@@ -98,6 +99,12 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
+
+# Where a `tests/` directory can live: the top-level one, or inside a package.
+_TEST_HOSTS = ("tests", *lint_common.FRAMEWORK_DIRS, "scripts")
 
 # The one location where session scope and the fixture's own blast radius coincide.
 _SESSION_PROVISIONING = "tests/fixtures/provisioning.py"
@@ -408,6 +415,10 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return [f for f in files if "__pycache__" not in f.parts]
 
 
+def _default_targets() -> list[Path]:
+    return [_REPO_ROOT / d for d in _TEST_HOSTS if (_REPO_ROOT / d).is_dir()]
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if argv:
@@ -415,15 +426,15 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / "tests"]
+    targets = [Path(a).resolve() for a in argv] if argv else _default_targets()
 
     total = 0
     for path in sorted(_iter_py_files(targets)):
         try:
             rel = path.relative_to(_REPO_ROOT).as_posix()
         except ValueError:
-            rel = path.as_posix()
-        if not rel.startswith("tests/"):
+            continue  # outside the repo: not one of its tests
+        if not lint_common.is_test_path(rel):
             continue
         for lineno, message in _scan_file(path, rel):
             total += 1

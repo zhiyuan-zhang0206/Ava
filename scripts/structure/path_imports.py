@@ -5,7 +5,8 @@ a module from a file (`importlib.util.spec_from_file_location`,
 `importlib.machinery.SourceFileLoader`, `runpy.run_path`) turns its directory into
 an unreviewed code package that sidesteps the package doors, budgets and locality
 rules. Shared code belongs in a governed package the script imports normally, and
-the script stays a thin entry point. Rule 6 in scripts/lint/code_structure.py; the
+the script stays a thin entry point. Files under a `tests/` directory are exempt.
+Rule 6 in scripts/lint/code_structure.py; the
 frozen sites live in the `path_imports` section of the scripts/structure/baseline/ shards
 as `path::target -> site count`, matched exactly like the locality sections.
 
@@ -37,6 +38,8 @@ count as a site, with no exception:
 from __future__ import annotations
 
 import ast
+
+from scripts.structure import lint_common
 
 SECTION = "path_imports"
 _SCOPE = ("ava_builtins/",)
@@ -286,10 +289,12 @@ def _is_allowed_skill_guard(rel_path: str, call: ast.Call) -> bool:
 def measure(tree: ast.Module, rel_path: str) -> Sites:
     """Path-import sites in one module under `ava_builtins/`, keyed `path::target`.
 
-    Skips a call that `_is_allowed_skill_guard` recognizes as the endorsed
-    within-skill `__file__` guard — that shape is not a site at all, so it
-    is never frozen in the baseline (see the module docstring)."""
-    if not rel_path.startswith(_SCOPE):
+    A test file (under any `tests/` directory) is exempt: a test loads the script
+    it proves by path on purpose. Skips a call that `_is_allowed_skill_guard`
+    recognizes as the endorsed within-skill `__file__` guard — that shape is not
+    a site at all, so it is never frozen in the baseline (see the module
+    docstring)."""
+    if not rel_path.startswith(_SCOPE) or lint_common.is_test_path(rel_path):
         return {}
     bindings = _Bindings(tree)
     sites: Sites = {}

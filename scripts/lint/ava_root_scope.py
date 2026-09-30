@@ -43,6 +43,9 @@ this lint's review surface.
 
 ## Exemptions
 
+A test file (any `tests/` directory, e.g. `services/ava_root/tests/`) is exempt:
+tests are the proof that the names stay at the edge, so they name them.
+
 A line that genuinely must carry one of these names opts out inline with
 `# ava-root-scope-ok: <reason>` (same convention as the other repo lints).
 The marker is matched against real comment tokens only (the token semantics
@@ -63,6 +66,9 @@ from pathlib import Path
 
 # Project root (this script lives under scripts/).
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
 
 # The default scan root: the root supervisor's own code.
 _DEFAULT_TARGET = "services/ava_root"
@@ -244,6 +250,8 @@ def main(argv: list[str] | None = None) -> int:
     targets = [Path(arg).resolve() for arg in argv] if argv else [_REPO_ROOT / _DEFAULT_TARGET]
     total = 0
     for path in _iter_files(targets):
+        if lint_common.is_repo_test_file(path, _REPO_ROOT):
+            continue
         for lineno, symbol, content in scan_file(path):
             total += 1
             try:

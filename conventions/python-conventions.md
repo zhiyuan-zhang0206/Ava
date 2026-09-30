@@ -46,9 +46,12 @@ Each directory in the same scope may have at most 20 direct entries:
 `.py` and `.pyi` files plus direct subdirectories. A subdirectory counts as
 one regardless of its contents — unless it holds nothing but `__pycache__` /
 dot-prefixed entries (or nothing), the leftover a local package rename or
-removal leaves and a fresh checkout never has, or it is a `docs/` layer without
-`__init__.py` (a `docs` package with `__init__.py` counts). Each level is checked
-independently. `__pycache__`, dot-prefixed entries, and symlinks do not count
+removal leaves and a fresh checkout never has, or it is a `docs/` or `tests/`
+layer without `__init__.py` (such a package with `__init__.py` counts). A `tests/`
+layer has no entry cap of its own either: a test is a file under any `tests/`
+directory, the top-level one or a package's own `<pkg>/**/tests/`, and
+`lint_common.is_test_path` is the one predicate every lint uses for it. Each
+level is checked independently. `__pycache__`, dot-prefixed entries, and symlinks do not count
 and are not traversed. `migrations` subtrees are entirely exempt. The repo-root `docs/` and
 `ui/` are outside the scope.
 

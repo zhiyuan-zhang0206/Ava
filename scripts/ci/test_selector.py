@@ -46,6 +46,23 @@ _SOURCE_ROOTS = frozenset(
         "schedules",
     }
 )
+# Where a test directory can live: the top-level `tests/` (e2e, contract and
+# shared-support tests) and the `tests/` directory of any package that carries
+# its own tests. A path is a test path when it sits inside such a `tests/`
+# directory, so a test moving from `tests/<area>/` into `<pkg>/tests/` stays
+# visible to every rule below.
+_TEST_HOSTS = (
+    "tests",
+    "agent",
+    "ava",
+    "ava_builtins",
+    "base",
+    "cli",
+    "gateway",
+    "ops",
+    "scripts",
+    "services",
+)
 _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
 _NON_DOCUMENTATION_PREFIXES = ("scripts/", "schedules/", "tests/")
 _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
@@ -115,14 +132,31 @@ def _selection_mode() -> str:
     return os.environ.get("TEST_SELECTION_MODE", "enforce")
 
 
+def _is_test_dir_path(path: str) -> bool:
+    """Whether a repo-relative path sits inside a test directory (top-level or a package's)."""
+    parts = path.split("/")
+    return parts[0] in _TEST_HOSTS and "tests" in parts[:-1]
+
+
+def _test_py_files(repo_root: Path) -> list[Path]:
+    """Every .py file inside a test directory, in a stable order."""
+    files: list[Path] = []
+    for host in _TEST_HOSTS:
+        host_root = repo_root / host
+        if host_root.is_dir():
+            files.extend(
+                path
+                for path in host_root.rglob("*.py")
+                if _is_test_dir_path(path.relative_to(repo_root).as_posix())
+            )
+    return sorted(files)
+
+
 def collectable_test_paths(repo_root: Path) -> set[str]:
-    """Return the current non-e2e backend test-file universe under tests/."""
-    tests_root = repo_root / "tests"
-    if not tests_root.is_dir():
-        return set()
+    """Return the current non-e2e backend test-file universe: every test file in a tests/ directory."""
     return {
         path.relative_to(repo_root).as_posix()
-        for path in tests_root.rglob("*.py")
+        for path in _test_py_files(repo_root)
         if _is_collectable_test_path(path.relative_to(repo_root).as_posix())
     }
 
@@ -148,18 +182,12 @@ def build_import_reverse_map(repo_root: Path) -> dict[str, set[str]]:
     repo_root = repo_root.resolve()
     collectable = collectable_test_paths(repo_root)
     reverse_map: dict[str, set[str]] = {}
-    tests_root = repo_root / "tests"
-    if not tests_root.is_dir():
-        return reverse_map
 
-    for test_path in sorted(tests_root.rglob("*.py")):
-        if test_path.name == "conftest.py":
-            continue
+    for test_path in _test_py_files(repo_root):
         importer = test_path.relative_to(repo_root).as_posix()
-        modules = _imported_modules(test_path)
         if importer not in collectable:
             continue
-        for module in modules:
+        for module in _imported_modules(test_path):
             source_path = _resolve_module(repo_root, module)
             if source_path is not None:
                 reverse_map.setdefault(source_path, set()).add(importer)
@@ -185,9 +213,7 @@ def select_tests(
     if all(_is_documentation_path(path) for path in changed):
         return _result("SKIP", "docs-only", full_estimate=full_estimate)
 
-    forced_roots = tuple(
-        root for root in _FORCED_FULL_ROOTS if any(path.startswith(root) for path in changed)
-    )
+    forced_roots = _forced_roots(changed)
     if forced_roots:
         return _result(
             "FULL",
@@ -291,15 +317,30 @@ def main(argv: list[str] | None = None) -> int:
 
 def _is_collectable_test_path(path: str) -> bool:
     return (
-        path.startswith("tests/")
+        _is_test_dir_path(path)
         and not path.startswith("tests/e2e/")
         and Path(path).name != "conftest.py"
         and _TEST_FILE_PATTERN.fullmatch(Path(path).name) is not None
     )
 
 
+def _forced_roots(changed: tuple[str, ...]) -> tuple[str, ...]:
+    """The forced-full roots a change touches. A test-only edit beside the code
+    (`base/x/tests/test_y.py`) is a test change, not a source change: it goes through
+    the reverse map like an edit under `tests/` always did."""
+    return tuple(
+        root
+        for root in _FORCED_FULL_ROOTS
+        if any(path.startswith(root) and not _is_test_dir_path(path) for path in changed)
+    )
+
+
 def _is_documentation_path(path: str) -> bool:
-    return not path.startswith(_NON_DOCUMENTATION_PREFIXES) and is_doc_path(path)
+    return (
+        not path.startswith(_NON_DOCUMENTATION_PREFIXES)
+        and not _is_test_dir_path(path)
+        and is_doc_path(path)
+    )
 
 
 def _imported_modules(test_path: Path) -> set[str]:

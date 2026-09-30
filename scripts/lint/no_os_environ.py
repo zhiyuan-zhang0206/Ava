@@ -19,7 +19,7 @@ config. Scattered `os.environ.get("AVA_X")` causes:
 
 Scan all non-test .py files under `agent/`, `base/`,
 `gateway/`, `services/`, `ava/`, `scripts/` (test_*.py / *_test.py /
-tests/ excluded). Any reference to `os.environ` or `os.getenv` is an error,
+any `tests/` directory excluded). Any reference to `os.environ` or `os.getenv` is an error,
 unless the file is in _ALLOWED_FILES (Settings itself + .env loader +
 bootstrap that cannot depend on Settings).
 
@@ -58,6 +58,9 @@ from pathlib import Path
 
 # Project root (this script lives under scripts/)
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
 
 # Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
 _SCAN_DIRS = (
@@ -68,6 +71,11 @@ _SCAN_DIRS = (
     "ava",
     "scripts",
 )
+
+# Framework dirs Rule 1 does not scan. A test file under them (a package's own
+# `<pkg>/**/tests/`) is still read for Rule 2, so the default scan visits their
+# test files only.
+_TEST_ONLY_DIRS = tuple(d for d in lint_common.FRAMEWORK_DIRS if d not in _SCAN_DIRS)
 
 # Provider API-key env vars are read from os.environ at build time
 # (base/lm/provider_api.require_key) once the provider is a plugin — the
@@ -282,6 +290,26 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return files
 
 
+def _files_to_scan(argv: list[str]) -> list[Path]:
+    """Explicit paths as given; otherwise every file the default scan reads."""
+    if argv:
+        return _iter_py_files([Path(a).resolve() for a in argv])
+    targets = [_REPO_ROOT / d for d in _SCAN_DIRS] + [_REPO_ROOT / "tests"]
+    targets += [_REPO_ROOT / d for d in _TEST_ONLY_DIRS if (_REPO_ROOT / d).is_dir()]
+    return [p for p in _iter_py_files(targets) if _in_default_scope(p)]
+
+
+def _in_default_scope(path: Path) -> bool:
+    """Under a `_TEST_ONLY_DIRS` root only test files are scanned (Rule 2 only)."""
+    try:
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        return True
+    if rel.split("/", 1)[0] in _TEST_ONLY_DIRS:
+        return _is_test_file(rel)
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     # argv non-empty = pre-commit passed the changed-file list; empty = default scan of all _SCAN_DIRS + tests/.
@@ -290,11 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-        targets = [Path(a).resolve() for a in argv]
-    else:
-        targets = [_REPO_ROOT / d for d in _SCAN_DIRS] + [_REPO_ROOT / "tests"]
-
-    py_files = _iter_py_files(targets)
+    py_files = _files_to_scan(argv)
     managed_envs = _settings_managed_aliases()
 
     total_violations = 0

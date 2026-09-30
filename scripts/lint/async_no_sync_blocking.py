@@ -26,8 +26,9 @@ A line that genuinely needs a sync call in an async handler (a tiny, bounded
 read; a third-party callback contract) opts out with an inline
 `# async-blocking-ok: <reason>` comment.
 
-Scope: `gateway/` and `ops/` — the event-loop surfaces. Tests, cli, base,
-agent and services are not scanned (they do not run the gateway loop).
+Scope: `gateway/` and `ops/` — the event-loop surfaces. Tests (any `tests/`
+directory, including a package's own `gateway/**/tests/` and `ops/**/tests/`),
+cli, base, agent and services are not scanned (they do not run the gateway loop).
 
 The repo-helper names must stay current: each one in `_REPO_BLOCKING_HELPERS`
 must still be defined (`def` / `async def`) somewhere in the source tree, or
@@ -43,6 +44,10 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_ROOT))
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
+
 _SCAN_DIRS = ("gateway", "ops")
 
 # Sync library/method surfaces that must not appear un-awaited in an async body.
@@ -105,7 +110,8 @@ _REPO_BLOCKING_HELPERS = {
 
 _BLOCKING_NAMES = _LIBRARY_BLOCKING_NAMES | _REPO_BLOCKING_HELPERS
 
-# Where a repo helper may be defined (the non-test source tree).
+# Where a repo helper may be defined (the non-test source tree; a test's own
+# helper never keeps an entry alive).
 _DEFINITION_DIRS = (
     "agent",
     "ava",
@@ -191,7 +197,7 @@ def _stale_repo_helpers() -> list[str]:
     pattern = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*[\[(]", re.MULTILINE)
     for directory in _DEFINITION_DIRS:
         for path in (_ROOT / directory).rglob("*.py"):
-            if "__pycache__" in path.parts:
+            if "__pycache__" in path.parts or lint_common.is_repo_test_file(path, _ROOT):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
@@ -214,7 +220,10 @@ def main() -> int:
             )
         return 1
     files = sorted(
-        p for d in _SCAN_DIRS for p in (_ROOT / d).rglob("*.py") if "__pycache__" not in p.parts
+        p
+        for d in _SCAN_DIRS
+        for p in (_ROOT / d).rglob("*.py")
+        if "__pycache__" not in p.parts and not lint_common.is_repo_test_file(p, _ROOT)
     )
     all_errors: list[tuple[Path, list[tuple[int, str]]]] = []
     for path in files:

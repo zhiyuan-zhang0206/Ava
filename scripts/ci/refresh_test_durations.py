@@ -10,7 +10,9 @@ the ~20% shard skew measured
 in the 2026-08-30 CI investigation. This script re-measures BOTH suites the
 same way CI runs them and rewrites the file:
 
-* backend: `pytest tests/ --ignore=tests/e2e -m "not flaky" -n 4` plus CI's
+* backend: `pytest --ignore=tests/e2e -m "not flaky" -n 4` (no positional path:
+  pyproject's `testpaths` collect the top-level tests/ and every package's own
+  `<pkg>/**/tests/`, exactly as the CI shards do) plus CI's
   `--cov=agent --cov=ava ...` module list (coverage tracing is part of the
   CI shard environment, so durations measured without it run systematically
   faster and the split under-estimates);
@@ -144,7 +146,6 @@ def _measure_shard(suite: str, group: int, output_path: Path) -> int:
     if suite == "backend":
         groups = _BACKEND_SHARDS
         pytest_args = [
-            "tests/",
             "-q",
             "--ignore=tests/e2e",
             "-m",
@@ -275,7 +276,6 @@ def _refresh_all() -> int:
 
         backend_rc = _run_suite(
             [
-                "tests/",
                 "-q",
                 "--ignore=tests/e2e",
                 "-m",

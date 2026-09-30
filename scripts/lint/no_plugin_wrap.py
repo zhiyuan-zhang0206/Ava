@@ -39,7 +39,9 @@ primitive is the obvious path; this catches the naive regression.
 ## Exemption
 
 Append `# wrap-ok: <reason>` on the offending line for a deliberate, reviewed
-bare assignment (rare). Error format `file:line: <line>` + non-zero exit.
+bare assignment (rare). A test file (any `tests/` directory under the plugins,
+e.g. `ava_builtins/plugins/<plugin>/tests/`) is exempt: a test stubs the SDK on
+purpose. Error format `file:line: <line>` + non-zero exit.
 """
 
 from __future__ import annotations
@@ -180,6 +182,8 @@ def main(argv: list[str] | None = None) -> int:
             rel = path.relative_to(_REPO_ROOT).as_posix()
         except ValueError:
             rel = path.as_posix()
+        if lint_common.is_repo_test_file(path, _REPO_ROOT):
+            continue
         for lineno, message in _scan_file(path):
             total += 1
             print(f"{rel}:{lineno}: {message}")

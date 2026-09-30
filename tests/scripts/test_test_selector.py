@@ -339,3 +339,115 @@ def test_cli_reports_an_unreadable_changed_file_as_an_invocation_error(
 
     assert error.value.code == 2
     assert "cannot read changed files" in capsys.readouterr().err
+
+
+# ── tests that live inside a package (`<pkg>/**/tests/`) ────────────────────
+#
+# A test sits either in the top-level tests/ or beside the code it proves. The
+# selector must treat both alike, or a test moving into its package silently
+# leaves its universe (and a test-only edit there forces the full suite).
+
+
+def _package_tests_repo(tmp_path: Path) -> Path:
+    repo_root = _selector_repo(tmp_path)
+    _write(repo_root, "base/lm/tests/test_lm.py", "from base import lm\n\ndef test_lm(): pass\n")
+    _write(repo_root, "base/lm/tests/helper.py", "VALUE = 1\n")
+    _write(repo_root, "base/lm/tests/conftest.py", "")
+    _write(
+        repo_root,
+        "cli/tests/test_cli.py",
+        "from base.lm.tests import helper\n\ndef test_cli(): pass\n",
+    )
+    _write(repo_root, "scripts/tests/test_script.py", "def test_script(): pass\n")
+    # Production modules that merely carry a test_ prefix are not tests.
+    _write(repo_root, "base/db/test_db_guard.py", "def assert_test_db_url(): pass\n")
+    _write(repo_root, "scripts/ci/test_selector.py", "")
+    return repo_root
+
+
+def test_package_tests_directories_are_in_the_collectable_universe(tmp_path: Path) -> None:
+    repo_root = _package_tests_repo(tmp_path)
+
+    assert test_selector.collectable_test_paths(repo_root) == {
+        "tests/unit/test_changed.py",
+        "tests/unit/test_imports.py",
+        "tests/unit/test_other.py",
+        "base/lm/tests/test_lm.py",
+        "cli/tests/test_cli.py",
+        "scripts/tests/test_script.py",
+    }
+
+
+def test_reverse_map_reads_the_tests_inside_packages(tmp_path: Path) -> None:
+    repo_root = _package_tests_repo(tmp_path)
+
+    reverse_map = test_selector.build_import_reverse_map(repo_root)
+
+    assert reverse_map["base/lm/__init__.py"] == {
+        "tests/unit/test_imports.py",
+        "base/lm/tests/test_lm.py",
+    }
+    # A helper beside the tests is a source key like any module.
+    assert reverse_map["base/lm/tests/helper.py"] == {"cli/tests/test_cli.py"}
+
+
+def test_a_test_only_edit_inside_a_package_is_selected_not_forced_full(tmp_path: Path) -> None:
+    """`base/` forces FULL for source edits; a test under it is a test change."""
+    repo_root = _package_tests_repo(tmp_path)
+
+    result = test_selector.select_tests(["base/lm/tests/test_lm.py"], repo_root=repo_root)
+
+    assert result.decision == "SELECTED"
+    assert result.tests == ("base/lm/tests/test_lm.py",)
+    assert result.forced_roots == ()
+
+    source = test_selector.select_tests(["base/lm/__init__.py"], repo_root=repo_root)
+    assert (source.decision, source.reason) == ("FULL", "forced-root:base/")
+
+
+def test_a_helper_edit_inside_a_package_reaches_its_importers(tmp_path: Path) -> None:
+    repo_root = _package_tests_repo(tmp_path)
+
+    result = test_selector.select_tests(["base/lm/tests/helper.py"], repo_root=repo_root)
+
+    assert result.decision == "SELECTED"
+    assert result.tests == ("cli/tests/test_cli.py",)
+
+
+def test_a_conftest_inside_a_package_still_forces_the_full_suite(tmp_path: Path) -> None:
+    repo_root = _package_tests_repo(tmp_path)
+
+    result = test_selector.select_tests(["base/lm/tests/conftest.py"], repo_root=repo_root)
+
+    assert (result.decision, result.reason) == ("FULL", "test-configuration")
+
+
+def test_markdown_inside_a_package_tests_directory_is_not_documentation(tmp_path: Path) -> None:
+    """A data file beside the tests is a test input: unmapped, so the full suite runs."""
+    repo_root = _package_tests_repo(tmp_path)
+    _write(repo_root, "base/lm/tests/expected.md", "expected output\n")
+
+    result = test_selector.select_tests(["base/lm/tests/expected.md"], repo_root=repo_root)
+
+    assert (result.decision, result.reason) == ("FULL", "unmapped")
+
+
+def test_a_production_module_named_test_is_not_a_test(tmp_path: Path) -> None:
+    repo_root = _package_tests_repo(tmp_path)
+
+    result = test_selector.select_tests(["scripts/ci/test_selector.py"], repo_root=repo_root)
+
+    assert result.tests == ()
+    assert (result.decision, result.reason) == ("FULL", "unmapped")
+
+
+def test_a_package_test_without_a_timing_entry_costs_the_average(tmp_path: Path) -> None:
+    """A moved test has no `.test_durations` id until the nightly refresh: it costs the
+    average of the known tests, never nothing and never an error."""
+    repo_root = _package_tests_repo(tmp_path)
+
+    result = test_selector.select_tests(["scripts/tests/test_script.py"], repo_root=repo_root)
+
+    assert result.decision == "SELECTED"
+    assert result.tests == ("scripts/tests/test_script.py",)
+    assert abs(result.est_seconds - 10 / 3) < 1e-9

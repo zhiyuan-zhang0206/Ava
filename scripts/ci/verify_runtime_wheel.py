@@ -36,6 +36,13 @@ REQUIRED = (
 )
 
 
+def _reject_tests(names: set[str]) -> None:
+    """Tests live beside the code they prove (`<pkg>/**/tests/`) and ship in no image."""
+    shipped = sorted(name for name in names if "tests" in name.split("/")[:-1])
+    if shipped:
+        raise ValueError(f"runtime wheel ships test files: {shipped[:5]}")
+
+
 def verify_members(wheel: Path) -> None:
     """Reject SDK-only wheels and any wheel carrying editable bootstrap files."""
     with zipfile.ZipFile(wheel) as archive:
@@ -48,6 +55,7 @@ def verify_members(wheel: Path) -> None:
             raise ValueError(f"runtime wheel missing package: {package}")
     if any(name.endswith(".pth") for name in names):
         raise ValueError("runtime wheel contains an editable/path injection file")
+    _reject_tests(names)
     migrations = {
         name for name in names if name.startswith("migrations/") and name.endswith(".sql")
     }
