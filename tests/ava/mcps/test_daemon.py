@@ -1210,8 +1210,7 @@ async def test_invalidate_session_noop_when_not_cached() -> None:
 async def test_handle_client_retries_on_transport_error_and_succeeds(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """First call_tool raises BrokenPipeError (transport) → retry → second
-    attempt succeeds after session invalidation."""
+    """Safe tool listing still retries after a transport failure."""
     _write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
@@ -1222,15 +1221,15 @@ async def test_handle_client_retries_on_transport_error_and_succeeds(
         call_count += 1
         if call_count == 1:
             raise BrokenPipeError
-        return _call_result(content=[], is_error=False)
+        return MagicMock(tools=[])
 
     session = _make_session()
-    session.call_tool = AsyncMock(side_effect=_flaky_call)
+    session.list_tools = AsyncMock(side_effect=_flaky_call)
     monkeypatch.setattr(
         daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
-    req = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
+    req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
     reader = _make_reader([(json.dumps(req) + "\n").encode()])
     writer = _FakeWriter()
     await daemon_mod._handle_client(
@@ -1295,12 +1294,12 @@ async def test_handle_client_gives_up_after_max_retries(
         raise BrokenPipeError
 
     session = _make_session()
-    session.call_tool = AsyncMock(side_effect=_always_broken)
+    session.list_tools = AsyncMock(side_effect=_always_broken)
     monkeypatch.setattr(
         daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
-    req = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
+    req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
     reader = _make_reader([(json.dumps(req) + "\n").encode()])
     writer = _FakeWriter()
     await daemon_mod._handle_client(
@@ -1319,8 +1318,7 @@ async def test_handle_client_gives_up_after_max_retries(
 async def test_handle_client_retry_reconnects_after_invalidation(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """After transport error invalidates session, _connect_server is called
-    again to create a fresh session for the retry."""
+    """A safe list_tools retry rebuilds the dead session."""
     _write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
@@ -1331,15 +1329,14 @@ async def test_handle_client_retry_reconnects_after_invalidation(
         connect_count += 1
         session = _make_session()
         if connect_count == 1:
-            # First session dies on call
-            session.call_tool = AsyncMock(side_effect=BrokenPipeError())
+            session.list_tools = AsyncMock(side_effect=BrokenPipeError())
         else:
-            session.call_tool = AsyncMock(return_value=_call_result(content=[], is_error=False))
+            session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
         return session, MagicMock()
 
     monkeypatch.setattr(daemon_mod, "_connect_server", _reconnect)
 
-    req = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
+    req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
     reader = _make_reader([(json.dumps(req) + "\n").encode()])
     writer = _FakeWriter()
     await daemon_mod._handle_client(
@@ -1357,10 +1354,7 @@ async def test_handle_client_retry_reconnects_after_invalidation(
 async def test_handle_client_retries_on_mcp_error_connection_closed(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Regression (#1229): the SDK raises `MCPError(CONNECTION_CLOSED)` `from
-    None` when the stdio server died. The retry loop must invalidate the cached
-    dead session, reconnect, and succeed — instead of serving the dead session
-    to every later call."""
+    """A listing retries SDK CONNECTION_CLOSED after rebuilding its session."""
     _write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
@@ -1376,16 +1370,16 @@ async def test_handle_client_retries_on_mcp_error_connection_closed(
         if connect_count == 1:
             # First session's stdio peer died: the SDK surfaces it as
             # MCPError(CONNECTION_CLOSED), raised `from None` (no __cause__).
-            session.call_tool = AsyncMock(
+            session.list_tools = AsyncMock(
                 side_effect=MCPError(CONNECTION_CLOSED, "Connection closed")
             )
         else:
-            session.call_tool = AsyncMock(return_value=_call_result(content=[], is_error=False))
+            session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
         return session, MagicMock()
 
     monkeypatch.setattr(daemon_mod, "_connect_server", _reconnect)
 
-    req = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
+    req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
     reader = _make_reader([(json.dumps(req) + "\n").encode()])
     writer = _FakeWriter()
     await daemon_mod._handle_client(
@@ -1455,12 +1449,12 @@ async def test_handle_client_retry_sleeps_exponential_backoff(
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", _fake_sleep)
 
     session = _make_session()
-    session.call_tool = AsyncMock(side_effect=BrokenPipeError())
+    session.list_tools = AsyncMock(side_effect=BrokenPipeError())
     monkeypatch.setattr(
         daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
-    req = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
+    req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
     reader = _make_reader([(json.dumps(req) + "\n").encode()])
     writer = _FakeWriter()
     await daemon_mod._handle_client(

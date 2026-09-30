@@ -72,7 +72,7 @@ class _RemoteMCPClient:
             try:
                 sock.sendall(req.encode("utf-8"))
                 resp = self._read_response(sock, req_id)
-            except BaseException:
+            except BaseException as e:
                 # Any failure leaves the stream in an ambiguous state: a
                 # response to this request may still arrive (client deadline
                 # fired while the daemon kept processing), or the stream may be
@@ -82,6 +82,11 @@ class _RemoteMCPClient:
                 with suppress(OSError):
                     sock.close()
                 self._sock = None
+                if method == "call_tool" and isinstance(e, Exception):
+                    raise MCPCallError(
+                        f"MCP tool result unknown for {params['server']}.{params['tool']}; "
+                        f"request may have reached the daemon: {type(e).__name__}: {e}"
+                    ) from e
                 raise
             if not resp.get("ok"):
                 raise MCPCallError(resp.get("error", "Unknown error"))

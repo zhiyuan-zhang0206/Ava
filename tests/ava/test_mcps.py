@@ -395,13 +395,11 @@ def _dying_then_healthy_connect(
     return order, dying_stack
 
 
-def test_call_raw_rebuilds_session_on_connection_closed(
+def test_call_raw_connection_closed_is_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When the cached stdio session's peer died (SDK raises MCPError with the
-    CONNECTION_CLOSED code, `from None`), the call closes the dead session,
-    reconnects, and retries once — instead of failing forever on the cached
-    corpse."""
+    """CONNECTION_CLOSED can mean the tool ran before its reply was lost.
+    Invalidate the cached session for a future call without replaying this one."""
     from mcp import MCPError
     from mcp.types import CONNECTION_CLOSED
 
@@ -412,9 +410,9 @@ def test_call_raw_rebuilds_session_on_connection_closed(
         _result([_content_text("ok")], is_error=False),
     )
 
-    result = mcps_mod._call_raw("fs", "do")
-    assert result["content"] == [{"type": "text", "text": "ok"}]
-    assert order == ["dying", "healthy"]  # dead session invalidated, rebuilt once
+    with pytest.raises(mcps_mod.MCPCallError, match="result unknown"):
+        mcps_mod._call_raw("fs", "do")
+    assert order == ["dying"]
     assert dying_stack.aclose.await_count == 1  # old transport closed
 
 

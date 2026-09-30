@@ -229,12 +229,12 @@ def post(
 ) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Unified POST wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
-    Retries the transient failure family — the `httpx.TransportError` parent
-    class (ConnectError / ConnectTimeout / ReadTimeout / WriteTimeout /
-    PoolTimeout / RemoteProtocolError etc.: "the gateway line is not
-    reachable", which subclass is a transport-layer detail) plus HTTP
-    429/5xx responses (`_TRANSIENT_HTTP_STATUSES`: the gateway or one of its
-    backends hiccuped) — with bounded exponential backoff + per-agent jitter
+    Retries transport failures and HTTP 429/5xx responses only when the route
+    is idempotent or promises server-side deduplication. For non-idempotent
+    routes, only ConnectError, ConnectTimeout, and PoolTimeout are retried:
+    these happen before the request can be sent. Other transport failures
+    leave the result unknown and must not cause a second POST. Retries use
+    bounded exponential backoff + per-agent jitter
     (`_retry_delay_seconds`), then either raises `GatewayUnavailable`
     (transport) or returns the last response (HTTP: the caller's
     `raise_from_response` produces the wire error / `HTTPStatusError` — the
@@ -242,9 +242,9 @@ def post(
 
     `idempotent=None` (default) inherits the route's semantics from its
     doorplate (`base.api_contracts.contracts`): IDEMPOTENT retries the transient family,
-    NON_IDEMPOTENT surfaces immediately (a ReadTimeout means the request
-    left this process and the server may well have acted on it — re-sending
-    can duplicate the effect, e.g. spawn's phantom-twin agent), and
+    NON_IDEMPOTENT surfaces an uncertain transport failure immediately (the
+    server may have acted on it — re-sending can duplicate the effect, e.g.
+    spawn's phantom-twin agent), and
     AT_LEAST_ONCE_WITH_KEY retries with an `Idempotency-Key` header (one key
     per logical call, shared by all retries) — the server dedups, so
     re-sending is safe. An explicit `idempotent=...` overrides the contract
@@ -298,12 +298,13 @@ def post(
                 path, json=json or {}, params=params, timeout=per_call, headers=headers
             )
         except httpx.TransportError as e:
-            if isinstance(e, httpx.ReadTimeout) and not retryable:
-                # The request may have landed (non-idempotent POST): fail now
-                # rather than re-send and double the effect (spawn → twin).
+            if not retryable and not isinstance(
+                e, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+            ):
+                # The request may have landed; only pre-send failures are safe to retry.
                 raise GatewayUnavailable(
-                    f"Gateway read timeout at {_client_singleton().base_url} "
-                    f"(no retry: non-idempotent request): {e!s}"
+                    f"Gateway transport error at {_client_singleton().base_url} "
+                    f"(no retry: non-idempotent request; result unknown, may have been delivered): {e!s}"
                 ) from e
             last_err = e
         else:
