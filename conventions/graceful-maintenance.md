@@ -63,7 +63,12 @@ signalled gateway drains its in-flight connections under a finite budget
 (`gateway.gateway_graceful_shutdown_timeout_seconds`, default 30s — well inside
 this command's default 300s deadline); past the budget uvicorn cancels the
 remaining request and stream tasks and the lifespan cleanup runs, so an
-unfinished streaming response cannot hold the process open. The TTL reaper's
+unfinished streaming response cannot hold the process open. The SSE streams do
+not spend that budget: the gateway's server marks its shutdown as it begins and
+each stream ends itself within one poll tick, so its client reconnects at once.
+ava-root waits for the gateway's stop longer than that budget plus the lifespan
+cleanup (`ServiceSpec.stop_ceiling_s`, derived from the same setting), so a
+gateway still draining is never reported as a failed stop. The TTL reaper's
 serial remote-dispatch batches stop starting new dispatches once shutdown
 begins, so that cleanup waits for an in-flight dispatch, never the remaining
 batch — deferred rows are re-selected by the next boot's pass.

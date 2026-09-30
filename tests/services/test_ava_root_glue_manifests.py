@@ -8,12 +8,14 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineRole
+from base.config import settings
 
 # The capability constants are typed frozenset[MachineRole]; capability values
 # are irrelevant to the roster-driven assertions here (same precedent as
 # tests/cli/test_cluster_health.py).
 from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 from services.ava_root.manifest import ManifestError, load_manifests
+from services.ava_root.supervisor import SupervisorConfig
 from services.ava_root_glue import manifests as gen
 
 _REPO = Path("/checkout/repo")
@@ -151,3 +153,70 @@ def test_session_host_attach_table_matches_the_g6b_ruling() -> None:
         "orchestration-session": "ops",
         "exec-child": "agent-host",
     }
+
+
+def _real_units() -> dict[str, dict[str, object]]:
+    units = gen.build_units(capabilities=["gateway", "agent-runner"], repo_root=_REPO)
+    return {cast("str", unit["id"]): unit for unit in units}
+
+
+def test_declared_shutdown_ceiling_becomes_root_window_and_undeclared_keeps_the_default() -> None:
+    declared = ServiceSpec(
+        session="svc-a",
+        cmd=".venv/bin/python -m a",
+        capabilities=_GATEWAY,
+        requires_db=False,
+        stop_ceiling_s=30.0,
+    )
+    undeclared = _spec("svc-b", _GATEWAY, ".venv/bin/python -m b")
+    units = {
+        unit["id"]: unit
+        for unit in gen.build_units(
+            [declared, undeclared], capabilities=["gateway"], repo_root=_REPO
+        )
+    }
+    assert units["svc-a"]["stop_timeout_s"] == 30.0 + gen.STOP_MARGIN_S
+    assert "stop_timeout_s" not in units["svc-b"]
+
+
+def test_every_roster_unit_gets_a_window_strictly_above_its_declared_ceiling() -> None:
+    """Root never waits for a unit less long than the unit's own cleanup may take."""
+    from ops.roster import build_services
+
+    default_window = SupervisorConfig().stop_timeout_s
+    units = _real_units()
+    for spec in build_services():
+        if spec.session not in units:
+            continue
+        window = cast("float | None", units[spec.session].get("stop_timeout_s"))
+        if spec.stop_ceiling_s is None:
+            assert window is None, f"{spec.session}: a window without a declared ceiling"
+            continue
+        assert window is not None, f"{spec.session} declares a ceiling but got no window"
+        assert window >= spec.stop_ceiling_s + gen.STOP_MARGIN_S
+    # The two units whose own cleanup outlasts root's default window declare it.
+    for session in ("gateway", "browser-mcp"):
+        window = cast("float", units[session]["stop_timeout_s"])
+        assert window > default_window, f"{session}: window {window} <= default {default_window}"
+
+
+def test_gateway_window_follows_the_drain_budget_the_launch_hands_uvicorn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One setting drives both uvicorn's drain and root's wait: no value can undercut."""
+    from gateway import _server
+
+    for drain in (30.0, 5.0, 120.0):
+        monkeypatch.setattr(settings.gateway, "gateway_graceful_shutdown_timeout_seconds", drain)
+        window = cast("float", _real_units()["gateway"]["stop_timeout_s"])
+        launched = _server.serve_kwargs(host="127.0.0.1")["timeout_graceful_shutdown"]
+        assert launched == drain
+        assert window > launched + gen.STOP_MARGIN_S  # room left for the lifespan cleanup
+
+
+def test_browser_mcp_window_covers_every_bounded_shutdown_step() -> None:
+    from services.browser import shutdown_budget
+
+    window = cast("float", _real_units()["browser-mcp"]["stop_timeout_s"])
+    steps = shutdown_budget.SHUTDOWN_STEPS * shutdown_budget.SHUTDOWN_STEP_TIMEOUT_S
+    assert window == steps + gen.STOP_MARGIN_S

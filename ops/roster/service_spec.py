@@ -49,6 +49,12 @@ class ServiceSpec:
             launch or recover processes.
         config_inputs: authoritative external files read at process birth.
             Their paths and bytes are part of the immutable launch generation.
+        stop_ceiling_s: the longest this service's own SIGTERM cleanup may run,
+            when that can exceed root's default TERM window. Derive it from the
+            same constants or settings the service's shutdown code reads, never
+            restate the number. Root's window for the unit is this plus
+            ``services.ava_root_glue.manifests.STOP_MARGIN_S``; None = the service
+            finishes inside root's default window.
         curl_url: HTTP readiness endpoint; None for non-HTTP protocols.
         tcp_port: listener port for a non-HTTP protocol readiness probe.
         identity_probe: a protocol readiness callback returning DaemonProbe.
@@ -94,6 +100,7 @@ class ServiceSpec:
     no_profile_marker: bool = False
     config_inputs: tuple[Path, ...] = ()
     db_access: DbAccess | None = None
+    stop_ceiling_s: float | None = None
 
 
 def profile_marker(spec: ServiceSpec) -> str | None:

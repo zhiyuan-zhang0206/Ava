@@ -7,10 +7,13 @@ import faulthandler
 import logging
 import os
 import signal
+import socket
+import sys
 from contextlib import suppress
 from typing import Any
 
 import uvicorn
+from uvicorn.config import STARTUP_FAILURE
 
 from base.cluster.machine import is_gateway
 from base.cluster.transport_encryption import verify_transport_encryption
@@ -19,9 +22,45 @@ from base.db.code_version_gate import raise_min_code_version
 from base.deploy.schema.migrations import assert_schema_current
 from base.log import init_gateway_process
 from base.native_process.os_platform import raise_fd_limit
+from gateway.middleware import stopping
 
 _log = logging.getLogger(__name__)
 _GATEWAY_UVICORN_WORKERS = 1
+
+
+class GatewayServer(uvicorn.Server):
+    """uvicorn's server, marking its shutdown for long-lived streams as it begins.
+
+    uvicorn cancels an unfinished response only when `timeout_graceful_shutdown`
+    runs out, so an SSE stream that never ends by itself holds every stop for that
+    whole budget (and ava-root's window for this unit is derived from it). Marking
+    the shutdown first lets the streams end within one poll tick; the budget stays
+    the bound for whatever does not end.
+    """
+
+    async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
+        stopping.mark_stopping()
+        await super().shutdown(sockets)
+
+
+def serve(kwargs: dict[str, Any]) -> None:
+    """`uvicorn.run` with the gateway's own server class.
+
+    `uvicorn.run` always builds the stock `Server`, so this is its single-worker
+    path with `GatewayServer`, including the startup-failure exit code root's
+    restart policy reads. Hot reload (dev only) keeps `uvicorn.run`: its reloader
+    builds its own server in a child process.
+    """
+    if kwargs["reload"]:
+        uvicorn.run(**kwargs)
+        return
+    config = uvicorn.Config(**kwargs)
+    config.load_app()
+    server = GatewayServer(config)
+    with suppress(KeyboardInterrupt):
+        server.run()
+    if not server.started:
+        sys.exit(STARTUP_FAILURE)
 
 
 def main() -> None:
@@ -101,14 +140,14 @@ def main() -> None:
             "gateway must run one uvicorn worker because rate limiters are process-local"
         )
     _log.warning("gateway starts with one uvicorn worker because rate limiters are process-local")
-    uvicorn.run(**serve_kwargs(host=host))
+    serve(serve_kwargs(host=host))
 
 
 def serve_kwargs(*, host: str, app: str = "gateway.app:app") -> dict[str, Any]:
     """Assemble the uvicorn launch parameters for the gateway ASGI server.
 
     The single assembly point of the launch contract: ``main()`` hands the dict
-    straight to ``uvicorn.run``, and the shutdown regression
+    straight to ``serve``, and the shutdown regression
     (``tests/gateway/test_server_shutdown.py``) starts a real child-process
     server from the same dict — only the bind address, the app path and the
     port are swapped — so a field dropped here (in particular

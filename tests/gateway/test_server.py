@@ -20,7 +20,7 @@ def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
     def _ignore(*_args: object, **_kwargs: object) -> None:
         return None
 
-    def _record_run(*_args: object, **kwargs: object) -> None:
+    def _record_serve(kwargs: dict[str, object]) -> None:
         captured.update(kwargs)
 
     monkeypatch.setattr(settings.services, "gateway_pidfile", tmp_path / "gateway.pid")
@@ -29,7 +29,7 @@ def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
     monkeypatch.setattr(_server, "init_gateway_process", _ignore)
     monkeypatch.setattr(_server, "is_gateway", lambda: False)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
-    monkeypatch.setattr(_server.uvicorn, "run", _record_run)
+    monkeypatch.setattr(_server, "serve", _record_serve)
 
     with caplog.at_level(logging.WARNING, logger="gateway._server"):
         _server.main()
@@ -80,7 +80,7 @@ def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
     monkeypatch.setattr(_server, "is_gateway", lambda: serves_gateway)
     monkeypatch.setattr(_server, "verify_transport_encryption", _ignore)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
-    monkeypatch.setattr(_server.uvicorn, "run", _ignore)
+    monkeypatch.setattr(_server, "serve", _ignore)
 
     _server.main()
 

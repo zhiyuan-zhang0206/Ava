@@ -20,6 +20,12 @@ from base.daemon.health import DaemonProbe, health_port, probe_daemon, probe_hom
 from base.paths import ava_home, otel_collector_binary, otel_collector_config
 from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 
+# After uvicorn's connection drain the gateway runs its lifespan cleanup and the
+# interpreter exits. That tail waits on the TTL reaper's in-flight remote dispatch
+# (each call capped at 5 s, `gateway/ttl_reaper`) plus the pool closes; this is
+# its declared bound.
+_GATEWAY_LIFESPAN_ALLOWANCE_S = 10.0
+
 # The roster body moved verbatim and still resolves these policy helpers by
 # name. Lazy delegation keeps their definitions in ops.spec without introducing
 # a module-initialization cycle when either side is imported first.
@@ -127,6 +133,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
     owns the pool it indexes — `plugins/ava_memory/services.py`.)
     """
     # Share the public entry/app port definition with the serving process.
+    from services.browser import shutdown_budget as browser_mcp_budget
     from services.gate.daemon import app_port, entry_port
     from services.healthchecks.gate import probe as probe_gate
     from services.healthchecks.otel_collector import probe_collector
@@ -165,6 +172,13 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # with a pid its own pidfile never recorded (`probe_home`).
             identity_probe=partial(probe_home, settings.services.gateway_health_url),
             healthcheck_module="services.healthchecks.gateway",
+            # SIGTERM lets uvicorn drain in-flight requests for up to the budget the
+            # launch hands it (`gateway._server.serve_kwargs`), then run the lifespan
+            # cleanup: root must wait at least that long.
+            stop_ceiling_s=(
+                settings.gateway.gateway_graceful_shutdown_timeout_seconds
+                + _GATEWAY_LIFESPAN_ALLOWANCE_S
+            ),
         ),
         ServiceSpec(
             session="im-bridge",
@@ -391,6 +405,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             requires_db=False,
             identity_probe=partial(probe_owned_service, "browser-mcp"),
             healthcheck_module="services.healthchecks.browser_mcp",
+            stop_ceiling_s=browser_mcp_budget.SHUTDOWN_CEILING_S,
         ),
         # computer-mcp: per-machine computer-use executor. Every desktop action
         # goes through the signed permissions helper; the daemon serializes

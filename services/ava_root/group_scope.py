@@ -84,9 +84,14 @@ def recorded_living(tracked: set[OwnedProcess]) -> set[OwnedProcess]:
     return {item for item in tracked if item.live()}
 
 
-def ownership_retained(unit_id: str, living: set[OwnedProcess], pgid: int) -> RuntimeError:
+def ownership_retained(
+    unit_id: str, living: set[OwnedProcess], pgid: int, window_s: float
+) -> RuntimeError:
     survivors = sorted(item.pid for item in living) or group_members(pgid)
-    return RuntimeError(f"unit {unit_id} did not stop; ownership retained (pids {survivors})")
+    return RuntimeError(
+        f"unit {unit_id} did not stop within its {window_s:g}s window; "
+        f"ownership retained (pids {survivors})"
+    )
 
 
 def unproven_group(unit_id: str, pgid: int, custody: ServiceCustody) -> RuntimeError:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ _UNIT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 # validators reject anything else, so field drift fails loudly instead of
 # being carried around silently.
 _REQUIRED_FIELDS = frozenset({"id", "exec", "restart"})
-_MANIFEST_FIELDS = _REQUIRED_FIELDS | {"attach", "env", "inputs"}
+_MANIFEST_FIELDS = _REQUIRED_FIELDS | {"attach", "env", "inputs", "stop_timeout_s"}
 _FILE_FIELDS = frozenset({"units", "launch_digest"})
 
 
@@ -76,6 +77,11 @@ class UnitManifest:
     attach: str
     env: tuple[tuple[str, str], ...] = ()
     inputs: tuple[InputSeal, ...] = ()
+    stop_timeout_s: float | None = None
+    """Seconds root waits for this unit to exit after TERM; None = root's default.
+
+    A unit whose own SIGTERM cleanup can outlast root's default declares it here,
+    so root never gives up on a unit that is still closing inside its own bound."""
 
     def digest(self) -> str:
         """Bind executable and private environment without exposing credentials."""
@@ -87,6 +93,7 @@ class UnitManifest:
                 "attach": self.attach,
                 "env": self.env,
                 "inputs": [item.as_mapping() for item in self.inputs],
+                "stop_timeout_s": self.stop_timeout_s,
             },
             separators=(",", ":"),
             sort_keys=True,
@@ -141,6 +148,7 @@ class UnitManifest:
             attach=attach,
             env=_parse_environment(raw.get("env", {}), origin),
             inputs=inputs,
+            stop_timeout_s=_parse_stop_timeout(raw.get("stop_timeout_s"), origin),
         )
 
 
@@ -153,6 +161,19 @@ def _parse_exec(raw: object, origin: str) -> tuple[str, ...]:
             raise ManifestError(f"{origin}: exec[{index}] must be a non-empty string")
         argv.append(part)
     return tuple(argv)
+
+
+def _parse_stop_timeout(raw: object, origin: str) -> float | None:
+    if raw is None:
+        return None
+    if (
+        isinstance(raw, bool)
+        or not isinstance(raw, (int, float))
+        or not math.isfinite(raw)
+        or raw <= 0
+    ):
+        raise ManifestError(f"{origin}: stop_timeout_s must be a positive finite number of seconds")
+    return float(raw)
 
 
 def _parse_environment(raw: object, origin: str) -> tuple[tuple[str, str], ...]:

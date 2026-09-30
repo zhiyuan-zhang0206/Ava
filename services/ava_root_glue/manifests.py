@@ -20,7 +20,10 @@ Mapping semantics (W1.1 v1 row set + G6 rulings):
   schedule runners / orchestration sessions) spawn at RUNTIME via their
   owning service (E2a) — they are not static manifest rows; their terminal
   attach values (G6b) live in `SESSION_HOST_ATTACH` for the spawn slice;
-- OS-edge / root-internal / retired rows never appear (W1.1 D/E/F).
+- OS-edge / root-internal / retired rows never appear (W1.1 D/E/F);
+- a spec that declares `stop_ceiling_s` (its own SIGTERM cleanup can outlast
+  root's default TERM window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`,
+  so root's window is derived from the unit's bound and cannot undercut it.
 
 Development exec derivation: a spec's `cmd` is a shell command, so the unit
 argv is `/bin/sh -c 'cd <repo> && ...'`. When the command is a simple one
@@ -63,6 +66,12 @@ from services.ava_root.manifest import (
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Root's TERM window for a unit that declares a shutdown ceiling is that ceiling
+# plus this margin: the reap, the group-closure read and scheduling all happen
+# inside root's window, so a unit that closes exactly at its own bound must
+# still finish before root gives up on it.
+STOP_MARGIN_S = 5.0
 
 _KNOWN_CAPABILITIES = frozenset(get_args(MachineRole))
 
@@ -177,16 +186,17 @@ def build_units(
             if release is None
             else _release_command(spec.cmd, release, repo_root)
         )
-        units.append(
-            {
-                "id": spec.session,
-                "exec": argv,
-                "restart": "always",
-                "attach": "root",
-                "env": prefix_env | ({} if environments is None else environments[spec.session]),
-                "inputs": [InputSeal.capture(path).as_mapping() for path in spec.config_inputs],
-            }
-        )
+        unit: dict[str, object] = {
+            "id": spec.session,
+            "exec": argv,
+            "restart": "always",
+            "attach": "root",
+            "env": prefix_env | ({} if environments is None else environments[spec.session]),
+            "inputs": [InputSeal.capture(path).as_mapping() for path in spec.config_inputs],
+        }
+        if spec.stop_ceiling_s is not None:
+            unit["stop_timeout_s"] = spec.stop_ceiling_s + STOP_MARGIN_S
+        units.append(unit)
     return units
 
 

@@ -636,6 +636,9 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
         # blocked `cluster update` for the whole 300s stop budget).
         with suppress(BaseException):
             await session_task
+        # Two bounded steps, so the daemon may keep closing for up to
+        # `shutdown_budget.SHUTDOWN_CEILING_S`; ava-root's window for this unit
+        # is derived from that total.
         await _bounded_stack_close(current_stack, "upstream stack close during shutdown")
         server.close()
         await _bounded(server.wait_closed(), "server close")
