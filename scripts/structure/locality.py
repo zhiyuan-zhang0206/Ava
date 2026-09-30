@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import functools
+import json
 import re
 from collections import defaultdict
 from collections.abc import Callable
@@ -19,7 +20,10 @@ from typing import cast
 
 from scripts.structure import baseline_shards, path_imports
 
-SECTIONS = ("private_imports", "owner_bypasses")
+SECTIONS = ("private_imports", "owner_bypasses", "patch_targets")
+# section -> the lint that measures it. Frozen and guarded like the others, but measured over
+# the test files by its own script; the structure gate only parses and guards them.
+EXTERNAL_SECTIONS = {"patch_targets": "scripts/lint/patch_targets.py"}
 # White-box tests reach into privates by design; only test *directories* are
 # exempt, since a governed module may legitimately be named test_*.py.
 _TEST_DIR = re.compile(r"(^|/)tests?/")
@@ -353,7 +357,7 @@ def measure(
     tree: ast.Module, rel_path: str, roots: tuple[str, ...], repo_root: Path
 ) -> dict[str, Sites]:
     if _TEST_DIR.search(rel_path):
-        return {kind: {} for kind in SECTIONS}
+        return {kind: {} for kind in SECTIONS if kind not in EXTERNAL_SECTIONS}
     return {
         "private_imports": private_imports(tree, rel_path, roots, repo_root),
         "owner_bypasses": owner_bypasses(tree, rel_path, roots),
@@ -411,6 +415,8 @@ def site_errors(
     sources = {new: old for old, new in (renames or {}).items()}
     errors: list[str] = []
     for kind, sites in measured.items():
+        if kind in EXTERNAL_SECTIONS:
+            continue
         errors.extend(_growth_errors(kind, sites, baseline[kind], sources))
         errors.extend(_stale_errors(kind, sites, baseline[kind], scanned, repo_root))
     return errors
@@ -452,6 +458,35 @@ def _stale_errors(
     return errors
 
 
+def introduced(shards: dict[str, str] | None, repo_root: Path, base: str) -> dict[str, str] | None:
+    """The base revision's shards, with each section whose own lint is absent at `base`
+    carried over from the working tree.
+
+    A section is introduced by the change that adds its lint: there is no earlier baseline
+    to shrink from, so it is compared with itself. From the next revision on the lint
+    exists at the base and the section is shrink-only like the others.
+    """
+    if shards is None:
+        return None
+    new = {
+        kind
+        for kind, lint in EXTERNAL_SECTIONS.items()
+        if not baseline_shards.exists_at(repo_root, base, lint)
+    }
+    carried = dict(shards)
+    for name, text in baseline_shards.read_worktree(repo_root).items():
+        added = {kind: entries for kind, entries in json.loads(text).items() if kind in new}
+        if added:
+            carried[name] = baseline_shards.render({**json.loads(carried.get(name, "{}")), **added})
+    return carried
+
+
+def _entry_scope(kind: str, scope: tuple[str, ...]) -> tuple[str, ...]:
+    """Top-level directories an entry's path may start with: an externally measured section
+    freezes test files, which sit in `tests/` or inside a package."""
+    return (*scope, "tests", "scripts") if kind in EXTERNAL_SECTIONS else scope
+
+
 def unpaired_additions(current: dict[str, int], previous: dict[str, int]) -> list[str]:
     """Added keys not explained by a same-file removal of the same private name.
 
@@ -491,7 +526,7 @@ def validate_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None
             and not path.is_absolute()
             and path.as_posix() == path_text
             and ".." not in path.parts
-            and path.parts[0] in scope
+            and path.parts[0] in _entry_scope(kind, scope)
             and path.suffix == ".py"
         )
         valid_target = target in DECISIONS if kind == "owner_bypasses" else bool(target)

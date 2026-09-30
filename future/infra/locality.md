@@ -5,6 +5,9 @@ plus the public doors of its neighbors. The mechanism that enforces the first
 two legs (package doors, single decision owners) is the structure gate's Rules 4
 and 5 (`scripts/lint/code_structure.py`, `scripts/structure/locality.py`); how to
 work with them is in [python-conventions](../../conventions/python-conventions.md).
+Rule 8 (`scripts/lint/patch_targets.py`) applies the same idea to tests: a test may
+not patch another package's private names; its census, the injection-seam work
+list, is [test-patch-audit](test-patch-audit.md).
 The principle itself lives in the serious-engineering skill
 (`principles/complexity-management`, "Locality is information hiding made
 observable"). The sweeper's `locality` class (`scripts/structure/cochange.py`)

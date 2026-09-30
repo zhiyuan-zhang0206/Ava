@@ -7,7 +7,23 @@
     "tests/scripts": 53
   },
   "files": {
-    "tests/scripts/test_alert_rules.py": 1150,
-    "tests/scripts/model_registry/test_check_model_updates.py": 899
+    "tests/scripts/model_registry/test_check_model_updates.py": 899,
+    "tests/scripts/test_alert_rules.py": 1150
+  },
+  "patch_targets": {
+    "tests/scripts/model_registry/test_check_model_updates.py::base.host.net.resilience._sleep": 1,
+    "tests/scripts/structure/test_baseline_shard_validity_gate.py::scripts.lint.code_structure._REPO_ROOT": 1,
+    "tests/scripts/structure/test_directory_budget_entries.py::scripts.lint.code_structure._REPO_ROOT": 1,
+    "tests/scripts/structure/test_lint_code_structure.py::scripts.lint.code_structure._MACHINE_ROLE_ALLOWED": 1,
+    "tests/scripts/structure/test_lint_code_structure.py::scripts.lint.code_structure._REPO_ROOT": 1,
+    "tests/scripts/structure/test_lint_code_structure.py::scripts.lint.code_structure._TYPE_CHECKING_ALLOWED": 1,
+    "tests/scripts/structure/test_locality_gate.py::scripts.lint.code_structure._REPO_ROOT": 1,
+    "tests/scripts/structure/test_path_imports.py::scripts.lint.code_structure._REPO_ROOT": 1,
+    "tests/scripts/structure/test_rename_aware_baseline.py::scripts.lint.code_structure._REPO_ROOT": 1,
+    "tests/scripts/structure/test_rename_aware_baseline.py::scripts.lint.code_structure._SCAN_DIRS": 1,
+    "tests/scripts/structure/test_rename_aware_baseline.py::scripts.lint.code_structure._STRUCTURE_DIRS": 1,
+    "tests/scripts/structure/test_tests_dir_scope.py::scripts.lint.code_structure._REPO_ROOT": 1,
+    "tests/scripts/test_migrate_skill_identity.py::base.packages.extensions.install_registry._REGISTRY_LOCK_TIMEOUT_S": 1,
+    "tests/scripts/test_rotate_cluster_secret.py::services.backup._run_with_progress": 1
   }
 }
