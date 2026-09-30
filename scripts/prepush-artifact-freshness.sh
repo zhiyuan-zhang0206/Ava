@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Always-run duplicate of the generated-artifact / snapshot freshness family,
+# Always-run duplicate of the generated-artifact freshness family,
 # ignoring every files: filter.
 #
 # pre-commit's own diff selection passes a files:-filtered hook only
@@ -7,12 +7,9 @@
 # empirically: `git diff --diff-filter=ACMR` is what pre-commit actually
 # selects on, and a delete-only diff produces an empty selection regardless
 # of the compared range). So a change that only deletes the last file
-# referencing a public symbol, event, or config field can leave the
-# corresponding generated snapshot stale with no pre-commit-stage hook ever
-# firing -- on any range, including the branch-diff rerun in
-# scripts/prepush-branch-lint.sh. That is exactly how PR #3658 reached CI
-# with a stale base/agents/api.txt after a rebase deleted the module it
-# described.
+# referencing an event or config field can leave the corresponding generated
+# artifact stale with no pre-commit-stage hook ever firing -- on any range,
+# including the branch-diff rerun in scripts/prepush-branch-lint.sh.
 #
 # This hook re-checks the whole repository at every push instead, by
 # re-invoking each underlying hook's own --all-files behavior. The underlying
@@ -24,7 +21,6 @@ set -euo pipefail
 # Keep in sync with lint-prepush-artifact-freshness's rationale comment in
 # .pre-commit-config.yaml; tests/ci/test_prepush_hooks.py checks the pairing.
 hooks=(
-    lint-contract-snapshots
     types-codegen-fresh
     constants-codegen-fresh
     events-registry-fresh

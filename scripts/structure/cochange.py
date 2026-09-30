@@ -67,7 +67,6 @@ _GENERATED_EXCLUDE = (
     "uv.lock",
     "package-lock.json",
     "db/schema.sql",
-    "*.api.txt",
 )
 # Declared cross-process contract boundaries: a pair of path prefixes whose
 # co-change is carried by codegen, not a leaked decision. See the module

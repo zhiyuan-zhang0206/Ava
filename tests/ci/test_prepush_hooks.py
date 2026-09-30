@@ -147,8 +147,8 @@ def test_prepush_parity_hooks_configured() -> None:
 
 def test_artifact_freshness_hook_list_matches_config() -> None:
     # Drift guard: scripts/prepush-artifact-freshness.sh hardcodes the
-    # generated-artifact/snapshot hook family so it can duplicate each one
-    # unconditionally at push. A new files:-filtered snapshot hook added to
+    # generated-artifact hook family so it can duplicate each one
+    # unconditionally at push. A new files:-filtered artifact hook added to
     # .pre-commit-config.yaml without also joining this list would silently
     # keep the same delete-only blind spot the hook exists to close.
     script = ARTIFACT_FRESHNESS.read_text()
@@ -156,7 +156,6 @@ def test_artifact_freshness_hook_list_matches_config() -> None:
     assert match, "scripts/prepush-artifact-freshness.sh must define a hooks=(...) array"
     listed = [line.strip() for line in match.group(1).splitlines() if line.strip()]
     expected = {
-        "lint-contract-snapshots",
         "types-codegen-fresh",
         "constants-codegen-fresh",
         "events-registry-fresh",
@@ -314,11 +313,9 @@ def test_pyright_files_scopes_to_changed_existing_python_files(tmp_path: Path) -
 
 
 def test_delete_only_diff_skips_filtered_hook_but_always_run_catches_it(tmp_path: Path) -> None:
-    """Regression test for the gap behind PR #3658 (`base/agents/api.txt` stale
-    after a rebase deleted the module it described): pre-commit's own diff
-    selection passes a files:-filtered hook only Added/Copied/Modified/Renamed
-    paths -- never a Deleted one, on any compared range -- so only an
-    always_run duplicate at push can catch a delete-only diff.
+    """Pre-commit's diff selection passes a files:-filtered hook only
+    Added/Copied/Modified/Renamed paths, never a Deleted one, on any compared
+    range. Only an always_run duplicate at push can catch a delete-only diff.
     """
     repo = tmp_path / "repo"
     repo.mkdir()

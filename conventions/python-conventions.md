@@ -130,33 +130,6 @@ What this means for common edits:
   function defined in that same module) — `cli.main` is not a handler
   registry; its tests patch the parser module before `build_parser()` runs.
 
-### Contract snapshots: a door's public surface, committed
-
-Rule 4 says nothing outside a package may import its `_`-private modules or
-names — so a door's contract IS its public surface. `scripts/structure/contracts.py`
-renders that surface (module-by-module, function/class/variable/re-export, sorted
-and deterministic) into a snapshot file next to the code: `base/db/api.txt`,
-`base/agents/api.txt`, `base/events/api.txt`. Regenerate with
-`.venv/bin/python scripts/structure/contracts.py --write`; the
-`lint-contract-snapshots` pre-commit hook runs `--check` and fails on drift.
-That hook is `files:`-filtered, and pre-commit's own diff selection never
-passes it a purely deleted path (it selects Added/Copied/Modified/Renamed
-only) — so a change that only deletes the last file behind a public symbol
-never triggers it, on any compared range. `lint-prepush-artifact-freshness`
-(pre-push, `always_run: true`) is the unconditional backstop for exactly that
-case; see [git hooks](runbook.md#git-hooks-pre-commit--pre-push).
-
-**A snapshot diff is a contract change, and the PR must declare it** (see the
-"Contract change" section in
-[`write-a-pr-description`](../.agents/skills/write-a-pr-description/SKILL.md)).
-The tool is pure AST — it never imports a door's own code — so a body-only
-change (an implementation fix with no signature change) leaves the snapshot
-byte-identical; only a real surface change (a new/removed public name, a
-changed signature, a widened re-export) moves it. A `fix` PR whose diff has to
-touch a contract snapshot is a sign the "fix" actually changed the door's
-contract — that goes back through [align](../ava_builtins/skills/ava-workflow/align/SKILL.md)
-instead of landing as an internal-only change.
-
 ## Function quality budgets: complexity and nesting
 
 Every function and method in the same recursive `.py` scope has two budgets:
