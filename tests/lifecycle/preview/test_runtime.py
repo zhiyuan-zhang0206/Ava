@@ -108,23 +108,23 @@ def test_recorded_real_execution_is_checked_exactly() -> None:
     assert not runtime.execution_completed(items, "done")
 
 
-def test_cleanup_observer_cannot_release_a_remaining_registry_slot(
+def test_cleanup_observer_rejects_a_born_home_that_is_not_detached(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
-    registry = tmp_path / "clusters.json"
-    original = json.dumps({str(home): {"gateway_home": str(home)}})
-    registry.write_text(original)
+    home.mkdir()
+    intent = json.dumps({"record": {"gateway_home": str(home)}})
+    (home / "start-intent.json").write_text(intent)
 
     def absent(_run: Path) -> list[psutil.Process]:
         return []
 
     monkeypatch.setattr(runtime, "owned_processes", absent)
 
-    with pytest.raises(RuntimeError, match="registry slot remains"):
+    with pytest.raises(RuntimeError, match="not detached"):
         runtime.verify_stopped(tmp_path, home)
 
-    assert registry.read_text() == original
+    assert (home / "start-intent.json").read_text() == intent
     assert not (tmp_path / "cleanup.json").exists()
 
 

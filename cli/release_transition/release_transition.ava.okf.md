@@ -16,7 +16,7 @@ or per-service branch). Success is native dispatch/readback, not completion.
 
 ## Authority and inputs
 
-`request.py` captures the home, registry, machine, configuration digest, operation
+`request.py` captures the home, machine, configuration digest, operation
 generation, and exact previous/candidate/executor artifact, manifest, source and
 schema identities, as kind `fleet`, `unit` or `pitr`. The candidate supplies
 the retained executor. Full image
@@ -25,8 +25,8 @@ file; an unchanged squashed baseline alone does not establish equal SQL.
 No platform is captured: each verification, boot included, checks the image's
 ABI tag against the host as observed then ([[base/deploy/release/runtime_release.ava.okf.md]]).
 
-`identity.py` requires the existing initialized start intent to match the exact
-captured registry reservation. Configuration admission uses settings-free
+`identity.py` requires the home's own start intent to be an initialized
+(provisioned or ready) gateway reservation; nothing outside the home is read. Configuration admission uses settings-free
 `base/deploy/release/start_inputs.py`, before Settings and at effect/readiness boundaries.
 It includes desired service selection. These comparisons detect changed inputs;
 they do not claim a lock over independent configuration writers.

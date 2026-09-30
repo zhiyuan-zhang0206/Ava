@@ -1,5 +1,5 @@
-"""Cluster identity and membership: path-only identity and the host-level cluster
-registry, this host's machine identity and the machines roster, cluster auth,
+"""Cluster identity and membership: path-only identity and each home's own record,
+this host's machine identity and the machines roster, cluster auth,
 ports, and the per-cluster data-plane instances.
 
 A cluster is one logical deployment: its OWN Postgres+Redis instance (under its
@@ -22,7 +22,7 @@ whose data plane still uses a historical identifier (prod's `ava_main`) keeps
 working unchanged until an explicit ops rename rewrites its URLs. A newly-born
 cluster gets the fixed identifier `DATA_PLANE_IDENTITY` (`ava`): its instance
 is single-tenant, so the identifier needs no per-cluster distinction.
-The public namespace exports registry, port allocation, URL derivation,
+The public namespace exports the home record, port allocation, URL derivation,
 Postgres provisioning and Redis ACL helpers. `ownership` provides the shared
 native storage observer used before startup and maintenance effects.
 
@@ -162,41 +162,17 @@ from base.cluster.provision import (
 from base.cluster.provision import (
     provision_database as provision_database,
 )
-from base.cluster.redis_acl import (
-    ensure_cluster_redis_acl as ensure_cluster_redis_acl,
+from base.cluster.record import (
+    INTENT_NAME as INTENT_NAME,
 )
-from base.cluster.registry import (
+from base.cluster.record import (
     ClusterRecord as ClusterRecord,
 )
-from base.cluster.registry import (
-    _dump_registry as _dump_registry,
-)
-from base.cluster.registry import (
-    _registry_disk_form as _registry_disk_form,
-)
-from base.cluster.registry import (
-    delete_record as delete_record,
-)
-from base.cluster.registry import (
-    delete_record_locked as delete_record_locked,
-)
-from base.cluster.registry import (
+from base.cluster.record import (
     get_record as get_record,
 )
-from base.cluster.registry import (
-    load_registry as load_registry,
-)
-from base.cluster.registry import (
-    registry_lock as registry_lock,
-)
-from base.cluster.registry import (
-    registry_path as registry_path,
-)
-from base.cluster.registry import (
-    save_record as save_record,
-)
-from base.cluster.registry import (
-    save_record_locked as save_record_locked,
+from base.cluster.redis_acl import (
+    ensure_cluster_redis_acl as ensure_cluster_redis_acl,
 )
 from base.host.env.port_block import (
     BLOCK_MAX as BLOCK_MAX,

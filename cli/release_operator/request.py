@@ -144,7 +144,6 @@ def _build_request(
     alert_webhook_file: str | None = None,
     acknowledged_rejection: str | None = None,
 ) -> FleetRequest:
-    from base.cluster import registry_path
     from base.cluster.machine import machine_name
     from base.deploy.release.start_inputs import configuration_digest
     from base.paths import ava_home
@@ -172,7 +171,6 @@ def _build_request(
     request = FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(registry_path()),
         created_at=datetime.now(UTC),
         machine=gateway.machine,
         previous=previous,

@@ -109,7 +109,7 @@ _ALLOWED_FILES = frozenset(
     {
         "cli/main.py",  # CLI bootstrap sets config/profile/log routing before importing Settings or command modules.
         "cli/preflight.py",  # Validates explicit home/registry and config inputs before Settings can load a cluster.
-        "cli/commands/cluster/registry.py",  # Cross-home child environment projection removes caller credentials before the target's Settings loads.
+        "cli/commands/cluster/home.py",  # Cross-home child environment projection removes caller credentials before the target's Settings loads.
         "cli/commands/lifecycle/_temporary_stop.py",  # Clears one-shot home override transport; this is child environment control, not runtime config.
         "cli/start_intent.py",  # Identity bootstrap precedes Settings: read and pin the explicit home and birth inputs before config imports.
         "tests/cli/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
@@ -149,7 +149,7 @@ _ALLOWED_FILES = frozenset(
         "ops/agent_launch.py",  # agent_spawn_env_dict copies the registry's forward view (base/host/env/registry.py child_env) from the live env into a detached child's env — the same child-env handoff as base.sessions.env_forwarding; Settings cannot enumerate non-modeled keys and the dict must reflect the parent's live env, not its own snapshot
         "scripts/ci/migration_smoke.py",  # builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Ava runtime config
         "scripts/preview/linux_cycle.py",  # the os.environ token is inside a `-c` script string handed to a spawned child interpreter to exercise the persistent-terminal fixture; this driving process never reads the raw environment itself
-        "scripts/preview/linux_observer.py",  # _require_context validates AVA_HOME/AVA_CLUSTER_REGISTRY name this preview's own home before importing Settings or touching storage — the same pre-Settings guard class as cli/preflight.py
+        "scripts/preview/linux_observer.py",  # _require_context validates AVA_HOME/AVA_HOST_STATE_DIR name this preview's own home before importing Settings or touching storage — the same pre-Settings guard class as cli/preflight.py
         "scripts/preview/local.py",  # clean_env() builds a disposable preview subprocess's child environment from a fixed allowlist of raw OS vars (HOME/USER/PATH/...) merged with a hardcoded profile — a preview driver constructing a child environment, the documented exemption class
         "scripts/lint/code_structure.py",  # LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings.
         "scripts/ci/coverage_gates.py",  # BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser

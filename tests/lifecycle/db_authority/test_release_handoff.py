@@ -36,7 +36,6 @@ import pytest
 from pydantic import JsonValue
 
 import cli.release_handoff.__main__ as entry
-from base import cluster
 from base.cluster import authority
 from base.cluster.authority import delivery
 from base.config import settings
@@ -86,7 +85,7 @@ _MIGRATIONS = {
     f"{_SITE}/migrations/20260101T000000_example.sql": b"SELECT 1;\n",
     f"{_SITE}/migrations/20260101T000000_example.down.sql": b"SELECT 1;\n",
 }
-_FINITE_JOB_ENVIRONMENT = {"HOME", "AVA_HOME", "AVA_CLUSTER_REGISTRY", "PATH"}
+_FINITE_JOB_ENVIRONMENT = {"HOME", "AVA_HOME", "AVA_HOST_STATE_DIR", "PATH"}
 
 
 class _Exec(BaseException):
@@ -137,7 +136,7 @@ class NativeStandIn:
 @dataclass
 class Cycle:
     born: Born
-    registry: Path
+    host_state_dir: Path
     a: ReleaseRef
     b: ReleaseRef
     native: NativeStandIn
@@ -158,7 +157,6 @@ class Cycle:
         return FleetRequest(
             id=uuid4(),
             home=str(self.home),
-            registry=str(self.registry),
             created_at=datetime.now(UTC),
             machine=_MACHINE,
             previous=previous,
@@ -186,10 +184,10 @@ def _process(environment: Mapping[str, str]) -> Generator[None]:
 def cycle(born: Born, monkeypatch: pytest.MonkeyPatch) -> Iterator[Cycle]:
     """The born home as the cluster's one registered unit, selecting image A."""
     import base.cluster.machine
+    from base.paths import host_state_dir
 
     home = born.home
-    registry = Path(cluster.registry_path())
-    cluster.save_record_locked(born.record, path=registry)
+    state_dir = host_state_dir()
     mark_phase(home, "provisioned")
     mark_phase(home, "ready")
     monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: _MACHINE)
@@ -211,7 +209,7 @@ def cycle(born: Born, monkeypatch: pytest.MonkeyPatch) -> Iterator[Cycle]:
     _live(born, live=True)
     state = Cycle(
         born=born,
-        registry=registry,
+        host_state_dir=state_dir,
         a=build_image(home, "a", extra=_MIGRATIONS),
         b=build_image(home, "b", extra=_MIGRATIONS),
         native=NativeStandIn(),
@@ -268,7 +266,7 @@ def _hand_off(
         "HOME": os.environ["HOME"],
         "PATH": os.environ["PATH"],
         "AVA_HOME": str(cycle.home),
-        "AVA_CLUSTER_REGISTRY": str(cycle.registry),
+        "AVA_HOST_STATE_DIR": str(cycle.host_state_dir),
     }
     execs: list[tuple[Path, list[str], dict[str, str]]] = []
 

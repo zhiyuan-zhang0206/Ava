@@ -311,28 +311,29 @@ def direct_db_url() -> str:
     pg_dump (needs a real backend session), provisioning, auth probes — must
     derive the direct Postgres URL instead. The derivation swaps ONLY the port,
     from the pooler listener to the cluster's direct Postgres port, both read
-    from the host-level registry record: the pooler is co-located with its
+    from this home's own cluster record: the pooler is co-located with its
     Postgres on the gateway box, so host and credentials are identical. When the
     URL does not name the pooler (pooling off, an operator stand-in URL) it is
     returned verbatim — already direct.
 
-    The record lookup matches the URL's host:port against EVERY local registry
-    record, not just this home's (a URL can legitimately name another local
-    cluster's pooler), and only when the URL names this box — a remote host's
-    record is not local, so a split agent-runner's gateway-pointing URL cannot
-    be resolved here. In that case the URL is returned as-is with a WARNING:
+    The record lookup matches the URL's host:port against this home's record
+    only, and only when the URL names this box. A home knows no other cluster, so
+    a unit whose URL names another home's pooler (a split agent-runner on this or
+    another box) cannot be resolved here. In that case the URL is returned as-is
+    with a WARNING:
     the "direct" dial silently routes through the gateway's pooler (the
     migration authority model keeps a runner from mutating the schema in
     practice, but the exemption itself is unavailable and must not be silent).
 
     The unanchored sentinel passes through byte-identical (the connect guard
-    matches it byte-for-byte), and a host with no registry record falls back to
-    `AVA_DB_URL` as-is rather than guessing.
+    matches it byte-for-byte), and a home with no record (no gateway capability)
+    keeps `AVA_DB_URL` as-is rather than guessing.
     """
-    from base.cluster import load_registry, record_pgbouncer_port, record_postgres_port
+    from base.cluster import get_record, record_pgbouncer_port, record_postgres_port
     from base.cluster.machine import reachable_host
     from base.config.data_plane import gateway_url_host
     from base.host.net.predicates import is_loopback_host
+    from base.paths import ava_home
 
     url = settings.data_plane.db_url
     if url == UNANCHORED_DB_SENTINEL:
@@ -345,26 +346,30 @@ def direct_db_url() -> str:
         return url
     if port is None:
         return url
-    # Only a loopback or self-named host can be resolved against the LOCAL
-    # registry — a remote host's record lives on that box, not here.
-    if is_loopback_host(host) or host == reachable_host().lower():
-        for rec in load_registry().values():
-            if port == record_pgbouncer_port(rec):
-                # URL names this cluster's pooler -> swap to its direct pg port.
-                return url_with_port(url, record_postgres_port(rec))
-            if port == record_postgres_port(rec):
-                # URL already names Postgres (pooling off / a stand-in on a
-                # cluster port) -> already direct.
-                return url
-    # No local record explains this URL's port: a local operator stand-in, or a
-    # split runner naming the gateway's pooler. A remote/SaaS plane (Task #1752)
+    # Only a loopback or self-named host can be resolved against this home's
+    # record — a remote host's record lives on that box, not here.
+    rec = (
+        get_record(ava_home())
+        if is_loopback_host(host) or host == reachable_host().lower()
+        else None
+    )
+    if rec is not None:
+        if port == record_pgbouncer_port(rec):
+            # URL names this cluster's pooler -> swap to its direct pg port.
+            return url_with_port(url, record_postgres_port(rec))
+        if port == record_postgres_port(rec):
+            # URL already names Postgres (pooling off / a stand-in on a cluster
+            # port) -> already direct.
+            return url
+    # This home's record does not explain the URL's port: a local operator
+    # stand-in, or a split runner naming the gateway's pooler. A remote/SaaS plane (Task #1752)
     # is direct by definition — no local pooler exists — so it dials silently.
     if settings.data_plane.pgbouncer_enabled and (
         is_loopback_host(host) or host == reachable_host().lower() or host == gateway_url_host()
     ):
         logger.warning(
-            "direct_db_url: AVA_DB_URL names {host}:{port}, which no local registry "
-            "record's PgBouncer or Postgres port matches (a split agent-runner's "
+            "direct_db_url: AVA_DB_URL names {host}:{port}, which this home's record "
+            "does not name as its PgBouncer or Postgres port (a split agent-runner's "
             "URL names the gateway's pooler, resolvable only on the gateway box). "
             "Returning AVA_DB_URL as-is — the admin-plane dial routes through "
             "PgBouncer; the migration authority model keeps a non-gateway host "

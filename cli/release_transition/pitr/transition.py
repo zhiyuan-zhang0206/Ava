@@ -114,14 +114,13 @@ class PitrTransition:
 
     def _require_fleet_of_one(self) -> None:
         """PITR stays single-box: its reserved gateway home is the cluster's only unit."""
-        from base.cluster import registry_path
         from base.cluster.machine import machine_name
         from cli.release_fleet.inventory import require_fleet_of_one
         from cli.release_transition.identity import require_reservation
 
         if machine_name() != self.request.machine:
             raise ValueError("the loaded machine differs from the PITR operation's")
-        require_reservation(self.request, active_registry=registry_path())
+        require_reservation(self.request)
         require_fleet_of_one(self.home)
 
     def _record(self, journal: Journal) -> ActivationRecord:

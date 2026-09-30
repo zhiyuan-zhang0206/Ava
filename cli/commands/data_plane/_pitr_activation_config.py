@@ -38,7 +38,7 @@ def _pg_connection() -> Generator[psycopg.Connection[Any]]:
     """
     cluster = get_record(ava_home())
     if cluster is None:
-        raise RuntimeError("cluster registry record is missing")
+        raise RuntimeError("cluster record is missing")
     with pg_admin.connect(
         pg_admin_url(record_postgres_port(cluster)),
         expected_data_dir=ava_home() / "pg",

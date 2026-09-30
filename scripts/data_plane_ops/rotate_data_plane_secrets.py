@@ -122,7 +122,7 @@ def build_state(scope: str = "both") -> RotationState:
     _require_gateway_context()
     record = get_record(ava_home())
     if record is None:
-        raise RuntimeError("no cluster registry record — cannot resolve data-plane ports")
+        raise RuntimeError("no cluster record — cannot resolve data-plane ports")
     values = dotenv_values(ava_home() / ".env")
     old_admin = (values.get("AVA_REDIS_ADMIN_PASSWORD") or "").strip()
     old_runtime = (values.get(REDIS_PASSWORD_ENV) or "").strip()

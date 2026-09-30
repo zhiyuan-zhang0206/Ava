@@ -56,7 +56,7 @@ class DarwinLaunch(Record):
     operation: str
     attempt: int = Field(ge=0)
     home: str
-    registry: str
+    host_state_dir: str
     label: str
     domain: str
     uid: int = Field(ge=0)

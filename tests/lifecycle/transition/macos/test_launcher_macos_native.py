@@ -168,13 +168,10 @@ def _image(home: Path) -> ReleaseRef:
 def _operation(tmp_path: Path) -> FleetRequest:
     home = tmp_path.resolve() / "home"
     home.mkdir(mode=0o700)
-    registry = tmp_path.resolve() / "clusters.json"
-    registry.write_text("{}")
     image = _image(home)
     request = FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(registry),
         created_at=datetime.now(UTC),
         machine="fixture",
         previous=image.model_copy(update={"artifact_digest": "a" * 64}),

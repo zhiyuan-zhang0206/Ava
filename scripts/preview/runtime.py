@@ -164,15 +164,15 @@ def verify_stopped(run: Path, home: Path) -> None:
     survivors = [process.pid for process in owned_processes(run)]
     if survivors:
         raise RuntimeError(f"Preview processes survived stop: {survivors}")
-    registry_path = run / "clusters.json"
-    if registry_path.exists():
-        registry = json.loads(registry_path.read_text())
-        # The normal destroy entry releases the registry; observation never does.
-        if str(home) in registry:
-            raise RuntimeError("Preview registry slot remains after destroy")
     pointer = run / "source" / ".ava_home"
     if pointer.exists() or pointer.is_symlink():
         raise RuntimeError("Preview checkout binding remains after destroy")
+    intent = home / "start-intent.json"
+    if intent.is_file() and json.loads(intent.read_text())["record"] is not None:
+        # A born gateway home must end detached; observation never writes the marker.
+        marker = home / "destroy-intent.json"
+        if not marker.is_file() or json.loads(marker.read_text())["state"] != "detached":
+            raise RuntimeError("Preview home is not detached after destroy")
     config_path = run / "config.json"
     if config_path.exists():
         config = json.loads(config_path.read_text())

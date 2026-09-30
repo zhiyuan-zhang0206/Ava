@@ -35,7 +35,6 @@ def _operation(home: Path) -> Path:
     request = FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(home.parent / "clusters.json"),
         created_at=datetime.now(UTC),
         machine="test-unit",
         previous=previous,

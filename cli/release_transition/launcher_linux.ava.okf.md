@@ -14,7 +14,7 @@ fallback here.
 
 The existing operation journal at `home/updates/<uuid>/operation.json` carries
 the exact `VerifiedRelease` interpreter, module argv, working directory,
-home/registry, user, environment, boot identity and deterministic unit name.
+home, host state dir, user, environment, boot identity and deterministic unit name.
 The unit name includes the durable executor attempt number.
 `plan_launch()` has no effects. The caller records that plan; `launch()` holds
 the home operation lock, verifies the image again, records the one dispatch

@@ -52,7 +52,7 @@ the owner-only socket acting as `ava_gateway` (`peer`, startup
 `-c role=ava_gateway`, which `RESET ALL` keeps): no fence census includes its
 session, so the same authority serves every phase, before and after the
 selector moves and across the generation it mints. Its launch environment is
-fixed (home, registry, `HOME`, `PATH`) and carries no login. The submission
+fixed (home, host state dir, `HOME`, `PATH`) and carries no login. The submission
 that launches it, the same candidate image before any operation exists, reads
 the registered units with the gateway login the previous image's handoff
 passed in its exec environment

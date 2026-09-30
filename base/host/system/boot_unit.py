@@ -22,7 +22,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from base.cluster import home_slug, registry_path
+from base.cluster import home_slug
 from base.host.atomic_io import write_text_atomic
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 from base.native_process.os_platform import IS_LINUX
@@ -43,7 +43,7 @@ class BootUnitContext:
     user: str
     group: str
     home_dir: Path  # the user's $HOME
-    registry: Path  # exact registry authority, including isolated previews
+    host_state_dir: Path  # host-level state dir (`AVA_HOST_STATE_DIR`), isolated previews included
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,7 @@ def _default_context() -> BootUnitContext:
     import grp
     import pwd
 
-    from base.paths import ava_home, repo_root
+    from base.paths import ava_home, host_state_dir, repo_root
 
     entry = pwd.getpwuid(os.getuid())
     group = grp.getgrgid(entry.pw_gid).gr_name
@@ -93,7 +93,7 @@ def _default_context() -> BootUnitContext:
         user=entry.pw_name,
         group=group,
         home_dir=Path(entry.pw_dir),
-        registry=registry_path().resolve(),
+        host_state_dir=host_state_dir(),
     )
 
 
@@ -154,7 +154,7 @@ def source_start_action(ctx: BootUnitContext) -> BootStartAction:
         (
             ("HOME", str(ctx.home_dir)),
             ("AVA_HOME", str(ctx.home)),
-            ("AVA_CLUSTER_REGISTRY", str(ctx.registry)),
+            ("AVA_HOST_STATE_DIR", str(ctx.host_state_dir)),
             ("PATH", f"{ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"),
         ),
     )
@@ -171,7 +171,7 @@ def render_unit(ctx: BootUnitContext, *, action: BootStartAction | None = None) 
     for key, expected in (
         ("HOME", ctx.home_dir),
         ("AVA_HOME", ctx.home),
-        ("AVA_CLUSTER_REGISTRY", ctx.registry),
+        ("AVA_HOST_STATE_DIR", ctx.host_state_dir),
     ):
         if environment.get(key) != str(expected):
             raise ValueError(f"boot action must preserve {key}")

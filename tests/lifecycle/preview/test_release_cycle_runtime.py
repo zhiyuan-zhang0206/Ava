@@ -14,6 +14,7 @@ import pytest
 from base.deploy.release.runtime_release import VerifiedRelease
 from base.host.system.boot_unit import BootStartAction, BootUnitContext
 from base.native_process.ownership import OwnedProcess
+from base.paths import host_state_dir
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import root_service
 from cli.release_transition.journal import Operation, Retirement
@@ -106,16 +107,12 @@ def test_steady_boot_uses_verified_pinned_image_in_existing_home_unit(
     monkeypatch.setattr(root_service, "install", install)
     if wrong:
         with pytest.raises(ValueError, match="differs"):
-            root_service.install_steady(
-                home, Path(request_record.registry), request_record.previous, image
-            )
+            root_service.install_steady(home, request_record.previous, image)
         assert not calls
     else:
-        root_service.install_steady(
-            home, Path(request_record.registry), request_record.previous, image
-        )
+        root_service.install_steady(home, request_record.previous, image)
         context, action = calls[0]
-        assert context.home == home and context.registry == Path(request_record.registry)
+        assert context.home == home and context.host_state_dir == host_state_dir()
         assert action.argv[:7] == (*image.module_argv("cli.release_transition.boot"),)
         assert action.cwd == image.cwd and "--operation" not in action.argv
         assert (
@@ -169,7 +166,7 @@ def test_initial_selects_through_the_release_adopt_operator_verb(
         )
         assert kwargs["cwd"] == image.cwd and kwargs["check"]
         assert kwargs["env"]["AVA_HOME"] == str(run / "home")
-        assert kwargs["env"]["AVA_CLUSTER_REGISTRY"] == str(run / "clusters.json")
+        assert kwargs["env"]["AVA_HOST_STATE_DIR"] == str(run)
         assert not {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"}.intersection(kwargs["env"])
         return subprocess.CompletedProcess(argv, 0, "", "")
 
@@ -415,7 +412,7 @@ def test_dispatch_reverifies_the_executor_and_submits_as_the_admitted_image(
         )
         assert kwargs["cwd"] == images["a"].cwd and kwargs["check"] and kwargs["timeout"] == 180
         assert kwargs["env"]["AVA_HOME"] == request_record.home
-        assert kwargs["env"]["AVA_CLUSTER_REGISTRY"] == request_record.registry
+        assert kwargs["env"]["AVA_HOST_STATE_DIR"] == str(run)
         assert not {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "OPENAI_API_KEY"}.intersection(
             kwargs["env"]
         )
@@ -633,7 +630,7 @@ def test_the_cli_runs_as_the_homes_admitted_runtime(
         calls.append((tuple(argv), kwargs["cwd"]))
         assert kwargs["check"]
         assert kwargs["env"]["AVA_HOME"] == str(run / "home")
-        assert kwargs["env"]["AVA_CLUSTER_REGISTRY"] == str(run / "clusters.json")
+        assert kwargs["env"]["AVA_HOST_STATE_DIR"] == str(run)
         assert not {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"}.intersection(kwargs["env"])
         return subprocess.CompletedProcess(argv, 0, "", "")
 

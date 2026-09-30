@@ -93,7 +93,6 @@ def fleet_request(root: Path, *, excluded_only: bool = False, **policy: Any) -> 
     unit = UnitKey(machine=RUNNER_MACHINE, home=str(runner))
     spec = UnitSpec(
         unit=unit,
-        registry=str(root / "runner-clusters.json"),
         roles=("agent-runner",),
         adapter="darwin-launchd-v1",
         previous=_ref("1", "d"),
@@ -108,7 +107,6 @@ def fleet_request(root: Path, *, excluded_only: bool = False, **policy: Any) -> 
     fields: dict[str, Any] = {
         "id": uuid4(),
         "home": str(gateway),
-        "registry": str(root / "clusters.json"),
         "created_at": datetime.now(UTC),
         "machine": "ubuntu",
         "previous": _ref("a", "d"),

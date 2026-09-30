@@ -38,7 +38,6 @@ def inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> identity.Identity
     monkeypatch.setattr(cluster, "port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     return identity.IdentityInput(
         tmp_path / "home",
-        tmp_path / "registry.json",
         checkout,
         True,
         frozenset({"gateway", "agent-runner"}),
@@ -50,9 +49,9 @@ def test_fresh_identity_committed_before_native_work(inputs: identity.IdentityIn
     identity.prepare_identity(inputs)
     data = identity.read_intent(inputs.home)
     assert data is not None and data["phase"] == "configured"
-    rec = cluster.load_registry(path=inputs.registry)[str(inputs.home)]
+    rec = cluster.get_record(inputs.home)
     env = dotenv_values(inputs.home / ".env")
-    assert "pgbouncer" in rec.ports
+    assert rec is not None and "pgbouncer" in rec.ports
     db_url = env["AVA_DB_URL"]
     assert db_url is not None and db_url.endswith(f":{rec.ports['pgbouncer']}/ava")
     # The database endpoint is credential-free: the owner is NOLOGIN and the
@@ -74,7 +73,7 @@ def test_fresh_identity_committed_before_native_work(inputs: identity.IdentityIn
 def test_repeat_preserves_identity_credentials_and_bytes(inputs: identity.IdentityInput) -> None:
     inputs = replace(inputs, roles=frozenset({"gateway"}))
     identity.prepare_identity(inputs)
-    paths = [inputs.home / ".env", inputs.home / identity.INTENT_NAME, inputs.registry]
+    paths = [inputs.home / ".env", inputs.home / identity.INTENT_NAME]
     before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
     identity.prepare_identity(inputs)
     assert [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths] == before
@@ -142,41 +141,23 @@ def test_a_published_claim_keeps_no_copy_of_its_credentials(
     assert not [value for value in credentials if value and value in raw]
 
 
-def test_stale_inputs_cannot_rebind_checkout_across_private_registries(
+def test_stale_inputs_cannot_rebind_checkout_to_another_home(
     inputs: identity.IdentityInput,
 ) -> None:
-    other = replace(
-        inputs,
-        home=inputs.home.with_name("other"),
-        registry=inputs.registry.with_name("other.json"),
-    )
+    other = replace(inputs, home=inputs.home.with_name("other"))
     identity.prepare_identity(inputs)
     with pytest.raises(RuntimeError, match="bound to another home"):
         identity.prepare_identity(other)
     assert (inputs.checkout / ".ava_home").read_text().strip() == str(inputs.home)
     assert identity.read_intent(other.home) is None
-    assert not other.registry.exists()
 
 
-@pytest.mark.parametrize(
-    ("location", "name"),
-    [
-        ("checkout", ".ava_home.json"),
-        ("checkout", ".ava_home"),
-        ("home", "start-intent.json"),
-        ("home", "start-intent.other"),
-        ("home", "destroy-intent.json"),
-        ("home", ".env"),
-        ("home", "registry.lock"),
-    ],
-)
-def test_registry_cannot_alias_lifecycle_data_or_lock(
-    inputs: identity.IdentityInput, location: str, name: str
+def test_birth_writes_nothing_outside_the_home_and_checkout(
+    inputs: identity.IdentityInput,
 ) -> None:
-    registry = (inputs.checkout if location == "checkout" else inputs.home) / name
-    with pytest.raises(ValueError, match="must not alias lifecycle"):
-        identity.prepare_identity(replace(inputs, registry=registry))
-    assert not inputs.home.exists()
+    """A home describes only itself: no host-level file lists the cluster."""
+    identity.prepare_identity(inputs)
+    assert sorted(p.name for p in inputs.home.parent.iterdir()) == ["checkout", "home"]
 
 
 def test_checkout_lock_serializes_independent_home_publication(
@@ -203,11 +184,7 @@ def test_retirement_excludes_rebinding_until_pointer_is_removed(
     inputs: identity.IdentityInput,
 ) -> None:
     identity.prepare_identity(inputs)
-    other = replace(
-        inputs,
-        home=inputs.home.with_name("other"),
-        registry=inputs.registry.with_name("other.json"),
-    )
+    other = replace(inputs, home=inputs.home.with_name("other"))
     entered = Event()
 
     def start() -> None:
@@ -225,28 +202,28 @@ def test_retirement_excludes_rebinding_until_pointer_is_removed(
     assert (inputs.checkout / ".ava_home").read_text().strip() == str(other.home)
 
 
-def test_crash_after_intent_before_registry_resumes_same_claim(
+def test_crash_after_intent_before_env_resumes_same_claim(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    save = cluster.save_record_locked
+    write = identity.upsert_env
     monkeypatch.setattr(
-        cluster,
-        "save_record_locked",
+        identity,
+        "upsert_env",
         lambda *_a, **_k: (_ for _ in ()).throw(OSError("power loss")),  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     )
     with pytest.raises(OSError, match="power loss"):
         identity.prepare_identity(inputs)
     pending = identity.read_intent(inputs.home)
     assert pending is not None and pending["phase"] == "claiming"
-    monkeypatch.setattr(cluster, "save_record_locked", save)
+    monkeypatch.setattr(identity, "upsert_env", write)
     identity.prepare_identity(inputs)
-    assert json.loads(inputs.registry.read_text())[str(inputs.home)] == pending["record"]
+    assert cluster.get_record(inputs.home) == cluster.ClusterRecord(**pending["record"])
     assert dict(dotenv_values(inputs.home / ".env")) == pending["env"]
 
 
 def test_bare_repeat_preserves_recorded_checkout_binding(inputs: identity.IdentityInput) -> None:
     identity.prepare_identity(inputs)
-    paths = [inputs.home / ".env", inputs.home / identity.INTENT_NAME, inputs.registry]
+    paths = [inputs.home / ".env", inputs.home / identity.INTENT_NAME]
     before = [path.read_bytes() for path in paths]
     identity.prepare_identity(replace(inputs, worktree=False))
     with pytest.raises(RuntimeError, match="another checkout"):
@@ -283,39 +260,19 @@ def test_crash_after_env_before_pointer_recovers_own_home(
     assert persisted is not None and persisted["phase"] == "configured"
 
 
-def test_configured_home_missing_registry_is_not_reborn(inputs: identity.IdentityInput) -> None:
+def test_configured_home_missing_its_intent_is_not_reborn(inputs: identity.IdentityInput) -> None:
     identity.prepare_identity(inputs)
-    inputs.registry.unlink()
+    (inputs.home / identity.INTENT_NAME).unlink()
     with pytest.raises(RuntimeError, match="reattachment"):
         identity.prepare_identity(inputs)
-    assert not inputs.registry.exists()
+    assert identity.read_intent(inputs.home) is None
 
 
 def test_existing_data_without_intent_refuses(inputs: identity.IdentityInput) -> None:
     (inputs.home / "pg").mkdir(parents=True)
     with pytest.raises(RuntimeError, match="no initialization authority"):
         identity.prepare_identity(inputs)
-    assert not inputs.registry.exists()
-
-
-def test_claim_cannot_steal_reallocated_ports(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    write = identity.upsert_env
-    monkeypatch.setattr(
-        identity,
-        "upsert_env",
-        lambda *_a: (_ for _ in ()).throw(OSError("interrupted")),  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    )
-    with pytest.raises(OSError):
-        identity.prepare_identity(inputs)
-    raw = json.loads(inputs.registry.read_text())
-    rec = raw.pop(str(inputs.home))
-    rec["gateway_home"] = str(inputs.home.parent / "other")
-    inputs.registry.write_text(json.dumps({rec["gateway_home"]: rec}))
-    monkeypatch.setattr(identity, "upsert_env", write)
-    with pytest.raises(RuntimeError, match="another home"):
-        identity.prepare_identity(inputs)
+    assert identity.read_intent(inputs.home) is None
 
 
 def _args(*extra: str):
@@ -329,7 +286,6 @@ def test_worktree_start_uses_explicit_home_not_ambient_projection(
 ) -> None:
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     monkeypatch.setenv("AVA_DB_URL", "postgresql://foreign@foreign.invalid/production")
     monkeypatch.setenv("AVA_CLUSTER_SECRET", "foreign-secret")
     prepare_start_identity(_args("--worktree"))
@@ -344,7 +300,6 @@ def test_interrupted_start_keeps_admitted_tool_path(
 ) -> None:
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     monkeypatch.delenv("AVA_SERVICE_PATH", raising=False)
     activated = inputs.checkout.parent / "other-venv"
     tools = str(inputs.checkout.parent / "tools")
@@ -356,18 +311,18 @@ def test_interrupted_start_keeps_admitted_tool_path(
             (str(activated / bin_name), str(inputs.checkout / ".venv" / bin_name), tools)
         ),
     )
-    save = cluster.save_record_locked
+    write = identity.upsert_env
 
     def crash(*_args: object, **_kwargs: object) -> None:
         raise OSError("power loss")
 
-    monkeypatch.setattr(cluster, "save_record_locked", crash)
+    monkeypatch.setattr(identity, "upsert_env", crash)
     with pytest.raises(OSError, match="power loss"):
         prepare_start_identity(_args("--worktree"))
     pending = identity.read_intent(inputs.home)
     assert pending is not None and pending["phase"] == "claiming"
     assert pending["env"]["AVA_SERVICE_PATH"] == tools
-    monkeypatch.setattr(cluster, "save_record_locked", save)
+    monkeypatch.setattr(identity, "upsert_env", write)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "different-tools"))
     prepare_start_identity(_args("--worktree"))
     assert dotenv_values(inputs.home / ".env")["AVA_SERVICE_PATH"] == tools
@@ -387,13 +342,11 @@ def test_lossy_tool_path_is_rejected_before_identity_publication(
 ) -> None:
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     monkeypatch.delenv("AVA_SERVICE_PATH", raising=False)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "tools #1"))
     with pytest.raises(ValueError, match="round-trip literally"):
         prepare_start_identity(_args("--worktree"))
     assert identity.read_intent(inputs.home) is None
-    assert not inputs.registry.exists()
 
 
 @pytest.mark.parametrize(
@@ -420,7 +373,6 @@ def _runner_start(
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     # A remote unit joins without the human secret: its capability authenticates.
     monkeypatch.delenv("AVA_CLUSTER_SECRET", raising=False)
 
@@ -484,7 +436,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
     installed = unit.require_unit_capability(home)
     assert installed.api is not None and [installed.api.token] == _FETCH_BEARERS
     assert "AVA_CLUSTER_SECRET" not in env
-    assert not inputs.registry.exists()
+    assert cluster.get_record(home) is None
 
 
 def test_capability_bundle_needs_its_transport_key(
@@ -505,7 +457,6 @@ def test_gateway_start_refuses_a_capability_bundle(
 ) -> None:
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     with pytest.raises(ValueError, match="agent-runner units"):
         prepare_start_identity(
             _args("--worktree", "--db-capability", str(tmp_path / "unit.bundle"))
@@ -527,7 +478,8 @@ def test_reservation_carries_the_release_coordinator_port(inputs: identity.Ident
     """The fleet coordinator listener's port is part of every gateway reservation;
     an intent recorded without it (a record from before the key) refuses."""
     identity.prepare_identity(inputs)
-    rec = cluster.load_registry(path=inputs.registry)[str(inputs.home)]
+    rec = cluster.get_record(inputs.home)
+    assert rec is not None
     ports: dict[str, int] = dict(rec.ports)  # pyright: ignore[reportAssignmentType]
     assert ports["coordinator"] == ports["gateway"] + 20
     path = inputs.home / identity.INTENT_NAME
@@ -545,10 +497,10 @@ def test_corrupt_foreign_reservation_never_publishes(inputs: identity.IdentityIn
     data["phase"] = "claiming"
     data["record"]["gateway_home"] = str(inputs.home.parent / "foreign")
     path.write_text(json.dumps(data))
-    before = inputs.registry.read_bytes()
+    before = (inputs.home / ".env").read_bytes()
     with pytest.raises(RuntimeError, match="another home"):
         identity.prepare_identity(inputs)
-    assert inputs.registry.read_bytes() == before
+    assert (inputs.home / ".env").read_bytes() == before
 
 
 def test_config_retry_keeps_first_snapshot_and_rejects_changed_input(
@@ -556,7 +508,6 @@ def test_config_retry_keeps_first_snapshot_and_rejects_changed_input(
 ) -> None:
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     config = inputs.home.parent / "config.env"
     config.write_text("AVA_LLM_OVERRIDE=fixture:model\n")
     args = _args("--worktree", "--config-file", str(config))
@@ -591,7 +542,6 @@ def _remote_config(
         lambda *_a, **_k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.55", 0))],  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     )
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     config = inputs.home.parent / "remote.env"
     config.write_text(
         f"AVA_DB_URL=postgresql://owner:provider@{host}:6543/app{query}\nAVA_REDIS_URL=rediss://acl:provider@redis.invalid:6381/0\nAVA_RUNNER_DB_PASSWORD=external-runner\n"
@@ -622,7 +572,7 @@ def test_remote_input_refuses_local_or_mixed_ownership(
     args = _remote_config(inputs, monkeypatch, host=host)
     with pytest.raises(ValueError, match="foreign"):
         prepare_start_identity(args)
-    assert not inputs.registry.exists()
+    assert identity.read_intent(inputs.home) is None
 
 
 @pytest.mark.parametrize("query", ["?hostaddr=127.0.0.1", "?host=", "?port=", "?dbname=other"])
@@ -632,7 +582,7 @@ def test_remote_input_cannot_redirect_libpq_identity(
     args = _remote_config(inputs, monkeypatch, query=query)
     with pytest.raises(ValueError, match="redirect"):
         prepare_start_identity(args)
-    assert not inputs.registry.exists()
+    assert identity.read_intent(inputs.home) is None
 
 
 def test_public_start_holds_home_lock_through_runtime_start(
@@ -643,7 +593,6 @@ def test_public_start_holds_home_lock_through_runtime_start(
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
 
     def runtime(**_kw: object) -> int:
         with (
@@ -673,7 +622,6 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
     calls: list[str] = []
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
 
     def runtime(**_kw: object) -> int:
         calls.append("complete wrapped start")
@@ -694,7 +642,6 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     calls: list[str] = []
 
     def ready(**_kw: object) -> int:

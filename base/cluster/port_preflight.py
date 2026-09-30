@@ -113,7 +113,7 @@ def env_port_drift(home: Path, rec: ClusterRecord) -> list[str]:
     for key, expected in expected_ports.items():
         value = env.get(key)
         if value is not None and value != str(expected):
-            out.append(f"{key}: .env={value!r} vs registry={expected}")
+            out.append(f"{key}: .env={value!r} vs record={expected}")
     # AVA_DB_URL is the one access URL: its expected port is the pooler listener
     # when this unit's own .env enables pooling (AVA_PGBOUNCER_ENABLED, default
     # on), else the direct Postgres port. The pooler port is a registry fact now
@@ -137,7 +137,7 @@ def env_port_drift(home: Path, rec: ClusterRecord) -> list[str]:
         except ValueError:
             continue
         if port is not None and port != expected:
-            out.append(f"{key}: url port={port} vs registry={expected}")
+            out.append(f"{key}: url port={port} vs record={expected}")
     return out
 
 

@@ -108,7 +108,6 @@ def prepare(
     b_ref, b_image, b_evidence = captured(run, candidate, *bindings[1])
     inputs: dict[str, Any] = {
         "home": str(run / "home"),
-        "registry": str(run / "clusters.json"),
         "unit": unit_name(run / "home"),
         "images": {},
         "requests": {},
@@ -170,8 +169,7 @@ def initial(run: Path) -> None:
     subprocess.run(  # noqa: S603 — fixed argv, verified image interpreter, no shell.
         image.module_argv("cli.main", "cluster", "release", "adopt", "--receipt", str(receipt)),
         cwd=image.cwd,
-        env=local.clean_env()
-        | {"AVA_HOME": str(run / "home"), "AVA_CLUSTER_REGISTRY": str(run / "clusters.json")},
+        env=local.clean_env() | {"AVA_HOME": str(run / "home"), "AVA_HOST_STATE_DIR": str(run)},
         timeout=180,
         check=True,
     )
@@ -205,8 +203,7 @@ def admitted_cli(run: Path, *arguments: str, timeout: float) -> None:
     subprocess.run(  # noqa: S603 — fixed argv, admitted verified interpreter, no shell
         argv,
         cwd=cwd,
-        env=local.clean_env()
-        | {"AVA_HOME": str(run / "home"), "AVA_CLUSTER_REGISTRY": str(run / "clusters.json")},
+        env=local.clean_env() | {"AVA_HOME": str(run / "home"), "AVA_HOST_STATE_DIR": str(run)},
         timeout=timeout,
         check=True,
     )
@@ -259,7 +256,7 @@ def _operation(run: Path, label: str) -> FleetRequest:
     if hashlib.sha256(encoded).hexdigest() != inputs["requests"][label]["sha256"]:
         raise RuntimeError("captured cycle request changed")
     request = FleetRequest.model_validate_json(encoded)
-    if request.home != str(run / "home") or request.registry != str(run / "clusters.json"):
+    if request.home != str(run / "home"):
         raise RuntimeError("cycle operation belongs to another preview")
     return request
 

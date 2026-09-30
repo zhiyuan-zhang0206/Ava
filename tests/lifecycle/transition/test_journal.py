@@ -42,7 +42,6 @@ def request_record(tmp_path: Path) -> FleetRequest:
     return FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(home.parent / "clusters.json"),
         created_at=datetime.now(UTC),
         machine="test-unit",
         previous=previous,
@@ -147,13 +146,13 @@ def test_interrupted_intent_is_retained_and_exact_replay_is_read_only(
     assert journal.create(request_record) == failed
 
 
-@pytest.mark.parametrize("field", ["configuration_digest", "registry", "machine"])
+@pytest.mark.parametrize("field", ["configuration_digest", "created_at", "machine"])
 def test_same_id_cannot_mutate_captured_inputs(request_record: FleetRequest, field: str) -> None:
     journal.create(request_record)
     before = (_file_state(request_record.path), _file_state(_active(request_record)))
     replacement = {
         "configuration_digest": "0" * 64,
-        "registry": str(Path(request_record.home).parent / "other-registry.json"),
+        "created_at": datetime(2020, 1, 1, tzinfo=UTC),
         "machine": "another-machine",
     }[field]
     changed = FleetRequest.model_validate(request_record.model_dump() | {field: replacement})

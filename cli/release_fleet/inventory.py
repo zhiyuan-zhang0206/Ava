@@ -89,7 +89,6 @@ def require_topology(request: FleetRequest | UnitRequest) -> None:
     A request that names other units is first held to the full inventory rule,
     so its refusal names the precise problem before the dbgen-8 boundary.
     """
-    from base.cluster import registry_path
     from base.cluster.machine import machine_name
     from cli.release_transition.identity import require_reservation
 
@@ -97,7 +96,7 @@ def require_topology(request: FleetRequest | UnitRequest) -> None:
         raise ValueError(NETWORKED_REFUSAL)  # noqa: TRY004 — a topology refusal, not a type error
     if machine_name() != request.machine:
         raise ValueError("the loaded machine differs from the operation's gateway unit")
-    require_reservation(request, active_registry=registry_path())
+    require_reservation(request)
     if request.units or request.excluded:
         registered, _machines, paused = registered_units()
         check_inventory(request, registered, paused)

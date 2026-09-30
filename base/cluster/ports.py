@@ -74,7 +74,7 @@ def _record_port(rec: cluster.ClusterRecord, key: str) -> int:
     fixed legacy fallback, handled by the callers)."""
     port = cast("int | None", rec.ports.get(key))  # type: ignore[literal-required]
     if port is None:
-        raise KeyError(f"registry record {rec.gateway_home!r} lacks the {key!r} port")
+        raise KeyError(f"cluster record {rec.gateway_home!r} lacks the {key!r} port")
     return port
 
 
@@ -88,21 +88,15 @@ def port_free(port: int) -> bool:
             return False
 
 
-def allocate_ports(existing_bases: set[int]) -> ClusterPorts:
-    """Scan [BLOCK_START, BLOCK_MAX) for a free contiguous block not already
-    claimed by a registry record and not bound on the host. Return the
-    service->port map for that base."""
+def allocate_ports() -> ClusterPorts:
+    """Scan [BLOCK_START, BLOCK_MAX) for a contiguous block with no port bound on
+    this host right now, and return the service->port map for that base.
+
+    A home knows no other cluster, so a stopped cluster's block looks free and can
+    be handed out again. The two homes then share ports, and whichever starts
+    second fails `ava start`'s port preflight instead of binding (the user's
+    ruling: probe at birth, refuse at start)."""
     for base in range(BLOCK_START, BLOCK_MAX, BLOCK_SIZE):
-        # Skip any candidate whose block would OVERLAP an existing record's
-        # block — not just an exact base match. A record's true block size is
-        # its birth-era BLOCK_SIZE (the block has grown over time), which the
-        # file does not carry; assume the largest (current) size so the check
-        # can only over-skip a candidate, never miss a collision — an
-        # exact-base check would let a DOWN cluster's block be re-allocated
-        # while its record still owns it, a silent collision the moment both
-        # start. Overlap is the honest test.
-        if any(base - (BLOCK_SIZE - 1) <= eb <= base + (BLOCK_SIZE - 1) for eb in existing_bases):
-            continue
         if all(cluster.port_free(base + off) for off in PORT_OFFSETS.values()):
             # PORT_OFFSETS' keys ARE the ClusterPorts service names; the dynamic
             # comprehension is the runtime source of that closed set.

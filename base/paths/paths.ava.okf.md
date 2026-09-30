@@ -53,12 +53,12 @@ $AVA_HOME/
 └── deploy-state.*.lock         # home lifecycle mutexes (+ .holder.json diagnostics)
 ```
 
-`~/.ava/clusters.json` is the exception — a **host-level** registry keyed by home
-path (overridable with `AVA_CLUSTER_REGISTRY`), shared across every cluster on
-the box, so it lives in the default home regardless of which unit reads it.
-The host-wide PTY allocation gate stores `pty-allocation-freeze.json` and its
-stable `pty-allocation.lock` beside that registry, so every co-located home
-crosses one admission boundary for the shared kernel PTY pool.
+The host state dir (`host_state_dir()`, `AVA_HOST_STATE_DIR`, default `~/.ava`)
+is the exception: state shared by every unit on the box, whichever reads it — the
+Postgres template, runtime binaries, coding-session owner records, and the PTY
+allocation gate (`pty-allocation-freeze.json` + its stable `pty-allocation.lock`,
+so every co-located home crosses one admission boundary for the shared kernel
+PTY pool). It lists no clusters: each home describes only itself.
 
 ## Notes
 

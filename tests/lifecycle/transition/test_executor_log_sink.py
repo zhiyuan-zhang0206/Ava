@@ -73,7 +73,6 @@ def _journal(home: Path) -> Path:
     request = FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(home.parent / "registry.json"),
         created_at=_WHEN,
         machine="test",
         previous=previous,
