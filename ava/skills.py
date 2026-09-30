@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 from ava.sdk_surface import skill_sources
 from base.log import logger
 from base.packages.skills.names import SkillIdentity, display_name, match_key
-from base.paths import ava_home
+from base.paths import skills_dir
 
 if TYPE_CHECKING:
     # Annotation-only on the mount signatures; imported at the call site so the
@@ -134,11 +134,6 @@ def target(skill: Skill) -> str:
     e.g. `superpowers.test_driven_development`, or bare `goal`. The Python
     projection of `identifier` — the two are the same path in two spellings."""
     return ".".join(match_key(seg) for seg in (*skill["namespace"], skill["name"]))
-
-
-def _skills_dir() -> Path:
-    """The skill load dir: `$AVA_HOME/skills/`. Separate function for test monkeypatch convenience."""
-    return ava_home() / "skills"
 
 
 # Plugin-contributed skill-root providers. The registry storage lives in
@@ -441,7 +436,7 @@ def _scan_tree() -> dict:
     from base.packages.extensions.install_registry import loadable_skill_names
 
     builder = SkillIndexBuilder()
-    builder.mount(_skills_dir(), loadable_skill_names())
+    builder.mount(skills_dir(), loadable_skill_names())
     for root in _provider_roots():
         builder.mount(root, None)
     return builder.tree
@@ -686,6 +681,12 @@ def _record_skill_invoked(skill: Skill) -> None:
     # blip into a permanent "already recorded" for the rest of the agent run.
     if _insert_skill_events(agent, [skill]):
         _recorded_skill_invocations.add(key)
+
+
+def clear_recorded_skill_invocations() -> None:
+    """Forget which skills this agent run already recorded, so the next
+    consumption of each one records again (the dedup is per-run state)."""
+    _recorded_skill_invocations.clear()
 
 
 def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:

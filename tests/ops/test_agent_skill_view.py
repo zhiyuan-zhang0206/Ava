@@ -18,6 +18,7 @@ from psycopg.types.json import Jsonb
 from ava import composer_commands, mcp_config, skills
 from base.db import create_agent
 from base.packages.plugins import mcp_enabled
+from base.paths import skills_dir
 from ops import cluster
 
 
@@ -38,11 +39,10 @@ def _clear_skill_sources() -> Generator[None, None, None]:
 
 
 @pytest.fixture
-def load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    root = tmp_path / "load"
+def load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = skills_dir()
     root.mkdir()
     _write_skill(root, "load-skill", "converged skill")
-    monkeypatch.setattr(skills, "_skills_dir", lambda: root)
     monkeypatch.setattr(
         "base.packages.extensions.install_registry.loadable_skill_names", lambda: {"load-skill"}
     )
