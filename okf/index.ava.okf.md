@@ -19,7 +19,7 @@ Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each
 | [[../ava/ava.ava.okf.md]] | SDK surface — `ava.*` single namespace: files / shell / agents / task / memory / skills / mcps / web / self / ui / watcher |
 | [[../gateway/gateway.ava.okf.md]] | Gateway — HTTP API, SSE push, authentication, `/api/agents` derived endpoints, bootstrap handshake |
 | [[../cli/cli.ava.okf.md]] | CLI — cluster lifecycle: start / pause / stop / update / converge, multi-machine deployment orchestration |
-| [[../evals/evals.ava.okf.md]] | Eval-case contract — schema-v1 JSONL format, reference loader, versioning discipline |
+| [[../evals/evals.ava.okf.md]] | Retired JSONL eval-case experiment; weekly adversarial evaluation remains in schedules |
 | [[../ui/web/web.ava.okf.md]] | Frontend Web UI — fleet monitoring, agent management, task tracking |
 | [[../ui/app/app.ava.okf.md]] | Tauri app shell — remote console window plus desktop and Android native behavior |
 | [[../base/base.ava.okf.md]] | Base library — lm provider abstraction, agents-contract wire protocol, migrations, logging, configuration |
