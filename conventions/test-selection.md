@@ -55,7 +55,11 @@ conservative.
 
 Tests live in the top-level `tests/` or beside the code they prove in
 `<pkg>/**/tests/` (hosts: agent, ava, ava_builtins, base, cli, gateway, ops, scripts,
-services). The selector treats both alike: a test-only edit under `base/x/tests/` is a
+services). A unit test sits in the `tests/` directory of the package it tests; an
+integration test across packages sits in the lowest package that may legally import
+everything it uses; end-to-end tests and contract tests that read repository artifacts
+stay in the top-level `tests/` ([testing guide](../tests/README.md#where-to-put-tests)).
+The selector treats both alike: a test-only edit under `base/x/tests/` is a
 test change resolved through the reverse map (rule 3 does not force FULL for it), and
 a module that merely carries a `test_` prefix outside a `tests/` directory
 (`scripts/ci/test_selector.py`) is not a test.

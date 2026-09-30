@@ -51,7 +51,7 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   can break consumer-side enum or field-set assertions. Locate those consumers
   and include their specific tests locally, rather than expanding to the full
   backend suite. For a new enum member, search with
-  `rg 'set\(<EnumName>\)|list\(<EnumName>\)' tests/`. CI must still run the full
+  `rg 'set\(<EnumName>\)|list\(<EnumName>\)' -g '**/tests/**'`. CI must still run the full
   suite before merge; an unrun or skipped CI suite is not a pass.
   ([postmortem](../../../postmortems/0003-touched-areas-is-not-the-blast-radius.md))
 

@@ -3,25 +3,43 @@
 ## Quick Start
 
 ```bash
-# Run all tests (excluding e2e)
-.venv/bin/pytest tests/ --ignore=tests/e2e -q
+# Run all tests (excluding e2e): bare pytest collects the top-level tests/
+# and every package's own <pkg>/**/tests/ (`testpaths` in pyproject.toml)
+.venv/bin/pytest --ignore=tests/e2e -q
 
-# Run a single module
+# Run a single module (a package's tests sit inside it)
 .venv/bin/pytest tests/agent/ -q
+.venv/bin/pytest base/packages -q
 
 # Run tests + coverage report
-.venv/bin/pytest tests/ --ignore=tests/e2e -q \
+.venv/bin/pytest --ignore=tests/e2e -q \
   --cov=agent --cov=ava --cov=gateway --cov=shared --cov=ui \
   --cov-report=term-missing
 
 # Generate HTML coverage report
-.venv/bin/pytest tests/ --ignore=tests/e2e -q \
+.venv/bin/pytest --ignore=tests/e2e -q \
   --cov=agent --cov=ava --cov=gateway --cov=shared --cov=ui \
   --cov-report=html
 open htmlcov/index.html
 ```
 
 ## Where to Put Tests
+
+A test lives in a `tests/` directory: the top-level `tests/`, or a package's own
+`<pkg>/**/tests/` beside the code it proves. What the test needs decides which:
+
+- **Unit test**: the `tests/` directory of the package it tests
+  (`base/packages/plugins/tests/test_manifest.py` tests
+  `base/packages/plugins/manifest.py`).
+- **Integration test across packages**: the lowest package that may legally import
+  everything the test uses under the repo's import layering.
+- **End-to-end tests, and contract tests that read repository artifacts** (workflows,
+  schedules, migrations, `pyproject.toml`, `ui/`): the top-level `tests/`.
+
+Package `tests/` directories have no `__init__.py` (`--import-mode=importlib`), and
+the repo-root `conftest.py` plugins apply to them exactly as to the top-level tree.
+The top-level `tests/{module}/` holds the unit tests of code whose package has no
+`tests/` directory of its own.
 
 ```
 tests/
@@ -42,11 +60,14 @@ tests/
 
 | Source | Test |
 |------|------|
+| `base/packages/plugins/manifest.py` | `base/packages/plugins/tests/test_manifest.py` |
 | `agent/graph/exec/node.py` | `tests/agent/test_exec_output.py` |
 | `gateway/agents/timeline.py` | `tests/gateway/test_timeline.py` |
 | `ava/shell.py` | `tests/ava/test_shell.py` |
 
-If adding a new sub-module (e.g., `ava/new_module.py`), create `test_new_module.py` under `tests/ava/`.
+If adding a new sub-module (e.g., `ava/new_module.py`), create `test_new_module.py` in
+the package's own `tests/` directory when it has one (`ava/tests/`), otherwise under
+`tests/ava/`.
 
 ## Test Naming
 

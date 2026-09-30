@@ -20,7 +20,7 @@ tags:
 
 | Layer | Location | Description |
 |---|---|---|
-| **Unit tests** | `tests/{module}/test_{file}.py` | one test file per source file |
+| **Unit tests** | `<pkg>/**/tests/test_{file}.py`, else `tests/{module}/test_{file}.py` | one test file per source file, in the `tests/` directory of the package it tests (the top-level `tests/{module}/` for code whose package has none) |
 | **Integration tests** | `tests/integration/` | cross-module tests; `TestClient` mounts `gateway.app` in-process + custom `_TestClientTransport` forwarding httpx, **no separate Gateway process** |
 | **E2E tests** | `tests/e2e/` | full-stack end-to-end tests |
 | **Data factories** | `tests/factories/` | test data construction tools |
@@ -33,12 +33,14 @@ stubbed Home page the shell-geometry suites drive — a fake EventSource, `/api/
 JSON stubs, and the shared context/open/settle helpers. Both the layout-invariant
 suite and the post-deploy visual gate consume it so their definitions cannot drift.
 
+A package's own tests sit beside the code they prove (`base/packages/plugins/tests/`); integration tests across packages go in the lowest package that may legally import everything they use; end-to-end tests and contract tests that read repository artifacts stay in the top-level `tests/`. Bare `pytest` collects both trees through `testpaths` (`tests/ci/test_collection_roots.py` keeps the globs complete), and the repo-root `conftest.py` plugins apply to every location alike.
+
 ### Test coverage scope
 - `tests/agent/` — agent core (loop, graph, messages, state, hooks)
 - `tests/ava/` — SDK surface (ava.* namespace)
 - `tests/gateway/` — API gateway
 - `tests/cli/` — command-line tools
-- `tests/base/` — base library
+- `tests/base/` — base library (`base/packages/*/tests/` holds the tests of `base/packages`)
 - `tests/services/` — backend services
 - `tests/ops/` — agent drain, pause/recovery, deployment holds, health inventory,
   service roster and resource admission
