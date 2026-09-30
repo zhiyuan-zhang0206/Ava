@@ -326,7 +326,7 @@ Which names: the state-touching ones — path resolvers, session liveness probes
 spawners, pause/unpause, anything that reads the filesystem, a subprocess or the
 network. **Not** constants, exception classes, Pydantic models, type aliases, pure
 formatters, or the `settings` singleton: nothing stubs them, so they carry no patch
-surface, and `except cluster.ClusterUpdateInProgress` only adds noise. A
+surface, and `except cluster_rpc.ClusterOpUnreachable` only adds noise. A
 function-local `from x import y` is already fine — it re-resolves per call, so it
 reads the owner's current binding and survives its enclosing function moving.
 

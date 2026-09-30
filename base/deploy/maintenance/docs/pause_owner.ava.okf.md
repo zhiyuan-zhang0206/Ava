@@ -15,10 +15,11 @@ cannot unpause generation B.
 
 Only a maintenance hold (below) writes the journal. A `paused` or `resumed`
 record without a hold is what the retired updater's stop op left: a `paused`
-one keeps business closed, and `ava cluster recover` clears only its captured
-exact record, after the no-live-owner proof (a pending or live local updater
-handoff refuses) and a successful unpause. An unreadable journal needs that
-proof before recovery force-clears it.
+one keeps business closed, and no command clears it. An unreadable journal
+refuses new work the same way. Both have one exit: after confirming no `ava
+stop` or `ava maintenance` command is in flight for this home, an operator
+removes the file by hand (`rm $AVA_HOME/run/deploy-pause-owner.json`) and runs
+`ava start`.
 
 An explicit [maintenance hold](maintenance.ava.okf.md) uses the same journal
 with a typed cohort/progress payload and the recorded shepherding process it
@@ -26,5 +27,6 @@ was taken under (`base/deploy/maintenance/hold_driver.py`). It has no expiry tim
 automatic release (see
 [[host_deploy_state/stranded-hold-recovery.ava.okf.md]]); only its exact
 operation's explicit `ava maintenance resume` (or `resume --cancel`) ends it. Ordinary
-compensation, force-clear and a newer rollout cannot release or overwrite it.
-This is distinct from a retired updater's pause record, which recovery clears.
+compensation and a newer maintenance operation cannot release or overwrite it.
+This is distinct from a retired updater's pause record, which has no exit but
+the manual removal above.

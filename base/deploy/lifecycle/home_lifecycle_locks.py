@@ -1,17 +1,14 @@
-"""Home lifecycle mutexes shared by local start/stop/pause and cluster recovery.
+"""Home lifecycle mutex shared by local start/stop/pause.
 
-Two OS advisory locks live beside each other under ``$AVA_HOME``:
+``resource_lock`` (``deploy-state.lifecycle.lock``) is an OS advisory lock under
+``$AVA_HOME`` that serializes long local start/stop/pause transitions with a
+bounded wait.
 
-- ``resource_lock`` (``deploy-state.lifecycle.lock``) serializes long local
-  start/stop/pause transitions with a bounded wait.
-- ``lifecycle_lock`` (``deploy-state.owner.lock``) serializes the short
-  pause-owner publication against recovery's proof and destructive action.
-
-Each mutex has an atomically replaced ``.holder.json`` sidecar naming the last
+The lock has an atomically replaced ``.holder.json`` sidecar naming the last
 holder's PID, purpose, start time and held/released state, so a bounded wait can
 name who held it. The sidecar is diagnostic only; the OS lock is the authority.
-The lock file names are stable: renaming them would split mutual exclusion
-between processes built from different revisions.
+The lock file name is stable: renaming it would split mutual exclusion between
+processes built from different revisions.
 """
 
 from __future__ import annotations
@@ -21,7 +18,6 @@ import datetime as dt
 import json
 import logging
 import os
-import sys
 from collections.abc import Generator
 from pathlib import Path
 
@@ -29,7 +25,6 @@ import base.paths
 from base.host.atomic_io import fsync_parent, write_text_atomic
 from base.native_process.os_platform import LockTimeoutError, file_lock
 
-_LOCK_TIMEOUT_S = 5.0
 _RESOURCE_LOCK_TIMEOUT_S = 30.0
 
 _log = logging.getLogger("base.deploy.lifecycle.home_lifecycle_locks")
@@ -38,11 +33,6 @@ _log = logging.getLogger("base.deploy.lifecycle.home_lifecycle_locks")
 def lifecycle_lock_path() -> Path:
     """Stable mutex for long local resource transitions and the hold probe."""
     return base.paths.ava_home() / "deploy-state.lifecycle.lock"
-
-
-def owner_lock_path() -> Path:
-    """Short mutex for publishing ownership versus destructive recovery."""
-    return base.paths.ava_home() / "deploy-state.owner.lock"
 
 
 def _holder_path(path: Path) -> Path:
@@ -118,17 +108,6 @@ def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator
         raise LockTimeoutError(
             f"{exc}; waiter purpose={purpose!r}; last holder: {_last_holder(path)}"
         ) from exc
-
-
-@contextlib.contextmanager
-def lifecycle_lock() -> Generator[None]:
-    """Serialize short owner-publish and owner-recovery critical sections."""
-    # The contextmanager generator enters through contextlib.__enter__; its
-    # caller is the operation that actually owns this critical section.
-    caller = sys._getframe(2)
-    purpose = f"{caller.f_globals['__name__']}.{caller.f_code.co_name}"
-    with _diagnostic_lock(owner_lock_path(), purpose=purpose, timeout_s=_LOCK_TIMEOUT_S):
-        yield
 
 
 @contextlib.contextmanager
