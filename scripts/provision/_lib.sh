@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared helpers for the scripts/provision/* pieces — one OS-dispatch + logging
-# surface so host-tool consumers share package logic: `Dockerfile` (the eval
-# image), `install-cli-tools.sh`, and `install-system.sh` (a bare host).
+# surface so host-tool consumers share package logic: `scripts/verify/Dockerfile`
+# (the verification image), `install-cli-tools.sh`, and `install-system.sh` (a bare host).
 # Each piece sources this, resolves the
 # platform once, and branches.
 #

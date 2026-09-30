@@ -879,6 +879,11 @@ root = "base/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
+[[tool.pyright.executionEnvironments]]
+root = "scripts/verify/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
 # END GENERATED pyright tests environments
 
 # Ladder rung: raise the reportUnknown*/reportMissing* family to "error" on the highest-signal core
