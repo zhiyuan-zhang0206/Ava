@@ -29,7 +29,6 @@ from base.cluster.machine import (
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.deploy.git.cluster_drift import prod_source_head_sha
-from base.deploy.state.cluster_lock import DeployLease
 from gateway.cluster.schemas import AgentMachineRow, MachineDeleteResponse
 from gateway.cluster.status import gather_cluster_status
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
@@ -78,13 +77,6 @@ def _machines_rows_blocking(pool: ConnectionPool) -> list[tuple[Any, ...]]:
             "FROM machines WHERE paused_at IS NULL ORDER BY name"
         )
         return cur.fetchall()
-
-
-def _cluster_globals_blocking() -> DeployLease | None:
-    """Read the cluster-global deploy lease off the event loop before roster fan-out."""
-    from gateway.cluster.status import _read_deploy_lease
-
-    return _read_deploy_lease()
 
 
 async def _dispatch_op(
@@ -170,9 +162,7 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
     if not rows:
         return []
 
-    # Read the cluster-global deploy lease once, then stamp every row.
-    deploy_lease = await asyncio.to_thread(_cluster_globals_blocking)
-    return await gather_cluster_status(rows, machine_name(), deploy_lease=deploy_lease)
+    return await gather_cluster_status(rows, machine_name())
 
 
 # --- Admin ops (token-only ops, ssh-free) -------------------------------------

@@ -24,9 +24,8 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
   `machine_probe.transition_since` records the first failed probe until
   recovery. The same episode stays silent during the normal-recovery budget,
   fires WARNING after `AVA_ALERTS_TRANSITION_WARNING_SECONDS`, and escalates
-  in place to ERROR after `AVA_ALERTS_TRANSITION_ERROR_SECONDS`. A live cluster
-  deploy or that host's updater lease explains the transition without resetting
-  its start; unreadable lease state explains nothing.
+  in place to ERROR after `AVA_ALERTS_TRANSITION_ERROR_SECONDS`. The pass reads no
+  deploy context, so a runner offline across an update grades from its true start.
   Edges entering or leaving `offline` publish the canonical `agent_updated`
   snapshot after commit, so the existing frontend fold updates immediately;
   `unknown → online` is not broadcast because both render online and a

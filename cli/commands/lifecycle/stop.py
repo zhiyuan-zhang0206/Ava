@@ -332,24 +332,15 @@ def _announce_stopping() -> None:
 
 
 def _release_self_heal_pause() -> None:
-    """After a declined restart, clear a paused posture that nothing else
-    will — but only when no cluster update owns it.
+    """After a declined restart, clear a paused posture that nothing else will.
 
-    The updater session pauses this host *before* `ava restart`; only a completed
-    `ava start`/`ava restart` or the gateway's compensating resume unpauses. A
-    restart that declines does neither, so a LOCAL self-heal would strand the
-    host paused until the stranded-pause recovery's own bound.
-
-    The update lock is the discriminator: a live lock means a rollout owns this
-    pause and will resume it; no lock means the pause was ours, no other owner
-    coming. A read failure leaves it paused — wrongly unpausing mid-rollout is
-    the worse mistake. This read is deliberately the *lossy* one — a settle hold
-    naming this host is not an owner either; the backstop clears it a bound
-    later (the controller's finer discrimination is unsafe in the failing
-    process, #1098).
+    A restart that declines never reaches `ava start`/`ava restart`'s unpause,
+    so a paused posture read here has no other owner coming to release it and
+    would strand the host paused. A stop or maintenance hold in progress owns
+    its own pause and is left to `ava start`; a read failure leaves the host
+    paused — wrongly unpausing is the worse mistake.
     """
     from base.deploy.maintenance import admission
-    from base.deploy.state.cluster_lock import update_lock_holder
     from base.deploy.state.host_deploy_state import read
 
     held = admission.snapshot()
@@ -372,21 +363,10 @@ def _release_self_heal_pause() -> None:
         return
     if state is None or state.posture != "paused":
         return  # nothing paused this host; an operator's `ava restart` changes nothing
-    try:
-        holder = update_lock_holder()
-    except Exception as exc:
-        print(
-            f"  · leaving this host paused (could not read the update lock: {exc})",
-            file=sys.stderr,
-        )
-        return
-    if holder is not None:
-        print(f"  · leaving this host paused — a cluster update holds the lock ({holder})")
-        return
     from ops.cluster_pause import unpause_local_cluster
 
     unpause_local_cluster()
-    print("  · unpaused this host (no cluster update owns the pause; nothing was stopped)")
+    print("  · unpaused this host (nothing else owns the pause; nothing was stopped)")
 
 
 def _require_restart_runtime(runtime: StartRuntime) -> None:
@@ -529,8 +509,8 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
         )
     if rc != 0:
         # The quiesce paused this host; a failed stop means no `ava start` is
-        # coming to restore it. Release the pause unless a cluster update owns
-        # it (same contract as the refusal paths above). The stop leg's own
+        # coming to restore it. Release the pause unless a stop hold owns it
+        # (same contract as the refusal paths above). The stop leg's own
         # journal phases (drain / services / ...) remain readable.
         _release_self_heal_pause()
         if owns_journal:

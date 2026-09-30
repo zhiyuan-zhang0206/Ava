@@ -62,12 +62,9 @@ pollute the agent context.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import itertools
 import os
 import sys
-import threading
-import time
 import traceback as _traceback
 from typing import Any, cast
 
@@ -156,105 +153,6 @@ logger.remove()
 # with the `-` sentinel, throwing away the attribution the turn contextvar knows.
 logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
 
-# ─── Rollout-window quieting ────────────────────────────────────────────────
-#
-# User ruling 2026-08-04 (task #731): a cluster rollout is an *announced*
-# operation, so its predictable side effects must not alarm at WARNING in the
-# event stream. While the deploy lease is held (rollout executing, or a settle
-# hold waiting for stragglers — `base.deploy.state.cluster_lock`), these categories are
-# downgraded WARNING/ERROR → INFO in the emitted event; the JSONL file sink
-# keeps the true level for forensics, and outside a rollout window they keep
-# their original level unchanged.
-#
-# The list is deliberately narrow (per the ruling, no blanket WARNING
-# suppression): real failures — db_pool_acquire_timeout, a genuinely stuck
-# rollout (`stalled_rollout` controller), provider errors — stay loud.
-_ROLLOUT_QUIET_EVENTS = frozenset(
-    {
-        "db_pool_acquire_slow",
-        "db_outage_wait",
-        "db_outage_pause",
-        "db_outage_reconcile_retry",
-    }
-)
-# event='log' lines (stdlib loggers carry no event=) matched by message prefix:
-# the `query cancellation failed: ...` line (source currently only present on some
-# runner checkouts — the msg prefix is the one stable handle).
-_ROLLOUT_QUIET_MSG_PREFIXES = ("query cancellation failed",)
-
-# Deploy-lease read cache for the quieting check. The sink must not dial the DB
-# per record, and the quieting must SURVIVE the short DB blip a rollout itself
-# causes (the gateway restart drops the data plane; the lease lives in that
-# same DB). One read per process per TTL; a previously-seen live lease is held
-# for the whole TTL even when the next read fails, which is exactly the
-# mid-rollout window the quieting exists for.
-#
-# The read runs on a background thread, never on the log producer's thread:
-# the quieting check sits in the synchronous `_postgres_sink` on the caller's
-# thread, and a lease read dials the DB (connect_timeout 5s + statement
-# timeout 60s). Dialing synchronously would freeze the producer — and the
-# `db_outage_*` categories the quieting exists for are emitted by the agent
-# runloop's recovery loop *exactly when the DB is unreachable*, so a
-# synchronous read turned the outage-pause loop into an outage amplifier
-# (audit 2026-08-08 P1). The snapshot is stale by design: quieting decisions
-# tolerate up to TTL staleness, blocking does not.
-_DEPLOY_CACHE_TTL_S = 60.0
-_deploy_cached: bool | None = None
-_deploy_cached_at = 0.0
-_deploy_refresh_lock = threading.Lock()
-
-
-def _read_deploy_lease() -> bool:
-    """One lease read: True while a cluster deploy holds the update lease.
-
-    Runs on the cache-refresh thread. Deferred import: `base.deploy.state.cluster_lock`
-    imports `base.db` imports this module at module scope, so a top-level
-    import here is a hard circular-import failure (same shape as
-    `add_postgres_sink`'s deferred `import base.db`).
-    """
-    from base.deploy.state.cluster_lock import read_update_lease
-
-    return read_update_lease() is not None
-
-
-def _refresh_deploy_cache() -> None:
-    """Refresh the lease snapshot; the caller (a daemon thread) absorbs all
-    failures. An unreadable DB (mid-rollout blip) keeps the previous answer
-    for the TTL — a rollout restarting the gateway must not cancel its own
-    quieting; a cold cache with an unreadable DB stays None → False, the
-    fail-safe direction (a warning we cannot justify quieting stays a
-    warning)."""
-    global _deploy_cached, _deploy_cached_at  # noqa: PLW0603 — module-level cache
-    # A failed read keeps the previous answer for the TTL — DB unreachable
-    # (mid-rollout blip) is the normal state of an outage this cache exists to
-    # ride out, and a WARNING per minute per process would itself flood the
-    # event stream. Deliberately quiet.
-    with contextlib.suppress(Exception):
-        _deploy_cached = _read_deploy_lease()
-    _deploy_cached_at = time.monotonic()
-
-
-def _deploy_in_progress() -> bool:
-    """True while a cluster deploy holds the update lease (rollout or settle
-    hold), TTL-cached so the log sink costs at most one lease read per process
-    per minute. Never raises and never blocks the caller: a stale snapshot is
-    returned while a refresh runs on a background thread, so the log producer
-    is never frozen by the quieting check (see the cache block above)."""
-    global _deploy_cached_at  # noqa: PLW0603 — module-level cache
-    now = time.monotonic()
-    if now - _deploy_cached_at < _DEPLOY_CACHE_TTL_S:
-        return bool(_deploy_cached)
-    with _deploy_refresh_lock:
-        if now - _deploy_cached_at < _DEPLOY_CACHE_TTL_S:
-            return bool(_deploy_cached)
-        # Claim the refresh slot before spawning the thread: concurrent
-        # callers inside the TTL return the snapshot instead of stacking
-        # refreshes, and a re-entrant log from inside the read itself (e.g.
-        # psycopg's "query cancellation failed" line) cannot recurse.
-        _deploy_cached_at = now
-    threading.Thread(target=_refresh_deploy_cache, name="deploy-lease-cache", daemon=True).start()
-    return bool(_deploy_cached)
-
 
 def _message_to_params(
     message: loguru.Message,
@@ -293,12 +191,7 @@ def _message_to_params(
 
     `payload` (dict, serialized to jsonb by the emitter) = record.extra
     minus dedicated columns, plus `msg` (`record.message` formatted
-    text) so a single jsonb line shows the full picture during debug.
-
-    Rollout quieting (the one deliberate impurity, task #731): a WARNING/ERROR
-    record in a `_ROLLOUT_QUIET_*` category is rewritten to INFO while
-    `_deploy_in_progress()` — the TTL-cached lease read — is true. Everything
-    else passes through untouched."""
+    text) so a single jsonb line shows the full picture during debug."""
     record = message.record
     extra = dict(record["extra"])
     agent_id_raw = extra.pop("agent_id")  # required — init_* bound it; KeyError fast
@@ -340,20 +233,7 @@ def _message_to_params(
         )
         extra["exception_type"] = exc.type.__name__
         extra["exception_value"] = str(exc.value)
-    level = record["level"].name
-    if (
-        level in ("WARNING", "ERROR")
-        and (
-            event in _ROLLOUT_QUIET_EVENTS
-            or record["message"].startswith(_ROLLOUT_QUIET_MSG_PREFIXES)
-        )
-        and _deploy_in_progress()
-    ):
-        # Announced rollout side effect — see the constants block above. The
-        # file sink still carries the original level; only the events row is
-        # quieted.
-        level = "INFO"
-    return (record["time"], agent_id, level, event, extra, source)
+    return (record["time"], agent_id, record["level"].name, event, extra, source)
 
 
 # loguru level name -> unified `events` level (lowercase; TRACE/SUCCESS collapse

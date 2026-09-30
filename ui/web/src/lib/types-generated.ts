@@ -5829,8 +5829,6 @@ export interface components {
             /** Running Sha */
             running_sha?: string | null;
             schema_mismatch?: components["schemas"]["SchemaMismatchStatus"] | null;
-            /** Deploy Hold */
-            deploy_hold?: string | null;
             /**
              * Identity Mismatch
              * @default false

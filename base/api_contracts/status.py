@@ -107,19 +107,6 @@ class MachineStatus(BaseModel):
     # was not restarted — only running_sha reveals the stale code.
     running_sha: str | None = None
     schema_mismatch: SchemaMismatchStatus | None = None
-    # The live deploy lease (`base.deploy.state.cluster_lock.read_update_lease().describe()`):
-    # holder, how long it has been held, when it lapses, plus the settle note when
-    # it is a hold rather than an executing rollout. None = no live lease. The lease
-    # is cluster-global, so it is read once server-side and stamped identically
-    # onto every row to keep the roster a bare list.
-    #
-    # **This is the lease signal alone (signal 1 of `ops.deploy_window`), not that
-    # module's full refusal verdict.** The roster does not read the per-host posture
-    # rows, so None here is not proof that no deploy is running: host-local
-    # maintenance takes no cluster lease at all. The lease is
-    # shown because it is the one signal that stays true while the transitioning host
-    # is unreachable, which is when an operator most needs it.
-    deploy_hold: str | None = None
     # The probe responder self-reported a machine_name that did NOT match the row
     # this probe targeted — a structural red flag that a loopback/misregistered
     # gateway_url made the gateway dial the wrong host (or itself) and answer under

@@ -40,9 +40,8 @@ and the next pass re-marks the identities online.
 Machine alerting uses a separate episode clock: `machine_probe.transition_since`
 is set on the first failed probe and cleared on success. The shared transition
 policy stays silent through normal recovery, then fires WARNING and escalates
-the same alert instance to ERROR. A live cluster deploy or this host's updater
-lease explains the bounded window without resetting the clock; unreadable
-deploy context explains nothing.
+the same alert instance to ERROR. This pass reads no deploy context, so a
+runner offline across an update grades from its true start like any other outage.
 
 The probe path is injectable (`probe` argument) so tests can run the full
 DB merge without dialing real ops servers.
@@ -63,7 +62,6 @@ from base.agents.observation.evidence import (
 from base.cluster.machines import list_agent_runners
 from base.config import settings
 from base.db.transaction import write_transaction
-from base.deploy.state import cluster_lock, host_deploy_state
 from base.deploy.transition import transition_severity
 from base.events.live.announce import publish_agent_updated_sync
 from ops import cluster_rpc
@@ -127,7 +125,6 @@ def _machine_alert_edges(
     new_cf: int,
     transition_since: datetime | None,
     now: datetime,
-    deploy_explains: bool,
 ) -> None:
     """Grade one machine transition and persist its firing/recovery edges.
 
@@ -159,7 +156,6 @@ def _machine_alert_edges(
         severity = transition_severity(
             transition_since,
             now,
-            deploy_explains=deploy_explains,
             warning_after_s=settings.alerts.transition_warning_seconds,
             error_after_s=settings.alerts.transition_error_seconds,
         )
@@ -227,7 +223,7 @@ def _machine_alert_edges(
 
 
 async def _record_probe(
-    pool: ConnectionPool, name: str, *, ok: bool, host_online: bool | None, deploy_explains: bool
+    pool: ConnectionPool, name: str, *, ok: bool, host_online: bool | None
 ) -> None:
     """UPSERT one probe outcome into machine_probe, bumping the consecutive
     failure count on failure and resetting it on success — and record the
@@ -267,21 +263,7 @@ async def _record_probe(
             new_cf=new_cf,
             transition_since=transition_since,
             now=now,
-            deploy_explains=deploy_explains,
         )
-
-
-def _deploy_explanations(names: list[str]) -> dict[str, bool]:
-    """Read the pass's deploy context once; unreadable context explains nothing."""
-    try:
-        cluster_deploy_live = cluster_lock.read_update_lease() is not None
-        host_states = host_deploy_state.read_all()
-    except Exception:
-        return dict.fromkeys(names, False)
-    return {
-        name: cluster_deploy_live or (name in host_states and host_states[name].updater_live)
-        for name in names
-    }
 
 
 def _merge_liveness(pool: ConnectionPool) -> list[int]:
@@ -350,12 +332,9 @@ async def run_liveness_pass(
     runners = list_agent_runners()
     if not runners:
         return
-    deploy_explanations = _deploy_explanations([name for name, _url in runners])
     results = await asyncio.gather(*(_probe_machine(name, probe=probe) for name, _url in runners))
     for (name, _url), (ok, host_online) in zip(runners, results, strict=True):
-        await _record_probe(
-            pool, name, ok=ok, host_online=host_online, deploy_explains=deploy_explanations[name]
-        )
+        await _record_probe(pool, name, ok=ok, host_online=host_online)
     changed_agent_ids = _merge_liveness(pool)
     # `_merge_liveness` committed before these best-effort invalidation hints.
     for agent_id in changed_agent_ids:

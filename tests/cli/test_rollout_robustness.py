@@ -83,8 +83,6 @@ def _paused_posture(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make `_release_self_heal_pause`'s posture read answer `paused` — the pause
     state it heals (R1 old-signal sweep, PR5: the posture row replaced the
     `cluster_paused` file)."""
-    from datetime import datetime
-
     from base.deploy.state.host_deploy_state import HostDeployState
 
     monkeypatch.setattr(
@@ -93,21 +91,19 @@ def _paused_posture(monkeypatch: pytest.MonkeyPatch) -> None:
             machine="test",
             posture="paused",
             updated_at=datetime.now(UTC),
-            updater_lease_expires_at=None,
-            paused_at=datetime.now(UTC),
         ),
     )
 
 
-def test_declined_restart_releases_a_pause_no_rollout_owns(
+def test_declined_restart_releases_a_pause_nothing_else_owns(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A locally spawned self-heal pauses this host before running `ava restart`. If
     that restart declines, nothing else clears the pause — so a healthy host would
-    sit with its restarter killed until the 10-minute stranded-pause recovery."""
+    sit with its restarter killed until an operator noticed."""
 
     _paused_posture(monkeypatch)
-    monkeypatch.setattr("base.deploy.state.cluster_lock.update_lock_holder", lambda: None)
+    monkeypatch.setattr("base.deploy.maintenance.admission.snapshot", lambda: None)
     unpaused: list[bool] = []
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", lambda: unpaused.append(True))
 
@@ -115,14 +111,23 @@ def test_declined_restart_releases_a_pause_no_rollout_owns(
     assert unpaused == [True]
 
 
-def test_declined_restart_leaves_a_rollouts_pause_alone(
+def test_declined_restart_leaves_a_stop_holds_pause_alone(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A live update lock means the rollout owns this pause and will resume the host
-    itself; unpausing now would let old-code agents respawn mid-migration."""
+    """A maintenance hold that has entered its stop window owns this pause and
+    `ava start` releases it after readiness; unpausing now would reopen the host
+    while its services are half stopped."""
+    from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
+    from base.deploy.maintenance.state import MaintenanceHold
 
     _paused_posture(monkeypatch)
-    monkeypatch.setattr("base.deploy.state.cluster_lock.update_lock_holder", lambda: "cloud:pid1")
+    held = PauseOwnerSnapshot(
+        status="paused",
+        holder="stop",
+        acquired_at=datetime.now(UTC),
+        maintenance=MaintenanceHold(phase="stopped"),
+    )
+    monkeypatch.setattr("base.deploy.maintenance.admission.snapshot", lambda: held)
     unpaused: list[bool] = []
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", lambda: unpaused.append(True))
 

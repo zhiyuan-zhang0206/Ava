@@ -1,9 +1,8 @@
-"""MachineStatus row shapers + row stamping for the roster fan-out (gateway/cluster/status.py).
+"""MachineStatus row shapers for the roster fan-out (gateway/cluster/status.py).
 
 The three abnormal-state rows — reachable-unknown, offline, identity mismatch —
 are pure functions of a machines-table row: no probe state, no backoff, no
-cluster-global markers. `stamp_cluster_globals` applies the cluster-global
-deploy lease onto every assembled row.
+cluster-global markers.
 Split out of status.py so the roster module stays under the 800-line budget
 while the row contract lives in one place."""
 
@@ -13,7 +12,6 @@ import logging
 from datetime import datetime
 
 from base.api_contracts.status import MachineStatus
-from base.deploy.state.cluster_lock import DeployLease
 
 _log = logging.getLogger("gateway.cluster._roster_rows")
 
@@ -112,17 +110,3 @@ def identity_mismatch_status(
         head_sha=None,
         identity_mismatch=True,
     )
-
-
-def stamp_cluster_globals(
-    machines: list[MachineStatus],
-    *,
-    deploy_lease: DeployLease | None,
-) -> list[MachineStatus]:
-    """Apply the cluster-global deploy lease to every assembled row; return them sorted."""
-    hold_detail = deploy_lease.describe() if deploy_lease is not None else None
-    stamped: list[MachineStatus] = []
-    for m in machines:
-        stamped.append(m.model_copy(update={"deploy_hold": hold_detail}))
-    stamped.sort(key=lambda m: m.name)
-    return stamped

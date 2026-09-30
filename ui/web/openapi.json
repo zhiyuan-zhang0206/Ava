@@ -11137,17 +11137,6 @@
               }
             ]
           },
-          "deploy_hold": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deploy Hold"
-          },
           "identity_mismatch": {
             "type": "boolean",
             "title": "Identity Mismatch",
