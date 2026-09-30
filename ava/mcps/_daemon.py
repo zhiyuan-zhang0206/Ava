@@ -37,7 +37,13 @@ from typing import Any
 
 from loguru import logger
 
-from ava.mcp_config import assert_requirements, is_transport_error, load_mcp_config, server_url
+from ava.mcp_config import (
+    MCPCallError,
+    assert_requirements,
+    is_transport_error,
+    load_mcp_config,
+    server_url,
+)
 from base.config import settings
 from base.log.sinks import add_sink
 
@@ -309,7 +315,16 @@ async def _handle_call_tool(
     # ComputerLineSession has the attribute.
     if hasattr(session, "client_agent_id"):
         session.client_agent_id = req.get("agent_id")
-    result = await session.call_tool(tool, args)
+    try:
+        result = await session.call_tool(tool, args)
+    except Exception as e:
+        if not _is_transport_error(e):
+            raise
+        await _invalidate_session(server, sessions, stacks, session_locks)
+        raise MCPCallError(
+            f"MCP tool result unknown for {server}.{tool}; request may have executed: "
+            f"{type(e).__name__}: {e}"
+        ) from e
     content = []
     for c in result.content or []:
         # Same fail-fast as ava/mcps/__init__.py:_dump_content: the MCP
@@ -386,8 +401,9 @@ async def _handle_client(
                 server = params.get("server", "")
 
                 try:
-                    # Retry on transport errors (dead MCP server process / broken
-                    # pipe): invalidate the cached session, back off, reconnect.
+                    # Retry transport errors before a tool call starts, or while
+                    # listing tools. A started tool call converts an uncertain
+                    # transport failure to MCPCallError before reaching here.
                     resp = None
                     for _attempt in range(3):
                         try:

@@ -380,9 +380,10 @@ def _session_death_codes() -> frozenset[int]:
 
 
 def is_transport_error(exc: BaseException) -> bool:
-    """True when `exc` means the MCP server process / transport died and a
-    reconnect + retry is appropriate — vs a tool-level error that must
-    propagate untouched (retrying would double-run side-effectful tools).
+    """True when `exc` means the MCP server process / transport died.
+
+    A caller may reconnect for its next request. It may retry this request
+    only if it was not a side-effectful tool call already in flight.
 
     Shared by the MCP daemon and the in-process SDK so both sides agree on
     the retry seam.

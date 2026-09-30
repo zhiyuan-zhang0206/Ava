@@ -20,6 +20,26 @@ from base.agents.messages import delivery_outbox as outbox
 from base.config import settings
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.WriteTimeout("write stalled"),
+        httpx.ReadError("reply lost"),
+        httpx.RemoteProtocolError("peer closed"),
+    ],
+)
+@patch("ava.gateway_client.transport._client")
+def test_unkeyed_spawn_does_not_retry_uncertain_transport_error(
+    mock_client: MagicMock, error: httpx.TransportError
+) -> None:
+    from ava.gateway_client import spawn
+
+    mock_client.post.side_effect = error
+    with pytest.raises(GatewayUnavailable, match="result unknown"):
+        spawn(spawner="user", prompt="hello", fork_from=None, prompt_source="user")
+    assert mock_client.post.call_count == 1
+
+
 def _limits(**overrides: object) -> outbox.DeliveryOutboxLimits:
     base: dict[str, object] = {
         "enabled": True,

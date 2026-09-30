@@ -70,5 +70,11 @@ Server entries may carry `requires` host-capability pre-checks; when unmet, an a
 
 ## Notes
 Tool arguments are named — must be passed by name. Errors are returned as `MCPCallError`.
+After a tool call starts, a lost transport or daemon response returns `MCPCallError`
+with an unknown result; the SDK does not replay the call on a new session or
+fall back to local execution. Tool discovery may retry transport failures;
+a tool call can retry only when session selection fails before it starts.
+Repeating a tool with at-least-once delivery requires a protocol-level
+idempotency key and server deduplication.
 
 SDK v2 (pinned `>=2.0.0,<3`, 2026-07-28 protocol revision): SDK field names are snake_case (`input_schema` / `is_error` / `structured_content`); `_dump_content` and the daemon re-serialize `by_alias=True`, so the camelCase wire contract agents parse is unchanged.
