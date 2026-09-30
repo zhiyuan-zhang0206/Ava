@@ -48,7 +48,7 @@ tree, and a session host has neither. That is what makes the SDK's promise
 "sessions persist across terminate/restart/update" **structural**: a session
 ends only through its own `kill` op, its shell exiting, that one host
 crashing (blast radius: one session), or a machine reboot.
-Decision: [2026-08-13-per-session-pty-hosts](../../../decisions/2026-08-13-per-session-pty-hosts.md).
+Decision: [2026-08-13-per-session-pty-hosts](../../../../decisions/2026-08-13-per-session-pty-hosts.md).
 
 The pty master fd lives in the host, so host death IS session death (the
 slave hangs up) — the per-session equivalent of closing one terminal window,
@@ -130,7 +130,7 @@ ScheduleManager, the page-server daemon, `ops.cluster_status` capture/kill, and
 ## Boundaries
 
 - POSIX-only (`pty.fork`; Windows has no pty backend —
-  [conventions/windows-setup.md](../../../conventions/windows-setup.md)).
+  [conventions/windows-setup.md](../../../../conventions/windows-setup.md)).
 - One pty per session counts against the host-wide `kern.tty.ptmx_max`
   ceiling (macOS default 511) — see `base/native_process/os_platform.py`.
 - [[generation-boundary.ava.okf.md]] defines the desired-state implications of

@@ -177,7 +177,7 @@ Repo skills live in `.agents/skills/` (open Agent Skills standard); `.ava/skills
 
 ## Key docs — read on demand
 
-Five axes, one fact per place: `*.ava.okf.md` next to the code = what the system **is**; `decisions/` = **why** (never rewritten); `future/` = **plans**; `conventions/` = **how to work**;
+Five axes, one fact per place: `*.ava.okf.md` in each package's `docs/` = what the system **is**; `decisions/` = **why** (never rewritten); `future/` = **plans**; `conventions/` = **how to work**;
 `postmortems/` = **why a failure escaped** — frozen incident narratives, each naming the guardrail it bought, distilled into [`conventions/defensive-patterns.md`](conventions/defensive-patterns.md)
 (read before lifecycle / release / infra work). What the system **does in time** is not an axis — no run is committed; query the live one ([`.agents/skills/inspect-a-trace/`](.agents/skills/inspect-a-trace/SKILL.md)).
 [Doc maintenance →](conventions/doc-maintenance.md)
@@ -225,7 +225,7 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 - **Local tests before push** — run only targeted pytest/vitest tests and relevant eslint/tsc checks before pushing. Full test suites run in CI only; never launch a local repository-wide or full-backend test run, including for `base/` changes (user ruling 2026-09-22). [How to →](.agents/skills/run-local-tests/SKILL.md)
 - **Git hooks** — install both stages from the main clone's stable `.venv`; heavy static checks run at pre-push. [Install and guardrails →](conventions/runbook.md#git-hooks-pre-commit--pre-push)
 - **CI to green, then enqueue, then clean up** — poll `.venv/bin/python scripts/ci_utils.py <PR#>` until all-green (fix red immediately; `NO_WORKFLOW_RUNS` = the suite never ran = not green), then submit with `--wait --merge` (submits to the Trunk merge queue; the queue verifies the combined tree that actually lands — a PR with conflicts still needs a manual `git rebase origin/main` first; PRs awaiting user review are never enqueued). After merge: remove the local worktree and delete the remote branch. [Detail →](.agents/skills/ship-a-change/SKILL.md)
-- **Commit = code + docs stable** — docs go in same PR. Structure changes reconcile the co-located `*.ava.okf.md`; scan `conventions/` + `future/` for stale refs.
+- **Commit = code + docs stable** — docs go in same PR. Structure changes reconcile the package's `docs/` OKF nodes; scan `conventions/` + `future/` for stale refs.
 
 ## Python conventions (quick reference)
 

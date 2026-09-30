@@ -1,8 +1,11 @@
-"""`scripts/content_lint/lint_ava_okf.py` — a typo'd explicit target must fail the gate.
+"""`scripts/content_lint/lint_ava_okf.py` — gate-level behavior.
 
-An explicit path argument that does not exist used to print
-"No .ava.okf.md files found." and exit 0; it must now report the missing
-target on stderr and exit 1.
+A typo'd explicit target must fail the gate: an explicit path argument that
+does not exist must report the missing target on stderr and exit 1, not print
+"No .ava.okf.md files found." and exit 0.
+
+E009 (overview position) is judged on the logical path, so a node in a
+package's `docs/` layer is checked as if it sat where the layer sits.
 """
 
 from __future__ import annotations
@@ -31,3 +34,43 @@ def test_explicit_missing_target_is_an_error(
     with pytest.raises(SystemExit) as exc2:
         gate.main()
     assert exc2.value.code == 1
+
+
+_NODE = "---\ntype: doc\ntitle: T\ndescription: D\n---\n\n# T\n"
+
+
+def _e009(repo_root: Path, rel: str) -> list[str]:
+    """The E009 messages the gate reports for `rel` inside the repo `repo_root`."""
+    path = repo_root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_NODE, encoding="utf-8")
+    root = repo_root.resolve()
+    errors = gate.lint_file(path.resolve(), gate.collect_all_paths(root), root)
+    return [e.msg for e in errors if e.code == "E009"]
+
+
+def test_e009_reports_a_sibling_overview_beside_its_directory(tmp_path: Path) -> None:
+    (tmp_path / "agent" / "foo").mkdir(parents=True)
+    (msg,) = _e009(tmp_path, "agent/foo.ava.okf.md")
+    assert "'agent/foo/foo.ava.okf.md'" in msg
+
+
+def test_e009_reports_a_layered_sibling_overview(tmp_path: Path) -> None:
+    """`agent/docs/foo.ava.okf.md` sits logically at `agent/foo.ava.okf.md`."""
+    (tmp_path / "agent" / "foo").mkdir(parents=True)
+    (msg,) = _e009(tmp_path, "agent/docs/foo.ava.okf.md")
+    assert "'agent/foo/docs/foo.ava.okf.md'" in msg
+
+
+def test_e009_reports_a_repo_root_layered_sibling_overview(tmp_path: Path) -> None:
+    (tmp_path / "foo").mkdir()
+    (msg,) = _e009(tmp_path, "docs/foo.ava.okf.md")
+    assert "'foo/docs/foo.ava.okf.md'" in msg
+
+
+def test_e009_accepts_overviews_inside_their_directory(tmp_path: Path) -> None:
+    (tmp_path / "agent" / "foo").mkdir(parents=True)
+    assert _e009(tmp_path, "agent/foo/foo.ava.okf.md") == []
+    assert _e009(tmp_path, "agent/foo/docs/foo.ava.okf.md") == []
+    # A layered document that only shares a name with no directory is fine too.
+    assert _e009(tmp_path, "agent/docs/bar.ava.okf.md") == []

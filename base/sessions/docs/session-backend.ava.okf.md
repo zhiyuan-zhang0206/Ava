@@ -33,7 +33,7 @@ to the root service runtime; the backend remains for its surviving session users
 ### Backends
 
 - **PosixProcSessionBackend** — the native supervisor for services: double-fork reparent to init, `SessionRecord` + logs under `$AVA_HOME/run/sessions/` / `$AVA_HOME/logs/`. No PTY is allocated, so the per-box PTY ceiling (`kern.tty.ptmx_max`) does not bound service count.
-- **PtySessionBackend** — agent shells / watchers. Each mutating op is a `python -m base.sessions.pty.cli` subprocess whose exit code maps to the interface shape; enumeration and bulk launch timestamps use one in-process record scan, with individual record reads as the I/O-failure fallback. Env rides a 0600 file, the launch command rides base64 (never argv), and the session's host submits it only once the login shell's prompt is ready. `login_shell=False` raises `NotImplementedError` (interactive login shells only); the kill timeout is owned by the host. See [[base/sessions/pty/pty_sessions.ava.okf.md|pty sessions]].
+- **PtySessionBackend** — agent shells / watchers. Each mutating op is a `python -m base.sessions.pty.cli` subprocess whose exit code maps to the interface shape; enumeration and bulk launch timestamps use one in-process record scan, with individual record reads as the I/O-failure fallback. Env rides a 0600 file, the launch command rides base64 (never argv), and the session's host submits it only once the login shell's prompt is ready. `login_shell=False` raises `NotImplementedError` (interactive login shells only); the kill timeout is owned by the host. See [[base/sessions/pty/docs/pty_sessions.ava.okf.md|pty sessions]].
 - **WinprocSessionBackend** — new Windows sessions use a private hidden console, explicit log handles and `control_mode=private-console-v1` in their record. `base/sessions/windows/console_signal.py` runs once via an absolute loaded-package path under isolated Python; it verifies exact PID/birth, record provenance and console members before a console-scoped Ctrl-Break. It never changes the daemon's console. Legacy/unknown records refuse graceful delivery; a successful send is OS acceptance, not proof of exit. Force cleanup preserves other session boundaries (`winproc._spared_pids`). Actual admitted agent PID remains separate from a verified venv redirector's native control PID.
   Cross-session control (issue #1930) and the helper's Job containment are in
   [[cross-session-control.ava.okf.md|cross-session control]].
@@ -45,7 +45,7 @@ to the root service runtime; the backend remains for its surviving session users
 ### macOS firewall manifest
 The Application Firewall allow-list manifest, reconciliation, status rendering,
 and off-box reachability attribution (issue #949):
-[[base/sessions/firewall-audit.ava.okf.md]].
+[[base/sessions/docs/firewall-audit.ava.okf.md]].
 
 ## Entry points
 
