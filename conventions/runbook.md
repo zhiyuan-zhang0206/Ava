@@ -1481,7 +1481,8 @@ updated by stopping every unit, switching every checkout and starting again
 ([decision](../decisions/2026-09-30-networked-cluster-stays-on-source-updates.md)).
 `python -m cli.fleet_update` runs it from the operator's development checkout
 over key-based SSH, in two halves; any manual step the release needs goes in
-between:
+between. When the operator's Mac is itself a host, it must be able to `ssh` to
+itself (its own public key in its own `authorized_keys`):
 
 ```bash
 .venv/bin/python -m cli.fleet_update down --new NEW_SHA \
@@ -1499,14 +1500,26 @@ between:
   fetches NEW on every host, runs `ava stop -y --timeout 600` on each runner and
   then the gateway (each must leave phase `stopped` with no failures), then on
   every host checks out NEW detached, repairs legacy read-only venv
-  directories and runs `uv sync --frozen`.
+  directories, runs `uv sync --frozen` and requires a clean tree.
+- A failed stop prints the next step: on that host retry
+  `ava stop -y --timeout 600`, confirm `ava maintenance status` shows
+  paused/stopped, then rerun `down`. A tree that is not clean after the switch
+  prints its `git status --porcelain` (first 20 lines). Untracked files are not
+  caused by the update (a changed `.gitignore` can reveal them): check them and
+  move them away, never delete, then rerun `down`. Nothing is moved, deleted or
+  retried automatically.
 - `up` runs `ava start` on the gateway (its cold start applies migrations),
   then on each runner; on macOS as a one-time LaunchAgent in `gui/<uid>`,
   because signing the helper needs the login keychain (the user must be
   logged in to the GUI). Each start must release its hold; every roster
-  machine must be online with checkout and running code on one commit; then
+  machine must be online with checkout and running code on one commit (`online`
+  follows the heartbeat, so the roster is re-read every 5 seconds for up to
+  `--roster-timeout`, default 90, and a failure shows the last read); then
   the gateway smoke-tests each agent-runner with a real agent, reading its own
-  address and bearer in place.
+  address and bearer in place; last, each host runs `ava packages refresh`
+  (skills follow their channel; `ava skill update` is retired) and its summary
+  line (`applied N, conflict M`) is printed. Conflicts are only reported: the
+  script never passes `--force`, which is human-only.
 - The first failure stops a half and nothing rolls back: fix the cause and
   rerun the whole half, which is idempotent. `--dry-run` runs only the
   read-only checks and prints the effects. Output is redacted and tee'd to

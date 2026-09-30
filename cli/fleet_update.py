@@ -3,7 +3,7 @@
 `down --new SHA`: preflight; stop each runner, then the gateway; switch every
 checkout to NEW. `up`: start the gateway, then each runner (macOS as a one-time
 GUI-session LaunchAgent: helper signing needs the login keychain); check holds
-and the roster; smoke-test each agent-runner. After a failure, fix the cause and
+and the roster; smoke-test each agent-runner; refresh skills. After a failure, fix the cause and
 rerun the whole half. See conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
 """
 
@@ -16,6 +16,7 @@ import plistlib
 import re
 import shlex
 import subprocess
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,17 @@ _HOME = 'H="$HOME/.ava"; S="$H/source"; cd "$S" || exit 1'
 _AVA = 'AVA_HOME="$H" "$S/.venv/bin/ava"'
 _STATUS = f"{_HOME}; {_AVA} maintenance status"
 _FREE = ("inactive", "resumed")  # maintenance statuses with no hold
+_POLL_S = 5  # roster re-read interval
+_STOP_HINT = (
+    '\nOn that host retry "ava stop -y --timeout 600", confirm maintenance status is '
+    "paused/stopped, then rerun `down`."
+)
+# Reports a dirty tree, never cleans it: untracked files are the operator's to move.
+_CLEAN = (
+    'd=$(git status --porcelain | head -n 20); [ -z "$d" ] || { echo "$d"; echo "Untracked files '
+    "are not caused by this update (a changed .gitignore can reveal them): check them, then "
+    'move them away (do not delete) and rerun down."; exit 1; }'
+)
 _PROBE = f"""{_HOME}
 echo "head=$(git rev-parse HEAD)"
 echo "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
@@ -192,16 +204,19 @@ def down(s: Session, args: argparse.Namespace) -> None:
     for alias in everyone:  # before any stop: a missing NEW must not strand a stopped cluster
         s.run(alias, f'{_HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
     for alias in [*args.runner, args.gateway]:
-        s.run(alias, f"{_HOME}; {_AVA} stop -y --timeout {args.stop_timeout}")
-        if not s.dry_run:
-            status, phase, failures = _hold(s.run(alias, _STATUS, effect=False))
-            if (status, phase) != ("paused", "stopped") or failures:
-                raise FailedError(f"{alias}: stop left {status}/{phase} failures={failures}")
+        try:
+            s.run(alias, f"{_HOME}; {_AVA} stop -y --timeout {args.stop_timeout}")
+            if not s.dry_run:
+                status, phase, failures = _hold(s.run(alias, _STATUS, effect=False))
+                if (status, phase) != ("paused", "stopped") or failures:
+                    raise FailedError(f"{alias}: stop left {status}/{phase} failures={failures}")  # noqa: TRY301
+        except FailedError as exc:
+            raise FailedError(f"{exc}{_STOP_HINT}") from exc
     for alias in everyone:
         s.run(
             alias,
             f"{_HOME}; git checkout -q --detach {new} && {_VENV_DIRS} && "
-            'env -u VIRTUAL_ENV uv sync --frozen && test -z "$(git status --porcelain)"',
+            f"env -u VIRTUAL_ENV uv sync --frozen && {_CLEAN}",
         )
     s.say(f"down complete: every host is stopped on {new[:12]}; run `up` when ready")
 
@@ -233,14 +248,32 @@ launchctl bootout "gui/$(id -u)/{label}" || echo "bootout of {label} failed"
 rm -rf "$D"; exit "$rc\""""
 
 
-def _one_commit(rows: list[dict[str, Any]]) -> str:
-    """The commit every roster machine runs, online, from a checkout at that same commit."""
-    offline = [row["name"] for row in rows if not row["online"] or row["identity_mismatch"]]
-    commits = {(row["head_sha"], row["running_sha"]) for row in rows}
-    commit = rows[0]["head_sha"]
-    if offline or commit is None or commits != {(commit, commit)}:
-        raise FailedError(f"roster: offline {offline}; (checkout, running) commits {commits}")
-    return commit
+def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[dict[str, Any]], str]:
+    """The roster and the one commit every machine runs, online, from a checkout at it.
+
+    `online` follows the heartbeat: a machine just started is re-read until --roster-timeout."""
+    deadline = time.monotonic() + args.roster_timeout
+    while True:
+        out = s.run(args.gateway, f"{program} roster", effect=False, stdin=_GATEWAY_PROGRAM)
+        rows = json.loads(out.splitlines()[-1])
+        offline = [row["name"] for row in rows if not row["online"] or row["identity_mismatch"]]
+        commits = {(row["head_sha"], row["running_sha"]) for row in rows}
+        commit = rows[0]["head_sha"]
+        if not offline and commit is not None and commits == {(commit, commit)}:
+            return rows, commit
+        if time.monotonic() >= deadline:
+            raise FailedError(
+                f"roster after {args.roster_timeout}s: offline {offline}; commits {commits}"
+            )
+        time.sleep(_POLL_S)
+
+
+def _refresh(s: Session, args: argparse.Namespace) -> None:
+    """Skills follow their channel, not the checkout. Conflicts are reported; never --force."""
+    for alias in [args.gateway, *args.runner]:
+        out = s.run(alias, f"{_HOME}; {_AVA} packages refresh")
+        if out:  # empty on a dry run
+            s.say(f"packages refresh [{alias}] {out.splitlines()[-1].strip()}")
 
 
 def up(s: Session, args: argparse.Namespace) -> None:
@@ -252,13 +285,13 @@ def up(s: Session, args: argparse.Namespace) -> None:
     program = f'{_HOME}; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -'
     if s.dry_run:
         s.run(args.gateway, f"{program} smoke MACHINE {args.smoke_timeout}  # each agent-runner")
+        _refresh(s, args)
         return
-    roster = s.run(args.gateway, f"{program} roster", effect=False, stdin=_GATEWAY_PROGRAM)
-    rows = json.loads(roster.splitlines()[-1])
-    commit = _one_commit(rows)
+    rows, commit = _roster(s, args, program)
     for name in [row["name"] for row in rows if row["serve_agent_runner"]]:
         smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
         s.run(args.gateway, smoke, stdin=_GATEWAY_PROGRAM)
+    _refresh(s, args)
     s.say(f"up complete: every machine runs {commit[:12]}")
 
 
@@ -278,6 +311,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             p.add_argument("--start-timeout", type=int, default=1800)
             p.add_argument("--smoke-timeout", type=int, default=300)
+            p.add_argument("--roster-timeout", type=int, default=90)
     args = parser.parse_args(argv)
     if "AVA_AGENT_ID" in os.environ:
         print("refused: run from a plain login shell, not an Ava agent's shell (a stop closes it)")
