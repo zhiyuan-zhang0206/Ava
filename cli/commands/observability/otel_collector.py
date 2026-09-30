@@ -497,20 +497,6 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
     and skip — the sidecar session will not start and the agent preflight
     disables OTLP export with a reported warning.
     """
-    from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_otel_binary
-
-    if WHEEL_RUNTIME:
-        binary = runtime_otel_binary()
-        marker = binary.parent / collector_artifact.VERSION_MARKER
-        if (
-            not binary.is_file()
-            or marker.read_text().strip() != collector_artifact.OTELCOL_CONTRIB_VERSION
-        ):
-            raise RuntimeError("verified release lacks its pinned collector; prepare before start")
-        dest_dir = ava_home / "otel-collector"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        _write_config(dest_dir / "config.yaml", generate_config(repo, ava_home, roles))
-        return
     tag = collector_artifact.platform_tag()
     if tag is None:
         print(

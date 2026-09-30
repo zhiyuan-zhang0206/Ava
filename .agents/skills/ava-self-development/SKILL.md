@@ -35,7 +35,8 @@ protection; the old orchestrator controls the first rollout of a new safeguard.
 
 ## Deployment gates
 
-Use the installed `ava cluster update --help` contract. Do not copy historical
+Use the runbook's "Updating a networked cluster in source mode" procedure
+(`python -m cli.fleet_update --help`). Do not copy historical
 drain timeouts or assume old code understands a new flag. Record before rollout:
 
 - Exact machine, user, unit home and ports. Local process listings cannot
@@ -68,7 +69,7 @@ Do not declare success from a filtered roster, pointer, CLI exit, or stale
 health response. An offline host is an explicit incomplete result.
 
 If rollout fails, preserve evidence and inspect the installed
-`ava cluster recover --help` and `ava cluster pitr rollback --help`. Confirm live
+`ava cluster recover --help`. Confirm live
 holder semantics and schema compatibility before acting. Do not blindly retry
 updates or reset production source. If no supported safe path exists, report
 the precise blocker and request a scoped recovery decision.

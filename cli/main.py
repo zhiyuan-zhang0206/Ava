@@ -207,12 +207,6 @@ def main(argv: list[str] | None = None) -> int:
     code_version.exempt_from_db_gate()
     _normalize_process_profile()
     args_in = sys.argv[1:] if argv is None else argv
-    if args_in[:2] == ["cluster", "update"]:
-        # Release submission has one captured request and no mutable-checkout
-        # fallback. Validate it before Settings or checkout-home resolution.
-        args = _build_parser().parse_args(args_in)
-        return args.func(args)
-
     # `ava boot` is what the OS boot job runs on the platforms whose scheduler
     # cannot retry a failed job for us (Linux cron `@reboot`, Windows ONLOGON):
     # `ava start` re-run while the machine is still coming up. Dispatched here,

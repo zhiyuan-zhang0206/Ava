@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Release operator surface
-description: Thin `ava cluster release prepare/request/adopt/exclude/status` verbs over release preparation and the fleet release transition.
+description: Thin prepare/request/adopt/exclude/status entry functions over release preparation and the fleet release transition; no CLI verb registers them.
 tags:
 - cluster-lifecycle
 - release
@@ -9,16 +9,18 @@ tags:
 
 # Release operator surface
 
-`ava cluster release prepare / request / adopt / exclude / status` are operator
-verbs over the release machinery. None of them decides a release: each
+`prepare / request / adopt / exclude / status` are operator entry functions over
+the release machinery. No CLI verb registers them (the `ava cluster release` group
+and `ava cluster update` are removed), so nothing in production reaches this
+package. None of them decides a release: each
 resolves paths under `$AVA_HOME` and calls release preparation or the fleet
 release transition ([[cli/release_fleet/docs/release_fleet.ava.okf.md]]), where the
 coordinator decides.
 
 ## `prepare`
 
-```bash
-ava cluster release prepare --commit FULL_COMMIT_SHA --inputs LOCAL_INPUTS_JSON [--repo REPO]
+```text
+prepare --commit FULL_COMMIT_SHA --inputs LOCAL_INPUTS_JSON [--repo REPO]
 ```
 
 Calls `cli.release_prepare.prepare_image` ([[cli/release_prepare/docs/release_prepare.ava.okf.md]])
@@ -45,8 +47,8 @@ again by commit alone.
 
 ## `request`
 
-```bash
-ava cluster release request --commit FULL_COMMIT_SHA --out REQUEST_JSON \
+```text
+request --commit FULL_COMMIT_SHA --out REQUEST_JSON \
   [--receipt RECEIPT_JSON] [--exclude MACHINE:HOME ... --reason R] [--watch-s S] \
   [--alert-agent AGENT_ID] [--alert-webhook-file NAME] [--acknowledged-rejection OPERATION_ID]
 ```
@@ -72,7 +74,7 @@ here: a missing or group/other-accessible file refuses), and
 candidate, the only way to request a rejected candidate again. `verify_pair` still refuses a
 schema-changing transition.
 
-The written file is handed to `ava cluster update --prepared REQUEST_JSON`;
+The written file is the request the release handoff consumes;
 nothing here submits or dispatches it. Refuses if `--out` already exists, if
 there is no prepared receipt for the commit, if this home has no active
 selection yet (run `adopt` first), or if the candidate is already the active
@@ -81,8 +83,8 @@ process that receives a database login); the candidate consumes its output.
 
 ## `adopt`
 
-```bash
-ava cluster release adopt --receipt RECEIPT_JSON
+```text
+adopt --receipt RECEIPT_JSON
 ```
 
 First image selection for a source-run home that has never selected a
@@ -92,7 +94,7 @@ release before: `activate_release(expected_current=None)` plus
 preview's own captured bundle, generalized to a real home and a
 real `PreparationReceipt` file. Requires a stopped root
 (`cli.commands.lifecycle.root_driver.require_root_absent`) and refuses if another
-release is already selected (that is `request` + `ava cluster update`'s job).
+release is already selected (that is `request` plus the handoff's job).
 The selection commits before the boot action installs; if the install fails
 (`sudo -n` wanting a password) or the process dies in between, re-running
 adopt with the same receipt keeps the selection and finishes the install. A
@@ -108,8 +110,8 @@ A macOS host refuses here by design rather than approximating one.
 
 ## `exclude`
 
-```bash
-ava cluster release exclude --operation OPERATION_ID --unit MACHINE:HOME --reason R
+```text
+exclude --operation OPERATION_ID --unit MACHINE:HOME --reason R
 ```
 
 A recorded operator decision in the fleet journal, taken under the home
@@ -121,8 +123,8 @@ published release state, and it rejoins only through a converge operation.
 
 ## `status`
 
-```bash
-ava cluster release status [--operation OPERATION_ID] [--json]
+```text
+status [--operation OPERATION_ID] [--json]
 ```
 
 Read-only. Reports the currently selected release (if any; one that no

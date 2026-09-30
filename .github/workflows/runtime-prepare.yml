@@ -46,7 +46,6 @@ on:
       - 'base/deploy/writers/barrier.py'
       - 'base/deploy/writers/observation.py'
       - 'base/host/system/job_observation.py'
-      - 'scripts/release_proofs/prove_runtime_migration.py'
       - 'base/deploy/schema/runtime_migration.py'
       - 'scripts/ci/verify_runtime_wheel.py'
       - 'pyproject.toml'

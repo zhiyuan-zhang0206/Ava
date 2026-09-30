@@ -7,12 +7,7 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
-from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME
 from base.deploy.schema.migration_errors import MigrationLayoutError
-from base.deploy.schema.runtime_migration import (
-    ReleaseMigrationContext,
-    installed_migration_paths,
-)
 from base.log import logger
 from base.native_process.os_platform import CREATE_NO_WINDOW
 
@@ -99,8 +94,6 @@ def _tracked_migration_paths() -> set[Path] | None:
     """
 
     migrations_dir = _migrations_dir()
-    if WHEEL_RUNTIME:
-        return installed_migration_paths(migrations_dir)
     root_result = _git_probe(["-C", str(migrations_dir), "rev-parse", "--show-toplevel"])
     if root_result.returncode != 0:
         return None
@@ -115,9 +108,7 @@ def _tracked_migration_paths() -> set[Path] | None:
     return {root / entry for entry in listing.stdout.split("\0") if entry}
 
 
-def _list_migration_files(
-    release: ReleaseMigrationContext | None = None,
-) -> list[tuple[str, Path]]:
+def _list_migration_files() -> list[tuple[str, Path]]:
     """Enumerate the migrations dir, validate layout, return (name, path) sorted
     ascending by name (≈ chronological). An empty dir is valid — a release may
     carry no delta over the baseline.
@@ -139,7 +130,7 @@ def _list_migration_files(
     if not migrations_dir.is_dir():
         raise MigrationLayoutError(f"migrations dir does not exist: {migrations_dir}")
 
-    tracked = set(release.validate(migrations_dir)) if release else _tracked_migration_paths()
+    tracked = _tracked_migration_paths()
     if tracked is None:
         raise MigrationLayoutError(
             f"{migrations_dir} is not inside a git worktree — cannot verify which "

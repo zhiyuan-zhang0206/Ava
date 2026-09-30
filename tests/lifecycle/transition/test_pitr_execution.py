@@ -11,9 +11,9 @@ import psycopg
 import pytest
 
 from base.native_process.evidence import ExpectedProcess
+from cli.commands.data_plane.maintenance_stop import DataOwner, DataStop
 from cli.release_transition import execute, journal
 from cli.release_transition.pitr import transition
-from cli.release_transition.pitr.evidence import DataOwner, DataStop
 from cli.release_transition.request import PitrRequest
 from tests.lifecycle.transition.test_launcher_linux import planned as planned
 from tests.lifecycle.transition.test_pitr_operation import _seal
@@ -258,31 +258,6 @@ def test_sealed_reentry_executes_only_retained_argv_and_environment(
     with pytest.raises(RuntimeError, match="same native executor"):
         execute.reenter(operation)
     assert events == []
-
-
-def test_failed_online_lease_keeps_business_diagnostics_and_operation_authority(
-    pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.deploy.release.operation import authorized_pitr
-    from base.deploy.state import cluster_lock
-    from services.pitr.activation.state import load_record
-
-    journal.create(pitr_request)
-    driver = object.__new__(transition.PitrTransition)
-    driver.request, driver.home = pitr_request, Path(pitr_request.home)
-    monkeypatch.setattr(transition, "PitrTransition", _constant(driver))
-    monkeypatch.setattr(cluster_lock, "acquire_update_lock", _constant(False))
-    with journal.exclusive(pitr_request.path) as handle:
-        handle.advance("provisioning")
-        with (
-            authorized_pitr(pitr_request.path, handle.pitr_record_write),
-            pytest.raises(RuntimeError, match="online writer"),
-        ):
-            execute.drive_pitr(handle)
-        record = load_record(driver.home)
-        assert record is not None and record.phase == "shadow" and record.error == "RuntimeError"
-        assert handle.operation.phase == "provisioning" and handle.operation.error is not None
-        assert handle.operation.pitr is not None and handle.operation.pitr.record_intent is not None
 
 
 def test_data_capture_refuses_postgres_replacement_before_any_data_signal(

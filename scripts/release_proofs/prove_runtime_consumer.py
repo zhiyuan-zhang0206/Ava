@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from base.cluster import frontend_service_cmd
-from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_python, runtime_venv
+from base.deploy.release.loaded_image import WHEEL_RUNTIME, runtime_python, runtime_venv
 from base.deploy.schema.migrations import required_migration_set
 from base.host.system.backend import get_backend
 from base.sessions.env_forwarding import forward_env_dict, venv_activation_prefix

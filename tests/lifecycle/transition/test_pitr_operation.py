@@ -24,7 +24,7 @@ from base.native_process.evidence import ExpectedProcess
 from cli.release_transition import journal
 from cli.release_transition.journal import read_request
 from cli.release_transition.pitr.evidence import PitrSeal
-from cli.release_transition.pitr.inputs import read_record, require_inputs
+from cli.release_transition.pitr.inputs import require_inputs
 from cli.release_transition.request import PitrRequest, ReleaseRef
 from services.pitr.activation.state import ActivationRecord, record_path, write_record
 from tests.lifecycle.transition.phases import at_phase
@@ -138,48 +138,6 @@ def test_incomplete_pitr_blocks_another_home_request(pitr_request: PitrRequest) 
     with pytest.raises(ValueError, match="incomplete"):
         journal.create(second)
     assert not second.path.exists()
-
-
-def test_active_pitr_requires_local_capability_before_business_write(
-    pitr_request: PitrRequest,
-) -> None:
-    _provisioning(pitr_request)
-    home = Path(pitr_request.home)
-    with pytest.raises(RuntimeError, match="executor capability"):
-        write_record(home, _record(pitr_request))
-    assert not record_path(home).exists()
-    with (
-        journal.exclusive(pitr_request.path) as handle,
-        authorized_pitr(pitr_request.path, handle.pitr_record_write),
-    ):
-        record = _record(pitr_request)
-        write_record(home, record)
-        assert read_record(handle.operation) == record
-        assert handle.operation.pitr is not None
-        assert handle.operation.pitr.record_intent == (
-            None,
-            hashlib.sha256(record_path(home).read_bytes()).hexdigest(),
-        )
-
-
-def test_record_write_intent_recovers_after_effect_without_accepting_unknown_bytes(
-    pitr_request: PitrRequest,
-) -> None:
-    _provisioning(pitr_request)
-    home = Path(pitr_request.home)
-    with (
-        journal.exclusive(pitr_request.path) as handle,
-        authorized_pitr(pitr_request.path, handle.pitr_record_write),
-    ):
-        write_record(home, _record(pitr_request))
-    # The journal still has pending intent, as after a death immediately after rename.
-    recovered = journal.read_operation(pitr_request.path)
-    assert read_record(recovered) is not None
-    payload = json.loads(record_path(home).read_bytes())
-    payload["origin"] = "unowned edit"
-    record_path(home).write_text(json.dumps(payload))
-    with pytest.raises(ValueError, match="captured PITR write generation"):
-        read_record(recovered)
 
 
 def test_capability_cannot_follow_another_action_generation(pitr_request: PitrRequest) -> None:
@@ -426,26 +384,6 @@ def test_pitr_refuses_selector_changes_without_touching_captured_files(
     with pytest.raises(ValueError, match="selected image changed"):
         require_inputs(operation)
     assert (home / ".env").read_bytes() == before
-
-
-def test_pitr_input_admission_imports_without_settings_or_database() -> None:
-    import subprocess
-    import sys
-
-    root = Path(__file__).resolve().parents[3]
-    program = (
-        f"import sys; sys.path.insert(0, {str(root)!r}); "
-        "import cli.release_transition.pitr.inputs; "
-        "assert not {'base.config', 'base.db', 'base.host.env.runtime_config'} & sys.modules.keys()"
-    )
-    result = subprocess.run(  # noqa: S603 — fixed import probe in the candidate source
-        [sys.executable, "-I", "-B", "-c", program],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(

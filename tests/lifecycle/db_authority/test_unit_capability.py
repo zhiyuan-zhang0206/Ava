@@ -29,7 +29,7 @@ from dotenv import dotenv_values
 
 from base import config
 from base.cluster import authority
-from base.cluster.authority import unit
+from base.cluster.authority import fence, unit
 from base.cluster.authority.api import API_TOKEN_ENV
 from base.config import settings
 from base.config.service_read import served_db_endpoint
@@ -506,8 +506,8 @@ def _rotate(born: Born) -> None:
     operation = authority.OperationAuthority(operation=uuid4(), direction="candidate")
     pooler.stop_pgbouncer(force=True)
     with bringup.admin_session(born.record, "ava") as conn:
-        authority.revoke(conn, born.home, operation)
-        authority.close_revoked(conn, born.home, operation)
+        fence.revoke(conn, born.home, operation)
+        fence.close_revoked(conn, born.home, operation)
         verified = authority.mint_generation(conn, born.home, operation)
     authority.activate(born.home, operation, verified)
     bringup._ensure_pooler(born.record, "ava", born.home, authority.active_generation(born.home))

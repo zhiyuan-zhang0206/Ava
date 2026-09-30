@@ -99,8 +99,8 @@ def preflight_operation(path: Path, *, previous: bool = False) -> int:
     request = operation.request
     _require_inputs(operation)
     os.environ["AVA_HOME"] = request.home
+    from cli.release_transition.boot import ImageStartRuntime
     from cli.release_transition.request import PitrRequest
-    from cli.start_runtime import StartRuntime
 
     if isinstance(request, PitrRequest):
         if previous:
@@ -108,7 +108,7 @@ def preflight_operation(path: Path, *, previous: bool = False) -> int:
         reference = request.image
     else:
         reference = request.previous if previous else request.candidate
-    runtime = StartRuntime.from_image(
+    runtime = ImageStartRuntime.from_image(
         Path(request.home),
         reference.verify(Path(request.home)),
         schema_digest=reference.schema_digest,
@@ -124,13 +124,8 @@ def preflight_operation(path: Path, *, previous: bool = False) -> int:
     names = {spec.session for spec, _reason in ops_spec.services_for_capabilities_annotated(roles)}
     disabled = resolve_selection(names, persist=False, publish=False)
     roster = start_roster(roles, disabled)
-    tree_manifest(roster, runtime.code_root, roles=roles, runtime=runtime)
-    digest = launch_digest(
-        runtime.code_root,
-        root_child_env(),
-        home=Path(request.home),
-        runtime=runtime,
-    )
+    tree_manifest(roster, runtime.code_root, roles=roles)
+    digest = launch_digest(runtime.code_root, root_child_env(), home=Path(request.home))
     _require_inputs(operation)
     # The manifest contains private child environment values. Emit only the
     # generation digest and selected names; never serialize credentials here.
@@ -162,7 +157,7 @@ def observe_operation(path: Path) -> int:
     request = operation.request
     _require_inputs(operation)
     os.environ["AVA_HOME"] = request.home
-    from cli.start_runtime import admit_release
+    from cli.release_transition.boot import admit_release
 
     reference = operation.reference
     runtime = admit_release(
@@ -184,7 +179,7 @@ def observe_operation(path: Path) -> int:
     names = {spec.session for spec, _reason in ops_spec.services_for_capabilities_annotated(roles)}
     disabled = resolve_selection(names, persist=False, publish=False)
     roster = start_roster(roles, disabled)
-    if not admit_live_start(roster, runtime.code_root, roles, reconcile=True, runtime=runtime):
+    if not admit_live_start(roster, runtime.code_root, roles, reconcile=True):
         raise RuntimeError("selected application root is absent")
     _require_root_owned(operation, Path(request.home))
     wait = wait_for_service_tree(roster, timeout_s=60)

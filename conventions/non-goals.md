@@ -142,9 +142,9 @@ first and ask "what changed that made it worth doing".
   cross-machine wire shape changes (e.g. the `/ops` result failure
   payload), do **not** keep a parallel parse branch for the old
   shape "just in case some agent-runner hasn't upgraded yet". Trigger:
-  fleet grows large enough that not every host can `ava cluster update`
+  fleet grows large enough that not every host can be updated
   together in the same hour. Reason: the fleet today is 1 gateway + 1-2
-  agent-runners, and `ava cluster update` fans out within minutes — every
+  agent-runners, and `cli.fleet_update` updates them within minutes — every
   rolling-upgrade compat branch shipped so far (#437) was deleted the
   same day (#444). Compat code at fleet size 1-2 is dead-on-arrival
   investment that confuses the next reviewer.

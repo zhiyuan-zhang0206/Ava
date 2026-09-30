@@ -103,7 +103,7 @@ def test_start_materializes_after_the_schema_check(monkeypatch: pytest.MonkeyPat
     calls: list[str] = []
     _instrument_cold_start_seams(monkeypatch, calls)
 
-    rc = _prepare_cold_start(Path("/repo"), frozenset({"gateway"}), (), runtime=None)
+    rc = _prepare_cold_start(Path("/repo"), frozenset({"gateway"}), ())
 
     assert rc == 0
     assert calls.index("migrate") < calls.index("materialize"), (
@@ -149,7 +149,7 @@ def test_start_adopts_before_it_materializes(monkeypatch: pytest.MonkeyPatch) ->
     calls: list[str] = []
     _instrument_cold_start_seams(monkeypatch, calls)
 
-    rc = _prepare_cold_start(Path("/repo"), frozenset({"gateway"}), (), runtime=None)
+    rc = _prepare_cold_start(Path("/repo"), frozenset({"gateway"}), ())
 
     assert rc == 0
     assert calls.index("adopt") < calls.index("materialize")

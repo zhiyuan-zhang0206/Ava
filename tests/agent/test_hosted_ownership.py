@@ -304,7 +304,7 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
                 "host-test",
                 uuid4(),
                 expected_from=status,
-                publication=_CurrentRuntimeAdmission(None),
+                publication=_CurrentRuntimeAdmission(),
             )
             is None
         )
@@ -319,7 +319,7 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
             "host-test",
             uuid4(),
             expected_from=status,
-            publication=_CurrentRuntimeAdmission(None),
+            publication=_CurrentRuntimeAdmission(),
         )
         assert successor is not None and successor.generation != old.generation
         stored = db_conn.execute(
@@ -354,7 +354,7 @@ async def test_committed_publication_refuses_unknown_null_resources(
         "host-test",
         uuid4(),
         expected_from="idling",
-        publication=_CurrentRuntimeAdmission(None),
+        publication=_CurrentRuntimeAdmission(),
     )
     assert successor is None
     row = db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
@@ -375,7 +375,7 @@ async def test_current_publication_advertises_v1_and_idle_retains_it(
         "host-test",
         owner,
         expected_from="idling",
-        publication=_CurrentRuntimeAdmission(None),
+        publication=_CurrentRuntimeAdmission(),
     )
     assert admitted is not None and admitted == seeded
     assert _version(db_conn, agent_id) == 1
@@ -416,7 +416,7 @@ async def test_held_continuation_admits_at_protocol_zero(
         "host-test",
         owner,
         expected_from="idling",
-        publication=_DeferredRuntimeAdmission(None),
+        publication=_DeferredRuntimeAdmission(),
     )
     assert admitted is not None
     assert _version(db_conn, agent_id) == 0
@@ -437,7 +437,7 @@ async def test_lifecycle_apply_releases_the_advertisement(
         "host-test",
         owner,
         expected_from="idling",
-        publication=_CurrentRuntimeAdmission(None),
+        publication=_CurrentRuntimeAdmission(),
     )
     assert first is not None and first == seeded
     assert _version(db_conn, agent_id) == 1

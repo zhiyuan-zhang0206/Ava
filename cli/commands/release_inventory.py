@@ -229,7 +229,7 @@ def _launchers(
 
 def _service_roster() -> list[dict[str, object]]:
     from base.cluster.machine import machine_role
-    from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME
+    from base.deploy.release.loaded_image import WHEEL_RUNTIME
     from ops.spec import services_for_capabilities_annotated
 
     if not WHEEL_RUNTIME:

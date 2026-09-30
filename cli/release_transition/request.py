@@ -16,12 +16,13 @@ from pydantic import (
     model_validator,
 )
 
+from base.deploy.release.operation import require_configuration
 from base.deploy.release.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
     verify_release,
 )
-from base.deploy.release.start_inputs import files_digest, require_configuration
+from base.deploy.release.start_inputs import files_digest
 from base.runtime_abi import current_abi
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]

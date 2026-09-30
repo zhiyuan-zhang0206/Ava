@@ -145,10 +145,7 @@ def write_fields(
     `actor` / `trace_id` describe the initiator for the write audit (the `.env`
     record and the `env_write` event) whenever `audit_site` is set.
     """
-    from base.deploy.release.operation import require_configuration_write_authorized
-
     path = env_file_path()
-    require_configuration_write_authorized(path.parent)
     path.parent.mkdir(parents=True, exist_ok=True)
     # Cross-process exclusive, for the whole snapshot-and-rewrite section. Each
     # `set_key` / `unset_key` READS the file and rewrites it, so two writers

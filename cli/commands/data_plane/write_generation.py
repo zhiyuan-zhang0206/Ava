@@ -111,7 +111,8 @@ def fence_write_generation(authority: OperationAuthority) -> WriteFence:
     keeps a removed user that already authenticated.
     """
     from base.cluster import record_pgbouncer_port
-    from base.cluster.authority import close_revoked, prune, revoke
+    from base.cluster.authority import prune
+    from base.cluster.authority.fence import close_revoked, revoke
     from cli.commands.data_plane.bringup import admin_session
 
     home, record, database = _write_authority()
@@ -173,7 +174,8 @@ def verify_write_generation(number: int, credential_digest: str) -> None:
     only that pair; no session of a stale application login, the owner, the
     groups or a dropped role survives; both logins answer through the endpoint.
     """
-    from base.cluster.authority import active_generation, check_invariant, stale_sessions
+    from base.cluster.authority import active_generation, check_invariant
+    from base.cluster.authority.fence import stale_sessions
     from cli.commands.data_plane.bringup import (
         READONLY_GRANTEES,
         admin_session,

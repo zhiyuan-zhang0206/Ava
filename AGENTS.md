@@ -97,8 +97,7 @@ bare on a scratch home — no `.env`, no gateway fetch, never `~/.ava`.
 First start takes the machine name, capability flags and reachable host. A
 remote agent-runner joins through the same entry with `--gateway-url` and its
 capability bundle (`--db-capability`, the transport key in `AVA_DB_CAPABILITY_KEY`),
-which also authenticates it; it creates no gateway or local data plane. Networked
-release operations keep refusing until capability delivery is automated.
+which also authenticates it; it creates no gateway or local data plane.
 A home describes only itself: its ports live in its own start intent, and no host
 file lists clusters (host caches: `AVA_HOST_STATE_DIR`, default `~/.ava`). First
 configuration may come from `--config-file`; credentials and identity survive retries.
@@ -117,20 +116,12 @@ source lives), not the current directory; first start runs it. The host's bare `
 runs `$AVA_HOME/ava`, the CLI link every converge keeps in its own home, and refuses without
 `AVA_HOME` — there is no default cluster. Host wiring + each plugin's `scaffold()` are
 applied by the source-start converge phase (`cli/commands/converge/host.py`; standalone:
-`ava converge`). Retained-image startup verifies its captured home and prepared artifacts;
-it does not install packages, migrate or scaffold plugins.
+`ava converge`).
 
-Release preparation captures committed source, acquires hash-checked inputs and
-builds a complete inactive image before any outage. `ava cluster update --prepared
-REQUEST` submits or continues the exact captured release operation through a
-finite external executor. The ordinary root boot unit owns the replacement
-application. Current activation supports one single-machine home (Linux, or
-macOS through the home helper) with a local data plane and unchanged packaged
-SQL; its stop closes terminals and schedules, exactly as PITR activation does (Linux-only). Fleet/schema
-transitions and other platform adapters remain pre-cutover work; unsupported
-requests refuse before draining. See
-[`release preparation`](cli/release_prepare/docs/release_prepare.ava.okf.md) and
-[`release transition`](cli/release_transition/docs/release_transition.ava.okf.md).
+Every unit runs from its own `$AVA_HOME/source` checkout (source mode). A
+networked cluster is updated by stopping every unit, switching every checkout and
+starting again, scripted as `python -m cli.fleet_update down` and `up`
+([runbook](conventions/runbook.md#updating-a-networked-cluster-in-source-mode)).
 
 ```bash
 uv sync       # prepare the checkout dependencies and CLI; no cluster is created
@@ -143,8 +134,6 @@ ava stop      # normal agent drain, then full local stop including PTYs/browser/
               # --keep-infra / --keep-service retain resources; --force is explicit escalation.
               # ava start resumes after readiness; agent identities and durable data survive.
 ava status    # check status (includes the pg/redis view)
-ava cluster update --prepared /absolute/request.json
-              # submit or continue one captured operation; dispatch is not completion
 ava cluster db-authority issue-unit --machine NAME --home UNIT_HOME --out BUNDLE
               # gateway: seal one unit's capability; prints its transport key once
 ava start --no-serve-gateway --serve-agent-runner --gateway-url URL --machine-name NAME --machine-host HOST --db-capability BUNDLE

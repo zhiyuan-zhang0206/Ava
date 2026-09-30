@@ -1,16 +1,7 @@
-"""Loaded-runtime input plus the existing locked publication admission decision."""
-
-import os
-from dataclasses import dataclass
-from functools import lru_cache
+"""The locked publication admission decision for a hosted runtime birth."""
 
 import psycopg
 
-from base.deploy.release.runtime_publication_input import (
-    RuntimePublicationInput,
-    resolve_runtime_publication_input,
-    revalidate_runtime_publication_input,
-)
 from base.deploy.writers.publication import (
     _ADMISSION_LOCK,
     _ADMISSION_ROW,
@@ -27,27 +18,11 @@ class PublicationAdmissionDeferredError(RuntimeError):
     """Maintenance defers birth without terminating a row or consuming inbound."""
 
 
-@dataclass(frozen=True)
 class RuntimeAdmission:
-    loaded: RuntimePublicationInput | None
-
-    @classmethod
-    def load(cls) -> "RuntimeAdmission":
-        """Once per actual process/host boot; never on each inbox claim."""
-        return cls(resolve_runtime_publication_input())
-
-    def revalidate(self) -> None:
-        if self.loaded is not None:
-            revalidate_runtime_publication_input(self.loaded)
+    """Admit one hosted runtime birth under the caller's transaction."""
 
     def decide(self, conn: psycopg.Connection) -> AdmissionDecision:
-        value = self.loaded
-        decision = publication_admission(
-            conn,
-            value.actual if value else None,
-            selector_artifact_digest=value.selector.artifact_digest if value else None,
-            selector_manifest_digest=value.selector.manifest_digest if value else None,
-        )
+        decision = publication_admission(conn)
         if isinstance(decision, DeferredAdmission):
             raise PublicationAdmissionDeferredError(
                 "runtime birth deferred by publication maintenance"
@@ -57,13 +32,7 @@ class RuntimeAdmission:
         return decision
 
     async def decide_async(self, conn: psycopg.AsyncConnection) -> AdmissionDecision:
-        value = self.loaded
-        decision = await publication_admission_async(
-            conn,
-            value.actual if value else None,
-            selector_artifact_digest=value.selector.artifact_digest if value else None,
-            selector_manifest_digest=value.selector.manifest_digest if value else None,
-        )
+        decision = await publication_admission_async(conn)
         if isinstance(decision, DeferredAdmission):
             raise PublicationAdmissionDeferredError(
                 "runtime birth deferred by publication maintenance"
@@ -96,20 +65,6 @@ def require_current_for_managed(decision: AdmissionDecision, resource_value: obj
             )
         return
     decode_resources(resource_value)
-
-
-@lru_cache(maxsize=1)
-def _process_boot(pid: int) -> RuntimeAdmission:
-    if pid != os.getpid():
-        raise RuntimeError("runtime input must belong to this actual process")
-    return RuntimeAdmission.load()
-
-
-def process_runtime_admission() -> RuntimeAdmission:
-    """A fork has a different key; no inherited verified object grants admission."""
-    value = _process_boot(os.getpid())
-    value.revalidate()
-    return value
 
 
 def require_activation(conn: psycopg.Connection, decision: AdmissionDecision) -> None:

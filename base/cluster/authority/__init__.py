@@ -1,4 +1,4 @@
-"""Database write-generation authority: groups, ledger, logins, fence, invariant.
+"""Database write-generation authority: groups, ledger, logins, invariant.
 
 Application processes never hold schema-owner or administrator credentials.
 Two stable NOLOGIN groups carry every application privilege; each write
@@ -48,18 +48,6 @@ from base.cluster.authority.delivery import (
 )
 from base.cluster.authority.delivery import (
     write_grant as write_grant,
-)
-from base.cluster.authority.fence import (
-    close_revoked as close_revoked,
-)
-from base.cluster.authority.fence import (
-    prove_closure as prove_closure,
-)
-from base.cluster.authority.fence import (
-    revoke as revoke,
-)
-from base.cluster.authority.fence import (
-    stale_sessions as stale_sessions,
 )
 from base.cluster.authority.groups import (
     VacuumSkippedError as VacuumSkippedError,

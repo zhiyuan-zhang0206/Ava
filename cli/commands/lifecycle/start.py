@@ -91,12 +91,10 @@ def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     return 1
 
 
-def _prepare_start_schema(*, retained: bool) -> int:
-    """Verified runtime origin never grants schema migration authority."""
-    print("\n→ verify prepared schema" if retained else "\n→ apply pending migrations")
+def _prepare_start_schema() -> int:
+    print("\n→ apply pending migrations")
     try:
-        if not retained:
-            cmd_migrations_apply()
+        cmd_migrations_apply()
     except Exception as e:
         print(f"  ✗ migrations apply failed: {e}", file=sys.stderr)
         return 1
@@ -107,22 +105,17 @@ def _prepare_cold_start(
     repo: Path,
     roles: MachineRoles,
     roster: tuple[ServiceSpec, ...],
-    *,
-    runtime: StartRuntime | None = None,
 ) -> int:
     """Prepare storage/configuration only with no prior live application root."""
     import cli.commands._repo as _repo_commands
     import cli.commands.converge.host as converge_host
 
     # 1) converge host state (symlink / PATH / $AVA_HOME dirs / plugin config
-    # images). Memory initialization is explicit (`ava memory init`). A retained
-    # image has already prepared its assets and never runs source convergence.
-    retained = runtime is not None and runtime.release is not None
+    # images). Memory initialization is explicit (`ava memory init`).
     try:
-        if not retained:
-            converge_host.converge_host(
-                repo, roles, services=frozenset(spec.session for spec in roster)
-            )
+        converge_host.converge_host(
+            repo, roles, services=frozenset(spec.session for spec in roster)
+        )
     except Exception as e:
         print(f"  ✗ converge failed: {e}", file=sys.stderr)
         return 1
@@ -137,22 +130,18 @@ def _prepare_cold_start(
             return rc
         from cli.commands.data_plane.bringup import prepare_gateway_schema
 
-        if not retained:
-            prepare_gateway_schema()
+        prepare_gateway_schema()
     else:
         print("\n→ local services: skipped (agent-runner uses central node's DB/Redis/Milvus)")
 
-    rc = _prepare_start_schema(retained=retained)
+    rc = _prepare_start_schema()
     if rc:
         return rc
 
     if "gateway" in roles:
         from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-        if retained:
-            complete_gateway_data_plane(refresh_schema=False)
-        else:
-            complete_gateway_data_plane()
+        complete_gateway_data_plane()
     rc = _repo_commands._assert_schema_current_or_die()
     if rc != 0:
         return rc
@@ -172,9 +161,8 @@ def _prepare_cold_start(
     # Adopt first: a name this machine installed before the registry existed is
     # invisible to the materializer until it has a row, and sweeping first means
     # one pass leaves machine and cluster agreeing rather than two.
-    if not retained:
-        adopt_local_extensions()
-        materialize_cluster_extensions()
+    adopt_local_extensions()
+    materialize_cluster_extensions()
 
     return 0
 
@@ -215,12 +203,12 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     if runtime is None:
         runtime = StartRuntime.development(_repo_root())
-    runtime.validate(ava_home())
+    runtime.validate()
     repo = runtime.code_root
     print(f"[ava start] cwd = {repo}")
 
     # The prod home must not launch from a disposable development checkout.
-    err = prod_service_checkout_error(repo) if runtime.release is None else None
+    err = prod_service_checkout_error(repo)
     if err:
         print(f"\u2717 {err}", file=sys.stderr)
         return 1
@@ -274,15 +262,10 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     roster = _root_driver_commands.start_roster(roles, launch_skip)
     try:
         live = _root_driver_commands.admit_live_start(
-            roster, repo, roles, reconcile=persist_services, runtime=runtime
+            roster, repo, roles, reconcile=persist_services
         )
         if not live:
-            rc = _prepare_cold_start(
-                repo,
-                roles,
-                roster,
-                runtime=runtime,
-            )
+            rc = _prepare_cold_start(repo, roles, roster)
             if rc:
                 return rc
     except (RuntimeError, OSError, ValueError) as exc:
@@ -342,13 +325,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     # Failed start attempts must leave recovery actions gated.
     serving_generation = start_serving.begin_start()
-    if runtime.release is None:
-        _record_running_sha(repo)
-    else:
-        from base.deploy.git import running_sha
-
-        assert runtime.source_commit is not None  # noqa: S101 — admitted release invariant
-        running_sha.set(runtime.source_commit)
+    _record_running_sha(repo)
     launch = _root_driver_commands._launch_service_tree(
         roster, repo, roles, reconcile=persist_services, runtime=runtime
     )
@@ -430,7 +407,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if wait.unready or wait.non_critical_unready or launch.failed:
         return SERVICES_NOT_READY_EXIT_CODE
 
-    if not start_serving.mark_serving(serving_generation, runtime=runtime.identity(ava_home())):
+    if not start_serving.mark_serving(serving_generation, runtime=runtime.identity()):
         print("  ✗ this start lost its serving generation", file=sys.stderr)
         return 1
     from base.paths import ava_home

@@ -671,16 +671,8 @@ def load_record(home: Path) -> ActivationRecord | None:
 
 def write_record(home: Path, record: ActivationRecord) -> None:
     ActivationRecord.from_json(json.dumps(asdict(record)))
-    from base.deploy.release.operation import note_pitr_write
-    from base.deploy.release.verified_file import regular_bytes
-
     path = record_path(home)
-    try:
-        before = regular_bytes(path)
-    except FileNotFoundError:
-        before = None
     encoded = json.dumps(asdict(record), sort_keys=True, separators=(",", ":")) + "\n"
-    note_pitr_write(home, before, encoded.encode())
     directory = ensure_private_dir(activation_root(home))
     fd, raw = tempfile.mkstemp(prefix=".operation-", suffix=".partial", dir=directory)
     partial = Path(raw)

@@ -224,7 +224,7 @@ class Operation(Record):
         if self.pitr is None or self.pitr.seal is None:
             self.request.require_configuration()
             return
-        from base.deploy.release.start_inputs import require_configuration
+        from base.deploy.release.operation import require_configuration
 
         require_configuration(Path(self.request.home), self.pitr.seal.configuration_digest)
 

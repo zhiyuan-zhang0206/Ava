@@ -341,11 +341,9 @@ def _gateway_authority_home(verb: str) -> Path | None:
     """This gateway home for a db-authority verb, or None after printing the refusal.
 
     The verbs need a gateway home with a local data plane (a remote-managed
-    plane has no write generation or enrollment store), and no release
-    operation may be incomplete: it captured the units it releases.
+    plane has no write generation or enrollment store).
     """
     from base.config import settings
-    from base.deploy.release.operation import require_configuration_write_authorized
     from base.host.env.bootstrap import config_source_is_local
     from base.paths import ava_home
 
@@ -356,13 +354,7 @@ def _gateway_authority_home(verb: str) -> Path | None:
             file=sys.stderr,
         )
         return None
-    gateway_home = ava_home().resolve()
-    try:
-        require_configuration_write_authorized(gateway_home)
-    except (RuntimeError, ValueError, OSError) as exc:
-        print(f"✗ ava cluster db-authority {verb}: {exc}", file=sys.stderr)
-        return None
-    return gateway_home
+    return ava_home().resolve()
 
 
 def _change_enrollment(verb: str, machine: str, home: str) -> tuple[str, str] | None:

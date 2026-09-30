@@ -61,20 +61,17 @@ def preflight_start_readiness(
 
     `check_launcher=False` drops the `.venv/bin/ava` entry-point check for a
     caller whose start runs in-process and never execs it (`ava restart`);
-    development's `.venv/bin/python` is still checked. A captured retained
-    runtime instead validates its complete image and exact interpreter, without
-    editable checkout or source-converge checks.
+    development's `.venv/bin/python` is still checked.
     """
     from base.paths import ava_home
 
     home = ava_home()
     if runtime is not None:
-        runtime.validate(home)
-    retained = runtime is not None and runtime.release is not None
+        runtime.validate()
     fatal: list[str] = []
     observations: list[str] = []
 
-    checkout_problem = None if retained else _prod_checkout_problem(repo)
+    checkout_problem = _prod_checkout_problem(repo)
     if checkout_problem is not None:
         fatal.append(checkout_problem)
 
@@ -89,19 +86,11 @@ def preflight_start_readiness(
         fatal += port_fatal
         observations += port_observations
 
-    if retained:
-        assert runtime is not None  # noqa: S101 — retained runtime established above
-        fatal += _entrypoint_findings(
-            runtime.interpreter,
-            label="the verified release interpreter",
-            fix="prepare a valid retained image",
-        )
-    else:
-        tree_fatal, tree_observations = _private_tree_findings(home)
-        fatal += tree_fatal
-        observations += tree_observations
-        fatal += _migration_findings()
-        fatal += _venv_findings(repo, check_launcher=check_launcher)
+    tree_fatal, tree_observations = _private_tree_findings(home)
+    fatal += tree_fatal
+    observations += tree_observations
+    fatal += _migration_findings()
+    fatal += _venv_findings(repo, check_launcher=check_launcher)
 
     return _report(fatal, observations)
 

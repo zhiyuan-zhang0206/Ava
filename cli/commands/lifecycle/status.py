@@ -125,72 +125,20 @@ def cmd_status() -> int:
                 f"branch any work, then `git -C $AVA_HOME/source checkout main`."
             )
 
-    # This home's current release identity, from its own durable records: the
-    # selected image, or the source checkout it runs, plus any incomplete home
-    # operation. There is no cluster-wide pin; the release journal is the record.
+    # The code this home runs: the source checkout, at its current HEAD.
     print()
-    for line in _release_identity_lines(Path(repo)):
-        print(line)
+    print(_source_identity_line(Path(repo)))
 
     _print_gateway_cluster_status()
     return 0
 
 
-def _release_identity_lines(repo: Path) -> list[str]:
-    """This home's release identity and any incomplete home operation.
-
-    A selected image (`$AVA_HOME/releases/current-release`) is the release; a
-    home without one runs its source checkout. Unreadable records print as
-    unreadable — never replaced by a guess or by a historical value.
-    """
+def _source_identity_line(repo: Path) -> str:
+    """The checkout this home executes; an unreadable HEAD prints as unreadable."""
     from base.deploy.git.cluster_drift import checkout_head_sha
-    from base.deploy.release.runtime_release import current_pointer
-    from base.paths import ava_home
 
-    home = ava_home()
-    try:
-        selected = current_pointer(home / "releases")
-    except (OSError, ValueError) as exc:
-        lines = [f"release: ✗ selector unreadable ({exc})"]
-    else:
-        if selected is None:
-            head = checkout_head_sha(repo)
-            lines = [
-                f"release: source checkout {repo} at {head[:7] if head else 'unreadable HEAD'}"
-            ]
-        else:
-            artifact, manifest = selected
-            lines = [f"release: image {artifact[:12]} (manifest {manifest[:12]})"]
-    operation = _home_operation_line(home)
-    if operation is not None:
-        lines.append(operation)
-    return lines
-
-
-def _home_operation_line(home: Path) -> str | None:
-    """The active release/PITR operation unless it completed cleanly."""
-    from base.deploy.release.verified_file import regular_bytes
-    from cli.release_transition.journal import read_operation
-
-    try:
-        journal = Path(regular_bytes(home / "updates" / "active").decode().strip())
-    except FileNotFoundError:
-        return None
-    except (OSError, ValueError) as exc:
-        return f"  operation: ✗ active pointer unreadable ({exc})"
-    try:
-        operation = read_operation(journal)
-    except (OSError, ValueError) as exc:
-        return f"  operation: ✗ journal {journal} unreadable ({exc})"
-    if operation.terminal and operation.error is None:
-        return None
-    request = operation.request
-    line = f"  operation: {request.kind} {str(request.id)[:8]} — phase {operation.phase}"
-    if operation.direction is not None:
-        line += f", direction {operation.direction}"
-    if operation.error is not None:
-        line += f", error: {operation.error}"
-    return line
+    head = checkout_head_sha(repo)
+    return f"release: source checkout {repo} at {head[:7] if head else 'unreadable HEAD'}"
 
 
 def _print_host_resources() -> None:

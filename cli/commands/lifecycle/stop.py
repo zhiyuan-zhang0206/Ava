@@ -389,28 +389,19 @@ def _release_self_heal_pause() -> None:
     print("  · unpaused this host (no cluster update owns the pause; nothing was stopped)")
 
 
-def _require_restart_runtime(runtime: StartRuntime, home: Path) -> None:
-    """Recheck the captured runtime and operation gate before disruptive work."""
-    from base.deploy.release.operation import require_start_authorized
+def _require_restart_runtime(runtime: StartRuntime) -> None:
+    """Recheck the captured runtime before disruptive work."""
     from base.paths import prod_service_checkout_error
 
-    require_start_authorized(home)
-    runtime.validate(home)
-    if runtime.release is None and (problem := prod_service_checkout_error(runtime.code_root)):
+    runtime.validate()
+    if problem := prod_service_checkout_error(runtime.code_root):
         raise ValueError(problem)
 
 
-def _restart_runtime(home: Path) -> StartRuntime:
-    """Admit the currently executing source or image before restart effects."""
-    from base.deploy.release.operation import require_start_authorized
-    from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME
-    from cli.start_runtime import admit_loaded_release
-
-    require_start_authorized(home)
-    runtime = (
-        admit_loaded_release(home) if WHEEL_RUNTIME else StartRuntime.development(_repo_root())
-    )
-    _require_restart_runtime(runtime, home)
+def _restart_runtime() -> StartRuntime:
+    """Admit the currently executing checkout before restart effects."""
+    runtime = StartRuntime.development(_repo_root())
+    _require_restart_runtime(runtime)
     return runtime
 
 
@@ -422,14 +413,12 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     """
     from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
     from base.host.proc import hosting_exec_domain, hosting_supervised_session
-    from base.paths import ava_home
     from cli.commands import _repo
     from cli.commands.lifecycle import _start_readiness_preflight, start
 
     # Admission precedes even the restart journal: an incompatible caller must
     # leave the running generation and its maintenance state untouched.
-    home = ava_home()
-    runtime = _restart_runtime(home)
+    runtime = _restart_runtime()
 
     # An exec-domain restart is SIGKILLed by the execute_code call's own
     # teardown — the call's whole process group, as its turn ends (nohup/& do
@@ -528,7 +517,7 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
 
     # Every restart uses the shared hosted pause kernel; a timeout never
     # silently authorizes force.
-    _require_restart_runtime(runtime, home)
+    _require_restart_runtime(runtime)
 
     # Restart retains the private data plane while replacing application services.
     with status_journal.phase("stop"):

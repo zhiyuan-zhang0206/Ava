@@ -294,6 +294,75 @@ type = "forbidden"
 source_modules = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
 forbidden_modules = ["shared"]
 
+# The retained-image release path (image preparation and verification, the
+# frozen image-exec handoff, the fleet coordinator, the release transition and
+# its PITR operation, write-generation rotation, per-unit enrollment channel)
+# is a self-contained island: nothing else may import it, at module level or
+# inside a function. It is imported only by itself; every production entry
+# point, including `ava start` and `ava stop`, runs without it. The list is
+# also the module set `tests/base/test_release_path_boundary.py` proves absent
+# from `sys.modules` after each production entry point imports. `ignore_imports`
+# exempts the island's own imports (its members import each other and the
+# production modules they build on).
+[[tool.importlinter.contracts]]
+name = "Production must not import the release/image path"
+type = "forbidden"
+source_modules = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
+forbidden_modules = [
+    "cli.release_build",
+    "cli.release_fleet",
+    "cli.release_handoff",
+    "cli.release_operator",
+    "cli.release_prepare",
+    "cli.release_transition",
+    "cli.commands._release_plugin_probe",
+    "cli.commands.release_inventory",
+    "cli.commands.data_plane.write_generation",
+    "cli.commands.data_plane.pitr_activation",
+    "cli.commands.data_plane._pitr_activation_config",
+    "base.deploy.release.identity",
+    "base.deploy.release.operation",
+    "base.deploy.release.loaded_image",
+    "base.deploy.release.runtime_release",
+    "base.deploy.release.runtime_prepare",
+    "base.deploy.release.runtime_publication_input",
+    "base.deploy.release.runtime_service_identity",
+    "base.deploy.schema.runtime_migration",
+    "base.api_contracts.release_handoff",
+    "base.cluster.authority.fence",
+    "base.cluster.authority.channel",
+    "base.runtime_abi",
+    "base.runtime_plugins",
+    "shared",
+]
+ignore_imports = [
+    "cli.release_build -> **",
+    "cli.release_fleet.** -> **",
+    "cli.release_handoff.** -> **",
+    "cli.release_operator.** -> **",
+    "cli.release_prepare -> **",
+    "cli.release_prepare.** -> **",
+    "cli.release_transition.** -> **",
+    "cli.commands._release_plugin_probe -> **",
+    "cli.commands.release_inventory -> **",
+    "cli.commands.data_plane.write_generation -> **",
+    "cli.commands.data_plane.pitr_activation -> **",
+    "cli.commands.data_plane._pitr_activation_config -> **",
+    "base.deploy.release.identity -> **",
+    "base.deploy.release.operation -> **",
+    "base.deploy.release.loaded_image -> **",
+    "base.deploy.release.runtime_release -> **",
+    "base.deploy.release.runtime_prepare -> **",
+    "base.deploy.release.runtime_publication_input -> **",
+    "base.deploy.release.runtime_service_identity -> **",
+    "base.deploy.schema.runtime_migration -> **",
+    "base.api_contracts.release_handoff -> **",
+    "base.cluster.authority.fence -> **",
+    "base.cluster.authority.channel -> **",
+    "base.runtime_plugins -> **",
+    "shared.** -> **",
+]
+
 # Ops layer: base < ops < {gateway, cli}. The ops module (Spec / Status /
 # controllers) sits above base and is consumed by gateway + cli (and by the
 # services daemons, which become thin mains over the controllers) — but must never

@@ -29,12 +29,11 @@ Three possible directions, none of them started: vendor a Windows redis build,
 shell out to Memurai (closed-source, licensing unexamined), or containerize the
 redis leg alone.
 
-### 2. Prepared release platform qualification
+### 2. Update qualification
 
 The detached CLI/ops updater graph and its platform shell chains are absent.
-`ava cluster update --prepared` uses the prepared release transition path.
-Windows support for that path requires its own native custody and complete
-qualification; the retired shell implementation is not a fallback.
+`python -m cli.fleet_update` updates POSIX hosts over SSH; a Windows unit has no
+update path until one is qualified with its own native custody.
 
 ### 3. `milvus` cannot install, and nothing gates it
 

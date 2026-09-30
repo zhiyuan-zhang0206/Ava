@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import NoReturn, cast
 
 import psycopg
 import pytest
 
 from base.api_contracts.status import MachineStatus, SchemaMismatchKind, SchemaMismatchStatus
-from base.deploy.schema import migration_layout
 from base.deploy.schema.migration_errors import MigrationLayoutError
 from base.deploy.schema.migrations import applied_migration_names
 from cli.commands.cluster.control import _schema_mismatch_banner
@@ -36,33 +34,6 @@ def test_current_sets_decide_schema_status(
 ) -> None:
     mismatch = schema_mismatch.classify(applied, required)
     assert (mismatch.kind if mismatch else None) == kind
-
-
-def test_installed_image_diagnosis_does_not_read_git_or_cluster_pin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    name = "20260101T000000_image-change"
-    up = tmp_path / f"{name}.sql"
-    down = tmp_path / f"{name}.down.sql"
-    up.write_text("SELECT 1;\n")
-    down.write_text("SELECT 1;\n")
-
-    def installed(_root: Path) -> set[Path]:
-        return {up, down}
-
-    def applied(_conn: object) -> set[str]:
-        return {"00000000T000000_baseline"}
-
-    monkeypatch.setattr(migration_layout, "WHEEL_RUNTIME", True)
-    monkeypatch.setattr(migration_layout, "_migrations_dir", lambda: tmp_path)
-    monkeypatch.setattr(migration_layout, "installed_migration_paths", installed)
-    monkeypatch.setattr(migration_layout, "_git_probe", _unexpected)
-    monkeypatch.setattr("base.deploy.state.cluster_pin.get_cluster_target_sha", _unexpected)
-    monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied)
-    mismatch = schema_mismatch.detect(conn=cast(psycopg.Connection, object()))
-    assert mismatch is not None
-    assert mismatch.kind == "schema-behind-code"
-    assert mismatch.detail == "DB lacks 1 migration(s) required by this image"
 
 
 def _assert_status_is_visible(status: SchemaMismatchStatus) -> None:

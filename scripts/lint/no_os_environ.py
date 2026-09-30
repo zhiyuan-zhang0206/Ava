@@ -130,7 +130,6 @@ _ALLOWED_FILES = frozenset(
         "scripts/lint/no_os_environ.py",  # this script itself has "os.environ" in strings
         "scripts/release_proofs/prove_runtime_prepare.py",  # CI scratch/checkout guards and sanitized child environments must be read before installed Settings exists.
         "scripts/release_proofs/prove_runtime_consumer.py",  # CI-only isolated child environment and missing-home negative control, not runtime configuration.
-        "scripts/release_proofs/prove_runtime_migration.py",  # CI-only runner scratch guard must not become an application setting.
         "scripts/release_proofs/prove_runtime_otel.py",  # CI-only scratch/home guard; never production collector configuration.
         "scripts/release_proofs/prove_runtime_plugins.py",  # CI-only private home and CI guard, not runtime plugin settings.
         "scripts/release_proofs/prove_exec_owner_installed.py",  # CI-only scratch child projection for source-absent proof.

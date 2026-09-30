@@ -174,7 +174,6 @@ def test_boot_checks_the_booting_host_before_admission(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A reboot after an OS patch still boots; a foreign host refuses before Settings."""
-    from cli import start_runtime
     from cli.release_transition import boot
 
     image = _image(home, "candidate")
@@ -184,7 +183,7 @@ def test_boot_checks_the_booting_host_before_admission(
         admitted.append(verified.digest)
         raise _AdmittedError
 
-    monkeypatch.setattr(start_runtime, "admit_release", admit)
+    monkeypatch.setattr(boot, "admit_release", admit)
     # The boot entry exports its home; keep that out of this test process.
     monkeypatch.setattr(boot, "os", SimpleNamespace(environ={}))
     host = current_abi()

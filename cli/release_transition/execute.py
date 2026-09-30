@@ -24,7 +24,7 @@ def execute(path: Path) -> None:
     operation = read_operation(path)
     request = operation.request
     os.environ["AVA_HOME"] = request.home
-    from base.deploy.release.runtime_interpreter import verify_loaded_image
+    from base.deploy.release.loaded_image import verify_loaded_image
 
     image = request.executor.verify(Path(request.home))
     verify_loaded_image(

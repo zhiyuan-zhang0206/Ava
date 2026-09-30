@@ -15,7 +15,6 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-from base.api_contracts.release_handoff import ReleaseImageExecPayload
 from ops import cluster, host_config, inventory, uploads
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
@@ -79,9 +78,6 @@ def dispatch_sync(
         case "upload_receive":
             ur = UploadReceivePayload.model_validate(payload)
             return "completed", uploads.upload_receive_op(ur).model_dump(mode="json")
-        case "release_image_exec":
-            rie = ReleaseImageExecPayload.model_validate(payload)
-            return "completed", cluster.release_image_exec_op(rie).model_dump(mode="json")
         case _:
             return "failed", {"error": f"unknown kind: {kind!r}"}
 
