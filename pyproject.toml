@@ -415,11 +415,9 @@ check-typed-exception = true
 "ava_builtins/plugins/*/skills/**/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
 "ava_builtins/plugins/*/skills/**/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
 "scripts/**" = ["ANN", "T20"]
-# The 19 typed S110 findings in scripts/tests were outside the retired lint's
-# production scan. Preserve that boundary without changing release proof or
-# updater code as part of this cleanup.
+# The typed S110 findings in scripts/tests were outside the retired lint's
+# production scan; preserve that boundary.
 "scripts/codegen/gen_config_lite_table.py" = ["S110"]
-"scripts/legacy_lkg/cold_boot.py" = ["S110"]
 "tests/ava/mcps/test_daemon.py" = ["S110"]
 "tests/ava/test_core.py" = ["S110"]
 "tests/ava/test_migration_reset.py" = ["S110"]

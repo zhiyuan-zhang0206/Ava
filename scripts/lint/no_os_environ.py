@@ -122,8 +122,6 @@ _ALLOWED_FILES = frozenset(
         "cli/start_intent.py",  # Identity bootstrap precedes Settings: read and pin the explicit home and birth inputs before config imports.
         "tests/cli/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
         "tests/cli/test_start_repo_guard.py",  # Verifies checkout/home routing before Settings can be constructed.
-        "scripts/legacy_lkg/prepare.py",  # CI fixed-base reconstruction, before either app Settings exists; never a production entry.
-        "scripts/legacy_lkg/cold_boot.py",  # CI private normal-process env and pre-Settings home rejection proof.
         "base/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
         "base/config/base.py",  # _unit_home reads AVA_HOME to root path-field defaults at field-construction time
         "base/config/data_plane.py",  # _self_machine_host reads AVA_MACHINE_HOST/AVA_HOME at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)
