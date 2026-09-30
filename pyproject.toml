@@ -764,6 +764,26 @@ reportUnnecessaryIsInstance = "none"
 #   reportUnknownMemberType = "error"
 #   reportUnknownArgumentType = "error"
 
+[[tool.pyright.executionEnvironments]]
+root = "base/packages/docs/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/packages/extensions/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/packages/plugins/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/packages/skills/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
 # Ladder rung: raise the reportUnknown*/reportMissing* family to "error" on the highest-signal core
 # layers, gating merge there while the rest of the tree stays at the global "warning". These three
 # roots carried 234 findings on origin/main, all fixed. Expand outward (gateway / agent / ava …) by
