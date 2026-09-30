@@ -280,10 +280,7 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
         )
     )
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env.update(
-        AVA_HOME=str(home),
-        AVA_HOST_STATE_DIR=str(tmp_path / "host-state"),
-    )
+    env.update(AVA_HOME=str(home))
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
         [sys.executable, "-I", "-B", "-c", _SETTINGS_BUILD_WARNING, str(_REPO_ROOT), init],
         cwd=tmp_path,

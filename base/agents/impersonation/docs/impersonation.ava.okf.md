@@ -18,7 +18,7 @@ process metadata (PID, name, executable, birth time and ancestors). New CLI
 requests also record `invoked_python` (the interpreter that ran the CLI) as an
 observation; a request rejects a non-string or empty value. Commands Ava hands
 an executor (launch request, ACK lines, renewal reminders) use a bare `ava`,
-resolved by the executor's inherited `AVA_HOME` (`scripts/ava-launcher.sh`). `relay_provider`
+run through the host's `~/.local/bin/ava`, a link to the production CLI. `relay_provider`
 selects transport; no name or process observation proves a provider's identity.
 The former UUID remains a private compatibility reference for existing leases,
 checkpoint receipts and plugin journals. Public commands and file paths

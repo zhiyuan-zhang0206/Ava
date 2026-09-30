@@ -504,11 +504,6 @@ os.environ.pop("AVA_AGENT_ID", None)
 # `_TEST_AVA_HOME` is created and exported as AVA_HOME in the env block at the
 # top of this file — the one source of the home; it is removed in
 # `pytest_sessionfinish`.
-# The host state dir is independent of AVA_HOME and defaults to the real `~/.ava`;
-# redirect it into the tmpfs home too so tests never read or write the operator's
-# host-level state (Postgres template, runtime binaries, PTY freeze).
-settings.general.host_state_dir = _TEST_AVA_HOME
-os.environ["AVA_HOST_STATE_DIR"] = str(_TEST_AVA_HOME)
 # multi-machine setup: spawn_agent / claim_agent_row reads machine_name()
 # from `$AVA_HOME/machine_name`; must write one into tmpfs first otherwise MachineNameMissing.
 (_TEST_AVA_HOME / "machine_name").write_text(f"test-{_SESSION_SUFFIX}")

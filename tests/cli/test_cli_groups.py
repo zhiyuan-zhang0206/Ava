@@ -47,9 +47,11 @@ def test_core_verbs_exist() -> None:
     assert {"start", "stop", "status", "pty", "cluster"} <= _top_choices()
 
 
-def test_cluster_group_has_down_and_destroy_and_no_listing() -> None:
+def test_cluster_group_has_destroy_and_no_down_or_listing() -> None:
     choices = _cluster_choices()
-    assert {"status", "down", "destroy"} <= choices
+    assert {"status", "destroy"} <= choices
+    # `down` stopped a cluster at another home; the host runs one, and `ava stop` stops it.
+    assert "down" not in choices
     # No host-level list of clusters exists to print (each home describes only itself).
     assert "ls" not in choices
     # The whole-cluster bounce left with the retired updater; `ava restart` is per unit.
@@ -69,18 +71,21 @@ def test_start_rejects_retired_identity_flags(tmp_path: Path) -> None:
         p.parse_args(["start", "--gateway-home", str(tmp_path / "h")])
 
 
-def test_cluster_verbs_take_path(tmp_path: Path) -> None:
+def test_cluster_destroy_acts_on_this_home_and_takes_no_path(tmp_path: Path) -> None:
     p = _build_parser()
-    args = p.parse_args(["cluster", "destroy", "--path", str(tmp_path / ".ava-t")])
-    assert args.path == str(tmp_path / ".ava-t")
-    args = p.parse_args(["cluster", "down", "--path", str(tmp_path / ".ava-t")])
-    assert args.path == str(tmp_path / ".ava-t")
-
-
-def test_cluster_destroy_requires_path_flag() -> None:
-    p = _build_parser()
+    assert p.parse_args(["cluster", "destroy"]).drop_db is False
+    assert p.parse_args(["cluster", "destroy", "--drop-db"]).drop_db is True
     with pytest.raises(SystemExit):
-        p.parse_args(["cluster", "destroy"])  # --path is required
+        p.parse_args(["cluster", "destroy", "--path", str(tmp_path / ".ava-t")])
+    with pytest.raises(SystemExit):
+        p.parse_args(["cluster", "down", "--path", str(tmp_path / ".ava-t")])
+
+
+def test_cluster_destroy_has_no_flag_that_skips_its_confirmation() -> None:
+    p = _build_parser()
+    for flag in ("--yes", "-y", "--force"):
+        with pytest.raises(SystemExit):
+            p.parse_args(["cluster", "destroy", flag])
 
 
 def test_enroll_entry_is_removed() -> None:

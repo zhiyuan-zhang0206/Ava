@@ -193,8 +193,9 @@ The repo-root `conftest.py` loads the suite's global fixtures as plugins from `t
 (`env_bootstrap.py` first, then `provisioning.py`, `guards.py`, ...), so they apply to every test in the
 repository. Together they redirect every host resource the suite could otherwise
 share with the operator's live cluster: `$AVA_HOME` (tmpfs), the database and
-Redis (throwaway per-worker instances), the host state dir, every daemon health
-port, and the session home. Each of those works because the resource is addressed
+Redis (throwaway per-worker instances), every daemon health port, and the
+session home (the vendored runtime, initdb template and PTY freeze live in the
+home, so `$AVA_HOME` redirects them too). Each of those works because the resource is addressed
 by a value the process reads — redirect the value, redirect the resource. Env
 vars are set in `os.environ`, not only on the settings singleton, so subprocesses
 (the e2e gateway / ops / restarter) inherit them.
@@ -203,13 +204,18 @@ vars are set in `os.environ`, not only on the settings singleton, so subprocesse
 reads one `~/Library/LaunchAgents` per user, and `crontab` edits one table per user.
 So the suite does not redirect it — it
 refuses to write to it at all, via `AVA_OS_JOBS_ENABLED=false`
-(`base.host.system.cron.os_jobs_enabled` gates all four registrars; the unregister paths
-stay live). `pytest_sessionfinish` then diffs the host's Ava jobs against a
-snapshot taken when the provisioning plugin is imported and fails the run on anything new, removing the
-jobs that name this suite's own homes and reporting anything else.
+(`base.host.system.cron.os_jobs_enabled` gates all five registrars). Labels and
+crontab markers name a job, not a home, so a second gate covers both directions:
+only the default home (`~/.ava`) may register or remove a job
+(`base.host.system.cron.owns_os_jobs`), and a test of a registrar takes the
+`default_home` fixture to be that home. `pytest_sessionfinish` then diffs the
+host's Ava jobs (plist contents included) against a snapshot taken when the
+provisioning plugin is imported and fails the run on anything new or changed. It
+removes nothing: a leaked job replaced the host's real one.
 
 Adding a new registrar, or a new subprocess that could reach one, means checking
-both: the gate is consulted, and the child inherits the env.
+all three: the switch and the default-home gate are consulted, and the child
+inherits the env.
 
 ## Fixture scope vs. what the fixture mutates
 

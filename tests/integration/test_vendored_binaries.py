@@ -23,14 +23,13 @@ import pytest
 
 from base.cluster.dataplane import pg_tools
 from base.cluster.dataplane import runtime_binaries as rb
-from base.config import settings
 
 
 @pytest.fixture()
 def isolated_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the host-level runtime root at a tmp dir (via the host-state-dir
-    anchor), so a test never touches the real ~/.ava/runtime."""
-    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
+    """Point the runtime root (`$AVA_HOME/runtime`) at a tmp home, so a test never
+    touches the real ~/.ava/runtime."""
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
 
 
 def test_pg_tool_prefers_vendored_dir(isolated_runtime: None) -> None:

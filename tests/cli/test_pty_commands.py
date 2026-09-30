@@ -10,15 +10,14 @@ import psycopg
 import pytest
 import redis
 
-from base.config import settings
 from base.native_process.os_platform import LockTimeoutError
 from base.sessions.pty import allocation_freeze
 from cli import main as cli_main
 
 
 @pytest.fixture(autouse=True)
-def _isolated_host_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path / "host")
+def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
 
 
 def test_operator_round_trip_needs_no_gateway_or_data_plane(
@@ -61,7 +60,6 @@ def test_cli_status_surfaces_corrupt_marker_as_fail_closed(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     path = allocation_freeze.state_path()
-    path.parent.mkdir(parents=True)
     path.write_text("[]")
 
     assert cli_main.main(["pty", "status"]) == 1

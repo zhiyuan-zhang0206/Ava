@@ -6,7 +6,6 @@ env alias so the .env surface is unchanged. Aggregated by base/config.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -243,19 +242,6 @@ class GeneralSettings(EnvSettings):
         description="Whether this process may hand jobs to the platform scheduler (launchd LaunchAgent / crontab line / Task Scheduler task). The test suite turns it off: the scheduler is one namespace per OS user, so a test-scoped $AVA_HOME cannot isolate it. Deregistration is never gated.",
         json_schema_extra={
             "restart_required": "all",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    host_state_dir: Path = Field(
-        default_factory=lambda: Path.home() / ".ava",
-        alias="AVA_HOST_STATE_DIR",
-        description="Host-level state shared by every unit on this host (Postgres template, runtime binaries, coding-session owner records, PTY allocation freeze). Lists no clusters: each home describes only itself.",
-        json_schema_extra={
-            "restart_required": "",
             "writable": False,
             "sensitive": False,
             "scope": "host",

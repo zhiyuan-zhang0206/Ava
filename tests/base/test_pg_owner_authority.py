@@ -130,7 +130,6 @@ def owned_pg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("AVA_HOME", str(home))
-    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     pg_port = _free_port()
     record = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", {"postgres": pg_port}),

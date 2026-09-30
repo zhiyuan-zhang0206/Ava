@@ -20,7 +20,7 @@ named-session surface (`ava.shell.sessions`, watchers, schedules) unchanged.
 
 Four modules:
 
-- `allocation_freeze.py` — the host-wide marker and allocation mutex. The
+- `allocation_freeze.py` — the home's marker and allocation mutex. The
   marker carries one operator-owned generation; only that generation can
   resume allocation. It has no gateway or data-plane dependency.
 
@@ -67,9 +67,9 @@ Everything per-session lives under `$AVA_HOME/run/pty/`:
 - `<name>.sock` — the session's socket (sun_path-bounded names fall back to
   a hashed tempdir path, computed identically by host and CLI).
 
-Allocation control is deliberately outside every per-home namespace. In the
-host state dir (`AVA_HOST_STATE_DIR`) are `pty-allocation-freeze.json` and the
-stable `pty-allocation.lock`; changing `$AVA_HOME` therefore cannot bypass a freeze.
+Allocation control is the home's: `$AVA_HOME/pty-allocation-freeze.json` and the
+stable `pty-allocation.lock`. The host runs one cluster, so that home is the host's
+freeze; a scratch home (a test, a tool) has a marker of its own.
 The marker stores schema version, random generation, holder, reason, and UTC
 creation time. A malformed marker means frozen, never inactive.
 

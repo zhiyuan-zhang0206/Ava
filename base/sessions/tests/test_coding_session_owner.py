@@ -12,7 +12,6 @@ from typing import cast
 
 import pytest
 
-from base.config import settings
 from base.native_process.os_platform import IS_WINDOWS
 from base.sessions import coding_session_owner as owner
 from base.sessions import coding_session_owner_record as record_codec
@@ -21,8 +20,8 @@ NOW = dt.datetime(2026, 9, 2, 0, 0, tzinfo=dt.UTC)
 
 
 @pytest.fixture(autouse=True)
-def _isolated_host_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path / "host")
+def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
 
 
 def _key(tmp_path: Path, workspace: str = "workspace") -> owner.CodingSessionKey:

@@ -171,9 +171,7 @@ def _config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str]
     values = dotenv_values(stream=io.StringIO(content.decode()), interpolate=False)
     remote_keys = {"AVA_DB_URL", "AVA_REDIS_URL", "AVA_RUNNER_DB_PASSWORD"}
     forbidden = (
-        derived_env_keys()
-        | env_identity_keys()
-        | {"AVA_HOME", "AVA_HOST_STATE_DIR", "AVA_REDIS_ADMIN_PASSWORD"}
+        derived_env_keys() | env_identity_keys() | {"AVA_HOME", "AVA_REDIS_ADMIN_PASSWORD"}
     ) - remote_keys
     unknown = set(values) - set(FIELD_ALIASES.values()) - remote_keys
     if unknown or set(values) & forbidden or any(v is None for v in values.values()):

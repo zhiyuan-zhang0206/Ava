@@ -47,7 +47,7 @@ def complete_boot_start() -> None:
     from base.paths import ava_home
 
     home = ava_home()
-    if not in_boot_unit(home):
+    if not in_boot_unit():
         return
     snapshot = _root_status(_root_client())
     if snapshot is None:

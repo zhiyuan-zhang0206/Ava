@@ -77,15 +77,15 @@ from real incidents; the concrete sizes and dates are illustrative.
   thread_id); blob table size; orphan worktrees / stale cluster homes.
 - Causes: LangGraph's PostgresSaver is append-only — terminated agents'
   checkpoint threads grow without bound (a real incident: 21GB in ~12h). Orphaned
-  dev-cluster homes (a deleted worktree whose `ava cluster down --path` was
-  forgotten).
+  dev-cluster homes an older version left behind (a deleted worktree whose
+  cluster was never stopped; a worktree no longer owns one).
 - Response: the checkpoint reaper (events-maintenance daemon) owns retention
   automatically: Rule B hourly trims stale threads (terminated, or inactive
   >24h) to keep=1; Rule A on the fast loop trims overgrown active threads
   (>20 ckpts) to keep=5. Compaction-boundary checkpoints are always kept
   (each past compaction segment stays recoverable). Physical space still
   needs VACUUM FULL after large trims (a 42GB→27GB trim was recovered this
-  way). Remove orphan worktrees with `ava cluster down --path`
+  way). Stop a leftover cluster at an orphan home with `AVA_HOME=<home> ava stop -y`
   *then* delete the directory; delete verified-obsolete backups only with
   user approval.
 
@@ -137,7 +137,7 @@ from real incidents; the concrete sizes and dates are illustrative.
   (same agent-id-derived ports) — tear down the whole unit, not just the dir.
 - Response: match the backend to the session type (PTY → `get_shell_backend`),
   kill stale sessions by exact name (`=name`, prefix matching kills siblings),
-  remove the whole stale unit (`ava cluster down --path` + bootout probes +
+  remove the whole stale unit (`AVA_HOME=<home> ava stop -y` + bootout probes +
   delete plist).
 
 ### Schedules not running / breaker tripped

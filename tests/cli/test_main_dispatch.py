@@ -425,8 +425,7 @@ def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ["restart"],
         ["converge"],
         ["maintenance", "stop"],
-        ["cluster", "down", "--path", "/somewhere"],
-        ["cluster", "destroy", "--path", "/somewhere"],
+        ["cluster", "destroy"],
         ["config", "set", "KEY=VALUE"],
         ["logs", "retention"],
         ["agents", "send", "1", "hello"],
@@ -593,7 +592,6 @@ assert "base.config" not in sys.modules
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.update(
         AVA_HOME=str(tmp_path / "home"),
-        AVA_HOST_STATE_DIR=str(tmp_path),
         AVA_DB_URL="postgresql://foreign.invalid/forbidden",
         AVA_GATEWAY_URL="http://foreign.invalid",
     )

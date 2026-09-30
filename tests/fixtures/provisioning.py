@@ -32,7 +32,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from base.config import settings
 from base.db.test_db_guard import assert_test_db_url
 from tests._containers import postgres, redis_server
-from tests._os_jobs import host_ava_os_jobs, is_test_owned_job, remove_os_job
+from tests._os_jobs import host_ava_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 from tests.fixtures.env_bootstrap import _TEST_AVA_HOME
 
@@ -300,34 +300,33 @@ def _clean_state(
 
 
 def _fail_on_leaked_os_jobs(session: pytest.Session) -> None:
-    """Fail the run when it armed a job in the host's OS scheduler.
+    """Fail the run when it armed or rewrote a job in the host's OS scheduler.
 
-    The counterpart to OS_JOBS_ENABLED and the helper native-effect guard:
-    these keep ordinary unit tests out of the native scheduler, and this proves it.
-    A new job here means some path reached the scheduler anyway — a subprocess
-    that lost the env, or a registrar added without the gate — and that job is now
-    firing on the developer's machine on its own schedule, which is why this is a
-    hard failure and not a warning.
+    The counterpart to OS_JOBS_ENABLED, the default-home gate and the helper
+    native-effect guard: these keep ordinary unit tests out of the native
+    scheduler, and this proves it. A new or changed job here means some path
+    reached the scheduler anyway — a subprocess that lost the env, or a registrar
+    added without the gate — and, since a label names a job and not a home, it
+    replaced the host's real one, which is why this is a hard failure and not a
+    warning.
 
-    Only this suite's own homes are swept (`is_test_owned_job`); anything else new
-    is reported and left alone, because it is far more likely to be an `ava start`
-    the operator ran in another terminal than a leak.
+    Nothing is removed: the job found is the host's own, rewritten. It is also
+    possible that it is an `ava start` the operator ran in another terminal, so
+    check before repairing it.
     """
     leaked = sorted(host_ava_os_jobs() - _OS_JOBS_AT_START)
     if not leaked:
         return
-    for job in leaked:
-        if is_test_owned_job(job):
-            remove_os_job(job)
     print(  # noqa: T201 — must reach the terminal; loguru output is captured
-        "\nOS-SCHEDULER LEAK: this pytest run registered "
+        "\nOS-SCHEDULER LEAK: this pytest run registered or rewrote "
         f"{len(leaked)} job(s) on the host:\n  "
         + "\n  ".join(leaked)
         + "\nThe suite runs with AVA_OS_JOBS_ENABLED=false (see "
-        "base.host.system.cron.os_jobs_enabled), and the helper native-effect guard is on. "
-        "A new test-owned job means a test bypassed one of these boundaries. "
-        "Jobs under this suite's own homes were removed; any others were left "
-        "for you to check.",
+        "base.host.system.cron.os_jobs_enabled), only the default home may register "
+        "a job (base.host.system.cron.owns_os_jobs), and the helper native-effect "
+        "guard is on. A job listed here means a test bypassed one of these "
+        "boundaries. The job was left in place: it replaced the host's own, so "
+        "re-run `ava converge` to restore it, unless this was your own `ava start`.",
         file=sys.stderr,
     )
     session.exitstatus = 1

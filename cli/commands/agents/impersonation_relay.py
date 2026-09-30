@@ -101,8 +101,8 @@ class WakeListener(Protocol):
 
 
 def ack_command(lease_id: int | UUID, ids: Sequence[int], agent_id: int | None = None) -> str:
-    """The exact ACK command for one pushed batch, as a bare `ava`: the executor
-    inherits AVA_HOME, and the host launcher runs that cluster's own CLI."""
+    """The exact ACK command for one pushed batch, as a bare `ava`: the host's
+    `~/.local/bin/ava`, linked to the production CLI."""
     return shlex.join(
         [
             "ava",

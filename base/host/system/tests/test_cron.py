@@ -1,4 +1,4 @@
-"""base.host.system.cron — home-slug labels, launchd ownership, crontab safety."""
+"""base.host.system.cron — fixed labels, launchd ownership, crontab safety."""
 
 from __future__ import annotations
 
@@ -48,12 +48,10 @@ def test_register_macos_never_reloads_its_own_launchd_job(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Registration cannot boot out the job containing its own process."""
-    slug = "ava-t-cafe0123"
-    label = f"com.ava.{slug}.health-probe"
+    label = "com.ava.health-probe"
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", label)
-    monkeypatch.setattr(cron, "_home_slug", lambda: slug)
     monkeypatch.setattr(cron, "_launchd_plist_content", _desired_plist)
     calls = _record_launchctl(monkeypatch)
 
@@ -67,12 +65,9 @@ def test_register_macos_still_reloads_from_another_launchd_job(
 ) -> None:
     """The self-protection is label-specific: boot autostart also runs
     ``ava start`` under launchd and must still converge the health probe."""
-    slug = "ava-t-cafe0123"
-    health_label = f"com.ava.{slug}.health-probe"
-    plist = _plant_plist(fake_home, health_label)
+    plist = _plant_plist(fake_home, "com.ava.health-probe")
     plist.write_text("<old-plist/>")
-    monkeypatch.setenv("XPC_SERVICE_NAME", f"com.ava.{slug}.autostart")
-    monkeypatch.setattr(cron, "_home_slug", lambda: slug)
+    monkeypatch.setenv("XPC_SERVICE_NAME", "com.ava.autostart")
     monkeypatch.setattr(cron, "_launchd_plist_content", _desired_plist)
     monkeypatch.setattr(cron, "descends_from_launchd_job", _never_descendant)
     calls = _record_launchctl(monkeypatch)
@@ -166,11 +161,10 @@ def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Per-cluster scoping of the crontab entry
+# The crontab entry
 # ---------------------------------------------------------------------------
-# The launchd label always carried the home slug; the crontab line carried
-# nothing, so every cluster's health-probe entry looked identical and one
-# cluster's register/unregister rewrote them all.
+# Its marker names the job, not a home: the host runs one cluster. Migration of
+# lines older versions wrote with a per-home suffix is in test_os_job_markers.py.
 
 
 def _crontab_stub(
@@ -198,53 +192,34 @@ def _crontab_stub(
     monkeypatch.setattr(cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_register_linux_stamps_the_owning_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cron, "_home_slug", lambda: "ava-mine")
+def test_register_linux_stamps_the_fixed_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, "", writes)
 
     assert cron._register_linux(300) == 0
-    assert "# ava-health-probe.ava-mine" in writes["input"]
-    assert "--auto-rollback" not in writes["input"]
-    assert "--threshold" not in writes["input"]
+    (line,) = writes["input"].splitlines()
+    assert line.endswith("cluster health-probe # ava-health-probe")
+    assert "--auto-rollback" not in line
+    assert "--threshold" not in line
 
 
-def test_register_linux_leaves_another_clusters_line_alone(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Two co-located clusters each own a health probe; registering one must not
-    silently unregister the other."""
-    monkeypatch.setattr(cron, "_home_slug", lambda: "ava-mine")
-    theirs = "*/5 * * * * /y/ava cluster health-probe --auto-rollback --threshold 3 # ava-health-probe.ava-theirs"
-    writes: dict[str, str] = {}
-    _crontab_stub(monkeypatch, f"0 3 * * * backup\n{theirs}\n", writes)
-
-    assert cron._register_linux(300) == 0
-    body = writes["input"]
-    assert theirs in body
-    assert body.count("# ava-health-probe.ava-mine") == 1
-    assert "0 3 * * * backup" in body
-
-
-def test_register_linux_clears_both_unmarked_legacy_forms_and_reports_success(
+def test_register_linux_keeps_unrelated_lines_and_reports_success(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(cron, "_home_slug", lambda: "ava-mine")
-    legacy_command = "*/5 * * * * /old/ava cluster health-probe --threshold 2"
-    legacy_script = "*/5 * * * * /old/health-probe-cron"
-    foreign = "*/5 * * * * /other/ava cluster health-probe # ava-health-probe.ava-other"
+    other_job = (
+        "*/1 * * * * /x/ava cluster watchdog-probe --role gateway  # ava-watchdog-probe.gateway"
+    )
     writes: dict[str, str] = {}
-    _crontab_stub(monkeypatch, f"{legacy_command}\n{legacy_script}\n{foreign}\n", writes)
+    _crontab_stub(monkeypatch, f"0 3 * * * backup\n{other_job}\n", writes)
 
     assert cron._register_linux(300) == 0
     assert capsys.readouterr() == (
         "  . crontab entry added (every 5 min)\n",
         "",
     )
-    assert legacy_command not in writes["input"]
-    assert legacy_script not in writes["input"]
-    assert foreign in writes["input"]
-    assert writes["input"].count("# ava-health-probe.ava-mine") == 1
+    body = writes["input"]
+    assert "0 3 * * * backup" in body and other_job in body
+    assert body.count("# ava-health-probe") == 1
 
 
 @pytest.mark.parametrize(
@@ -300,35 +275,15 @@ def test_register_linux_missing_crontab_message_and_rc(
     )
 
 
-def test_unregister_linux_removes_only_the_named_cluster(
+def test_unregister_linux_removes_only_the_probe_line(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`ava cluster destroy --path <other>` must not take this host's own probe
-    down with it."""
-    mine = "*/5 * * * * /x/ava cluster health-probe --auto-rollback --threshold 3 # ava-health-probe.ava-mine"
-    theirs = "*/5 * * * * /y/ava cluster health-probe --auto-rollback --threshold 3 # ava-health-probe.ava-theirs"
+    probe = "*/5 * * * * /x/ava cluster health-probe # ava-health-probe"
     writes: dict[str, str] = {}
-    _crontab_stub(monkeypatch, f"{mine}\n{theirs}\n", writes)
+    _crontab_stub(monkeypatch, f"{probe}\n0 3 * * * backup\n", writes)
 
-    assert cron._unregister_linux("ava-theirs") == 0
-    body = writes["input"]
-    assert mine in body
-    assert theirs not in body
-
-
-def test_unregister_linux_still_clears_a_pre_marker_line(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Markers are new. A line written before them cannot be attributed to a
-    cluster, but the old register path rewrote every health-probe line it found,
-    so a host held at most one — leaving it behind would strand a job pointing at
-    a home that may no longer have a cluster."""
-    legacy = "*/5 * * * * /x/ava cluster health-probe --auto-rollback --threshold 3"
-    writes: dict[str, str] = {}
-    _crontab_stub(monkeypatch, f"{legacy}\n0 3 * * * backup\n", writes)
-
-    assert cron._unregister_linux("ava-anything") == 0
-    assert legacy not in writes["input"]
+    assert cron._unregister_linux() == 0
+    assert probe not in writes["input"]
     assert "0 3 * * * backup" in writes["input"]
 
 
@@ -341,7 +296,7 @@ def test_unregister_linux_ignores_the_watchdog_probe_lines(
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, f"{probe_line}\n", writes)
 
-    assert cron._unregister_linux("ava-mine") == 0
+    assert cron._unregister_linux() == 0
     assert writes == {}  # nothing matched, so the crontab was never rewritten
 
 
@@ -352,12 +307,12 @@ def test_unregister_linux_ignores_the_watchdog_probe_lines(
         (0, "0 3 * * * backup\n", 0, "  . no Ava health-probe entry found in crontab\n", False),
         (
             0,
-            "*/5 * * * * /x/ava cluster health-probe # ava-health-probe.ava-mine\n",
+            "*/5 * * * * /x/ava cluster health-probe # ava-health-probe\n",
             0,
             "  . crontab entry removed\n",
             True,
         ),
-        (0, "*/5 * * * * /x/ava cluster health-probe # ava-health-probe.ava-mine\n", 1, "", True),
+        (0, "*/5 * * * * /x/ava cluster health-probe # ava-health-probe\n", 1, "", True),
     ],
 )
 def test_unregister_linux_messages_and_success_gated_removal(
@@ -372,28 +327,23 @@ def test_unregister_linux_messages_and_success_gated_removal(
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, existing, writes, read_rc=read_rc, write_rc=write_rc)
 
-    assert cron._unregister_linux("ava-mine") == 0
+    assert cron._unregister_linux() == 0
     assert capsys.readouterr() == (expected_out, "")
     assert ("input" in writes) == should_write
 
 
-def test_unregister_macos_removes_only_the_named_clusters_plist(
+def test_unregister_macos_removes_only_the_probe_plist(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Filesystem-level proof of the scoping: two clusters' plists are on disk,
-    and unregistering one leaves the other's file untouched.
-
-    This is the failure mode `ava cluster destroy --path <worktree>` had — run
-    from the prod checkout it removed the plist of whichever home the PROCESS
-    resolved, i.e. prod's.
-    """
+    """Filesystem-level proof of the scoping: with another job's plist on disk,
+    unregistering the probe leaves it untouched and boots out the probe's label."""
     monkeypatch.setenv("HOME", str(tmp_path))
     agents = tmp_path / "Library" / "LaunchAgents"
     agents.mkdir(parents=True)
-    mine = agents / "com.ava.ava-mine.health-probe.plist"
-    theirs = agents / "com.ava.ava-theirs.health-probe.plist"
-    mine.write_text("<plist/>")
-    theirs.write_text("<plist/>")
+    probe = agents / "com.ava.health-probe.plist"
+    autostart = agents / "com.ava.autostart.plist"
+    probe.write_text("<plist/>")
+    autostart.write_text("<plist/>")
 
     booted: list[str] = []
 
@@ -403,11 +353,10 @@ def test_unregister_macos_removes_only_the_named_clusters_plist(
 
     monkeypatch.setattr(cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert cron._unregister_macos("ava-theirs") == 0
-    assert not theirs.exists()
-    assert mine.exists()
-    # ...and the launchd job booted out was the target's, not this process's.
-    assert booted == [f"gui/{os.getuid()}/com.ava.ava-theirs.health-probe"]
+    assert cron._unregister_macos() == 0
+    assert not probe.exists()
+    assert autostart.exists()
+    assert booted == [f"gui/{os.getuid()}/com.ava.health-probe"]
 
 
 # ── registration guard: worktree checkout must not register prod's probe ──
@@ -426,16 +375,15 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 def test_register_refused_for_worktree_checkout_against_prod_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Task #1025: a worktree process (a home with its own `source` + another
     checkout) must not register that home's health-probe plist — the 2026-08-07
     accident where a worktree-venv debug script rewrote the plist and the probe
     auto-rolled-back the cluster."""
-    prod_home = tmp_path / ".ava"
+    prod_home = default_home / ".ava"
     (prod_home / "source").mkdir(parents=True)
-    monkeypatch.setenv("AVA_HOME", str(prod_home))
-    monkeypatch.setattr("base.paths.repo_root", lambda: tmp_path / "Ava" / ".worktrees" / "r4")
+    monkeypatch.setattr("base.paths.repo_root", lambda: default_home / "Ava" / ".worktrees" / "r4")
     monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     calls = _fake_backend(monkeypatch)
 
@@ -445,12 +393,11 @@ def test_register_refused_for_worktree_checkout_against_prod_home(
 
 
 def test_register_allowed_from_the_homes_own_source_checkout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A home's own `source` checkout registers normally."""
-    prod_home = tmp_path / ".ava"
+    prod_home = default_home / ".ava"
     (prod_home / "source").mkdir(parents=True)
-    monkeypatch.setenv("AVA_HOME", str(prod_home))
     monkeypatch.setattr("base.paths.repo_root", lambda: prod_home / "source")
     monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     calls = _fake_backend(monkeypatch)
@@ -460,12 +407,11 @@ def test_register_allowed_from_the_homes_own_source_checkout(
     assert calls == ["300"]
 
 
-def test_register_allowed_for_a_home_without_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_register_allowed_for_a_default_home_without_source(
+    default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A home with no checkout of its own runs whichever checkout registers it."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-dev"))
-    monkeypatch.setattr("base.paths.repo_root", lambda: tmp_path / "dev-src")
+    """A default home with no checkout of its own runs whichever checkout registers it."""
+    monkeypatch.setattr("base.paths.repo_root", lambda: default_home / "dev-src")
     monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
     calls = _fake_backend(monkeypatch)
 
@@ -480,12 +426,10 @@ def test_register_macos_defers_when_ancestry_proves_the_job(
     """On current macOS an exec'd descendant reads XPC_SERVICE_NAME="0", not the
     label (2026-09-17 recurrence), so the live process-tree check must defer
     even when the environment value is "0"."""
-    slug = "ava-t-cafe0123"
-    label = f"com.ava.{slug}.health-probe"
+    label = "com.ava.health-probe"
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "0")
-    monkeypatch.setattr(cron, "_home_slug", lambda: slug)
     monkeypatch.setattr(cron, "_launchd_plist_content", _desired_plist)
 
     def _is_current(candidate: str) -> bool:
@@ -504,12 +448,9 @@ def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
 ) -> None:
     """The "0" descendant reading must not block a legitimate external converge
     from applying a pending spec change."""
-    slug = "ava-t-cafe0123"
-    label = f"com.ava.{slug}.health-probe"
-    plist = _plant_plist(fake_home, label)
+    plist = _plant_plist(fake_home, "com.ava.health-probe")
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "0")
-    monkeypatch.setattr(cron, "_home_slug", lambda: slug)
     monkeypatch.setattr(cron, "_launchd_plist_content", _desired_plist)
     monkeypatch.setattr(cron, "descends_from_launchd_job", _never_descendant)
     calls = _record_launchctl(monkeypatch)

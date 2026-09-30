@@ -3,8 +3,10 @@ production's order: no gateway stop/start while a runner runs, no runner start w
 
 from __future__ import annotations
 
+import ast
 import json
 import plistlib
+import re
 import shlex
 import subprocess
 from collections.abc import Callable
@@ -169,6 +171,41 @@ def test_macos_start_is_a_gui_one_shot() -> None:
     assert job["ProgramArguments"][:2] == ["/bin/zsh", "-lc"]
     assert 'AVA_HOME="$H" "$S/.venv/bin/ava" start' in job["ProgramArguments"][2]
     assert shlex.split(f"zsh -lc {shlex.quote(script)}")[2] == script and 'rm -rf "$D"' in script
+
+
+def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
+    default_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The update's `up` runs the default home's own `<home>/source` CLI, from a
+    run-once LaunchAgent in the gui domain. It must pass the checkout guard and the
+    default-home gate of the OS-job registrars that `start`'s converge reaches, and
+    it must not itself be a registrar's job: its label is its own, and nothing in
+    `cli.fleet_update` imports the application."""
+    from base.host.system import cron
+    from cli.preflight import require_own_checkout
+
+    script = fleet_update.gui_oneshot("mac", 60)
+    job = plistlib.loads(
+        script.split("<<'AVA_FLEET_PLIST'\n")[1].split("\nAVA_FLEET_PLIST")[0].encode()
+    )
+    assert re.fullmatch(r"com\.ava\.fleet-update\.mac\.\d{8}T\d{6}", job["Label"])
+    command = job["ProgramArguments"][2]
+    assert 'H="$HOME/.ava"; S="$H/source"' in command
+    assert 'AVA_HOME="$H" "$S/.venv/bin/ava" start' in command
+
+    # `$H` is the default home and `$S` its own checkout: both gates let `start` through.
+    home = default_home / ".ava"
+    (home / "source").mkdir(parents=True)
+    assert require_own_checkout(["start"], home / "source") is None
+    assert cron.owns_os_jobs("autostart")
+
+    imported: set[str] = set()
+    for node in ast.walk(ast.parse(Path(fleet_update.__file__).read_text())):
+        if isinstance(node, ast.Import):
+            imported |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            imported.add((node.module or "").split(".")[0])
+    assert not {"base", "cli", "gateway", "services", "agent", "ava"} & imported
 
 
 _STOP_RETRY = 'retry "ava stop -y --timeout 600"'

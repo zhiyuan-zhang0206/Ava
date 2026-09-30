@@ -26,7 +26,6 @@ def native_env(tmp_path: Path) -> dict[str, str]:
     home.mkdir()
     env.update(
         AVA_HOME=str(home),
-        AVA_HOST_STATE_DIR=str(tmp_path / "host-state"),
         AVA_CONFIG_FETCH="skip",
         AVA_DB_URL="postgresql://unused@127.0.0.1:1/unused",
         AVA_REDIS_URL="redis://127.0.0.1:1/0",
@@ -44,7 +43,7 @@ def pytest_configure(config: pytest.Config) -> None:
     # --confcutdir and so runs without the repo-root conftest. When that
     # conftest is loaded it already isolates the whole session; this hook runs
     # before every collected test, so rewriting os.environ here would leak into
-    # every other directory (its home, data plane and host state) in a combined
+    # every other directory (its home and data plane) in a combined
     # run. pytest registers parent conftests first, keyed by their path.
     repo_conftest = Path(__file__).parents[3] / "conftest.py"
     if config.pluginmanager.get_plugin(str(repo_conftest)) is not None:
@@ -56,7 +55,6 @@ def pytest_configure(config: pytest.Config) -> None:
     config.add_cleanup(isolated.cleanup)
     os.environ.update(
         AVA_HOME=str(Path(isolated.name) / "home"),
-        AVA_HOST_STATE_DIR=str(Path(isolated.name) / "host-state"),
         AVA_CONFIG_FETCH="skip",
         AVA_DB_URL="postgresql://unused@127.0.0.1:1/unused",
         AVA_REDIS_URL="redis://127.0.0.1:1/0",
