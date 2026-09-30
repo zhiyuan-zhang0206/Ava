@@ -11,6 +11,15 @@ Root records custody before spawning and preserves captured native births before
 signals. Normal stop is bounded TERM and exact observed closure; only explicit
 force permits KILL. Failed closure retains custody and blocks a replacement.
 
+The TERM window is per unit: the manifest's `stop_timeout_s`, else the default
+`SupervisorConfig.stop_timeout_s` (10 s). A unit whose own SIGTERM cleanup can
+outlast the default declares its ceiling in the roster (`ServiceSpec.stop_ceiling_s`)
+and the manifest generator sets the window to that ceiling plus `STOP_MARGIN_S`
+(`services/ava_root_glue/manifests.py`), so root never reads a unit that is still
+closing inside its own bound as unstopped. Explicit force escalates to KILL only
+after that same window. A window is the unit's promise, not root's guess: a unit
+that overruns its declared ceiling is refused like any other, naming the window.
+
 POSIX units each lead a process group (setpgid; same session and macOS
 responsible process). A stop that finds the leader live is certified only once
 the leader is reaped inside that stop and the kernel reports its group empty

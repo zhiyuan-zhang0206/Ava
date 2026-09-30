@@ -15,6 +15,15 @@ probes for the exact units in the loaded manifest. A missing probe refuses
 wiring before any service spawns. Adding a plugin service follows the same
 `ServiceSpec.identity_probe` contract as a core service.
 
+The manifest generator (`manifests.py`) also derives each unit's stop window: a
+`ServiceSpec` that declares `stop_ceiling_s` (its own SIGTERM cleanup can outlast
+root's default window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`. The
+gateway's ceiling is uvicorn's drain budget
+(`gateway.gateway_graceful_shutdown_timeout_seconds`) plus the lifespan cleanup
+allowance, read from the same setting the launch hands uvicorn; browser-mcp's is
+its bounded shutdown steps (`services/browser/shutdown_budget.py`). See
+[[services/ava_root/docs/closure.ava.okf.md]].
+
 `HealthMonitor` owns application-service retry scheduling. Only a fresh DOWN
 observation may request replacement. The supervisor must settle native custody
 before replacement; unknown ownership, unavailable inspection, foreign listeners,

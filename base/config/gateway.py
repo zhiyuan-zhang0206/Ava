@@ -362,7 +362,10 @@ class GatewaySettings(EnvSettings):
             "lifespan cleanup that follows it must fit inside that deadline, so the "
             "budget sits near a tenth of it; it also exceeds ordinary slow-request "
             "durations, so a planned restart still lets normal work finish. A stuck "
-            "stream costs at most this budget, never the stop."
+            "stream costs at most this budget, never the stop. SSE streams end as "
+            "the shutdown begins and cost none of it. ava-root's stop window for the "
+            "gateway is derived from this value (plus the lifespan cleanup), so any "
+            "value here is one root waits out."
         ),
         json_schema_extra={
             "restart_required": "gateway",
