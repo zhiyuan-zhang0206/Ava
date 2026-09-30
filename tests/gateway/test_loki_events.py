@@ -37,9 +37,9 @@ from base.telemetry.loki_index_labels import (
     LOKI_QUERY_CONCURRENCY,
     WAL_DISK_FULL_THRESHOLD,
     LokiReadEra,
-    LokiReadSlice,
     event_stream_selector,
     retention_hours,
+    split_index_label_window,
     validate_loki_deploy_config,
 )
 from gateway.lgtm import _loki_logql, loki_events, loki_events_cache, loki_query_budget
@@ -89,11 +89,9 @@ class _FakeClient:
     def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
         self.calls.append((url, params))
         if not self.payloads:
-            # attribute_aggregate slices a window into multiple instant
-            # queries (era-sliced read path, task #1407 B2); a test that
-            # canned a single payload legitimately sees later slices with no
-            # data. Loki itself returns an empty result for an empty window,
-            # so return that instead of raising.
+            # Some aggregate paths issue multiple instant queries. Loki
+            # returns an empty result for an empty window, so the fake does
+            # the same when canned responses are exhausted.
             return _FakeResponse({"data": {"result": []}})
         item = self.payloads.pop(0)
         return item if isinstance(item, _FakeResponse) else _FakeResponse(item)
@@ -176,16 +174,6 @@ def _fresh_aggregation_cache() -> Any:
     loki_events_cache.clear()
     yield
     loki_events_cache.clear()
-
-
-@pytest.fixture(autouse=True)
-def _stable_default_read_era(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep non-rollout tests independent of the wall-clock cutover date."""
-
-    def _single_legacy(window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
-        return (LokiReadSlice(LokiReadEra.LEGACY, *window),)
-
-    monkeypatch.setattr(loki_events, "_read_slices", _single_legacy)
 
 
 def test_aggregation_cache_key_is_canonical_and_minute_aligned() -> None:
@@ -317,16 +305,7 @@ def _event_line(
 
 
 _ROLL_OUT_START = datetime(2026, 8, 10, tzinfo=UTC)
-_ROLL_OUT_CUTOVER = _ROLL_OUT_START + timedelta(hours=1)
-_ROLL_OUT_END = _ROLL_OUT_CUTOVER + timedelta(hours=1)
-
-
-def _straddled_slices() -> tuple[LokiReadSlice, LokiReadSlice]:
-    """Two non-overlapping label eras for cutover merge tests."""
-    return (
-        LokiReadSlice(LokiReadEra.LEGACY, _ROLL_OUT_START, _ROLL_OUT_CUTOVER),
-        LokiReadSlice(LokiReadEra.INDEXED, _ROLL_OUT_CUTOVER, _ROLL_OUT_END),
-    )
+_ROLL_OUT_END = _ROLL_OUT_START + timedelta(hours=2)
 
 
 def _wait_for_budget_waiters(expected: int) -> None:
@@ -1169,24 +1148,18 @@ class TestQueryEvents:
 
         monkeypatch.setattr(loki_events, "_client", _accessor(_TimedClient()))
 
-        def _slices(_window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
-            return _straddled_slices()
-
-        monkeypatch.setattr(loki_events, "_read_slices", _slices)
-
         loki_events.query_events(from_=_ROLL_OUT_START, to=_ROLL_OUT_END, timeout_s=8.0)
 
-        # era-sliced read path: the straddling window spans the legacy and
-        # indexed slices (task #1407 B2), each carrying the timeout
-        assert timeouts == [8.0, 8.0]
+        assert timeouts == [8.0]
 
-    def test_request_params_and_straddling_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_request_params_and_single_indexed_window(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         client = _install(monkeypatch, _loki_payload([]))
-
-        def _slices(_window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
-            return _straddled_slices()
-
-        monkeypatch.setattr(loki_events, "_read_slices", _slices)
+        assert [
+            (s.era, s.start, s.end)
+            for s in split_index_label_window(_ROLL_OUT_START, _ROLL_OUT_END)
+        ] == [(LokiReadEra.INDEXED, _ROLL_OUT_START, _ROLL_OUT_END)]
         rows, has_more = loki_events.query_events(
             agent_id=3, limit=100, offset=0, from_=_ROLL_OUT_START, to=_ROLL_OUT_END
         )
@@ -1195,15 +1168,15 @@ class TestQueryEvents:
         url, params = client.calls[0]
         assert url.endswith("/loki/api/v1/query_range")
         assert (
-            params["query"] == '{service_name="unknown_service", stream!="archive"} | json '
+            params["query"]
+            == '{service_name="unknown_service", stream!="archive", agent_id="3"} | json '
             '| agent_id_extracted="3"'
         )
         assert params["direction"] == "backward"
         assert params["limit"] == 101  # limit + offset + 1 lookahead
-        # explicit straddling window: the indexed slice spans cutover -> end
-        _, last_params = client.calls[-1]
-        assert last_params["start"] == int(_ROLL_OUT_CUTOVER.timestamp() * 1e9)
-        assert last_params["end"] == int(_ROLL_OUT_END.timestamp() * 1e9)
+        assert len(client.calls) == 1
+        assert params["start"] == int(_ROLL_OUT_START.timestamp() * 1e9)
+        assert params["end"] == int(_ROLL_OUT_END.timestamp() * 1e9)
 
     def test_tier_filter_drops_json_parse_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, _loki_payload([]))
@@ -1251,62 +1224,6 @@ class TestQueryEvents:
         _, params = client.calls[0]
         assert params["start"] == int(from_.timestamp() * 1e9)
         assert params["end"] == int(to.timestamp() * 1e9)
-
-    def test_straddle_merges_and_deduplicates_the_cutover_row(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        before = _event_line(ts="2026-08-10T00:30:00Z", event_name="before")
-        labeled_before = _event_line(ts="2026-08-10T00:45:00Z", event_name="labeled_before")
-        boundary = _event_line(ts="2026-08-10T01:00:00Z", event_name="boundary")
-        after = _event_line(ts="2026-08-10T01:30:00Z", event_name="after")
-        client = _install(
-            monkeypatch,
-            [
-                _loki_payload(
-                    [
-                        ("1786309200000000000", before),
-                        ("1786310100000000000", labeled_before),
-                        ("1786311000000000000", boundary),
-                    ]
-                ),
-                _loki_payload(
-                    [
-                        ("1786311000000000000", boundary),
-                        ("1786312800000000000", after),
-                    ]
-                ),
-            ],
-        )
-
-        def _slices(_window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
-            return _straddled_slices()
-
-        monkeypatch.setattr(loki_events, "_read_slices", _slices)
-
-        rows, has_more = loki_events.query_events(
-            agent_id=7,
-            event_names=["spawn"],
-            from_=_ROLL_OUT_START,
-            to=_ROLL_OUT_END,
-            direction="forward",
-            limit=4,
-        )
-
-        assert [row["event_name"] for row in rows] == [
-            "before",
-            "labeled_before",
-            "boundary",
-            "after",
-        ]
-        assert has_more is False
-        assert len(client.calls) == 2
-        assert client.calls[0][1]["query"].startswith(
-            '{service_name="unknown_service", stream!="archive"}'
-        )
-        assert 'event_name=""' not in client.calls[0][1]["query"]
-        assert client.calls[1][1]["query"].startswith(
-            '{service_name="unknown_service", stream!="archive", event_name!="", agent_id="7", event_name="spawn"}'
-        )
 
     def test_newest_first_merge_across_streams(self, monkeypatch: pytest.MonkeyPatch) -> None:
         payload = {
@@ -1550,24 +1467,14 @@ class TestCountEvents:
         assert '| event_name_extracted=~"spawn"' in q
         assert params["time"] == datetime(2026, 8, 2, tzinfo=UTC).timestamp()
 
-    def test_straddling_window_sums_both_slice_durations(
+    def test_single_indexed_window_uses_full_duration(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         client = _install(monkeypatch, {"data": {"result": []}})
-
-        def _slices(_window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
-            return _straddled_slices()
-
-        monkeypatch.setattr(loki_events, "_read_slices", _slices)
         assert loki_events.count_events(from_=_ROLL_OUT_START, to=_ROLL_OUT_END) == 0
-        # era-sliced read path: a straddling window splits into legacy +
-        # indexed slices; their durations must sum to the window length (2h)
-        assert len(client.calls) == 2
-        total = 0
-        for _url, params in client.calls:
-            duration = int(params["query"].rsplit("[", 1)[1].split("s")[0])
-            total += duration
-        assert total == 7200
+        assert len(client.calls) == 1
+        assert client.calls[0][1]["query"].endswith(")[7200s]))")
+        assert client.calls[0][1]["time"] == _ROLL_OUT_END.timestamp()
 
     def test_empty_window_returns_zero_without_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, {"data": {"result": []}})
@@ -1581,32 +1488,6 @@ class TestCountEvents:
     def test_empty_result_is_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _install(monkeypatch, {"data": {"result": []}})
         assert loki_events.count_events() == 0
-
-    def test_straddle_adds_disjoint_era_counts(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        client = _install(
-            monkeypatch,
-            [
-                {"data": {"result": [{"metric": {}, "value": [0, "2"]}]}},
-                {"data": {"result": [{"metric": {}, "value": [0, "3"]}]}},
-            ],
-        )
-
-        def _slices(_window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
-            return _straddled_slices()
-
-        monkeypatch.setattr(loki_events, "_read_slices", _slices)
-
-        assert (
-            loki_events.count_events(
-                agent_id=7,
-                event_names=["spawn"],
-                from_=_ROLL_OUT_START,
-                to=_ROLL_OUT_END,
-            )
-            == 5
-        )
-        assert 'event_name=""' not in client.calls[0][1]["query"]
-        assert 'event_name!="", agent_id="7", event_name="spawn"' in client.calls[1][1]["query"]
 
     def test_query_events_empty_window_returns_no_rows(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2097,16 +1978,9 @@ class TestAttributeAggregate:
         assert results == [42.5, 42.5]
         assert len(client.calls) == 2
 
-    @pytest.mark.parametrize(
-        ("era", "indexed_labeled"),
-        [(LokiReadEra.LEGACY, False), (LokiReadEra.INDEXED, True)],
-    )
-    def test_agent_llm_usage_pipeline_filters_on_body_truth(
-        self, era: LokiReadEra, indexed_labeled: bool
-    ) -> None:
+    def test_agent_llm_usage_pipeline_filters_on_body_truth(self) -> None:
         q = loki_events._agg_pipeline(
-            era=era,
-            indexed_labeled=indexed_labeled,
+            era=LokiReadEra.INDEXED,
             agent_id=42,
             event_names=["llm_usage"],
         )
@@ -2393,28 +2267,13 @@ class TestQueryProjectedLines:
                 limit_per_slice=2,
             )
 
-    @pytest.mark.parametrize("era", [LokiReadEra.LEGACY, LokiReadEra.INDEXED])
     def test_projected_lines_filter_on_body_truth_event_name(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        era: LokiReadEra,
     ) -> None:
         """The code_len/output_len projections (metrics A3, task #1409) must
-        filter on body-truth event_name. Structured-metadata labels are
-        batch-reused in the legacy era — streams labeled event_name="code"
-        carry mixed log/llm_usage lines whose bodies lack `attributes.body` —
-        so an SM-label filter lets non-code lines reach
-        `line_format "{{ len .body }}"` and renders 0 (the distributions
-        were zero-dominated from the 08-23 cutover until #1515 switched the
-        filter to `event_name_extracted`)."""
-        if era is LokiReadEra.INDEXED:
-
-            def _indexed_slices(
-                window: tuple[datetime, datetime],
-            ) -> tuple[LokiReadSlice, ...]:
-                return (LokiReadSlice(LokiReadEra.INDEXED, *window),)
-
-            monkeypatch.setattr(loki_events, "_read_slices", _indexed_slices)
+        filter on body-truth event_name even when the indexed selector narrows
+        the stream; structured-metadata labels can be batch-reused."""
         client = _install(monkeypatch, {"data": {"result": []}})
         loki_events.query_projected_lines(
             fields=["body"],
@@ -2430,12 +2289,7 @@ class TestQueryProjectedLines:
         for q in range_queries:
             assert '| json event_name_extracted="event_name" | event_name_extracted=~"code"' in q
             assert '| event_name=~"code"' not in q
-        if era is LokiReadEra.INDEXED:
-            assert 'event_name="code"' in range_queries[0]
-        else:
-            # The legacy selector must stay matcher-free — an SM event_name
-            # matcher there would reintroduce the batch-reuse label mismatch.
-            assert 'event_name="code"' not in range_queries[0]
+        assert 'event_name="code"' in range_queries[0]
 
 
 # ─── count_events_series / attribute_max_series (ops panel, task #1197) ─────
@@ -2492,21 +2346,13 @@ class TestCountEventsSeries:
         assert q.startswith("sum(count_over_time((")
         assert "sum by" not in q
 
-    def test_straddle_keeps_the_grid_and_adds_each_bucket(
+    def test_single_indexed_window_keeps_the_range_grid(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         client = _install(
             monkeypatch,
-            [
-                {"data": {"result": [{"metric": {}, "values": [[1786311000, "2"]]}]}},
-                {"data": {"result": [{"metric": {}, "values": [[1786311000, "3"]]}]}},
-            ],
+            {"data": {"result": [{"metric": {}, "values": [[1786311000, "2"]]}]}},
         )
-
-        def _slices(_window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
-            return _straddled_slices()
-
-        monkeypatch.setattr(loki_events, "_read_slices", _slices)
 
         out = loki_events.count_events_series(
             event_names=["sse_drop"],
@@ -2515,11 +2361,11 @@ class TestCountEventsSeries:
             step_s=300,
         )
 
-        assert out == {"": [(1786311000, 5)]}
-        assert [call[1]["start"] for call in client.calls] == [_ROLL_OUT_START.timestamp()] * 2
-        assert [call[1]["end"] for call in client.calls] == [_ROLL_OUT_END.timestamp()] * 2
-        assert 'event_name=""' in client.calls[0][1]["query"]
-        assert 'event_name!="", event_name="sse_drop"' in client.calls[1][1]["query"]
+        assert out == {"": [(1786311000, 2)]}
+        assert len(client.calls) == 1
+        assert client.calls[0][1]["start"] == _ROLL_OUT_START.timestamp()
+        assert client.calls[0][1]["end"] == _ROLL_OUT_END.timestamp()
+        assert 'event_name="sse_drop"' in client.calls[0][1]["query"]
 
     def test_empty_window_short_circuits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, {"data": {"result": []}})
@@ -2572,19 +2418,13 @@ class TestAttributeMaxSeries:
         )
         assert client.calls == []
 
-    def test_straddle_uses_the_bucket_maximum(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        _install(
+    def test_single_indexed_window_uses_bucket_maximum(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _install(
             monkeypatch,
-            [
-                {"data": {"result": [{"metric": {}, "values": [[1786311000, "2.5"]]}]}},
-                {"data": {"result": [{"metric": {}, "values": [[1786311000, "3.5"]]}]}},
-            ],
+            {"data": {"result": [{"metric": {}, "values": [[1786311000, "2.5"]]}]}},
         )
-
-        def _slices(_window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
-            return _straddled_slices()
-
-        monkeypatch.setattr(loki_events, "_read_slices", _slices)
 
         assert loki_events.attribute_max_series(
             field="latency_ms",
@@ -2592,7 +2432,8 @@ class TestAttributeMaxSeries:
             from_=_ROLL_OUT_START,
             to=_ROLL_OUT_END,
             step_s=300,
-        ) == [(1786311000, 3.5)]
+        ) == [(1786311000, 2.5)]
+        assert len(client.calls) == 1
 
 
 class _RaisingClient:

@@ -36,11 +36,9 @@ _event_name_regex = _loki_logql._event_name_regex
 _tier_predicate = _loki_logql._tier_predicate
 _build_logql = _loki_logql._build_logql
 _window = _loki_logql._window
-_read_slices = _loki_logql._read_slices
 _slice_duration_s = _loki_logql._slice_duration_s
 _agg_pipeline = _loki_logql._agg_pipeline
 _agg_pipelines = _loki_logql._agg_pipelines
-_range_eras = _loki_logql._range_eras
 _weighted_quantile = _loki_logql._weighted_quantile
 
 _parse_line = _loki_event_rows._parse_line
@@ -67,7 +65,6 @@ class _LokiEventsFacade(ModuleType):
         "_get_json": (_loki_transport, "_get_json"),
         "_log_loki_failure": (_loki_transport, "_log_loki_failure"),
         "_read_gate": (_loki_transport, "_read_gate"),
-        "_read_slices": (_loki_logql, "_read_slices"),
     }
 
     def __setattr__(self, name: str, value: object) -> None:
