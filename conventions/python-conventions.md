@@ -230,9 +230,12 @@ One-off legitimate cases use inline `# noqa: T201` with a reason.
 
 `base.log.logger` is loguru: a message takes `{}` fields
 (`logger.warning("gate for {} raised: {}", name, exc)`), never printf `%s`,
-which loguru leaves in the text while dropping the arguments. Enforced by
-`scripts/lint/loguru_format.py` (hook `lint-loguru-format`); stdlib
-`logging` loggers keep `%s`.
+which loguru leaves in the text while dropping the arguments. A stdlib
+`logging.getLogger(...)` logger is the opposite: it keeps `%s`
+(`_log.warning("gate for %s raised: %s", name, exc)`), and a `{}` field with
+positional arguments raises `TypeError` at emit, losing the line. Both
+directions are enforced by `scripts/lint/loguru_format.py` (hook
+`lint-loguru-format`).
 
 ## No decorative emoji in core Python
 

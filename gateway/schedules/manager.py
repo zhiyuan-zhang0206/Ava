@@ -145,7 +145,7 @@ class ScheduleManager:
         # worktree is removed. Same guard as `ava start` (Task #966).
         refusal = prod_service_checkout_error(_REPO_ROOT)
         if refusal is not None:
-            _log.error("schedule supervision refused: {}", refusal)
+            _log.error("schedule supervision refused: %s", refusal)
             return
         self._task = asyncio.create_task(self._run(), name="schedule-manager")
 
