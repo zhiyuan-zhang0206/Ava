@@ -510,6 +510,16 @@ def _observe_cluster_health(
         _alert_failure(home, message, started_at=since)
         return 1
 
+    # Check disk before gateway liveness: a full data volume can keep the
+    # gateway from starting, and its alert must name the cause of that outage.
+    # Keep the existing success line in check 6's output position below.
+    disk_failure = _disk_usage_failure()
+    if disk_failure is not None:
+        message = f"FAIL: disk usage — {disk_failure}"
+        print(message, file=sys.stderr)
+        _alert_failure(home, message, deploy_explains=False)
+        return 1
+
     # 1. Gateway liveness (primary signal)
     if not _gateway_liveness_with_retry():
         failure_class = "environment" if _data_plane_abnormal() else "code"
@@ -575,17 +585,8 @@ def _check_alert_only_health(home: Path) -> int:
         return 1
     print("  ✓ service probes")
 
-    # 6. Data-volume usage — alert-only, same class as check 5: a full disk is
-    # the 2026-08-08 outage class (checkpoint growth filled the disk and the
-    # gateway could not start), but rolling back code frees no disk space, so
-    # it bypasses _unhealthy and alerts directly (edge-triggered, one firing +
-    # one recovery per episode).
-    disk_failure = _disk_usage_failure()
-    if disk_failure is not None:
-        message = f"FAIL: disk usage — {disk_failure}"
-        print(message, file=sys.stderr)
-        _alert_failure(home, message, deploy_explains=False)
-        return 1
+    # 6. Data-volume usage passed before gateway liveness. A full disk alerts
+    # directly instead of being graded as a code failure.
     print("  ✓ disk usage")
 
     # 7. Editable-install records — alert-only, same class as checks 5 and 6:

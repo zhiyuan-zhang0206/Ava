@@ -22,6 +22,7 @@ from tests.cli.test_cluster_health import (
 from tests.cli.test_cluster_health import (
     _sent_alerts as _sent_alerts,
 )
+from tests.cli.test_cluster_health import _write_aged_alert_state
 
 
 @pytest.mark.parametrize(
@@ -111,3 +112,45 @@ def test_health_probe_dispatch_preserves_observation_options(
             "check_schema": True,
         }
     ]
+
+
+def test_full_disk_is_reported_when_gateway_is_down(
+    _all_checks_pass: None,
+    _home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _sent_alerts: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Disk pressure must explain the gateway outage without being short-circuited."""
+    message = "FAIL: disk usage — data volume 92.4% used (watermark 90%)"
+    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(
+        cluster_health, "_disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"
+    )
+    _write_aged_alert_state(_home, message)
+
+    assert cluster_health.run_health_probe() == 1
+    assert message in capsys.readouterr().err
+    assert len(_sent_alerts) == 1
+    assert "disk usage" in _sent_alerts[0]
+    assert "gateway liveness" not in _sent_alerts[0]
+
+
+@pytest.mark.parametrize(
+    ("flag", "destination"),
+    [
+        ("crash-loop-check", "crash_loop_check"),
+        ("schema-check", "schema_check"),
+    ],
+)
+def test_health_probe_check_flags_disable_only_when_negated(flag: str, destination: str) -> None:
+    from cli.parsers import build_parser
+
+    parser = build_parser()
+    default = parser.parse_args(["cluster", "health-probe"])
+    disabled = parser.parse_args(["cluster", "health-probe", f"--no-{flag}"])
+    assert getattr(default, destination) is True
+    assert getattr(disabled, destination) is False
+    with pytest.raises(SystemExit) as refused:
+        parser.parse_args(["cluster", "health-probe", f"--{flag}"])
+    assert refused.value.code == 2

@@ -1370,6 +1370,10 @@ verbs above are documented in
 
 **Health observations and release decisions.** `ava cluster health-probe` retries
 gateway liveness three times, 30 seconds apart, before declaring it unhealthy.
+It checks data-volume usage before gateway liveness so a full disk that prevents
+gateway startup is reported as disk pressure. Both the crash-loop and schema
+checks are enabled by default; `--no-crash-loop-check` and `--no-schema-check`
+disable them individually.
 Gateway and population failures retain their code, environment, or local-maintenance
 classification. A disabled agent-host or native maintenance hold cannot hide a low
 global population: the probe still exits 1 and grades that outage. A live cluster

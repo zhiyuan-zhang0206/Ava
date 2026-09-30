@@ -518,16 +518,18 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         help="crash-loop detection window in minutes (default: 10)",
     )
     cluster_health_probe_p.add_argument(
-        "--crash-loop-check",
+        "--no-crash-loop-check",
         action="store_false",
+        dest="crash_loop_check",
         default=True,
-        help="run the crash-loop detection check (default: enabled)",
+        help="disable the crash-loop detection check (default: enabled)",
     )
     cluster_health_probe_p.add_argument(
-        "--schema-check",
+        "--no-schema-check",
         action="store_false",
+        dest="schema_check",
         default=True,
-        help="run the schema health check (default: enabled)",
+        help="disable the schema health check (default: enabled)",
     )
     cluster_health_probe_p.set_defaults(func=_h_cluster_health_probe)
 
