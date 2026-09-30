@@ -18,6 +18,7 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
 
     claude_models = {
         "claude-sonnet-5",
+        "claude-sonnet-5-5",
         "claude-haiku-4-5-20251001",
         "claude-opus-5",
         "claude-opus-5-5",
@@ -27,6 +28,7 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
     assert claude_models <= MODELS.keys()
     assert set(SUPPORTED_MODELS["claude"]) == {
         "claude-sonnet-5",
+        "claude-sonnet-5-5",
         "claude-haiku-4-5-20251001",
         "claude-opus-5",
         "claude-opus-5-5",
@@ -68,6 +70,20 @@ def test_claude_successors_and_thinking_contract() -> None:
         assert not MODELS[model].thinking_always_on, model
 
 
+def test_claude_sonnet_5_5_capabilities_and_display_successor() -> None:
+    ensure_provider_plugins_loaded()
+    sonnet = MODELS["claude-sonnet-5-5"]
+    assert sonnet.spawnable and sonnet.context_window == 1_000_000
+    assert sonnet.max_output_tokens == 128_000
+    assert sonnet.knowledge_cutoff == "2026-06"
+    assert sonnet.effort_levels == ("low", "medium", "high", "xhigh", "max")
+    assert sonnet.tuning.reasoning_effort == "high"
+    assert sonnet.media_types == frozenset({"image", "pdf"})
+    assert sonnet.thinking_always_on
+    assert MODELS["claude-sonnet-5"].superseded_by == "claude-sonnet-5-5"
+    assert MODELS["claude-sonnet-5"].spawnable
+
+
 def test_gpt6_sol_luna_successors_and_capabilities() -> None:
     ensure_provider_plugins_loaded()
     assert MODELS["gpt-5.6-sol"].superseded_by == "gpt-6-sol"
@@ -84,6 +100,19 @@ def test_gpt6_sol_luna_successors_and_capabilities() -> None:
         assert spec.media_types == frozenset({"image"})
 
 
+def test_gpt6_1_sol_capabilities_and_display_successor() -> None:
+    ensure_provider_plugins_loaded()
+    sol_61 = MODELS["gpt-6.1-sol"]
+    assert sol_61.spawnable and sol_61.context_window == 1_050_000
+    assert sol_61.max_output_tokens is None
+    assert sol_61.knowledge_cutoff == "2026-04"
+    assert sol_61.effort_levels == ("low", "medium", "high", "xhigh", "max")
+    assert sol_61.tuning.reasoning_effort == "medium"
+    assert sol_61.media_types == frozenset({"image"})
+    assert MODELS["gpt-6-sol"].superseded_by == "gpt-6.1-sol"
+    assert MODELS["gpt-6-sol"].spawnable
+
+
 def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> None:
     discovered = enable_config.discover_plugins()
     config = enable_config.load_for_runtime(set(discovered))
@@ -96,6 +125,7 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
         "gpt-5.6-terra",
         "gpt-5.6-luna",
         "gpt-6-sol",
+        "gpt-6.1-sol",
         "gpt-6-luna",
     }
     assert gpt_models <= MODELS.keys()
@@ -105,6 +135,7 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
         "gpt-5.6-terra",
         "gpt-5.6-luna",
         "gpt-6-sol",
+        "gpt-6.1-sol",
         "gpt-6-luna",
     }
     assert pricing.model_vendor("gpt-5.6-sol") == "openai"

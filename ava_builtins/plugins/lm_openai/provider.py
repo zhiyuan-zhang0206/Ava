@@ -151,9 +151,21 @@ register(
         "gpt-6-sol": ModelSpec(
             provider="gpt",
             spawnable=True,
+            # Display-only supersession: existing agent configs remain valid.
+            superseded_by="gpt-6.1-sol",
             context_window=1_050_000,
             knowledge_cutoff="2026-04",
             effort_levels=_GPT_EFFORT,
+            tuning=ModelTuning(reasoning_effort="medium"),
+            media_types=frozenset({"image"}),
+        ),
+        "gpt-6.1-sol": ModelSpec(
+            provider="gpt",
+            spawnable=True,
+            context_window=1_050_000,
+            knowledge_cutoff="2026-04",
+            # Live-checked 2026-09-30: none returns 400; low is accepted.
+            effort_levels=("low", "medium", "high", "xhigh", "max"),
             tuning=ModelTuning(reasoning_effort="medium"),
             media_types=frozenset({"image"}),
         ),
@@ -268,6 +280,38 @@ register(
                             input_tokens_max=None,
                             cache_miss="4.0",
                             cache_hit="0.40",
+                            output="15.0",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "gpt-6.1-sol": PriceRates(
+            cache_miss=2.0,
+            cache_hit=0.10,
+            output=10.0,
+            source_url="https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+            source_checked_at="2026-09-30",
+            vendor="openai",
+            # Cache writes cost $2.50/M; requests over 272K input tokens
+            # use the higher rates for the full request.
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=272_000,
+                            cache_miss="2.0",
+                            cache_hit="0.10",
+                            output="10.0",
+                        ),
+                        PriceTier(
+                            input_tokens_min=272_001,
+                            input_tokens_max=None,
+                            cache_miss="4.0",
+                            cache_hit="0.20",
                             output="15.0",
                         ),
                     ),

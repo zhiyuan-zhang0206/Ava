@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-09-22.1",
+  "catalog_version": "2026-09-30.1",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -581,6 +581,29 @@
         }
       ]
     },
+    "claude-sonnet-5-5": {
+      "vendor": "anthropic",
+      "source_url": "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
+      "source_checked_at": "2026-09-30",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "2.0",
+                "cache_read": "0.20",
+                "output": "10.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
     "claude-haiku-4-5-20251001": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",
@@ -869,6 +892,39 @@
               "rates": {
                 "input": "4.0",
                 "cache_read": "0.40",
+                "output": "15.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-6.1-sol": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+      "source_checked_at": "2026-09-30",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": 272000,
+              "rates": {
+                "input": "2.0",
+                "cache_read": "0.10",
+                "output": "10.0"
+              },
+              "utc_daily_overrides": []
+            },
+            {
+              "input_tokens_min": 272001,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "4.0",
+                "cache_read": "0.20",
                 "output": "15.0"
               },
               "utc_daily_overrides": []
