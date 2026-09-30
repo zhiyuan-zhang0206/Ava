@@ -90,6 +90,25 @@ def test_mcp_install_refuses_manifest_beyond_host_engines(
     assert not (unit_home / "mcps" / "acme").exists()
 
 
+def test_mcp_install_refuses_prerelease_host_without_opt_in(
+    unit_home: Path,
+    tmp_path: Path,
+    fake_uv_sync: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    def prerelease_host(_repo: Path) -> str:
+        return "1.2.3-alpha"
+
+    monkeypatch.setattr("base.deploy.git.host_version.host_version", prerelease_host)
+    pkg = _make_mcp_package(tmp_path)
+    _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"ava": ">=1.2.3"}))
+    assert cmd_mcp_install(str(pkg), None, None) == 1
+    assert "requires Ava >=1.2.3" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert reg.get("acme") is None
+    assert not (unit_home / "mcps" / "acme").exists()
+
+
 def test_mcp_install_refuses_unbounded_pyproject(
     unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
 ) -> None:
