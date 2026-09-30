@@ -278,15 +278,6 @@ def validate_migrations_at_ref(ref: str, *, repo_root: Path | None = None) -> No
     validate_migration_layout(names)
 
 
-def required_migration_set_from_names(names: Iterable[str]) -> set[str]:
-    """Derive the required set from one already captured source inventory."""
-    names = tuple(names)
-    validate_migration_layout(names)
-    return {_BASELINE_NAME} | {
-        stem for name in names if (stem := _migration_stem(name)) is not None
-    }
-
-
 def required_migration_set() -> set[str]:
     """The set of migration names the code in this checkout expects the DB to
     have applied: the baseline sentinel plus every migration file in migrations/.

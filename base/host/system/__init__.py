@@ -6,6 +6,5 @@ that owns the application root), ``cron`` (the health-probe cron line),
 ``logs_job``,
 ``packages_job`` and ``pr_flow_job`` (recurring OS jobs), with
 ``boot_policy`` stating the boot retry policy once. ``probes`` holds the host
-capability probes and ``job_observation`` the settings-free, read-only native
-scheduler queries.
+capability probes.
 """

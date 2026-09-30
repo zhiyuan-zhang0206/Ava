@@ -17,7 +17,7 @@ The primitives for ending a process Ava started. Normal `pause` and `stop`
 use `cli/commands/lifecycle/service_stop.py`: deliver a verified graceful signal and
 wait for actual process exit without implicit escalation. Their shared deadline
 reports an incomplete stop if resources remain. Persistent terminals are the
-exception: a stop, a release or a PITR activation HUPs/TERMs each shell's
+exception: a stop HUPs/TERMs each shell's
 captured session and SIGKILLs what outlives a bounded grace
 ([[base/sessions/pty/docs/session-kill.ava.okf.md|session kill]];
 decisions/2026-09-28-stop-escalates-to-sigkill.md). Explicit force may use a
@@ -67,8 +67,7 @@ birth pair the stop path itself revalidates, and the best-effort cmdline —
 plus the stop stage (the phase label) that hit the deadline. `stop_services`
 raises it as `StopIncompleteError` (a `TimeoutError`, so every existing catch
 keeps working). The terminal closure reports a process that outlived its
-SIGKILL the same way, at stage `terminals` (`close_terminals`) or
-`release-terminals` (`close_release_terminals`, a release or PITR).
+SIGKILL the same way, at stage `terminals` (`close_terminals`).
 
 Reads are best-effort but never dishonest: a process that cannot be inspected
 is listed as unreadable rather than dropped, and a PID recycled since capture
