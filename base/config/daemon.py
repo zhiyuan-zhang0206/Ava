@@ -565,30 +565,6 @@ class DaemonSettings(
         },
     )
 
-    events_maintenance_trim_deadline_s: float = Field(
-        default=300.0,
-        alias="AVA_EVENTS_MAINTENANCE_TRIM_DEADLINE_S",
-        description="Hard deadline in seconds for one events-maintenance checkpoint-trim pass; exceeding it wedges the loop for watchdog respawn.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    events_maintenance_checkpoint_trim_enabled: bool = Field(
-        default=False,
-        alias="AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED",
-        description="Enforce the per-thread keep-three checkpoint budget on the maintenance fast loop. Default false (never-delete ruling, 2026-09-12): nothing is deleted while the checkpoint storage model is retention-first. Setting true re-enables history deletion — an explicit authorization, and unsafe for delta-written threads.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     events_maintenance_resolution_deadline_s: float = Field(
         default=600.0,
         alias="AVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S",
