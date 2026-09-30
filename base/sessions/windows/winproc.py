@@ -581,7 +581,7 @@ def _spared_pids(name: str, proc: psutil.Process) -> frozenset[int]:
       (its child) first, so the Windows agent-runner ended up stopped *and*
       un-updated, with the log ending mid-teardown right after the watchdog line.
       Agent processes are records in the same namespace and were exposed the same
-      way: the fleet update's stop deliberately leaves them running for the rollout to
+      way: `ava cluster update`'s stop deliberately leaves them running for the rollout to
       quiesce, yet stopping `ava-ops` force-killed every agent it had launched,
       skipping the graceful path their `finally` needs.
     - **this process and its own ancestors below `proc`.** Whoever is running the
