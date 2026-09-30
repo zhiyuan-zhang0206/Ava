@@ -463,8 +463,7 @@ class TestStatusSnapshot:
 class TestClusterEndpoints:
     @pytest.mark.parametrize("route", ["/api/cluster/stop", "/api/cluster/resume"])
     def test_the_legacy_deploy_lease_transition_is_gone(self, route: str) -> None:
-        """A fleet release stops and resumes units itself (cli/release_fleet); the
-        legacy lease-bound stop/resume routes and their ops kinds no longer exist."""
+        """The legacy lease-bound stop/resume routes and their ops kinds no longer exist."""
         with TestClient(app) as client:
             r = client.post(
                 route,

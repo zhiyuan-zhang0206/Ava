@@ -591,7 +591,7 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
 
     AVA_DB_URL's port is decided by AVA_PGBOUNCER_ENABLED at URL generation, so
     converge (which runs before the data-plane bring-up on every `ava start` /
-    `ava cluster update`) keeps the `.env` value in sync, idempotently:
+    the fleet update) keeps the `.env` value in sync, idempotently:
 
     1. Normalize AVA_DB_URL's port: the pooler listener (`record_pgbouncer_port`)
        when the toggle is on, the direct Postgres port (`record_postgres_port`)

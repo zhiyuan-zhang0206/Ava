@@ -8,7 +8,7 @@ exits after messaging.
 
 Delivery survives a restart window: the wake send retries with doubling gaps
 (10s to a 160s cap, ~10.5 min in total) because a gateway / agent restart
-window (an update wave, `ava cluster update`) outlasts the SDK's own 3 quick
+window (an update wave, the fleet update) outlasts the SDK's own 3 quick
 retries; if every attempt fails the watcher exits 2.
 
 The condition comes from the placeholders below:

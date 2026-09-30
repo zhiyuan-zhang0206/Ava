@@ -12,7 +12,7 @@ effects.
 IDLE_EXIT_CODE = 42  # `ava.self.terminate()` / `ava.self.restart()`: this turn ends (halted=True)
 SYSTEM_HALT_EXIT_CODE = 43  # `ava.self.compact(summary)`: agent altered control flow
 
-# `ava restart` / `ava cluster update` refused BEFORE stopping anything: its
+# `ava restart` refused BEFORE stopping anything: its
 # validate-before-kill preflight failed, so the host is untouched and still serving.
 # Read by the detached updater shell, which must recover a host that is DOWN
 # (`ava start`) and must NOT `ava start` over one that is deliberately still up.

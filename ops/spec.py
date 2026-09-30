@@ -379,8 +379,7 @@ class Spec:
 
 
 # Compatibility re-export: legacy importers (`from ops.spec import
-# build_services`, scripts/release_proofs/prepare_plugin_fixture.py's generated
-# `services.py` template, tests) take the canonical roster from this module.
+# build_services`, tests) take the canonical roster from this module.
 # Placed at the BOTTOM deliberately: roster's build_services calls back into
 # this module's helpers (plugin_services /
 # _assert_unique_sessions) lazily, so this edge must not run while this module

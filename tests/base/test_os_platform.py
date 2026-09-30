@@ -98,7 +98,7 @@ class TestEnsureLineBufferedStdio:
             f"sys.path.insert(0, {repo_root!r})\n"
             f"from base.native_process.os_platform import ensure_line_buffered_stdio\n"
             f"ensure_line_buffered_stdio()\n"
-            f"print('[ava cluster update] header')\n"
+            f"print('[update] header')\n"
             f"time.sleep(30)\n"
         )
         proc = subprocess.Popen(  # noqa: S603 — this interpreter, a literal script
@@ -119,7 +119,7 @@ class TestEnsureLineBufferedStdio:
         proc.kill()
         proc.wait(timeout=10)
         assert got, "the child's line did not reach the pipe while it was still running"
-        assert got[0].strip() == "[ava cluster update] header"
+        assert got[0].strip() == "[update] header"
 
     def test_idempotent_and_survives_a_stream_without_reconfigure(
         self, monkeypatch: pytest.MonkeyPatch

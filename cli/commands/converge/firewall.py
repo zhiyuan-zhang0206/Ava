@@ -11,7 +11,7 @@ never existed — and retry through `sudo -n` on releases that still require
 elevation.
 
 A plain `sudo` would prompt for a password, and converge runs unattended from
-`ava start`, the watchdog, and `ava cluster update`. A prompt in that path does
+`ava start`, the watchdog, and the fleet update. A prompt in that path does
 not degrade to "unfixed"; it hangs the bring-up, which is strictly worse than the
 defect it was trying to repair, and on a headless host it hangs it invisibly.
 `sudo -n` either runs the fallback mutation or fails immediately, and a failure

@@ -5,7 +5,7 @@ Five reference watchers wake the launching agent with a single send at their
 trigger point: ``watch_idle.py`` (ava-watcher, ava-goal, and ava-fleet), ``watch_work.py``
 (ava-use-other-agents), and ``gather_files.py``
 (ava-dynamic-workflow). A gateway / agent restart window (an update wave,
-``ava cluster update``) outlasts the SDK's own 3 quick retries; before this the
+the fleet update) outlasts the SDK's own 3 quick retries; before this the
 exception killed the watcher and the wake was lost (2026-09-17, task #3694 —
 the same class as #2663's ci_watcher fix). Each template now retries delivery
 with doubling gaps and exits 2 when every attempt failed. These tests pin the
