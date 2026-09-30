@@ -19,7 +19,6 @@ import pytest
 import yaml
 
 from base.deploy.release import collector_artifact as artifact
-from base.host.net import resilience
 from cli.commands.observability import otel_collector as oc
 
 
@@ -1210,11 +1209,11 @@ def test_download_with_retry_preserves_contract(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    retry_waits: list[float],
     failures: int,
 ) -> None:
     errors = [OSError(f"reset {i}") for i in range(1, failures + 1)]
     calls = 0
-    sleeps: list[float] = []
 
     def download(_url: str, dest: Path) -> None:
         nonlocal calls
@@ -1224,8 +1223,6 @@ def test_download_with_retry_preserves_contract(
         dest.write_bytes(b"ok")
 
     monkeypatch.setattr(artifact, "_stream_download", download)
-    monkeypatch.setattr(artifact.time, "sleep", sleeps.append)
-    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
     monkeypatch.setattr(artifact.time, "monotonic", lambda: 10.0)
     url = "https://example.invalid/t.tar.gz"
     if failures == 3:
@@ -1240,7 +1237,7 @@ def test_download_with_retry_preserves_contract(
         artifact._download_with_retry(url, tmp_path / "t.tar.gz")
         assert (tmp_path / "t.tar.gz").read_bytes() == b"ok"
     assert calls == min(failures + 1, 3)
-    assert sleeps == [5.0 * i for i in range(1, calls)]
+    assert retry_waits == [5.0 * i for i in range(1, calls)]
     assert capsys.readouterr().err == "".join(
         f"  ! otel-collector: download attempt {i}/3 failed after 0s: reset {i}\n"
         for i in range(1, failures + 1)

@@ -33,6 +33,10 @@ from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.web import FetchError, SearchError, WebError
 from base.config import settings
 
+# Retry backoff waits are recorded, not slept, so retry-path tests run instantly; the retry
+# loop itself is still exercised (call counts).
+pytestmark = pytest.mark.usefixtures("retry_waits")
+
 
 class _FakeResp:
     """Minimum urllib.request.urlopen return object — supports `with` + `.read()`."""
@@ -48,13 +52,6 @@ class _FakeResp:
 
     def read(self) -> bytes:
         return self._payload
-
-
-@pytest.fixture(autouse=True)
-def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Neutralize base.host.net.resilience backoff sleeps so retry-path tests run
-    instantly; the retry loop itself is still exercised (call counts)."""
-    monkeypatch.setattr("base.host.net.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _make_brave_response(results: list[dict]) -> bytes:

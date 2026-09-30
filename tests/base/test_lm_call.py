@@ -291,6 +291,11 @@ def test_answer_text_build_failure_uses_build_error_when_given(
 # ─── invoke_text retry ────────────────────────────────────────────────────
 
 
+def _no_jitter(delay: float) -> float:
+    """Stand-in for `jittered` where `invoke_response` imported it: waits equal the backoff."""
+    return delay
+
+
 def test_invoke_text_retries_transient_then_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -299,8 +304,7 @@ def test_invoke_text_retries_transient_then_succeeds(
     import httpx
 
     monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.host.net.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
     calls = {"n": 0}
 
     class _Flaky:
@@ -330,8 +334,7 @@ def test_invoke_text_retry_exhausted_raises_error_type(
     import httpx
 
     monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.host.net.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -357,8 +360,7 @@ def test_invoke_text_retry_uses_exponential_backoff(
 
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.host.net.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -383,8 +385,7 @@ def test_invoke_text_retry_backoff_capped(monkeypatch: pytest.MonkeyPatch) -> No
 
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.host.net.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -435,8 +436,7 @@ def test_invoke_text_retry_respects_retry_after(
     120s), plus jitter — mirroring the SDKs' own header reading at our layer."""
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.host.net.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -458,8 +458,7 @@ def test_invoke_text_retry_after_capped_at_120(
     sequence applies instead."""
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.host.net.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -479,8 +478,7 @@ def test_invoke_text_retry_after_ms_header(
     """`retry-after-ms` (the SDKs' non-standard precision header) is honored."""
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.host.net.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(

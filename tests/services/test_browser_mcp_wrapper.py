@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from base.config import settings
-from base.host.net import resilience
 from services.browser.mcp_socket_bridge import NotDeliveredError
 from services.browser.mcp_wrapper import _Link, _ReconnectingLink
 
@@ -360,13 +359,12 @@ async def test_link_drain_reset_preserves_unknown_delivery_error() -> None:
 
 
 async def test_shared_socket_bridge_dials_with_bounded_retries(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
 ) -> None:
     bridge = import_module("services.browser.mcp_socket_bridge")
     failures = [FileNotFoundError("absent"), ConnectionRefusedError("refused")]
     reader, writer = FakeReader([]), FakeWriter()
     calls: list[tuple[str, int]] = []
-    sleeps: list[float] = []
 
     async def open_socket(*, path: str, limit: int):
         calls.append((path, limit))
@@ -374,30 +372,25 @@ async def test_shared_socket_bridge_dials_with_bounded_retries(
             raise failures.pop(0)
         return reader, writer
 
-    async def sleep(delay: float) -> None:
-        sleeps.append(delay)
-
     monkeypatch.setattr(bridge.asyncio, "open_unix_connection", open_socket)
-    monkeypatch.setattr(bridge.asyncio, "sleep", sleep)
-    monkeypatch.setattr(resilience, "_asleep", sleep)
     assert await bridge.dial_unix_socket("test.sock", service_label="chrome MCP daemon") == (
         reader,
         writer,
     )
     assert calls == [("test.sock", 64 * 1024 * 1024)] * 3
-    assert sleeps == [0.5, 0.5]
+    assert retry_waits == [0.5, 0.5]
 
     async def always_refused(*, path: str, limit: int):
         raise ConnectionRefusedError("refused")
 
     monkeypatch.setattr(bridge.asyncio, "open_unix_connection", always_refused)
     calls.clear()
-    sleeps.clear()
+    retry_waits.clear()
     with pytest.raises(ConnectionError) as error:
         await bridge.dial_unix_socket("test.sock", service_label="chrome MCP daemon")
     assert str(error.value) == "chrome MCP daemon not reachable at test.sock: refused"
     assert error.value.__context__ is None
-    assert sleeps == [0.5] * 9
+    assert retry_waits == [0.5] * 9
 
 
 async def test_shared_socket_bridge_passes_through_unclassified_error(
@@ -414,15 +407,8 @@ async def test_shared_socket_bridge_passes_through_unclassified_error(
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
-async def test_wrapper_retry_budget_and_backoff(monkeypatch: pytest.MonkeyPatch, side: str) -> None:
+async def test_wrapper_retry_budget_and_backoff(retry_waits: list[float], side: str) -> None:
     wrapper = import_module(f"services.{side}.mcp_wrapper")
-    sleeps: list[float] = []
-
-    async def sleep(delay: float) -> None:
-        sleeps.append(delay)
-
-    monkeypatch.setattr(wrapper.asyncio, "sleep", sleep)
-    monkeypatch.setattr(resilience, "_asleep", sleep)
     reconnecting = wrapper._ReconnectingLink()
     failure = RuntimeError("offline")
     connect = AsyncMock(side_effect=failure)
@@ -432,7 +418,7 @@ async def test_wrapper_retry_budget_and_backoff(monkeypatch: pytest.MonkeyPatch,
     assert error.value is failure
     assert connect.await_count == 6
     base = 1.0 if side == "browser" else 0.5
-    assert sleeps == [base * 2**attempt for attempt in range(5)]
+    assert retry_waits == [base * 2**attempt for attempt in range(5)]
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
@@ -472,9 +458,7 @@ async def test_wrapper_failure_policy_and_wire_messages(side: str) -> None:
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
-async def test_upstream_rejection_is_browser_only(
-    monkeypatch: pytest.MonkeyPatch, side: str
-) -> None:
+async def test_upstream_rejection_is_browser_only(retry_waits: list[float], side: str) -> None:
     wrapper = import_module(f"services.{side}.mcp_wrapper")
     rejection = "chrome upstream session is down; browser-mcp will restart"
     writers = [FakeWriter(), FakeWriter()]
@@ -486,26 +470,19 @@ async def test_upstream_rejection_is_browser_only(
         wrapper._Link(FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]), writers[1]),
     ]
     connect = AsyncMock(side_effect=links)
-    sleeps: list[float] = []
-
-    async def sleep(delay: float) -> None:
-        sleeps.append(delay)
-
-    monkeypatch.setattr(wrapper.asyncio, "sleep", sleep)
-    monkeypatch.setattr(resilience, "_asleep", sleep)
     reconnecting = wrapper._ReconnectingLink()
     reconnecting._connect_once = connect
     if side == "browser":
         assert await reconnecting.request({"method": "call_tool", "tool": "x"}) == "ok"
         assert connect.await_count == 2
         assert [len(writer.written) for writer in writers] == [1, 1]
-        assert sleeps == [1.0]
+        assert retry_waits == [1.0]
     else:
         with pytest.raises(RuntimeError, match=rejection):
             await reconnecting.request({"method": "call_tool", "tool": "x"})
         assert connect.await_count == 1
         assert [len(writer.written) for writer in writers] == [1, 0]
-        assert sleeps == []
+        assert retry_waits == []
     assert closed == [0]
 
 
@@ -541,7 +518,7 @@ async def test_stalled_drain_is_unknown_delivery_without_retry(
 @pytest.mark.parametrize("side", ["browser", "computer"])
 @pytest.mark.parametrize("fail_stage", ["write", "drain"])
 async def test_write_or_drain_failure_is_not_retried(
-    monkeypatch: pytest.MonkeyPatch, side: str, fail_stage: str
+    retry_waits: list[float], side: str, fail_stage: str
 ) -> None:
     wrapper = import_module(f"services.{side}.mcp_wrapper")
 
@@ -567,13 +544,6 @@ async def test_write_or_drain_failure_is_not_retried(
             ),
         ]
     )
-    sleeps: list[float] = []
-
-    async def sleep(delay: float) -> None:
-        sleeps.append(delay)
-
-    monkeypatch.setattr(wrapper.asyncio, "sleep", sleep)
-    monkeypatch.setattr(resilience, "_asleep", sleep)
     reconnecting = wrapper._ReconnectingLink()
     reconnecting._connect_once = connect
     with pytest.raises(BrokenPipeError, match="socket broke"):
@@ -584,7 +554,7 @@ async def test_write_or_drain_failure_is_not_retried(
         0,
     ]
     assert closed == [True]
-    assert sleeps == []
+    assert retry_waits == []
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
@@ -616,7 +586,7 @@ async def test_drain_reset_surfaces_unknown_delivery_without_retry(side: str) ->
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
 async def test_closed_before_write_retries_without_sending(
-    monkeypatch: pytest.MonkeyPatch, side: str
+    retry_waits: list[float], side: str
 ) -> None:
     wrapper = import_module(f"services.{side}.mcp_wrapper")
     closed = FakeWriter()
@@ -628,16 +598,9 @@ async def test_closed_before_write_retries_without_sending(
             wrapper._Link(FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]), fresh),
         ]
     )
-    sleeps: list[float] = []
-
-    async def sleep(delay: float) -> None:
-        sleeps.append(delay)
-
-    monkeypatch.setattr(wrapper.asyncio, "sleep", sleep)
-    monkeypatch.setattr(resilience, "_asleep", sleep)
     reconnecting = wrapper._ReconnectingLink()
     reconnecting._connect_once = connect
     assert await reconnecting.request({"method": "call_tool", "tool": "click"}) == "ok"
     assert connect.await_count == 2
     assert [len(closed.written), len(fresh.written)] == [0, 1]
-    assert sleeps == [1.0 if side == "browser" else 0.5]
+    assert retry_waits == [1.0 if side == "browser" else 0.5]

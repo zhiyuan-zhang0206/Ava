@@ -20,7 +20,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 import ava.mcps._browser as browser_mod
-from base.host.net import resilience
 
 
 class _FakeWriter:
@@ -324,9 +323,8 @@ async def test_connect_browser_direct_retries_until_socket_appears(
 
 @pytest.mark.parametrize("failure", [FileNotFoundError, ConnectionRefusedError])
 async def test_dial_browser_exhaustion_has_no_trailing_sleep(
-    monkeypatch: pytest.MonkeyPatch, failure: type[OSError]
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], failure: type[OSError]
 ) -> None:
-    sleeps: list[float] = []
     calls = 0
 
     async def fail(*, path: str, limit: int) -> None:
@@ -335,18 +333,13 @@ async def test_dial_browser_exhaustion_has_no_trailing_sleep(
         assert (path, limit) == ("test.sock", browser_mod._LINE_LIMIT)
         raise failure("offline")
 
-    async def sleep(delay: float) -> None:
-        sleeps.append(delay)
-
     monkeypatch.setattr(browser_mod.asyncio, "open_unix_connection", fail)
-    monkeypatch.setattr(browser_mod.asyncio, "sleep", sleep)
-    monkeypatch.setattr(resilience, "_asleep", sleep)
     with pytest.raises(ConnectionError) as error:
         await browser_mod._dial_browser_mcp("test.sock")
     assert str(error.value) == "browser-mcp daemon not reachable at test.sock: offline"
     assert error.value.__context__ is None
     assert calls == 10
-    assert sleeps == [0.5] * 9
+    assert retry_waits == [0.5] * 9
 
 
 async def test_dial_browser_non_retryable_error_passes_through(

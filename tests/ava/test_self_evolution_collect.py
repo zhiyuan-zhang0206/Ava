@@ -484,14 +484,6 @@ class _ScriptedClient:
         )
 
 
-def _capture_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    """Pin base.host.net.resilience's sleep seam (its own tests' pattern) so retry
-    tests assert the wait budget instead of sleeping it."""
-    sleeps: list[float] = []
-    monkeypatch.setattr("base.host.net.resilience._sleep", sleeps.append)
-    return sleeps
-
-
 def test_fetch_client_disables_env_proxy(collect_mod: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """2026-09-12 regression: httpx honored the env proxy for cluster-internal
     reads (a no_proxy form it does not match), so /api/events went to a local
@@ -506,7 +498,7 @@ def test_fetch_client_disables_env_proxy(collect_mod: Any, monkeypatch: pytest.M
 
 
 def test_fetch_retries_transient_then_succeeds(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
 ) -> None:
     """A blip inside the budget must not cost the day's dataset."""
     rows = [_row(1, _ts_after(0))]
@@ -515,18 +507,17 @@ def test_fetch_retries_transient_then_succeeds(
         payload={"items": rows, "meta": {"has_more": False}},
     )
     _patch_client(collect_mod, monkeypatch, client)
-    sleeps = _capture_sleeps(monkeypatch)
 
     out = collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
 
     assert [r["id"] for r in out] == [1]
     assert client.calls == 3
-    assert sleeps == [5.0, 10.0]
+    assert retry_waits == [5.0, 10.0]
 
 
 @pytest.mark.parametrize("code", [502, 503, 504])
 def test_fetch_retryable_status_exhausts_budget_with_diagnostics(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, code: int
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, code: int, retry_waits: list[float]
 ) -> None:
     """2026-09-12 regression: a spent budget must raise with the responder's
     status, headers, and body — the evidence that tells a local forward
@@ -538,7 +529,6 @@ def test_fetch_retryable_status_exhausts_budget_with_diagnostics(
     )
     client = _ScriptedClient([reply] * 5)
     _patch_client(collect_mod, monkeypatch, client)
-    sleeps = _capture_sleeps(monkeypatch)
 
     with pytest.raises(RuntimeError) as err:
         collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
@@ -549,7 +539,7 @@ def test_fetch_retryable_status_exhausts_budget_with_diagnostics(
     assert "<html>Bad Gateway</html>" in message
     assert "after 5 attempts" in message
     assert client.calls == 5
-    assert sleeps == [5.0, 10.0, 20.0, 40.0]
+    assert retry_waits == [5.0, 10.0, 20.0, 40.0]
     assert isinstance(err.value.__cause__, httpx.HTTPStatusError)
 
 
@@ -559,13 +549,12 @@ def test_fetch_retryable_status_exhausts_budget_with_diagnostics(
     ids=["connect-error", "timeout"],
 )
 def test_fetch_transport_failure_exhausts_budget_with_diagnostics(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, failure: Exception
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, failure: Exception, retry_waits: list[float]
 ) -> None:
     """Transport errors (httpx.TransportError includes TimeoutException) run
     the same budget, and the spent-budget error names the failure."""
     client = _ScriptedClient([failure] * 5)
     _patch_client(collect_mod, monkeypatch, client)
-    sleeps = _capture_sleeps(monkeypatch)
 
     with pytest.raises(RuntimeError) as err:
         collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
@@ -574,9 +563,10 @@ def test_fetch_transport_failure_exhausts_budget_with_diagnostics(
     assert type(failure).__name__ in message
     assert str(failure) in message
     assert client.calls == 5
-    assert sleeps == [5.0, 10.0, 20.0, 40.0]
+    assert retry_waits == [5.0, 10.0, 20.0, 40.0]
 
 
+@pytest.mark.usefixtures("retry_waits")
 def test_fetch_exhausted_diagnostics_are_bounded(
     collect_mod: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -585,7 +575,6 @@ def test_fetch_exhausted_diagnostics_are_bounded(
     reply = _Status(503, headers={"x-note": "h" * 1000}, body="b" * 1000)
     client = _ScriptedClient([reply] * 5)
     _patch_client(collect_mod, monkeypatch, client)
-    _capture_sleeps(monkeypatch)
 
     with pytest.raises(RuntimeError) as err:
         collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
@@ -598,24 +587,23 @@ def test_fetch_exhausted_diagnostics_are_bounded(
 
 @pytest.mark.parametrize("code", [429, 500, 404])
 def test_fetch_permanent_status_fails_fast(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, code: int
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, code: int, retry_waits: list[float]
 ) -> None:
     """Task #3126: only 502/503/504 are retryable. 429/500 (transient in the
     shared default) and every other status are structural for this read —
     one attempt, no sleep, the original HTTPStatusError."""
     client = _ScriptedClient([_Status(code)] * 5)
     _patch_client(collect_mod, monkeypatch, client)
-    sleeps = _capture_sleeps(monkeypatch)
 
     with pytest.raises(httpx.HTTPStatusError):
         collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
 
     assert client.calls == 1
-    assert sleeps == []
+    assert retry_waits == []
 
 
 def test_fetch_no_observability_refusal_fails_fast_with_typed_error(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
 ) -> None:
     """A cluster without observability refuses reads with 503 +
     code=observability_read_unavailable (gateway/_loki_transport._read_gate).
@@ -634,18 +622,17 @@ def test_fetch_no_observability_refusal_fails_fast_with_typed_error(
     reply = _Status(503, headers={"content-type": "application/problem+json"}, body=body)
     client = _ScriptedClient([reply] * 5)
     _patch_client(collect_mod, monkeypatch, client)
-    sleeps = _capture_sleeps(monkeypatch)
 
     with pytest.raises(collect_mod.ObservabilityReadUnavailable) as err:
         collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
 
     assert "observability reads unavailable" in str(err.value)  # the gateway detail rides along
     assert client.calls == 1
-    assert sleeps == []
+    assert retry_waits == []
 
 
 def test_fetch_503_with_another_problem_code_keeps_the_retry_path(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
 ) -> None:
     """The refusal check is narrow: any other problem+json 503 (admission
     shedding, proxy) keeps its normal retry path — a transient outage must
@@ -654,13 +641,12 @@ def test_fetch_503_with_another_problem_code_keeps_the_retry_path(
     reply = _Status(503, headers={"content-type": "application/problem+json"}, body=body)
     client = _ScriptedClient([reply] * 5)
     _patch_client(collect_mod, monkeypatch, client)
-    sleeps = _capture_sleeps(monkeypatch)
 
     with pytest.raises(RuntimeError, match="after 5 attempts"):
         collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
 
     assert client.calls == 5
-    assert sleeps == [5.0, 10.0, 20.0, 40.0]
+    assert retry_waits == [5.0, 10.0, 20.0, 40.0]
 
 
 # ── plugin attribution (issue #40) ──────────────────────────────────────────

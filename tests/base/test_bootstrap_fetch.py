@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from base import config
 from base.host.env import bootstrap
-from base.host.net import resilience
 from gateway.app import app
 
 
@@ -196,10 +195,9 @@ def test_inject_treats_blank_as_absent(
     assert os.environ["DEEPSEEK_API_KEY"] == "real-fetched-key"
 
 
-def test_fetch_retries_transient_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bootstrap.time, "sleep", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
-    sleeps: list[float] = []
-    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
+def test_fetch_retries_transient_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+) -> None:
     calls = {"n": 0}
 
     class _Resp:
@@ -217,7 +215,7 @@ def test_fetch_retries_transient_then_succeeds(monkeypatch: pytest.MonkeyPatch) 
     out = bootstrap.fetch_bootstrap_config("http://cp")
     assert out["AVA_DB_URL"] == "postgresql://ok/x"
     assert calls["n"] == 2  # retried once after the transient connect error
-    assert sleeps == [0.5]
+    assert retry_waits == [0.5]
 
 
 def test_fetch_does_not_retry_readtimeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -235,8 +233,9 @@ def test_fetch_does_not_retry_readtimeout(monkeypatch: pytest.MonkeyPatch) -> No
     assert calls["n"] == 1  # not retried
 
 
-def test_fetch_preserves_linear_connect_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
-    sleeps: list[float] = []
+def test_fetch_preserves_linear_connect_backoff(
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+) -> None:
     calls = 0
 
     class _Resp:
@@ -252,19 +251,18 @@ def test_fetch_preserves_linear_connect_backoff(monkeypatch: pytest.MonkeyPatch)
         return _Resp()
 
     monkeypatch.setattr(bootstrap, "dial_get", flaky_get)
-    monkeypatch.setattr(bootstrap.time, "sleep", sleeps.append)
-    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
     assert bootstrap.fetch_bootstrap_config("http://cp", attempts=3) == {
         "AVA_DB_URL": "postgresql://ok/x"
     }
     assert calls == 3
-    assert sleeps == [0.5, 1.0]
+    assert retry_waits == [0.5, 1.0]
 
 
-def test_fetch_one_attempt_preserves_connect_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_one_attempt_preserves_connect_exception(
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+) -> None:
     error = httpx.ConnectTimeout("unreachable")
     calls = 0
-    sleeps: list[float] = []
 
     def fail(*_args: object, **_kwargs: object) -> None:
         nonlocal calls
@@ -272,13 +270,11 @@ def test_fetch_one_attempt_preserves_connect_exception(monkeypatch: pytest.Monke
         raise error
 
     monkeypatch.setattr(bootstrap, "dial_get", fail)
-    monkeypatch.setattr(bootstrap.time, "sleep", sleeps.append)
-    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
     with pytest.raises(httpx.ConnectTimeout) as caught:
         bootstrap.fetch_bootstrap_config("http://cp", attempts=1)
     assert caught.value is error
     assert calls == 1
-    assert sleeps == []
+    assert retry_waits == []
 
 
 # ── config source derivation (AVA_CONFIG_SOURCE deleted) ──

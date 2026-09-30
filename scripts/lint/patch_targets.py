@@ -8,7 +8,7 @@ CI structure job (`pre-commit run --all-files`).
 
 ## Why
 
-A test that replaces `base.host.net.resilience._sleep` depends on an implementation detail
+A test that replaces `ava.mcps._daemon._connect_server` depends on an implementation detail
 its owner never promised to keep, and every such reach-in is a missing injection seam: the
 code under test had no public way to take its clock, its transport or its identity from the
 caller, so the test reached in. Rule 4 (`scripts/lint/code_structure.py`) forbids the same

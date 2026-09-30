@@ -16,7 +16,6 @@ from unittest.mock import Mock
 import pytest
 
 from base.config import settings
-from base.host.net import resilience
 from services.computer.mcp_wrapper import _Link, _ReconnectingLink
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
@@ -71,15 +70,6 @@ class HangingReader(FakeReader):
 
 def _line(obj: dict[str, Any]) -> bytes:
     return (json.dumps(obj) + "\n").encode()
-
-
-@pytest.fixture
-def no_retry_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _sleep(_delay: float) -> None:
-        pass
-
-    monkeypatch.setattr("services.computer.mcp_wrapper.asyncio.sleep", _sleep)
-    monkeypatch.setattr(resilience, "_asleep", _sleep)
 
 
 async def test_request_returns_result_on_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,9 +141,8 @@ async def test_request_preserves_unknown_delivery_error(fail_stage: str) -> None
 # ── _ReconnectingLink ───────────────────────────────────────────────────────
 
 
-async def test_reconnecting_link_redials_on_connection_error(
-    no_retry_delay: None,
-) -> None:
+@pytest.mark.usefixtures("retry_waits")
+async def test_reconnecting_link_redials_on_connection_error() -> None:
     attempts = 0
     writer = FakeWriter()
 
@@ -171,9 +160,8 @@ async def test_reconnecting_link_redials_on_connection_error(
     assert len(writer.written) == 1
 
 
-async def test_reconnecting_link_never_retries_delivered_call(
-    no_retry_delay: None,
-) -> None:
+@pytest.mark.usefixtures("retry_waits")
+async def test_reconnecting_link_never_retries_delivered_call() -> None:
     """A request whose response never arrives may have executed on the desktop —
     retrying could double-click. The error surfaces and the link reconnects."""
 
@@ -203,10 +191,9 @@ async def test_reconnecting_link_never_retries_delivered_call(
     assert attempts == 2
 
 
+@pytest.mark.usefixtures("retry_waits")
 @pytest.mark.parametrize("fail_stage", ["write", "drain"])
-async def test_reconnecting_link_does_not_retry_write_or_drain_failure(
-    no_retry_delay: None, fail_stage: str
-) -> None:
+async def test_reconnecting_link_does_not_retry_write_or_drain_failure(fail_stage: str) -> None:
     attempts = 0
     failed_writer = FailingWriter(fail_stage)
     success_writer = FakeWriter()
@@ -282,10 +269,9 @@ async def test_reconnecting_link_times_out_without_retry(monkeypatch: pytest.Mon
 
 
 def test_connect_exhaustion_closes_every_socket_without_trailing_sleep(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
 ) -> None:
     sockets: list[Mock] = []
-    sleeps: list[float] = []
 
     def make_socket(*_args: object) -> Mock:
         sock = Mock()
@@ -294,15 +280,13 @@ def test_connect_exhaustion_closes_every_socket_without_trailing_sleep(
         return sock
 
     monkeypatch.setattr(client.socket, "socket", make_socket)
-    monkeypatch.setattr(client.time, "sleep", sleeps.append)
-    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
     with pytest.raises(PermissionsHelperError) as error:
         client.connect("test.sock")
     assert str(error.value) == "permissions helper not reachable at test.sock: absent"
     assert error.value.__context__ is None
     assert len(sockets) == 5
     assert all(sock.close.call_count == 1 for sock in sockets)
-    assert sleeps == [0.2] * 4
+    assert retry_waits == [0.2] * 4
 
 
 def test_helper_connect_non_retryable_error_passes_through(

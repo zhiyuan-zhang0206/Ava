@@ -18,7 +18,6 @@ import pytest
 
 import ava.mcps._computer as computer_mod
 from ava.mcps._computer import connect_computer_direct
-from base.host.net import resilience
 
 
 class FakeServer:
@@ -123,9 +122,8 @@ async def test_daemon_error_surfaces(session_and_server: tuple[Any, FakeServer])
 
 @pytest.mark.parametrize("failure", [FileNotFoundError, ConnectionRefusedError])
 async def test_dial_computer_exhaustion_has_no_trailing_sleep(
-    monkeypatch: pytest.MonkeyPatch, failure: type[OSError]
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], failure: type[OSError]
 ) -> None:
-    sleeps: list[float] = []
     calls = 0
 
     async def fail(*, path: str, limit: int) -> None:
@@ -134,18 +132,13 @@ async def test_dial_computer_exhaustion_has_no_trailing_sleep(
         assert (path, limit) == ("test.sock", computer_mod._LINE_LIMIT)
         raise failure("offline")
 
-    async def sleep(delay: float) -> None:
-        sleeps.append(delay)
-
     monkeypatch.setattr(computer_mod.asyncio, "open_unix_connection", fail)
-    monkeypatch.setattr(computer_mod.asyncio, "sleep", sleep)
-    monkeypatch.setattr(resilience, "_asleep", sleep)
     with pytest.raises(ConnectionError) as error:
         await computer_mod._dial_computer_mcp("test.sock")
     assert str(error.value) == "computer-mcp daemon not reachable at test.sock: offline"
     assert error.value.__context__ is None
     assert calls == 10
-    assert sleeps == [0.5] * 9
+    assert retry_waits == [0.5] * 9
 
 
 async def test_dial_computer_non_retryable_error_passes_through(
