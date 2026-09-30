@@ -8,13 +8,17 @@ Retry-After helpers (design-concept.md §4.4, evaluation-record #14).
 
 from __future__ import annotations
 
+import asyncio
 import email.message
+import inspect
 import io
+import time
 import urllib.error
 
 import httpx
 import pytest
 
+from base.host.net import resilience
 from base.host.net.resilience import (
     ExponentialBackoff,
     Policy,
@@ -56,15 +60,11 @@ def _http_error(status: int, *, retry_after: str | None = None) -> urllib.error.
     )
 
 
-@pytest.fixture(autouse=True)
-def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Neutralize backoff sleeps; assertions use call counts instead."""
+# Backoff waits are recorded, never slept; tests that do not read them assert call counts.
+pytestmark = pytest.mark.usefixtures("retry_waits")
 
-    async def _no_asleep(_s: float) -> None:
-        pass
-
-    monkeypatch.setattr("base.host.net.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.host.net.resilience._asleep", _no_asleep)
+# Captured at import, before any fixture replaces them.
+_DEFAULT_WAIT_HOOKS = (resilience.retry_sleep, resilience.retry_asleep)
 
 
 class TestRetry:
@@ -128,10 +128,8 @@ class TestRetry:
         with pytest.raises(RuntimeError, match="converted"):
             retry(Policy(on_final_failure=_hook))(f)
 
-    def test_backoff_sequence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_backoff_sequence(self, retry_waits: list[float]) -> None:
         """Exponential shape: base * factor**attempt, capped."""
-        sleeps: list[float] = []
-        monkeypatch.setattr("base.host.net.resilience._sleep", sleeps.append)
         f = _Flaky(_http_error(503), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -141,11 +139,9 @@ class TestRetry:
                     jitter="none",
                 )
             )(f)
-        assert sleeps == [1.0, 2.0, 4.0]
+        assert retry_waits == [1.0, 2.0, 4.0]
 
-    def test_backoff_capped(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        sleeps: list[float] = []
-        monkeypatch.setattr("base.host.net.resilience._sleep", sleeps.append)
+    def test_backoff_capped(self, retry_waits: list[float]) -> None:
         f = _Flaky(_http_error(503), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -155,11 +151,9 @@ class TestRetry:
                     jitter="none",
                 )
             )(f)
-        assert sleeps == [1.0, 2.0, 3.0, 3.0]
+        assert retry_waits == [1.0, 2.0, 3.0, 3.0]
 
-    def test_retry_after_overrides_backoff(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        sleeps: list[float] = []
-        monkeypatch.setattr("base.host.net.resilience._sleep", sleeps.append)
+    def test_retry_after_overrides_backoff(self, retry_waits: list[float]) -> None:
         f = _Flaky(_http_error(429, retry_after="30"), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -169,11 +163,9 @@ class TestRetry:
                     jitter="none",
                 )
             )(f)
-        assert sleeps == [30.0]
+        assert retry_waits == [30.0]
 
-    def test_respect_retry_after_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        sleeps: list[float] = []
-        monkeypatch.setattr("base.host.net.resilience._sleep", sleeps.append)
+    def test_respect_retry_after_false(self, retry_waits: list[float]) -> None:
         f = _Flaky(_http_error(429, retry_after="30"), 100)
         with pytest.raises(urllib.error.HTTPError):
             retry(
@@ -184,7 +176,7 @@ class TestRetry:
                     respect_retry_after=False,
                 )
             )(f)
-        assert sleeps == [1.0]
+        assert retry_waits == [1.0]
 
 
 class TestAretry:
@@ -216,6 +208,73 @@ class TestAretry:
         with pytest.raises(urllib.error.HTTPError):
             await aretry(Policy(idempotent=False, on_final_failure=lambda _e: None))(_call)
         assert f.calls == 1
+
+
+class TestWaitHooks:
+    """`retry_sleep` / `retry_asleep` are the public seam tests observe backoff waits through."""
+
+    def test_hooks_are_public_and_default_to_the_real_waits(self) -> None:
+        assert {"retry_sleep", "retry_asleep"} <= set(resilience.__all__)
+        assert (time.sleep, asyncio.sleep) == _DEFAULT_WAIT_HOOKS
+
+    def test_retry_reads_the_hook_at_each_wait(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A hook replaced after the retry was built still takes effect."""
+        run = retry(
+            Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none")
+        )
+        seen: list[float] = []
+        monkeypatch.setattr(resilience, "retry_sleep", seen.append)
+        with pytest.raises(urllib.error.HTTPError):
+            run(_Flaky(_http_error(503), 100))
+        assert seen == [1.0, 2.0]
+
+    async def test_aretry_reads_the_hook_at_each_wait(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        f = _Flaky(_http_error(503), 100)
+
+        async def _call() -> object:
+            return f()
+
+        run = aretry(
+            Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none")
+        )
+        seen: list[float] = []
+
+        async def _record(seconds: float) -> None:
+            seen.append(seconds)
+
+        monkeypatch.setattr(resilience, "retry_asleep", _record)
+        with pytest.raises(urllib.error.HTTPError):
+            await run(_call)
+        assert seen == [1.0, 2.0]
+
+    async def test_retry_waits_records_sync_and_async_waits_in_call_order(
+        self, retry_waits: list[float]
+    ) -> None:
+        policy = Policy(max_attempts=2, backoff=ExponentialBackoff(1.0, 1.0, 1.0), jitter="none")
+        flaky_sync = _Flaky(urllib.error.URLError("boom"), 1)
+        assert retry(policy)(flaky_sync) == "ok"
+        flaky_async = _Flaky(urllib.error.URLError("boom"), 1)
+
+        async def _call() -> object:
+            return flaky_async()
+
+        assert (
+            await aretry(
+                Policy(max_attempts=2, backoff=ExponentialBackoff(3.0, 1.0, 3.0), jitter="none")
+            )(_call)
+            == "ok"
+        )
+        assert retry_waits == [1.0, 3.0]
+        assert inspect.iscoroutinefunction(resilience.retry_asleep)
+
+    def test_retry_waits_fails_fast_when_a_loop_never_ends(self, retry_waits: list[float]) -> None:
+        """A recorder that keeps filling means a caller loops around an instant wait (#1001)."""
+        with pytest.raises(AssertionError, match="issue #1001"):
+            for _ in range(100_000):
+                resilience.retry_sleep(0.0)
+        assert 0 < len(retry_waits) < 100_000
 
 
 class TestHttpClassifier:
@@ -318,32 +377,32 @@ class TestJitter:
     def test_relative_zero_span_returns_delay(self) -> None:
         assert jittered(4.0, span=0.0, mode="relative") == 4.0
 
-    def test_retry_passes_phase_jitter_to_sleep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_retry_passes_phase_jitter_to_sleep(
+        self, monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+    ) -> None:
         def _uniform(_low: float, _high: float) -> float:
             return 100.0
 
-        sleeps: list[float] = []
-        monkeypatch.setattr("base.host.net.resilience._sleep", sleeps.append)
         monkeypatch.setattr("base.host.net.resilience._agent_phase", self._fixed_phase)
         monkeypatch.setattr("base.host.net.resilience.random.uniform", _uniform)
         f = _Flaky(urllib.error.URLError("boom"), 1)
         assert retry(Policy(max_attempts=2, jitter="phase", jitter_span=5.0))(f) == "ok"
-        assert sleeps == [2.25]
+        assert retry_waits == [2.25]
 
-    def test_retry_passes_relative_jitter_to_sleep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_retry_passes_relative_jitter_to_sleep(
+        self, monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+    ) -> None:
         def _unexpected_phase(_span: float) -> float:
             pytest.fail("unexpected phase")
 
         def _uniform(_low: float, _high: float) -> float:
             return 0.5
 
-        sleeps: list[float] = []
-        monkeypatch.setattr("base.host.net.resilience._sleep", sleeps.append)
         monkeypatch.setattr("base.host.net.resilience._agent_phase", _unexpected_phase)
         monkeypatch.setattr("base.host.net.resilience.random.uniform", _uniform)
         f = _Flaky(urllib.error.URLError("boom"), 1)
         assert retry(Policy(max_attempts=2, jitter="relative", jitter_span=0.5))(f) == "ok"
-        assert sleeps == [1.5]
+        assert retry_waits == [1.5]
 
     def test_agent_mode_bounds(self) -> None:
         # delay + phase in [0, span) + uniform(-span, span)

@@ -20,11 +20,17 @@ R2 convergence point D (design-concept.md §4.4 + evaluation-record #14):
   (only-override, never-rewrite).
 - ``jittered`` / ``extract_retry_after`` — the shared sleep-spread and
   Retry-After helpers every migrated call site uses.
+- ``retry_sleep`` / ``retry_asleep`` — the wait hooks (see "Wait hooks").
 
 Idempotency gate (D3): with ``idempotent=False`` the call runs exactly once
 and a final failure MUST be made visible — ``on_final_failure`` compensation
 hook (alert / queue / raise) or the raised exception itself; silent loss is
 structurally impossible.
+
+Wait hooks: ``retry()`` sleeps through ``retry_sleep`` and ``aretry()`` awaits
+``retry_asleep``. Both are looked up in this module at every wait, not bound
+when the retry is built, so a test observes or skips the waits through the
+``retry_waits`` fixture without patching ``time`` / ``asyncio`` globally.
 
 ``with_`` carries a trailing underscore because ``with`` is a Python keyword
 — the design's ``http_classifier.with(permanent=...)`` spelling is not a
@@ -54,6 +60,8 @@ __all__ = [
     "http_classifier",
     "jittered",
     "retry",
+    "retry_asleep",
+    "retry_sleep",
 ]
 
 T = TypeVar("T")
@@ -66,10 +74,10 @@ _TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504})
 # a longer header is treated as absent rather than blindly slept.
 MAX_RETRY_AFTER_RESPECT_S = 120.0
 
-# Module-level aliases so tests can pin retry sleeps without patching
-# time/asyncio globally (same seam as cli/commands/_probe.py's _poll_sleep).
-_sleep = time.sleep
-_asleep = asyncio.sleep
+# The wait hooks (see the module docstring): looked up at every wait, replaced
+# only by tests, through the `retry_waits` fixture.
+retry_sleep: Callable[[float], None] = time.sleep
+retry_asleep: Callable[[float], Awaitable[None]] = asyncio.sleep
 
 
 class Backoff(Protocol):
@@ -284,7 +292,7 @@ def retry(policy: Policy) -> Callable[[Callable[[], T]], T]:
                         retry_after = extract_retry_after(exc)
                         if retry_after is not None:
                             delay = max(delay, retry_after)
-                    _sleep(jittered(delay, policy.jitter_span, policy.jitter))
+                    retry_sleep(jittered(delay, policy.jitter_span, policy.jitter))
                     continue
                 if policy.on_final_failure is not None:
                     policy.on_final_failure(exc)
@@ -310,7 +318,7 @@ def aretry(policy: Policy) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T
                             retry_after = extract_retry_after(exc)
                             if retry_after is not None:
                                 delay = max(delay, retry_after)
-                        await _asleep(jittered(delay, policy.jitter_span, policy.jitter))
+                        await retry_asleep(jittered(delay, policy.jitter_span, policy.jitter))
                         continue
                     if policy.on_final_failure is not None:
                         policy.on_final_failure(exc)

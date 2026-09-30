@@ -44,6 +44,11 @@ from services.memory_indexer.embeddings.gemini import (
     GeminiEmbeddingProvider,
 )
 
+# Retry backoff waits are recorded, not slept, so retry-path tests do not hang; the retry loop
+# itself is still exercised (call counts). The provider's policy is a module constant (R2-D), no
+# longer settings-driven. Tests that measure elapsed time on real sockets restore the real waits.
+pytestmark = pytest.mark.usefixtures("retry_waits")
+
 
 def _provider() -> GeminiEmbeddingProvider:
     return GeminiEmbeddingProvider()
@@ -220,22 +225,6 @@ def _dummy_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.config import settings
 
     monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("test-gemini-key"))
-
-
-@pytest.fixture(autouse=True)
-def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Neutralize base.host.net.resilience backoff sleeps so retry-path tests do
-    not hang; the retry loop itself is still exercised (call counts). The
-    provider's policy is a module constant (R2-D), no longer settings-driven.
-    `_asleep` must be a REAL coroutine function: `aretry` awaits it, so a sync
-    lambda turns every async retry into `TypeError: object NoneType can't be
-    used in 'await' expression`."""
-    monkeypatch.setattr("base.host.net.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    async def _no_asleep(_s: float) -> None:
-        return None
-
-    monkeypatch.setattr("base.host.net.resilience._asleep", _no_asleep)
 
 
 # ── provider surface (the contract) ───────────────────────────────────────
@@ -734,8 +723,8 @@ def test_embed_trickle_total_deadline(
     timeout = 0.25
     monkeypatch.setattr(gemini, "_ENDPOINT", endpoint)
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", timeout)
-    monkeypatch.setattr(resilience, "_sleep", time.sleep)
-    monkeypatch.setattr(resilience, "_asleep", asyncio.sleep)
+    monkeypatch.setattr(resilience, "retry_sleep", time.sleep)
+    monkeypatch.setattr(resilience, "retry_asleep", asyncio.sleep)
     policy = Policy(
         max_attempts=attempts,
         backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
@@ -765,8 +754,8 @@ def test_embed_compressed_trickle_deadline(
 
     timeout = 0.2
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", timeout)
-    monkeypatch.setattr(resilience, "_sleep", time.sleep)
-    monkeypatch.setattr(resilience, "_asleep", asyncio.sleep)
+    monkeypatch.setattr(resilience, "retry_sleep", time.sleep)
+    monkeypatch.setattr(resilience, "retry_asleep", asyncio.sleep)
     policy = Policy(
         max_attempts=attempts,
         backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
@@ -799,8 +788,8 @@ def test_embed_framing_drip_deadline(
 
     timeout = 0.2
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", timeout)
-    monkeypatch.setattr(resilience, "_sleep", time.sleep)
-    monkeypatch.setattr(resilience, "_asleep", asyncio.sleep)
+    monkeypatch.setattr(resilience, "retry_sleep", time.sleep)
+    monkeypatch.setattr(resilience, "retry_asleep", asyncio.sleep)
     policy = Policy(
         max_attempts=attempts,
         backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
@@ -834,20 +823,16 @@ def test_embed_gzip_response_round_trip(monkeypatch: pytest.MonkeyPatch, chunked
 @pytest.mark.parametrize("mode", ["sync", "async"])
 @pytest.mark.parametrize("status", [400, 429])
 def test_embed_slow_error_body_preserves_status(
-    monkeypatch: pytest.MonkeyPatch, mode: str, status: int
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], mode: str, status: int
 ) -> None:
     """Real HTTPX rejects error headers immediately, preserving classification and delay."""
     from base.host.net import resilience
 
-    sleeps: list[float] = []
     classified: list[Exception] = []
 
     def classify(exc: Exception) -> bool:
         classified.append(exc)
         return resilience.http_classifier(exc)
-
-    async def record_sleep(seconds: float) -> None:
-        sleeps.append(seconds)
 
     policy = Policy(
         max_attempts=2,
@@ -856,8 +841,6 @@ def test_embed_slow_error_body_preserves_status(
         classify=classify,
     )
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", 0.3)
-    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
-    monkeypatch.setattr(resilience, "_asleep", record_sleep)
     with _embedding_server(error_status=status, drip=False) as (endpoint, requests):
         monkeypatch.setattr(gemini, "_ENDPOINT", endpoint)
 
@@ -872,12 +855,12 @@ def test_embed_slow_error_body_preserves_status(
                 invoke()
             assert isinstance(error.value.__cause__, httpx.HTTPStatusError)
             assert len(requests) == 1
-            assert sleeps == []
+            assert retry_waits == []
         else:
             result = invoke()
             np.testing.assert_array_equal(result, np.ones((1, DIM), dtype=np.float32))
             assert len(requests) == 2
-            assert sleeps == [7.0]  # Retry-After wins over the tiny policy backoff.
+            assert retry_waits == [7.0]  # Retry-After wins over the tiny policy backoff.
         elapsed = time.monotonic() - started
         assert elapsed < 0.25  # The error body would take 2s; even one timeout is 0.3s.
         assert len(classified) == 1
