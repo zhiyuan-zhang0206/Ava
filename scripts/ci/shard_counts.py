@@ -94,7 +94,7 @@ def _emit(text: str, summary: str, summary_path: Path | None) -> None:
 
 def run_shard(group: str, junit: str, out: Path, summary_path: Path | None) -> int:
     report = latest_report(junit)
-    counts = {"group": group, **count_junit(report)}
+    counts: dict[str, Any] = {"group": group, **count_junit(report)}
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(counts, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     rows = sorted(counts["buckets"].items())
@@ -183,7 +183,7 @@ def run_total(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     commands = parser.add_subparsers(dest="command", required=True)
     shard = commands.add_parser("shard", help="count one shard's JUnit report")
     shard.add_argument("--group", required=True)
