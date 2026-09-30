@@ -485,8 +485,8 @@ def test_early_green_window_without_the_main_run_is_not_green(gh: Any, has_workf
     out until the main run is visible rather than calling that narrow window green."""
     checks = [
         _APP_CHECK,
-        _check("prove-observation", "SKIPPED", workflow="Agent observation proof"),
-        _check("prove-retry-guard", "SKIPPED", workflow="CI retry safety proof"),
+        _check("prove-example-a", "SKIPPED", workflow="Example proof A"),
+        _check("prove-example-b", "SKIPPED", workflow="Example proof B"),
     ]
     has_workflows(True)
     gh(checks, scheduled=[], main_completed=False)
@@ -1815,14 +1815,14 @@ def test_limbo_runs_skips_unparseable_created_at_and_non_int_id(monkeypatch) -> 
 def test_check_ci_attaches_limbo_to_pending(gh: Any, has_workflows: Any, monkeypatch) -> None:
     gh(
         [_check("backend (pytest + pyright)", "SUCCESS")],
-        scheduled=["Caller protocol integration proof"],
+        scheduled=["Example proof A"],
     )
     has_workflows(True)
-    stuck = [{"id": 91, "name": "Caller protocol integration proof", "age_s": 1500}]
+    stuck = [{"id": 91, "name": "Example proof A", "age_s": 1500}]
     monkeypatch.setattr(ci_utils, "_limbo_runs", lambda *_a, **_k: stuck)
     r = ci_utils.check_ci("1")
     assert r.verdict is CIStatus.PENDING
-    assert r.pending == ["Caller protocol integration proof"]
+    assert r.pending == ["Example proof A"]
     assert r.limbo == stuck
     assert "GitHub limbo" in r.summary()
 
