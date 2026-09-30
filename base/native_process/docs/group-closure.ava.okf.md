@@ -34,13 +34,9 @@ lost the leader is a `RuntimeError`. The leader is never reaped here, so custody
 stays with the caller.
 
 The default signal refuses a reaped leader and accepts XNU's EPERM for an
-all-zombie group, since the listing decides. `close_unadmitted` adds the reap
-and, on any failure, keeps the unreaped leader referenced for the life of the
-process. `wait_group_finished` is natural completion (leader exited, listing
-names nothing else) without signal or reap; on Linux it is no closure proof, so
-callers close afterwards. `group_empty` answers for a group whose leader was
-already reaped: the macOS listing, or a Linux null group signal, which the
-tasklist lock orders against fork.
+all-zombie group, since the listing decides. `group_empty` answers for a group
+whose leader was already reaped: the macOS listing, or a Linux null group
+signal, which the tasklist lock orders against fork.
 
 This is trusted-tool cleanup, not a fence: a member that calls `setsid()` or
 `setpgid()` leaves the group.

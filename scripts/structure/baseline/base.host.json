@@ -2,7 +2,6 @@
   "complexity": {
     "base/host/env/config_registry.py::_build_registry": 19,
     "base/host/env/dotenv_boot.py::_enforce_cluster_env_authority": 18,
-    "base/host/env/runtime_config.py::write_fields": 22,
-    "base/host/system/job_observation.py::observe_crontab": 15
+    "base/host/env/runtime_config.py::write_fields": 22
   }
 }

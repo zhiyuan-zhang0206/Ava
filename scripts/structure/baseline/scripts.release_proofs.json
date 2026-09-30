@@ -1,5 +1,0 @@
-{
-  "complexity": {
-    "scripts/release_proofs/prove_native_launcher_reads.py::main": 16
-  }
-}

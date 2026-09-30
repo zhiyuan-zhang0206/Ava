@@ -37,8 +37,8 @@ longest leg observed, not a first-principles ceiling; what has to stay true is
 the invariant above, which `base.deploy.timing` checks.
 
 The module also holds the agent-lease family, the `ava start` readiness
-clocks, a remote unit's capability bundle lifetime and the coordinator
-listener's request clocks; each constant's comment names its consumer.
+clocks and a remote unit's capability bundle lifetime; each constant's comment
+names its consumer.
 """
 
 from __future__ import annotations
@@ -53,14 +53,6 @@ NO_PROGRESS_TIMEOUT_S = 900.0
 # (`base.deploy.state.cluster_lock.lease_may_lapse`) — and large enough that a multi-minute
 # rollout costs a handful of single-row UPDATEs rather than a poll-rate write stream.
 LEASE_RENEW_INTERVAL_S = 60.0
-
-# How stale a finite release or PITR executor's heartbeat may grow before its
-# incomplete operation stops explaining an outage and the health probe reports
-# the executor lost (`base.deploy.release.operation`). The executor stamps a local
-# file every `LEASE_RENEW_INTERVAL_S` from its own thread, so five missed
-# beats are a dead, killed or rebooted process, never one slow write; the
-# database lease cannot say this, because a release stops that database.
-EXECUTOR_HEARTBEAT_TTL_S = 300.0
 
 # How often the agent host renews its hosted agents' leases: the one ownership
 # beat of `services/agent_host/daemon.py` (`_beat_forever`), which sleeps exactly
@@ -166,12 +158,3 @@ NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 # transport key disclose.
 UNIT_BUNDLE_TTL_S = 24 * 3600.0
 UNIT_BUNDLE_MAX_TTL_S = 72 * 3600.0
-
-# A coordinator listener that reads a request before any proof is checked. One socket read may wait
-# `COORDINATOR_READ_TIMEOUT_S`; the whole request (request line, headers, body
-# and answer) gets `COORDINATOR_REQUEST_DEADLINE_S` from accept. A unit sends
-# each request whole, far inside both. Only a stalled or trickling peer reaches
-# them, and the deadline is what drops one that sends a byte just inside every
-# read timeout instead of holding one of the listener's few slots for good.
-COORDINATOR_READ_TIMEOUT_S = 10.0
-COORDINATOR_REQUEST_DEADLINE_S = 15.0

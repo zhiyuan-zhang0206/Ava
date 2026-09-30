@@ -1,0 +1,53 @@
+name: Native root lifetime proof
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'base/host/system/boot_unit.py'
+      - 'cli/commands/lifecycle/root_driver.py'
+      - 'cli/commands/lifecycle/start.py'
+      - 'services/ava_root/**'
+      - 'services/ava_root_glue/**'
+      - 'base/native_process/ownership.py'
+      - 'base/sessions/backend.py'
+      - 'base/native_process/root_control/**'
+      - 'cli/commands/lifecycle/_temporary_stop.py'
+      - 'cli/commands/lifecycle/service_stop.py'
+      - 'cli/commands/lifecycle/stop.py'
+      - 'tests/lifecycle/native_root/**'
+      - 'tests/services/test_ava_root_daemon.py'
+      - 'conftest.py'
+      - 'tests/fixtures/*.py'
+      - 'tests/_*.py'
+      - '.github/actions/install-pg-redis/**'
+      - '.github/actions/uv-sync/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/native-root-lifetime-proof.yml'
+permissions:
+  contents: read
+jobs:
+  root-lifetime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        with:
+          version: 0.10.2
+      - uses: ./.github/actions/uv-sync
+      - name: Require native manager (absence is not a passing skip)
+        run: |
+          test -d /run/systemd/system
+          sudo -n true
+          systemctl --version
+      - name: Root lifetime and independent data sibling
+        run: uv run pytest --noconftest tests/services/test_ava_root_daemon.py::test_native_systemd_root_lifetime -q --junitxml=root-lifetime.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-root-lifetime
+          path: root-lifetime.xml

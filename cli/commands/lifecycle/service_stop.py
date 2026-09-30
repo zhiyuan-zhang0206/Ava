@@ -9,14 +9,9 @@ session as `base.sessions.pty.session_tree` defines it — the recorded shell,
 its descendants and its POSIX session — then HUP the shells and TERM the rest,
 wait a bounded grace, and SIGKILL what is left, each session whole. Every busy
 session whose shell it verified gone gets its owner's notice, naming what of it
-outlived the SIGKILL. Its callers differ only in the grace, the SIGKILL leg's
-bound, the report's stage and whether the notice is also recorded as intent
-before the first signal: `close_terminals` at `ava stop`
-(decisions/2026-09-28-stop-escalates-to-sigkill.md), `close_release_terminals`
-at a release or a PITR activation
-(decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2;
-decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2). KILL
-reaches only identities captured from the terminal records' shells and hosts.
+outlived the SIGKILL. `close_terminals` runs it at `ava stop`
+(decisions/2026-09-28-stop-escalates-to-sigkill.md). KILL reaches only
+identities captured from the terminal records' shells and hosts.
 """
 
 from __future__ import annotations
@@ -46,13 +41,10 @@ from cli.commands.lifecycle._maintenance_stop_report import (
 )
 from ops import pty_close_notices
 
-# How often the completed-work wait re-reads the terminal trees.
-_WORK_POLL_S = 0.5
-
 # How long a normal stop's terminal closure waits between its HUP/TERM and the
 # SIGKILL of whatever is left (decisions/2026-09-28-stop-escalates-to-sigkill.md):
 # a job that handles TERM gets this long to clean up. The stop's own deadline
-# caps it as well. A release or PITR activation passes its own grace.
+# caps it as well.
 _TERMINAL_STOP_GRACE_S = 10.0
 
 # The SIGKILL leg's own bound at a normal stop: each wait inside a session kill,
@@ -175,14 +167,6 @@ class TerminalInventory:
     """Every live recorded terminal, captured before any signal."""
 
     terminals: tuple[_Terminal, ...]
-
-    @property
-    def shells(self) -> dict[str, OwnedProcess]:
-        return {terminal.name: terminal.shell for terminal in self.terminals}
-
-    @property
-    def busy(self) -> dict[str, OwnedProcess]:
-        return {terminal.name: terminal.shell for terminal in self.terminals if terminal.busy}
 
 
 def capture_terminals() -> TerminalInventory:
@@ -357,7 +341,7 @@ def _close(
     grace_until: float,
     kill_s: float,
     stage: str,
-    deadline: float | None = None,
+    deadline: float,
 ) -> None:
     """The one terminal closure: hang up, a bounded grace, SIGKILL, then the evidence.
 
@@ -382,7 +366,7 @@ def _close(
     if live_identities(identity for _terminal, identity in survivors):
         raise _terminals_incomplete(survivors, stage)
     settled = time.monotonic() + kill_s
-    _await_no_terminals(settled if deadline is None else max(deadline, settled), stage)
+    _await_no_terminals(max(deadline, settled), stage)
 
 
 def _closed(terminals: list[_Terminal], killed: list[tuple[_Terminal, OwnedProcess]]) -> _Closed:
@@ -445,8 +429,7 @@ def _record_close_notices(closed: _Closed, notice: _Notice) -> None:
     """Durably record one closure notice per closed busy session (issue #2044).
 
     Each entry names the session's shell and the processes of it that outlived
-    the SIGKILL (none in a release's intent, recorded before any signal). A
-    session recorded twice — a release's intent, then its closure — keeps one
+    the SIGKILL. A session recorded twice — a stop and its retry — keeps one
     record: the dedup key is the shell's, and delivery is exactly-once per key.
     An idle session or a Windows unit records nothing. A write failure is loud
     but never fails the closure — retrying the whole stop would not restore
@@ -505,58 +488,6 @@ def close_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
         stage="terminals",
         deadline=deadline,
     )
-
-
-def await_terminal_work(timeout: float) -> list[str]:
-    """Observe until no recorded terminal carries a job, or `timeout` passes.
-
-    The completed-work bound before a release closes its terminal writers: it
-    signals nothing, so a job that finishes in time is never interrupted.
-    Returns the sessions still busy at the bound.
-    """
-    _require_pty_custody()
-    deadline = deadline_after(timeout)
-    while True:
-        busy = sorted(capture_terminals().busy)
-        left = deadline - time.monotonic()
-        if not busy or left <= 0:
-            return busy
-        time.sleep(min(_WORK_POLL_S, left))
-
-
-def close_release_terminals(
-    operation: str, acquired_at: datetime, *, grace_s: float, kill_s: float, reason: str
-) -> TerminalInventory:
-    """Close every persistent terminal at a release or PITR boundary; none survives it.
-
-    The same closure as `close_terminals`, with the boundary's own bounds:
-    `grace_s` for the hang-up and `kill_s` for each wait of the SIGKILL leg.
-    Busy sessions' owner notices are recorded first, as the closure's intent,
-    naming `reason` (`pty_close_notices.RELEASE_REASON` or `.PITR_REASON`): the
-    boundary cannot complete with the session alive, so no retry or crash may
-    lose the notice. The closure then records each session whose shell it
-    verified gone once more, like `close_terminals`: the same record, now
-    naming whatever of the session outlived its SIGKILL. A survivor, or a
-    terminal born during closure, fails with the process inventory and leaves
-    the boundary unresolved.
-    """
-    _require_pty_custody()
-    inventory = capture_terminals()
-    notice = _Notice(operation, acquired_at, reason)
-    _record_close_notices({name: (shell, []) for name, shell in inventory.busy.items()}, notice)
-    _close(
-        list(inventory.terminals),
-        notice,
-        grace_until=time.monotonic() + grace_s,
-        kill_s=kill_s,
-        stage="release-terminals",
-    )
-    return inventory
-
-
-def _require_pty_custody() -> None:
-    if sys.platform == "win32":
-        raise RuntimeError("release terminal closure requires POSIX PTY custody")
 
 
 def stop_services(

@@ -115,8 +115,7 @@ orphan-host reaper and a failed spawn's abort.
 session backend.
 
 The persistent-terminal closure (`cli/commands/lifecycle/service_stop.py`) — a normal
-`ava stop` (`close_terminals`), a release's stop phase and a PITR activation
-(`close_release_terminals`) — captures each shell's session with
+`ava stop` (`close_terminals`) — captures each shell's session with
 `capture_session` before any signal, HUPs the shells and TERMs the rest. Each
 grace poll `refresh`es every capture with one scan, keeping its proof current.
 A poll is quiet only when no captured process lives and the scan read no

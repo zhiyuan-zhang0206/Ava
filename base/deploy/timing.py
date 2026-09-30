@@ -92,12 +92,6 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.LEASE_RENEW_INTERVAL_S,
         "how often a lease-owning operation re-arms its own deploy lease",
     ),
-    "EXECUTOR_HEARTBEAT_TTL_S": Clock(
-        "deploy",
-        lambda: deploy.EXECUTOR_HEARTBEAT_TTL_S,
-        "how stale a release executor's heartbeat may grow before its operation "
-        "stops explaining an outage",
-    ),
     "GATEWAY_PREFLIGHT_BUDGET_S": Clock(
         "deploy",
         lambda: deploy.GATEWAY_PREFLIGHT_BUDGET_S,
@@ -124,17 +118,6 @@ CLOCKS: dict[str, Clock] = {
         "unit-bundle",
         lambda: deploy.UNIT_BUNDLE_MAX_TTL_S,
         "the longest lifetime `issue-unit` seals into a unit capability bundle",
-    ),
-    # --- coordinator-channel family (values in base/deploy/progress_timeout.py) ---
-    "COORDINATOR_READ_TIMEOUT_S": Clock(
-        "coordinator-channel",
-        lambda: deploy.COORDINATOR_READ_TIMEOUT_S,
-        "how long one socket read of a coordinator listener request may wait",
-    ),
-    "COORDINATOR_REQUEST_DEADLINE_S": Clock(
-        "coordinator-channel",
-        lambda: deploy.COORDINATOR_REQUEST_DEADLINE_S,
-        "the whole coordinator listener request, from accept to its answer",
     ),
     # --- agent-lease family (values in base/deploy/progress_timeout.py) ---
     "AGENT_LEASE_TTL_S": Clock(
@@ -214,13 +197,6 @@ CONSTRAINTS: list[Constraint] = [
         "outside the lease TTL so the visible sequence stays offline-then-dead",
     ),
     Constraint(
-        ">=",
-        "EXECUTOR_HEARTBEAT_TTL_S",
-        "5 * LEASE_RENEW_INTERVAL_S",
-        "the executor stamps its heartbeat every lease-renewal round; five missed "
-        "beats before it reads as lost, so one slow write never unpauses alerting",
-    ),
-    Constraint(
         "<",
         "GATEWAY_PREFLIGHT_BUDGET_S",
         "NO_PROGRESS_TIMEOUT_S",
@@ -249,15 +225,6 @@ CONSTRAINTS: list[Constraint] = [
         "UNIT_BUNDLE_MAX_TTL_S",
         "the default bundle lifetime must be one `issue-unit` accepts, or issuing "
         "a bundle without `--ttl-hours` refuses",
-    ),
-    # --- coordinator-channel family ---
-    Constraint(
-        "<",
-        "COORDINATOR_READ_TIMEOUT_S",
-        "COORDINATOR_REQUEST_DEADLINE_S",
-        "a peer that goes silent is dropped after one read timeout, a trickling "
-        "one at the deadline: a read timeout at or past the deadline never fires, "
-        "and every stalled request would hold its slot for the whole deadline",
     ),
     # --- schedule supervision family ---
     Constraint(

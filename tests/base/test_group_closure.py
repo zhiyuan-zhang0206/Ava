@@ -1,4 +1,4 @@
-"""The shared group-closure core on its default signal (PITR unowned launch, preparation)."""
+"""The shared group-closure core on its default signal (PITR unowned launch)."""
 
 from __future__ import annotations
 
@@ -69,16 +69,13 @@ def test_listed_member_besides_leader_forces_another_round(
 
 
 def test_unresolved_closure_keeps_the_leader_unreaped(monkeypatch: pytest.MonkeyPatch) -> None:
-    held: list[subprocess.Popen[bytes]] = []
-    monkeypatch.setattr(group_closure, "_UNRESOLVED", held)
     process = _leader()
     try:
         events = _late_listing(monkeypatch, process.pid, late_rounds=None)
         with pytest.raises(group_closure.GroupClosureUnresolvedError, match="besides"):
-            group_closure.close_unadmitted(process, time.monotonic() + 0.5)
+            group_closure.confirm_closure(process, time.monotonic() + 0.5)
         assert events.count("signal") >= 2
         assert process.returncode is None
-        assert held == [process]
     finally:
         _release(process)
 

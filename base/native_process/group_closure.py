@@ -14,8 +14,7 @@ SIGKILL either fails or hands the pending signal to the new child. XNU instead
 lets a member inside fork() when the signal lands complete it, and that child
 never receives the signal. So any other listed member, live or zombie, forces
 another round. `confirm_closure` proves closure and leaves the leader to its
-caller's custody; `close_unadmitted` also reaps it. An unresolved closure
-leaves the leader unreaped.
+caller's custody; an unresolved closure leaves it unreaped.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ import select
 import signal
 import subprocess
 import sys
-import threading
 import time
 from collections.abc import Callable
 from functools import cache
@@ -36,11 +34,6 @@ from typing import Any
 
 _PROC_PGRP_ONLY = 2  # <sys/proc_info.h>: list PIDs by process-group id.
 _POLL_S = 0.05
-
-# Leaders whose closure is unresolved. Holding them keeps Popen's finalizer from
-# queueing them for a later reap, which would release their group numbers.
-_UNRESOLVED: list[subprocess.Popen[bytes]] = []
-_UNRESOLVED_LOCK = threading.Lock()
 
 
 class GroupClosureUnresolvedError(TimeoutError):
@@ -161,22 +154,6 @@ def _darwin_group_listing(pgid: int) -> list[int]:
     return sorted(buffer[: filled // width])
 
 
-def wait_group_finished(process: subprocess.Popen[bytes], deadline: float) -> bool:
-    """Natural completion by `deadline`: the leader exited and its group lists nothing else.
-
-    Never signals or reaps. It is not a closure proof (on Linux an unsignalled
-    member can fork past the scan), so the caller closes the group afterwards.
-    """
-    if not wait_leader_exit(process, deadline):
-        return False
-    while group_members(process.pid) != [process.pid]:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return False
-        time.sleep(min(_POLL_S, remaining))
-    return True
-
-
 def confirm_closure(
     process: subprocess.Popen[bytes],
     deadline: float,
@@ -224,19 +201,3 @@ def _kill_group(process: subprocess.Popen[bytes]) -> None:
         # XNU refuses to signal a group whose members are all zombies.
         if sys.platform != "darwin":
             raise
-
-
-def close_unadmitted(process: subprocess.Popen[bytes], deadline: float) -> int:
-    """Close the group of a launch no owner admitted, then reap its leader.
-
-    Returns the leader's exit status. Any failure, including
-    `GroupClosureUnresolvedError` at `deadline`, keeps the unreaped leader
-    referenced for the life of this process.
-    """
-    try:
-        confirm_closure(process, deadline)
-    except BaseException:
-        with _UNRESOLVED_LOCK:
-            _UNRESOLVED.append(process)
-        raise
-    return process.wait()

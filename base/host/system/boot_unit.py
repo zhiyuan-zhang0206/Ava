@@ -46,21 +46,6 @@ class BootUnitContext:
     host_state_dir: Path  # host-level state dir (`AVA_HOST_STATE_DIR`), isolated previews included
 
 
-@dataclass(frozen=True)
-class BootStartAction:
-    """One explicit start command under the existing home boot owner.
-
-    Release transitions use their pinned stage entry here so the new root is
-    born in its own boot cgroup, never in the finite updater's cgroup. The
-    transition restores a steady release start action after the stage succeeds.
-    """
-
-    argv: tuple[str, ...]
-    cwd: Path
-    environment: tuple[tuple[str, str], ...]
-    restart_on_failure: bool = True
-
-
 # --- paths and names --------------------------------------------------------
 
 
@@ -146,43 +131,21 @@ def _path_value(value: str, what: str) -> str:
     return _clean(value, what).replace("%", "%%")
 
 
-def source_start_action(ctx: BootUnitContext) -> BootStartAction:
-    """The ordinary source checkout invocation of the same root boot owner."""
-    return BootStartAction(
-        (str(ctx.repo / ".venv/bin/python"), "-m", "cli.main", "start"),
-        ctx.repo,
-        (
-            ("HOME", str(ctx.home_dir)),
-            ("AVA_HOME", str(ctx.home)),
-            ("AVA_HOST_STATE_DIR", str(ctx.host_state_dir)),
-            ("PATH", f"{ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"),
-        ),
-    )
-
-
-def render_unit(ctx: BootUnitContext, *, action: BootStartAction | None = None) -> str:
+def render_unit(ctx: BootUnitContext) -> str:
     """Start normally, then let systemd own the verified application root."""
-    action = source_start_action(ctx) if action is None else action
-    environment = dict(action.environment)
-    if len(environment) != len(action.environment) or any(
-        not key.isidentifier() for key in environment
-    ):
-        raise ValueError("boot action environment keys must be unique identifiers")
-    for key, expected in (
-        ("HOME", ctx.home_dir),
-        ("AVA_HOME", ctx.home),
-        ("AVA_HOST_STATE_DIR", ctx.host_state_dir),
-    ):
-        if environment.get(key) != str(expected):
-            raise ValueError(f"boot action must preserve {key}")
-    if not action.argv or not Path(action.argv[0]).is_absolute() or not action.cwd.is_absolute():
-        raise ValueError("boot action executable and working directory must be absolute")
-    env_lines = "\n".join(
-        f"Environment={_quote(f'{key}={value}', 'environment value')}"
-        for key, value in action.environment
+    # The ordinary source checkout invocation of the root boot owner.
+    argv = (str(ctx.repo / ".venv/bin/python"), "-m", "cli.main", "start")
+    environment = (
+        ("HOME", str(ctx.home_dir)),
+        ("AVA_HOME", str(ctx.home)),
+        ("AVA_HOST_STATE_DIR", str(ctx.host_state_dir)),
+        ("PATH", f"{ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"),
     )
-    # Quote every supplied argument. ':' also disables systemd's $ expansion.
-    command = " ".join(_quote(value, "start argument") for value in action.argv)
+    env_lines = "\n".join(
+        f"Environment={_quote(f'{key}={value}', 'environment value')}" for key, value in environment
+    )
+    # Quote every argument. ':' also disables systemd's $ expansion.
+    command = " ".join(_quote(value, "start argument") for value in argv)
     # Only the generic network target: the host's private-network or proxy
     # services are the operator's (order after them with a drop-in), and a boot
     # start that beats them fails and retries under Restart=on-failure.
@@ -199,9 +162,9 @@ def render_unit(ctx: BootUnitContext, *, action: BootStartAction | None = None) 
         f"User={_path_value(ctx.user, 'user')}\n"
         f"Group={_path_value(ctx.group, 'group')}\n"
         f"{env_lines}\n"
-        f"WorkingDirectory={_path_value(str(action.cwd), 'runtime path')}\n"
+        f"WorkingDirectory={_path_value(str(ctx.repo), 'runtime path')}\n"
         f"ExecStart=:{command}\n"
-        f"Restart={'on-failure' if action.restart_on_failure else 'no'}\n"
+        "Restart=on-failure\n"
         f"RestartSec={BOOT_RETRY_INTERVAL_S}\n"
         f"TimeoutStartSec={START_TIMEOUT_S}\n"
         "# Only root receives TERM; it owns captured application-tree closure.\n"
@@ -320,9 +283,7 @@ def _read_text(path: Path) -> str | None:
 # --- native registration / retirement -------------------------------------------
 
 
-def install(
-    *, context: BootUnitContext | None = None, action: BootStartAction | None = None
-) -> list[str]:
+def install(*, context: BootUnitContext | None = None) -> list[str]:
     """Register and enable the sole Linux boot route without recursive startup."""
     if not systemd_running():
         raise RuntimeError(
@@ -332,7 +293,7 @@ def install(
     steps: list[str] = []
 
     destination = unit_path(ctx.home)
-    unit_content = render_unit(ctx, action=action)
+    unit_content = render_unit(ctx)
     if _read_text(destination) != unit_content:
         fd, name = tempfile.mkstemp(prefix="ava-boot-unit-", suffix=".service")
         os.close(fd)

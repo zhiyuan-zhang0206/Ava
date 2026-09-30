@@ -15,7 +15,6 @@ from typing import Literal, Self
 from pydantic import model_validator
 
 from base.native_process.evidence import Digest, EvidenceModel
-from base.native_process.os_platform import IS_WINDOWS
 
 
 def runtime_venv(*, checkout: Path | None = None) -> Path:
@@ -25,11 +24,6 @@ def runtime_venv(*, checkout: Path | None = None) -> Path:
     from base.paths import repo_root
 
     return repo_root() / ".venv"
-
-
-def runtime_python() -> Path:
-    """Absolute Python path anchored to the loaded development checkout."""
-    return runtime_venv() / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
 
 
 def external_plugin_read_root() -> Path:

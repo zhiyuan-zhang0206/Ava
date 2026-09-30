@@ -105,42 +105,6 @@ def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
         render_unit(bad)
 
 
-def test_custom_start_action_uses_same_native_root_owner(ctx: BootUnitContext) -> None:
-    action = boot_unit.BootStartAction(
-        (
-            "/custom/venv/bin/python",
-            "-I",
-            "-m",
-            "cli.custom.stage",
-            "--operation",
-            "/private/$x%/operation.json",
-        ),
-        Path("/custom/site"),
-        boot_unit.source_start_action(ctx).environment,
-        restart_on_failure=False,
-    )
-    unit = render_unit(ctx, action=action)
-    assert '"cli.custom.stage" "--operation" "/private/$x%%/operation.json"' in unit
-    assert "WorkingDirectory=/custom/site" in unit
-    assert "Type=forking" in unit
-    assert f"PIDFile={boot_unit.root_pid_path(ctx.home)}" in unit
-    assert "Restart=no\n" in unit
-    assert "KillMode=process\n" in unit
-    assert "cli.main" not in unit
-
-
-@pytest.mark.parametrize("key", ["HOME", "AVA_HOME", "AVA_HOST_STATE_DIR"])
-def test_boot_action_cannot_change_context_identity(ctx: BootUnitContext, key: str) -> None:
-    source = boot_unit.source_start_action(ctx)
-    action = boot_unit.BootStartAction(
-        source.argv,
-        source.cwd,
-        tuple((k, "/other" if k == key else v) for k, v in source.environment),
-    )
-    with pytest.raises(ValueError, match=key):
-        render_unit(ctx, action=action)
-
-
 # --- detection ---------------------------------------------------------------
 
 

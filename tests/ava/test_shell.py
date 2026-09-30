@@ -446,14 +446,14 @@ def test_new_session_bare_python_resolves_into_venv(
     customization (pyenv/conda/nvm rewriting PATH) — only on the mechanism
     this repo actually ships.
     """
-    from base.deploy.release.runtime_interpreter import runtime_python
+    from base.deploy.release.runtime_interpreter import runtime_venv
 
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     (fake_home / ".bash_profile").write_text("# minimal profile — no PATH edits\n")
     monkeypatch.setenv("HOME", str(fake_home))
 
-    expected = str(runtime_python())
+    expected = str(runtime_venv() / "bin" / "python")
     sid = shell.new("test-venv-python", ttl=120)
     try:
         _ready(sid)
