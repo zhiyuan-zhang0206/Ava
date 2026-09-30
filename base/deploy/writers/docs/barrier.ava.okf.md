@@ -12,7 +12,7 @@ tags:
 `publication.py` defines the version-2 envelope in this SAME field:
 `current` is a committed exact all-unit release tuple; `pending` preserves that
 predecessor while freezing ordinary births. Each unit binds machine, canonical
-home, artifact/manifest digests, the observer's `ExpectedUnitWriters` digest, and
+home, artifact/manifest digests, the expected-writers tuple digest, and
 the separate complete prepared receipt digest (including service-only
 declarations). The receipt filename digest from the verified inventory producer
 is the latter; its narrower `expected.unit().inventory_digest` cannot substitute

@@ -65,8 +65,8 @@ _MACHINES = "SELECT name FROM machines"
 class PublishedUnit(ManagedUnit):
     """Bind observer expectations and the full prepared receipt separately.
 
-    ``inventory_digest`` identifies the narrower ``ExpectedUnitWriters`` tuple
-    returned by the unit observer. ``prepared_receipt_digest`` binds the sealed
+    ``inventory_digest`` identifies the narrower expected-writers tuple recorded
+    for the unit. ``prepared_receipt_digest`` binds the sealed
     receipt that also retains service-only roster declarations.
     """
 
