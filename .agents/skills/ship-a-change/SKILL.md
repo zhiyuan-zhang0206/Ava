@@ -175,7 +175,7 @@ Still on you:
    (instant-fail): change the SHA (rebase) before resubmitting.
 8. Verify it landed (when not using `--merge`): `gh pr view <PR#>` →
    state `MERGED`; the queue may take 10-30 min. Before removing the
-   worktree, run `python scripts/check_worktree_remove.py <path>` and
+   worktree, run `.venv/bin/python scripts/check_worktree_remove.py <path>` (a python without psutil exits 3, no verdict) and
    **abort the removal if it reports live sessions or
    processes anchored under the path** — a cluster-owned session anchored
    there (a schedule launched by a gateway that ran from the worktree,

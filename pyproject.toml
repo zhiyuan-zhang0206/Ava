@@ -662,14 +662,15 @@ reportUnnecessaryIsInstance = "none"
 # (no globs). So a tests directory under base/, ops/, services/, ava/, scripts/ or ava_builtins/
 # needs its own entry, listed HERE, above the base/ops/services entries: without one it inherits
 # the package's seven "error" rules (base/ops/services) or the global "warning" (the rest).
-# cli/, gateway/ and agent/ already gate exactly the two rules. tests/ci/test_pyright_test_environments.py
-# names any tests directory that is missing its entry. Each entry looks like:
+# cli/, gateway/ and agent/ already gate exactly the two rules, so they need none.
 #
-#   [[tool.pyright.executionEnvironments]]
-#   root = "base/packages/tests"
-#   reportUnknownMemberType = "error"
-#   reportUnknownArgumentType = "error"
-
+# Those entries are GENERATED, one per tests directory, sorted by root: run
+# `.venv/bin/python scripts/codegen/gen_pyright_test_environments.py` after adding, moving or
+# removing a tests directory (the pre-commit hook `lint-pyright-test-environments` and
+# tests/ci/test_pyright_test_environments.py fail until you do). Do not edit between the markers.
+# Two changes that add entries collide only where their roots are neighbors in this order;
+# resolve by running the script again.
+# BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
 [[tool.pyright.executionEnvironments]]
 root = "base/packages/docs/tests"
 reportUnknownMemberType = "error"
@@ -689,6 +690,8 @@ reportUnknownArgumentType = "error"
 root = "base/packages/skills/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
+
+# END GENERATED pyright tests environments
 
 # Ladder rung: raise the reportUnknown*/reportMissing* family to "error" on the highest-signal core
 # layers, gating merge there while the rest of the tree stays at the global "warning". These three

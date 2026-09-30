@@ -750,6 +750,39 @@ jobs:
           fi
           exit "$status"
 
+      - name: Require the test gate
+        # Fail-closed: the Trunk gate below is the only thing that turns the pytest
+        # step's failures red (it is continue-on-error), so an empty secret must not
+        # skip it silently.
+        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          pytest-outcome: ${{ steps.pytest-shard.outcome }}
+
+      - name: Report executed test counts
+        # What this shard actually ran, from the JUnit report pytest already wrote
+        # (the -q log has no test ids): the total and the count per tests/ directory,
+        # in this log and the job summary. The last attempt's report wins. It is also a
+        # gate: no JUnit report (pytest died before writing one, e.g. a plugin failed
+        # to import) or no executed test at all reds the shard, which the Trunk
+        # uploader alone would let pass.
+        if: ${{ !cancelled() }}
+        run: >
+          python3 scripts/ci/shard_counts.py shard --group ${{ matrix.group }}
+          --junit 'tmp/junit-backend-shard-${{ matrix.group }}-a*.xml'
+          --out tmp/shard-counts-${{ matrix.group }}.json
+          --summary "$GITHUB_STEP_SUMMARY" --min-tests 1
+
+      - name: Upload executed test counts
+        # Input of the `backend test counts` job; informational, never a gate.
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shard-counts-${{ matrix.group }}
+          path: tmp/shard-counts-${{ matrix.group }}.json
+          if-no-files-found: ignore
+
       - name: Trunk quarantine gate (upload test results)
         id: trunk-gate
         if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
@@ -757,6 +790,8 @@ jobs:
         with:
           cli-version: 0.15.4
           junit-paths: tmp/junit-backend-shard-${{ matrix.group }}-*.xml
+          # The action's default is true: a missing report would upload nothing and pass.
+          allow-missing-junit-files: false
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
@@ -904,6 +939,14 @@ jobs:
             exit 1
           fi
 
+      - name: Require the test gate
+        # Fail-closed, enforce mode only (see backend-shard): an empty secret must
+        # not skip the Trunk gate silently.
+        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' && needs.test-select.outputs.mode == 'enforce' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          pytest-outcome: ${{ steps.run-subset.outcome }}
+
       - name: Trunk quarantine gate (upload test results)
         id: trunk-gate
         # Enforce mode only: in shadow the subset never gates, so it uploads
@@ -913,6 +956,8 @@ jobs:
         with:
           cli-version: 0.15.4
           junit-paths: tmp/junit-backend-selected.xml
+          # The action's default is true: a missing report would upload nothing and pass.
+          allow-missing-junit-files: false
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
@@ -957,6 +1002,7 @@ jobs:
         uses: ./.github/actions/uv-sync
 
       - name: Run flaky pytest bucket serially
+        id: pytest-serial
         continue-on-error: true
         run: >
           mkdir -p tmp &&
@@ -965,6 +1011,32 @@ jobs:
           --cov=ops --cov=services --cov=ava_builtins
           --junit-xml=tmp/junit-backend-serial.xml -o junit_family=xunit1
 
+      - name: Require the test gate
+        # Fail-closed (see backend-shard): an empty secret must not skip the Trunk gate.
+        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          pytest-outcome: ${{ steps.pytest-serial.outcome }}
+
+      - name: Report executed test counts
+        # The flaky bucket's tests count with the shards' (see backend-shard). The bucket
+        # may legitimately be empty (pytest exits 5 and still writes a report), so only
+        # a missing JUnit report reds it.
+        if: ${{ !cancelled() }}
+        run: >
+          python3 scripts/ci/shard_counts.py shard --group serial
+          --junit tmp/junit-backend-serial.xml --out tmp/shard-counts-serial.json
+          --summary "$GITHUB_STEP_SUMMARY" --min-tests 0
+
+      - name: Upload executed test counts
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shard-counts-serial
+          path: tmp/shard-counts-serial.json
+          if-no-files-found: ignore
+
       - name: Trunk quarantine gate (upload test results)
         id: trunk-gate
         if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
@@ -972,6 +1044,8 @@ jobs:
         with:
           cli-version: 0.15.4
           junit-paths: tmp/junit-backend-serial.xml
+          # The action's default is true: a missing report would upload nothing and pass.
+          allow-missing-junit-files: false
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
@@ -1342,6 +1416,76 @@ jobs:
           uv run coverage combine coverage-data-*
           uv run coverage json -o coverage.json
           uv run python scripts/ci/coverage_gates.py coverage.json
+
+  backend-test-counts:
+    # How many tests CI executed, and how that moved. Adds the shards' and the flaky
+    # bucket's counts up and compares them with the previous main run's total, so a test
+    # that moved, or fell out of the suite, shows as a change in one line instead of
+    # being proved by counting around every batch. Purely informational: the job cannot
+    # fail the run, and nothing needs it. Same fan-out condition as backend-shard.
+    name: backend test counts (all shards)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    needs: [classify, test-select, backend-shard, backend-serial]
+    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.test-select.outputs.mode != 'enforce' || needs.test-select.outputs.decision != 'SELECTED') }}
+    permissions:
+      contents: read
+      actions: read
+    env:
+      # Every count file the total expects: the backend-shard matrix groups and the
+      # serial bucket. tests/ci/test_shard_counts.py pins this against the matrix.
+      COUNT_GROUPS: "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 serial"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download executed test counts
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: shard-counts-*
+          path: shard-counts
+          merge-multiple: true
+
+      - name: Fetch the previous main total
+        # The total of the main run this change is based on (a PR names its base commit);
+        # else the latest main run that left one. None yet is not an error.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p baseline
+          runs() { gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push --status success --json databaseId --jq '.[].databaseId' "$@"; }
+          candidates=""
+          if [ -n "$BASE_SHA" ]; then
+            candidates="$(runs --commit "$BASE_SHA" --limit 1)"
+          fi
+          candidates="$candidates $(runs --limit 10)"
+          for run_id in $candidates; do
+            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name test-count-baseline --dir baseline; then
+              echo "baseline: main run $run_id"
+              break
+            fi
+          done
+
+      - name: Sum the executed test counts
+        continue-on-error: true
+        run: >
+          python3 scripts/ci/shard_counts.py total --dir shard-counts
+          --expected "$COUNT_GROUPS" --baseline baseline/test-count-baseline.json
+          --out test-count-baseline.json --summary "$GITHUB_STEP_SUMMARY"
+          --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+
+      - name: Record the total as the next baseline
+        # Only main's own totals are baselines; a PR reads them and leaves none.
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-count-baseline
+          path: test-count-baseline.json
+          if-no-files-found: ignore
 
   test-selection-shadow-report:
     # The shadow-mode measurement point. It only exists while the mode is
