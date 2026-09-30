@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Per-thread checkpoint retention
-description: Gateway-owned keep-three checkpoint pruning (parked by default; never-delete ruling) with bounded fair passes and an in-flight messages-write guard.
+description: Retained keep-three checkpoint pruning implementation, unscheduled since the 2026-09-30 trim opt-in retirement under the never-delete ruling.
 tags: []
 ---
 
@@ -9,10 +9,11 @@ tags: []
 
 ## Contract
 
-The events-maintenance daemon calls `checkpoint_reaper.prune_threads` every
-minute only while `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=true`; the
-default is false (never-delete ruling, 2026-09-12, task #3180) — the pass is
-parked and nothing is deleted. One table-driven grouping counts all checkpoint rows by `thread_id`;
+The daemon's checkpoint trim opt-in was retired on 2026-09-30 under the
+never-delete ruling (2026-09-12, task #3180). No daemon schedules
+`checkpoint_reaper.prune_threads`; live checkpoint history is retained. The
+reaper implementation remains for a separate retirement decision. If called,
+one table-driven grouping counts all checkpoint rows by `thread_id`;
 threads above the fixed keep-three budget become candidates regardless of agent
 status, liveness, or whether an `agents_meta` row exists. Compaction boundaries
 are exempt from the budget: a checkpoint stamped `compact_boundary: true` is
@@ -41,7 +42,7 @@ parent's pending-send writes, and delta formats depend on the full replay chain.
 An explicit operator can also supply `preserve_checkpoint_ids`, for example
 segment endpoints verified from the compact version when a best-effort boundary
 stamp was absent. These IDs supplement the latest window and stamped boundaries;
-they do not enable the parked background reaper or change boundary metadata.
+they do not schedule the retained reaper or change boundary metadata.
 
 PostgresSaver can expose a new messages blob before its checkpoint row. The
 trim therefore proceeds only when the newest checkpoint's exact referenced
@@ -57,5 +58,5 @@ does not consume the productive-thread cap, allowing later candidates to run.
 - `base/agents/history/checkpoint_cleanup.py` owns the atomic trim, survivor references, and
   retained ancestry and in-flight-write guard. Compaction stamps boundaries but
   does not invoke the retired keep-one deletion flow.
-- `services/events_maintenance/daemon.py` owns the one-minute cadence and the
-  `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED` trim switch.
+- `services/events_maintenance/daemon.py` no longer schedules checkpoint
+  trimming or reports a trim health component.
