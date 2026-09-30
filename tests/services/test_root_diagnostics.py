@@ -219,7 +219,6 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
 
 def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(probes, "IS_MACOS", False)
-    monkeypatch.setattr(probes, "IS_WINDOWS", False)
     monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
     names = {check.name for check in probes.build_diagnostics(set())}
     assert names == {"venv"}

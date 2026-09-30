@@ -31,7 +31,7 @@ home's authoritative `.env` and plugin configuration files, and the development
 source snapshot (tracked plus nonignored untracked files) at start admission;
 root exposes that digest with its native birth in status, without exposing
 secrets. Ambient keys root still hands every unit (proxy, DISPLAY, HOME,
-USER/LOGNAME, TMPDIR and the other temp dirs, Windows system keys) are outside
+USER/LOGNAME, TMPDIR and the other temp dirs) are outside
 the digest: a start that differs only in them reuses the running generation,
 which keeps the values it started with, instead of refusing. The deployment
 glue selects services and supplies health and diagnostic participants: [[services/ava_root_glue/ava_root_glue.ava.okf.md]]. The generic
@@ -58,37 +58,9 @@ an immutable running release or seal ignored dependency directories.
   an adoption hint, never replacement custody. Failed start cannot become ready.
   No resident boot wrapper or root runtime deadline exists; interactive start
   writes no PIDFile. `KillMode=process` preserves independent data-plane siblings.
-- Windows: `caller -> ava-root -> application Jobs`. A current-user-only local
-  named pipe carries control, an exclusive native file handle owns the singleton,
-  and custody publication uses flushed bytes plus write-through rename. Every
-  application is created atomically in a retained, non-breakaway Job. A Job
-  membership snapshot counts only when the kernel's assigned count equals its
-  listed PIDs; the brief disagreement while a member is born or torn down is
-  re-queried within a bound, then refused. Normal
-  stop sends Ctrl-Break only to consoles whose complete membership matches the
-  captured Job births. A native no-console observation on one member permits
-  checking the remaining consoles; it never proves delivery or closure. Stop
-  still requires zero native Job members and native exit signals for every
-  observed birth; an exited Windows process object can retain its PID while
-  another handle remains open. Birth checks hold a native process handle and
-  test its exit signal rather than infer liveness from that PID's presence.
-  Force terminates that
-  original Job. Root death closes the handles and kills members but leaves
-  unresolved custody. The desktop helper is separate and is not an ancestor.
-  The implementation and native Windows CI fixtures exist; ordinary Windows
-  startup remains gated until the native suite actually passes.
-
-Root itself is outside application Jobs so explicit durable terminals can be
-born through a deployment resource handler. Each terminal has its own independent
-Job owner and native birth record; it survives application-root stop, while full
-stop requires its durable empty-Job receipt. Ordinary agent execution stays inside
-its caller's Job and cannot request breakaway implicitly. This uses one owner per
-terminal rather than another permanent per-home broker.
-
 ## Control contract
 
-This package is the server and the Windows application Job owner. The wire
-protocol, client and native pipe/custody primitives sit below every consumer:
+This package owns the application service tree. The wire protocol and client sit below every consumer:
 [[base/native_process/root_control/root_control.ava.okf.md]].
 
 ## Closure and uncertainty

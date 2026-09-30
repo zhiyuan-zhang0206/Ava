@@ -35,17 +35,6 @@ tree. On Linux the Ava tree starts at root; no helper diagnostic is registered.
 Postgres, Redis, and PgBouncer have separate native data-plane custody so they can
 remain available during application maintenance.
 
-On Windows the glue registers the explicit `terminal.start` resource operation.
-It holds the host allocation-freeze lock from durable birth intent through the
-per-terminal owner's ready receipt. Shutdown closes admission and waits for any
-earlier birth. The owner creates its target atomically in a non-breakaway Job;
-its native pipe and record remain available after root stops. Full terminal stop
-observes an empty original Job before publishing closure. An unavailable owner
-without that receipt remains unresolved custody, including after owner death.
-The terminal backend has its own record namespace; it never adopts named agent
-sessions or launches a requester-side fallback. Native Windows CI, not Mac unit
-tests, must prove both survival and complete Job closure before startup is enabled.
-
 Durable update and hold completion belongs to the external transition executor,
 outside the subtree it stops. Root diagnostics does not invoke the pin, schema,
 code-update, or pause-recovery controllers. The old controller graph and hold

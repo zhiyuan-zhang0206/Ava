@@ -598,8 +598,8 @@ func sessionInfo() -> [String: Any] {
 
 /// Report the main display's geometry in LOGICAL points plus the
 /// physical<->logical scale factor. Computer-use callers map screenshot pixels
-/// (physical) to click coordinates (logical) via `scale`; Windows has no
-/// backing scale (physical == logical, scale is always 1).
+/// (physical) to click coordinates (logical) via `scale`. On a 1x display,
+/// physical and logical coordinates match.
 ///
 /// The scale is derived from CoreGraphics' live display mode (pixel size vs
 /// point size) instead of `NSScreen.backingScaleFactor`: AppKit caches screen

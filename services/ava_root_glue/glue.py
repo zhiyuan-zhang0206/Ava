@@ -8,7 +8,6 @@ boundaries; diagnostics never repair them from inside the service subtree.
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -59,14 +58,9 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
         else NON_CRITICAL_SERVICE_READY_TIMEOUT_S
         for unit_id in requested
     }
-    participants = assemble(
+    return assemble(
         context, registry, diagnostics=build_diagnostics(requested), startup_graces=startup_graces
     )
-    if sys.platform == "win32":
-        from services.ava_root_glue.windows_terminal import TerminalBroker
-
-        participants.append(TerminalBroker(context))
-    return participants
 
 
 def assemble(

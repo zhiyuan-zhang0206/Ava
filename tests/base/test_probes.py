@@ -83,8 +83,10 @@ def test_default_user_data_dir_none_when_absent(
     assert pp.default_chrome_user_data_dir() is None  # dir never created
 
 
-def test_default_user_data_dir_none_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pp, "sys", _FakeSys("win32"))
+def test_default_user_data_dir_none_on_unsupported_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pp, "sys", _FakeSys("freebsd"))
     assert pp.default_chrome_user_data_dir() is None
 
 
@@ -105,12 +107,6 @@ def test_display_linux_requires_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert pp.display_available() is True
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
-    assert pp.display_available() is True
-
-
-def test_display_true_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Windows always has a display (like macOS — headless Windows is rare)."""
-    monkeypatch.setattr(pp, "sys", _FakeSys("win32"))
     assert pp.display_available() is True
 
 
@@ -212,9 +208,7 @@ def test_browser_deps_incapability_returns_npx_reason(monkeypatch: pytest.Monkey
 
 
 def test_unix_sockets_available_reads_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The probe IS `hasattr(socket, "AF_UNIX")` — present on POSIX, absent on
-    Windows. Removing the attribute simulates a Windows interpreter without
-    lying about `sys.platform`."""
+    """The probe reads AF_UNIX availability directly from the socket module."""
     assert pp.unix_sockets_available() is True
     monkeypatch.delattr(pp.socket, "AF_UNIX", raising=False)
     assert pp.unix_sockets_available() is False
@@ -228,10 +222,7 @@ def test_browser_mcp_incapability_none_when_capable(monkeypatch: pytest.MonkeyPa
 
 
 def test_browser_mcp_incapability_without_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A Windows agent-runner has display + Chrome + npx — so `browser` runs —
-    and still cannot run browser-mcp, whose transport is a Unix socket. This is
-    the whole point of the separate probe: the gate must differ between the two
-    services on the same host."""
+    """A host without AF_UNIX cannot run browser-mcp even with browser tools."""
     _all_present(monkeypatch)
     monkeypatch.setattr(pp, "unix_sockets_available", lambda: False)
     assert pp.browser_incapability() is None
@@ -300,7 +291,7 @@ def test_gui_login_user_reads_the_console_owner(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_gui_login_user_none_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pp, "sys", _FakeSys("win32"))
+    monkeypatch.setattr(pp, "sys", _FakeSys("linux"))
     monkeypatch.setattr(pp, "_bounded_stdout", _unexpected_probe)
     assert pp.gui_login_user() is None
 

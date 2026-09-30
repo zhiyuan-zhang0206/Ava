@@ -39,8 +39,8 @@ Root must close its own application tree. An abrupt root death can leave childre
 retained custody blocks cold duplicate launch, but automatic orphan recovery and
 proof of independently detached execution-domain closure remain unimplemented.
 The native Linux CI test exercises actual manager adoption, root TERM closure,
-and retention of a data-process stand-in. It does not prove database durability
-or Windows containment. Mac permission grants require real signed-helper proof.
+and retention of a data-process stand-in. It does not prove database durability.
+Mac permission grants require real signed-helper proof.
 
 Unit exit before stop: root reaps its own leaders, then reads the group a few
 event-loop turns later (asyncio's child watcher reaps with `waitpid` first, on

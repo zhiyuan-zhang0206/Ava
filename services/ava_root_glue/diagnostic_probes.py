@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 from base.config import settings
 from base.daemon.health import DaemonProbe
-from base.native_process.os_platform import IS_MACOS, IS_WINDOWS
+from base.native_process.os_platform import IS_MACOS
 from base.native_process.ownership import OwnedProcess
 from base.telemetry.station_endpoint import StationTarget
 from services.ava_root_glue.diagnostics import Diagnostic
@@ -253,8 +253,7 @@ def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
     checks: list[Diagnostic] = []
     if IS_MACOS:
         checks.append(Diagnostic("brew-pin", brew_pins))
-    if not IS_WINDOWS:
-        checks.append(Diagnostic("venv", venv))
+    checks.append(Diagnostic("venv", venv))
     if IS_MACOS:
         from services.healthchecks.permissions_helper import probe
 

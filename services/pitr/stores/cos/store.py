@@ -53,10 +53,7 @@ class CosObjectStore:
     """One bucket-scoped adapter; credentials never enter process argv.
 
     ``SIMPLE_PUT_LIMIT_BYTES`` is a class attribute (not a module global) so
-    contract tests can shrink it on the class the adapter instance binds to
-    — the windows import-surface suite re-imports these modules, which
-    would leave a module-global patch on a module the tested class no
-    longer reads.
+    contract tests can shrink it on the class the adapter instance binds to.
     """
 
     SIMPLE_PUT_LIMIT_BYTES = 5 * 1024**3

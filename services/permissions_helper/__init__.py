@@ -1,23 +1,13 @@
-"""Permissions helper — the desktop-automation daemon holding the machine's
-desktop permissions (macOS TCC / Windows interactive-session identity).
+"""Permissions helper — the macOS desktop-automation daemon holding TCC grants.
 
-`converge()` here dispatches by platform so callers (the converge phase, the
-tests) never branch on sys.platform themselves.
+`converge()` is the entry point for helper setup.
 """
 
 from __future__ import annotations
 
-import sys
-
 
 def converge() -> None:
-    """Idempotent helper bring-up for this platform.
+    """Idempotent macOS helper bring-up: build, sign, and load."""
+    from services.permissions_helper.lifecycle import converge as _converge
 
-    macOS: stable cert + swift build + codesign + launchd load. Windows:
-    csc build + logon-task registration + launch into the user session.
-    """
-    if sys.platform == "win32":
-        from services.permissions_helper.windows.lifecycle import converge as _converge
-    else:
-        from services.permissions_helper.lifecycle import converge as _converge
     _converge()

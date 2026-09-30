@@ -17,7 +17,6 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from types import FrameType
 
 from base.native_process.root_control.ipc import (
     ErrorCode,
@@ -137,19 +136,11 @@ async def run(options: DaemonOptions) -> int:
     server = ControlServer(socket_path, dispatch, after_response=after_response)
     loop = asyncio.get_running_loop()
 
-    def stop_signal(_signum: int, _frame: FrameType | None) -> None:
-        loop.call_soon_threadsafe(request_stop)
-
-    if sys.platform == "win32":
-        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGBREAK):
-            signal.signal(signum, stop_signal)
-    else:
-        for signum in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(signum, request_stop)
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(signum, request_stop)
     # SIGHUP does not reload anything; ignoring it keeps a stray terminal
     # hangup from killing the tree; release replacement is an outer-owner action.
-    if sys.platform != "win32":
-        loop.add_signal_handler(signal.SIGHUP, lambda: _log.info("SIGHUP ignored"))
+    loop.add_signal_handler(signal.SIGHUP, lambda: _log.info("SIGHUP ignored"))
     started: list[WiringParticipant] = []
     try:
         await supervisor.start()
