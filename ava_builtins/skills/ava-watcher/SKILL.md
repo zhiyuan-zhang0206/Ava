@@ -94,7 +94,7 @@ startup, plus alerts when the probe itself fails):
   first (or read the remote ref) — a stale copy reads exactly like "no
   change".
 - **Protect the wake delivery across a restart window.** A gateway / agent
-  restart window (an update wave, `ava cluster update`) refuses connections
+  restart window (an update wave, the fleet update) refuses connections
   for minutes; a bare `send_message` exhausts the SDK's own 3 quick retries
   and the raised exception kills the watcher — the wake is lost silently.
   When the wake must not be lost, retry delivery with growing gaps and fail

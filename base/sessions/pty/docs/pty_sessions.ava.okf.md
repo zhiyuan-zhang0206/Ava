@@ -42,7 +42,7 @@ normally reparents to init through `base._reparent`. On macOS, enabling both
 helper switches makes it a direct signed-helper child with stable TCC
 responsibility; its pty record—not the volatile helper table—remains lifecycle
 truth. Every mass-teardown channel that used to kill shells —
-`ava cluster update`'s service stop, `ava stop`'s tree kill, a healthcheck
+a fleet update's service stop, `ava stop`'s tree kill, a healthcheck
 `respawn_and_verify` — reaches processes by service identity or process
 tree, and a session host has neither. That is what makes the SDK's promise
 "sessions persist across terminate/restart/update" **structural**: a session

@@ -11,7 +11,7 @@ tags:
 
 One load directory: `~/.ava/skills/` (gated by the install registry's enabled
 flag). Converge (`cli/commands/extensions/skills_sync.py`, on `ava start` /
-`ava cluster update` / `ava converge`) syncs two source types into it:
+the fleet update / `ava converge`) syncs two source types into it:
 
 1. **Repo built-in** (origin=repo): `<repo>/ava_builtins/skills/` →
    `~/.ava/skills/<name>/`. Repo-native sources are bootstrap-only:

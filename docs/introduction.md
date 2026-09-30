@@ -12,7 +12,7 @@ Ava agents act by **writing code**, not by picking from a menu of tools. They
 form a **fleet** — a graph of peers that spawn, fork, and message one another —
 and they can **read and modify their own source**, shipping changes through
 PR → CI → merge and then rolling the new code across the running cluster with
-`ava cluster update`.
+the fleet update script (`python -m cli.fleet_update`).
 
 The core is deliberately small. From day one every layer is built asking *can
 this scaffolding be stripped once the model is strong enough to not need it?* —
@@ -32,8 +32,8 @@ screenshots, Windows notes, and FAQ: **[QUICKSTART.md](../QUICKSTART.md)**.
 
 ### 1. Self-Evolving — the cluster upgrades itself
 
-Ava's cluster upgrades itself. New code lands on `main`, and `ava cluster update`
-rolls the whole cluster onto it — without stopping the work in flight. An
+Ava's cluster upgrades itself. New code lands on `main`, and the fleet update script
+(`python -m cli.fleet_update`) rolls the whole cluster onto it — without stopping the work in flight. An
 agent's current code execution finishes at its turn boundary before the new
 version takes over; only wedged processes are force-reaped. The rollout is
 self-supervised: a canary runs the new code under observation while a holdout
@@ -230,7 +230,7 @@ a bare `ava` means the cluster `$AVA_HOME` names (`~/.ava` for prod); a worktree
 | `ava stop` / `ava restart` | tear down / bounce this host |
 | `ava status` | one-screen view: sessions, pg/redis/pgbouncer, healthchecks |
 | `ava logs` | list live service sessions or tail one |
-| `ava cluster update` | roll the latest merged code across the cluster — the only update path |
+| `python -m cli.fleet_update` | roll the latest merged code across a networked cluster over SSH (`down`, then `up`) — the only update path |
 | `ava cluster status/down/destroy` | multi-machine roster + home-addressed stop / detach |
 | `.venv/bin/ava start --no-serve-gateway --serve-agent-runner --gateway-url <url> --db-capability <bundle>` | first start of a split-deployment agent-runner joining a gateway (its checkout's CLI — the home's own link does not exist yet; with the bundle's `AVA_DB_CAPABILITY_KEY` exported) |
 | `ava agents` | observe + control agents (ls / cancel / restart / terminate) |

@@ -20,9 +20,8 @@ native drain boundary (`_temporary_stop`, `service_stop`) — which is why they
 form one package rather than one per verb.
 
 `root_driver.py`, `service_stop.py`, `start_generation.py`, `maintenance.py` and
-`migrations.py` are public: the release transition (`cli/release_transition/`),
-the release operator, `data_plane/maintenance_stop`, and the cutover scripts
-reach them. The `_`-prefixed modules are steps only this package calls.
+`migrations.py` are public: `data_plane/maintenance_stop` and the cutover
+scripts reach them. The `_`-prefixed modules are steps only this package calls.
 
 ## Stop, pause and maintenance
 
@@ -31,9 +30,8 @@ its native drain, after `_start_readiness_preflight` has refused any restart
 whose start would fail ([[start-readiness-preflight.ava.okf.md]]).
 `ops.agent_pause` and `ops.agent_pause.probe` own prepare/drain and runtime
 capability checks; `service_stop` and `data_plane/maintenance_stop` verify
-resource exits (`_maintenance_stop_report` names survivors), and
-`data_plane/write_generation` performs a release's write-generation fence and
-admission. `data_plane/_pooler_stop.OwnedPooler` owns ordinary pooler stop
+resource exits (`_maintenance_stop_report` names survivors).
+`data_plane/_pooler_stop.OwnedPooler` owns ordinary pooler stop
 admission for maintenance and startup recovery: exact native birth and listener
 proof precede a durable stop intent and the first SIGINT (`WAIT_FOR_SERVERS`).
 Retries and already-closed listeners only wait; PgBouncer would interpret
@@ -79,5 +77,3 @@ and when an unready service becomes exit code 4:
 - [[cli/commands/docs/commands.ava.okf.md]] — the command-package overview
 - [[start-readiness.ava.okf.md]] — the launch guard, the root-owned readiness
   wait and the failure exit code
-- [[cli/release_transition/docs/release_transition.ava.okf.md]] — prepared release
-  transitions, which drive this package's root and stop boundary

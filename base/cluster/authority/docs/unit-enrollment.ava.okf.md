@@ -1,19 +1,18 @@
 ---
 type: doc
 title: Unit enrollment
-description: The per-unit enrollment secret a release coordinator authenticates, its operator rotate/revoke commands, what a unit capability bundle exposes, and the coordinator channel's request proofs, replay window and sealing.
+description: The per-unit enrollment secret, its operator rotate/revoke commands, what a unit capability bundle exposes, and the coordinator channel's request proofs, replay window and sealing.
 tags: [authority, lifecycle]
 ---
 
 # Unit enrollment
 
 The enrollment (`db-authority/units/<key>.json` on the gateway, the unit's copy
-in `enrollment.json`) is the unit's durable identity toward a release
-coordinator; the human bearer and write generations never authenticate that
+in `enrollment.json`) is the unit's durable identity toward a coordinator
+channel; the human bearer and write generations never authenticate that
 channel. It is minted when the unit first receives a bundle and reused by
-later bundles. Only an
-operator command on the gateway changes it, refused while a release operation
-is incomplete; the commands print the enrollment id, never the secret:
+later bundles. Only an operator command on the gateway changes it; the
+commands print the enrollment id, never the secret:
 
 - `ava cluster db-authority rotate-enrollment --machine M --home H`: new id and
   secret (atomic replace); the unit receives them with its next `issue-unit`
@@ -52,20 +51,18 @@ unit's own first-start `--machine-name` and home, which that unit asserts
 about itself, and the credentials work without any installation.
 
 `revoke-enrollment` therefore does not contain a compromised unit or a lost
-bundle. Rotate the write generation (a release transition revokes the old
-generation's logins and tokens everywhere), then issue every unit a new
+bundle. Rotate the write generation (the runbook's manual procedure revokes the
+old generation's logins and tokens everywhere), then issue every unit a new
 bundle, and revoke the lost unit's enrollment. What the bundle reached beyond
 the generation rotates separately: the telemetry token with the human secret
 (`scripts/data_plane_ops/rotate_cluster_secret.py`), the Redis runtime password bootstrap
 served with `scripts/data_plane_ops/rotate_data_plane_secrets.py --scope runner`, and the
-provider keys at each provider. A networked home cannot run a release
-transition yet (`NETWORKED_REFUSAL`, slices dbgen-8 and FC-9), so until those
-land it has no in-band way to rotate its write generation.
+provider keys at each provider. No command rotates the write generation: the
+procedure is [manual rotation after a credential leak](../../../../conventions/runbook.md#manual-rotation-after-a-credential-leak).
 
 ## Coordinator channel
 
-`channel` is the coordinator channel's authentication (the listener itself
-belongs to the fleet transition): a request proof is an HMAC-SHA256 over the
+`channel` is the coordinator channel's authentication (no listener uses it now): a request proof is an HMAC-SHA256 over the
 protocol tag, operation, unit, enrollment id, method, path, body digest,
 timestamp and nonce under an HKDF-derived key; the listener verifies it against
 the gateway's current record (rotation and revocation take effect at once), a
@@ -76,23 +73,3 @@ checks and records a nonce under one lock, so concurrent copies of one
 request admit once), and a forged proof never burns a nonce. `seal` / `open_sealed`
 (AES-256-GCM under a key derived from the secret, operation and unit) carry a
 payload for exactly one unit in one operation.
-
-## Before remote units (dbgen-8/FC-9)
-
-The coordinator channel carries no remote unit yet (`require_topology`
-refuses them). These must land before it does:
-
-- **Authenticated coordinator responses.** The channel MACs requests only:
-  the unit's client parses any `200` body as an `Instruction`, over plain
-  HTTP to the captured endpoint. An on-path attacker, or anything that
-  answers at that endpoint, can order a unit to `close`, `excluded` or
-  `restore`, and the follower complies, because it checks only the
-  operation, unit, image and maintenance hold: a capability is sealed, an
-  order is not. The plan: the listener MACs every response under its own
-  HKDF label (`response`) over the protocol, operation, unit, the request's
-  nonce, the status and the body's SHA-256, and the client verifies that MAC
-  before it parses anything, refusing a response without one. Covering the
-  request's nonce binds each answer to the one request it answers, so a
-  captured answer cannot be replayed to a later request. The protocol tag
-  (`ava-coordinator/1`) is not frozen into any shipped image yet, so the
-  change needs no second release.

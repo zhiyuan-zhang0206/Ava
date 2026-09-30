@@ -23,13 +23,6 @@ continuing would guess at the operator's intent:
   cannot pick a winner between two claimants.
 - The post-load cross-model registry revalidation in the provider loader.
 
-The release probe (`cli/commands/_release_plugin_probe.py`) substitutes the
-canonical reporter around the three faces it exercises — the `plugin.py`
-loader (dangling config entries included), the `services.py` roster, and
-provider registration (`ensure_provider_plugins_loaded`; the image's own
-provider-bearing built-ins stay enabled next to the retained set, so provider
-validation never faces an empty binding set) — so a candidate whose retained
-plugin code fails there is rejected at release. The remaining load sites are
-not probed: unloadable `metrics.py`, `inspector.py`, `setup.py`, or
-`default_config.py` code still ships, contained loudly (skipped and reported)
-at runtime.
+Unloadable `metrics.py`, `inspector.py`, `setup.py`, `plugin.py`, `services.py`
+or `default_config.py` code is contained loudly (skipped and reported) at
+runtime; no pre-flight rejects a plugin before it ships.

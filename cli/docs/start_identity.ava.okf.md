@@ -58,46 +58,16 @@ Bare repeated start retains the desired service selection in `service-selection.
 A live root is admitted before preparation: changed source, environment, or roster
 requires prior stop; identical live generations skip configuration, dependency,
 and schema writes. Schema drift fails read-only. This development source digest
-excludes ignored build outputs and does not certify an immutable release image.
+excludes ignored build outputs.
 
-`cli/start_runtime.py` admits a captured `VerifiedRelease` for an initialized home.
-It verifies the complete inventory, build commit, actual loaded interpreter and
-module paths, and isolated `-I -B` execution. Release start must match the home's
-selected artifact and manifest; a source checkout cannot start a home with a
-release selector. The external release operation supplies these captured facts
-and owns selection, migration permission, recovery and known-good publication.
-Image verification by itself grants none of those decisions.
-Ordinary start accepts this runtime identity directly. Old candidate receipts,
-updater telemetry flags and parent-process rollout markers grant no startup
-rights. The durable home operation gate runs before preparation, and the exact
-maintenance hold remains closed until complete readiness and authorized resume.
-Source convergence preserves host setup and scaffold steps without automatic
-production editable-install repair or reinstall.
-Restart captures the same runtime before recording lifecycle progress or stopping
-services. Installed restart requires that the currently loaded isolated image
-matches the selected verified inventory; source restart refuses a retained-image
-home. Both check the durable home operation gate before effects, recheck before
-stop, and pass the identical captured runtime into startup.
-
-The retained operation also binds the authoritative configuration through the
-Settings-free `base/deploy/release/start_inputs.py` digest. Start, preflight, observation and
-resume refuse changed inputs; stage checks precede Settings loading and repeat
-after startup or readiness. The explicit startup capability rechecks this digest
-before ordinary release start prepares identity or loads Settings. These checks
-detect drift at lifecycle boundaries; they do not lock arbitrary file writers.
-
-The same start and root driver consume this runtime identity. Release manifests
-contain direct captured executable/module argv, and the root uses the verified
-working directory. Their generation binds artifact/manifest identity, environment,
-and home configuration, including desired service selection, without invoking Git.
-Configuration inputs must be regular files; a dangling or replaced symlink cannot
-silently become a default configuration. Repeated identity preparation writes
-no checkout pointer or lock inside the sealed image. Verified assets do not run
-source converge, npm installation, extension materialization, or implicit SQL
-migrations; storage ownership, pooler and consumer readiness still run. The
-current release path requires an already provisioned home and current schema.
-Fresh release initialization and schema-changing transitions require separate
-preparation and migration authority; no checkout fallback supplies them.
+`cli/start_runtime.py` (`StartRuntime`) names what one start executes: the checkout
+that loaded the code, its working directory and the interpreter that loaded it.
+It is captured once, rechecked before each lifecycle phase, and grants no
+migration, writer-closure or other operation right. Restart captures the same
+runtime before recording lifecycle progress or stopping services and passes it
+into startup. The exact maintenance hold remains closed until complete readiness
+and authorized resume. Source convergence preserves host setup and scaffold
+steps without automatic production editable-install repair or reinstall.
 
 On macOS only, root must descend from the signed permissions helper. Linux root
 starts directly or under systemd. Ordinary application services have no named-session

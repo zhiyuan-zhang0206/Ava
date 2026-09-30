@@ -93,7 +93,7 @@ as before.
   slot, which is the intentional at-most-once trade-off.
 - **A template change does not reach a running cluster on its own.** The DB is
   authoritative and `provision_builtin_schedules` only inserts rows that are
-  missing — it never rewrites one that exists — so `ava cluster update` refreshes
+  missing — it never rewrites one that exists — so the fleet update refreshes
   the checkout without touching the script any cluster is actually running.
   Push it explicitly, once per changed built-in:
 

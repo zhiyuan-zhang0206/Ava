@@ -34,7 +34,7 @@ Every route module is a FastAPI `APIRouter` `include_router`-mounted to `/api/*`
 - **event_resolutions** (`/api/event-resolutions`) — authenticated immutable-Loki warning/error class dismissal history: create, status-filtered review list, and manual reopen; writes `event_dismissals` and emits transition markers, while the events-maintenance daemon publishes the resulting gauges
 
 ### Cluster & configuration
-- **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, and maintenance control; release submission belongs to [[release_transition.ava.okf.md]] (admin contracts: [[gateway/cluster/docs/ops-surfaces.ava.okf.md]])
+- **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, and maintenance control (admin contracts: [[gateway/cluster/docs/ops-surfaces.ava.okf.md]])
 - **bootstrap** (`/api/bootstrap`) — agent-runner registration handshake (returns cluster config; `AVA_DB_URL` is the credential-free endpoint, never a login, and the human secret is never served; admits a unit's machine API token)
 - **config** (`/api/config`) — runtime configuration read/write (PUT is merge-patch reducer, not full-replace); validates the full affected Settings candidate before persisting (400 invalid / 409 concurrent-write retry)
 - **settings** (`/api/settings`) — frontend user preference KV store (`user_settings` table)

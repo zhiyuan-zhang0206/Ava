@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Start readiness
-description: One selected root roster, exact process ownership, and fresh protocol readiness gate ordinary start and retained-image startup.
+description: One selected root roster, exact process ownership, and fresh protocol readiness gate ordinary start.
 tags:
 - cli
 - lifecycle
@@ -31,20 +31,13 @@ services in its own non-GUI domain when delegation fails.
 After launch, every selected service, including the frontend, must have fresh
 identity-bound protocol evidence. Root generation changes invalidate the result.
 Startup returns success and publishes serving only when the complete roster is
-ready. Boot and update callers receive the same verdict; no readiness waiver
+ready. Every caller receives the same verdict; no readiness waiver
 turns an incomplete launch into success. Failed launches retain their diagnostic
 record through `base/deploy/lifecycle/launch_failures.py`.
-
-A retained-image update admits the captured image and operation before any
-startup effect. It verifies prepared dependencies and schema rather than
-repairing an editable checkout. The external executor independently observes
-readiness before resuming work.
 
 ## Related contracts
 
 - [[cli/commands/lifecycle/docs/readiness-verdict.ava.okf.md]] — exit codes,
   generation evidence, deadlines and alerts.
 - [[cli/docs/start_identity.ava.okf.md]] — first-start identity and operation admission.
-- [[cli/release_transition/docs/release_transition.ava.okf.md]] — retained execution,
-  selected-image transitions and recovery.
 - [[base/cluster/docs/machine.ava.okf.md]] — capabilities and the selected service roster.

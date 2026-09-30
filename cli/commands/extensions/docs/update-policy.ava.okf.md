@@ -51,7 +51,7 @@ their sources (design §5.3; plugin/MCP applies land in P2):
   available: … | blocked_version: … | conflict: … | refused_scan: … | error: …`;
   consecutive failures back the check interval off (doubled per failure, capped
   at a week, ±10% jitter).
-- **Skips**: a per-home flock (no concurrent passes), a cluster update in
+- **Skips**: a per-home flock (no concurrent passes), a fleet update in
   flight, and for `--from-job` also the OS-jobs / refresh switches. Manual runs
   check on demand; job runs honor each package's due cadence and backoff.
 - The pass **never restarts anything** and **never writes the checkout**; a

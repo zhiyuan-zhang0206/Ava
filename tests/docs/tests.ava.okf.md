@@ -44,11 +44,11 @@ A package's own tests sit beside the code they prove (`base/packages/plugins/tes
 - `tests/services/` — backend services
 - `tests/ops/` — agent drain, pause/recovery, deployment holds, health inventory,
   service roster and resource admission
-- `tests/lifecycle/` — lifecycle qualification, grouped by native root custody,
-  immutable images, preparation, retained transitions and branch previews
+- `tests/lifecycle/` — lifecycle qualification, grouped by database authority,
+  native root custody, the fleet update script and branch previews
   (`preview/` also holds the CI preview visual gate's golden-minting contracts).
-  Native platform cases and opt-in acquisition cases keep their explicit gates;
-  moving the tests does not turn a simulated result into native evidence.
+  Native platform cases keep their explicit gates; moving the tests does not
+  turn a simulated result into native evidence.
 - `tests/skills/` — skills
 - `tests/scripts/` — release/docs/secret-rotation and repository tooling;
   lint script tests also live at `tests/` root `test_lint_*.py`
@@ -82,8 +82,8 @@ A package's own tests sit beside the code they prove (`base/packages/plugins/tes
 ## Entry points
 
 - `.venv/bin/pytest tests/agent/test_<subject>.py -q` — run the relevant subject
-- `.venv/bin/pytest tests/lifecycle/transition/test_<subject>.py -q` — run a
-  retained-transition contract; native proof commands belong to their CI workflow
+- `.venv/bin/pytest tests/lifecycle/db_authority/test_<subject>.py -q` — run a
+  database-authority contract; native proof commands belong to their CI workflow
 - Full-suite and coverage execution belong to CI, not local development
 
 ## Notes

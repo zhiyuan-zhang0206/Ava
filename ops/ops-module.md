@@ -13,15 +13,14 @@ coordination. Its design rationale is recorded in
 | RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster_rpc.py` (gateway client) |
 | Op clusters the ops server dispatches | `ops/lifecycle/`, `ops/cluster.py`, `ops/host_config.py`, `ops/inventory.py`, `ops/uploads.py` |
 | Pause, stop and restart | CLI maintenance orchestration over the shared drain |
-| Release transition | `cli/release_transition/`, prepared image and native executor |
+| Fleet update | `cli/fleet_update.py` (down and up scripts per unit, gated by the code version) |
 
 Each package door is the module it grew from; `ops.agents`,
 `ops.rpc_schemas`, `ops.cluster_status`, `ops.agent_pause` and `ops.roster`
 kept their import paths. Module names never repeat the package name, so the
 op clusters read `ops.lifecycle`, `ops.cluster`, `ops.host_config`,
-`ops.inventory` and `ops.uploads`. Two modules stay top-level by contract: the runtime-prepare probe imports
-`ops.spec` by name inside a candidate image, and `python -m ops.private_files`
-is an operator entry point beside its `private-files/` manifest.
+`ops.inventory` and `ops.uploads`. `python -m ops.private_files` stays top-level:
+it is an operator entry point beside its `private-files/` manifest.
 
 `build_services()` supplies the application root manifest and local status roster.
 Agent-runner units execute agents inside one agent host. There is no per-agent
@@ -30,7 +29,7 @@ PTY hosts remain separate execution resources.
 
 The application root owns service supervision. There is no controller manager,
 background checkout/update trigger, scheduled updater reaper, or automatic
-stranded-hold restart path. Release decisions belong to the finite executor.
+stranded-hold restart path.
 
 Pause and update hold admission and wait for native restart, checkpoint flush,
 actual continuation completion and resource settlement. Ordinary stop shares
@@ -38,9 +37,8 @@ that drain and then closes the selected local services, PTYs and data plane.
 Timeout fails without implicit force. The complete operator contract is in
 [graceful maintenance](../conventions/graceful-maintenance.md).
 
-The current release adapter admits one local gateway on the same SQL schema.
-Fleet distribution, schema migration, and workload-cohort release decisions
-remain pre-cutover work in the
+A fleet update is `python -m cli.fleet_update`. What the update path still lacks
+is recorded in the
 [unified lifecycle plan](../future/infra/unified-cluster-lifecycle.md). Retired
 updater RPCs cannot be used to fill those gaps.
 

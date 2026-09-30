@@ -73,8 +73,8 @@ serial remote-dispatch batches stop starting new dispatches once shutdown
 begins, so that cleanup waits for an in-flight dispatch, never the remaining
 batch — deferred rows are re-selected by the next boot's pass.
 
-The retained release executor calls the ordinary maintenance drain with
-straggler reaping enabled. A cohort member still un-landed
+The ordinary maintenance drain can run with straggler reaping enabled (no caller
+does since the release executor was removed). A cohort member still un-landed
 `update_straggler_reap_seconds` (default 15) after its restart command was
 issued is truncated and released with the honest `reaped` outcome instead of
 aborting the wave (task #4016; the local stop family — `ava stop`/`pause`/
@@ -96,9 +96,8 @@ that one needs `ava maintenance status` plus an explicit `resume --cancel` or
 `repair`, never a retry loop. A rollout's own pause no longer defers the held
 continuation it requires, so the ordinary update drain consumes and certifies.
 For ordinary local maintenance, retry the command or run `ava start` to restore
-services and release the hold after readiness succeeds. A captured release
-operation instead continues through its exact prepared request; ordinary start
-cannot bypass its incomplete journal. A failed start keeps admission closed.
+services and release the hold after readiness succeeds. A failed start keeps
+admission closed.
 A recorded checkpoint/continuation failure blocks ordinary start and resume
 before services are launched; repair and inspect that failure first. A healthy
 service probe cannot prove that a failed checkpoint became durable.
@@ -269,8 +268,7 @@ an unflushed checkpoint durable.
 Ava root supervises the admitted application roster. Deliberate maintenance
 stops remove services from that roster before closing their captured processes;
 service supervision cannot reinterpret a planned stop as an unexpected crash.
-The external release executor owns release decisions and the ordinary root
-boot unit owns replacement applications. Data-plane and persistent-terminal
+The ordinary root boot unit owns replacement applications. Data-plane and persistent-terminal
 custody are separate and must be reconciled explicitly.
 
 Host startup and successor admission reconcile proven-dead hosted agent owners
