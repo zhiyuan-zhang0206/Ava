@@ -1,7 +1,7 @@
 ---
 type: doc
 title: PITR CLI Commands
-description: Inspect PITR retention evidence and archive finite migration rollback snapshots before their forward retirement.
+description: Inspect PITR retention, control its deletion gate, and archive finite migration rollback snapshots before their forward retirement.
 tags:
 - cli
 - pitr
@@ -10,7 +10,7 @@ tags:
 # PITR CLI Commands
 
 `cli/commands/data_plane/pitr.py` backs the `ava pitr` command group. `retention inspect`
-renders the newest local retention dry-run plan without a delete surface; with
+renders the newest local retention dry-run plan without deleting; with
 no plan on disk it prints a note to stderr and exits 1. The retention deletion
 gate adds its only sanctioned flip commands: `retention
 status` (carriers, latest plan, daemon state machine, journal tail), `retention
@@ -18,7 +18,9 @@ arm --digest <SHA256> --confirm` (approve the current plan digest; fails closed
 on a blocked plan or a stale digest), `retention disable --confirm` (clear the
 carriers), and `retention run-once --confirm` (the operator-present first pass
 through the same bounded executor, after recomputing and re-comparing the plan
-digest). Every flip and every pass appends to the retention journal.
+digest). Once armed, the scheduler can also delete remote objects on an
+eligible tick; `disable --confirm` clears the carriers before later ticks.
+Every flip and every pass appends to the retention journal.
 
 `multipart list [--prefix P] [--credentials-file PATH]` renders every
 incomplete multipart upload (orphan shard) with its part count, byte size,

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Physical PITR — WAL Archive, Base Chains, and Remote Retention
-description: The disabled-by-default physical point-in-time-recovery plane beside the daily logical dumps — per-home WAL spool and shim, the gated GCS uploader, the weekly base-candidate and restore-proof schedulers, and the dry-run retention planner over both deletion surfaces (the PITR prefix and the `ava-logical/` dump pool) until an operator arms the deletion role.
+description: Default-off physical PITR — WAL archiving, base chains, restore proofs, and gated remote retention across physical and logical objects.
 tags: []
 ---
 
@@ -11,8 +11,8 @@ tags: []
 
 The physical recovery plane: continuous WAL archiving plus weekly pg_basebackup
 chains that together restore the database to any point, and the retention side
-that trims both remote object pools once an operator decides to. Every layer is
-disabled by default and gated separately; enabling one never enables the next.
+that trims both remote object pools once an operator decides to. Five boolean
+gates default off; PITR activation explicitly opens the first three.
 It sits beside — and does not replace — the daily logical dumps
 ([[services/gateway_side/backup/backup.ava.okf.md|daily backup]]), which stay
 mandatory.
@@ -30,10 +30,10 @@ Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`
   encrypted logical recovery floor independently of updater orchestration;
   activation reuses a previously recorded artifact only after re-verifying it
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
-- `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for physical base candidates and generation-pinned restore proofs; both gates default off and it never deletes remote data
+- `services/pitr/base_scheduler_daemon.py` — weekly bases, restore proofs, retention plans, and an arm-gated deletion tick
 - `services/pitr/retention/planner.py` — the default-off local dry-run planner (see *Remote retention* below)
 - `services/pitr/stores/logical_dump_names.py` — the shared managed-name grammar the daily backup writer and the retention classifier both parse, so a name the writer emits is exactly a name the planner may ever delete
-- `cli/commands/data_plane/pitr.py` — read-only `ava pitr retention inspect` view of the latest durable local plan, with per-surface (physical/logical) counts and the weak-evidence count
+- `cli/commands/data_plane/pitr.py` — `ava pitr retention` inspection, status, arm, disable and run-once commands
 
 ## Gates and layers
 
@@ -65,6 +65,11 @@ Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`
   and only then publishes a new immutable `protected=true` manifest. It never
   edits the candidate, touches live PGDATA, selects a latest object, or deletes
   remote data.
+- `ava cluster pitr activate` writes `AVA_PITR_ENABLED`,
+  `AVA_PITR_BASE_BACKUP_ENABLED` and `AVA_PITR_RESTORE_PROOF_ENABLED` true
+  in the home `.env`; it writes `AVA_PITR_RETENTION_PLANNER_ENABLED=false`
+  and leaves `AVA_PITR_RETENTION_DELETE_ARMED` off and
+  `AVA_PITR_RETENTION_DELETE_APPROVED_DIGEST` unset.
 - The second gate also requires an explicit local least-privilege replication
   URL; the ordinary cluster owner remains `NOSUPERUSER` without `REPLICATION`.
 - Database dials never use a write-generation login. Capture facts, the
@@ -86,22 +91,31 @@ operation with proven closure is quarantined without plaintext and the next
 one proceeds; unproven closure blocks its kind until `ava pitr operations
 retire`: [[services/pitr/operation-custody.ava.okf.md|Operation custody]].
 
-## Remote retention (dry run)
+## Remote retention
 
-- The optional `AVA_PITR_RETENTION_PLANNER_ENABLED` slice computes only a local
-  dry-run plan over both deletion surfaces: the latest two protected chains by
-  capture identity, every unprotected candidate pinned, continuous ACKed
-  WAL/history from the oldest retained base, and the `ava-logical/` dump pool
-  under the window mirroring the daily backup's local prune (the newest seven
-  dailies plus the newest pre-update snapshot plus the newest two activation
-  snapshots, and the in-flight activation operation's pinned snapshot).
-- Logical objects without a verifiable sidecar binding (GCS/COS by nature, or a
-  sidecar-less straggler on OSS/Baidu) keep strict-naming-plus-live-stat
-  evidence and are named in the plan's weak-evidence list; a verified sidecar
-  pair carries the full-strength binding on OSS/Baidu.
-- Any malformed, missing, forked, generation-ambiguous, grammar-external or
-  concurrently changing evidence blocks all eligibility — on both surfaces.
-- It has no delete API, credential or production-enable path; remote execution
-  remains future work until an operator arms the deletion role.
+- `AVA_PITR_RETENTION_PLANNER_ENABLED` computes a local dry-run plan across
+  physical and `ava-logical/` objects: retain the latest two protected chains
+  by capture identity, pin every unprotected candidate, keep continuous ACKed
+  WAL/history from the oldest retained base, and mirror the local logical
+  window (seven newest dailies, newest pre-update, two newest activation
+  snapshots, and the in-flight activation pin).
+- Logical objects without verifiable sidecars (GCS/COS, or sidecar-less
+  OSS/Baidu) use strict names plus live stat and appear as weak evidence;
+  verified OSS/Baidu sidecar pairs carry stronger binding.
+- Malformed, missing, forked, generation-ambiguous, grammar-external or
+  changing evidence blocks eligibility on both surfaces.
+- The planner does not delete. `ava pitr retention arm --digest <SHA256> --confirm`
+  writes the arm flag and approved digest to the home `.env`; the scheduler
+  rereads them each tick. With planning on, an unblocked fresh plan whose digest
+  matches for two ticks can delete remote physical/logical objects via the
+  bounded `retention_delete_store()` executor and delete credentials.
+  `ava pitr retention run-once --confirm` also deletes through it after a fresh
+  digest check.
+- To verify the gate is off, `ava pitr retention status` must show
+  `armed=unset/false`, `approved_digest=unset` and, when reachable, daemon
+  `delete_state=disabled/dry-run`. Unreachable means file state only.
+  `ava pitr retention disable --confirm`
+  clears both carriers for the next tick; an in-flight pass can finish.
+  Stopping the scheduler leaves its `.env` arm state intact.
 
 [[services/gateway_side/backup/backup.ava.okf.md|Daily local backup]]
