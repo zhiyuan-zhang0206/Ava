@@ -105,7 +105,6 @@ _ROOT_FILES = (
     "uv.lock",
     ".pre-commit-config.yaml",
     "AGENTS.md",
-    "Dockerfile",
     "docker-compose.yml",
     ".gitleaks.toml",
     "CHANGELOG.md",

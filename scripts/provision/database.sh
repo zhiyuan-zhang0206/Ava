@@ -20,6 +20,11 @@
 # tests/ci/test_pgbouncer_pin.py asserts the copies match.
 PGBOUNCER_APT_VERSION="1.26.0-1.pgdg24.04+1"
 
+# The operator-approved Redis series (8.2, as macOS pins `redis@8.2`): the newest
+# patch release redis.io serves for it. base/host/brew_pin.py holds the canonical
+# value; tests/ci/test_redis_pin.py asserts the copies match.
+REDIS_APT_VERSION="6:8.2.*"
+
 OS="$(prov_os)"
 case "$OS" in
   linux)
@@ -38,13 +43,15 @@ case "$OS" in
       prov_apt_install ca-certificates curl gnupg locales
 
       # Redis >= 6.2 for ACL resetchannels (Ubuntu 22.04 apt ships 6.0).
-      # Install from the official redis.io apt repo (matching prod's 8.2).
+      # Install from the official redis.io apt repo, held to the approved 8.2
+      # series: the repo's newest release is a different major line.
       prov_apt_install gpg
       curl -fsSL https://packages.redis.io/gpg | gpg --dearmor > /tmp/redis-archive-keyring.gpg
       prov_sudo mv /tmp/redis-archive-keyring.gpg /usr/share/keyrings/redis-archive-keyring.gpg
       echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(source /etc/os-release && echo $VERSION_CODENAME) main"       | prov_sudo tee /etc/apt/sources.list.d/redis.list > /dev/null
       prov_sudo apt-get update
-      prov_apt_install redis
+      prov_apt_install "redis-server=${REDIS_APT_VERSION}" "redis-tools=${REDIS_APT_VERSION}"
+      prov_sudo apt-mark hold redis-server redis-tools
       prov_sudo locale-gen en_US.UTF-8
 
       # Postgres 17 server via the official PGDG repo (Ubuntu 24.04 ships 16).
