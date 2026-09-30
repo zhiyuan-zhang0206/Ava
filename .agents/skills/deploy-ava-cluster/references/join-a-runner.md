@@ -42,8 +42,7 @@ secret is never served), rejects a remote gateway returning loopback storage
 URLs, and installs the capability: the bundle must authenticate under
 the key, name this machine and home and the endpoint the gateway serves, be
 unexpired, carry a generation not older than an installed one, and log in. It
-writes `$AVA_HOME/db-authority/unit.json` and `enrollment.json` (0600) and
-deletes the bundle. A runner with no installed capability refuses. It records
+writes `$AVA_HOME/db-authority/unit.json` (0600) and deletes the bundle. A runner with no installed capability refuses. It records
 the local identity before host convergence, registration, and root startup. `--machine-host` must be reachable from the gateway: the gateway calls
 the runner's `/ops` there with its gateway API token (the runner holds only
 that token's digest). A remote join requires a non-loopback address and a

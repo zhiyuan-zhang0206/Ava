@@ -53,9 +53,10 @@ pending or revoked, so `counter` never decreases.
 
 Mutations take a typed token: `BirthAuthority` mints only generation 0;
 `OperationAuthority(operation, direction)` mints later numbers, revokes, closes
-and records drops. The caller holds the matching lock (start intent or the
-operation lock). A recorded origin may also read `cutover`: generation 0 of a
-home converted before births minted the ledger, which nothing mints now.
+and records drops. Birth runs under the start intent's lock; every ledger
+mutation takes the ledger lock itself. A recorded origin may also read `cutover`:
+generation 0 of a home converted before births minted the ledger, which nothing
+mints now.
 
 | Step | Durable effect |
 |---|---|
