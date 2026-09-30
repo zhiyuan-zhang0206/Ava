@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Database write-generation authority
-description: Stable NOLOGIN capability groups, per-rollout generation logins, the private ledger, the census-proven fence and the fail-closed catalog invariant.
+description: Stable NOLOGIN capability groups, per-generation logins, the private ledger, the census-proven fence and the fail-closed catalog invariant.
 tags: [postgres, authority, lifecycle]
 ---
 
@@ -10,9 +10,9 @@ tags: [postgres, authority, lifecycle]
 `base.cluster.authority` separates write authority from the schema. The
 schema owner and two stable `NOLOGIN` groups hold every privilege; application
 processes log in only as one **write generation**: `ava_g<n>_gateway` and
-`ava_g<n>_runner`. A rollout revokes the old generation, proves its sessions
-closed, and mints the next. Returning to an earlier image mints a new number;
-a revoked number never logs in again. The decision is
+`ava_g<n>_runner`. A rotation (the runbook's manual procedure after a credential
+leak) revokes the old generation, proves its sessions closed, and mints the
+next; a revoked number never logs in again. The decision is
 [internal data plane always authenticated](../../../../decisions/2026-09-26-internal-data-plane-always-authenticated.md).
 
 The package is a library. Every catalog function takes the caller's admin
@@ -86,7 +86,7 @@ role can no longer log in, and sessions of dropped roles, because PostgreSQL
 lets `DROP ROLE` succeed under a live session. Any prepared transaction holds.
 A generation backend that authenticated just before its role lost LOGIN may
 appear after the census; its only capability, membership, was revoked in the
-same transaction. The caller stops the owned pooler first. `stale_sessions` is the same census without termination.
+same transaction. The caller stops the owned pooler first.
 
 ## Invariant
 
@@ -100,7 +100,7 @@ default-privilege grantee outside owner/groups/PUBLIC (`EXECUTE`, `USAGE`,
 PUBLIC `CONNECT`. A missing monitor is not a violation; start creates it.
 
 The sweep and the closure census never touch the monitor: it is not a group
-member and can log in, so a rollout neither demotes it nor terminates its
+member and can log in, so a rotation neither demotes it nor terminates its
 sessions.
 
 ## Delivery and wiring

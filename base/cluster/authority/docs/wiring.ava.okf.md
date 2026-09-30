@@ -40,17 +40,15 @@ carries a login to another home:
   --out FILE`): `issue_bundle` seals the ACTIVE generation's runner login, the
   unit's API admission (`UnitApi`: the runner API token, the gateway token's
   digest and the telemetry token; none when the gateway's API is open), the
-  endpoint bootstrap serves (`service_read.served_db_endpoint`), the unit's
-  enrollment and a binding (machine, home, generation number and credential
-  digest, nonce, expiry) with AES-256-GCM under a fresh 32-byte transport key.
+  endpoint bootstrap serves (`service_read.served_db_endpoint`) and a binding
+  (machine, home, generation number and credential digest, nonce, expiry) with
+  AES-256-GCM under a fresh 32-byte transport key.
   The key is printed once and stored nowhere; the header (machine, home,
   generation, expiry, nonce) is readable and authenticated as associated data.
-  The enrollment is minted once per unit into `db-authority/units/<key>.json`
-  and reused by later bundles; deleting that record revokes it. Refused on a
-  pure runner, a remote-managed plane (no generation exists there), a home
-  without an active generation.
-  Only the enrollment is the unit's own; the login and tokens are shared
-  ([what a bundle exposes](unit-enrollment.ava.okf.md#what-a-bundle-exposes)).
+  Refused on a pure runner, a remote-managed plane (no generation exists there),
+  a home without an active generation.
+  Nothing in the bundle is the unit's own; the login and tokens are shared
+  ([what a bundle exposes](unit-bundle.ava.okf.md)).
 - **Install** (unit, `ava start --db-capability FILE`, key in
   `AVA_DB_CAPABILITY_KEY`, popped at once): `open_bundle` refuses anything that
   fails authentication or has expired; the join's bootstrap fetch presents the
@@ -58,8 +56,8 @@ carries a login to another home:
   name and home, the endpoint the gateway serves now, a generation not older
   than the installed one (an equal number must carry the same credential
   digest), and a login the cluster accepts (`SELECT 1` through the endpoint, so
-  a revoked generation never installs). It writes `unit.json` and
-  `enrollment.json` (0600) and start deletes the bundle. A first join with no
+  a revoked generation never installs). It writes `unit.json` (0600) and start
+  deletes the bundle. A first join with no
   bundle and no installed capability refuses before identity is persisted.
 - **Deliver**: the unit's root launcher gives every runner-class service
   `unit_delivery` (the login on the recorded endpoint plus
@@ -75,11 +73,10 @@ carries a login to another home:
 A new generation reaches a remote unit only through a new bundle (a join, an
 emergency).
 
-## Unit enrollment
+## Unit bundle exposure
 
-A unit's durable enrollment secret, its operator commands and the coordinator
-channel's authentication:
-[unit enrollment](unit-enrollment.ava.okf.md).
+What a bundle carries, who shares it, and how a lost one is contained:
+[unit bundle exposure](unit-bundle.ava.okf.md).
 
 ## Wiring
 
@@ -99,4 +96,4 @@ channel's authentication:
 - **Monitoring** is not delivered: the collector's PostgreSQL receiver
   (`cli/commands/observability/otel_collector.py`) dials the owner-only socket as
   `ava_monitor` by `peer`, so its rendered config names no credential and a
-  rollout leaves it working.
+  rotation leaves it working.

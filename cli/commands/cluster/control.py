@@ -340,8 +340,8 @@ def fetch_gateway_cluster_status() -> dict[str, object]:
 def _gateway_authority_home(verb: str) -> Path | None:
     """This gateway home for a db-authority verb, or None after printing the refusal.
 
-    The verbs need a gateway home with a local data plane (a remote-managed
-    plane has no write generation or enrollment store).
+    The verb needs a gateway home with a local data plane (a remote-managed
+    plane has no write generation).
     """
     from base.config import settings
     from base.host.env.bootstrap import config_source_is_local
@@ -357,81 +357,15 @@ def _gateway_authority_home(verb: str) -> Path | None:
     return ava_home().resolve()
 
 
-def _change_enrollment(verb: str, machine: str, home: str) -> tuple[str, str] | None:
-    """Rotate or revoke one unit's gateway enrollment; (unit, enrollment id) or None.
-
-    None means the refusal was printed. Only the enrollment id leaves this
-    function, never the secret.
-    """
-    from base.cluster.authority import AuthorityRefusedError
-    from base.cluster.authority.unit import (
-        UnitIdentity,
-        revoke_enrollment,
-        rotate_enrollment,
-    )
-
-    change = {"rotate-enrollment": rotate_enrollment, "revoke-enrollment": revoke_enrollment}[verb]
-    gateway_home = _gateway_authority_home(verb)
-    if gateway_home is None:
-        return None
-    try:
-        unit = UnitIdentity(machine=machine, home=home)
-        enrollment = change(gateway_home, unit)
-    except (AuthorityRefusedError, ValueError, OSError) as exc:
-        print(f"✗ ava cluster db-authority {verb}: {exc}", file=sys.stderr)
-        return None
-    return unit.describe(), enrollment.enrollment_id
-
-
-def cmd_db_authority_rotate_enrollment(*, machine: str, home: str) -> int:
-    """`ava cluster db-authority rotate-enrollment` (gateway): replace a unit's secret.
-
-    The unit's next `issue-unit` bundle delivers the new secret; until it is
-    installed the release coordinator channel refuses the unit.
-    """
-    changed = _change_enrollment("rotate-enrollment", machine, home)
-    if changed is None:
-        return 1
-    unit, enrollment_id = changed
-    print(
-        f"✓ enrollment of {unit} rotated (new id {enrollment_id}); the unit authenticates "
-        "again after it installs a new bundle: run `ava cluster db-authority issue-unit "
-        f"--machine {machine} --home {home} --out <bundle>`"
-    )
-    return 0
-
-
-def cmd_db_authority_revoke_enrollment(*, machine: str, home: str) -> int:
-    """`ava cluster db-authority revoke-enrollment` (gateway): delete a unit's record.
-
-    The unit can no longer authenticate to a release coordinator; a later
-    `issue-unit` for it mints a new enrollment (an explicit re-enrollment).
-    Its database login and API token are the write generation's and stay
-    valid until the generation rotates.
-    """
-    changed = _change_enrollment("revoke-enrollment", machine, home)
-    if changed is None:
-        return 1
-    unit, enrollment_id = changed
-    print(
-        f"✓ enrollment {enrollment_id} of {unit} revoked; the unit can no longer "
-        "authenticate to a release coordinator (a later issue-unit re-enrolls it). "
-        "Its database login and API token belong to the write generation and stay "
-        "valid until the generation rotates."
-    )
-    return 0
-
-
 def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours: float) -> int:
     """`ava cluster db-authority issue-unit` — seal one remote unit's database capability.
 
     Runs on the gateway home. The bundle carries the ACTIVE write generation's
     runner login and (while the API is authenticated) its API admission — the
     runner API token, the gateway token's digest and the telemetry token — the
-    endpoint bootstrap serves and the unit's enrollment secret, bound to
-    (`machine`, `home`) and expiring after `ttl_hours`. It is
-    written 0600 to `out` (never overwritten) and sealed under a transport key
-    printed once here; the unit installs it with
+    endpoint bootstrap serves, bound to (`machine`, `home`) and expiring after
+    `ttl_hours`. It is written 0600 to `out` (never overwritten) and sealed under
+    a transport key printed once here; the unit installs it with
     `ava start --db-capability <bundle>` and that key in AVA_DB_CAPABILITY_KEY.
     Refused on a pure agent-runner, a remote-managed plane and a home without an
     active generation.

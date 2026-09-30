@@ -3,7 +3,7 @@
 Application processes never hold schema-owner or administrator credentials.
 Two stable NOLOGIN groups carry every application privilege; each write
 generation is one gateway and one runner login that inherits its group, owns
-nothing and is recorded in the home's private ledger. A rollout revokes the
+nothing and is recorded in the home's private ledger. A rotation revokes the
 previous generation, proves its sessions closed, and mints the next one.
 
 Every catalog function takes the caller's admin connection (the OS-user

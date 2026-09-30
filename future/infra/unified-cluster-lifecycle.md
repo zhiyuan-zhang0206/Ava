@@ -225,7 +225,7 @@ admitted operator CLI consumes the gateway login. Bootstrap serves no database
 credential; a remote agent-runner installs a sealed, unit-bound capability the
 gateway operator issues (`ava cluster db-authority issue-unit`,
 `ava start --db-capability`), carrying the active generation's runner login,
-its API admission and the unit's enrollment secret
+and its API admission
 ([unit capability](../../base/cluster/authority/docs/wiring.ava.okf.md#remote-agent-runner-units)).
 API admission is a generation boundary too: every generation carries one
 machine API token per class; the gateway admits the human secret or the ACTIVE
@@ -262,7 +262,7 @@ alerts remain active; removing an old decision path is not evidence that a
 replacement is complete. A networked cluster has no in-band way to rotate its
 write generation, so a compromised unit or a lost capability bundle is
 contained by the manual procedure in the runbook
-([what a bundle exposes](../../base/cluster/authority/docs/unit-enrollment.ava.okf.md#what-a-bundle-exposes)).
+([what a bundle exposes](../../base/cluster/authority/docs/unit-bundle.ava.okf.md)).
 
 No real-process test runs a gateway with its cluster secret set against a
 runner's real `/ops` and spawns an agent through it. The e2e stack blanks the

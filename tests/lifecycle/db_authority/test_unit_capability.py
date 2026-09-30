@@ -1,9 +1,8 @@
 """Per-unit database capability for remote agent-runners (the manual delivery).
 
 Bootstrap serves no database login. The gateway operator issues a sealed,
-unit-bound bundle of the ACTIVE write generation's runner login plus the
-unit's enrollment secret; the runner installs it at start and its launcher
-delivers it. The single-box gateway fixture (real PostgreSQL 17, PgBouncer and
+unit-bound bundle of the ACTIVE write generation's runner login; the runner
+installs it at start and its launcher delivers it. The single-box gateway fixture (real PostgreSQL 17, PgBouncer and
 Redis) proves the end-to-end path, that a bearer-only runner receives nothing,
 and that a revoked generation's bundle never installs. The tamper, binding and
 boot-pass checks need no database.
@@ -146,15 +145,10 @@ def test_a_bundle_opens_only_with_its_own_transport_key(gateway: Path, runner_ho
         unit.open_bundle(issued.envelope, "AAAA")
     with pytest.raises(unit.UnitCapabilityError, match="not a database capability bundle"):
         unit.open_bundle(b"{}", issued.transport_key)
-    # The envelope never carries the login, the API token or the enrollment
-    # secret in clear.
+    # The envelope never carries the login or the API token in clear.
     bundle = _open(issued)
     assert bundle.capability.api is not None
-    for secret in (
-        bundle.capability.password,
-        bundle.capability.api.token,
-        bundle.enrollment.secret,
-    ):
+    for secret in (bundle.capability.password, bundle.capability.api.token):
         assert secret.encode() not in issued.envelope
 
 
@@ -193,7 +187,7 @@ def test_issue_names_only_the_credential_free_endpoint(gateway: Path, runner_hom
         _issue(gateway, runner_home, endpoint="postgresql://ava:pw@10.0.0.7:6433/ava")
 
 
-# ── install: binding, enrollment, private store ─────────────────────────────
+# ── install: binding, private store ─────────────────────────────────────────
 
 
 def test_install_binds_the_unit_and_the_served_endpoint(
@@ -216,27 +210,10 @@ def test_install_binds_the_unit_and_the_served_endpoint(
     assert unit.load_unit_capability(runner_home) is None
 
     installed = _install(runner_home, issued)
-    for path in (unit.unit_capability_path(runner_home), unit.unit_enrollment_path(runner_home)):
-        assert path.stat().st_mode & 0o777 == 0o600
+    assert unit.unit_capability_path(runner_home).stat().st_mode & 0o777 == 0o600
     assert (unit.unit_capability_path(runner_home).parent.stat().st_mode & 0o777) == 0o700
     assert installed == unit.require_unit_capability(runner_home)
     assert installed.role == "ava_g0_runner"
-
-
-def test_the_enrollment_is_minted_once_and_carried_to_the_unit(
-    gateway: Path, runner_home: Path
-) -> None:
-    first, second = _open(_issue(gateway, runner_home)), _open(_issue(gateway, runner_home))
-    assert first.enrollment == second.enrollment
-    assert first.capability.bundle != second.capability.bundle
-    record = unit.enrollment_record_path(gateway, first.capability.unit)
-    assert record.stat().st_mode & 0o777 == 0o600
-    assert unit.Enrollment.model_validate_json(record.read_bytes()) == first.enrollment
-    unit.install_bundle(
-        runner_home, first, machine=_MACHINE, served_endpoint=_ENDPOINT, probe=_no_probe
-    )
-    installed = unit.unit_enrollment_path(runner_home).read_bytes()
-    assert unit.Enrollment.model_validate_json(installed) == first.enrollment
 
 
 # ── the runner's boot pass and launcher ─────────────────────────────────────
