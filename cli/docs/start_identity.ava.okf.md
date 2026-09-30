@@ -12,11 +12,11 @@ tags:
 `cli/start_intent.py` resolves and validates first-start inputs without importing
 runtime Settings. `cli/start_identity.py` persists the complete private intent
 under the home and checkout binding locks (in that order) before publishing
-`.env`. The intent is the home's record of itself: a gateway's port block and
+`.env`. The intent is the home's record of itself: a gateway's ports and
 data-plane host live in its `record` (`base/cluster/record.py`), and no host
-file lists clusters. A new block is the first one with no port bound right now;
-a stopped cluster's block can be handed out again, and the start port preflight
-then refuses whichever home starts second. The checkout lock serializes
+file lists clusters. A new home records the fixed port table
+(`base/host/env/port_table.py`) after a bind probe finds every port free; a
+record whose slots differ from the table is refused. The checkout lock serializes
 different homes; stale first-start inputs cannot replace an existing binding.
 Pointer publication and retirement share that lock. An interrupted claim
 resumes the same ports and credentials: the intent carries

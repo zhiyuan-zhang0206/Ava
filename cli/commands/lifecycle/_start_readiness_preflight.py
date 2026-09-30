@@ -14,10 +14,9 @@ What it forwards (each item read-only; nothing here repairs or launches):
   `logs/.metadata_never_index` marker whose converge write requires a regular
   file. Non-regular nodes INSIDE the trees (sockets, FIFOs, devices) are
   reported as observations only: converge skips them, so start survives them;
-- daemon health ports another unit already answers on — the blocking pre-bind
-  gate of `start._refuse_occupied_health_ports` (issue #977), which otherwise
-  runs only after the stop. Its warning-only sibling — the full port block plus
-  `.env`/registry drift (issue #603) — rides along as observations;
+- daemon health ports another home's daemon already answers on — the blocking
+  pre-bind gate of `start._refuse_occupied_health_ports` (issue #977), which
+  otherwise runs only after the stop;
 - tracked migration files in the checked-out tree that cannot be read: the
   applier opens them inside start, and the pre-stop layout gate
   (`validate_migrations_at_ref`) vets names only;
@@ -82,7 +81,7 @@ def preflight_start_readiness(
             "ahead of this one reports the same condition)"
         )
     else:
-        port_fatal, port_observations = _port_findings(repo, home, roles)
+        port_fatal, port_observations = _port_findings(roles)
         fatal += port_fatal
         observations += port_observations
 
@@ -118,29 +117,21 @@ def _machine_roles() -> MachineRoles | None:
     return _repo_commands._roles_or_none()
 
 
-def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[str], list[str]]:
-    """(fatal, observations) for the two port layers, checked on the roster that
+def _port_findings(roles: MachineRoles) -> tuple[list[str], list[str]]:
+    """(fatal, observations) for the health-port gate, checked on the roster that
     the update's own `ava start` will launch with.
 
     The fatal layer is the blocking pre-bind gate (#977): a daemon health port
-    answered by another unit refuses the whole start, and after the stop that
-    refusal has no host left to serve. Only a *terminal* verdict counts — this
-    unit's own daemons are ALIVE — so an idempotent restart still passes. The
-    observation layer is the warning-only scan (#603): the full port block plus
-    `.env`/registry drift, surfaced here while the operator is watching the
-    updater instead of only inside the post-stop converge.
+    answered by another home's daemon refuses the whole start, and after the stop
+    that refusal has no host left to serve. Only a *terminal* verdict counts — this
+    unit's own daemons are ALIVE — so an idempotent restart still passes.
 
-    Detection failures are observations, not refusals, mirroring
-    `_port_preflight.ensure_port_preflight`'s contract: a preflight must never
-    be the thing that takes the host down.
+    Detection failures are observations, not refusals: a preflight must never be
+    the thing that takes the host down.
     """
     import cli.commands._probe as _probe_commands
     import ops.roster as _roster
-    from base import cluster
-    from base.cluster.port_preflight import env_port_drift
     from base.deploy.lifecycle.service_selection import resolve_selection
-    from cli.commands.converge.port_preflight import collect_port_conflicts
-    from cli.commands.converge.spec import ConvergeCtx
     from cli.commands.lifecycle.root_driver import _root_tree_roster
 
     try:
@@ -153,21 +144,10 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
     fatal = [
         f"{port.spec.session}: health port answered by {port.detail} — `ava start` "
         "refuses the whole launch on this (#977); after the stop that refusal leaves "
-        "no host serving. Free the port, or move this unit's block: `ava start "
-        "--gateway <url> --machine-name <name> --machine-host <host> "
-        "--health-port-base <N>`"
+        "no host serving. Stop the other home's daemon that holds the port"
         for port in occupied
     ]
-
-    try:
-        ctx = ConvergeCtx(repo=repo, ava_home=home, roles=roles)
-        observations = list(collect_port_conflicts(ctx))
-        record = cluster.get_record(home)
-        if record is not None:
-            observations += env_port_drift(home, record)
-    except Exception as exc:  # same contract as the outer guard
-        observations = [f"port-block scan skipped: {exc}"]
-    return fatal, observations
+    return fatal, []
 
 
 def _private_tree_findings(home: Path) -> tuple[list[str], list[str]]:

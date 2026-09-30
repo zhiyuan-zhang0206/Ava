@@ -451,6 +451,7 @@ _assert_env_precedes_project_imports()
 import ava
 from base.config import set_field, settings
 from base.daemon.health import _HEALTH_PORT_OVERRIDES
+from base.host.env.port_table import FIXED_PORTS
 
 # The host-scope isolation pins (env block above) must have taken effect before
 # Settings construction: the native LGTM render reads the Tempo URLs at use
@@ -557,16 +558,22 @@ settings.general.machine_serve_gateway = None
 # ── Service ports: the session gets its own, never a prod default ──
 #
 # Redirecting AVA_HOME is not enough. Every service port falls back to a FIXED
-# default when nothing overrides it — restarter 8102, gateway 8000, frontend
-# 3000, milvus — and those are the ports the operator's prod cluster on this same
-# box is already bound to. So a test that starts a daemon binds prod's port, and
-# a test that runs a healthcheck probes (or respawns!) prod's service.
+# default when nothing overrides it — the fixed port table
+# (base/host/env/port_table.py: gateway 8000, frontend 3000, milvus, every
+# daemon's health port) — and those are the ports the operator's prod cluster on
+# this same box is already bound to. So a test that starts a daemon binds prod's
+# port, and a test that runs a healthcheck probes (or respawns!) prod's service.
 #
-# That is not hypothetical: on 2026-07-24 a pytest-leaked restarter daemon took
-# prod's 8102 and answered its /healthz for 98 minutes, so prod's watchdog saw
-# green and never revived the real restarter — the whole cluster's `restarting`
+# That is not hypothetical: on 2026-07-24 a pytest-leaked daemon took prod's
+# health port and answered its /healthz for 98 minutes, so prod's watchdog saw
+# green and never revived the real daemon — the whole cluster's `restarting`
 # agents froze. `pg`/`redis` were already isolated this way (tests/_containers.py
 # binds :0); these were the ports that were not.
+#
+# Every port a test binds or dials comes from the kernel or from the private range
+# above 21000, and the whole table sits below it (tests/base/test_fixed_ports.py),
+# so no test port can equal a table port. `tests/base/test_fixed_ports.py` also
+# fails when a port-bearing setting in this session still holds its table value.
 #
 # Pinned in the settings singleton (in-process readers, which have already
 # constructed Settings by now) AND in os.environ (any subprocess a test spawns).
@@ -598,6 +605,37 @@ for _health_port_field in _HEALTH_PORT_OVERRIDES.values():
 _pin_setting("gateway_health_url", f"http://127.0.0.1:{_free_port()}/api/health")
 _pin_setting("frontend_healthcheck_url", f"http://127.0.0.1:{_free_port()}")
 _pin_setting("milvus_port", _free_port())
+# The rest of the settings that default to a table port. The permissions helper
+# port is pinned in the singleton only: its env key is popped above on purpose,
+# and a set key would read as a helper spawn context in every child.
+_pin_setting("gateway_port", _free_port())
+_pin_setting("browser_cdp_port", _free_port())
+_pin_setting("grafana_port", _free_port())
+_pin_setting("milvus_uri", f"http://127.0.0.1:{settings.services.milvus_port}")
+_pin_setting("memory_search_port", _free_port())
+_pin_setting("memory_search_uri", f"http://127.0.0.1:{settings.services.memory_search_port}")
+set_field("permissions_helper_port", _free_port())
+
+
+def _distinct_free_ports(count: int) -> list[int]:
+    """`count` different free localhost ports: every socket stays bound until all
+    are chosen, so the kernel cannot hand the same number out twice."""
+    with contextlib.ExitStack() as stack:
+        socks: list[socket.socket] = []
+        for _ in range(count):
+            sock = stack.enter_context(
+                contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+            )
+            sock.bind(("127.0.0.1", 0))
+            socks.append(sock)
+        return [int(sock.getsockname()[1]) for sock in socks]
+
+
+# The ports every test home born in this session records (`guards.py`): one
+# kernel-assigned port per slot of the fixed table.
+_SESSION_PORTS: dict[str, int] = dict(
+    zip(FIXED_PORTS, _distinct_free_ports(len(FIXED_PORTS)), strict=True)
+)
 
 # Belt-and-suspenders on the OS-jobs switch already in `os.environ` at the top of
 # this file: an operator's real `~/.ava/.env` is loaded by `base.host.env.dotenv_boot`
@@ -645,3 +683,13 @@ def pristine_env() -> Mapping[str, str]:
     loaded, and a test that reached in by module path would be coupled to it.
     """
     return _PRISTINE_ENV
+
+
+@pytest.fixture(scope="session")
+def session_ports() -> dict[str, int]:
+    """One kernel-assigned port per slot of the fixed table, for test homes.
+
+    A fixture for the same reason as `pristine_env`: it travels through pytest's
+    own channel instead of a module path that depends on how the plugin loads.
+    """
+    return dict(_SESSION_PORTS)

@@ -26,8 +26,7 @@ Checked, all read-only:
   converge skips them (see `base/host/private_storage.py`).
 - **daemon health ports** — the blocking pre-bind gate (issue #977), on the
   roster the coming start will launch. Only terminal verdicts count, so an
-  idempotent restart passes. The warning-only port-block scan and
-  `.env`/registry drift (issue #603) ride along as observations.
+  idempotent restart passes.
 - **migration readability** — tracked migrations the applier cannot open; their
   names are already vetted at the target ref by `validate_migrations_at_ref`.
 - **prod-checkout anchor and the venv entry points** — `ava start`'s first

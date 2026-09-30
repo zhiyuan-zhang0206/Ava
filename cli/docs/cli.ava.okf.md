@@ -46,7 +46,7 @@ survive pause only. See [operator procedure](../../conventions/graceful-maintena
 
 `cli/start_intent.py` validates identity before Settings loads and holds the home
 lifecycle lock through readiness. `cli/start_identity.py` durably records the
-home, capabilities, credentials, and allocated ports before their first effects.
+home, capabilities, credentials, and the port table before their first effects.
 An interrupted first start resumes that intent; a bare repeated start preserves
 identity and desired service selection. Unknown existing resources, conflicting
 inputs, and a destroyed home refuse. The contract is in
@@ -86,5 +86,5 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 ## Notes
 
 - Bare `ava` = `~/.local/bin/ava` → `scripts/ava-launcher.sh`: runs `$AVA_HOME/ava` (the home's CLI link) or refuses; a checkout's `.venv/bin/ava` acts on its own cluster (`.ava_home` pointer).
-- Each cluster has its own pg/redis; isolation is home-directory isolation (instances under `$AVA_HOME` + port blocks), not db names / redis indexes in a shared instance.
+- Each cluster has its own pg/redis; isolation is home-directory isolation (instances under `$AVA_HOME` on the fixed port table), not db names / redis indexes in a shared instance.
 - Children: [[cli/docs/cluster.ava.okf.md]] (the `ava cluster` verb group) · [[cli/docs/start_identity.ava.okf.md]] (idempotent cluster start) · [[cli/commands/docs/commands.ava.okf.md]] (the module split) · [[cli/commands/extensions/docs/packages.ava.okf.md]] (the plugins / skill / mcp package surface) · [[cli/docs/mcp_server.ava.okf.md]] (`ava mcp serve` — this cluster AS an MCP server).

@@ -59,7 +59,7 @@ def _bridge_config(home: Path) -> RedisBridgeConfig | None:
     if not settings.data_plane.cluster_secret:
         return None
 
-    from base.cluster import get_record, record_redis_port
+    from base.cluster import get_record
     from base.cluster.machine import reachable_host
 
     listen_host = reachable_host()
@@ -68,7 +68,7 @@ def _bridge_config(home: Path) -> RedisBridgeConfig | None:
     record = get_record(home)
     if record is None:
         raise _RedisBridgeUnconfiguredError(f"bridge unconfigured: no registry record for {home}")
-    return RedisBridgeConfig(listen_host=listen_host, port=record_redis_port(record))
+    return RedisBridgeConfig(listen_host=listen_host, port=record.ports["redis"])
 
 
 def _source_path(repo: Path) -> Path:

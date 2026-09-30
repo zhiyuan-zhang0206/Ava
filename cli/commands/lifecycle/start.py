@@ -39,13 +39,11 @@ def _ensure_gateway_data_plane() -> int:
 def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     """0 when every health port in `roster` is this unit's to bind, else 1 + why.
 
-    The one thing no port scheme can arrange in advance. A block allocated at
-    install keeps two clusters apart, and `--health-port-base` lets an operator
-    separate two units by hand — but neither survives a *third* unit appearing
-    later, and a WSL2 distro can bind whatever it likes on a loopback Windows
-    also reaches. Detection is what does not depend on everyone having agreed
-    beforehand, so `ava start` asks the port who is there before it launches
-    anything onto it (issue #977).
+    The one thing a fixed port table cannot arrange in advance: another home's
+    daemon (a leaked test daemon, a stray from a previous checkout) may already
+    answer on this unit's health port. Detection does not depend on everyone
+    having agreed beforehand, so `ava start` asks the port who is there before it
+    launches anything onto it (issue #977).
 
     Exits 1 rather than the readiness code: nothing has been launched, so this is
     a step that failed, not a host that came up incomplete. That also keeps it
@@ -53,16 +51,14 @@ def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     before any application process is started.
 
     One occupied port refuses the WHOLE start, gateway and frontend included —
-    there is no partial bring-up, because a `.env` is edited once and the whole
-    block moves together, so degrading to "start the other six" would leave the
-    mixed state the incident was made of. The escape hatch is
-    `--disable-service <name>`, which drops the daemon from the roster this gate
-    reads and is therefore the way to bring the rest of the unit up while the
-    collision is being sorted out; the message says so.
+    there is no partial bring-up, because degrading to "start the other six"
+    would leave a mixed state. The escape hatch is `--disable-service <name>`,
+    which drops the daemon from the roster this gate reads and is therefore the
+    way to bring the rest of the unit up while the collision is being sorted out;
+    the message says so.
     """
     # Read through the probe owner so the safety fixture guards this lookup.
     import cli.commands._probe as _probe_commands
-    from base.paths import ava_home
 
     occupied = _probe_commands._occupied_health_ports(roster)
     if not occupied:
@@ -73,17 +69,10 @@ def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     print(
         "\n  Not starting — NOTHING was launched, including the gateway and the frontend. "
         "Launching onto a held port dies on 'address already in use'; launching onto a "
-        "RELAYED one is worse, because the watchdog's probe is answered by the other unit "
-        "and the failure reads as green.\n"
-        "  A health port belongs to a unit, not to a cluster — two units on one machine "
-        "(a second install, or a WSL2 distro whose loopback Windows can reach) need one of "
-        "them moved. Give this unit its own block:\n"
-        f"      ava start --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> --machine-host <host> "
-        f"--health-port-base <N>\n"
-        f"  or set the AVA_*_HEALTH_PORT keys in {ava_home() / '.env'} directly, then retry "
-        "`ava start`.\n"
-        "  To bring the rest of this unit up meanwhile, drop the listed daemons from this "
-        "start: "
+        "RELAYED one is worse, because the watchdog's probe is answered by the other home's "
+        "daemon and the failure reads as green.\n"
+        "  Stop the listed daemon, then retry `ava start`. To bring the rest of this unit "
+        "up meanwhile, drop the listed daemons from this start: "
         + " ".join(f"--disable-service {port.spec.session}" for port in occupied)
         + "\n  (that daemon then does not run at all — it is a stopgap, not the fix).",
         file=sys.stderr,
@@ -121,7 +110,7 @@ def _prepare_cold_start(
         return 1
 
     # 2) gateway brings up this cluster's own pg/redis instance (under its
-    #    $AVA_HOME, on its per-cluster ports); a runner-only host skips (uses the
+    #    $AVA_HOME, on its recorded ports); a runner-only host skips (uses the
     #    central node's DB/Redis). macOS: brew binaries via pg_ctl + redis-server;
     #    Linux: pg_ctl + redis-server. No docker on any POSIX platform.
     if "gateway" in roles:

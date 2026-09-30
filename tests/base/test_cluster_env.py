@@ -4,7 +4,6 @@ import pytest
 
 from base import cluster
 from base.host.env import registry
-from base.host.env.port_block import PORT_OFFSETS
 
 
 def _rec(tmp_path: Path):
@@ -13,7 +12,6 @@ def _rec(tmp_path: Path):
             "gateway": 18000,
             "frontend": 18001,
             "heartbeat": 18002,
-            "restarter": 18003,
             "labeler": 18004,
             "task_maintenance": 18005,
             "memory_indexer": 18006,
@@ -26,7 +24,7 @@ def _rec(tmp_path: Path):
             "pgbouncer": 18013,
             "events_maintenance": 18014,
             "app": 18015,
-            # Post-S4-slot birth shape: every PORT_OFFSETS service carries a key.
+            # The birth shape: every slot of the fixed table carries a key.
             "delivery_watchdog": 18016,
             "im_bridge": 18017,
             "agent_host": 18019,
@@ -153,12 +151,12 @@ def test_derive_env_pgbouncer_enabled_writes_pooler_port(tmp_path: Path):
     )
     from urllib.parse import urlsplit
 
-    assert urlsplit(env["AVA_DB_URL"]).port == 18000 + PORT_OFFSETS["pgbouncer"]  # 18013
+    assert urlsplit(env["AVA_DB_URL"]).port == 18013
     assert "AVA_PGBOUNCER_PORT" not in env
 
 
 def test_per_cluster_base_urls_point_at_own_instance_ports(tmp_path: Path):
-    """Every cluster's base URLs are loopback at its own allocated pg/redis ports —
+    """Every cluster's base URLs are loopback at its recorded pg/redis ports —
     derive_env then swaps in the db name + `ava_<cluster>` identity + secret.
     The default (no `data_plane_host` on the record) MUST render exactly this
     local form — the A5 de-hardcoding contract: parameterizing the host source
@@ -226,106 +224,34 @@ def test_url_host_reads_host_with_loopback_fallback():
     assert url_host("redis://:6380/0") == "127.0.0.1"
 
 
-def test_wsl_default_health_port_base_cannot_collide_with_a_birthed_cluster():
-    """`registry.WSL_DEFAULT_HEALTH_PORT_BASE` (issue #1152) must sit outside the
-    birth allocator's own scan range — otherwise a cluster later born on the same
-    WSL2 box (`cluster.allocate_ports`, which scans [BLOCK_START, BLOCK_MAX))
-    could eventually claim the exact base a WSL2 unit auto-defaulted to,
-    recreating the collision this constant exists to avoid."""
-    from base.host.env import port_block
-
-    assert registry.WSL_DEFAULT_HEALTH_PORT_BASE >= port_block.BLOCK_MAX
-
-
-def test_wsl_default_health_port_base_derives_a_legal_block():
-    """The reserved base must itself produce ports inside 1024-65535 — asserted
-    directly rather than assumed, since `health_port_env` raises otherwise."""
-    ports = registry.health_port_env(registry.WSL_DEFAULT_HEALTH_PORT_BASE)
-    assert all(1024 <= int(p) <= 65535 for p in ports.values())
-
-
-def test_health_port_env_derives_the_block_from_a_base():
-    """`--health-port-base` lands each daemon exactly where an allocated cluster
-    would put it — base + the service's block offset, not a second convention.
-
-    Pinned against `derive_env` on a record with the same base, so the operator's
-    hand-set unit and an installed cluster can never diverge on layout."""
-    from base.host.env.port_block import PORT_OFFSETS
-
-    derived = registry.health_port_env(18000)
-    assert derived == {
-        var: str(18000 + PORT_OFFSETS[svc])
-        for svc, var in registry.health_port_env_aliases().items()
-    }
-
-
-def test_health_port_env_matches_derive_env_for_the_same_base(tmp_path: Path):
-    """The two producers of an `AVA_*_HEALTH_PORT` set agree value-for-value.
-
-    `derive_env` writes a cluster's own block at its birth; `health_port_env`
-    writes a unit's block from `ava start --health-port-base`. Two code paths,
-    one layout — a drift would put a co-located unit's ports somewhere the
-    operator did not read off `ava cluster ls`."""
-    installed = cluster.derive_env(
-        _rec(tmp_path),
-        base_db_url="postgresql://ava:p@localhost:5432/ava",
-        base_redis_url="redis://localhost:6379/0",
-        cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
-        redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
-        redis_password="runtime-value",  # noqa: S106 — isolated test credential
-    )
-    hand_set = registry.health_port_env(18000)
-    assert {k: installed[k] for k in hand_set} == hand_set
-
-
-def test_health_port_env_refuses_a_base_that_overflows_the_port_range():
-    """A base whose block runs past 65535 is a typo, and clamping it would bind
-    ports nobody asked for — so it raises instead."""
-    import pytest
-
-    with pytest.raises(ValueError, match="outside 1024-65535"):
-        registry.health_port_env(65530)
-
-
 # ── S4 isolation: health-port tables single-sourced + late-slot fallback ──
 
 
 def test_health_port_tables_in_sync():
-    """F-s4-3 guard: the four descriptions of "per-unit daemon health ports" must
-    name the same service set, or a new daemon can silently fall out of the
-    per-unit model (im_bridge / delivery_watchdog did exactly that: settings and
-    DEFAULT_PORTS knew them, the env-var derive surface did not, so
-    `--health-port-base` did not move them).
+    """Guard: the descriptions of "daemon health ports" must name the same
+    service set, or a new daemon can silently fall out of the derive surface
+    (im_bridge / delivery_watchdog did exactly that: settings and DEFAULT_PORTS
+    knew them, the env-var derive surface did not).
 
-    The tables are now derived from PORT_OFFSETS + _HEALTH_PORT_ENV rather than
-    hand-maintained; this test pins the derivation so a future hand edit is a
-    test failure, not a silent drift."""
+    The tables are derived from `_HEALTH_PORT_SERVICES` and the fixed port table
+    rather than hand-maintained; this test pins the derivation so a future hand
+    edit is a test failure, not a silent drift."""
     from base.daemon import health
-    from base.host.env.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
+    from base.host.env.port_table import FIXED_PORTS
 
     svcs = set(registry.health_port_env_aliases())
     assert set(health._HEALTH_PORT_OVERRIDES) == svcs
     assert set(health.DEFAULT_PORTS) == svcs
-    # every health daemon lives in the block table (offsets 16/17 for the two
-    # late daemons), so `--health-port-base` / derive / preflight all move it
-    assert svcs <= set(PORT_OFFSETS)
-    # the legacy fallback is the LEGACY_AVA_PORTS subset, by construction
-    assert {svc: LEGACY_AVA_PORTS[svc] for svc in svcs} == health.DEFAULT_PORTS
+    # every health daemon has a slot in the fixed table
+    assert svcs <= set(FIXED_PORTS)
+    # the fallback is the FIXED_PORTS subset, by construction
+    assert {svc: FIXED_PORTS[svc] for svc in svcs} == health.DEFAULT_PORTS
     # env vars follow the AVA_<NAME>_HEALTH_PORT shape — a rename elsewhere
     # (settings alias, dotenv_boot force set) breaks this loudly
     for svc, var in registry.health_port_env_aliases().items():
         assert var == f"AVA_{svc.upper()}_HEALTH_PORT", f"{svc} -> {var}"
     # every health var is part of the derive surface (subprocess strip + force)
     assert set(registry.health_port_env_aliases().values()) <= registry.derived_env_keys()
-
-
-# The overlap-against-other-records behavior this test once pinned
-# (`allocate_ports` skipping a block another host record occupied) no longer
-# exists: `allocate_ports` takes no arguments now and consults no registered
-# record, only live port bind-ability (`base.cluster.port_free`) — a home
-# knows no other cluster. That surviving behavior (skip a block with a bound
-# port, land on the next) is covered by
-# `tests/base/test_cluster_alloc.py::test_allocate_ports_skips_a_block_with_a_bound_port`.
 
 
 @pytest.mark.parametrize("missing", ["redis_admin_password", "redis_password"])

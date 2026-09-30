@@ -281,7 +281,7 @@ class _ServiceRuntimeSettings(EnvSettings):
     agent_host_health_port: int | None = Field(
         default=None,
         alias="AVA_AGENT_HOST_HEALTH_PORT",
-        description="Hosted agent-runner healthz port. None = derive from the unit's port block.",
+        description="Hosted agent-runner healthz port. Unset = default 8114.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",
@@ -301,7 +301,7 @@ class _ServiceRuntimeSettings(EnvSettings):
     page_server_health_port: int | None = Field(
         default=None,
         alias="AVA_PAGE_SERVER_HEALTH_PORT",
-        description="Page server supervisor healthz port. None = derive from the unit's port block.",
+        description="Page server supervisor healthz port. Unset = default 8112.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",

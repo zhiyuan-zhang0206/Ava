@@ -18,15 +18,10 @@ from urllib.parse import SplitResult, urlsplit
 
 from dotenv import dotenv_values
 
-from base.host.env.registry import (
-    WSL_DEFAULT_HEALTH_PORT_BASE,
-    derived_env_keys,
-    env_identity_keys,
-    health_port_env,
-)
+from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.net.predicates import is_loopback_host
 from base.host.private_storage import ensure_private_dir
-from base.native_process.os_platform import IS_WINDOWS, IS_WSL, file_lock
+from base.native_process.os_platform import IS_WINDOWS, file_lock
 from cli.start_identity import IdentityInput, prepare_identity, read_intent
 from cli.start_runtime import StartRuntime
 
@@ -310,7 +305,7 @@ def _inputs(
     config, digest = _config_values(args, home)
     values.update(config)
     values["AVA_SERVICE_PATH"] = _service_path(values, home)
-    _apply_identity_options(args, home, stored, values, roles)
+    _apply_identity_options(args, home, stored, values)
     if config.get("AVA_DB_URL"):
         _validate_remote_inputs(values, roles)
     if "gateway" not in roles:
@@ -350,7 +345,6 @@ def _apply_identity_options(
     home: Path,
     stored: dict[str, str],
     values: dict[str, str],
-    roles: frozenset[str],
 ) -> None:
     for field in _FIELDS:
         explicit = getattr(args, field)
@@ -367,17 +361,10 @@ def _apply_identity_options(
     for key in ("AVA_MACHINE_NAME", "AVA_MACHINE_HOST"):
         if any(c in values.get(key, "") for c in "\r\n\x00"):
             raise ValueError(f"invalid {key}")
-    _apply_host_options(args, values, roles)
+    _apply_host_options(args, values)
 
 
-def _apply_host_options(
-    args: argparse.Namespace, values: dict[str, str], roles: frozenset[str]
-) -> None:
-    if args.health_port_base is not None:
-        values.update(health_port_env(args.health_port_base))
-    elif IS_WSL and "gateway" not in roles:
-        for key, value in health_port_env(WSL_DEFAULT_HEALTH_PORT_BASE).items():
-            values.setdefault(key, value)
+def _apply_host_options(args: argparse.Namespace, values: dict[str, str]) -> None:
     if args.ssl_cert_file is not None:
         values.update(SSL_CERT_FILE=args.ssl_cert_file, REQUESTS_CA_BUNDLE=args.ssl_cert_file)
         os.environ["SSL_CERT_FILE"] = args.ssl_cert_file

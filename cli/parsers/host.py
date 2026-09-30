@@ -175,9 +175,6 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     start_p.add_argument(
         "--machine-host", default=None, help="this host's reachable private-network address"
     )
-    start_p.add_argument(
-        "--health-port-base", type=int, default=None, help="this unit's daemon port-block base"
-    )
     start_p.add_argument("--ssl-cert-file", default=None, help="CA bundle for gateway verification")
     start_p.add_argument(
         "--db-capability",

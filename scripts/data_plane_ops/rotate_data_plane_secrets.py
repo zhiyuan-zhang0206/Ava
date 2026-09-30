@@ -31,7 +31,6 @@ from dotenv import dotenv_values
 from base.cluster import (
     ensure_cluster_redis_acl,
     get_record,
-    record_redis_port,
     redis_identity,
 )
 from base.cluster.derive import REDIS_PASSWORD_ENV
@@ -137,7 +136,7 @@ def build_state(scope: str = "both") -> RotationState:
         new_redis_admin_password=mint_secret() if scope in {"admin", "both"} else old_admin,
         old_redis_password=old_runtime,
         new_redis_password=mint_secret() if scope in {"runner", "both"} else old_runtime,
-        redis_port=record_redis_port(record),
+        redis_port=record.ports["redis"],
         redis_host=url_host(settings.data_plane.redis_url),
         redis_user=redis_identity(),
     )

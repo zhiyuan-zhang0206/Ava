@@ -47,8 +47,7 @@ describes only itself (`base/cluster/record.py`).
   bring-up, so a rotation self-heals — the cost of losing `.env` is credentials
   and config, not data.) The leftover home stays *un-bootable* instead: its
   `destroy-intent.json` is `detached`, which `cli/start_identity.py:prepare_identity`
-  refuses. A block handed to another cluster since is caught by the start port
-  preflight either way.
+  refuses.
 - `health-probe` is a cron payload that exits 0/1, not a human-readable view —
   the roster is `status`.
 - `status`'s `code` column is a live per-host probe reading: the commit the

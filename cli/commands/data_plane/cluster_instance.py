@@ -1,8 +1,7 @@
 """Per-cluster native Postgres+Redis bring-up.
 
 Every cluster (including `main`) runs its OWN Postgres and Redis under its
-`$AVA_HOME` on its own allocated ports, so two co-located clusters share no data
-plane and cannot reach into each other's database/channels — this is the only
+`$AVA_HOME` on the fixed port table (`base.host.env.port_table`) — this is the only
 data-plane path; there is no shared host instance.
 
 Model (mirrors `base.cluster.dataplane.pg_tools.throwaway_postgres`, but persistent + authed):
@@ -712,7 +711,7 @@ def _print_pooler_status() -> None:
     """The pooler line: its registry-derived listen port, probed through the
     admin console as the operator entry from the home's authority store. No
     registry record means the port is unknowable — say so instead of a false `:0`."""
-    from base.cluster import get_record, record_pgbouncer_port
+    from base.cluster import get_record
     from base.cluster.authority import AuthorityRefusedError, read_pooler_admin
     from cli.commands.data_plane.pgbouncer import pgbouncer_listener_reachable
 
@@ -720,7 +719,7 @@ def _print_pooler_status() -> None:
     if rec is None:
         print("  - pgbouncer: no registry record — cannot resolve its port")
         return
-    port = record_pgbouncer_port(rec)
+    port = rec.ports["pgbouncer"]
     try:
         ok = pgbouncer_listener_reachable(port, read_pooler_admin(ava_home()).password)
     except AuthorityRefusedError as exc:

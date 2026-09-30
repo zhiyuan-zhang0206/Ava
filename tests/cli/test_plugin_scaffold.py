@@ -128,7 +128,6 @@ def test_converge_steps_do_not_scaffold_plugins() -> None:
 
 _HOST_INTEGRATION_STEP_NAMES = frozenset(
     {
-        "port conflict preflight",
         "health preflight",
         "otel collector sidecar",
         "lgtm native backends",

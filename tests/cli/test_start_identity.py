@@ -474,19 +474,61 @@ def test_ready_phase_never_regresses_or_rewrites(inputs: identity.IdentityInput)
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
-def test_reservation_carries_the_retired_coordinator_port(inputs: identity.IdentityInput) -> None:
-    """The retired coordinator slot's port is still part of every gateway reservation:
-    the reservation is exactly the full block, so an intent recorded without it refuses."""
+def test_birth_records_the_ports_a_new_home_gets(
+    inputs: identity.IdentityInput, session_ports: dict[str, int]
+) -> None:
+    """A test home records this session's own ports, never the fixed table's: the
+    table is what the operator's cluster on the same box binds."""
     identity.prepare_identity(inputs)
     rec = cluster.get_record(inputs.home)
     assert rec is not None
-    ports: dict[str, int] = dict(rec.ports)  # pyright: ignore[reportAssignmentType]
-    assert ports["coordinator"] == ports["gateway"] + 20
+    assert dict(rec.ports) == session_ports
+    assert not set(session_ports.values()) & set(cluster.FIXED_PORTS.values())
+
+
+def test_birth_refuses_ports_that_are_already_bound(
+    inputs: identity.IdentityInput, session_ports: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cluster, "port_free", lambda port: port != session_ports["gateway"])  # pyright: ignore[reportUnknownArgumentType] — test double
+    with pytest.raises(RuntimeError, match="already occupied"):
+        identity.prepare_identity(inputs)
+    assert not (inputs.home / identity.INTENT_NAME).exists()
+
+
+def test_the_fixed_table_is_a_valid_reservation(inputs: identity.IdentityInput) -> None:
+    """A production home records exactly the fixed table; its intent reads back
+    unchanged."""
+    identity.prepare_identity(inputs)
     path = inputs.home / identity.INTENT_NAME
     data = json.loads(path.read_text())
-    del data["record"]["ports"]["coordinator"]
+    data["record"]["ports"] = dict(cluster.FIXED_PORTS)
     path.write_text(json.dumps(data))
-    with pytest.raises(RuntimeError, match="invalid start port reservation"):
+    read = identity.read_intent(inputs.home)
+    assert read is not None and read["record"]["ports"] == cluster.FIXED_PORTS
+
+
+@pytest.mark.parametrize(
+    ("slot", "present", "message"),
+    [
+        ("retired_slot", False, r"unexpected \['retired_slot'\]"),
+        ("memory_search", True, r"missing \['memory_search'\]"),
+    ],
+)
+def test_reservation_must_match_the_fixed_table_exactly(
+    inputs: identity.IdentityInput, slot: str, present: bool, message: str
+) -> None:
+    """A record carrying a slot the table lacks (or lacking one it has) is refused
+    at once and names the difference, so a hand step left undone fails the start
+    loudly instead of running on a stale layout."""
+    identity.prepare_identity(inputs)
+    path = inputs.home / identity.INTENT_NAME
+    data = json.loads(path.read_text())
+    if present:
+        del data["record"]["ports"][slot]
+    else:
+        data["record"]["ports"][slot] = 8102
+    path.write_text(json.dumps(data))
+    with pytest.raises(RuntimeError, match=rf"invalid start port reservation.*{message}"):
         identity.read_intent(inputs.home)
 
 
