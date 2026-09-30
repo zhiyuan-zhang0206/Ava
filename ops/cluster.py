@@ -1,8 +1,9 @@
 """Cluster-ops RPC implementations.
 
-Stranded-lease recovery, stopping announcements and live status snapshots. One
-of the op clusters beside `ops.lifecycle`, `ops.host_config`, `ops.inventory` and
-`ops.uploads`; each cluster is self-contained.
+Stopping announcements, live status snapshots, persistent-shell probes and the
+per-agent command view. One of the op clusters beside `ops.lifecycle`,
+`ops.host_config`, `ops.inventory` and `ops.uploads`; each cluster is
+self-contained.
 
 Most of these are thin wrappers; this layer is the agent-runner-callable RPC
 surface the ops server dispatches (`services/agent_ops/daemon.py:_dispatch`) and
@@ -11,24 +12,13 @@ the gateway cluster router calls.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, cast
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from base.cluster.machine import machine_name
 from base.cluster.machines import mark_stopping
 from base.config.turn_view import resolve_agent_config_pins
-from base.deploy.lifecycle import home_lifecycle_locks
-from base.deploy.maintenance import pause_owner
-from base.deploy.state.cluster_lock import (
-    claim_recovery_lock,
-    read_update_lease,
-    release_update_lock,
-)
-from base.deploy.state.host_deploy_state import updater_lease_live
 from base.log import logger
-from ops.cluster_pause import unpause_local_cluster
 from ops.cluster_status import (
     ClusterStatus,
     agent_shell_sessions,
@@ -43,101 +33,6 @@ from ops.rpc_schemas import (
     ShellKillResult,
     ShellProbeResult,
 )
-
-
-class ClusterUpdateInProgress(RuntimeError):  # noqa: N818 — state description
-    """An exact deploy or maintenance owner still excludes this transition."""
-
-
-def _lock_holder_is_live(holder: str, *, held_for_s: float | None = None) -> bool:
-    """Whether `holder` (the update-lock owner string `<machine>:pid<N>`, minted by
-    the deploy lease) names a process that is
-    still running on THIS host.
-
-    The negation of `base.deploy.state.cluster_lock.holder_process_gone` supplies local-owner
-    proof, including the pid-recycling slack. A holder on a different machine, an
-    unparseable holder, and an unreadable process identity are all treated as live
-    (refuse rather than risk clobbering a real run). `held_for_s` (the lease's
-    server-computed age) arms the pid-recycling check: the holder string carries
-    no start time, but a live pid whose process STARTED after the acquire (+ the
-    shared slack) is the pid's next occupant, not the holder. This matters at
-    recover's timescale: a 30-minute TTL is exactly the window in which a busy
-    host recycles the dead orchestration's pid.
-    """
-    from base.deploy.state.cluster_lock import holder_process_gone
-
-    return not holder_process_gone(holder, held_for_s=held_for_s)
-
-
-def cluster_recover_op() -> dict[str, object]:
-    """Operator stranded-cluster recovery — force-clear a pause + update lock that
-    a hard-killed rollout left behind.
-
-    Refuses (raises ClusterUpdateInProgress) when a deploy is actually alive, via
-    two authoritative checks — a deploy lease whose holder PROCESS is still
-    running (pid-probed when the holder is this host; a holder elsewhere cannot
-    be probed and is conservatively treated as live), OR this host's live updater
-    lease (a separate updater owner the deploy lease cannot see).
-    Only when neither holds is the paused/locked state stale and safe to
-    force-clear. Probing the holder pid allows this retained legacy helper to
-    refuse while the process is still alive.
-
-    The pid-probe gates the lease refusal rather than following it: the lease is
-    renewed by its holder and outlives a crashed one by up to its full TTL, so an
-    un-probed "the lease says a rollout is executing" refusal blocks recovery for
-    exactly the window this op exists to skip (2026-08-12: a rollout hard-killed
-    by its own stop leg left a live-looking lease, and recovery refused on it for
-    the rest of the TTL with the holder pid provably dead).
-
-    Order: clear the lock first, then unpause — so a failure clearing the lock
-    leaves the cluster paused (the safe, still-wedged state) rather than unpaused
-    with a stale lock that would block the next rollout's acquire.
-
-    Returns {"unlocked_holder": <prior lock holder or None>}.
-    """
-    with (
-        home_lifecycle_locks.resource_lock(purpose="ops.cluster_recover"),
-        home_lifecycle_locks.lifecycle_lock(),
-    ):
-        lease = read_update_lease()
-        if lease is not None and _lock_holder_is_live(lease.holder, held_for_s=lease.held_for_s):
-            what = lease.kind or "deploy"
-            raise ClusterUpdateInProgress(
-                f"the cluster deploy lease ({what}) is held by a live process "
-                f"({lease.holder}) — recovery refused; wait for it to finish or kill it "
-                "first. A holder on another machine cannot be probed from here: run "
-                "recover there, or wait out the lease TTL"
-            )
-        if updater_lease_live():
-            raise ClusterUpdateInProgress(
-                "an update is in flight on this host — its updater lease is live; "
-                "recovery refused; wait for it to finish or kill its session first"
-            )
-        pause_snapshot = pause_owner.read()
-        recovery_holder = f"recovery:{machine_name()}:pid{os.getpid()}"
-        claim = claim_recovery_lock(recovery_holder, lease)
-        if not claim.acquired:
-            raise ClusterUpdateInProgress(
-                "the cluster deploy lease changed while recovery was proving it stale; "
-                "a new owner may have started, so recovery refused without unpausing or clearing"
-            )
-        try:
-            unpause_local_cluster()
-            if pause_snapshot.holder is not None and pause_snapshot.acquired_at is not None:
-                pause_owner.clear(
-                    pause_snapshot.holder,
-                    pause_snapshot.acquired_at,
-                )
-            elif pause_snapshot.status == "invalid":
-                pause_owner.force_clear()
-        finally:
-            release_update_lock(recovery_holder)
-        cleared = claim.previous_holder
-    logger.info(
-        "[cluster] manual recover: force-released lock (was {holder}) + unpaused",
-        holder=cleared,
-    )
-    return {"unlocked_holder": cleared}
 
 
 def cluster_stopping_op(machine: str, home: str) -> dict[str, str]:

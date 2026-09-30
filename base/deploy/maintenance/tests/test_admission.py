@@ -17,12 +17,8 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
 
-def test_maintenance_survives_old_timestamp_and_every_ordinary_resume() -> None:
+def test_maintenance_hold_has_no_expiry() -> None:
     pause_owner.begin_maintenance("migration", WHEN - timedelta(days=10))
-    assert admission.held()
-    assert not pause_owner.clear("migration", WHEN - timedelta(days=10))
-    with pytest.raises(RuntimeError, match="explicit resume"):
-        pause_owner.force_clear()
     assert admission.held()
 
 

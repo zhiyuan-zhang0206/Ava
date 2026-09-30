@@ -8,8 +8,8 @@ description: Triages Ava production alerts and diagnoses disk, memory, connectiv
 This skill is the cluster operator's day-to-day companion: how to review the
 alert stream, how to diagnose the recurring failure classes, and how to
 respond. It is **methodology** (how to find and judge), not a fix index —
-for symptom → fix recovery of a broken cluster use the `ava cluster recover`
-CLI verb (see `conventions/runbook.md`); for the CLI verbs see
+for symptom → fix recovery of a broken cluster see `conventions/runbook.md`
+(a stranded maintenance hold: `conventions/graceful-maintenance.md`); for the CLI verbs see
 `ava-guide/ops`; for rolling out changes see `ship-a-change`.
 
 ## Role

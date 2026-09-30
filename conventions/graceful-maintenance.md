@@ -237,6 +237,13 @@ a refused connection alone does not establish that the owner is absent.
 | `stopped`, `starting` | Run `maintenance start`, verify readiness, then `maintenance resume`. |
 | `ready` | `maintenance resume` verifies the generation and opens admission. |
 
+An unreadable journal, or a `paused` record with no maintenance hold (what the
+retired updater's stop left), has no exact generation for these commands to
+match, and no command clears it. After confirming no `ava stop` or `ava
+maintenance` command is in flight for this home (`ava maintenance status`
+reports what it can read), remove `$AVA_HOME/run/deploy-pause-owner.json` by
+hand and run `ava start`.
+
 On a gateway, `maintenance stop` requires `--gateway-last`, asserting that the
 operator independently verified remote stops. Live terminals refuse unless
 `--keep-terminals` asserts a separately verified work boundary. A failed stop

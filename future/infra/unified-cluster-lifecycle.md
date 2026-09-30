@@ -64,18 +64,17 @@ state.
    - Every cluster reads `deployment_state.managed_writer_evidence->'pending'
      IS NULL` before this release is admitted. The retired updater's checked
      publication recovery is gone, and no runtime command clears a recorded
-     pending publication. It keeps fencing every deploy-lease acquire, including
-     PITR provisioning, until an operator's manual database repair clears
-     exactly the recorded value. The fence itself stays.
+     pending publication; an operator's manual database repair clears exactly
+     the recorded value.
    - `$AVA_HOME/installed_sha` has no reader or writer; the source-tree check
      alerts only on checkout edits of a source-run home. Delete the file in the
      cutover record.
-   - Do not run `ava cluster recover` on a host while a legacy updater, rollout,
-     cluster-restart or hold-recovery session may still be alive there. No
-     current code spawns such a session, so recovery no longer probes for one:
-     a legacy session is invisible to it until it takes its database lease. The
-     remaining guards (deploy-lease holder PID probe, host updater lease,
-     maintenance admission) cover every current owner.
+   - Do not remove `$AVA_HOME/run/deploy-pause-owner.json` on a host while a
+     legacy updater, rollout, cluster-restart or hold-recovery session, an `ava
+     stop`, or an `ava maintenance` command may still be alive there. No current
+     code spawns a legacy session, and no command clears a `paused` record one
+     left: once `ava maintenance status` shows no live owner, the operator
+     removes the journal by hand.
    - `$AVA_HOME/run/updater-handoff.json`, `updater-handoff.lock`,
      `updater-bootstrap-recovery.json` and `updater-spawn/` have no reader or
      writer: recovery no longer refuses on them. Delete them in the cutover

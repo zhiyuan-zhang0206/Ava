@@ -33,7 +33,6 @@
     "tests/cli/test_converge_selection.py::cli.commands.observability.lgtm_native._render_configs": 1,
     "tests/cli/test_converge_selection.py::cli.commands.observability.lgtm_native._render_grafana_admin_password": 1,
     "tests/cli/test_converge_selection.py::cli.commands.observability.lgtm_native._verify_loki": 1,
-    "tests/cli/test_deploy_refusal_surfacing.py::ops.cluster._lock_holder_is_live": 2,
     "tests/cli/test_external_skills_adversarial.py::cli.commands.extensions.external_skills._commit_activation": 2,
     "tests/cli/test_external_skills_adversarial.py::cli.commands.extensions.external_skills._materialize_source_snapshot": 2,
     "tests/cli/test_external_skills_adversarial.py::cli.commands.extensions.external_skills._rename_no_replace": 9,
