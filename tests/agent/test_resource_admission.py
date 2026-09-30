@@ -155,7 +155,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
         "resource-test",
         uuid4(),
         expected_from="idling",
-        publication=_CurrentRuntimeAdmission(None),
+        publication=_CurrentRuntimeAdmission(),
     )
     assert successor is not None and successor.generation != target.generation
 

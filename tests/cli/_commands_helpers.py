@@ -159,7 +159,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
         monkeypatch.setattr(_cli, "_collect_setup_values", lambda _a: (..., []))"""
     from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 
-    def fixture_runtime(_self: object, _home: Path) -> LoadedRuntimeIdentity:
+    def fixture_runtime(_self: object) -> LoadedRuntimeIdentity:
         return serving_root.runtime
 
     monkeypatch.setattr("cli.start_runtime.StartRuntime.identity", fixture_runtime)

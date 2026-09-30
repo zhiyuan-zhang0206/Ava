@@ -9,7 +9,7 @@ tags:
 
 # Retained release transition
 
-`ava cluster update --prepared REQUEST` hands the request to its verified
+The release handoff (no CLI verb registers it) hands the request to its verified
 executor image ([[cli/release_handoff/docs/release_handoff.ava.okf.md]]), which
 submits or resumes one immutable operation (no moving-main, mutable checkout
 or per-service branch). Success is native dispatch/readback, not completion.

@@ -11,14 +11,12 @@ reads them through here, bound to the ledger's credential digest:
   ``credential_digest`` reach launch digests and journals;
 - an operator process on the gateway home that no launcher injected
   (``consume``, as environment ``operator_environment``), admitted only while
-  it runs the home's admitted runtime: the selected release image, or the
-  source checkout the home was born from.
+  it runs the home's admitted runtime: the source checkout the home was born from.
 """
 
 from __future__ import annotations
 
 import json
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -184,25 +182,12 @@ def _intent_checkout(home: Path) -> Path:
     return Path(checkout)
 
 
-def require_admitted_runtime(home: Path, *, code_root: Path, prefix: Path) -> None:
-    """Refuse unless ``code_root``/``prefix`` are the home's admitted runtime.
+def require_admitted_runtime(home: Path, *, code_root: Path) -> None:
+    """Refuse unless ``code_root`` is the home's admitted runtime.
 
-    A selected release admits only the interpreter prefix of that exact image
-    (``releases/<artifact>/venv``) with the code loaded from inside it. Without
-    a selected release, only the source checkout recorded by the home's start
-    intent is admitted. A stale image's CLI, or a job still pointing at an old
-    environment, receives nothing.
+    Only the source checkout recorded by the home's start intent is admitted;
+    a job still pointing at another checkout receives nothing.
     """
-    from base.deploy.release.runtime_release import current_pointer
-
-    selected = current_pointer(home / "releases")
-    if selected is not None:
-        image = (home / "releases" / selected[0] / "venv").resolve()
-        if prefix.resolve() != image or not code_root.resolve().is_relative_to(image):
-            raise AuthorityRefusedError(
-                f"this process does not run the home's selected release image {selected[0]}"
-            )
-        return
     checkout = _intent_checkout(home)
     if code_root.resolve() != checkout.resolve():
         raise AuthorityRefusedError(
@@ -217,7 +202,7 @@ def consume(home: Path, cls: GenerationClass) -> WriteGrant:
     raises ``AuthorityRefusedError`` and delivers nothing.
     """
     code_root = Path(__file__).resolve().parents[3]
-    require_admitted_runtime(home, code_root=code_root, prefix=Path(sys.prefix))
+    require_admitted_runtime(home, code_root=code_root)
     return write_grant(home, cls)
 
 

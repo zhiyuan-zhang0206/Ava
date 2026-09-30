@@ -1,13 +1,11 @@
 """Browser entry identity never changes runner routing or legacy login."""
 
-import json
 import shlex
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from base.cluster.derive import fe_build_env, frontend_service_cmd
+from base.cluster.derive import fe_build_env
 from base.config import settings
 from base.config.gateway import GatewaySettings
 from gateway.auth.cors import cors_allowed_origins, session_cookie_secure
@@ -92,22 +90,3 @@ def test_https_cookie_policy_preserves_direct_http(monkeypatch: pytest.MonkeyPat
     assert not session_cookie_secure("http://console.example/api/auth/login")
     assert not session_cookie_secure("https://other.example/api/auth/login")
     assert not session_cookie_secure("https://console.example:8443/api/auth/login")
-
-
-def test_prepared_frontend_refuses_unrepresented_browser_origin(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr("base.deploy.release.runtime_interpreter.WHEEL_RUNTIME", True)
-    monkeypatch.setattr(
-        "base.deploy.release.runtime_interpreter.runtime_frontend_dir", lambda: tmp_path
-    )
-    monkeypatch.setattr("base.cluster.derive.IS_WINDOWS", False)
-    monkeypatch.setattr(settings.gateway, "gateway_port", 8800)
-    monkeypatch.setattr(settings.gateway, "browser_origin", "")
-    (tmp_path / "frontend-manifest.json").write_text(
-        json.dumps({"publicBuildConfig": {"gatewayPort": 8800, "apiBase": ""}})
-    )
-    assert "server/server.js" in frontend_service_cmd(3001)
-    monkeypatch.setattr(settings.gateway, "browser_origin", "https://console.example")
-    with pytest.raises(RuntimeError, match="does not support AVA_BROWSER_ORIGIN"):
-        frontend_service_cmd(3001)

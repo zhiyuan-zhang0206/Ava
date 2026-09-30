@@ -266,10 +266,6 @@ def run(args: argparse.Namespace) -> int:
             )
         )
         return 0
-    from base.deploy.release.operation import require_start_authorized
-    from base.paths import ava_home
-
-    require_start_authorized(ava_home())
     at = _generation(args)
     # Task #3270: this invocation is an operator-side ladder step, so stamp its
     # shepherding identity on the standing hold before doing its work. A no-op

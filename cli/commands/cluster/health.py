@@ -41,7 +41,6 @@ from cli.commands.cluster.health_alerts import (
     _deploy_suppression,
     _ingest_alert,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
     _ingest_alert_fallback,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
-    executor_lost,
     notify_owner,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
 )
 
@@ -413,24 +412,15 @@ def _editable_install_failure() -> str | None:
     )
 
 
-def _source_tree_failure(home: Path) -> str | None:
+def _source_tree_failure() -> str | None:
     """Report source tamper or unavailable inspection without repairing files.
 
-    Applies only to a home that executes its source checkout. A home with a
-    selected release image runs verified image bytes, so a leftover checkout
-    cannot reach running code; an unreadable selector leaves the executing code
-    unknown, never healthy. This alert-only check cannot authorize rollback:
-    selecting a release does not repair arbitrary edits.
+    Applies to a home that executes its source checkout. This alert-only check
+    cannot authorize rollback: it does not repair arbitrary edits.
     """
     import base.deploy.git.source_tree_guard as stg
     from base.deploy.git import cluster_drift
-    from base.deploy.release.runtime_release import current_pointer
 
-    try:
-        if current_pointer(home / "releases") is not None:
-            return None
-    except (OSError, ValueError) as exc:
-        return f"prod source tree guard skipped: release selector unreadable ({exc})"
     source_root = cluster_drift.prod_source_dir()
     if source_root is None:
         return None
@@ -447,7 +437,7 @@ def _run_source_tree_check(home: Path) -> int | None:
     """Run check 8 — alert-only, so it bypasses ``_unhealthy`` (a tampered
     tree is the 2026-08-28 outage class, but rollback does not undo an on-disk
     edit). Returns None when the check passes, 1 when it alerts."""
-    failure = _source_tree_failure(home)
+    failure = _source_tree_failure()
     if failure is None:
         return None
     message = f"FAIL: source tree — {failure}"
@@ -501,15 +491,6 @@ def _observe_cluster_health(
     check_schema: bool,
 ) -> int:
     """Observe one health round and report the first failed check."""
-    # 0. An in-flight release or PITR operation whose executor is gone: it
-    # holds the home and nothing will finish it, and it no longer explains
-    # any other failure (`health_alerts._deploy_suppression`).
-    if (lost := executor_lost()) is not None:
-        message, since = lost
-        print(message, file=sys.stderr)
-        _alert_failure(home, message, started_at=since)
-        return 1
-
     # Check disk before gateway liveness: a full data volume can keep the
     # gateway from starting, and its alert must name the cause of that outage.
     # Keep the existing success line in check 6's output position below.

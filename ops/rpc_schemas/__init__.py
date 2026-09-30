@@ -398,9 +398,6 @@ OpKind = Literal[
     "agent_skill_view",
     "shell_capture",
     "upload_receive",
-    # The frozen v1 image-exec handoff; its payload and result are the
-    # settings-free `base.api_contracts.release_handoff` models.
-    "release_image_exec",
 ]
 
 

@@ -106,7 +106,7 @@ async def test_dead_host_does_not_bypass_resource_or_machine_fences(
             "host-test",
             uuid4(),
             expected_from="running",
-            publication=_CurrentAdmission(None),
+            publication=_CurrentAdmission(),
         )
     stored = db_conn.execute(
         "SELECT runtime_owner,incarnation_resources,lease_expires_at>clock_timestamp() "
@@ -130,7 +130,7 @@ async def test_two_successors_of_dead_host_admit_only_one_owner(
                 "host-test",
                 uuid4(),
                 expected_from="running",
-                publication=_CurrentAdmission(None),
+                publication=_CurrentAdmission(),
             )
             for _ in range(2)
         ),
@@ -168,7 +168,7 @@ async def test_reused_pid_identifies_old_host_exit_without_touching_replacement(
         "host-test",
         uuid4(),
         expected_from="running",
-        publication=_CurrentAdmission(None),
+        publication=_CurrentAdmission(),
     )
     assert admitted is not None
     assert native.is_running() and stable_create_time(native) == current.birth

@@ -65,7 +65,7 @@ def _hermetic_start(
 ) -> None:
     from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 
-    def fixture_runtime(_self: object, _home: Path) -> LoadedRuntimeIdentity:
+    def fixture_runtime(_self: object) -> LoadedRuntimeIdentity:
         return serving_root.runtime
 
     monkeypatch.setattr("cli.start_runtime.StartRuntime.identity", fixture_runtime)
@@ -159,39 +159,6 @@ def test_start_does_not_consume_old_updater_authority(
     )
     assert _start_commands.cmd_start() == 0
     assert start_serving.is_serving()
-
-
-def test_home_operation_refuses_start_before_any_preparation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.deploy.release import operation
-
-    def held(_home: Path) -> None:
-        raise RuntimeError("home operation holds startup")
-
-    monkeypatch.setattr(operation, "require_start_authorized", held)
-    monkeypatch.setattr(
-        _setup_commands,
-        "_collect_setup_values",
-        _ignoring_args(lambda: pytest.fail("start passed its gate")),
-    )
-    with pytest.raises(RuntimeError, match="home operation holds startup"):
-        _start_commands.cmd_start()
-
-
-def test_installed_start_requires_captured_runtime_before_preparation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.deploy.release.runtime_release import ReleaseRejectedError
-
-    monkeypatch.setattr("base.deploy.release.runtime_interpreter.WHEEL_RUNTIME", True)
-    monkeypatch.setattr(
-        _setup_commands,
-        "_collect_setup_values",
-        _ignoring_args(lambda: pytest.fail("unadmitted runtime")),
-    )
-    with pytest.raises(ReleaseRejectedError, match="explicit verified release admission"):
-        _start_commands.cmd_start()
 
 
 @pytest.mark.parametrize("argument", ["release_receipt", "updater_telemetry"])

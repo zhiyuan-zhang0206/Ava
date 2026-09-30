@@ -18,13 +18,12 @@ from base.cluster.authority import (
     OperationAuthority,
     activate,
     check_invariant,
-    close_revoked,
     mint_generation,
     require_ledger,
-    revoke,
 )
 from base.cluster.authority import ledger as ledger_module
 from base.cluster.authority import roles as roles_module
+from base.cluster.authority.fence import close_revoked, revoke
 from tests.lifecycle.db_authority.conftest import OWNER, AuthorityCluster
 
 _LOGIN_ATTRIBUTES = (

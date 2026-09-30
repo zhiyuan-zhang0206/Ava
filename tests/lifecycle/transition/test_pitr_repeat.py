@@ -12,9 +12,8 @@ import pytest
 
 from base.deploy.release.operation import authorized_pitr
 from cli.release_fleet.request import FleetRequest
-from cli.release_transition import journal, submit
+from cli.release_transition import journal
 from cli.release_transition.pitr import submission
-from cli.release_transition.pitr.inputs import require_inputs
 from cli.release_transition.request import PitrRequest
 from services.pitr.activation.state import mark_pre_mutation_rolled_back, record_path, write_record
 from tests.lifecycle.transition.phases import at_phase
@@ -63,26 +62,6 @@ def _release(request: PitrRequest) -> journal.Operation:
     return at_phase("complete", request=release)
 
 
-@pytest.mark.parametrize("later_release", [False, True])
-def test_repeated_rollback_joins_exact_completed_business_receipt(
-    pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch, later_release: bool
-) -> None:
-    completed = _rolled_back(pitr_request)
-    active = _release(pitr_request) if later_release else completed
-    home = Path(pitr_request.home)
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
-    monkeypatch.setattr("base.host.system.boot_unit.systemd_running", lambda: True)
-    monkeypatch.setattr(submission, "_active", _constant(active))
-    before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
-    request = submission.prepare_request("rollback", origin="operator")
-    assert request == pitr_request
-    assert request.activation_id == pitr_request.activation_id
-    # A no-restart completion cannot fall into preflight/launch on repeat.
-    path, native = submit.submit_request(request)
-    assert path == request.path and native == {"state": "not_started"}
-    assert {path: path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
-
-
 def test_terminal_repeat_rejects_unowned_business_bytes(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -111,15 +90,3 @@ def test_rolled_back_record_without_completed_journal_refuses_before_reservation
     with pytest.raises(ValueError, match="retained home journal"):
         submission.prepare_request("rollback", origin="operator")
     assert not pitr_request.path.exists()
-
-
-def test_shadow_record_does_not_authorize_captured_env_deletion(pitr_request: PitrRequest) -> None:
-    journal.create(pitr_request)
-    home = Path(pitr_request.home)
-    with journal.exclusive(pitr_request.path) as handle:
-        handle.advance("provisioning")
-        with authorized_pitr(pitr_request.path, handle.pitr_record_write):
-            write_record(home, _record(pitr_request))
-        (home / ".env").unlink()
-        with pytest.raises(ValueError, match="environment"):
-            require_inputs(handle.operation)

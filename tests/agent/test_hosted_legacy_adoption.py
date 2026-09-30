@@ -87,7 +87,7 @@ async def _admit(
         "host-test",
         owner,
         expected_from=expected_from,
-        publication=_LegacyAdmission(None),
+        publication=_LegacyAdmission(),
     )
 
 

@@ -29,6 +29,7 @@ from psycopg import sql
 
 from base import cluster
 from base.cluster import authority, ownership
+from base.cluster.authority import fence
 from base.cluster.authority.api import API_TOKEN_ENV
 from base.config import settings
 from base.host.net.url_secret import url_with_userinfo
@@ -526,8 +527,8 @@ def test_collector_postgres_receiver_keeps_no_credential_and_survives_rollover(
     old_gateway = born.login("gateway")
     rollout = authority.OperationAuthority(operation=uuid4(), direction="candidate")
     with _dial_as_receiver(receiver, "ava") as scraping, born.admin() as conn:
-        authority.revoke(conn, born.home, rollout)
-        authority.close_revoked(conn, born.home, rollout)
+        fence.revoke(conn, born.home, rollout)
+        fence.close_revoked(conn, born.home, rollout)
         verified = authority.mint_generation(conn, born.home, rollout)
         authority.activate(born.home, rollout, verified)
         # The fence closed the old generation, not the monitoring session.

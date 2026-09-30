@@ -1,9 +1,8 @@
 """Cluster-ops RPC implementations.
 
-Stranded-lease recovery, stopping announcements, live status snapshots and the
-release image-exec handoff. One of the op clusters beside `ops.lifecycle`,
-`ops.host_config`, `ops.inventory` and `ops.uploads`; each cluster is
-self-contained.
+Stranded-lease recovery, stopping announcements and live status snapshots. One
+of the op clusters beside `ops.lifecycle`, `ops.host_config`, `ops.inventory` and
+`ops.uploads`; each cluster is self-contained.
 
 Most of these are thin wrappers; this layer is the agent-runner-callable RPC
 surface the ops server dispatches (`services/agent_ops/daemon.py:_dispatch`) and
@@ -12,25 +11,11 @@ the gateway cluster router calls.
 
 from __future__ import annotations
 
-import base64
-import binascii
-import json
 import os
-import subprocess
 from pathlib import Path
 from typing import Any, cast
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from base.api_contracts.release_handoff import (
-    HandoffRefusedError,
-    ReleaseImageEntry,
-    ReleaseImageExecPayload,
-    ReleaseImageExecResult,
-    ReleaseImageRef,
-    entry_argv,
-    entry_environment,
-    read_envelope,
-)
 from base.cluster.machine import machine_name
 from base.cluster.machines import mark_stopping
 from base.config.turn_view import resolve_agent_config_pins
@@ -43,10 +28,7 @@ from base.deploy.state.cluster_lock import (
 )
 from base.deploy.state.host_deploy_state import updater_lease_live
 from base.deploy.updater import handoff
-from base.host.proc import run_bounded
 from base.log import logger
-from base.paths import ava_home
-from base.runtime_abi import current_abi
 from ops.cluster_pause import unpause_local_cluster
 from ops.cluster_status import (
     ClusterStatus,
@@ -362,91 +344,3 @@ def shell_capture_op(agent_id: int, session_id: int, lines: int = 200) -> ShellC
         created_at=created_at,
         uptime_seconds=uptime_seconds,
     )
-
-
-# ── release_image_exec: the frozen v1 image-exec handoff on this unit ──
-
-RELEASE_ENTRY_TIMEOUT_S = 120.0
-_OUTPUT_TAIL = 2000
-
-
-def _tail(data: bytes) -> str:
-    return data.decode("utf-8", "replace")[-_OUTPUT_TAIL:]
-
-
-def run_release_entry(
-    *,
-    home: Path,
-    machine: str,
-    entry: ReleaseImageEntry,
-    image: ReleaseImageRef,
-    request: bytes,
-    timeout_s: float = RELEASE_ENTRY_TIMEOUT_S,
-) -> dict[str, Any]:
-    """Run `entry` of `image` on `request` for this unit; the entry's JSON object.
-
-    The request's envelope must name this home and machine and `image` as its
-    executor; the image is verified in this home's store against this host now.
-    The entry reads the exact bytes on stdin and is killed past `timeout_s`.
-    """
-    envelope = read_envelope(request)
-    if Path(envelope.home) != home:
-        raise HandoffRefusedError(f"the request belongs to {envelope.home}, not to {home}")
-    if envelope.machine != machine:
-        raise HandoffRefusedError(
-            f"the request names machine {envelope.machine!r}, not {machine!r}"
-        )
-    if not envelope.names(image):
-        raise HandoffRefusedError("the request names another executor than the image to run")
-    verified = image.verify(home, host_abi=current_abi())
-    try:
-        # run_bounded, not subprocess.run(timeout=...): a plain timeout only
-        # kills the direct child, which can leave the real entry process
-        # (or a launcher-stub descendant on Windows) running past the bound
-        # (base/host/proc.py).
-        completed = run_bounded(
-            entry_argv(verified, entry, "-"),
-            input=request,
-            capture_output=True,
-            cwd=verified.cwd,
-            env=entry_environment(os.environ, str(home)),
-            timeout=timeout_s,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise HandoffRefusedError(
-            f"the {entry} entry did not finish within {timeout_s:g}s"
-        ) from exc
-    if completed.returncode != 0:
-        raise HandoffRefusedError(
-            f"the {entry} entry exited {completed.returncode}: {_tail(completed.stderr)}"
-        )
-    try:
-        document = json.loads(completed.stdout)
-    except ValueError as exc:
-        raise HandoffRefusedError(
-            f"the {entry} entry printed no JSON document: {_tail(completed.stdout)}"
-        ) from exc
-    if not isinstance(document, dict):
-        raise HandoffRefusedError(f"the {entry} entry printed a non-object JSON document")
-    return cast("dict[str, Any]", document)
-
-
-def release_image_exec_op(payload: ReleaseImageExecPayload) -> ReleaseImageExecResult:
-    """`release_image_exec`: verify an image in this unit's store and run one entry.
-
-    Changes nothing itself; the entry owns its own journaling. A refusal, a
-    nonzero exit, non-JSON output or a timeout raises `HandoffRefusedError`
-    (a ValueError: the daemon reports a failed op).
-    """
-    try:
-        request = base64.b64decode(payload.request, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise HandoffRefusedError("the request is not valid base64") from exc
-    result = run_release_entry(
-        home=ava_home().resolve(),
-        machine=machine_name(),
-        entry=payload.entry,
-        image=payload.image,
-        request=request,
-    )
-    return ReleaseImageExecResult(entry=payload.entry, result=result)

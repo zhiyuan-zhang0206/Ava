@@ -30,6 +30,7 @@ import psycopg
 import pytest
 
 from base.cluster import authority, ownership
+from base.cluster.authority import fence
 from base.config import settings
 from base.db import connections
 from base.host.env import dotenv_boot
@@ -335,9 +336,9 @@ def _dies_after(module: Any, name: str) -> Callable[[pytest.MonkeyPatch], None]:
 
 
 _FENCE_DEATHS = {
-    "revoked": _dies_after(authority, "revoke"),
+    "revoked": _dies_after(fence, "revoke"),
     "pooler-stopped": _dies_after(pooler, "stop_pgbouncer"),
-    "closed": _dies_after(authority, "close_revoked"),
+    "closed": _dies_after(fence, "close_revoked"),
     "pruned": _dies_after(authority, "prune"),
 }
 _ISSUE_DEATHS = {

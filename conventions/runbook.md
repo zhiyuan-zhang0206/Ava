@@ -189,7 +189,7 @@ prod runtime and dev workspace are split at the filesystem level:
 
 | Path | Role | Notes |
 |---|---|---|
-| `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through the CLI `ava cluster update` (`ava.self.update()` was removed 2026-08) |
+| `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through `python -m cli.fleet_update` ([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode); `ava.self.update()` was removed 2026-08) |
 | `~/Ava/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool) | freely checkout any branch, decoupled from prod |
 
 ### Worktree uv iron rule (Tasks #1572, #5638)
@@ -566,28 +566,14 @@ Service selection is durable. A bare `ava start` retains it; explicit
 The root admits and probes the complete selected roster. There is no watchdog
 controller that pulls a checkout or chooses a release on the application's behalf.
 
-Release recovery belongs to the external executor and its captured operation.
-Keep the request, preparation receipts, home journal and native executor evidence.
-Re-submit the same `ava cluster update --prepared /absolute/request.json` to join
-or continue that operation; a submission acknowledgement is not completion.
-Continuation first proves the prior execution domain closed. Unknown ownership,
-a changed request or configuration, or a surviving child refuses continuation.
-
-The connected transition currently supports one initialized local Linux gateway
-with equal migration inventories, and closes persistent terminal writers in its
-stop phase instead of keeping them. It refuses fleet or schema changes before
-maintenance. Do not infer fleet recovery, migration rollback or
-workload-threshold support from this local proof boundary. The remaining work
-is explicit in
-[the lifecycle plan](../future/infra/unified-cluster-lifecycle.md).
+A failed update half is recovered by fixing its cause and rerunning that half:
+each half of `python -m cli.fleet_update` is idempotent
+([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode)).
 
 Ordinary maintenance holds retain their separate operator procedures in
 [graceful maintenance](graceful-maintenance.md). Generic recovery is not a way
-to discard an external release journal, forge process closure, clear durable
-publication evidence or mutate the selected image. Preserve such evidence for
-the operation's owner; do not resurrect a removed updater or bootstrap entry.
-See [the release operation contract](../cli/release_transition/docs/release_transition.ava.okf.md)
-for current continuation and retirement semantics.
+to forge process closure or clear durable publication evidence; do not resurrect
+a removed updater or bootstrap entry.
 
 Commands in the "long-running processes" / "E2E tests" sections below default to cwd = `$AVA_HOME/source/` (prod context). Dev work goes through `~/Ava/.worktrees/<task>/`.
 
@@ -772,41 +758,11 @@ shard) behind: the lifecycle rule stays the standing channel (fragments
 aborted after 7 days), and `ava pitr multipart list/abort` is the explicit
 single-upload surface for anything that cannot wait out that window.
 
-Activation is Ava-owned: use `ava cluster pitr status`, then
-`ava cluster pitr activate --origin operator:<name>`. The command validates the
-disabled shadow posture, creates the mandatory verified logical recovery floor,
-persists every side-effect intent, applies archive settings with `ALTER SYSTEM`,
-and restarts the home's applications and data plane through its finite PITR
-operation executor ([release transition](../cli/release_transition/docs/release_transition.ava.okf.md)).
-After restart readiness the same operation executes `pg_switch_wal()`, and requires
-`pg_stat_archiver`, the fsynced local ACK, and viewer-only exact
-generation/size/CRC metadata to agree within the persisted five-minute deadline.
-It then forces one operation-scoped base candidate and exact isolated restore
-proof; only that chain may reach `protected`. That artifact is pinned while active;
-terminal runs use a bounded two-artifact retention window.
-Resume and status reverify that artifact. Preparation serializes with cluster
-update/maintenance, binds the live PGDATA/port/postmaster/system-id identity on
-both sides of the dump, and persists failures without resetting `started_at`.
-Its credential check proves distinct service-account emails, not merely distinct keys. The
-viewer proves object-list/read access without requiring bucket-metadata access; the
-objectCreator + objectViewer uploader is identity-checked without creating or deleting a probe. Never edit PostgreSQL or `.env` manually
-during this sequence. Resume a pending restart through the command; do not call
-`pg_ctl` or introduce another restart mechanism. `ava cluster pitr rollback`
-persists rollback intent, restores the frozen settings, and restarts through
-the same finite PITR operation. The four PITR gate keys are
-config-owned and are never reverted or stripped by a rollback; a fresh
-activation after a rollback needs them absent — unset them with `ava config unset
-pitr_enabled pitr_base_backup_enabled pitr_restore_proof_enabled
-pitr_retention_planner_enabled`, and the activation provisions them — or
-resume an already-prepared operation with the keys aligned to their desired
-values.
-Each of the four owned PostgreSQL settings has its own intent and applied
-journal entry: resume distinguishes pre-ALTER from post-ALTER/pre-journal
-failure without replaying a completed setting. Rollback restores only those
-owned fields, so unrelated concurrent `ALTER SYSTEM` keys survive; readiness
-verifies the owned semantic baseline after restart instead of requiring the
-whole `postgresql.auto.conf` file to equal its old bytes.
-It preserves logical dumps, local ACKs, remote objects, and protected manifests.
+Activation has no operator entry (there is no `ava cluster pitr`). A home whose
+activation completed keeps its archive settings and its durable record
+(`$AVA_HOME/physical-backup/activation/operation.json`), which the base-backup,
+uploader and retention services read. Never edit PostgreSQL or `.env` by hand to
+imitate an activation.
 
 Restore proof additionally requires
 `AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE`, a distinct 0600 viewer-only service
@@ -857,9 +813,9 @@ its complete encrypted artifact in quarantine: restore from it directly
 (`.agents/skills/operating-ava-cluster/references/db-restore.md`) or copy it
 into `backups/db/` (0600); the next scheduled run dumps again.
 
-When an activation fails, read the durable record first:
+When an activation record shows a failure, read the durable record first:
 `$AVA_HOME/physical-backup/activation/operation.json`
-(`error` / `error_code` / `error_detail`) and `ava cluster pitr status`. The
+(`error` / `error_code` / `error_detail`). The
 CLI refusal line keeps only the TAIL of the restore worker's traceback, so the
 outermost exception there is the actionable cause — but a cleanup refusal can
 mask it. Zombie signature (2026-09-06, activation #12): the refusal names
@@ -1100,7 +1056,7 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   **Guardrails**: any existing profile directory is never touched, including an
   empty or partial first copy (idempotent across restarts; prod's multi-GB logged-in
   profile survives every start); non-interactive
-  paths (watchdog respawn, boot autostart, `ava cluster update` rollout) never prompt and
+  paths (watchdog respawn, boot autostart, a `cli.fleet_update` start) never prompt and
   always take the fresh default; a host with no daily Chrome degrades silently to
   fresh.
 - **On by default with auto-detect**: `AVA_BROWSER_ENABLED` defaults to true.
@@ -1317,69 +1273,7 @@ runner unit of the generation), and a runner never holds
 `AVA_CLUSTER_SECRET` (a home that still records it refuses to start). Memory checkout initialization remains
 explicit through `ava memory init`.
 
-**Release-operator verbs.** `ava cluster release prepare` / `request` /
-`adopt` / `exclude` / `status` are thin operator wiring over release
-preparation and the fleet release transition; a single box is a fleet of one:
-
-```bash
-ava cluster release prepare --commit FULL_COMMIT_SHA --inputs LOCAL_INPUTS_JSON [--repo REPO]
-ava cluster release request --commit FULL_COMMIT_SHA --out /absolute/path/to/request.json \
-  [--receipt RECEIPT_JSON] [--exclude MACHINE:HOME --reason R] [--watch-s S]
-ava cluster release adopt --receipt /absolute/path/to/receipt.json
-ava cluster release exclude --operation OPERATION_ID --unit MACHINE:HOME --reason R
-ava cluster release status [--operation OPERATION_ID] [--json]
-```
-
-`prepare` builds one inactive image under `$AVA_HOME/releases/work/<commit>`;
-no outage. It takes an already-acquired `LocalInputs` document — this verb
-does not acquire build inputs online. `request` reads that receipt plus this
-home's currently selected release and writes the fleet request `ava cluster
-update --prepared` consumes; it must account for every registered unit (a
-paused machine's units are excluded; `--exclude` records an operator
-exclusion; any other unit refuses until networked releases exist). `adopt` is
-this home's first-ever image selection
-(`activate_release(expected_current=None)` plus the steady boot action, Linux
-only); every later transition goes through `request` then `update`. `exclude`
-leaves a unit out of a held operation; `status` is read-only — see
-[release operator surface](../cli/release_operator/docs/release_operator.ava.okf.md).
-
-Release preparation completes before maintenance. The prepared request captures
-exact previous/candidate/executor image identities, home, configuration
-and operation generation:
-
-```bash
-ava cluster update --prepared /absolute/path/to/request.json
-```
-
-The running CLI only verifies the request's executor image in this home's
-release store and hands off to that image's fixed entry point (the frozen v1
-[image-exec handoff](../cli/release_handoff/docs/release_handoff.ava.okf.md)); the
-executor's code performs the submission. Submission reports native execution
-state. Completion comes from the operation journal, not a successful submission
-exit. Resubmit the same captured request to
-inspect or continue a positively closed attempt; uncertain native custody refuses.
-The executor lives outside the application root and retains its code throughout
-the transition. It is the fleet coordinator
-([coordinator](../cli/release_fleet/docs/coordinator.ava.okf.md)): a failure before
-the write-generation fence aborts and restarts the unchanged previous image; a
-candidate failure after it (start, readiness, the start barrier or the
-post-resume watch window) selects the captured predecessor once on a new
-generation; anything else holds for the operator with a `held` alert.
-
-The connected effect adapter currently supports a fleet of one (one
-initialized local Linux gateway, or macOS through the home helper) and equal
-packaged migration SQL, and closes persistent terminal writers at its stop
-phase. Networked fleets and schema changes refuse before stopping work.
-This is not a production cutover instruction. The remaining per-unit
-credential delivery, converge, migration barrier, PITR restart integration and
-platform proof are tracked in the
-[lifecycle plan](../future/infra/unified-cluster-lifecycle.md). The preparation and
-execution contracts live in [release preparation](../cli/release_prepare/docs/release_prepare.ava.okf.md)
-and [release transition](../cli/release_transition/docs/release_transition.ava.okf.md); the operator
-verbs above are documented in
-[release operator surface](../cli/release_operator/docs/release_operator.ava.okf.md).
-
-**Health observations and release decisions.** `ava cluster health-probe` retries
+**Health observations.** `ava cluster health-probe` retries
 gateway liveness three times, 30 seconds apart, before declaring it unhealthy.
 It checks data-volume usage before gateway liveness so a full disk that prevents
 gateway startup is reported as disk pressure. Both the crash-loop and schema
@@ -1389,19 +1283,7 @@ Gateway and population failures retain their code, environment, or local-mainten
 classification. A disabled agent-host or native maintenance hold cannot hide a low
 global population: the probe still exits 1 and grades that outage. A live cluster
 deploy can pause explained alert grading while retaining the episode's true start;
-so can this home's in-flight release or PITR operation (`$AVA_HOME/updates/active`),
-which the probe names in its output even while the data plane is down, but only while
-its executor's heartbeat (`updates/<id>/executor-heartbeat`, stamped every lease-renewal
-round) is fresh and it has journaled no abort, recovery or rollback decision. Once the
-heartbeat (or, before the first one, the stamp its submission and each native dispatch
-leave) is older than `EXECUTOR_HEARTBEAT_TTL_S` (300 s), the operation explains nothing
-and the probe fails on its own with `operation executor lost`, graded from the executor's
-last sign of life: nothing will finish that operation, and startup stays refused while it
-holds the home. A stale stamp is lost even while the journal records an error: an abort
-or recovery decision's error stands until its next phase, with the executor still running.
-A failed (held) operation, whose executor removed its stamp on the way out, is not lost;
-like missing or unreadable ownership, it explains nothing, and neither does the deploy lease
-it leaves behind until the lease's TTL; disk pressure remains independent.
+disk pressure remains independent.
 
 The OS job and CLI probe only observe and alert. They do not invoke rollback,
 maintain release-policy failure counters, or promote pending code to known-good.
@@ -1411,9 +1293,7 @@ health-probe registration. Registration replaces this home's scheduled payload w
 
 A dev/QA cluster's birth seeds `AVA_HEALTH_PROBE_AGENT_MIN=0` when it has no resident
 agents by design; an explicit value stands as written. Crash-loop limits remain
-health observation parameters. Cohort-based release recovery and known-good
-publication belong to the release operation and remain required before production
-cutover; removing the independent health writer does not implement that policy.
+health observation parameters.
 
 **`ava start` reports the admitted roster's readiness.**
 
@@ -1479,10 +1359,7 @@ multi-machine ordering, failure recovery and the first-deployment limitation.
 
 Stop-class drills and operations: see the executor-cancellation insurance and hold handover section of [graceful maintenance](graceful-maintenance.md).
 
-The release executor consumes prepared immutable inputs; it does not mutate its
-serving checkout or acquire dependencies while services are stopped. Merging a PR
-does not deploy it or change a running operation's captured decision. `ava stop`
-asks for confirmation unless `-y` is supplied.
+Merging a PR does not deploy it. `ava stop` asks for confirmation unless `-y` is supplied.
 
 
 ### Updating a networked cluster in source mode

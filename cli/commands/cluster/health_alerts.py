@@ -22,7 +22,6 @@ from typing import Any, Literal
 
 import httpx
 
-from base.deploy.release.operation import InFlight
 from base.deploy.transition import transition_severity
 
 # Transition state for owner alerts: message, episode starts_at, last-fired
@@ -330,13 +329,8 @@ def _alert_failure(
     message: str,
     *,
     deploy_explains: bool = False,
-    started_at: datetime | None = None,
 ) -> None:
-    """Track and grade one unhealthy episode, firing only on class changes.
-
-    A new episode starts now, or at `started_at` when the caller knows when
-    the condition truly began.
-    """
+    """Track and grade one unhealthy episode, firing only on class changes."""
     from base.config import settings
 
     marker = home / ALERT_STATE_FILE
@@ -348,7 +342,7 @@ def _alert_failure(
     if recorded_message == message and recorded_start is not None:
         starts_at = recorded_start
     else:
-        starts_at = now if started_at is None else min(started_at, now)
+        starts_at = now
         recorded_severity = None
     severity = transition_severity(
         starts_at,
@@ -414,54 +408,13 @@ def _alert_recovery(home: Path) -> None:
         )
 
 
-def _release_operation() -> InFlight | None:
-    """This home's in-flight release or PITR operation; an unreadable one explains nothing."""
-    from base.deploy.release.operation import operation_in_flight
-    from base.paths import ava_home
-
-    try:
-        return operation_in_flight(ava_home())
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        print(
-            f"  (release operation unreadable, explains nothing: {type(exc).__name__}: {exc})",
-            file=sys.stderr,
-        )
-        return None
-
-
 def _deploy_suppression() -> str | None:
     """Pause alert grading only while a live deploy explains the outage.
 
-    This home's in-flight release or PITR operation explains it first, while
-    its executor's heartbeat is fresh: the probe annotates its output with the
-    operation instead of alerting, even while the data plane that holds the
-    deploy lease is down. The episode retains its true start. A lost executor,
-    a recovering operation or a failed (held) one explains nothing, and
-    neither does the deploy lease it may still hold until the lease's TTL; an
-    expired or unreadable deploy owner explains nothing either, so severity
-    resumes from that same start.
+    An expired or unreadable deploy owner explains nothing, so severity resumes
+    from the outage's true start.
     """
     from ops.deploy_window import deploy_in_flight
 
-    operation = _release_operation()
-    if operation is not None:
-        return operation.label if operation.explains else None
     window = deploy_in_flight()
     return window.detail if window.active else None
-
-
-def executor_lost() -> tuple[str, datetime] | None:
-    """The failure an in-flight operation whose executor stopped stamping raises.
-
-    Nothing will finish that operation, and startup stays refused while it
-    holds the home, so it is an incident on its own. It is graded from the
-    executor's last sign of life, not from the probe run that noticed it.
-    """
-    operation = _release_operation()
-    if operation is None or not operation.lost:
-        return None
-    seen = operation.last_seen.isoformat(timespec="seconds")
-    return (
-        f"FAIL: release operation — {operation.label}: operation executor lost (last seen {seen})",
-        operation.last_seen,
-    )

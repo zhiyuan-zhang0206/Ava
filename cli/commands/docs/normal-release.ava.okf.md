@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Retained Publication Admission
-description: Shared publication fences remain admission guards; host update execution belongs to the prepared release journal.
+description: Shared publication fences remain admission guards; cluster updates are the attended source-mode procedure.
 tags:
 - cli
 - update
@@ -9,12 +9,11 @@ tags:
 
 # Retained Publication Admission
 
-Host updates enter through `ava cluster update --prepared REQUEST`, implemented
-by [[cli/release_transition/docs/release_transition.ava.okf.md]]. Its durable journal
-and native executor own progress and recovery. The old normal-release,
-bootstrap-hop and continuation CLI/RPC commands are absent.
+Cluster updates are the attended stop / switch / start procedure scripted as
+`python -m cli.fleet_update` (see the runbook's "Updating a networked cluster in
+source mode"); no CLI/RPC update command exists.
 
 Shared publication receipts, selectors and managed-writer fences still participate
 in `RuntimeAdmission`. They remain enforced until database publication authority
-is replaced; a prepared host operation does not imply all-writer database closure.
+is replaced.
 See [[base/deploy/schema/docs/migrations.ava.okf.md]] for the database admission boundary.

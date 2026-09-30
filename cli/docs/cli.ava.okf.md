@@ -22,19 +22,14 @@ The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` builds
 | `ava stop` | Same drain, then full local stop including terminals, browser, extras and private pg/redis; `--keep-infra` / repeatable `--keep-service` preserve selected resources; `--force` is explicit |
 | `ava restart` | Pause + start on this unit, retaining PTYs and infrastructure |
 | `ava status` | status (including pg/redis and the end-to-end private-network Redis bridge view) |
-| `ava cluster update --prepared REQUEST` | hand the captured release operation to its verified executor image ([[cli/release_handoff/docs/release_handoff.ava.okf.md]]), which submits or resumes it through a retained native executor ([[cli/release_transition/docs/release_transition.ava.okf.md]]) |
 | `ava converge` | replays idempotent host wiring (symlink/PATH/dirs/plugin images and the macOS Redis bridge), usually via `ava start`; it never touches the memory pool |
 | `ava firewall status` / `ava firewall sync` | macOS Application Firewall allowlist manifest: `status` renders each manifest purpose, glob, resolved path, and Allow/Block/Missing state; `sync` applies it (repair + prune stale rules). Unprivileged mutation was empirically verified on the macmini running macOS 15.3.1, then falls back to non-interactive `sudo -n` and finally reports the exact manual commands on platforms that still require elevation |
 | `ava boot` | manual uncapped retry of `ava start` while boot dependencies become available |
 
-Inactive image preparation lives in [[cli/release_prepare/docs/release_prepare.ava.okf.md]].
-It binds captured committed source and explicit artifact inputs to a verified
-release image before a release operation acquires maintenance ownership.
-
 ### `ava cluster` Subcommands
 
 Verbs that act on a cluster rather than on this host's services, addressed by
-**home path** (`--path`), not name: `ls` / `status` / `update --prepared` / `down` /
+**home path** (`--path`), not name: `status` / `down` /
 `destroy` / `health-probe` / `recover` / `cron-*` /
 other registered commands. Enumerated in [[cli/docs/cluster.ava.okf.md]].
 
@@ -89,7 +84,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 - **Ops-layer only**: not exposed to agents (they use the `ava.*` SDK).
 - **Settings-independent**: `ava start` identity admission is specially routed in `main()` before settings-gated imports — no `base.config` (stdlib + `base.host.env.dotenv_boot`). `ava config` uses only registry metadata and direct local files until a full Settings consumer needs the singleton, so a broken `.env` remains repairable. `ava pty` is settings-lite and data-plane-independent.
 - **Cold stop**: normal pause/stop loads the cluster configuration for native drain. Explicit force stop, or repeating a completed stop with no recorded failures, can skip gateway configuration fetch; the latter reads the existing pause journal before Settings bootstrap.
-- **Migrations are not a command**: `cli/commands/lifecycle/migrations.py:cmd_migrations_apply` runs internally from `ava start` / `ava cluster update`.
+- **Migrations are not a command**: `cli/commands/lifecycle/migrations.py:cmd_migrations_apply` runs internally from `ava start`.
 
 ## Entry Points
 

@@ -33,24 +33,13 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
 
     @exclusive_resources
     def start_locked(*args: P.args, **kwargs: P.kwargs) -> int | StartDelegation:
-        from base.deploy.release.operation import require_start_authorized
-        from base.paths import ava_home
-
-        operation_hold = require_start_authorized(ava_home())
         current = admission.snapshot()
         if current is None:
-            if operation_hold is not None:
-                raise RuntimeError("release startup requires its exact maintenance hold")
             return start(*args, **kwargs)
         if current.maintenance is not None and current.maintenance.unsettled_failures():
             raise RuntimeError(
                 "start cannot release failed continuation/flush receipts; hold retained"
             )
-        if operation_hold is not None:
-            # Operation startup restores services while its executor retains
-            # the hold. Only that executor may resume after observation.
-            with admission.authorized_start(*operation_hold):
-                return start(*args, **kwargs)
         if admission.start_authorized():
             return start(*args, **kwargs)
         assert current.holder is not None and current.acquired_at is not None  # noqa: S101

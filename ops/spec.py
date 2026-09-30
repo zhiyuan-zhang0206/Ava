@@ -34,10 +34,9 @@ definitions live in ``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec`
 from __future__ import annotations
 
 import importlib.util
-import shlex
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.cluster.machine import MachineRoles
@@ -54,18 +53,6 @@ from base.telemetry.observability import collector_allowed_for_home, gateway_obs
 from ops.roster.service_spec import (
     ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
 )
-
-
-def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
-    """Bind Python services to the loaded runtime without changing their gates."""
-    from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_python
-
-    prefix = ".venv/bin/python "
-    if not WHEEL_RUNTIME or not spec.cmd.startswith(prefix):
-        return spec
-    return replace(
-        spec, cmd=f"{shlex.quote(str(runtime_python()))} -I -B -X utf8 {spec.cmd[len(prefix) :]}"
-    )
 
 
 def plugin_services() -> tuple[ServiceSpec, ...]:
@@ -395,7 +382,7 @@ class Spec:
 # build_services`, scripts/release_proofs/prepare_plugin_fixture.py's generated
 # `services.py` template, tests) take the canonical roster from this module.
 # Placed at the BOTTOM deliberately: roster's build_services calls back into
-# this module's helpers (_bind_runtime_command / plugin_services /
+# this module's helpers (plugin_services /
 # _assert_unique_sessions) lazily, so this edge must not run while this module
 # is partially initialized (spec → roster at the top would be a load-time
 # edge in the opposite direction of the call-time edge — keep both lazy).

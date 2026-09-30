@@ -1,6 +1,6 @@
 ---
 name: ava-modification-layers
-description: Routes Ava deployment changes to install extensions, skill edits, plugin development, or kernel development. Use before modifying Ava itself, especially when deciding where files belong, how changes take effect, or whether `ava cluster update` is required.
+description: Routes Ava deployment changes to install extensions, skill edits, plugin development, or kernel development. Use before modifying Ava itself, especially when deciding where files belong, how changes take effect, or whether an operator cluster update is required.
 ---
 
 # Modification layers
@@ -16,9 +16,9 @@ unreviewed change through a shortcut that does not exist. The design record is
 | **L1 — install** | Add an existing extension: `ava plugins install <url>`, `ava skill install <url>`, `ava mcp install <url>` | Next skill scan / next use — no restart | Deployment owner (install-time supply-chain scan) |
 | **L2 — skill edit** | A SKILL.md under `$AVA_HOME/skills/` (or a repo/plugin source synced there) | Immediately at the next invocation — skill bodies are read fresh (mtime-cached) each time a skill is loaded | The agent / deployment owner |
 | **L3 — plugin development** | A plugin package (its own repo or `~/.ava/plugins/<name>/`) | The agent process's `self.restart` boundary — no in-process hot reload (user ruling 2026-08-13) | Deployment owner |
-| **L4 — kernel change** | The Ava kernel repo itself | PR → CI → human merge → `ava cluster update` | Upstream maintainer + CI |
+| **L4 — kernel change** | The Ava kernel repo itself | PR → CI → human merge → operator update (`python -m cli.fleet_update`) | Upstream maintainer + CI |
 
-`ava cluster update` belongs to **L4 only** (plus routine version tracking).
+An operator cluster update belongs to **L4 only** (plus routine version tracking).
 If your change never touches the kernel repo, no PR pipeline and no cluster
 rollout is involved.
 
@@ -39,14 +39,14 @@ rollout is involved.
   (`ava_builtins/plugins/`) are a kernel-shipped base set and change via L4.
 - **L4** — file an issue or a PR against the kernel repo. Contributors read
   the `ava-self-development` skill (the kernel-contributor manual: worktree →
-  PR → CI → merge → `ava cluster update`).
+  PR → CI → merge → operator update).
 
 ## Safety: the production checkout is not a workspace
 
 > ⚠️ `~/.ava/source` (`$AVA_HOME/source`) is the tree the live cluster boots
 > from — it is not your working copy. A stray edit, `git checkout`, or
 > `git branch` there breaks every new agent spawn fleet-wide (agents start
-> from on-disk code, not memory), and the next `ava cluster update`
+> from on-disk code, not memory), and the next cluster update
 > force-checks-out the target and discards stray commits. To change kernel
 > code, work in a separate clone/worktree like any other contributor.
 

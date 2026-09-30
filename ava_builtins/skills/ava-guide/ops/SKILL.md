@@ -122,28 +122,14 @@ gateway dials back to its ops server) and is **required**. The runner starts no
 gateway process of its own; it needs network reachability to the gateway and
 its capability bundle.
 
-## Prepare, update and recover
+## Update and recover
 
-Resolve the intended local or remote branch to one committed source revision.
-Acquire and verify dependencies and assets, then prepare an inactive immutable
-image before maintenance. Use `cli.release_prepare` and its explicit captured
-inputs; preparation has no authority to stop services or select a release.
-A branch preview may test an unmerged commit. That result does not replace CI,
-review or operator authorization for production.
-
-Submit a prepared request with
-`ava cluster update --prepared /absolute/request.json`. The request binds the
-home, configuration, predecessor, candidate and external executor. Check the
-operation journal and native ownership after submission; acknowledgement alone
-is not completion. Re-submit the same captured request to join or continue that
-operation. Do not create a new request to conceal an incomplete attempt.
-
-The connected executor currently supports one initialized local Linux gateway
-with equal migration inventories. Its stop phase closes persistent terminals
-and schedules; they do not survive a release. Fleet/schema transitions and the
-workload rollback policy remain explicit pre-cutover work.
-Consult `cli/release_transition/docs/release_transition.ava.okf.md` and
-`future/infra/unified-cluster-lifecycle.md` before claiming broader support.
+A production cluster runs every unit from its own source checkout and is updated
+by stopping every unit, switching every checkout and starting again:
+`python -m cli.fleet_update down` and `up`, attended and idempotent per half (the
+runbook's "Updating a networked cluster in source mode"). A branch preview may
+test an unmerged commit. That result does not replace CI, review or operator
+authorization for production.
 
 Related local commands:
 

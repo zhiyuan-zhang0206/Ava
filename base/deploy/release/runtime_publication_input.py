@@ -14,7 +14,7 @@ from typing import Literal, cast
 
 from pydantic import Field
 
-from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
+from base.deploy.release.loaded_image import WHEEL_RUNTIME, runtime_venv
 from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256, verify_release
 from base.deploy.release.verified_file import regular_bytes
 from base.deploy.writers.observation import ExcludedRegistration, ExpectedUnitWriters

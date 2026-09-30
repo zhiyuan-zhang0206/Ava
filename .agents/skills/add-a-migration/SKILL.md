@@ -16,12 +16,11 @@ There is no standalone migrate command. Pending migrations are applied as a step
 `ava start` (early in boot, after Postgres is up and before the schema-current assertion), so
 any restart that crosses a schema change catches the DB up automatically.
 
-Real production upgrades go through `ava cluster update --prepared REQUEST`
-(the CLI — the only update entry point; run by the Release agent with user
-approval), which submits or resumes one immutable release operation whose
-start phase runs the ordinary `ava start` boot path that migrates. For a
-manual catch-up, run `ava start` directly, which applies pending migrations on
-the way up.
+Production upgrades run `python -m cli.fleet_update down` and `up` (attended, with
+user approval; see the runbook's "Updating a networked cluster in source mode"):
+the gateway's cold `ava start` in the `up` half applies the pending migrations.
+For a manual catch-up, run `ava start` directly, which applies pending
+migrations on the way up.
 
 ## Adding a new migration
 
