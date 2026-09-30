@@ -140,12 +140,13 @@ own. The runner login and runner API token are the write generation's, shared by
 every runner unit, and the telemetry token is the cluster's until the human
 secret rotates. A bundle with its transport key therefore gives its holder every
 runner unit's database and API admission for that generation (bootstrap, with its
-Redis runtime URL and provider keys, and every unit's `/ops` included). Its machine binding only
-stops an install on the wrong unit by mistake: the installer asserts its own
-machine name, and the credentials work without installing. When a unit is
-compromised or a bundle and its key are lost, rotate the write generation and
-issue every unit a new bundle; rotate the human secret (telemetry token), the
-Redis runtime password and the provider keys as well, by hand, in the order of
+Redis runtime URL and provider keys, and every unit's `/ops` included). Its
+machine binding only stops an install on the wrong unit by mistake: the
+installer asserts its own machine name, and the credentials work without
+installing. When a unit is compromised or a bundle and its key are lost, rotate
+the write generation and issue every unit a new bundle; rotate the human secret
+(telemetry token), the Redis runtime password and the provider keys as well, by
+hand, in the order of
 [manual rotation after a credential leak](#manual-rotation-after-a-credential-leak).
 Detail: [[base/cluster/authority/docs/unit-bundle.ava.okf.md]].
 
