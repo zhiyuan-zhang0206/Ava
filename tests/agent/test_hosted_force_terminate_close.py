@@ -19,6 +19,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import AvaContext
@@ -260,6 +261,66 @@ async def test_a_superseded_older_force_cannot_classify(
     assert row is not None
     db_conn.execute(
         "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (row[0], agent_id)
+    )
+    db_conn.commit()
+    host = _host(_raising_graph(), aops_pool)
+    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
+        await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+
+
+def _retired_reap_mark(conn: psycopg.Connection, agent_id: int) -> None:
+    """The row shape the retired straggler reap left: 'restarting' with its
+    maintenance restart still un-applied. Nothing writes it any more."""
+    conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
+        "VALUES (%s,'','restart','system:maintenance',%s)",
+        (
+            agent_id,
+            Jsonb({"maintenance": {"holder": "ops:test", "acquired_at": "2026-09-20T00:00:00Z"}}),
+        ),
+    )
+    conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=%s", (agent_id,))
+    conn.commit()
+
+
+async def test_a_restarting_row_with_a_pending_maintenance_restart_still_crashes(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """Only an applied force is a deliberate end: the retired reap mark is an
+    ordinary ownership loss, so the refusal raises."""
+    agent_id = _agent(db_conn)
+    incarnation = await _admit(aops_pool, agent_id)
+    _retired_reap_mark(db_conn, agent_id)
+    host = _host(_raising_graph(), aops_pool)
+    with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
+        await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+
+
+async def test_a_held_wake_under_the_retired_reap_mark_still_raises(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_id = _agent(db_conn)
+    incarnation = await _admit(aops_pool, agent_id)
+    _retired_reap_mark(db_conn, agent_id)
+    monkeypatch.setattr(
+        "services.agent_host.host.admit_hosted_runtime", AsyncMock(return_value=incarnation)
+    )
+    host = _host(_raising_graph(), aops_pool)
+    with pytest.raises(ImpersonationError):
+        await host._run_held_controls(agent_id, "running")
+
+
+async def test_a_lapsed_lease_still_crashes(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """Renewal is the host beat's job; a truly expired lease stays fail-closed."""
+    agent_id = _agent(db_conn)
+    incarnation = await _admit(aops_pool, agent_id)
+    db_conn.execute(
+        "UPDATE agents_meta SET lease_expires_at = now() - interval '5 minutes' WHERE id=%s",
+        (agent_id,),
     )
     db_conn.commit()
     host = _host(_raising_graph(), aops_pool)

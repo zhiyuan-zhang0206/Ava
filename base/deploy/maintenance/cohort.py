@@ -68,8 +68,8 @@ def prepare(
     current = admission.require_operation(holder, acquired_at)
     hold = current.maintenance
     assert hold is not None  # noqa: S101
-    if unsettled := hold.unsettled_failures():
-        raise RuntimeError(f"maintenance has failed continuations: {sorted(unsettled)}")
+    if hold.failures:
+        raise RuntimeError(f"maintenance has failed continuations: {sorted(hold.failures)}")
     if hold.phase != "preparing":
         return hold
     if conn.info.transaction_status != TransactionStatus.IDLE:
@@ -273,18 +273,7 @@ def _classify(
         if not row.active_for(owner) and row.agent_id not in applied
     ]
     if invalid:
-        stranded = [
-            row.agent_id for row in rows if row.agent_id in invalid and row.status == "restarting"
-        ]
-        guidance = (
-            " (a stranded update straggler-reap mark clears via `ava start` —"
-            " settle + wake — or at the next agent-host boot)"
-            if stranded
-            else ""
-        )
-        raise RuntimeError(
-            f"maintenance requires the live original native owner: {invalid}{guidance}"
-        )
+        raise RuntimeError(f"maintenance requires the live original native owner: {invalid}")
     return (
         hold
         if captured
@@ -457,15 +446,8 @@ def _restart(conn: psycopg.Connection, agent_id: int, holder: str, acquired_at: 
 
 
 def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
-    """Cross-check local continuation receipts against preserved DB pointers.
-
-    Reaped members (task #4016) have no flush/apply receipt by construction:
-    their certification checks the honest reap state instead -- the row still
-    CAS-marked 'restarting' and its command never applied or observed. A
-    failure recorded around that release (the interrupted turn unwinding) is
-    settled too: the reap left nothing to repair, so it is not read here.
-    """
-    if hold.unsettled_failures() or set(hold.drained) | set(hold.reaped) != set(hold.commands):
+    """Cross-check local continuation receipts against preserved DB pointers."""
+    if hold.failures or set(hold.drained) != set(hold.commands):
         raise RuntimeError("maintenance still has unfinished or failed continuations")
     if hold.parked:
         rows = conn.execute(
@@ -479,20 +461,6 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
         if {row[0] for row in rows} != set(hold.parked):
             raise RuntimeError("parked agent intent changed during maintenance")
     for agent_id, command_id in hold.commands.items():
-        if agent_id in hold.reaped:
-            row = conn.execute(
-                "SELECT 1 FROM agents_meta m JOIN inbound_messages i "
-                "ON i.id=%s AND i.agent_id=m.id "
-                "WHERE m.id=%s AND m.status='restarting' AND i.kind='restart' "
-                "AND i.applied_at IS NULL AND i.observed_at IS NULL "
-                "AND i.status IN ('pending','claimed')",
-                (command_id, agent_id),
-            ).fetchone()
-            if row is None:
-                raise RuntimeError(
-                    f"reaped agent {agent_id} is not in its reap state; the mark moved"
-                )
-            continue
         row = conn.execute(
             "SELECT 1 FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant SQL fragment
             "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "

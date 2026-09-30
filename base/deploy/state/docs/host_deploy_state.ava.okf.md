@@ -25,7 +25,7 @@ tags:
 
 ### Posture transitions (writers)
 
-- `ops/cluster_pause.py` — `pause_local_cluster` drains through the admission journal without closing APIs; service shutdown sets paused posture and `unpause_local_cluster` restores idle posture; under a held journal it refuses unsettled failed receipts, and stopped services until `ava start` passes readiness. `is_paused()` reads the row (a read failure reads as NOT paused — the conservative direction). The gateway 503 middleware and the `status`/`cluster` endpoints go through it.
+- `ops/cluster_pause.py` — service shutdown sets paused posture and `unpause_local_cluster` restores idle posture; under a held journal it refuses failed receipts, and stopped services until `ava start` passes readiness. `is_paused()` reads the row (a read failure reads as NOT paused — the conservative direction). The gateway 503 middleware and the `status`/`cluster` endpoints go through it.
 - `cli/commands/lifecycle/start.py` tail — `set_posture('idle')` after a successful `ava start`.
 
 ### Retained lease reader

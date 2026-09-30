@@ -13,6 +13,12 @@ and the matching GitHub Releases, cut by `scripts/ci/release_cut.py`.
   PITR activation and their CI workflows) and the `shared/` release-probe shell.
   A cluster is updated from source with `python -m cli.fleet_update`
   ([decision](decisions/2026-09-30-remove-release-image-path.md)).
+- The update straggler reap: a drain that truncated and released an agent still
+  in a long turn, with its `reaped` hold receipts, settle-at-boot, four events
+  and the `AVA_UPDATE_STRAGGLER_REAP_SECONDS` and
+  `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` settings. A stop still never kills a
+  straggler; it waits out `--timeout` and the operator escalates with `--force`
+  ([decision](decisions/2026-09-30-remove-straggler-reap.md)).
 
 ### Changed
 - The bottom-layer package `shared` is now `base` (`base < ava < agent <

@@ -21,7 +21,7 @@ from base.deploy.maintenance import admission, pause_owner
 from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
 from gateway.lgtm import loki_events
-from ops import cluster_pause, cluster_status
+from ops import agent_pause, cluster_pause, cluster_status
 
 
 @pytest.fixture
@@ -230,15 +230,13 @@ class _FakeSessionBackend:
 
 @pytest.fixture
 def pause_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
-    from ops import agent_pause
-
     backend = _FakeSessionBackend()
     monkeypatch.setattr("base.sessions.backend.get_backend", lambda: backend)
     monkeypatch.setattr(agent_pause, "host_running", lambda: False)
     return backend
 
 
-class TestPauseLocalCluster:
+class TestPauseAgents:
     @pytest.fixture(autouse=True)
     def _private_pause_owner(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
@@ -250,7 +248,7 @@ class TestPauseLocalCluster:
         """Phase A may finish while a peer still needs this gateway's SDK API."""
         pause_backend.alive_answer = True
 
-        cluster_pause.pause_local_cluster()
+        agent_pause.pause_agents()
 
         current = admission.snapshot()
         assert current is not None and current.maintenance is not None
@@ -263,9 +261,9 @@ class TestPauseLocalCluster:
 
     def test_idempotent_when_session_missing(self, pause_backend: _FakeSessionBackend) -> None:
         """Repeated Phase A reuses the same drain without starting services."""
-        cluster_pause.pause_local_cluster()
+        agent_pause.pause_agents()
         first = pause_owner.read()
-        cluster_pause.pause_local_cluster()
+        agent_pause.pause_agents()
         assert pause_owner.read() == first
         assert first.maintenance is not None and first.maintenance.phase == "drained"
         assert pause_backend.killed == pause_backend.spawned == []
@@ -282,7 +280,7 @@ class TestUnpauseLocalCluster:
     ) -> None:
         from base.deploy.state.host_deploy_state import set_posture
 
-        cluster_pause.pause_local_cluster()
+        agent_pause.pause_agents()
         set_posture("paused")
         assert cluster_pause.is_paused()
 
@@ -359,7 +357,7 @@ class TestRetiredDeploymentEndpoints:
         def forbidden(*_args: object, **_kwargs: object) -> None:
             pytest.fail("retired HTTP ingress reached the old updater")
 
-        monkeypatch.setattr(cluster_pause, "pause_local_cluster", forbidden)
+        monkeypatch.setattr(agent_pause, "pause_agents", forbidden)
         monkeypatch.setattr(ops_mod, "cluster_recover_op", forbidden)
         with TestClient(app) as client:
             assert client.request(method, path).status_code == 404

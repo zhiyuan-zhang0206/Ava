@@ -1,8 +1,9 @@
-"""Drain local native work before stopping its dependencies.
+"""Resume a drained unit and read or release its pause posture.
 
-The existing pause-owner journal closes admission and records checkpoint/exit
-receipts. It fences HTTP only after the cluster-wide drain barrier advances this
-home into its stop window. Database posture remains a status projection.
+The drain itself is `ops.agent_pause`. The existing pause-owner journal closes
+admission and records checkpoint/exit receipts. It fences HTTP only after the
+cluster-wide drain barrier advances this home into its stop window. Database
+posture remains a status projection.
 """
 
 from __future__ import annotations
@@ -52,40 +53,14 @@ def is_paused(
     return resolved_state is not None and resolved_state.posture == "paused"
 
 
-def pause_local_cluster() -> None:
-    """Drain native agents while keeping their in-flight SDK dependencies available.
-
-    The existing admission journal also keeps watchdogs and schedule admission
-    paused. Posture becomes 503 only when the caller actually stops services,
-    after all participating runners have completed their ordinary restarts.
-
-    This entry is update-family only, so the drain enables the straggler reap
-    (task #4016): a member still un-landed past `update_straggler_reap_seconds`
-    is truncated and released as `reaped` instead of aborting the wave. It has no
-    production caller: the legacy lease-bound `cluster_stop` op and the release
-    drain that enabled the reap are both gone (recorded debt: retire it with the
-    straggler-reap machinery).
-    """
-    from base.config import settings
-    from ops.agent_pause import pause_agents
-
-    pause_agents(settings.gateway.update_quiesce_timeout_seconds, reap=True)
-
-
 def unpause_local_cluster() -> None:
-    """Restore posture, then release this unit's existing agent pause.
-
-    The resume/start boundary also settles any stranded straggler-reap marks
-    (task #4016): the compensating resume of an aborted wave runs while this
-    host stayed up, so the marker rows would otherwise outlive their drain.
-    """
+    """Restore posture, then release this unit's existing agent pause."""
     from base.deploy.maintenance import admission
     from ops.agent_pause import resume_agents
 
     current = admission.snapshot()
     if current is None:
         _unpause_local_cluster()
-        _settle_stranded_reaps()
         return
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if (refusal := _hold_refusal(current)) is not None:
@@ -99,47 +74,13 @@ def unpause_local_cluster() -> None:
     with admission.authorized_start(current.holder, current.acquired_at):
         _unpause_local_cluster()
     resume_agents()
-    _settle_stranded_reaps()
-
-
-def _settle_stranded_reaps() -> None:
-    """Restore rows a wave's straggler reap left marked, then wake each one.
-
-    Best-effort by design: a settle failure leaves the mark in place (the row
-    stays unrunnable) and the next boot or resume retries it; it must not block
-    this unit's resume. The wake is what lets the settled agent's first
-    admission run the existing inbound reconcile and re-deliver the work the
-    reap truncated (task #4016).
-    """
-    from base.cluster.machine import machine_name
-    from base.db import connect
-    from base.deploy.maintenance.straggler_reap import (
-        announce_settled,
-        publish_settled_wakes,
-        settle_stranded_reaps,
-    )
-
-    try:
-        with connect() as conn, conn.transaction():
-            settled = settle_stranded_reaps(conn, machine_name())
-    except Exception:
-        _log.warning(
-            "[cluster] stranded straggler-reap settle failed; the mark stays for the "
-            "next boot/resume to retry",
-            exc_info=True,
-        )
-        return
-    if settled:
-        _log.info("[cluster] restored stranded straggler-reap row(s): %s", settled)
-        announce_settled(settled, site="resume")
-    publish_settled_wakes(settled)
 
 
 def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     """The refusal `unpause_local_cluster` raises for a held unit, or None when its
     resume may proceed."""
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-    if current.maintenance is not None and current.maintenance.unsettled_failures():
+    if current.maintenance is not None and current.maintenance.failures:
         return (
             "cannot resume failed continuation/flush receipts; fix the root cause, "
             f"then ava maintenance repair --operation {current.holder} "

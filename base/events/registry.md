@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 25 | event stream |
-| telemetry (category=telemetry) | `events` | 222 | event stream |
+| telemetry (category=telemetry) | `events` | 218 | event stream |
 | log (category=log) | `events` | 12 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 30 role | live projection |
@@ -92,7 +92,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 222)
+## 3. Telemetry events (category=telemetry, 218)
 
 Telemetry-side event name resolution (`base/log/__init__.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -241,10 +241,6 @@ consumers: see the comments at each emit point.
 | `delta_message_suffix` | message history write-body transfer and retained suffix counts; excludes snapshot seed | noise | thread_id, checkpoint_ns, checkpoint_id, candidate_writes, fetched_rows, fetched_bytes, body_batches, retained_writes, reset_found | — | events |
 | `pause_lifecycle_wait` | preparation bounded-waited in-flight work it did not author | anomaly | waited_s, outcome, agents | — | events |
 | `pause_orphan_claim_settled` | preparation settled an ordinary claim without a live runtime | anomaly | agent, message_id, age_s, outcome | — | events |
-| `update_straggler_reaped` | drain reaped straggler cohort agent(s) past their restart window | anomaly | agents, window_s | — | events |
-| `update_straggler_reap_settled` | successor boundary settled stranded straggler-reap marks | anomaly | agents, site | — | events |
-| `host_turn_truncated` | the update drain's straggler reap ended this hosted turn on purpose — the row was CAS-marked 'restarting' mid-turn and the turn's fail-closed guard read refused; no corpse marker, no error event, no failure receipt. The successor boundary settles the mark and re-delivers the claimed work | observation | — | — | events |
-| `host_held_wake_truncated` | a held-controls wake stopped quietly because the update straggler reap had marked its row 'restarting' — the successor boundary owns the row and its un-applied restart, so the wake had nothing left to do; not a failure | observation | — | — | events |
 | `host_turn_force_terminated` | this hosted turn ended on its own incarnation's applied force terminate (e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate command was applied but not yet observed, the turn's fail-closed guard read refused, and the pump's own boundary observes the command; not a failure | observation | — | — | events |
 | `host_held_wake_force_terminated` | a held-controls wake stopped quietly because its incarnation's applied force terminate landed — the pump's boundary owns the command's observation, so the wake had nothing left to do; not a failure | observation | — | — | events |
 | `db_outage_wait` | db outage wait | anomaly | — | — | events |

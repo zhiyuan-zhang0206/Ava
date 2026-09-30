@@ -207,14 +207,12 @@ class TurnOutcome:
     `crashed` without it — their checkpoint was never settled.
 
     `truncated` marks a deliberate external end of the turn, classified bound
-    to the turn's own incarnation: the update straggler-reap (task #4016; the
-    drain CAS-marked the row 'restarting' mid-turn, so the fail-closed guard
-    read refused) or an applied force terminate (task #4180; the watchdog
-    wedge recovery / a CLI force / a machine pause, whose command awaits its
-    observation by this pump's boundary). `crashed` stays False — no corpse
-    marker is stamped — and the settle boundary skips the abort reconcile: the
-    successor boundary that settles the mark (or observes the force) owns the
-    claimed rows.
+    to the turn's own incarnation: an applied force terminate (task #4180; the
+    watchdog wedge recovery / a CLI force / a machine pause, whose command
+    awaits its observation by this pump's boundary). `crashed` stays False —
+    no corpse marker is stamped — and the settle boundary skips the abort
+    reconcile: the successor boundary that observes the force owns the claimed
+    rows.
     """
 
     __slots__ = ("aborted", "crashed", "exited", "truncated")

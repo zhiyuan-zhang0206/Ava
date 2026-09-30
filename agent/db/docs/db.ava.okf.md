@@ -28,8 +28,7 @@ or a blocked graph invocation.
   the same owner lock. They only mutate chat rows and never acknowledge a
   lifecycle command using missing checkpoint evidence.
 - **Interrupt peek**: `pending_interrupt_reason` reads pending external cancel or
-  terminate commands and maintenance reap marks so an in-flight operation can
-  abort. It retains user/system attribution from the first matching inbound;
+  terminate commands so an in-flight operation can abort. It retains user/system attribution from the first matching inbound;
   `has_pending_interrupt` projects presence for backoff/ownership consumers.
   Claim remains the authority for dispatch and acknowledgement.
 - **Wake delivery**: queue writers publish a Redis wake after durable insertion.

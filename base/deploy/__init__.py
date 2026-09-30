@@ -10,7 +10,7 @@ Sub-packages:
   inventory schemas the updater recovery journals embed.
 - ``updater`` — retained updater handoff and recovery evidence.
 - ``maintenance`` — explicit maintenance holds: admission, pause ownership,
-  restart cohorts, straggler settle.
+  restart cohorts.
 - ``lifecycle`` — local unit lifecycle state: serving generations, the desired
   service set, the status journal, home lifecycle mutexes.
 - ``state`` — durable deploy state: the cluster deploy lease, host deploy

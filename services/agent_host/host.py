@@ -112,7 +112,6 @@ from services.agent_host.runtime import (
 )
 from services.agent_host.settlement import close_hosted_turn
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
-from services.agent_host.truncation import reap_truncation_outcome, reap_truncation_stop
 
 _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 
@@ -188,7 +187,6 @@ class AgentHost:
         # — it would just throw the work away and make that agent's NEXT turn
         # pay a cold build, which is the opposite of what a cache is for.
         self._in_flight: set[int] = set()
-        self._settled_reap_pending: set[int] = set()
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
         self.admission = TurnAdmission(settings.daemon.host_max_concurrent_turns)
         self.stats = HostStats()
@@ -203,9 +201,6 @@ class AgentHost:
         """
         from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 
-        # A settled reap asks for one admission attempt, even if the row then
-        # proves unrunnable or another wake reached it first.
-        self._settled_reap_pending.discard(agent_id)
         resources = HostedTurnResources()
         with bind_hosted_resources(resources):
             # Keep the child's Context so its config fingerprint can be copied
@@ -401,9 +396,7 @@ class AgentHost:
         )
         if incarnation is None:
             return
-        reap_stop = reap_truncation_stop(self._control_pool, incarnation)
-        force_stop = force_termination_stop(self._control_pool, incarnation)
-        async with reap_stop, force_stop:
+        async with force_termination_stop(self._control_pool, incarnation):
             await self._apply_held_controls(agent_id, incarnation)
 
     async def _apply_held_controls(self, agent_id: int, incarnation: RuntimeIncarnation) -> None:
@@ -580,10 +573,6 @@ class AgentHost:
             ).fetchone()
         return None if row is None else row[0]
 
-    def arm_settled_reaps(self, agents: list[int]) -> None:
-        """Deliver each boot-settled reap once through the paced scan."""
-        self._settled_reap_pending.update(agents)
-
     async def pending_inbound_wakes(self, stale_after_s: float) -> list[PendingInboundWake]:
         """Find queued work and expired predecessors missed by Redis wakes.
 
@@ -602,13 +591,7 @@ class AgentHost:
             # cohort: its pace belongs to the drain windows (task #4652).
             return held_wakes
         rows = await scan_rows(self._control_pool, self._owner, self._machine, stale_after_s)
-        wakes = [PendingInboundWake(agent_id=row[0], stale=row[1], recovery=row[2]) for row in rows]
-        pending = {wake.agent_id for wake in wakes}
-        wakes.extend(
-            PendingInboundWake(agent_id=agent_id, stale=False, recovery=True)
-            for agent_id in self._settled_reap_pending - pending
-        )
-        return wakes
+        return [PendingInboundWake(agent_id=row[0], stale=row[1], recovery=row[2]) for row in rows]
 
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the
@@ -741,9 +724,7 @@ class AgentHost:
                     incarnation=incarnation,
                 )
             except Exception as exc:
-                ended = await reap_truncation_outcome(exc, self._control_pool, agent_id)
-                if ended is None:
-                    ended = await force_termination_outcome(exc, self._control_pool, agent_id)
+                ended = await force_termination_outcome(exc, self._control_pool, agent_id)
                 if ended is not None:
                     self.drop_agent(agent_id)
                     return ended

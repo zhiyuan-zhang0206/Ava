@@ -17,8 +17,7 @@ no fence:
   another machine's agent, or one this hold never drains;
 - the drain is certified and the agent drained or is parked
   (`MaintenanceHold.settled_after_drain`): the hold reached `drained`, which
-  required every member drained or reaped with no unsettled failure, or any
-  later phase.
+  required every member drained with no failure, or any later phase.
 
 None of these agents has a continuation left in the hold. The wake of a
 drained or parked member reads its row and returns: no restart command is

@@ -134,18 +134,6 @@ def cli_log_sinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return opened
 
 
-@pytest.fixture(autouse=True)
-def local_pauses(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
-    """Orchestration tests stub the native daemon boundary explicitly.
-
-    Kernel integration tests call ops.agent_pause or the public command kernel
-    directly; a phase-ordering test must not dial this host's real agent-host.
-    """
-    calls: list[bool] = []
-    monkeypatch.setattr("ops.cluster_pause.pause_local_cluster", lambda: calls.append(True))
-    return calls
-
-
 def _running(process: psutil.Process) -> bool:
     """Still the pinned process and not yet exited (a zombie has exited)."""
     try:
