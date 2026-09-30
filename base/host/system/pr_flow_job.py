@@ -19,10 +19,6 @@ The job command runs the checkout's own venv python against the checkout's
 `base.host.system.cron.ava_binary_path`), so a worktree's converge — should the gate
 ever pass there — would register its own pair, never prod's.
 
-Windows carries no registration path: its schtasks tasks invoke the CLI
-(`python -m cli.main <argv>`) and the sampler is a script with no CLI verb;
-the machine holding the credentials is macOS, so the Windows backend is a
-deliberate no-op rather than a second invocation mechanism.
 """
 
 from __future__ import annotations
@@ -42,9 +38,6 @@ import base.host.system.cron
 # the 00:00 self-evolution fire and the 04:00/04:40/05:00 maintenance block.
 _HOUR = 0
 _MINUTE = 25
-# One invocation: steady-state is minutes; the bound leaves headroom for a
-# cold 30-day window walk (bounded by the export script's own page caps).
-_WINDOWS_TIME_LIMIT_S = 1800
 
 _CRON_MARKER = "# ava-pr-flow"
 

@@ -7,9 +7,7 @@ flock, per-package cadence and backoff), so the job spec stays dumb and
 idempotent — one tick, no re-registration when a policy changes.
 
 POSIX surfaces the run's output in `$AVA_HOME/logs/packages-refresh.log`
-(launchd appends stdout/stderr; the crontab line redirects). Windows registers
-a minute-interval Task Scheduler job and degrades a registration failure to a
-loud warning, like its sibling jobs (`base.host.system.backend`).
+(launchd appends stdout/stderr; the crontab line redirects).
 """
 
 from __future__ import annotations
@@ -25,7 +23,6 @@ import base.host.system.cron
 from base.config import settings
 
 _CRON_MARKER = "# ava-packages-refresh"
-_WINDOWS_TIME_LIMIT_S = 900
 
 
 def _label(slug: str) -> str:
@@ -140,26 +137,6 @@ def _unregister_linux(slug: str) -> int:
     return base.host.system.cron.remove_crontab_entry(
         _cron_marker(slug), write_failure_rc=1, on_removed=None
     )
-
-
-def _register_windows() -> str | None:
-    """Register the minute-interval refresh task."""
-    from base.host.system.schtasks import create_minute_task
-
-    minutes = max(1, _tick_seconds() // 60)
-    return create_minute_task(
-        "packages-refresh",
-        ("packages", "refresh", "--from-job"),
-        minutes,
-        time_limit_s=_WINDOWS_TIME_LIMIT_S,
-    )
-
-
-def _unregister_windows(slug: str) -> int:
-    from base.host.system.schtasks import delete_task
-
-    delete_task("packages-refresh", slug)
-    return 0
 
 
 def register_packages_job() -> None:
