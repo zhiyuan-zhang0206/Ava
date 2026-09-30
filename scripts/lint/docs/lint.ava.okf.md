@@ -16,6 +16,7 @@ guards are a separate group: [[scripts/content_lint/docs/content_lint.ava.okf.md
 ## The linters
 
 - `code_structure.py` + `../../structure/{quality_budget,locality,path_imports,baseline_shards,directory_budget}.py` — 800-line/20-entry/CC/nesting budgets plus locality (package doors, single owners, no `ava_builtins/` path imports; see `python-conventions.md`). The `../../structure/baseline/*.json` shards also freeze the three locality sections as exact `path::target -> site count` maps — growth or shrinkage both fail until edited. CC 10-14 warns; `--complexity-warnings-full` unfolds counts.
+- `patch_targets.py` + `../../structure/{placement,patch_points,patch_targets,patch_report}.py` — a test may not patch a private name of a package it does not belong to (its home comes from its own imports, not its directory); frozen in the `patch_targets` baseline section; `--report` prints the census. Detail: [[scripts/lint/docs/patch-targets.ava.okf.md]].
 - `../../lint_pool_keepalives.py` — a psycopg pool in `scripts/` or in a module the `postgres-dial` decision allows must carry `PG_KEEPALIVE_KWARGS` (AST-based, sees through `AsyncConnectionPool[T](...)` subscripts and `LoggingConnectionPool` subclasses); elsewhere Rule 5 already routes every pool through `base.db.pool()` / `async_pool()`. Stays at `scripts/` root, not this directory, pending the Postgres-dial locality work.
 - `no_emoji.py`, `no_os_environ.py`, `no_script_sibling_imports.py` — Python conventions; sibling imports work with PYTHONSAFEPATH=1.
 - Ruff S110 checks lone-pass handlers in production code, including typed exceptions.
@@ -34,9 +35,9 @@ guards are a separate group: [[scripts/content_lint/docs/content_lint.ava.okf.md
 ## `async_no_sync_blocking.py`
 
 The gateway is a single event loop; one sync psycopg / subprocess / psutil
-call inside an `async def` handler freezes every other request — the
-2026-08-03 incident where `/api/memory/search` ran a synchronous
-gemini-embedding on the loop and the gateway went unresponsive for hours.
+call inside an `async def` handler freezes every other request (the
+2026-08-03 incident: `/api/memory/search` ran a synchronous embedding on the
+loop and the gateway hung for hours).
 
 Flags, inside an `async def` body (not a nested `def` — presumed threaded):
 DB connection/cursor/execute/fetch/commit/rollback calls, known sync DB
@@ -45,8 +46,7 @@ helpers and sync ops, process/session backend calls, filesystem calls,
 and any bare `*_blocking`-suffixed helper (those exist to be wrapped in
 `asyncio.to_thread`). Inline opt-out: `# async-blocking-ok: <reason>`.
 
-Scope: `gateway/` and `ops/` only — the event-loop surfaces. Wired into
-pre-commit (`lint-async-no-sync-blocking`).
+Scope: `gateway/` and `ops/` (the event-loop surfaces); pre-commit hook `lint-async-no-sync-blocking`.
 
 ## `logger_add_diagnose.py`
 
@@ -58,33 +58,15 @@ non-`False` literal, or a value this script cannot verify statically (a
 name, a `**kwargs` unpack) are all flagged, fail-closed; no inline exemption
 exists. Exempt: test code (`tests/`, `test_*.py`, `*_test.py`).
 
-Wired into pre-commit (`lint-logger-add-diagnose`). Full rule + rationale:
-the script's own module docstring.
+Wired into pre-commit (`lint-logger-add-diagnose`); rationale in the script docstring.
 
 ## CLI contract (explicit targets)
 
-The `lint_*.py` gates that take explicit path arguments share one contract — a
-typo'd target must never scan silently, and an out-of-repo target scans rather
-than crashes:
+The `lint_*.py` gates that take path arguments share one contract: a typo'd target never scans silently, and an out-of-repo target scans rather than crashes.
 
-- **No arguments** — scan the default scope (`_SCAN_DIRS`, the git-tracked
-  file list, ...).
-- **Explicit arguments must resolve.** A missing one is a hard error:
-  `error: target path(s) not found: <argument(s)>` on stderr, exit 1.
-  Resolution is per-script: absolute paths are used as-is; a relative path
-  resolves against the repo root with a caller-cwd fallback (content lints
-  `lint_no_cjk` / `lint_no_tailnet`), against the repo root only
-  (`time_bomb`), or against the caller's cwd (the rest; pre-commit
-  passes absolute paths).
-- **Out-of-repo targets scan under their absolute path.** Scope-anchored
-  scripts (`code_structure` / `fixture_scope` / `no_plugin_wrap`)
-  keep their own filter: a target outside it is skipped silently (rc 0).
-  Directory targets enumerate members (`turn_scoped_config` takes `.py`
-  files only — a directory argument scans nothing); an unreadable member (a
-  dangling `*.py` symlink, non-UTF-8 content) is skipped like any unreadable
-  file. `time_bomb` resolves callees through its repo-scoped index, so an
-  out-of-repo source file's source half silently passes (rc 0) — only its
-  test half, which reads the target directly, applies.
+- **No arguments** — scan the default scope (`_SCAN_DIRS`, the git-tracked file list, ...).
+- **Explicit arguments must resolve.** A missing one is `error: target path(s) not found: <argument(s)>` on stderr, exit 1. Resolution is per-script: absolute paths as-is; a relative path against the repo root with a caller-cwd fallback (`lint_no_cjk` / `lint_no_tailnet`), against the repo root only (`time_bomb`), or against the caller's cwd (the rest; pre-commit passes absolute paths).
+- **Out-of-repo targets scan under their absolute path.** Scope-anchored scripts (`code_structure` / `fixture_scope` / `no_plugin_wrap`) skip one outside their scope silently (rc 0). Directory targets enumerate members (`turn_scoped_config` takes `.py` files only, so a directory scans nothing); an unreadable member (dangling symlink, non-UTF-8) is skipped. `time_bomb` resolves callees through its repo-scoped index, so an out-of-repo source file's source half silently passes; only its test half applies.
 
 ## `loguru_format.py`
 

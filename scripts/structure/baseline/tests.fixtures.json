@@ -1,0 +1,8 @@
+{
+  "patch_targets": {
+    "tests/fixtures/guards.py::base.native_process.runtime_incarnation._child_incarnation": 1,
+    "tests/fixtures/guards.py::cli.commands._probe": 1,
+    "tests/fixtures/guards.py::cli.commands.lifecycle.root_driver._wait_for_root_services_ready": 1,
+    "tests/fixtures/units.py::base.deploy.lifecycle.start_serving._observe_root": 1
+  }
+}

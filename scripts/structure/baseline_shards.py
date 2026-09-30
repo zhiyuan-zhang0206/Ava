@@ -128,3 +128,13 @@ def read_at(repo_root: Path, rev: str) -> dict[str, str] | None:
             return None
         texts[filename.removesuffix(".json")] = shown.stdout
     return texts
+
+
+def exists_at(repo_root: Path, rev: str, path: str) -> bool:
+    """Whether `path` exists in the tree of revision `rev`."""
+    result = subprocess.run(  # noqa: S603 — local git query, no shell
+        ["git", "-C", str(repo_root), "cat-file", "-e", f"{rev}:{path}"],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
