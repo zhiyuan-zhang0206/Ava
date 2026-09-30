@@ -8,9 +8,11 @@ This script reads what pytest already wrote, the shard's JUnit report, so nothin
 collected a second time:
 
     shard_counts.py shard --group 3 --junit 'tmp/junit-backend-shard-3-a*.xml' --out tmp/c3.json \\
-                          --summary "$GITHUB_STEP_SUMMARY"
+                          --summary "$GITHUB_STEP_SUMMARY" [--min-tests 1]
         counts the tests one shard executed, by directory, into its log and the GitHub job
-        summary, and writes them as JSON (the workflow uploads it as an artifact);
+        summary, and writes them as JSON (the workflow uploads it as an artifact). It fails
+        when the shard left no JUnit report or executed fewer than `--min-tests` tests: the
+        Trunk uploader lets both pass, and this is the check that does not;
 
     shard_counts.py total --dir counts/ --expected "1 2 ... 16 serial" [--baseline b.json] \\
                           --out test-count-baseline.json --summary "$GITHUB_STEP_SUMMARY" \\
@@ -57,7 +59,8 @@ def count_junit(path: Path) -> dict[str, Any]:
         test_file = element.get("file")
         if test_file is None:
             raise SystemExit(
-                f"{path}: a testcase has no `file` attribute; run pytest with -o junit_family=xunit1"
+                f"{path}: testcase {element.get('classname')}.{element.get('name')} has no `file` "
+                "attribute (a pytest internal error, or -o junit_family=xunit1 is missing)"
             )
         tests += 1
         skipped += element.find("skipped") is not None
@@ -92,7 +95,7 @@ def _emit(text: str, summary: str, summary_path: Path | None) -> None:
             handle.write(summary + "\n")
 
 
-def run_shard(group: str, junit: str, out: Path, summary_path: Path | None) -> int:
+def run_shard(group: str, junit: str, out: Path, summary_path: Path | None, min_tests: int) -> int:
     report = latest_report(junit)
     counts: dict[str, Any] = {"group": group, **count_junit(report)}
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +112,12 @@ def run_shard(group: str, junit: str, out: Path, summary_path: Path | None) -> i
         + _table(rows, ("directory", "tests")),
         summary_path,
     )
+    if counts["tests"] < min_tests:
+        raise SystemExit(
+            f"shard {group} executed {counts['tests']} tests, fewer than the {min_tests} it must "
+            f"(pytest ran nothing: an empty `testpaths`, a deselecting marker, a plugin that "
+            f"removed the items); {report} is its report"
+        )
     return 0
 
 
@@ -190,6 +199,9 @@ def main(argv: list[str] | None = None) -> int:
     shard.add_argument("--junit", required=True, help="glob; the highest attempt wins")
     shard.add_argument("--out", type=Path, required=True)
     shard.add_argument("--summary", type=Path, help="the GitHub job summary file to append to")
+    shard.add_argument(
+        "--min-tests", type=int, default=0, help="fail when fewer tests than this were executed"
+    )
     total = commands.add_parser(
         "total", help="add the shards' counts up and compare with a baseline"
     )
@@ -202,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
     total.add_argument("--run-id", default="", help="the workflow run the total describes")
     args = parser.parse_args(argv)
     if args.command == "shard":
-        return run_shard(args.group, args.junit, args.out, args.summary)
+        return run_shard(args.group, args.junit, args.out, args.summary, args.min_tests)
     return run_total(args)
 
 

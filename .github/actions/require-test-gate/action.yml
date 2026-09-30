@@ -1,0 +1,29 @@
+name: Require the test gate
+description: >-
+  Fail-closed companion of the Trunk quarantine gate. A pytest step that runs with
+  continue-on-error never fails its job by itself; the Trunk gate is what turns its
+  failures red. Call this when TRUNK_ORG_URL_SLUG is empty, i.e. when that gate is
+  about to be skipped: a run that should have the secret errors out, and a run that
+  cannot have it (a fork) fails on pytest's own outcome.
+inputs:
+  pytest-outcome:
+    description: steps.<id>.outcome of the pytest step whose failures the gate would judge.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        # Secrets exist only on this repository's own runs; a fork's pull request gets none.
+        CAN_HAVE_SECRETS: ${{ github.repository == 'zhiyuan-zhang0206/Ava' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        PYTEST_OUTCOME: ${{ inputs.pytest-outcome }}
+      run: |
+        if [ "$CAN_HAVE_SECRETS" = "true" ]; then
+          echo "::error::TRUNK_ORG_URL_SLUG is empty, the test gate cannot run"
+          exit 1
+        fi
+        if [ "$PYTEST_OUTCOME" != "success" ]; then
+          echo "::error::pytest ended '$PYTEST_OUTCOME' and this run has no Trunk gate (no secrets): failing on pytest's own outcome"
+          exit 1
+        fi
+        echo "no Trunk gate on this run (no secrets); pytest succeeded"
