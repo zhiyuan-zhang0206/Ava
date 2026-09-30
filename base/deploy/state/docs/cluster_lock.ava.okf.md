@@ -18,14 +18,13 @@ does not remove these SQL guards.
 
 - `acquire_update_lock` atomically claims a free or expired lease. Durable
   `managed_writer_evidence.pending` refuses a generic takeover even after expiry.
-- `renew_update_lock` and `release_update_lock` require the exact holder. Release,
-  settle conversion and settle release cannot discard pending publication evidence.
+- `renew_update_lock` and `release_update_lock` require the exact holder. Release
+  and settle conversion cannot discard pending publication evidence.
 - `read_update_lease` returns holder, age, expiry, kind and structured settle facts.
   `update_lock_holder` exposes the same authority to admission and diagnostics;
   a refused acquire logs which guard refused it.
-- Settle holds remain distinct from executing leases. Their host set and bounded
-  TTL let `ops.deploy_window` clear a converged settle hold without releasing an
-  executing operation's lease.
+- Settle holds remain distinct from executing leases; their host set and bounded
+  TTL are what tell the two apart.
 
 `deployment_state.min_code_version` is the same singleton row's other job and no
 part of the lease: the lowest code version allowed to write, raised at every
