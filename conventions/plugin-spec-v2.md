@@ -164,11 +164,14 @@ list uses 150: the work queue sits directly below the built-in `page` section.)
 
 ### Version ranges
 
-A semver range is a conjunction (AND) of clauses, comma- or space-separated:
+A manifest version range is a conjunction (AND) of clauses, comma- or space-separated:
 `>=1,<2`. Operators: `>=`, `>`, `<=`, `<`, `==`, `=`; a bare version means
-`==`. No OR, no wildcards, no prerelease ordering — prerelease suffixes are
-accepted on versions but not ordered. **An upper bound (`<`/`<=`/`==`) is a
-hard validator requirement for `dependencies.pythonPackages` entries** — the
+`==`. No OR or wildcards. Prereleases sort below the matching final release;
+dev/alpha/beta/rc labels follow PEP 440 order. A range admits a prerelease
+only when a clause explicitly names one. Other suffixes remain valid and sort
+lexically among themselves below the final release. **An upper bound
+(`<`/`<=`/`==`) is a hard validator requirement for
+`dependencies.pythonPackages` entries** — the
 #1198 lesson: unbounded = eventually pulled past the break.
 
 ## Implemented today (S0–S2)

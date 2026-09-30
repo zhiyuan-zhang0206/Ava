@@ -63,6 +63,32 @@ def test_range_allows_bad_version_raises() -> None:
         pm.range_allows(">=1", "not-a-version")
 
 
+def test_prerelease_is_distinct_from_final_release() -> None:
+    assert pm._parse_version("1.2.3-alpha") != pm._parse_version("1.2.3")
+    assert pm.range_allows("==1.2.3", "1.2.3-alpha") is False
+
+
+def test_prerelease_requires_an_explicit_prerelease_range() -> None:
+    assert pm.range_allows(">=1.2.3", "1.2.3-alpha") is False
+    assert pm.range_allows(">=1.2.2", "1.2.3-alpha") is False
+    assert pm.range_allows(">=1.2.3-alpha", "1.2.3-alpha") is True
+    assert pm.range_allows(">=1.2.3-alpha", "1.2.3-beta") is True
+    assert pm.range_allows(">=1.2.3-beta", "1.2.3-alpha") is False
+    assert pm.range_allows(">=1.2.3-alpha", "1.2.3") is True
+
+
+def test_prerelease_below_final_upper_bound_is_excluded() -> None:
+    assert pm.range_allows(">=1.2.3-alpha,<1.2.3", "1.2.3-beta") is False
+
+
+def test_prerelease_labels_order_and_unknown_suffix_stays_valid() -> None:
+    assert pm.range_allows(">=1.2.3-dev1", "1.2.3-alpha") is True
+    assert pm.range_allows(">=1.2.3-rc1", "1.2.3-beta") is False
+    assert pm.range_allows("==1.2.3-a0", "1.2.3-alpha") is True
+    assert pm.range_allows(">=1.2.3", "1.2.3-a.x") is False
+    assert pm.range_allows(">=1.2.3-a.x", "1.2.3-a.y") is True
+
+
 # ── validation ─────────────────────────────────────────────────────────
 
 
@@ -213,6 +239,13 @@ def test_check_host_engine() -> None:
     errors = pm.check_host_engine(m, "0.1.5")
     assert len(errors) == 1
     assert "requires Ava >=0.1.38" in errors[0]
+
+
+def test_check_host_engine_refuses_prerelease_without_explicit_opt_in() -> None:
+    m = _manifest(engines={"ava": ">=1.2.3"})
+    assert pm.check_host_engine(m, "1.2.3-alpha")
+    m = _manifest(engines={"ava": ">=1.2.3-alpha"})
+    assert pm.check_host_engine(m, "1.2.3-alpha") == []
 
 
 def test_host_version_from_repo(tmp_path: Path) -> None:
