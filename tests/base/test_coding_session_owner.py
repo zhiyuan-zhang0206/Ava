@@ -461,8 +461,8 @@ def test_codex_app_server_socket_is_short_and_generation_scoped(tmp_path: Path) 
 
 @_POSIX_ONLY
 def test_a_long_cluster_home_still_gets_a_socket_under_the_kernel_limit(tmp_path: Path) -> None:
-    """A preview home (~/.ava-previews/<run>/home) pushed <home>/run past sun_path."""
-    long_home = tmp_path / ("preview-run-with-a-long-name-" * 4) / "home"
+    """A home under a long directory path pushed <home>/run past sun_path."""
+    long_home = tmp_path / ("a-directory-with-a-long-name-" * 4) / "home"
     long_home.mkdir(parents=True)
     workspace = long_home / "workspaces" / "2"
     workspace.mkdir(parents=True)

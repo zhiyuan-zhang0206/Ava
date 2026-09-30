@@ -45,8 +45,8 @@ A package's own tests sit beside the code they prove (`base/packages/plugins/tes
 - `tests/ops/` — agent drain, pause/recovery, deployment holds, health inventory,
   service roster and resource admission
 - `tests/lifecycle/` — lifecycle qualification, grouped by database authority,
-  native root custody, the fleet update script and branch previews
-  (`preview/` also holds the CI preview visual gate's golden-minting contracts).
+  native root custody and the fleet update script
+  (`preview/` holds the CI preview visual gate's golden-minting contracts).
   Native platform cases keep their explicit gates; moving the tests does not
   turn a simulated result into native evidence.
 - `tests/skills/` — skills

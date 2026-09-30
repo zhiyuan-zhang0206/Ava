@@ -426,7 +426,7 @@ def test_existing_file_keeps_its_permissions(tmp_path: Path) -> None:
 _PANEL_2_1_283 = (
     " ▐▛███▜▌   Claude Code v2.1.283\n"
     "▝▜█████▛▘  Opus 5.5 (1M context)\n"
-    "  ~/.ava-previews/run/home/workspaces/4\n"
+    "  ~/.ava/workspaces/4\n"
     "────────────\n"
     "\u276f\n"
     "────────────\n"
