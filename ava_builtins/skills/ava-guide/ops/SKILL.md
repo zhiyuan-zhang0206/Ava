@@ -134,10 +134,9 @@ authorization for production.
 Related local commands:
 
 - `ava restart` restarts this home's application through its ordinary lifecycle.
-- `ava converge` applies development host wiring. Retained-image startup verifies
-  prepared inputs instead of repairing a checkout or acquiring dependencies.
+- `ava converge` applies development host wiring.
 - `ava status` and `ava cluster status` provide observations, not permission to
-  replace the selected release.
+  update the cluster.
 
 ## Update safety discipline
 
@@ -146,17 +145,14 @@ Related local commands:
   Verify the selected service roster and representative agent progress after
   activation. Skipped checks are not successful checks.
 - **Retain executing code.** Never change the checkout, interpreter or libraries
-  underneath a serving process. The external executor replaces the application
-  root from independently retained images.
-- **Recover the recorded operation.** Preserve receipts, logs and native births.
-  Continue only after proving the prior executor domain closed. Unknown custody
-  or changed inputs require diagnosis, not raw signals, hand-edited journals or
-  a blind new rollout. Generic maintenance recovery does not own release state.
-- **Treat first adoption as a separate cutover.** The new mechanism cannot
+  underneath a serving process: `down` stops every unit before it switches a
+  checkout.
+- **Recover by rerunning the half.** After a failure, fix the cause and rerun
+  the whole half; both are idempotent. Unknown custody or a hold that is not a
+  completed stop needs diagnosis, not raw signals or hand-edited state.
+- **Treat first adoption as a separate cutover.** A new mechanism cannot
   protect the legacy deployment that introduces it. Inspect the currently
   running implementation and follow the approved explicit cutover procedure.
-- **One operation owns the home.** Prepare outside the outage window; reserve
-  activation before mutation and preserve that authority through recovery.
   Respect any explicit CI-only or no-local-cluster constraint.
 
 ## Release Cut

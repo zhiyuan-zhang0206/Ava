@@ -1,12 +1,8 @@
 """Repo change classification — which side (frontend / backend) a set of changed
 file paths touches.
 
-Single source of truth shared by `ava cluster update`'s selective restart
-(`cli/commands/update.py`) and the gateway's read-only update preflight
-(`gateway/cluster.py:update_check`). The gateway cannot import the higher `cli`
-layer, so this lives in `base` where both can reach it — keeping the two from
-drifting (a divergence would make the UI advertise a different restart side than
-the rollout actually performs).
+CI's change-class gating (the `classify` job in `.github/workflows/ci.yml`) and the
+PR test selector (`scripts/ci/test_selector.py`) both classify a diff through it.
 """
 
 from __future__ import annotations

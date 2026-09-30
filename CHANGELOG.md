@@ -7,12 +7,17 @@ and the matching GitHub Releases, cut by `scripts/ci/release_cut.py`.
 
 ## [Unreleased]
 
+### Removed
+- The retained-image release path (image preparation, the image-exec handoff, the
+  finite executor, the fleet coordinator, write-generation rotation by rollout,
+  PITR activation and their CI workflows) and the `shared/` release-probe shell.
+  A cluster is updated from source with `python -m cli.fleet_update`
+  ([decision](decisions/2026-09-30-remove-release-image-path.md)).
+
 ### Changed
 - The bottom-layer package `shared` is now `base` (`base < ava < agent <
   gateway < cli`), with no compatibility aliases: external plugins, schedules
-  and skills that import `shared.*` must import `base.*`. A three-file
-  `shared/` release-probe shell remains only so release preparation can cross
-  the rename (see `shared/__init__.py` for its retirement condition).
+  and skills that import `shared.*` must import `base.*`.
 - The internal database plane always authenticates, whatever
   `AVA_CLUSTER_SECRET` says: `pg_hba` admits only the OS-user administrator by
   peer on the owner-only socket and SCRAM application logins; PgBouncer always

@@ -19,9 +19,6 @@ What outlives a bounded grace is SIGKILLed with its whole session
 (decisions/2026-09-28-stop-escalates-to-sigkill.md); only a process that
 outlives its SIGKILL leaves the maintenance hold in place with a per-phase
 diagnostic.
-
-A release and a PITR activation run the same closure with their own bounds
-(tests/lifecycle/transition/test_terminal_closure.py).
 """
 
 from __future__ import annotations

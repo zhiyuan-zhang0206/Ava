@@ -433,8 +433,8 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
     written 0600 to `out` (never overwritten) and sealed under a transport key
     printed once here; the unit installs it with
     `ava start --db-capability <bundle>` and that key in AVA_DB_CAPABILITY_KEY.
-    Refused on a pure agent-runner, a remote-managed plane, a home without an
-    active generation, and while a release operation is incomplete.
+    Refused on a pure agent-runner, a remote-managed plane and a home without an
+    active generation.
     """
     from base.cluster.authority import AuthorityRefusedError
     from base.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle

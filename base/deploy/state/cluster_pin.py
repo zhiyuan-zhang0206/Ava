@@ -3,9 +3,8 @@
 `cluster_pin` (one row, central DB) holds the commit the retired in-place
 updater last pinned (`target_sha`) and its known-good bookkeeping
 (`last_known_good_sha`, `pending_known_good_sha`). Nothing advances these
-columns any more: the retained release journal (`cli/release_transition/`) is
-the release record, and known-good publication belongs to the release
-operation, which has not implemented it yet. The values are therefore frozen at
+columns any more: `cli/fleet_update.py` updates each unit from source and
+records no pin. The values are therefore frozen at
 whatever the legacy updater last wrote, and no operator surface presents them
 as the cluster's current target or rollback anchor.
 

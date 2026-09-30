@@ -608,7 +608,7 @@ async def run() -> None:
 def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
-    SIGTERM (the graceful stop `ava cluster update` sends) and Ctrl-C converge on
+    SIGTERM (the graceful stop the fleet update sends) and Ctrl-C converge on
     the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `ava stop`
     default force-kill does not reach this.
     """

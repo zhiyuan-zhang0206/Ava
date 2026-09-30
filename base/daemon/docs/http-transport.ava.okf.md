@@ -26,8 +26,7 @@ prove process closure or grant startup permission; callers establish their own
 admission before binding.
 
 `base.native_process.evidence` owns strict digest/model values, exact native process
-identity and read-only process observations. Runtime image construction, service
-health and native launcher reads import these values without loading rollout
+identity and read-only process observations. Service health and native launcher reads import these values without loading rollout
 leases or managed-writer controllers. Native read errors remain unknown; PID
 reuse stays distinct from the expected process exiting. This evidence grants no
 startup or mutation authority.

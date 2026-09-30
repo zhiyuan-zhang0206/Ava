@@ -32,9 +32,7 @@ own native owner; it never drains arbitrary children with `waitpid(-1)`.
 `root_status` exposes state, owned PID, run directory, unexpected-exit restarts
 and durable stop intent; while seeded it also reports the held seed's argv,
 working directory, run directory and log paths (`seed`, advertised as
-`ping.root_seed_report_v1`), never its environment, which carries secrets. A
-macOS release compares that report, `seed.json` and the live root's kernel argv
-to prove the pinned image ([[cli/release_transition/docs/root_macos.ava.okf.md]]).
+`ping.root_seed_report_v1`), never its environment, which carries secrets.
 `ping.root_stop_intent_v1` and `ping.helper_shutdown_v1` are required before ordinary
 start can seed this helper. An older protocol fails closed with an upgrade message.
 

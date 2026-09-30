@@ -30,8 +30,7 @@ network, because they are operator tools and the SDK surface is for agents.
 
 The cluster router exposes no source-checkout update, rollout, restart or
 update-check endpoint. The status page displays observations and does not
-launch deployments. Captured release requests enter through
-[[cli/release_transition/docs/release_transition.ava.okf.md]].
+launch deployments; a fleet update is the operator script `python -m cli.fleet_update`.
 
 ## `GET /api/stats/dashboard?hours=`
 

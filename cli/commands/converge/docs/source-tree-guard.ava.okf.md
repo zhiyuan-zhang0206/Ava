@@ -28,11 +28,9 @@ allowlisted. `base/deploy/git/source_tree_guard.py` owns the whitelist and the g
   5-7: it fails the probe and wakes the owner; rollback does not undo an
   on-disk edit. The probe never writes, and nothing repairs the tree for the
   operator.
-- **Scope** — the check applies only while the home runs its source checkout.
-  A home with a selected release image (`$AVA_HOME/releases/current-release`)
-  executes verified image bytes, so a leftover checkout cannot reach running
-  code and is not inspected. An unreadable selector leaves the executing code
-  unknown and reports **"guard skipped"**, never a clean pass.
+- **Scope** — a home runs its source checkout, so the check always applies. A
+  checkout the guard cannot evaluate reports **"guard skipped"**, never a clean
+  pass.
 - **HEAD moves are not tamper** — no current lifecycle records an installed
   commit for a source checkout, and an operator legitimately moves the checkout
   before an `ava restart`. Running-versus-checkout drift is shown, not alerted,
@@ -70,5 +68,3 @@ detector, so they need no whitelist entry.
 - [[../../docs/commands.ava.okf.md]] — command-module and lifecycle overview
 - [[../../docs/editable-install-guard.ava.okf.md]] — the sibling guard for the prod
   venv's editable-install pointer
-- [[cli/release_transition/docs/release_transition.ava.okf.md]] — the release
-  selector that decides whether a home runs an image

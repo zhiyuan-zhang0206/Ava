@@ -28,7 +28,7 @@ def _stop_data_plane(*, skip_infra: bool, runner_only: bool) -> None:
     """Stop this cluster's own Postgres+Redis (data preserved on disk).
 
     A runner-only host has no local data plane. `skip_infra` (keep_infra — the
-    `ava cluster update` / internal-restart path) leaves the instance running so the
+    the fleet update / internal-restart path) leaves the instance running so the
     following migrate/start still has DB; without this the migrate step would hit
     connect-refused now that every cluster (including `main`) owns its instance.
     Otherwise (a full `ava stop`) the private instance is torn down."""
@@ -81,7 +81,7 @@ def _compute_stop_scope(
     The browser session joins the preserve set when keep_browser is set. A host
     without the gateway capability has no local data plane; unknown (None, role
     unresolved) conservatively takes the gateway path (stops infra). skip_infra
-    (keep_infra — the `ava cluster update` / internal-restart path) leaves the instance
+    (keep_infra — the fleet-update / internal-restart path) leaves the instance
     running so the following migrate/start still has DB.
     """
     # Dynamic lookup for monkeypatch-aware tests.

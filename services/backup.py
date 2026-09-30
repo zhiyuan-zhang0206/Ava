@@ -444,7 +444,7 @@ def _available_target(
 ) -> Path:
     """Return an unused managed dump path without replacing a prior snapshot.
 
-    `pre_update` marks an `ava cluster update` snapshot with a kind segment so
+    `pre_update` marks a fleet-update snapshot with a kind segment so
     prune can give update-kind artifacts their own retention slot.
     """
     if pre_update and pitr_activation:

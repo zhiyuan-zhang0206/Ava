@@ -335,14 +335,9 @@ def compact(summary: str) -> NoReturn:
 
 
 def update() -> NoReturn:
-    """Removed — updates go through the CLI only; calling it now raises
-    `RuntimeError`.
-
-        ava cluster update                 # smooth (default)  # lint-docstring: ok CLI command name
-        ava cluster update --mode force    # force: ~10s drain  # lint-docstring: ok CLI command name
-    """
+    """Removed — updating the machines is an operator action (the operator runs
+    `python -m cli.fleet_update`); calling this raises `RuntimeError`."""
     raise RuntimeError(
-        "ava.self.update() has been removed; update the cluster from the CLI "
-        "instead: `ava cluster update` (smooth) or `ava cluster update --mode "
-        "force` (force-kill stragglers)."
+        "ava.self.update() has been removed; a cluster update is an operator action: "
+        "run `python -m cli.fleet_update` from the operator's terminal."
     )

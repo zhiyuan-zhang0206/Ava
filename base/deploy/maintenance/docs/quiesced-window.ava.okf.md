@@ -26,7 +26,7 @@ dispatch pool, which the calling daemon passes in (ops never reaches into the
 daemon's module state). `base.db.pool_release` performs the release against the pool's
 private face because psycopg-pool has no public "close idle, keep usable"
 operation (`drain()` re-opens replacements, `close()` is terminal). Its only
-caller was the legacy `cluster_stop` op, which the fleet release transition
+caller was the legacy `cluster_stop` op, which the scripted fleet update
 replaced; it has no production caller now (recorded debt). Both host pools and
 the ops pool run `min_size=0`, so the first borrow after resume reconnects
 lazily.

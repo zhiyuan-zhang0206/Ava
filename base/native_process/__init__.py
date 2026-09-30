@@ -6,8 +6,8 @@ or a session backend: OS platform flags (`os_platform`), native birth facts
 *running* process actually loaded (`loaded_commit`, as opposed to what the
 checkout is at right now) and the ordered code version derived from it
 (`code_version`), turn- and incarnation-scoped agent identity
-(`turn_identity`, `runtime_incarnation`), one bounded POSIX command's process
-group (`posix_command`, `group_closure`) and its Windows Job Object
+(`turn_identity`, `runtime_incarnation`), one POSIX process group's
+closure (`group_closure`) and its Windows Job Object
 equivalent (`winjob*`), managed-exec-domain ownership without the agent graph
 (`exec_domain`), child-process environment primitives (`child_env`), strict
 process-observation value types (`evidence`), and the root supervisor's local

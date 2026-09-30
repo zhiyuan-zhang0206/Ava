@@ -22,7 +22,7 @@ disagree with this one, which is the whole bug class this row exists to close.
 What differs between them is how much of the row they need. `update_lock_holder()` is
 the bare "is it held", enough wherever any hold means stand back (stranded-pause, `ava
 status`). `read_update_lease()` returns the row itself, for consumers that must
-*explain* the hold to a human (a refused `ava cluster update`, the health probe's cron log) or
+*explain* the hold to a human (a refused fleet update, the health probe's cron log) or
 must tell an executing rollout apart from a settle hold before branching — the pin and
 code controllers, through `DeployLease.awaits` below. Neither is a second source of
 truth: they are two reads of this one row.
@@ -44,7 +44,7 @@ multi-process rollout opens — the TTL'd row can.
 returns. Phase B polls each agent-runner back to `paused=false` for a bounded time;
 a host whose checkout + `uv sync` + restart outruns that is left mid-transition and
 the orchestration exits — while that host is still swapping its processes. Releasing
-there is what let a second `ava cluster update` start into a half-transitioned cluster on
+there is what let a second fleet update start into a half-transitioned cluster on
 2026-07-29, force-terminating two agents that had done nothing wrong. So an
 orchestration that ends with hosts still converging holds the lease instead of
 releasing it — a **settle hold**: the lease stays held, on its own TTL, with the
@@ -60,7 +60,7 @@ remaining work. A healer on X that reads only "is it held" defers to a hold whos
 entire content is that it is waiting for the thing the healer would do — the mutual
 wait of issue #1020, which cost ~16 minutes of a mixed-code host and would not clear
 at all under a renewed window. `DeployLease.awaits` is that discrimination, and it is
-the *only* one: nothing about a settle hold's refusal of a second `ava cluster update`
+the *only* one: nothing about a settle hold's refusal of a second fleet update
 changes, and no host but the named one is permitted anything.
 """
 
@@ -113,7 +113,7 @@ class DeployLease:
 
     Durations are computed server-side (`now()` in the same statement that reads the
     row) rather than against the caller's clock: the consumers are spread across
-    machines — a refused `ava cluster update` on one host, the health probe on another — and
+    machines — a refused fleet update on one host, the health probe on another — and
     a cross-host clock skew must never turn into a wrong "expires in" or a wrong
     suppression window.
     """
@@ -165,7 +165,7 @@ class DeployLease:
 
         Permitting is deliberately narrow: it says nothing about *other* hosts' heals,
         it does not release the hold, and it does not weaken the refusal a second
-        `ava cluster update` gets. It also answers only the question the *lease* can answer.
+        a fleet update gets. It also answers only the question the *lease* can answer.
         A caller that consults a second signal — a host's `host_deploy_state`
         posture, which covers host-local work that takes no lease — must still
         consult it: a True here is not a verdict that nothing is running on this host.
@@ -677,7 +677,7 @@ def read_update_lease(*, conn: Any | None = None) -> DeployLease | None:
     """The *live* lease (None if free, or only an expired holder remains).
 
     The read every consumer that must explain the hold to a human goes through — a
-    refused `ava cluster update`, the health probe's decision to treat a down gateway as an
+    refused fleet update, the health probe's decision to treat a down gateway as an
     expected transition rather than an outage. `update_lock_holder()` is the
     name-only form kept for the branch-on-it callers. When `conn` is supplied,
     the caller owns its lifecycle; otherwise this read opens and closes one

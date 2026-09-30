@@ -33,6 +33,6 @@ holder in its error.
 
 - The lock file names are stable. Renaming them would split mutual exclusion
   between processes built from different revisions.
-- The module keeps no UI state. Gate keeps none either: a release transition
-  stops Gate with the rest of root, and a `$AVA_HOME/deploy-state.json` left by
+- The module keeps no UI state. Gate keeps none either: a stop stops Gate
+  with the rest of root, and a `$AVA_HOME/deploy-state.json` left by
   the retired updater is inert.

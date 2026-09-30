@@ -30,7 +30,7 @@ untouched copies are removed; touched ones are kept with a warning.
 User-origin entries (installed via `ava plugins install <git-url>` or
 `ava skill register`) are never touched.
 
-Runs as a converge step (`ava start` / `ava cluster update` / `ava converge`) and
+Runs as a converge step (`ava start` / the fleet update / `ava converge`) and
 directly after `ava plugins install`/`uninstall` so packages activate on the
 next skill scan without a restart.
 """

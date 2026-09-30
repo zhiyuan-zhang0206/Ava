@@ -412,11 +412,11 @@ def ensure_line_buffered_stdio() -> None:
     Python line-buffers stdout only when it is a tty; into a pipe it uses an 8 KiB
     block buffer, so a long-running command's own `print()` lines surface all at
     once when it exits. Every detached orchestration session pipes the CLI into
-    `tee` (`{ ava cluster update --local; } 2>&1 | tee -a <log>`), and the CHILD processes
+    `tee` (`{ <update command>; } 2>&1 | tee -a <log>`), and the CHILD processes
     it spawns — `uv sync`, the `ava start` subprocess — write to that same pipe
     unbuffered. The result is a live log that is not merely late but *misordered*:
     on 2026-07-28 a rollout's log showed `ava start` output and a pin warning with
-    no `[ava cluster update]` header, no pin line and no phase markers above them, which
+    no `[update]` header, no pin line and no phase markers above them, which
     reads exactly like a rollout that skipped its orchestration. The parent's lines
     all appeared, in the right order, at the END of the file once it exited. It
     cost a false alarm during a live deploy.
@@ -424,7 +424,7 @@ def ensure_line_buffered_stdio() -> None:
     Line buffering is the fix rather than `flush=True` at each call site (there are
     hundreds, and the next one added would silently reintroduce this) or
     `PYTHONUNBUFFERED` in the session env (which would have to be repeated at every
-    spawn site, in two shells, and would not help a human piping `ava cluster update` by
+    spawn site, in two shells, and would not help a human piping the fleet update script by
     hand). A tty is already line-buffered, so this changes nothing interactively.
 
     Idempotent; call once near process start (the CLI entry does).

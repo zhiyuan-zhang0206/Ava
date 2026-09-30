@@ -70,12 +70,7 @@ ordinary `ava start` — which calls this and applies nothing — is unaffected.
 empty `machine_units` means a fresh birth (step 2.5 migrates before step 3
 registers the unit) and is allowed.
 
-An explicit verified-release transition context is stricter: it requires the
-current non-settling rollout lease identity, canonical unit-owned generation,
-manifest-bound packaged SQL inventory, and a nonempty matching gateway roster
-before any migration. It does not obtain authority from an
-environment override. Ordinary checkout enumeration remains Git-bound.
-Integer-keyed migration history is unsupported and fails before mutation.
+Checkout enumeration is Git-bound. Integer-keyed migration history is unsupported and fails before mutation.
 
 Rationale and the rejected alternatives:
 [2026-07-31-migrations-are-gateway-only](../../../../decisions/2026-07-31-migrations-are-gateway-only.md).
@@ -121,4 +116,4 @@ retransmission timeout.
 ## Key Dependencies
 
 - [[base/docs/base.ava.okf.md]] — the base-layer overview
-- [[cli/docs/cli.ava.okf.md]] — `ava start` / `ava cluster update`, which apply and roll back
+- [[cli/docs/cli.ava.okf.md]] — `ava start` and the fleet update (`cli/fleet_update.py`), which apply and roll back

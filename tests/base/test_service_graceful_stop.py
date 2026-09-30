@@ -1,5 +1,5 @@
 """Tests for the graceful stop of a SERVICE session — the path `ava stop` and
-`ava cluster update` drive.
+The fleet update's drive.
 
 The behaviour under test is end-to-end and process-shaped, so these spawn REAL
 detached children through the real backend: a service session's login shell must
@@ -288,7 +288,7 @@ def test_orchestration_session_keeps_its_wrapper_shell(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(posixproc, "new_session", _fake_new)
     backend = PosixProcSessionBackend()
-    pipeline = "ava cluster update | tee -a log"
+    pipeline = "update-command | tee -a log"
     assert backend.new_session("ava-updater", pipeline, Path("/repo"), env={}, exec_cmd=False)
     # The pipeline is left for the login shell to run and outlive...
     assert seen[0].endswith(f"&& {pipeline}'")

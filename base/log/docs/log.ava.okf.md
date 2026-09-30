@@ -24,7 +24,7 @@ Every log line is also an **event** in the unified event stream (event-system de
 - `init_agent_process(agent_id)` — kernel: stderr + file `agent-{N}.log` + unified event pipeline (process=`agent-kernel`).
 - `init_subprocess_logger(agent_id)` — exec subprocess: **only** file sink, no stderr (subprocess stderr is captured by the parent and injected as exec_output fed to the LLM; framework logs on stderr would pollute the agent context). Writes the same `agent-{N}.log`.
 - `init_gateway_process(name)` — gateway and every long-running daemon, including agent-host, ops, watchdog, labeler, memory-indexer, heartbeat and maintenance services: stderr + `<name>.log` + unified event pipeline (process=`name`, agent_id NULL on rows); each daemon has its own `<name>.log` for easier postmortem. Also freezes this process's commit — earliest shared seam, see `base/native_process/loaded_commit.py`.
-- `init_cli_process(name)` — CLI verbs that bring a unit up (`cli-<verb>`), the release executor, the PITR base worker: gateway's sinks, no `service_started` row.
+- `init_cli_process(name)` — CLI verbs that bring a unit up (`cli-<verb>`), the PITR base worker: gateway's sinks, no `service_started` row.
 - `init_restricted_process()` — the PITR restore worker, which runs with no HOME or AVA_HOME: stderr only, plain text, and never builds Settings (every other init does, to resolve `logs_dir()`).
 - All are **idempotent** (`_init_done` process-level guard) — `logger.add` is not idempotent; repeated calls accumulate sinks until fd exhaustion (errno 24); watchdog reusing healthcheck every 60s would hit this, the guard blocks it.
 

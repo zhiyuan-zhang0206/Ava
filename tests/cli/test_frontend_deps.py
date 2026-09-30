@@ -1,6 +1,6 @@
 """`_ensure_frontend_deps` unit tests -- lockfile-drift reinstall logic.
 
-Regression guard: after `ava cluster update` pulls a package-lock.json with new dependencies,
+Regression guard: after the fleet update pulls a package-lock.json with new dependencies,
 it must re-run `npm ci`; otherwise `npm run build` fails immediately due to missing
 deps, the frontend session exits, and port 3000 refuses connections (root cause
 of the 2026-06-07 prod outage).
@@ -110,7 +110,7 @@ def test_reinstalls_when_lockfile_changed(tmp_path: Path, fake_npm_ci: list[Path
     repo = _make_repo(tmp_path, '{"lock": 1}')
     _repo._ensure_frontend_deps(repo)  # installs against lock v1
     fake_npm_ci.clear()
-    # `ava cluster update` pulls a lockfile that added a dependency
+    # The fleet update pulls a lockfile that added a dependency
     (repo / "ui" / "web" / "package-lock.json").write_text('{"lock": 2, "added": "dep"}')
     _repo._ensure_frontend_deps(repo)
     assert fake_npm_ci == [repo / "ui" / "web"]

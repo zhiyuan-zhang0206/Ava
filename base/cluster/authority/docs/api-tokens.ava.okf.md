@@ -20,12 +20,9 @@ stays on the gateway.
 
 A revoked generation's token never authenticates again. The gateway re-reads
 its acceptance on every request; a unit's `/ops` reads it once, at daemon
-boot. That holds only because the ledger revokes in one place, the release
-fence, and `LocalTransition.fence` first requires root and every service it
-birthed, the ops daemon included, to be gone (`require_root_absent`). A new
-revocation path must stop the ops daemon first, or `/ops` must read its
-acceptance per request; `tests/lifecycle/db_authority/test_api_tokens.py`
-fails on either change. Delivery mirrors the
+boot. That holds only because the ledger revokes in one place (`fence.revoke`),
+which no production caller reaches. A new revocation path must stop the ops
+daemon first, or `/ops` must read its acceptance per request. Delivery mirrors the
 login: the root launcher gives each service its class token (`api_access`,
 `cli/commands/_data_plane.api_delivery`) only while the API is authenticated
 (a set human secret on the gateway, an API-bearing capability on a remote

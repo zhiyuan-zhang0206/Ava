@@ -47,7 +47,7 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 # `~/.ava/skills/` is THE load dir: repo skills (`<repo>/ava_builtins/skills/*`) and plugin
 # skills (`<repo>/ava_builtins/plugins/<p>/skills/*`, `~/.ava/plugins/<p>/skills/*`) are
 # synced into it by the skills converge step (`cli/commands/extensions/skills_sync.py`,
-# run by `ava start` / `ava cluster update` / `ava converge`); they are not mounted from
+# run by `ava start` / the fleet update / `ava converge`); they are not mounted from
 # their source trees. A plugin's skills sync under its name
 # (`~/.ava/skills/<p>/…`), so the namespace layer survives as plain folder
 # structure. The agent never sees "plugins" — only a skill tree whose shape is

@@ -10,8 +10,6 @@ from pathlib import Path
 # The framework code: every production Python package at the repo root. Lints
 # whose scope is "the framework" import this instead of keeping their own copy,
 # so a new or renamed package cannot drift out of one lint's scope unnoticed.
-# `shared` is the time-boxed release-probe shell (see shared/__init__.py); it ships
-# in the wheel, so it stays in this list until it retires.
 FRAMEWORK_DIRS = (
     "agent",
     "ava",
@@ -21,7 +19,6 @@ FRAMEWORK_DIRS = (
     "gateway",
     "ops",
     "services",
-    "shared",
 )
 
 

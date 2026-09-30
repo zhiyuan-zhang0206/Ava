@@ -155,7 +155,6 @@ class PingResult(TypedDict):
     pid: NotRequired[int]
     root_stop_intent_v1: NotRequired[bool]
     helper_shutdown_v1: NotRequired[bool]
-    finite_executor_v1: NotRequired[bool]
     root_seed_report_v1: NotRequired[bool]  # `root_status.seed` is reported
     preflight_screen: bool  # Screen Recording grant held
     ax_trusted: bool  # Accessibility grant held

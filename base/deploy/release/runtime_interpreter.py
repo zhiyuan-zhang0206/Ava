@@ -1,7 +1,6 @@
 """Interpreter paths for the currently imported source checkout, never a moving selector.
 
-The checkout keeps its own venv (`.venv`); a wheel-loaded runtime is the retained
-image path (`base.deploy.release.loaded_image`), which production never imports.
+The checkout keeps its own venv (`.venv`).
 """
 
 from __future__ import annotations
@@ -92,8 +91,7 @@ def source_digest(repo: Path) -> str:
 class LoadedRuntimeIdentity(EvidenceModel):
     """Loaded code identity; no selector, publication or maintenance permission.
 
-    ``kind="release"`` is produced only by the retained-image path
-    (`base.deploy.release.loaded_image`); the persisted shape is unchanged.
+    Only ``kind="source"`` is produced; ``"release"`` remains in the persisted shape.
     """
 
     kind: Literal["source", "release"]

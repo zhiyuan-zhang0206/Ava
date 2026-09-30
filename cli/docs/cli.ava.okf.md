@@ -52,12 +52,6 @@ identity and desired service selection. Unknown existing resources, conflicting
 inputs, and a destroyed home refuse. The contract is in
 [[cli/docs/start_identity.ava.okf.md]].
 
-Operation-owned image startup uses this same identity-before-configuration
-boundary. The stage carries only a settings-free journal capability; the common
-start guard binds its exact maintenance holder and timestamp after preparation.
-It refuses missing, changed, or unsettled holds and leaves resume to the finite
-executor after observation. Ordinary startup keeps its readiness-gated resume.
-
 A pure runner joins through `ava start --serve-agent-runner --no-serve-gateway`
 with `--gateway-url`, `--machine-name`, `--machine-host`, an environment bearer
 and `--db-capability` (the unit capability from `ava cluster db-authority
@@ -67,9 +61,6 @@ fetches current connection facts at Settings construction.
 
 Package acquisition is separate and has no cluster effects:
 [[cli/docs/python-install.ava.okf.md]].
-
-The inactive committed application build input is described in
-[[cli/docs/release-build.ava.okf.md]].
 
 ## Internal Commands (`_` prefix)
 

@@ -1,4 +1,4 @@
-"""`base/db/__init__.py` live-agent helpers — the SQL the `ava cluster update` quiesce step drives.
+"""`base/db/__init__.py` live-agent helpers — the SQL the fleet update's quiesce step drives.
 
 These are the relocated home of the agents_meta / inbound_messages queries the
 gateway CLI used to hand-write inline: signal_live_agents_restart (bulk

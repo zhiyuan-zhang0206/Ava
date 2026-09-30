@@ -341,9 +341,7 @@ os.environ.pop("AVA_PERMISSIONS_HELPER_PORT", None)
 # AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE — so a fixture `.env` that deliberately
 # omits the viewer credential is completed into a VALID candidate and the
 # expected rejection returns 200 (tests/gateway/test_config_candidate_api.py::
-# test_put_rejects_invalid_oss_candidate_without_writing, 2026-09-16; the
-# services-side sibling tests/services/test_pitr_activation_candidate.py has the
-# same shape). CI is green because it carries no such env; scrubbing here makes
+# test_put_rejects_invalid_oss_candidate_without_writing, 2026-09-16). CI is green because it carries no such env; scrubbing here makes
 # a local run resolve exactly as CI does. A test that exercises PITR config sets
 # its own keys (monkeypatch / write_fields).
 for _pitr_key in [key for key in os.environ if key.startswith("AVA_PITR_")]:

@@ -45,6 +45,6 @@ proof before changing an activation flag.
 
 For the isolated logical restore commands and acceptance checks, follow
 [`db-restore.md`](../.agents/skills/operating-ava-cluster/references/db-restore.md).
-Migration rollback qualification belongs to the prepared release transition and
-its explicit recovery evidence. The retired mutable-checkout updater drill is
-not a supported recovery entrypoint.
+Migration rollback is the paired `.down.sql` applied through `rollback_to`;
+the retired mutable-checkout updater drill is not a supported recovery
+entrypoint.

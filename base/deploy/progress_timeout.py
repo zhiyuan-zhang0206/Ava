@@ -167,8 +167,7 @@ NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 UNIT_BUNDLE_TTL_S = 24 * 3600.0
 UNIT_BUNDLE_MAX_TTL_S = 72 * 3600.0
 
-# The fleet coordinator listener (`cli.release_fleet.listener`), which reads a
-# request before any proof is checked. One socket read may wait
+# A coordinator listener that reads a request before any proof is checked. One socket read may wait
 # `COORDINATOR_READ_TIMEOUT_S`; the whole request (request line, headers, body
 # and answer) gets `COORDINATOR_REQUEST_DEADLINE_S` from accept. A unit sends
 # each request whole, far inside both. Only a stalled or trickling peer reaches

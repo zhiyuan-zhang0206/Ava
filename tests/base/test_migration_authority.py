@@ -167,7 +167,7 @@ def test_allows_a_fresh_birth_with_no_recorded_identity(
 
 
 def test_allows_the_gateway_unit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The sanctioned path — `ava cluster update`'s migrate step on the cluster's own
+    """The sanctioned path — the fleet update's migrate step on the cluster's own
     gateway — is unaffected."""
     _register_gateway_unit(*_GATEWAY)
     _claim_checkout(monkeypatch, *_GATEWAY)
