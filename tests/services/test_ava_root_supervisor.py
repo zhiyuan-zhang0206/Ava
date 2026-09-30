@@ -270,9 +270,10 @@ def kill_all(spawned: list[psutil.Process]) -> None:
             process.kill()
 
 
-async def gone(process: psutil.Process) -> None:
+async def gone(process: psutil.Process, *, reaped: bool = False) -> None:
+    """Wait for `process` to end; `reaped` waits until it left the process table (a zombie fills its group)."""
     for _ in range(250):
-        if ended(process):
+        if not process.is_running() if reaped else ended(process):
             return
         await asyncio.sleep(0.02)
     raise AssertionError(f"pid {process.pid} did not exit")
@@ -391,7 +392,7 @@ async def stranger_at_number(
         assert generation is not None and generation.identity is not None
         assert generation.scope_closed_at_exit is False
         survivor.kill()
-        await gone(survivor)
+        await gone(survivor, reaped=True)
         pgid, member, signals = await stranger_group(tmp_path, own_session=own_session)
     except BaseException:
         kill_all([survivor])
@@ -426,7 +427,7 @@ async def test_exited_leader_never_signals_a_stranger_group_at_its_number(
         assert record.exists()
     finally:
         kill_all([member])
-    await gone(member)
+    await gone(member, reaped=True)
     # Once that group has ended, the stop proves the unit's group over.
     await owner.down("worker")
     assert not list((tmp_path / "custody").iterdir())
@@ -535,7 +536,7 @@ async def test_only_one_birth_read_inside_the_group_proves_another_session(
         assert not ended(member)
     finally:
         kill_all([member])
-    await gone(member)
+    await gone(member, reaped=True)
     await owner.down("worker")
     await owner.shutdown()
 
@@ -755,7 +756,7 @@ async def test_an_unreadable_survivor_leaves_its_siblings_recorded_and_closed(
         assert ended(kept) and not ended(denied)
         assert f"pids [{denied.pid}]" in str(refused.value)
         denied.kill()
-        await gone(denied)
+        await gone(denied, reaped=True)
         await owner.down("worker")
         assert not list((tmp_path / "custody").iterdir())
     finally:
