@@ -39,7 +39,7 @@ Full loaded-runtime verification belongs at process admission, not heartbeat or
 inbox-claim frequency; ordinary serving/recovery checks only read the marker
 and authenticate current native root status.
 
-This is local evidence, not DB publication, a fleet barrier, resource-predecessor
-closure or a protocol-version grant. RuntimeAdmission keeps all existing DB and
-resource fences. Direct-process E2E fixtures inject their own test-only serving
+This is local evidence, not a fleet barrier, resource-predecessor closure or a
+protocol-version grant. Hosted admission keeps its own row and resource fences.
+Direct-process E2E fixtures inject their own test-only serving
 gate through `tests.e2e._proc`; those business tests exclude root custody proof.

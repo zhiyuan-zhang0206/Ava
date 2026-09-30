@@ -10,9 +10,9 @@ tags:
 # Cluster Deploy Lease
 
 `base/deploy/state/cluster_lock.py` owns the retained `deployment_state` singleton lease.
-Runtime admission, maintenance, stop and recovery still consult its exclusion
-and pending-publication evidence. Removing the retired updater command graph
-does not remove these SQL guards.
+Maintenance, stop and recovery still consult its exclusion and the recorded
+`managed_writer_evidence.pending` fact. Removing the retired updater command
+graph does not remove these SQL guards.
 
 ## Lease and publication contracts
 
@@ -34,7 +34,6 @@ gateway start ([[base/db/docs/code-version-gate.ava.okf.md|code version gate]]).
 
 `base/deploy/progress_timeout.py` supplies the retained no-progress bound;
 `base/deploy/state/host_deploy_state.py` supplies host posture and lease evidence.
-`base/deploy/writers/runtime_admission.py` consumes the SQL admission guards.
 
 The retired updater result publisher and status projections are absent.
 `cluster_last_update` and unused outcome columns in `deployment_state` remain

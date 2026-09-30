@@ -309,7 +309,6 @@ def _stub_host_transitions(
         owner: UUID,
         *,
         expected_from: str,
-        publication: object | None = None,
     ) -> RuntimeIncarnation | None:
         if not await flip(pool, agent_id, "running", expected_from=expected_from):
             return None
@@ -511,7 +510,6 @@ class TestPoolIsolation:
             owner: UUID,
             *,
             expected_from: str,
-            publication: object | None = None,
         ) -> RuntimeIncarnation:
             assert expected_from == "idling"
             calls.append(("admit", pool))

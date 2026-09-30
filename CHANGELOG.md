@@ -25,6 +25,9 @@ and the matching GitHub Releases, cut by `scripts/ci/release_cut.py`.
   `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` settings. A stop still never kills a
   straggler; it waits out `--timeout` and the operator escalates with `--force`
   ([decision](decisions/2026-09-30-remove-straggler-reap.md)).
+- The managed-writer publication fence (`base/deploy/writers/`): hosted admission
+  no longer locks `deployment_state` or defers a birth on its phase, and always
+  advertises protocol zero ([decision](decisions/2026-09-30-remove-publication.md)).
 
 ### Changed
 - The bottom-layer package `shared` is now `base` (`base < ava < agent <

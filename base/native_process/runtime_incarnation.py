@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from uuid import UUID
 
 # The wire value advertising the identity-envelope protocol on agents_meta
-# (task #4122): admission writes it under a current managed publication, and
-# the caller gate compares callers against it. Deliberately not a config field
-# -- changing it is a protocol-version bump (writer + gate move together in
-# code), not a per-cluster behavioral knob.
+# (task #4122): the caller gate compares callers against it; hosted admission
+# writes zero. Deliberately not a config field -- changing it is a
+# protocol-version bump (writer + gate move together in code), not a
+# per-cluster behavioral knob.
 RUNTIME_PROTOCOL_V1 = 1
 
 

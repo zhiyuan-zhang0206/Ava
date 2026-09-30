@@ -38,26 +38,20 @@ expiry only on the explicit evidence policy: renewal silence at or beyond
 `LEGACY_HOST_ADOPTION_SILENCE_S`, no live same-home agent-host daemon, and no
 live exec child of that agent; the proposal is re-pinned to the exact row state
 under the lock and recorded as a `hosted_legacy_adoption` audit event. NULL
-evidence alone never authorizes takeover. No spawn stamps the birth marker:
-enabling new births still requires the publication/all-writer boundary, never an
-environment flag or an installed revision.
+evidence alone never authorizes takeover. No spawn stamps the birth marker; an
+environment flag or an installed revision never enables new births.
 
 Values the current model cannot decode, the closed-predecessor form, drained
 sets and never-admitted resurrection:
 [[closed-predecessor.ava.okf.md|closed predecessor]].
 
-Hosted admission resolves the loaded image once per host process and rechecks
-its cheap immutable binding without traversing the image on each turn. The
-existing publication decision locks deployment and registry before agent
-metadata. A pending publication returns no hosted admission and queued inbound
-is not consumed. Incomplete historical v2 publication without activation
-hash/challenge is not new-mode permission. Historical NULL resource rows remain
-unknown under current publication and cannot become empty through admission.
+Hosted admission locks only the agent's own metadata row and reads no
+deployment-wide state. A stored resource value the current model cannot decode
+refuses under every admission (`resource_fence`). Historical NULL resource rows
+remain unknown and cannot become empty through admission.
 
-Admission runs under the least-privilege `ava_runner` database identity and
-takes the publication row lock through the fixed security-definer
-`lock_runtime_publication_admission()` operation, which exposes no rollout
-mutation surface; publication columns remain ordinary read-only facts.
+Admission runs under the least-privilege `ava_runner` database identity, which
+holds no write privilege on `deployment_state`.
 
 Managed exec launches the fixed isolated read-only `agent.exec_domain_owner`
 entry (`-I -B -X utf8`) behind a permit gate, validates its captured launcher birth and

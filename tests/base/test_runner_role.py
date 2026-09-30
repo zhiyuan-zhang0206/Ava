@@ -32,7 +32,6 @@ from base.cluster import (
 from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.db.pg_admin import owner_conninfo
-from base.deploy.writers.publication import LegacyProtocolZero, publication_admission
 from base.host.net.url_secret import url_with_userinfo
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 
@@ -656,15 +655,15 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
             conn.execute("CREATE TABLE runner_must_not_ddl (id int)")
 
 
-def test_runner_publication_admission_locks_without_rollout_write(runner_db: str) -> None:
-    """Admission may serialize on deployment state without granting its writes."""
+def test_runner_reads_but_cannot_write_deployment_state(runner_db: str) -> None:
+    """The version gate row is readable by runners and writable only by the gateway."""
     _grant_runner(runner_db)
 
     with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
-        with conn.transaction():
-            assert isinstance(publication_admission(conn), LegacyProtocolZero)
+        row = conn.execute("SELECT min_code_version FROM deployment_state WHERE id = 1").fetchone()
+        assert row is not None
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+            conn.execute("UPDATE deployment_state SET min_code_version = 0 WHERE id = 1")
 
 
 def _exercise_pause_grants(conn: psycopg.Connection, agent_id: int) -> None:

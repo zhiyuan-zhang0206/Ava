@@ -1,4 +1,4 @@
-"""Deployment and unit lifecycle: publication, holds, deploy state, timing.
+"""Deployment and unit lifecycle: holds, deploy state, timing.
 
 Sub-packages:
 
@@ -6,7 +6,6 @@ Sub-packages:
 - ``release`` — config-free loaded-runtime identity, the startup-input digest,
   verified reads, lock and collector acquisition, the editable-install guard and
   dated release tags.
-- ``writers`` — managed-writer publication evidence and admission.
 - ``maintenance`` — explicit maintenance holds: admission, pause ownership,
   restart cohorts.
 - ``lifecycle`` — local unit lifecycle state: serving generations, the desired

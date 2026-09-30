@@ -27,7 +27,6 @@ admission before binding.
 
 `base.native_process.evidence` owns strict digest/model values and the exact
 native process identity. Service health imports them without loading rollout
-leases or managed-writer controllers. This evidence grants no startup or mutation
-authority.
+leases. This evidence grants no startup or mutation authority.
 
 The generic transport mounts only routes explicitly supplied by a caller.

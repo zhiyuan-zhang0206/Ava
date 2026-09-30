@@ -24,16 +24,8 @@ from base.agents.incarnation.resources import (
     decode_resources,
     register_exec,
 )
-from base.deploy.writers.publication import AdmissionDecision, CurrentAdmission
-from base.deploy.writers.runtime_admission import RuntimeAdmission
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.agent.test_resources import _admitted, _entry, _force, _process
-
-
-class _CurrentRuntimeAdmission(RuntimeAdmission):
-    async def decide_async(self, conn: psycopg.AsyncConnection) -> AdmissionDecision:
-        del conn
-        return CurrentAdmission(uuid4())
 
 
 async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
@@ -155,7 +147,6 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
         "resource-test",
         uuid4(),
         expected_from="idling",
-        publication=_CurrentRuntimeAdmission(),
     )
     assert successor is not None and successor.generation != target.generation
 
