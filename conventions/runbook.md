@@ -520,6 +520,17 @@ schedule on the spot) — see [`schedules/README.md`](../schedules/README.md).
 Persistent `ava-schedule-<id>` terminals survive pause and update with their
 currently loaded runner code and script text. Adopt changed runner code through
 an explicit schedule restart at its work boundary, or a full stop/start.
+**A wave that moves code between packages (the `shared/` → `base/` rename is the
+canonical case), changes schedule templates, or otherwise touches an import
+surface must also close the loop on in-store schedule copies.** A rollout
+never updates them (above), and a stale copy only surfaces at its next fire
+(crash-loop auto-pause once it cannot stay up). Before trusting `schedules`,
+verify and redeploy: run a full dry-import sweep over every in-store copy
+(py_compile + top-level imports only — never a real fire) and redeploy drifted
+copies through the same `ava schedules update <name> --script-file <template>`
+path. Tooling lives on the runner host (`~/.ava/sched-dry-import/run_dry.sh`;
+the weekly `sched-dry-import-weekly` backstop schedule red-reports to its
+operator).
 On agent-runners it also runs capability preflights: a headed Chrome (when the browser
 is enabled, see below), a **probe of the configured cross-machine transfer backend**
 (`AVA_CROSS_MACHINE_TRANSFER_BACKEND`, `drive` by default), and **the ability to open
