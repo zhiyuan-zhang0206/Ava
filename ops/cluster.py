@@ -27,7 +27,6 @@ from base.deploy.state.cluster_lock import (
     release_update_lock,
 )
 from base.deploy.state.host_deploy_state import updater_lease_live
-from base.deploy.updater import handoff
 from base.log import logger
 from ops.cluster_pause import unpause_local_cluster
 from ops.cluster_status import (
@@ -100,26 +99,6 @@ def cluster_recover_op() -> dict[str, object]:
         home_lifecycle_locks.resource_lock(purpose="ops.cluster_recover"),
         home_lifecycle_locks.lifecycle_lock(),
     ):
-        updater_snapshot = handoff.read()
-        if updater_snapshot.status == "invalid":
-            raise ClusterUpdateInProgress(
-                "an updater spawn handoff is still active or unreadable — recovery "
-                "refused until its child publishes the DB lease or its safety bound expires"
-            )
-        if updater_snapshot.status == "pending" and not updater_snapshot.expired:
-            raise ClusterUpdateInProgress(
-                "an updater child is still inside its protected startup window — "
-                "recovery refused until that pending handoff expires"
-            )
-        if updater_snapshot.status == "running" and handoff.owner_is_live(updater_snapshot):
-            raise ClusterUpdateInProgress(
-                "an updater process still owns this host pause — recovery refused"
-            )
-        if not handoff.allows_generic_recovery(updater_snapshot):
-            raise ClusterUpdateInProgress(
-                "retained updater compensation requires an explicit checked recovery — "
-                "generic unpause refused"
-            )
         lease = read_update_lease()
         if lease is not None and _lock_holder_is_live(lease.holder, held_for_s=lease.held_for_s):
             what = lease.kind or "deploy"
@@ -144,8 +123,6 @@ def cluster_recover_op() -> dict[str, object]:
             )
         try:
             unpause_local_cluster()
-            if updater_snapshot.generation is not None:
-                handoff.clear(updater_snapshot.generation)
             if pause_snapshot.holder is not None and pause_snapshot.acquired_at is not None:
                 pause_owner.clear(
                     pause_snapshot.holder,

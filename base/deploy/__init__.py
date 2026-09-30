@@ -6,9 +6,7 @@ Sub-packages:
 - ``release`` — config-free loaded-runtime identity, the startup-input digest,
   verified reads, lock and collector acquisition, the editable-install guard and
   dated release tags.
-- ``writers`` — managed-writer publication evidence and admission, and the unit
-  inventory schemas the updater recovery journals embed.
-- ``updater`` — retained updater handoff and recovery evidence.
+- ``writers`` — managed-writer publication evidence and admission.
 - ``maintenance`` — explicit maintenance holds: admission, pause ownership,
   restart cohorts, straggler settle.
 - ``lifecycle`` — local unit lifecycle state: serving generations, the desired

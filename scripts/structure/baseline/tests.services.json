@@ -41,8 +41,6 @@
     "tests/services/test_host_pool_capacity.py::test_more_than_twenty_workload_leases_share_bounded_backends": 6
   },
   "patch_targets": {
-    "tests/services/agent_ops/test_retired_updater_ingress.py::ops.cluster_rpc._default_idempotency_key": 1,
-    "tests/services/agent_ops/test_retired_updater_ingress.py::ops.cluster_rpc._dispatch_once": 1,
     "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._executable_pids": 2,
     "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._retirement_command": 4,
     "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._retirement_owner": 2,

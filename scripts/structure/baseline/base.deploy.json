@@ -11,8 +11,6 @@
     "base/deploy/maintenance/state.py::MaintenanceHold.decode": 18,
     "base/deploy/release/editable_install.py::editable_import_gate": 15,
     "base/deploy/schema/migrations.py::apply_pending_migrations": 15,
-    "base/deploy/updater/handoff.py::_read_unlocked": 16,
-    "base/deploy/updater/recovery.py::NormalReleaseRecoveryJournal.coherent_phase": 16,
     "base/deploy/writers/publication.py::WriterPublication.unique_units": 21
   }
 }
