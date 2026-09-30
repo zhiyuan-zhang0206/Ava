@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
-# Single install entry for system CLI tools — the main Dockerfile RUNs it.
+# Single install entry for system CLI tools — install-system.sh (and so the
+# verification image, scripts/verify/Dockerfile) RUNs it.
 #
 # Installs: apt baseline (gnupg / ca-cert / curl) + GitHub CLI keyring +
 # high-frequency CLI tools used by the agent (git / rg / jq / fd / bat /
 # tree / fzf / htop / gh).
 #
 # Does NOT touch: nodejs / uv / Python deps / playwright / mcp-language-server
-# — those are strongly tied to base image and image purpose (main Dockerfile
-# uses nodesource node 22 + the pinned uv download (provision/toolchain.sh) + playwright; eval-bench
-# uses Debian default node + pip install uv + no playwright). Each
-# Dockerfile installs its own.
+# — those are strongly tied to the host or image purpose (node.sh, toolchain.sh).
 #
-# Does NOT clean /var/lib/apt/lists/* — caller decides (main Dockerfile
-# uses BuildKit cache mount and skips cleanup; eval-bench install.sh cleans
-# to save image size).
+# Does NOT clean /var/lib/apt/lists/* — the caller decides (the verification
+# Dockerfile removes them after the whole system layer).
 #
 # WSL without sudo: a host that already carries every tool skips apt entirely
 # (the gh keyring + apt-sources writes below need root), and an apt failure

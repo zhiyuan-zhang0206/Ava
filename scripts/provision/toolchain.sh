@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# uv — the package manager every Ava unit and the eval image use. Installed
+# uv — the package manager every Ava unit and the verification image use. Installed
 # from a pinned GitHub release asset (fixed version + sha256, single source
 # with base/host/brew_pin.py) instead of the astral installer's rolling latest,
 # so a fresh box gets the same operator-approved version CI and brew-pinned
@@ -7,8 +7,8 @@
 #
 # This installs ONLY the uv binary. Interpreter provisioning + dependency sync
 # differ per consumer and stay with them: source development uses its locked
-# dependency installer; the eval image bakes its venv in a dedicated Dockerfile
-# layer (it needs the pyproject/uv.lock COPY + the corp-CA build secret).
+# dependency installer; the verification image builds its venv at run time from the
+# commit under test's lockfile.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
 # Pinned uv release — must match base/host/brew_pin.py UV_VERSION / UV_ASSET_SHA256

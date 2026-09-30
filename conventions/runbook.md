@@ -2313,4 +2313,7 @@ boundary. A full destroy marks the home detached only after cleanup succeeds.
 Root framework tests under `tests/services/test_ava_root_*` exercise supervision,
 custody, IPC and readiness; an isolated native cluster is still required to verify
 platform ancestry and actual application execution. There is no local branch-preview
-controller: validate a branch with CI and the throwaway test clusters.
+controller: validate a branch with CI, the throwaway test clusters, and the Linux
+verification container (`python3 scripts/verify/container.py --ref <ref>`: a fresh
+container, the commit cloned to `~/.ava/source`, the first `ava start`, a scripted agent;
+[verification boundaries](../future/infra/verification-boundaries.md)).

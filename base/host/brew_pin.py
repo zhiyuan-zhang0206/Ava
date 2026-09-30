@@ -48,6 +48,13 @@ UV_ASSET_SHA256: dict[str, str] = {
 # action embed the same string; tests/ci/test_pgbouncer_pin.py asserts they match.
 PGBOUNCER_APT_VERSION = "1.26.0-1.pgdg24.04+1"
 
+# The operator-approved Redis series for Linux apt installs (redis.io, Ubuntu
+# 24.04): the newest 8.2 patch release, as the `redis@8.2` formula above is for
+# Homebrew hosts. An apt glob, not one build, because the series is what the
+# operator approved. scripts/provision/database.sh (bash, before Python exists)
+# embeds the same string; tests/ci/test_redis_pin.py asserts the copies match.
+REDIS_APT_VERSION = "6:8.2.*"
+
 
 def pinned_brew_formulae() -> set[str] | None:
     """Return Homebrew's pinned formulae, or ``None`` when brew is absent.
