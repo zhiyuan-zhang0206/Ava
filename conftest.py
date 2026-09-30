@@ -29,6 +29,7 @@ pytest_plugins = [
     "tests.fixtures.units",
     "tests.fixtures.milvus",
     "tests.fixtures.log_capture",
+    "tests.fixtures.retry_waits",
     # Stall forensics (task #3513: the asyncio probe under `-o faulthandler_timeout=N`)
     # and the split-directory collection guard — see each docstring.
     "tests._asyncio_stall_probe",

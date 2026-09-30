@@ -64,16 +64,6 @@ def _missing_environment_value(_alias: str) -> None:
     return None
 
 
-def _no_retry_sleep(_seconds: float) -> None:
-    return None
-
-
-def _pin_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin base.host.net.resilience's sleep seam (its own tests' pattern) so the
-    retry-path tests exercise the backoff loop without waiting it out."""
-    monkeypatch.setattr("base.host.net.resilience._sleep", _no_retry_sleep)
-
-
 class _JSONResponse:
     def __init__(self, payload: object) -> None:
         self._payload = payload
@@ -736,11 +726,11 @@ def test_write_report_persists_markdown_and_json(
     assert json.loads((report_dir / "last-report.json").read_text())["providers"]
 
 
+@pytest.mark.usefixtures("retry_waits")
 def test_fetch_json_retries_a_transient_connection_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tracker = _load_script()
-    _pin_retry_sleep(monkeypatch)
     url = "https://api.example.com/models"
     payload: dict[str, object] = {"data": []}
     calls: list[str] = []
@@ -761,11 +751,11 @@ def test_fetch_json_retries_a_transient_connection_error(
     assert calls == [url, url]
 
 
+@pytest.mark.usefixtures("retry_waits")
 def test_fetch_json_raises_after_the_retry_budget_is_exhausted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tracker = _load_script()
-    _pin_retry_sleep(monkeypatch)
     calls: list[str] = []
 
     def get(request_url: str, **kwargs: object) -> _JSONResponse:
@@ -783,11 +773,11 @@ def test_fetch_json_raises_after_the_retry_budget_is_exhausted(
     assert len(calls) == 3
 
 
+@pytest.mark.usefixtures("retry_waits")
 def test_permanent_http_error_is_not_retried(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tracker = _load_script()
-    _pin_retry_sleep(monkeypatch)
     url = "https://api.example.com/models"
     calls: list[str] = []
 
@@ -808,11 +798,11 @@ def test_permanent_http_error_is_not_retried(
     assert calls == [url]
 
 
+@pytest.mark.usefixtures("retry_waits")
 def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     tracker = _load_script()
-    _pin_retry_sleep(monkeypatch)
     env_file = tmp_path / ".env"
     _write_env_file(tracker, env_file)
     monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
@@ -846,11 +836,11 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
     assert state["providers"]["gemini"]["status"] == "ok"
 
 
+@pytest.mark.usefixtures("retry_waits")
 def test_repeated_provider_failure_announces_once_and_never_repeats(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     tracker = _load_script()
-    _pin_retry_sleep(monkeypatch)
     env_file = tmp_path / ".env"
     _write_env_file(tracker, env_file)
     monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)

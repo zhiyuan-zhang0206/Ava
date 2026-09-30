@@ -11,7 +11,6 @@
     "tests/integration/test_cluster_instance.py::cli.commands.data_plane.cluster_instance._HBA_PROOF_TIMEOUT_S": 1,
     "tests/integration/test_impersonation_manifest_operator_gate.py::base.agents.impersonation_manifest._insert_local_item": 1,
     "tests/integration/test_impersonation_manifest_operator_gate.py::base.agents.impersonation_manifest._persist_capture_failure": 1,
-    "tests/integration/test_impersonation_manifest_operator_gate.py::base.agents.impersonation_manifest._upsert_manifest_alert": 1,
-    "tests/integration/test_vendored_binaries.py::base.host.net.resilience._sleep": 1
+    "tests/integration/test_impersonation_manifest_operator_gate.py::base.agents.impersonation_manifest._upsert_manifest_alert": 1
   }
 }
