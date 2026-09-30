@@ -141,15 +141,31 @@ repos:
       # package a test belongs to comes from its own imports (placement rule),
       # not its directory, so the verdict survives the move into <pkg>/tests/.
       # Today's sites are frozen in the `patch_targets` baseline section.
-      # Per-file verdicts: pre-commit passes the changed test files and only
-      # those are checked; a changed lint, placement module or baseline shard
-      # triggers a full scan (~5s). See scripts/lint/patch_targets.py header.
+      # This hook checks per file: pre-commit passes the changed test files and
+      # only those are checked; a changed lint, placement module or baseline
+      # shard triggers a full scan (~6s). A test's home follows what its
+      # subject's package imports, so a production import change can move the
+      # home of a test that did not change: the full scan below runs at every
+      # push, and CI's structure job (--all-files) scans everything too. See
+      # scripts/lint/patch_targets.py header.
       - id: lint-patch-targets
         name: lint patch targets (tests may not patch another package's private names)
         entry: .venv/bin/python scripts/lint/patch_targets.py
         language: system
         require_serial: true
-        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/lint/patch_targets\.py|scripts/structure/(placement|patch_points|patch_targets|patch_report|locality|baseline_shards)\.py|scripts/structure/baseline/.*\.json)$
+        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/lint/patch_targets\.py|scripts/structure/(placement|import_cache|patch_points|patch_targets|patch_report|locality|baseline_shards)\.py|scripts/structure/baseline/.*\.json)$
+
+      # The unconditional full scan of the hook above, at every push whatever
+      # the diff (pre-commit's own file selection would never pass it the
+      # untouched tests whose home a production import change moves).
+      - id: lint-patch-targets-full
+        name: lint patch targets, full scan (a production import change moves other tests' homes)
+        entry: .venv/bin/python scripts/lint/patch_targets.py
+        language: system
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false
+        require_serial: true
 
       # Ban building a psycopg pool without TCP keepalives where the structure
       # gate's `postgres-dial` rule cannot see it: scripts/ and the modules that

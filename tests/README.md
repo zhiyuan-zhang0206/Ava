@@ -285,8 +285,9 @@ in the product rather than inferred from an attribute path.
 A seam is only patchable from outside its package when its name is public: the
 patch-target lint (`scripts/lint/patch_targets.py`, structure Rule 8) rejects a test that
 patches a `_private` name of a package the test does not belong to. A test belongs to the
-package its own imports place it in (`scripts/structure/placement.py`), so the same file
-gets the same verdict in `tests/` and in `<pkg>/tests/`. When a private name is the only
+package its own imports and its subject's production imports place it in
+(`scripts/structure/placement.py`), so the same file gets the same verdict in `tests/` and
+in `<pkg>/tests/`. When a private name is the only
 seam, give it a public name or a parameter instead of patching it from another package.
 
 The related trap in the same incident: patching a name on the **package** when the

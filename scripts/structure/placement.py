@@ -15,10 +15,18 @@ The placement rule (one owner, reused by every test-locality lint):
    already imports (computed lazily, only when a pair needs it). A set of units with no
    legal top is ambiguous; the pick prefers the unit of the module the file is named after
    (`test_<module>.py`), then the unit that may import the most others.
-4. Inside the home unit the home package is the nearest common ancestor directory of the
-   referenced modules of that unit. A file whose evidence spans several sub-packages
-   therefore lives high (its "home" is a package that contains all of them): it is an
-   integration test of those packages, not a unit test of one.
+4. Inside the home unit the home package is the deepest package P that holds or directly
+   depends on every referenced module of that unit: each such module lies in P's subtree,
+   or the non-test code in P's subtree imports it (or something below it) directly, function-level
+   imports included. Candidates are the packages on the ancestor chains of the referenced
+   modules, never above their nearest common ancestor directory (the bound). Only direct
+   imports count (a dependency of a dependency does not), and `tests.*` references are not
+   modules of the unit, so a shared fixture neither raises nor lowers the home. If no single
+   package is the deepest (a dependency cycle between two packages), the home stays at the
+   bound. Layer legality stays with step 3: only the home unit's own packages are
+   candidates, so a production import running against the contracts moves no home. A file
+   whose evidence spans packages that no one package depends on therefore lives high: it
+   is an integration test of those packages, not a unit test of one.
 
 Files that stay at the top level by policy (`TOP_LEVEL_*`: e2e, shared fixtures and
 factories, the root conftest, the real-process integration proofs) have no home: there is
@@ -41,9 +49,17 @@ would read as "own package". Fallback (documented, tested): when every strong fi
 reference of a file is patch evidence, nothing is dropped, so such a file keeps the home
 its patch targets give it rather than losing its home.
 
-Every result depends only on the file's own text plus `pyproject.toml` (and, for a pair
-the contracts are silent about, the non-test source's import edges), so a linter can check
-a changed file alone, and moving the file into `<pkg>/tests/` does not change its home.
+## What a home depends on
+
+A result depends on the file's own text, `pyproject.toml` and the non-test source's direct
+imports (`ModuleIndex.importers`, read from the working tree on every run and cached per file
+by `import_cache.py`; no dependency graph is committed). Moving the file into `<pkg>/tests/`
+does not change its home, but a production import change can: adding an import may lower the
+home of a test that references both ends, deleting one may raise it, and a
+dependency cycle keeps it at the bound. Because of that the lint that enforces a home (the
+patch-target lint) checks a changed test file alone at commit time and rescans everything at
+push and in CI; and the rule that will enforce a test's placement must require the *legal*
+directory, never the *lowest* one, or an unrelated production commit would force tests to move.
 """
 
 from __future__ import annotations
@@ -59,7 +75,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import lint_common
+from scripts.structure import import_cache, lint_common
 
 # First-party code tops that take part in placement (import-linter roots + scripts).
 CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts")
@@ -204,6 +220,24 @@ class ModuleIndex:
         if module is None:
             return None
         return module, dotted[len(module) :].split(".")[1:]
+
+    @functools.cached_property
+    def importers(self) -> dict[str, set[str]]:
+        """Module prefix -> the directories whose non-test subtree directly imports it.
+
+        `a.b.c` imported from `x/y/z.py` files `a`, `a.b` and `a.b.c` under `x`, `x/y`. Direct
+        edges only, function-level imports included; resolved against this checkout.
+        """
+        found: dict[str, set[str]] = collections.defaultdict(set)
+        for rel, statements in import_cache.production_imports(self.repo_root, CODE_TOPS).items():
+            parts = rel.split("/")[:-1]
+            directories = {"/".join(parts[:depth]) for depth in range(1, len(parts) + 1)}
+            for ref in collect_references(ast.parse(statements), self):
+                if ref.kind == "import":
+                    names = ref.module.split(".")
+                    for depth in range(1, len(names) + 1):
+                        found[".".join(names[:depth])] |= directories
+        return found
 
     def dir_of(self, module: str) -> str:
         """Directory owning the module: its parent dir for a file, itself for a package."""
@@ -692,13 +726,46 @@ def is_top_level(rel_path: str) -> bool:
     return rel_path in TOP_LEVEL_FILES or rel_path.startswith(TOP_LEVEL_PREFIXES)
 
 
+def _inside(directory: str, package: str) -> bool:
+    return directory == package or directory.startswith(package + "/")
+
+
+def _chain(directories: Iterable[str], bound: str) -> set[str]:
+    """`bound` and every package below it on an ancestor chain of one of `directories`."""
+    floor = bound.count("/")
+    parts = [directory.split("/") for directory in directories]
+    return {
+        "/".join(chain[:depth]) for chain in parts for depth in range(floor + 1, len(chain) + 1)
+    }
+
+
+def _serves(index: ModuleIndex, package: str, dirs: dict[str, str]) -> bool:
+    """Does `package` hold or directly import every module (`dirs`: module -> its directory)?"""
+    return all(
+        _inside(directory, package) or package in index.importers.get(module, ())
+        for module, directory in dirs.items()
+    )
+
+
 def _home_dir(index: ModuleIndex, unit: str, modules: list[str]) -> str:
-    """The nearest common ancestor directory of the unit's referenced modules."""
-    home = common_dir([index.dir_of(module) for module in sorted(set(modules))])
+    """The deepest package of the unit that holds or directly depends on every module.
+
+    The bound is the nearest common ancestor directory of the modules; a package on a module's
+    ancestor chain below it qualifies when each module is in its subtree or imported by its
+    non-test code. One deepest package is the home; none (a dependency cycle) leaves the bound.
+    """
+    dirs = {module: index.dir_of(module) for module in sorted(set(modules))}
+    bound = common_dir(list(dirs.values()))
     root = unit_root(unit)
     if not (index.repo_root / root).is_dir():  # a loose module file such as services/pidfile.py
         root = str(Path(root).parent)
-    return home if home.startswith(root) else root
+    if not bound.startswith(root):
+        return root
+    fits = [package for package in _chain(dirs.values(), bound) if _serves(index, package, dirs)]
+    deepest = [
+        package for package in fits if not any(o != package and _inside(o, package) for o in fits)
+    ]
+    return deepest[0] if len(deepest) == 1 else bound
 
 
 def place(
