@@ -8,20 +8,18 @@ in `base/config/__init__.py` holds one instance of each.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from base.host.env.dotenv_boot import resolve_ava_home
+
 
 def _unit_home() -> Path:
-    """Default data-root for path fields whose default_factory cannot reference
-    the ava_home field (pydantic resolves fields independently at init). Mirrors
-    the AVA_HOME resolution (env AVA_HOME, else ~/.ava) so pidfiles / memory /
-    milvus-data / logs default under THIS unit's home and follow a
-    ~/.ava -> ~/.ava_gateway rename instead of pinning to ~/.ava."""
-    home = os.environ.get("AVA_HOME")
-    return (Path(home) if home else Path.home() / ".ava").expanduser()
+    """Default data-root for path fields whose default_factory runs at
+    sub-model construction: the process's home (`resolve_ava_home`), so pidfiles /
+    memory / milvus-data / logs default under THIS unit's home."""
+    return resolve_ava_home()
 
 
 class EnvSettings(BaseSettings):

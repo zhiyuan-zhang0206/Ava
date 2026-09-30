@@ -126,17 +126,10 @@ connection facts from the gateway at Settings construction. See
 
 ## Dev worktrees
 
-Acquire dependencies into the worktree's own real `.venv`, then run:
-
-```bash
-.venv/bin/ava start --worktree
-```
-
-This selects `~/.ava-<worktree-dir>` unless an explicit `AVA_HOME` already selects
-an allowed home, records the checkout pointer, and defaults to gateway plus
-runner. It allocates an isolated port block against both reservations and live
-listeners. No production credentials or agent data are copied. An unanchored
-source checkout must select its home explicitly through this first-start path.
+A worktree owns no cluster. Acquire dependencies into its own real `.venv` and
+verify with selected tests and CI ([development in a worktree](../../../conventions/dev-setup.md#development-in-a-worktree)).
+A home that carries its own `source` checkout (`~/.ava`) is started, stopped and
+updated only by that checkout's `ava`.
 
 ## Verify the result
 

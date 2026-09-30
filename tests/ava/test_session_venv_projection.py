@@ -89,8 +89,7 @@ def test_watcher_override_reaches_backend_without_changing_generic_sessions(
     monkeypatch.setitem(os.environ, "AVA_DB_URL", runner_db)
     monkeypatch.setitem(os.environ, "AVA_REDIS_URL", runner_redis)
     monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "test-secret")
-    monkeypatch.setattr(dotenv_boot, "_HOME", Path.home() / ".ava")
-    monkeypatch.setattr(dotenv_boot, "_ANCHORED", True)
+    monkeypatch.setenv("AVA_HOME", str(Path.home() / ".ava"))
     monkeypatch.setattr(watcher, "_agent_id", lambda: 42)
     monkeypatch.setattr(sessions, "_next_session_index_from_db", lambda: 1)
     monkeypatch.setattr(sessions, "_shell_prefix", lambda: "session-")
@@ -134,8 +133,7 @@ def test_watcher_override_reaches_backend_without_changing_generic_sessions(
 def test_watcher_fail_fast_precedes_session_allocation(monkeypatch: pytest.MonkeyPatch) -> None:
     from ava import watcher
 
-    monkeypatch.setattr(dotenv_boot, "_HOME", Path.home() / ".ava")
-    monkeypatch.setattr(dotenv_boot, "_ANCHORED", True)
+    monkeypatch.setenv("AVA_HOME", str(Path.home() / ".ava"))
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: True)
     monkeypatch.delenv("AVA_PROCESS_PROFILE", raising=False)
     monkeypatch.delenv("AVA_LAUNCHER_PROFILE", raising=False)
@@ -161,8 +159,7 @@ _RUNNER_REDIS = "redis://ava:runner@127.0.0.1:6380/0"
 
 def _secured_default_home(monkeypatch: pytest.MonkeyPatch) -> None:
     # watcher_runner_env reads these launcher values live, before session birth.
-    monkeypatch.setattr(dotenv_boot, "_HOME", Path.home() / ".ava")
-    monkeypatch.setattr(dotenv_boot, "_ANCHORED", True)
+    monkeypatch.setenv("AVA_HOME", str(Path.home() / ".ava"))
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: True)
     monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "test-secret")
 
@@ -249,7 +246,7 @@ def test_other_home_or_pure_runner_keeps_existing_child_boot(
     monkeypatch.setitem(os.environ, "AVA_DB_URL", _OWNER_DB)
     monkeypatch.setitem(os.environ, "AVA_REDIS_URL", _RUNNER_REDIS)
     if different_home:
-        monkeypatch.setattr(dotenv_boot, "_HOME", tmp_path / "other-cluster")
+        monkeypatch.setenv("AVA_HOME", str(tmp_path / "other-cluster"))
     else:
         monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
 
@@ -278,7 +275,6 @@ def test_unprojected_agent_child_still_hits_owner_url_guard(
         {
             "HOME": str(tmp_path),
             "AVA_HOME": str(home),
-            "AVA_HOME_OVERRIDE": "1",
             "AVA_PROCESS_PROFILE": "agent",
         }
     )

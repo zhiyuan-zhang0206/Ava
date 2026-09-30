@@ -85,7 +85,6 @@ def _intent(home: Path, record: cluster.ClusterRecord, values: dict[str, str]) -
         "version": 1,
         "home": str(home),
         "checkout": str(_REPO),
-        "worktree": False,
         "roles": ["agent-runner", "gateway"],
         "config_digest": None,
         "phase": "configured",
@@ -120,7 +119,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
 
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
-    monkeypatch.setattr(settings.general, "ava_home", str(home))
+    monkeypatch.setenv("AVA_HOME", str(home))
     monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     ports = dict(cluster.new_home_ports())
     ports.update(postgres=_free_port(), redis=_free_port(), pgbouncer=_free_port())
@@ -132,7 +131,6 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
         IdentityInput(
             home,
             _REPO,
-            False,
             frozenset({"gateway", "agent-runner"}),
             {},
         ),

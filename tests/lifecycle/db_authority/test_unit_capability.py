@@ -224,15 +224,12 @@ def runner_boot(
     monkeypatch: pytest.MonkeyPatch, runner_home: Path, gateway: Path
 ) -> Iterator[unit.UnitCapability]:
     """A pure agent-runner home (no database URL in `.env`) with an installed
-    capability, as this process's anchored home. The whole environment is
-    restored afterwards."""
+    capability, as this process's home. The whole environment is restored
+    afterwards."""
     saved = dict(os.environ)
     env_file = runner_home / ".env"
     env_file.write_text("AVA_MACHINE_SERVE_AGENT_RUNNER=true\n")
-    monkeypatch.setattr(dotenv_boot, "_HOME", runner_home)
-    monkeypatch.setattr(dotenv_boot, "_ANCHORED", True)
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", runner_home / "absent-mirror.env")
+    monkeypatch.setenv("AVA_HOME", str(runner_home))
     monkeypatch.setattr(dotenv_boot, "_db_authority_refusal", None)
     for key in (
         "AVA_PROCESS_PROFILE",
@@ -254,7 +251,7 @@ def _boot_with_bootstrap() -> None:
     """The runner's boot order: the authority pass, the unit delivery (which
     supplies the fetch's API token), then the bootstrap payload (the
     credential-free endpoint)."""
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(dotenv_boot.resolve_ava_home())
     dotenv_boot.deliver_unit_authority()
     bootstrap._apply_bootstrap_values(
         "http://gateway.invalid", {"AVA_DB_URL": _ENDPOINT, "AVA_EVENTS_CHANNEL": "ava:events"}
@@ -335,7 +332,7 @@ def test_a_runner_without_a_capability_is_refused_by_name(
 def test_a_pure_runners_launcher_delivers_the_installed_capability(
     runner_boot: unit.UnitCapability, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings.general, "ava_home", str(runner_home))
+    monkeypatch.setenv("AVA_HOME", str(runner_home))
     monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
     assert bringup.db_delivery("runner") == {
         "AVA_DB_URL": runner_boot.dsn,
@@ -442,7 +439,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     # The runner's launcher delivers exactly that login to its services. (A
     # scoped patch: the gateway fixture's teardown still acts on its own home.)
     with monkeypatch.context() as scoped:
-        scoped.setattr(settings.general, "ava_home", str(runner))
+        scoped.setenv("AVA_HOME", str(runner))
         scoped.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
         assert bringup.db_delivery("runner") == {
             "AVA_DB_URL": capability.dsn,

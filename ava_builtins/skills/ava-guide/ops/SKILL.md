@@ -63,7 +63,6 @@ instead of experimenting on the data plane.
 ```bash
 ava start     # initialize or resume this checkout's home, provision owned storage,
               # and wait for the selected root services to become ready.
-ava start --worktree  # first start of an isolated dev checkout
 ava pause     # normal agent drain; keep infrastructure, browser and persistent PTYs
 ava stop      # normal drain, then full local stop; durable data and agent IDs survive
               # --keep-infra / --keep-service retain resources; --force is explicit

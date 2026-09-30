@@ -146,7 +146,7 @@ def test_permissions_helper_app_dir_is_stable_under_ava_home(
 ) -> None:
     from base import paths
 
-    monkeypatch.setattr(paths.settings.general, "ava_home", str(tmp_path / "home"))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
     assert paths.permissions_helper_app_dir() == tmp_path / "home" / "helper"
 
 
@@ -845,7 +845,7 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
     monkeypatch.setattr(lifecycle, "_SOURCE", src)
     monkeypatch.setattr(lifecycle, "_INFO_PLIST", info)
     monkeypatch.setattr(lifecycle, "_LOCALES", locales)
-    monkeypatch.setattr(lifecycle, "_BUILD_DIR", build)
+    monkeypatch.setattr("base.paths.permissions_helper_app_dir", lambda: build)
     return app
 
 

@@ -37,7 +37,7 @@ def fake_bin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     bin_path.parent.mkdir(parents=True, exist_ok=True)
     bin_path.write_text("fake")
     os.utime(bin_path, (time.time(), time.time()))
-    monkeypatch.setattr(ocr_mod, "_BIN", bin_path)
+    monkeypatch.setattr(ocr_mod, "_bin_path", lambda: bin_path)
     return bin_path
 
 
@@ -62,7 +62,7 @@ def _force_rebuild(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str) -
     future = time.time() + 7200
     os.utime(src_path, (future, future))
     monkeypatch.setattr(ocr_mod, "_SOURCE", src_path)
-    monkeypatch.setattr(ocr_mod, "_BIN", bin_path)
+    monkeypatch.setattr(ocr_mod, "_bin_path", lambda: bin_path)
 
 
 def test_parses_tsv_lines_zh_en(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,7 +1,7 @@
-"""Co-located gateway and runner units each load their own .env.
-resolve_ava_home is the checkout-anchored
-resolver that decides which home a bare invocation uses (and whether it is
-anchored, i.e. safe to load the host .env's prod database URL)."""
+"""Co-located gateway and runner units each load their own .env: the boot pass
+loads `$AVA_HOME/.env`, forces this unit's cluster declarations over a polluted
+parent environment and drops the cluster values it does not declare. The home
+resolution itself is covered by base/tests/test_home_resolution.py."""
 
 from __future__ import annotations
 
@@ -15,12 +15,7 @@ import pytest
 
 from base.host.env import dotenv_boot
 from base.host.env.dotenv_boot import resolve_ava_home
-
-# resolve_ava_home reads os.environ["AVA_HOME"] LIVE (it runs before Settings is
-# built and decides the home), so these tests drive the real input via
-# setitem/delitem on os.environ — not monkeypatch.setenv, which the lint bans for
-# Settings fields because it can't reach the module-load Settings singleton (a
-# different mechanism that does not apply to this pre-Settings resolver).
+from tests.fixtures.units import use_env_files
 
 
 @pytest.fixture(autouse=True)
@@ -61,200 +56,6 @@ def _restore_authority_env() -> Iterator[None]:
             os.environ[key] = val
 
 
-# ── resolve_ava_home: checkout-anchored home + anchored flag ──
-
-
-def test_resolve_explicit_env_wins(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicit AVA_HOME is honored verbatim and counts as anchored — this is
-    the path gateway-launched subprocesses and prod sessions take."""
-    monkeypatch.setitem(os.environ, "AVA_HOME", "/srv/.ava_gateway")
-    home, anchored = resolve_ava_home()
-    assert home == Path("/srv/.ava_gateway")
-    assert anchored is True
-
-
-def test_resolve_prod_source_anchors_to_dot_ava(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The prod source checkout (~/.ava/source) resolves to ~/.ava with no pointer."""
-    monkeypatch.delitem(os.environ, "AVA_HOME", raising=False)
-    prod = (Path.home() / ".ava" / "source").resolve()
-    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: prod)
-    home, anchored = resolve_ava_home()
-    assert home == Path.home() / ".ava"
-    assert anchored is True
-
-
-def test_resolve_pointer_file_anchors_to_its_target(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A dev checkout carrying a .ava_home pointer resolves to the pointed home."""
-    monkeypatch.delitem(os.environ, "AVA_HOME", raising=False)
-    (tmp_path / ".ava_home").write_text(f"{tmp_path}/.ava-mycluster\n")
-    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: tmp_path)
-    home, anchored = resolve_ava_home()
-    assert home == tmp_path / ".ava-mycluster"
-    assert anchored is True
-
-
-def test_resolve_prod_source_beats_a_planted_pointer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Precedence pin: when the checkout IS the prod source AND a `.ava_home`
-    pointer has been planted in it, the prod anchor wins — the checkout still
-    resolves to ~/.ava. A 'pointer is more specific, prefer it' refactor would
-    let a seeded pointer silently repoint production (the phantom-cluster
-    incident class); this test makes that regression loud."""
-    monkeypatch.delitem(os.environ, "AVA_HOME", raising=False)
-    prod = tmp_path / "source"
-    prod.mkdir()
-    (prod / ".ava_home").write_text(f"{tmp_path}/.ava-evil\n")
-    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: prod)
-    monkeypatch.setattr(dotenv_boot, "_prod_source", lambda: prod)
-    home, anchored = resolve_ava_home()
-    assert home == Path.home() / ".ava"
-    assert anchored is True
-
-
-def test_resolve_unanchored_dev_checkout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A dev checkout with no explicit AVA_HOME and no pointer claims no cluster:
-    UNANCHORED, on this process's private scratch home — never the default ~/.ava,
-    which belongs to the prod source alone (tests/base/test_unanchored_checkout.py)."""
-    monkeypatch.delitem(os.environ, "AVA_HOME", raising=False)
-    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: tmp_path)
-    home, anchored = resolve_ava_home()
-    assert (home, anchored) == (dotenv_boot._unanchored_home(), False)
-    assert not home.is_relative_to(Path.home() / ".ava")
-
-
-def test_resolve_empty_pointer_is_unanchored(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A blank pointer file does not anchor — treated as no pointer."""
-    monkeypatch.delitem(os.environ, "AVA_HOME", raising=False)
-    (tmp_path / ".ava_home").write_text("   \n")
-    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: tmp_path)
-    _, anchored = resolve_ava_home()
-    assert anchored is False
-
-
-# ── resolve_ava_home: AVA_HOME contradicting the checkout's own claim ──
-#
-# tests/fixtures/env_bootstrap.py exports AVA_HOME_OVERRIDE=1 for the whole suite (its scratch
-# home IS a deliberate contradiction on any installed worktree), so every test
-# below that expects a refusal has to drop it first.
-
-
-def _plant_pointer(monkeypatch: pytest.MonkeyPatch, checkout: Path, target: Path) -> None:
-    (checkout / ".ava_home").write_text(f"{target}\n")
-    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: checkout)
-    monkeypatch.delitem(os.environ, "AVA_HOME_OVERRIDE", raising=False)
-
-
-def test_env_contradicting_the_pointer_is_refused(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The 2026-07-31 wedge (#1059) in miniature: a worktree whose `.ava_home`
-    names its own cluster, invoked from a shell carrying another cluster's
-    AVA_HOME. Resolving either way mixes two clusters (this one's `migrations/`
-    against that one's database), so it raises instead."""
-    _plant_pointer(monkeypatch, tmp_path, tmp_path / ".ava-worktree")
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path / ".ava-prod"))
-    with pytest.raises(dotenv_boot.AvaHomeContradictionError) as excinfo:
-        resolve_ava_home()
-    message = str(excinfo.value)
-    assert str(tmp_path / ".ava-prod") in message  # what the env said
-    assert str(tmp_path / ".ava-worktree") in message  # what the checkout said
-    assert str(tmp_path / ".ava_home") in message  # who said it
-    assert "unset AVA_HOME" in message  # how to fix it
-
-
-def test_env_agreeing_with_the_pointer_resolves(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The common worktree case — `ava start` in a checkout whose cluster env is
-    already loaded — is not a contradiction and stays unchanged."""
-    home = tmp_path / ".ava-worktree"
-    _plant_pointer(monkeypatch, tmp_path, home)
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    assert resolve_ava_home() == (home, True)
-
-
-def test_env_wins_on_a_checkout_that_claims_no_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """No pointer, not the prod source: nothing to contradict, so AVA_HOME is
-    honored verbatim as before. This is what keeps enrolled runners, the
-    gateway's own launched daemons and fresh clones working."""
-    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: tmp_path)
-    monkeypatch.delitem(os.environ, "AVA_HOME_OVERRIDE", raising=False)
-    monkeypatch.setitem(os.environ, "AVA_HOME", "/srv/.ava_gateway")
-    assert resolve_ava_home() == (Path("/srv/.ava_gateway"), True)
-
-
-def test_prod_source_contradicted_by_env_is_refused(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The claim can come from the path rule instead of a pointer file: the prod
-    source checkout owns ~/.ava, so an AVA_HOME naming anything else is the same
-    contradiction — and the error has to say where the claim came from, since
-    there is no file to go read."""
-    prod = tmp_path / "source"
-    prod.mkdir()
-    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: prod)
-    monkeypatch.setattr(dotenv_boot, "_prod_source", lambda: prod)
-    monkeypatch.delitem(os.environ, "AVA_HOME_OVERRIDE", raising=False)
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path / ".ava-elsewhere"))
-    with pytest.raises(dotenv_boot.AvaHomeContradictionError, match="prod source checkout"):
-        resolve_ava_home()
-
-
-def test_override_authorizes_a_deliberate_contradiction(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """AVA_HOME_OVERRIDE is the escape hatch the suite itself rides on: the
-    contradiction resolves to the env home, unchanged from before the guard."""
-    _plant_pointer(monkeypatch, tmp_path, tmp_path / ".ava-worktree")
-    monkeypatch.setitem(os.environ, "AVA_HOME_OVERRIDE", "1")
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path / ".ava-scratch"))
-    assert resolve_ava_home() == (tmp_path / ".ava-scratch", True)
-
-
-def test_override_set_to_a_false_value_does_not_authorize(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """`AVA_HOME_OVERRIDE=false` reads as "off" and must not open the hatch —
-    a bare-presence check would turn every attempt to disable it into a bypass."""
-    _plant_pointer(monkeypatch, tmp_path, tmp_path / ".ava-worktree")
-    monkeypatch.setitem(os.environ, "AVA_HOME_OVERRIDE", "false")
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path / ".ava-prod"))
-    with pytest.raises(dotenv_boot.AvaHomeContradictionError):
-        resolve_ava_home()
-
-
-def test_unnormalized_paths_are_not_a_contradiction(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Same home spelled two ways (`~` vs `$HOME`, a trailing `.`, a symlinked
-    tmpdir) is agreement, not contradiction — the comparison resolves both sides.
-    On macOS this is not hypothetical: /tmp is a symlink to /private/tmp."""
-    home = tmp_path / ".ava-worktree"
-    home.mkdir()
-    _plant_pointer(monkeypatch, tmp_path, home)
-    monkeypatch.setitem(os.environ, "AVA_HOME", f"{home}/./")
-    resolved, anchored = resolve_ava_home()
-    assert anchored is True
-    assert resolved.resolve() == home.resolve()
-
-
-def test_empty_pointer_leaves_env_alone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A blank pointer file claims nothing (same rule as the unanchored case
-    above), so it cannot contradict an explicit AVA_HOME."""
-    (tmp_path / ".ava_home").write_text("   \n")
-    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: tmp_path)
-    monkeypatch.delitem(os.environ, "AVA_HOME_OVERRIDE", raising=False)
-    monkeypatch.setitem(os.environ, "AVA_HOME", "/srv/.ava_gateway")
-    assert resolve_ava_home() == (Path("/srv/.ava_gateway"), True)
-
-
 # ── _enforce_cluster_env_authority: this cluster's .env wins over a polluted parent ──
 
 
@@ -277,8 +78,7 @@ def _point_env_at(monkeypatch: pytest.MonkeyPatch, env_file: Path, tmp_path: Pat
     merged.write_text(
         (env_file.read_text() if env_file.exists() else "") + "\n".join(_IDENTITY_LINES) + "\n"
     )
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", merged)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
+    use_env_files(monkeypatch, merged)
 
 
 def test_enforce_overrides_leaked_derived_key(
@@ -291,7 +91,7 @@ def test_enforce_overrides_leaked_derived_key(
     env_file = tmp_path / ".env"
     env_file.write_text("AVA_AGENT_HOST_HEALTH_PORT=18035\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_AGENT_HOST_HEALTH_PORT"] == "18035"
 
 
@@ -305,7 +105,7 @@ def test_enforce_ignores_non_enforced_keys(monkeypatch: pytest.MonkeyPatch, tmp_
     env_file = tmp_path / ".env"
     env_file.write_text("AVA_LLM_OVERRIDE=env-file\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_LLM_OVERRIDE"] == "env-live"
 
 
@@ -320,7 +120,7 @@ def test_enforce_forces_identity_key_declared_in_env_file(
     env_file = tmp_path / ".env"
     env_file.write_text("AVA_MACHINE_NAME=file-host\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_MACHINE_NAME"] == "file-host"
 
 
@@ -338,7 +138,7 @@ def test_enforce_drops_undeclared_identity_key(
     monkeypatch.setitem(os.environ, "AVA_MACHINE_NAME", "leaked-prod-host")
     monkeypatch.setitem(os.environ, "AVA_MEMORY_REMOTE", "git@github.com:prod/AvaMemory.git")
     _point_env_at(monkeypatch, tmp_path / "no-identity.env", tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_MACHINE_SERVE_GATEWAY" not in os.environ
     assert "AVA_MACHINE_SERVE_AGENT_RUNNER" not in os.environ
     assert "AVA_MACHINE_NAME" not in os.environ
@@ -357,7 +157,7 @@ def test_enforce_keeps_timezone_supplied_by_env_alone(
     authoritative value via /api/bootstrap at Settings build regardless."""
     monkeypatch.setitem(os.environ, "AVA_TIMEZONE", "Asia/Shanghai")
     _point_env_at(monkeypatch, tmp_path / "no-timezone.env", tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_TIMEZONE"] == "Asia/Shanghai"
 
 
@@ -377,7 +177,7 @@ def test_enforce_forces_declared_tempo_urls_over_forwarded_snapshot(
         "AVA_TELEMETRY_TEMPO_ENDPOINT=http://127.0.0.1:14318\n"
     )
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] == "http://127.0.0.1:3200"
     assert os.environ["AVA_TELEMETRY_TEMPO_ENDPOINT"] == "http://127.0.0.1:14318"
 
@@ -391,7 +191,7 @@ def test_enforce_keeps_tempo_urls_supplied_by_env_alone(
     env_file = tmp_path / ".env"
     env_file.write_text("AVA_TIMEZONE=Asia/Shanghai\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] == "http://tempo.test:3200"
 
 
@@ -403,7 +203,7 @@ def test_declared_service_path_wins_over_forwarded_snapshot(
     env_file = tmp_path / ".env"
     env_file.write_text(f"AVA_SERVICE_PATH='{declared}'\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_SERVICE_PATH"] == declared
 
 
@@ -455,9 +255,8 @@ def test_enforce_keeps_gateway_url_supplied_by_env_alone(
         )
         + "\n"
     )
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
-    dotenv_boot._enforce_cluster_env_authority()
+    use_env_files(monkeypatch, env_file)
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_GATEWAY_URL"] == "http://gw:8000"
 
 
@@ -482,7 +281,7 @@ def test_enforce_drops_app_port_absent_from_env_file(
     pure-runner case: cluster data-plane keys arrive via bootstrap)."""
     monkeypatch.setitem(os.environ, "AVA_APP_PORT", "3001")
     _point_env_at(monkeypatch, tmp_path / "no-port.env", tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_APP_PORT" not in os.environ
 
 
@@ -495,7 +294,7 @@ def test_enforce_keeps_app_port_declared_in_env_file(
     env_file = tmp_path / ".env"
     env_file.write_text("AVA_APP_PORT=18113\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_APP_PORT"] == "18113"
 
 
@@ -514,22 +313,21 @@ def test_enforce_drops_every_undeclared_derived_key(
     monkeypatch.setitem(os.environ, "AVA_EVENTS_CHANNEL", "ava:events:leaked")
     monkeypatch.setitem(os.environ, "AVA_MILVUS_PORT", "19530")
     _point_env_at(monkeypatch, tmp_path / "no-port.env", tmp_path)
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_APP_PORT" not in os.environ
     assert "AVA_EVENTS_CHANNEL" not in os.environ
     assert "AVA_MILVUS_PORT" not in os.environ
 
 
-def test_enforce_keeps_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The unanchored sentinel is exempt from the drop: a fresh dev checkout
-    plants it deliberately before the load, and popping it would silently
-    un-anchor the checkout (Settings would then fail on the no-default field
-    instead of failing with the named sentinel).
+def test_enforce_keeps_placeholder_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The placeholder DB URL is exempt from the drop: a process tree that
+    carries it (planted by a lite boot) keeps it, and popping it would replace
+    the named refusal with a no-default Settings failure.
 
-    Uses a hand-built env file WITHOUT the identity merge: the sentinel only
+    Uses a hand-built env file WITHOUT the identity merge: the placeholder only
     exists in the environment, and the point of the test is that the drop
     leaves it alone."""
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", dotenv_boot.UNANCHORED_DB_SENTINEL)
+    monkeypatch.setitem(os.environ, "AVA_DB_URL", dotenv_boot.PLACEHOLDER_DB_URL)
     # Declare every OTHER identity key (the suite's .env merge in
     # `_point_env_at` does this too) so the drop pass leaves them alone: the
     # run's later Settings() builds need AVA_REDIS_URL present, and a pop here
@@ -544,10 +342,9 @@ def test_enforce_keeps_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch, tmp_
         )
         + "\n"
     )
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
-    dotenv_boot._enforce_cluster_env_authority()
-    assert os.environ["AVA_DB_URL"] == dotenv_boot.UNANCHORED_DB_SENTINEL
+    use_env_files(monkeypatch, env_file)
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    assert os.environ["AVA_DB_URL"] == dotenv_boot.PLACEHOLDER_DB_URL
 
 
 @pytest.mark.parametrize(
@@ -570,29 +367,25 @@ def test_enforce_drops_undeclared_redis_url(
         )
         + "\n"
     )
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
-    dotenv_boot._enforce_cluster_env_authority()
+    use_env_files(monkeypatch, env_file)
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_REDIS_URL" not in os.environ
 
 
-def test_enforce_keeps_unanchored_sentinel_over_a_declaring_env_file(
+def test_enforce_keeps_placeholder_url_over_a_declaring_env_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The sentinel outranks an `.env` that DOES declare AVA_DB_URL.
+    """The placeholder outranks an `.env` that DOES declare AVA_DB_URL.
 
-    This is the case that matters and the one the test above cannot reach. An
-    unanchored checkout resolves AVA_ENV_PATH to the DEFAULT home, so the file
-    this pass reads is production's `.env` — which declares AVA_DB_URL. The
-    force-assign loop therefore overwrote the sentinel `load_ava_env` had just
-    planted, and the drop loop's guard never saw it. Measured on a real
-    unanchored checkout before the fix: the process came out of boot holding the
-    production database URL, which is precisely what the sentinel exists to
-    prevent.
+    This is the case that matters and the one the test above cannot reach: the
+    force-assign loop would otherwise overwrite the placeholder a lite boot had
+    planted, and the drop loop's guard never sees it. A process tree that
+    carries the placeholder must not come out of the pass holding a real
+    database URL.
 
     Other declared cluster keys must still be forced from the file — the guard is
-    about the sentinel, not about disabling the authority pass."""
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", dotenv_boot.UNANCHORED_DB_SENTINEL)
+    about the placeholder, not about disabling the authority pass."""
+    monkeypatch.setitem(os.environ, "AVA_DB_URL", dotenv_boot.PLACEHOLDER_DB_URL)
     monkeypatch.setitem(os.environ, "AVA_EVENTS_CHANNEL", "leaked-from-a-sibling")
     env_file = tmp_path / "declares-db.env"
     env_file.write_text(
@@ -606,12 +399,11 @@ def test_enforce_keeps_unanchored_sentinel_over_a_declaring_env_file(
         )
         + "\n"
     )
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
+    use_env_files(monkeypatch, env_file)
 
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
 
-    assert os.environ["AVA_DB_URL"] == dotenv_boot.UNANCHORED_DB_SENTINEL
+    assert os.environ["AVA_DB_URL"] == dotenv_boot.PLACEHOLDER_DB_URL
     assert os.environ["AVA_EVENTS_CHANNEL"] == "ava:thisunit:events", (
         "the authority pass must still force every other declared cluster key"
     )
@@ -638,9 +430,8 @@ def test_enforce_drops_a_leaked_redis_url(monkeypatch: pytest.MonkeyPatch, tmp_p
         )
         + "\n"
     )
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
-    dotenv_boot._enforce_cluster_env_authority()
+    use_env_files(monkeypatch, env_file)
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_REDIS_URL" not in os.environ
 
 
@@ -707,7 +498,7 @@ def test_gateway_profile_pops_only_for_gateway(
     _pre_pop = {k: os.environ.get(k) for k in agent_runner_cluster_aliases()}
 
     try:
-        dotenv_boot._enforce_cluster_env_authority()
+        dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
 
         if key_should_survive:
             assert test_key in os.environ, (
@@ -841,7 +632,7 @@ def test_agent_profile_keeps_launcher_runner_url_and_drops_admin_passwords(
         "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
     )
 
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
 
     assert os.environ["AVA_DB_URL"].startswith("postgresql://ava_runner:")
     assert "AVA_REDIS_ADMIN_PASSWORD" not in os.environ
@@ -862,8 +653,7 @@ def _point_env_at_without_db_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     env_file.write_text(
         "AVA_AGENT_HOST_HEALTH_PORT=18035\n" + "\n".join(_NO_DB_URL_IDENTITY_LINES) + "\n"
     )
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
+    use_env_files(monkeypatch, env_file)
 
 
 def test_agent_profile_keeps_undeclared_launcher_runner_url(
@@ -872,7 +662,7 @@ def test_agent_profile_keeps_undeclared_launcher_runner_url(
     """#4036/#4334: on a unit whose `.env` does NOT declare AVA_DB_URL (a pure
     agent-runner), the launcher-injected runner projection must survive the
     drop — it is the agent child's only DB source in settings-lite / CLI
-    paths, and popping it left the unanchored sentinel (probe population
+    paths, and popping it left the placeholder URL (probe population
     check misread as an environment failure)."""
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
     _point_env_at_without_db_url(monkeypatch, tmp_path)
@@ -886,7 +676,7 @@ def test_agent_profile_keeps_undeclared_launcher_runner_url(
     monkeypatch.setitem(os.environ, "AVA_APP_PORT", "3001")
     monkeypatch.setitem(os.environ, "AVA_REDIS_ADMIN_PASSWORD", "redis-admin-only")
 
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
 
     assert os.environ["AVA_DB_URL"] == "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
     assert "AVA_APP_PORT" not in os.environ
@@ -904,7 +694,7 @@ def test_agent_profile_drops_undeclared_owner_url(
         os.environ, "AVA_DB_URL", "postgresql://ava_main:owner-password@127.0.0.1:5433/ava"
     )
 
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
 
     assert "AVA_DB_URL" not in os.environ
 
@@ -924,27 +714,7 @@ def test_plain_process_drops_undeclared_runner_url(
         "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
     )
 
-    dotenv_boot._enforce_cluster_env_authority()
-
-    assert "AVA_DB_URL" not in os.environ
-
-
-def test_unanchored_checkout_drops_undeclared_runner_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The keep is anchored-only: an unanchored dev checkout keeps the sentinel
-    discipline — an agent shell's inherited runner url is still dropped, so a
-    bare worktree can never silently dial the host home's database."""
-    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
-    monkeypatch.setattr(dotenv_boot, "_ANCHORED", False)
-    _point_env_at_without_db_url(monkeypatch, tmp_path)
-    monkeypatch.setitem(
-        os.environ,
-        "AVA_DB_URL",
-        "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
-    )
-
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
 
     assert "AVA_DB_URL" not in os.environ
 
@@ -960,7 +730,7 @@ def test_agent_profile_drops_malformed_undeclared_db_url(
     _point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(os.environ, "AVA_DB_URL", "postgresql://[::1")
 
-    dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
 
     assert "AVA_DB_URL" not in os.environ
 

@@ -19,7 +19,6 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
-from base.config import settings
 from cli.commands.data_plane import pgbouncer as pgb
 
 _SECRET = "pgbouncerstopisolationtestsecret"  # noqa: S105 — test fixture, not a real credential
@@ -85,7 +84,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A scratch $AVA_HOME. Nothing here reaches a real cluster."""
     h = tmp_path / ".ava-scratch"
     h.mkdir()
-    monkeypatch.setattr(settings.general, "ava_home", str(h))
+    monkeypatch.setenv("AVA_HOME", str(h))
     return h
 
 
@@ -148,7 +147,7 @@ def test_sibling_home_sharing_a_path_prefix_is_not_ours(
     ours = tmp_path / ".ava"
     sibling = tmp_path / ".ava-preview"
     (sibling / "pgbouncer").mkdir(parents=True)
-    monkeypatch.setattr(settings.general, "ava_home", str(ours))
+    monkeypatch.setenv("AVA_HOME", str(ours))
     pidfile = _write_pidfile(ours, 4242)
     monkeypatch.setattr(
         psutil,

@@ -6,6 +6,7 @@ try:
     import fcntl
 except ImportError:  # Windows ships no fcntl module; the index lock degrades (see _locked_update)
     fcntl = None  # type: ignore[assignment]
+import functools
 import os
 import re
 import tempfile
@@ -41,7 +42,27 @@ Start each note with YAML frontmatter, then the attribution header:
 Use `write(slug, content, ..., store="shared")` as the canonical writer:
 an absolute pool path, immune to `ava.cwd` changes."""
 
-PATH = _ava.const(_ava_home() / "memory", doc=_PATH_DOC)
+
+@functools.cache
+def _documented_pool(home: Path) -> Path:
+    """The pool root for `home`, wrapped once so every read of one home is one object."""
+    return _ava.const(home / "memory", doc=_PATH_DOC)
+
+
+def __getattr__(name: str) -> Path:
+    """`PATH`, resolved when read so the module never captures the home at import.
+
+    An assignment (`memory.PATH = ...`, the isolated-evaluation boot in
+    `agent/process_boot.py`) creates a real attribute that shadows this hook.
+    """
+    if name == "PATH":
+        return _documented_pool(_ava_home())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _pool_root() -> Path:
+    """The pool root as `PATH` reads: an assigned value wins, else the home's."""
+    return globals().get("PATH") or __getattr__("PATH")
 
 
 def _search(
@@ -63,7 +84,7 @@ def _search(
     k = coerce_typed(k, "k", int)
     timeout = coerce_typed(timeout, "timeout", (int, float), allow_none=True)
     results = _client.memory_search(query, k, timeout=timeout)
-    return [(PATH / r.path, r.description, list(r.tags)) for r in results]
+    return [(_pool_root() / r.path, r.description, list(r.tags)) for r in results]
 
 
 # Public binding — the plugin's wrap("memory.search", ...) replaces this name,

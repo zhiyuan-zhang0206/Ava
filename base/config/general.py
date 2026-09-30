@@ -140,19 +140,6 @@ class GeneralSettings(EnvSettings):
         },
     )
 
-    ava_home: Path = Field(
-        default=Path.home() / ".ava",
-        alias="AVA_HOME",
-        description="User data root — plugins, memory, and run state live underneath. Use a distinct value (e.g. ~/.ava-prod) per instance on one host.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     timezone: str = Field(
         default="America/Los_Angeles",
         alias="AVA_TIMEZONE",

@@ -26,7 +26,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import ava.mcps._daemon as daemon_mod
-from base.config import settings
+from base.host.env.dotenv_boot import resolve_ava_home
 
 # Most tests here are deterministic (mocked I/O / pure DB side-effects) and run in
 # the parallel pool. Only the real AF_UNIX socket lifecycle smoke tests depend on
@@ -912,7 +912,7 @@ def test_reap_stale_daemons_kills_only_this_unit(
     non-daemon processes are never touched."""
     monkeypatch.setattr(daemon_mod, "_reap_stale_daemons", _ORIG_REAP)
 
-    home = str(settings.general.ava_home)
+    home = str(resolve_ava_home())
     root = str(Path(daemon_mod.__file__).resolve().parents[2])
 
     argv = [".venv/bin/python", "-m", "ava.mcps._daemon"]
@@ -980,7 +980,7 @@ def test_reap_stale_daemons_skips_bash_lc_session_wrapper(
     """
     monkeypatch.setattr(daemon_mod, "_reap_stale_daemons", _ORIG_REAP)
 
-    home = str(settings.general.ava_home)
+    home = str(resolve_ava_home())
     root = str(Path(daemon_mod.__file__).resolve().parents[2])
 
     inner = (
@@ -1006,7 +1006,7 @@ def test_reap_stale_daemons_reaps_a_pre_rename_ghost(monkeypatch: pytest.MonkeyP
     is still this unit's daemon: reaped when it shares the unit's AVA_HOME, never
     when it belongs to another unit, and its `bash -lc` wrapper is spared."""
     monkeypatch.setattr(daemon_mod, "_reap_stale_daemons", _ORIG_REAP)
-    home = str(settings.general.ava_home)
+    home = str(resolve_ava_home())
     root = str(Path(daemon_mod.__file__).resolve().parents[2])
     legacy = [".venv/bin/python", "-m", daemon_mod._LEGACY_DAEMON_MODULE]
     procs = [

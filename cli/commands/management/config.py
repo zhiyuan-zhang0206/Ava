@@ -36,19 +36,15 @@ _HTTP_TIMEOUT_S = 15.0
 _GATEWAY_URL_KEYS = ("AVA_GATEWAY_URL",)
 
 
-def _anchored_gateway_base() -> str | None:
-    """This checkout's own home gateway identity: its persisted ``gateway_url``
+def _home_gateway_base() -> str | None:
+    """This process's home gateway identity: its persisted ``gateway_url``
     file first (machine identity, written at the home's first `ava start`), then the
     home `.env` aliases. None when the home carries no identity yet (fresh
-    install before first start) or when the checkout is unanchored — an
-    unanchored checkout has NO home of its own; its rule-4 scratch home carries
-    no identity to read."""
+    install before first start)."""
     from base.host.env import runtime_config
-    from base.host.env.dotenv_boot import AVA_ENV_PATH, checkout_anchored
+    from base.host.env.dotenv_boot import resolve_ava_home
 
-    if not checkout_anchored():
-        return None
-    gateway_url_path = AVA_ENV_PATH.parent / "gateway_url"
+    gateway_url_path = resolve_ava_home() / "gateway_url"
     if gateway_url_path.exists():
         gateway_url = gateway_url_path.read_text().strip()
         if gateway_url:
@@ -65,49 +61,42 @@ def _gateway_base() -> str:
     """Resolve the configured gateway without constructing ``Settings``.
 
     Explicit env wins (deliberate cross-cluster intent). Otherwise the
-    checkout-anchored home's own gateway identity wins — host aliases are only
-    its fallback, never the first choice: a bare worktree (no `.ava_home`
-    pointer) resolving to the default home used to pick up prod's gateway URL
-    from the alias file and route `ava config set` into prod's `.env`
-    (2026-09-07 incident). An unanchored checkout therefore gets a refusal
-    with guidance instead of a silent fallback."""
+    home's own gateway identity wins. A home with no identity yet gets a
+    refusal with guidance instead of a silent fallback."""
     for key in _GATEWAY_URL_KEYS:
         gateway_url = os.environ.get(key, "").strip()
         if gateway_url:
             return gateway_url.rstrip("/")
-    anchored = _anchored_gateway_base()
-    if anchored is not None:
-        return anchored
+    home_base = _home_gateway_base()
+    if home_base is not None:
+        return home_base
     raise _ConfigError(
-        "gateway_url unset — this checkout is not anchored to a cluster home: "
-        "run `.venv/bin/ava start --worktree` to give it its own cluster, or "
-        "`export AVA_GATEWAY_URL=<gateway url>` to target one explicitly. "
-        "(An unanchored checkout never falls back to the default home's gateway.)"
+        "gateway_url unset — this home carries no gateway identity yet: "
+        "run `ava start` for it, or "
+        "`export AVA_GATEWAY_URL=<gateway url>` to target one explicitly."
     )
 
 
 def _guard_gateway_write(target: str) -> None:
-    """Refuse gateway config writes whose target is not this checkout's home.
+    """Refuse gateway config writes whose target is not this process's home.
 
     The 2026-09-01 ruling: config changes go through the official path AND are
     verified against the complete candidate before writing. The target half of
-    that verification lives here: an unanchored checkout may not write any
-    gateway config, and an explicit env override that contradicts the
-    anchored home's own gateway identity is refused — a foreign-home write
-    must never be one innocuous command away (2026-09-07 incident)."""
-    anchored = _anchored_gateway_base()
-    if anchored is None:
+    that verification lives here: a home with no gateway identity may not write
+    any gateway config, and an explicit env override that contradicts the home's
+    own gateway identity is refused — a foreign-home write must never be one
+    innocuous command away (2026-09-07 incident)."""
+    home_base = _home_gateway_base()
+    if home_base is None:
         raise _ConfigError(
-            "refusing to write gateway config: this checkout is not anchored "
-            "to a cluster home (no `.ava_home` pointer). Run "
-            "`.venv/bin/ava start --worktree` for a dev cluster, or run this "
-            "command from the target home's own checkout."
+            "refusing to write gateway config: this home carries no gateway "
+            "identity yet. Run `ava start` for it first."
         )
-    if target != anchored:
+    if target != home_base:
         raise _ConfigError(
             f"refusing to write gateway config: resolved target {target!r} "
-            f"does not match this home's gateway {anchored!r} — a config write "
-            "must target this checkout's own cluster home."
+            f"does not match this home's gateway {home_base!r} — a config write "
+            "must target this process's own home."
         )
 
 
@@ -557,17 +546,6 @@ def _edit_local_config(
     """Validate and persist one local `.env` patch without booting Settings."""
     from base.config.candidate import validate_env_patch_for_write
     from base.host.env import runtime_config
-    from base.host.env.dotenv_boot import checkout_anchored
-
-    if not checkout_anchored():
-        print(
-            "[ava config] refusing to write local config: this checkout is not "
-            "anchored to a cluster home (no `.ava_home` pointer) — it boots on a "
-            "throwaway scratch home, so a write would configure nothing. Run "
-            "`.venv/bin/ava start --worktree` for a dev cluster.",
-            file=sys.stderr,
-        )
-        return 1
 
     try:
         writes, removals, changed = _build_local_patch(pairs, unset_keys)

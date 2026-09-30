@@ -1,27 +1,18 @@
-"""`pool_ops.py::ava_home` never guesses `~/.ava` (2026-09-27 fix).
+"""`pool_ops.py` resolves the home the way every other Ava process does.
 
-`ava_builtins/plugins/ava_memory/pool_ops.py` is imported by the
-consolidation scripts under `skills/scripts/` (`consolidate.py`, `steward.py`,
-`arbiter_merge.py`, `gen_indexes.py`, `rebuild_memory_index.py`) as
+`ava_builtins/plugins/ava_memory/pool_ops.py` is imported by the consolidation
+scripts under `skills/scripts/` (`consolidate.py`, `steward.py`, `arbiter_merge.py`,
+`gen_indexes.py`, `rebuild_memory_index.py`) as
 `ava_builtins.plugins.ava_memory.pool_ops`, so a run needs the checkout's venv
-(`ava_builtins` importable). It still avoids `base.host.env.dotenv_boot`'s
-checkout-anchored home resolution: `ava_home()` takes the opposite, simpler
-stance, requiring an explicit `AVA_HOME` and failing fast instead of
-defaulting to `Path.home() / ".ava"` — the same "unanchored checkout reaches
-production" bug class as `base/host/env/dotenv_boot.py`, but for a script with no
-per-invocation identity to anchor to. `pool_dir()` / `refresh_index()` are
-write paths (git commit + push to the pool, `ava memory refresh`), so a wrong
-guess would not just misread a stray file, it would mutate whatever machine
-happens to run this.
+(`ava_builtins` importable). Its home is `base.host.env.dotenv_boot.resolve_ava_home`
+(`$AVA_HOME`, else `~/.ava`), which builds no Settings. `pool_dir()` /
+`refresh_index()` are write paths (git commit + push to the pool, `ava memory
+refresh`), so the default-home cases run under a fake HOME: nothing here can touch
+the operator's real `~/.ava`.
 
 Runs `pool_ops.py` in a subprocess with a from-scratch environment (like
-`test_ava_memory_steward_guard.py`'s `env = os.environ.copy()` pattern)
-rather than `monkeypatch.setenv`/`delenv` on `AVA_HOME` — `AVA_HOME` is also
-a `base.config.Settings` field alias, and `no_os_environ.py` (Rule 2)
-correctly flags `monkeypatch.setenv` on it as a Settings-singleton no-op
-footgun everywhere else in the suite; `pool_ops.py` reads raw `os.environ` by
-design, so a real subprocess environment is the actual seam here, not a
-monkeypatch.
+`test_ava_memory_steward_guard.py`'s `env = os.environ.copy()` pattern): the
+scripts run as their own processes, so a real process environment is the seam.
 """
 
 from __future__ import annotations
@@ -31,27 +22,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-# argv: <function to call>. Prints the result on success; on SystemExit (the
-# fail-fast path), prints "SYSTEMEXIT: <message>" and exits 1 so the test can
-# tell a refusal apart from a crash.
+# argv: <function to call>. Prints the result.
 _DRIVER = r"""
 import sys
 
 from ava_builtins.plugins.ava_memory import pool_ops
 
-try:
-    fn = sys.argv[1]
-    if fn == "ava_home":
-        print(str(pool_ops.ava_home()))
-    elif fn == "pool_dir":
-        print(str(pool_ops.pool_dir()))
-    elif fn == "machine_name":
-        print(pool_ops.machine_name())
-    else:
-        raise ValueError(f"unknown fn {fn!r}")
-except SystemExit as exc:
-    print(f"SYSTEMEXIT: {exc}")
-    sys.exit(1)
+fn = sys.argv[1]
+if fn == "pool_dir":
+    print(str(pool_ops.pool_dir()))
+elif fn == "machine_name":
+    print(pool_ops.machine_name())
+else:
+    raise ValueError(f"unknown fn {fn!r}")
 """
 
 
@@ -74,42 +57,14 @@ def _run(
     )
 
 
-def test_ava_home_refuses_when_unset() -> None:
-    res = _run("ava_home", {})
-
-    assert res.returncode == 1
-    assert "SYSTEMEXIT: AVA_HOME is not set" in res.stdout
-
-
-def test_ava_home_never_falls_back_to_the_default_home(tmp_path: Path) -> None:
-    """A planted look-alike `~/.ava` under a fake HOME must never be picked up
-    when AVA_HOME itself is unset — there is no fallback path to it at all."""
+def test_pool_dir_is_under_the_default_home_when_ava_home_is_unset(tmp_path: Path) -> None:
     fake_home = tmp_path / "home"
-    planted = fake_home / ".ava"
-    planted.mkdir(parents=True)
-    (planted / "machine_name").write_text("planted-prod-runner\n")
+    fake_home.mkdir()
 
-    res = _run("ava_home", {}, home=fake_home)
+    res = _run("pool_dir", {}, home=fake_home)
 
-    assert res.returncode == 1
-    assert "SYSTEMEXIT: AVA_HOME is not set" in res.stdout
-    assert str(planted) not in res.stdout
-
-
-def test_ava_home_uses_the_explicit_env_var(tmp_path: Path) -> None:
-    home = tmp_path / "dev-cluster-home"
-
-    res = _run("ava_home", {"AVA_HOME": str(home)})
-
-    assert res.returncode == 0, res.stdout
-    assert res.stdout.strip() == str(home)
-
-
-def test_pool_dir_requires_ava_home() -> None:
-    res = _run("pool_dir", {})
-
-    assert res.returncode == 1
-    assert "SYSTEMEXIT: AVA_HOME is not set" in res.stdout
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip() == str(fake_home / ".ava" / "memory")
 
 
 def test_pool_dir_is_relative_to_the_explicit_home(tmp_path: Path) -> None:
@@ -117,23 +72,27 @@ def test_pool_dir_is_relative_to_the_explicit_home(tmp_path: Path) -> None:
 
     res = _run("pool_dir", {"AVA_HOME": str(home)})
 
-    assert res.returncode == 0, res.stdout
+    assert res.returncode == 0, res.stderr
     assert res.stdout.strip() == str(home / "memory")
 
 
 def test_machine_name_short_circuits_on_its_own_env_var() -> None:
-    """AVA_MACHINE_NAME alone is enough — no AVA_HOME needed for this path."""
+    """AVA_MACHINE_NAME alone is enough — no home file is read for this path."""
     res = _run("machine_name", {"AVA_MACHINE_NAME": "testbox"})
 
-    assert res.returncode == 0, res.stdout
+    assert res.returncode == 0, res.stderr
     assert res.stdout.strip() == "testbox"
 
 
-def test_machine_name_refuses_rather_than_reading_the_default_home() -> None:
-    res = _run("machine_name", {})
+def test_machine_name_reads_the_default_homes_file_when_ava_home_is_unset(tmp_path: Path) -> None:
+    fake_home = tmp_path / "home"
+    (fake_home / ".ava").mkdir(parents=True)
+    (fake_home / ".ava" / "machine_name").write_text("planted-runner\n")
 
-    assert res.returncode == 1
-    assert "SYSTEMEXIT: AVA_HOME is not set" in res.stdout
+    res = _run("machine_name", {}, home=fake_home)
+
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip() == "planted-runner"
 
 
 # ── import side effects (path_imports refactor, pool_ops now a plugin submodule) ──

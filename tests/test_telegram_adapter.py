@@ -80,7 +80,7 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     """Point the adapter's settings at a test token/owner and a tmp AVA_HOME."""
     monkeypatch.setattr(settings.telegram, "telegram_bot_token", "123456:TEST-TOKEN")
     monkeypatch.setattr(settings.telegram, "telegram_owner_id", 42)
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
 
 
 async def _wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> None:

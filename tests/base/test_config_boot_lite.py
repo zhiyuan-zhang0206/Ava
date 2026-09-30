@@ -191,10 +191,11 @@ def test_required_fields_fail_fast_for_a_local_source(tmp_path: Path) -> None:
 def test_skip_mode_defers_prepare_and_plants_placeholders() -> None:
     proc = _spawn(
         "import os, base.config as c\n"
+        "from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL\n"
         "prepared_before = c._boot_state()['prepared']\n"
         "value = c.settings.lm.llm_model\n"
         "print('DEFER', prepared_before, c._boot_state()['prepared'], value,\n"
-        "      'unanchored' in os.environ.get('AVA_DB_URL', ''))\n",
+        "      os.environ.get('AVA_DB_URL') == PLACEHOLDER_DB_URL)\n",
         env={"AVA_CONFIG_FETCH": "skip"},
     )
     assert proc.returncode == 0, proc.stderr

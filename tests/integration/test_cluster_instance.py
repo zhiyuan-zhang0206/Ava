@@ -31,6 +31,7 @@ from redis.retry import Retry
 from base import cluster
 from base.cluster import provision_database
 from base.config import settings
+from base.host.env.dotenv_boot import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.pgbouncer import stop_pgbouncer
@@ -43,7 +44,7 @@ _REDIS_RUNTIME = "test_redis_runtime_abc123"
 def _gateway_config(monkeypatch: pytest.MonkeyPatch, ports: tuple[int, int]) -> Path:
     """Configure a born gateway with different Postgres and Redis usernames."""
     pg_port, redis_port = ports
-    home = Path(settings.general.ava_home)
+    home = resolve_ava_home()
     values = {
         "AVA_DB_URL": f"postgresql://ava_main@127.0.0.1:{pg_port}/ava_main",
         "AVA_REDIS_URL": f"redis://ava:{_REDIS_RUNTIME}@127.0.0.1:{redis_port}/0",
@@ -87,7 +88,6 @@ def _born_intent(home: Path) -> None:
         "version": 1,
         "home": str(home),
         "checkout": str(Path(__file__).resolve().parents[2]),
-        "worktree": False,
         "roles": ["agent-runner", "gateway"],
         "config_digest": None,
         "phase": "configured",
@@ -110,7 +110,7 @@ def isolated_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     redis_port). Tears the instance down on exit."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr(settings.general, "ava_home", str(home))
+    monkeypatch.setenv("AVA_HOME", str(home))
     monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _BEARER)
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", _REDIS_ADMIN)
@@ -125,7 +125,7 @@ def isolated_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
         # call time. Re-pin it rather than assume the setup patch is still in
         # force: a body that unwound it would aim this at the operator's real
         # `~/.ava` and take down the production pooler.
-        monkeypatch.setattr(settings.general, "ava_home", str(home))
+        monkeypatch.setenv("AVA_HOME", str(home))
         stop_pgbouncer()
         subprocess.run(  # noqa: S603
             [ci._pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
@@ -167,13 +167,13 @@ def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None
     provision_database(
         "ava_tinst",
         base_admin_url=ci.pg_admin_url(pg_port),
-        expected_data_dir=Path(settings.general.ava_home) / "pg",
+        expected_data_dir=resolve_ava_home() / "pg",
     )
     cluster.ensure_checkpoint_schema(
         "ava_tinst",
         base_admin_url=ci.pg_admin_url(pg_port),
         database_created=True,
-        expected_data_dir=Path(settings.general.ava_home) / "pg",
+        expected_data_dir=resolve_ava_home() / "pg",
     )
 
     with _admin(pg_port, "ava_tinst") as conn:
@@ -275,7 +275,7 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
     from cli.start_identity import IdentityInput, _gateway_values
 
     pg_port, redis_port = isolated_cluster
-    home = Path(settings.general.ava_home)
+    home = resolve_ava_home()
     ports = cluster.new_home_ports()
     ports.update(postgres=pg_port, redis=redis_port, pgbouncer=_free_port())
     record = cluster.ClusterRecord(ports=ports, gateway_home=str(home), created_at="test")
@@ -284,7 +284,6 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
         IdentityInput(
             home,
             tmp_path,
-            False,
             frozenset({"gateway", "agent-runner"}),
             {"AVA_PGBOUNCER_ENABLED": "false"},
         ),
@@ -330,7 +329,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
     """TCP ownership does not make another directory's equal Unix port ours."""
     pg_port, _redis_port = isolated_cluster
     assert ci._start_pg(pg_port, "") == 0
-    owned_data = Path(settings.general.ava_home) / "pg"
+    owned_data = resolve_ava_home() / "pg"
     with tempfile.TemporaryDirectory(prefix="ava-pg-foreign-", dir="/tmp") as temporary:
         directory = Path(temporary)
         data = directory / "data"
@@ -447,7 +446,7 @@ def test_rewritten_hba_is_reloaded_into_running_server(
     file on disk."""
     pg_port, _redis_port = isolated_cluster
     assert ci._start_pg(pg_port, "") == 0
-    data = Path(settings.general.ava_home) / "pg"
+    data = resolve_ava_home() / "pg"
     # A legacy postmaster: trust everywhere, reloaded into the running server.
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")
     with psycopg.connect(ci.pg_admin_url(pg_port), autocommit=True) as conn:
@@ -479,7 +478,7 @@ def test_hba_proof_refuses_a_postmaster_still_serving_trust(
     pg_port, _redis_port = isolated_cluster
     assert ci._start_pg(pg_port, "") == 0
     ci.require_authenticated_hba(pg_port, "127.0.0.1")
-    data = Path(settings.general.ava_home) / "pg"
+    data = resolve_ava_home() / "pg"
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")
     with psycopg.connect(ci.pg_admin_url(pg_port), autocommit=True) as conn:
         conn.execute("SELECT pg_reload_conf()")

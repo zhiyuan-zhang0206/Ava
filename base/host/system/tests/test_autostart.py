@@ -30,7 +30,7 @@ from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 
 @pytest.fixture(autouse=True)
 def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(autostart.settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(autostart, "ava_binary_path", lambda: "/Users/x/.local/bin/ava")
     # Pin the home-path slug (label token).
     monkeypatch.setattr(autostart, "_home_slug", lambda: "ava-t-cafe0123")

@@ -16,7 +16,6 @@ from typing import Any
 import httpx
 import pytest
 
-from base.config import settings
 from services.im_bridge.adapters import weixin
 from services.im_bridge.adapters.weixin import WeixinAdapter, _outbound_message
 
@@ -47,7 +46,7 @@ class _FakeHTTP:
 
 
 def _adapter(http: _FakeHTTP, monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> WeixinAdapter:
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(weixin, "load_account", lambda: dict(_ACCOUNT))
     a = WeixinAdapter(None)  # type: ignore[arg-type]
     a._client = http  # type: ignore[attr-defined]

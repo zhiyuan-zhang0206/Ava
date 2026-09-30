@@ -58,9 +58,8 @@ def _outbox_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
     never the operator's live journal — with the knobs stubbed so no config or
     dotenv read is involved."""
     from base.agents.messages import delivery_outbox
-    from base.config import settings
 
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(
         delivery_outbox,
         "limits",

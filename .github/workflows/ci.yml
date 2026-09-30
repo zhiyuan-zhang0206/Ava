@@ -1176,6 +1176,7 @@ jobs:
           uv run python - <<'PY'
           import subprocess
 
+          from base.paths import permissions_helper_app_dir
           from services.permissions_helper import client, lifecycle
 
           # Import the signing identity into the isolated keychain.
@@ -1223,9 +1224,10 @@ jobs:
           )
 
           # Compile and assemble the real helper app bundle.
-          app = lifecycle._BUILD_DIR / "AvaPermissionsHelper.app"
-          lifecycle._BUILD_DIR.mkdir(parents=True, exist_ok=True)
-          binary = lifecycle._BUILD_DIR / "AvaPermissionsHelper"
+          build_dir = permissions_helper_app_dir()
+          app = build_dir / "AvaPermissionsHelper.app"
+          build_dir.mkdir(parents=True, exist_ok=True)
+          binary = build_dir / "AvaPermissionsHelper"
           lifecycle._run(["swiftc", "-O", str(lifecycle._SOURCE), "-o", str(binary)])
           lifecycle._remove_app(app)
           exe = lifecycle._app_executable(app)

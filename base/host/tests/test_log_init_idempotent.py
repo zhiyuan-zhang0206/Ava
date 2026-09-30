@@ -282,7 +282,6 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.update(
         AVA_HOME=str(home),
-        AVA_HOME_OVERRIDE="1",
         AVA_HOST_STATE_DIR=str(tmp_path / "host-state"),
     )
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home

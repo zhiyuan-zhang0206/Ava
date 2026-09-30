@@ -99,7 +99,7 @@ def _notice(
 def _bridge(
     tmp_path: Any, gateway: FakeGateway, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[NoticeBridge, FakeAdapter]:
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     core = IMBridgeCore()
     core.gateway = gateway  # type: ignore[assignment]
     adapter = FakeAdapter()
@@ -361,7 +361,7 @@ def _direct_bridge(db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pyt
     from base.config import settings
 
     pool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     core = IMBridgeCore(db_pool=pool)
     adapter = FakeAdapter()
     core.adapters["telegram"] = adapter  # type: ignore[assignment]

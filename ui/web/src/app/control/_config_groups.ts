@@ -159,7 +159,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "DASHSCOPE_API_KEY",
   ],
   "config-general": [
-    "AVA_HOME",
     "AVA_TIMEZONE",
     "AVA_MESSAGE_TIMESTAMPS",
     "AVA_MESSAGE_TIMESTAMP_WEEKDAY",

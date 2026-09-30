@@ -614,7 +614,7 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
 
     from base.cluster import get_record
     from base.config import settings
-    from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+    from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
     from base.host.env.dotenv_file import remove_env, upsert_env
     from base.host.net.url_secret import url_with_port
 
@@ -629,7 +629,7 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     env_path = ctx.ava_home / ".env"
     current = (dotenv_values(env_path).get("AVA_DB_URL") or "").strip()
     normalized: str | None = None
-    if current and current != UNANCHORED_DB_SENTINEL:
+    if current and current != PLACEHOLDER_DB_URL:
         try:
             port = urlsplit(current).port
         except ValueError:

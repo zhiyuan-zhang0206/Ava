@@ -116,11 +116,11 @@ def _sync_skills_load_dir() -> None:
     """Run the skills converge pass so a just-(un)installed plugin's skills
     land in / leave `~/.ava/skills/` now, keeping the "active on the next
     skill scan, no restart" promise. Idempotent."""
-    from base.config import settings
+    from base.paths import ava_home
     from cli.commands._repo import _repo_root
     from cli.commands.extensions.skills_sync import converge_skills
 
-    result = converge_skills(_repo_root(), Path(settings.general.ava_home).expanduser())
+    result = converge_skills(_repo_root(), ava_home())
     for warning in result.warnings:
         print(f"  ! skills: {warning}", file=sys.stderr)
 

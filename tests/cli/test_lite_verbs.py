@@ -4,7 +4,7 @@ The lite opt-out exists so a runner's recovery verbs still construct Settings
 with the gateway down. `restart` must NOT be one of them: its preflight
 registers this machine in the central DB and its start leg needs the cluster
 config regardless, so a lite restart on a pure runner could only ever dial the
-never-dialed placeholder DB URL and die with UnanchoredHomeError (observed on
+never-dialed placeholder DB URL and die with PlaceholderDbUrlError (observed on
 the fleet Windows box, 2026-08-19) — while a fetching restart works whenever
 restart can work at all.
 
@@ -76,7 +76,6 @@ def test_only_completed_cold_stop_can_skip_gateway_fetch(
     """A repeated stop works offline; incomplete or failed work must still drain."""
     # Bootstrap and spawned interpreters consume the raw home before Settings.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path))
-    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     journal = tmp_path / "run" / "deploy-pause-owner.json"
     journal.parent.mkdir()
     payload: dict[str, object] = {
@@ -96,7 +95,6 @@ def test_corrupt_stop_journal_is_not_offline_success(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path))
-    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     journal = tmp_path / "run" / "deploy-pause-owner.json"
     journal.parent.mkdir()
     journal.write_text('{"state":"paused","maintenance":')
@@ -113,7 +111,7 @@ def test_pty_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_maintenance_stop_is_not_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
     """Task #3268 (issue #2346): stop's drain verification dials this unit's real
     data plane, so a lite maintenance stop on a runner could only ever hit the
-    never-dialed placeholder DB URL and die UnanchoredHomeError mid-ladder —
+    never-dialed placeholder DB URL and die PlaceholderDbUrlError mid-ladder —
     leaving the hold behind. It fetches like restart does."""
     assert _dispatched_fetch_env(monkeypatch, ["maintenance", "stop"]) is None
 

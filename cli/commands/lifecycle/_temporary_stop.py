@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import signal
 import subprocess
 import sys
@@ -337,10 +336,8 @@ def stop(
     pause) SIGKILLs what outlives its bounded grace
     (`service_stop.close_terminals`).
     """
-    from cli.commands.lifecycle.stop import _announce_stopping, _confirm_stop
-
-    os.environ.pop("AVA_HOME_OVERRIDE", None)
     from base.host.proc import hosting_exec_domain, hosting_supervised_session
+    from cli.commands.lifecycle.stop import _announce_stopping, _confirm_stop
 
     # An exec-domain leg is SIGKILLed with the call's process group as the tool
     # call returns, mid-drain (the 2026-09-12 stranding shape). Name the one

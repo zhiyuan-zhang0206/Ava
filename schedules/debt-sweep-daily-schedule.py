@@ -27,6 +27,7 @@ from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, claimed_slot, fire_slot_once
 from base.config import settings
 from base.log import init_gateway_process
+from base.host.env.dotenv_boot import resolve_ava_home
 from base.paths import ava_home
 from base.daemon.schedules.watcher import next_fire
 
@@ -135,7 +136,7 @@ def ensure_worker(label: str, prompt: str) -> WorkerDispatch:
 
 def _scan_artifact_path(day: str, slot: datetime, *, ensure_home: bool) -> Path:
     slot_stamp = slot.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-    root = ava_home() if ensure_home else Path(settings.general.ava_home).expanduser()
+    root = ava_home() if ensure_home else resolve_ava_home()
     return root / "debt-sweeps" / day / f"mechanical-scan-{slot_stamp}.txt"
 
 

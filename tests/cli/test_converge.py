@@ -332,7 +332,7 @@ def test_cmd_converge_unconfigured_returns_zero(
     archive_shim.write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
     # settings is an import-time singleton, so patch the attribute directly
     # (setenv("AVA_HOME") would not be re-read).
-    monkeypatch.setattr(settings.general, "ava_home", home / "avahome")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setenv("AVA_HOME", str(home / "avahome"))  # pyright: ignore[reportUnknownArgumentType]
     # A unit test must not reach Maven Central: seed the vendored Postgres tree so
     # the vendored-binaries step takes ensure_pg_binaries()'s idempotent early
     # return (the real download is covered by tests/integration/test_vendored_binaries.py).

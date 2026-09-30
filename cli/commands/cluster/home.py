@@ -31,14 +31,6 @@ def _subprocess_env(*, gateway_home: Path) -> dict[str, str]:
     stripped = derived_env_keys() | env_identity_keys()
     env = {k: v for k, v in os.environ.items() if k not in stripped}
     env["AVA_HOME"] = str(gateway_home)
-    # Acting on a home this checkout does not own is the whole point here — the
-    # child runs THIS checkout's `cli.main stop` (cwd=_repo_root(), sys.executable)
-    # against ANOTHER cluster's home, which is exactly the shape
-    # `resolve_ava_home` refuses. Stopping is home-scoped and reads no code from
-    # the target checkout, so the mixing that makes a contradiction dangerous
-    # (this checkout's `migrations/` against that cluster's database) cannot
-    # happen; say so explicitly rather than letting the guard reject the verb.
-    env["AVA_HOME_OVERRIDE"] = "1"
     # No config-source pin needed: AVA_CONFIG_SOURCE is gone (2026-08-01) and the
     # child (`ava stop`) is a settings-lite verb — cli.main opts it out of the
     # gateway fetch, and it reads only this target home's host-scope .env, which
@@ -78,8 +70,8 @@ def cmd_cluster_down(*, path: str) -> int:
 
 
 def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
-    """Detach a cluster: stop it, retire its OS jobs and checkout binding, mark the
-    home detached, optionally remove its data dirs.
+    """Detach a cluster: stop it, retire its OS jobs, mark the home detached,
+    optionally remove its data dirs.
 
     Refuses to destroy the default home (`~/.ava`) — it is prod. Returns 0 on
     success, 1 if the path holds no cluster record or is the default home.
@@ -111,7 +103,6 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
 
     from base.host.private_storage import write_private_bytes
     from base.native_process.os_platform import file_lock
-    from cli.start_identity import retire_checkout_binding
     from services.permissions_helper.launchd_job import unregister_helper
 
     # Publish a terminal intent before stopping. Concurrent/internal starts must
@@ -125,7 +116,6 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
         try:
             _unregister_scheduled_jobs(home)
             unregister_helper(home, helper_port=rec.ports["permissions_helper"])
-            retire_checkout_binding(home)
         except (OSError, RuntimeError, ValueError, TypeError) as exc:
             print(f"cluster cleanup incomplete: {exc}", file=sys.stderr)
             return 1

@@ -74,10 +74,9 @@ No application process ever logs in as it.
 
 A **unit** is one install of Ava under its own `$AVA_HOME`, and `AVA_HOME`
 locates the unit's `.env`, logs, memory pool, milvus data, pidfiles, etc., all of
-which derive from it. The home is resolved **checkout-anchored** by
-`base/host/env/dotenv_boot.py:resolve_ava_home` — see "How a unit finds its home"
-below — so a bare invocation (ad-hoc script, subagent) inside a dev worktree never
-silently falls back to the prod home:
+which derive from it. The home is `AVA_HOME` when set, else `~/.ava`
+(`base/host/env/dotenv_boot.py:resolve_ava_home` — see "How a unit finds its home"
+below), read whenever it is needed:
 
 A machine carries a **capability set** — `gateway`, `agent-runner`, or both:
 
@@ -102,10 +101,8 @@ checkpoints, applies migrations and runner grants, starts PgBouncer, then waits
 for every selected root service to become ready. A failure preserves the same
 initialization intent; a retry does not rotate credentials or select new ports.
 
-The home is resolved from the checkout and explicit environment, never the
-current directory. `ava start --worktree` selects an isolated home and writes
-the checkout pointer. Bare repeated start keeps identity and desired service
-selection. Unknown existing resources, conflicting inputs, missing reservations,
+The home is `AVA_HOME`, else `~/.ava`, never the current directory. A bare
+repeated start keeps identity and desired service selection. Unknown existing resources, conflicting inputs, missing reservations,
 and a terminal destroy intent refuse rather than reconstructing ownership.
 A home describes only itself: its record is its own start intent, and no host
 file lists clusters (host-level caches sit in `AVA_HOST_STATE_DIR`, default
@@ -248,55 +245,47 @@ agent-runners stay single-home `~/.ava` and reach that gateway + DB/Redis over
 the private network. A larger deployment splits the gateway onto its own
 gateway-only host (the explicit `--role gateway` install).
 
-**How a unit finds its home** (`base/host/env/dotenv_boot.py:resolve_ava_home`, run
-before `Settings` is constructed). Which checkout the code lives in is the
-prod/dev discriminator, so resolution is anchored to `__file__`, not cwd —
-identical no matter where a bare script is launched. Precedence:
+**How a unit finds its home** (`base/host/env/dotenv_boot.py:resolve_ava_home`, read
+every time the home is asked for, never captured at import): `AVA_HOME` when the
+variable is set, else `~/.ava`. That is the whole rule — no pointer file, no
+checkout claim, no in-process override — so a process and the children it spawns
+cannot disagree about their home. Production does not depend on the variable. A
+process tree that must not touch the host's cluster sets it once, at its top, and
+every descendant inherits it:
 
-1. `AVA_HOME` env var — explicit; what a gateway-launched subprocess and the prod
-   service sessions set.
-2. checkout == `~/.ava/source` (the prod source) → `~/.ava`.
-3. `<checkout>/.ava_home` pointer file → the home it names. `.venv/bin/ava start
-   --worktree` writes this into a dev cluster's worktree (gitignored), so every
-   later bare invocation from that worktree resolves to the cluster's own home.
-4. otherwise → **unanchored**: a checkout that claims no cluster (a dev worktree
-   that never ran `ava start --worktree`, a fresh clone, CI) and carries no
-   explicit `AVA_HOME`. It never resolves to `~/.ava` — that home belongs to the
-   prod source alone. Its home is a private per-process scratch path under the
-   system temp dir, and it boots **bare**: no `.env` / `mirror.env` is read, the
-   config source decision never fetches from a gateway and the bootstrap
-   transport itself refuses to dial (`checkout_anchored()` gates
-   `fetch_bootstrap_config`, so no bootstrap snapshot is written) — but this is
-   scoped to the bootstrap fetch alone: an `AVA_CLUSTER_SECRET` / `AVA_GATEWAY_URL`
-   the process inherited from its parent shell still reaches an ordinary CLI
-   client (`ava agents ls`, ...) under the deliberate "explicit env wins" rule.
-   `load_ava_env` plants a sentinel `AVA_DB_URL`
-   (`UNANCHORED_DB_SENTINEL`, an unreachable loopback URL) so a DB
-   connection fails loud — `base/db.connect`/`pool` raise `UnanchoredHomeError`.
-   Lint scripts, codegen hooks and ad-hoc `python -c` imports keep working from
-   any checkout; every verb that acts on "this checkout's cluster" (`start`,
-   `stop`, `restart`, `converge`, `config` writes, service launches)
-   refuses and points at `ava start --worktree`. `pytest` is unaffected:
-   `tests/fixtures/env_bootstrap.py` sets its own `AVA_HOME` before import.
+- the test session (`tests/fixtures/env_bootstrap.py`) sets a temporary home before
+  anything imports application code;
+- a hook or tool that imports application code (the lints, codegen dumps and docs
+  checks that pre-commit and pre-push run) calls
+  `dotenv_boot.enter_scratch_home()` before its first application import, behind
+  `if __name__ == "__main__":` (tests import these modules, and a pytest process
+  refuses the call): a fresh temporary `AVA_HOME` and `AVA_CONFIG_FETCH=skip`,
+  whatever the caller's environment carries.
+  The worktree-removal guard (`scripts/check_worktree_remove.py`) is the one tool
+  that keeps the real home: it reads this machine's live session records
+  (`$AVA_HOME/run/pty`), so it only skips the gateway config fetch, dials nothing and
+  writes nothing; run it straight from a checkout.
 
-Rule 1 only outranks rules 2-3 while they agree. When `AVA_HOME` names one home
-and the checkout claims another, resolution **refuses** with
-`AvaHomeContradictionError` naming both sides — a process holding one cluster's
-`.env` (database, secret, ports) and another's code (`migrations/`, skills,
-plugins) has no correct home to pick. That combination is how a fleet agent
-migrated prod on 2026-07-31: every agent shell inherits `AVA_HOME=~/.ava`, so a
-bare `ava start` in a freshly installed worktree resolved prod while running the
-worktree's migrations ([decision](../decisions/2026-07-31-ava-home-vs-checkout-contradiction.md)).
-Set `AVA_HOME_OVERRIDE=1` to authorize it where the mixing is the point:
-`ava start --worktree` (it writes the pointer), `ava cluster down/destroy`
-(this checkout's `ava stop` against another home), and the test suite's scratch
-home. It is read from the real environment only — the check runs before any
-`.env` is loaded, so no cluster can grant itself the exemption on disk.
+**Which checkout may change a home.** A home that carries its own `<home>/source`
+checkout (the production home `~/.ava`; every unit started from source) is started,
+stopped and reconfigured only by that checkout's code
+(`dotenv_boot.home_checkout_error`). The CLI gate (`cli.preflight.require_own_checkout`,
+the first thing `cli.main` does, settings-free) refuses every verb outside a
+read-only list (`status`, `ls`, `get` and the like) when the running CLI belongs to
+any other checkout, and first start and the service launchers apply the same rule. A
+home with no `source` — a test or scratch home — accepts any checkout. The way out of
+the refusal is in its message: run `<home>/source/.venv/bin/ava`, or name a home of
+your own with `AVA_HOME`. `python -m cli.fleet_update` already drives every host
+through `$HOME/.ava/source/.venv/bin/ava`, so it is never refused.
 
-`.env` lives at `$AVA_HOME/.env`; each co-located unit carries its own. On a
-single-home machine prod (`~/.ava/source` → `~/.ava`) and dev worktrees resolve to
-*different* homes via the rules above, so they no longer share one `.env` by
-accident — a dev worktree only reaches a real database after its `ava start`.
+Without the variable a development checkout reads the host's own cluster: on a
+development machine that also runs production, that is production. It may read; it
+may not start, stop or reconfigure it.
+
+`.env` lives at `$AVA_HOME/.env`; each co-located unit carries its own. A dev
+worktree with `AVA_HOME` unset resolves to `~/.ava` like any other process: tests
+and tools therefore name a home of their own (above), and a real database is
+reached only through a home that was started.
 
 `.env` is the single config source of truth (precedence `env > Field default`; no
 override layer). To add/change a value — a cluster secret like an API key, or a host
@@ -1231,7 +1220,6 @@ effects. Repeated start checks the same identity and selected service roster.
 
 ```bash
 ava start
-ava start --worktree
 ava status
 ava pause
 ava stop -y

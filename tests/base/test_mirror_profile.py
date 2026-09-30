@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 from dotenv import dotenv_values, load_dotenv
 
+from tests.fixtures.units import skip_authority_pass, use_env_files
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CN_PROFILE = _REPO_ROOT / "scripts" / "mirrors" / "cn.env"
 
@@ -85,10 +87,9 @@ def test_unit_boot_preserves_single_index_precedence_across_aliases(
         unit.write_text(f"{lower_key}=https://unit.example/simple\n")
     else:
         unit.write_text(f"{higher_key}=https://pypi.org/simple\n")
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", unit)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", mirror)
+    use_env_files(monkeypatch, unit, mirror)
     # This independent boot policy does not participate in package index precedence.
-    monkeypatch.setattr(dotenv_boot, "_enforce_cluster_env_authority", lambda: None)
+    monkeypatch.setattr(dotenv_boot, "_enforce_cluster_env_authority", skip_authority_pass)
     before = unit.read_bytes(), mirror.read_bytes()
     dotenv_boot.load_ava_env()
     assert python_index(tmp_path, os.environ) == "https://pypi.org/simple"

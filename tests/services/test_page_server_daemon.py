@@ -419,9 +419,7 @@ def test_stale_server_in_its_page_session_replaces_that_session(
     )
     monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(psd, "_probe_port", lambda *_args: "ok:old-token")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        psd, "_page_server_occupants", lambda: {12004: (5001, str(psd.settings.general.ava_home))}
-    )
+    monkeypatch.setattr(psd, "_page_server_occupants", lambda: {12004: (5001, str(psd.ava_home()))})
     monkeypatch.setattr(psd, "_page_session_owner", lambda pid, _pids: key if pid == 5001 else None)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
@@ -747,8 +745,8 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
         psd,
         "_page_server_occupants",
         lambda: {
-            12010: (5010, str(psd.settings.general.ava_home)),
-            12011: (5011, str(psd.settings.general.ava_home)),
+            12010: (5010, str(psd.ava_home())),
+            12011: (5011, str(psd.ava_home())),
         },
     )
     monkeypatch.setattr(psd, "_page_session_owner", lambda pid, _pids: key if pid == 5010 else None)  # pyright: ignore[reportUnknownArgumentType]

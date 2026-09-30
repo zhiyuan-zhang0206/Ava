@@ -66,8 +66,8 @@ from cli.commands.extensions.skill_package import contains_skill_md
 # `~/.ava/skills`, silently shadowing what main ships. Observed 2026-08-08: a
 # R5 worktree's copy of `ava-serious-research` was synced into prod by a
 # `skill update` run from that worktree (audit round 2, skills-plugins #3).
-# Dev worktree clusters resolve their own home (`~/.ava-<dir>`), which is not
-# the default home, so only the prod-home + worktree combination is refused.
+# Only the prod-home + worktree combination is refused: a home of any other
+# name (a test or scratch home) takes whatever checkout runs.
 _WORKTREE_MARKERS = (".claude/worktrees", "/.worktrees/")
 
 

@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures.units import skip_authority_pass, use_env_files
+
 # Ensure settings-lite so we can import config without a real .env
 os.environ["AVA_CONFIG_FETCH"] = (
     "skip"  # assignment, not setdefault: a setdefault would silently keep an inherited value (the login-shell .env leak class) instead of pinning settings-lite
@@ -67,9 +69,16 @@ class TestScopeDerivationRules:
         assert len(expected) > 150  # the six-gap class lives in this set
 
     def test_session_forward_is_host_scope(self) -> None:
-        from base.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV, session_forward_keys
+        from base.host.env.registry import (
+            AVA_HOME_ENV,
+            MANIFEST_CERTIFICATION_SECRET_ENV,
+            session_forward_keys,
+        )
 
-        expected = _aliases_with(scope=("host",)) - {MANIFEST_CERTIFICATION_SECRET_ENV}
+        # The home is no Settings field; it rides every child as a declared key.
+        expected = (_aliases_with(scope=("host",)) | {AVA_HOME_ENV}) - {
+            MANIFEST_CERTIFICATION_SECRET_ENV
+        }
         assert session_forward_keys() == expected
         # The F-s3-4 headline: per-agent identity never rides a daemon session.
         assert "AVA_AGENT_ID" not in session_forward_keys()
@@ -112,9 +121,8 @@ class TestScopeDerivationRules:
         proof = "host-finalizer-proof"
         env_file = tmp_path / ".env"
         env_file.write_text(f"{MANIFEST_CERTIFICATION_SECRET_ENV}={proof}\n")
-        monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
-        monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "mirror.env")
-        monkeypatch.setattr(dotenv_boot, "_enforce_cluster_env_authority", lambda: None)
+        use_env_files(monkeypatch, env_file, tmp_path / "mirror.env")
+        monkeypatch.setattr(dotenv_boot, "_enforce_cluster_env_authority", skip_authority_pass)
         monkeypatch.setattr(dotenv_boot, "_manifest_finalizer_boot_authorized", False)
         monkeypatch.delenv(MANIFEST_CERTIFICATION_SECRET_ENV, raising=False)
         monkeypatch.setenv(MANIFEST_CERTIFICATION_FINALIZER_ENV, "1")
@@ -315,6 +323,7 @@ class TestRegistryInvariants:
         registered = set(_aliases_with(scope=())) | _all_aliases()
         registered |= er.HOST_PASSTHROUGH_KEYS
         registered |= {
+            er.AVA_HOME_ENV,
             "SSL_CERT_FILE",
             "REQUESTS_CA_BUNDLE",
             "AVA_AGENT_CONFIG_OVERLAY",

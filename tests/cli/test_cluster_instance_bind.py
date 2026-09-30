@@ -677,7 +677,7 @@ def test_the_postmaster_inherits_no_ava_authority(
         "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
         "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
         "AVA_REDIS_ADMIN_PASSWORD": "redis-admin-" + "r" * 20,
-        "AVA_HOME": "/Users/operator/.ava",
+        "AVA_HOME": str(tmp_path / ".ava-operator"),
     }
     for key, value in {**delivered, "PATH": "/usr/bin:/bin", "TZ": "Asia/Shanghai"}.items():
         monkeypatch.setenv(key, value)

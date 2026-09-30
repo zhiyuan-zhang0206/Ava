@@ -49,48 +49,51 @@ def test_workspace_dir_none_fails_fast(unit_home: Path) -> None:
 # ── prod_service_checkout_error (Task #966: 01:13 worktree accident) ──
 
 
-def test_prod_checkout_guard_allows_anchored_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The prod home's own anchored checkout is the one allowed launch site."""
-    monkeypatch.setattr(paths, "ava_home", lambda: Path.home() / ".ava")
-    assert paths.prod_service_checkout_error(Path.home() / ".ava" / "source") is None
+def _home_with_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / ".ava"
+    (home / "source").mkdir(parents=True)
+    monkeypatch.setenv("AVA_HOME", str(home))
+    return home
 
 
-def test_prod_checkout_guard_refuses_dev_worktree(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A worktree under ~/.ava/worktrees (or anywhere else) must never launch
-    prod services: it resolves to the prod home as an unanchored checkout, and
-    deleting the worktree removes the floor under the running fleet."""
-    monkeypatch.setattr(paths, "ava_home", lambda: Path.home() / ".ava")
-    for repo in (
-        Path.home() / ".ava" / "worktrees" / "ava-2750-dev-wt",
-        Path.home() / ".ava" / "source-wt",
-        Path.home() / "Ava",
-    ):
+def test_prod_checkout_guard_allows_the_homes_own_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A home's own source checkout is the one allowed launch site."""
+    home = _home_with_source(tmp_path, monkeypatch)
+    assert paths.prod_service_checkout_error(home / "source") is None
+
+
+def test_prod_checkout_guard_refuses_dev_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worktree (under the home or anywhere else) must never launch a home's
+    services: deleting the worktree removes the floor under the running fleet."""
+    home = _home_with_source(tmp_path, monkeypatch)
+    for repo in (home / "worktrees" / "ava-2750-dev-wt", home / "source-wt", tmp_path / "Ava"):
         err = paths.prod_service_checkout_error(repo)
         assert err is not None, repo
-        assert "01:13 worktree accident" in err
-        assert str(Path.home() / ".ava" / "source") in err
+        assert str(home / "source") in err
 
 
-def test_prod_checkout_guard_allows_dev_home_any_checkout(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_prod_checkout_guard_allows_a_home_without_source_any_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A dev unit (home != ~/.ava) runs its own checkout's code by design —
-    the guard is only about the prod home."""
-    dev_home = tmp_path / ".ava-dev"
-    dev_home.mkdir()
-    monkeypatch.setattr(paths, "ava_home", lambda: Path(str(dev_home)))
-    assert paths.prod_service_checkout_error(Path.home() / ".ava" / "worktrees" / "dev-wt") is None
+    """A home with no `source` of its own (a test or scratch home) runs whichever
+    checkout's code launches it — the guard is about homes that have an owner."""
+    home = tmp_path / ".ava-dev"
+    home.mkdir()
+    monkeypatch.setenv("AVA_HOME", str(home))
+    assert paths.prod_service_checkout_error(tmp_path / "worktrees" / "dev-wt") is None
 
 
 def test_file_anchored_roots_resolve_to_the_checkout_root() -> None:
     """Modules that locate the checkout from their own `__file__` count their
-    package depth: the paths door, the `.env` boot chain, and the Grafana
-    dashboard supplier's builtin plugins directory all land on this checkout."""
-    from base.host.env import dotenv_boot
+    package depth: the paths door and the Grafana dashboard supplier's builtin
+    plugins directory all land on this checkout."""
     from base.telemetry.metrics import grafana_dashboard_supply
 
     checkout = Path(__file__).resolve().parents[2]
     assert (checkout / "base" / "__init__.py").is_file()
     assert paths.repo_root() == checkout
-    assert dotenv_boot._checkout_root() == checkout
     assert checkout / "ava_builtins" / "plugins" == grafana_dashboard_supply._REPO_PLUGINS_DIR

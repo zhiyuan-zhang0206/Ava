@@ -38,7 +38,7 @@ def _adapter(core: _FakeCore, handler: Any) -> TelegramAdapter:
 def _settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     monkeypatch.setattr(settings.telegram, "telegram_bot_token", FAKE_BOT_TOKEN)
     monkeypatch.setattr(settings.telegram, "telegram_owner_id", OWNER)
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
 
 
 def test_get_updates_requests_callback_query(

@@ -260,18 +260,6 @@ def test_default_root_under_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert feed._default_root() == tmp_path / "state" / "mirrors" / "web-scrape"
 
 
-def test_default_root_never_guesses_the_default_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Locks the 2026-09-28 fix: an unanchored checkout's scratch home (never
-    a hardcoded `~/.ava` guess) is what `_default_root` lands on when
-    `resolve_ava_home` itself resolves there — the same bug class `_common.py`
-    / `_source_root` were fixed for in #3550, one level down."""
-    scratch = tmp_path / "unanchored-scratch-home"
-    monkeypatch.setattr(feed, "resolve_ava_home", lambda: (scratch, False))
-    assert feed._default_root() == scratch / "state" / "mirrors" / "web-scrape"
-
-
 def test_to_s1_uses_passed_root(tmp_path: Path) -> None:
     post: dict[str, Any] = {
         "url": "https://example.com/x",

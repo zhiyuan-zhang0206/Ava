@@ -27,15 +27,9 @@ def source_root() -> Path:
     ``$AVA_HOME/source``). ``base.host.env.dotenv_boot`` must be importable from
     either, so the root is resolved before the import happens.
 
-    The second case needs an explicit ``AVA_HOME`` — never a
-    ``Path(os.environ.get("AVA_HOME", "~/.ava"))`` guess. A bare interpreter
-    running the converged copy with no `AVA_HOME` in its environment and a
-    real `~/.ava/source` alongside (this machine, e.g., a worktree-cluster
-    invocation that lost its inherited env) must never silently anchor to
-    that default cluster instead of refusing — the same "unanchored checkout
-    reaches production" bug class this module exists to resolve for
-    `read_trace.py` / `fetch_trace.py` themselves, one level down (PR #3550's
-    P2 follow-up).
+    The second case locates the home the way `resolve_ava_home` does (``AVA_HOME``
+    when set, else ``~/.ava``); that function cannot run yet, because ``base``
+    is not importable until this returns.
     """
 
     here = Path(__file__).resolve().parent
@@ -43,15 +37,7 @@ def source_root() -> Path:
         if (cand / "base" / "__init__.py").is_file():
             return cand
     env = os.environ.get("AVA_HOME")
-    if not env:
-        raise RuntimeError(
-            f"cannot locate the Ava source root: no `base` package above {here}, "
-            "and AVA_HOME is not set to try <AVA_HOME>/source -- this never guesses "
-            "~/.ava (see the P2 fix in #3550's follow-up); pass an explicit "
-            "AVA_HOME=<cluster home> when running the converged skill copy with a "
-            "bare interpreter."
-        )
-    cand = Path(env).expanduser() / "source"
+    cand = (Path(env).expanduser() if env else Path.home() / ".ava") / "source"
     if (cand / "base" / "__init__.py").is_file():
         return cand
     raise RuntimeError(

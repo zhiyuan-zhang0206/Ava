@@ -490,7 +490,6 @@ def test_host_identity_fields_are_read_only() -> None:
     from base.config import FIELD_INFOS
 
     for name in (
-        "ava_home",
         "gateway_url",
         "gateway_port",
         "machine_name",

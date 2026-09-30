@@ -189,7 +189,7 @@ async def test_root_graceful_stop_runs_the_product_handlers_cleanup(
     script.write_text(
         _SERVICE.format(repo=str(repo), started=str(started), marker=str(marker), ops=ops)
     )
-    env = (("AVA_HOME", str(unit_home)), ("AVA_HOME_OVERRIDE", "1"), ("AVA_CONFIG_FETCH", "skip"))
+    env = (("AVA_HOME", str(unit_home)), ("AVA_CONFIG_FETCH", "skip"))
     unit = UnitManifest("svc", (sys.executable, str(script)), RestartPolicy.NEVER, "root", env)
     owner = Supervisor(
         UnitRegistry([unit]), run_dir=unit_home / "root", config=SupervisorConfig(stop_timeout_s=10)
@@ -236,7 +236,7 @@ def test_plugin_restart_runs_the_product_handlers_cleanup(unit_home: Path) -> No
     marker = unit_home / "plugin-clean"
     code = _PLUGIN_SERVICE.format(repo=str(repo), marker=str(marker))
     env = dict(os.environ)
-    env.update(AVA_HOME=str(unit_home), AVA_HOME_OVERRIDE="1", AVA_CONFIG_FETCH="skip")
+    env.update(AVA_HOME=str(unit_home), AVA_CONFIG_FETCH="skip")
     result = subprocess.run(  # noqa: S603 — fixed test-owned Python script
         [sys.executable, "-c", code],
         cwd=repo,

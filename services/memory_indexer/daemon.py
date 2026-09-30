@@ -87,7 +87,12 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 
 _log = logging.getLogger("services.memory_indexer.daemon")
 
-_MEMORY_ROOT = gateway_memory_dir()
+
+def _memory_root() -> Path:
+    """The consolidated memory checkout this daemon indexes, resolved on use."""
+    return gateway_memory_dir()
+
+
 _PIDFILE = settings.services.memory_indexer_pidfile
 _LOOP_INTERVAL_S = 1.0
 # Derive the ceiling from one provider batch's full retry budget: a single
@@ -225,7 +230,7 @@ def _process_paths(
     Backends must be cross-thread safe (the milvus gRPC client is).
     """
     liveness.beat()
-    root = _MEMORY_ROOT.resolve()
+    root = _memory_root().resolve()
     to_delete: list[Path] = []
     to_embed: list[tuple[Path, float, str, str]] = []  # (path, mtime, hash, content)
     existing_meta = backend.all_meta()
@@ -418,11 +423,11 @@ def _reconcile(
     never split a file; its rows commit as one unit (issue #1946). An
     `EmbeddingAPIError` is logged and the remaining chunks are skipped.
     """
-    disk = _scan_disk(_MEMORY_ROOT)
+    disk = _scan_disk(_memory_root())
     indexed = backend.all_meta()
     indexed_paths = {Path(p) for p in indexed}
     disk_paths = set(disk.keys())
-    root = _MEMORY_ROOT.resolve()
+    root = _memory_root().resolve()
 
     dirty: set[Path] = set()
     # Changes / additions — mark dirty when mtime differs;
@@ -636,7 +641,8 @@ async def run() -> None:
     )
     _log.info("[indexer] healthz listening on :%s", health_port("memory_indexer"))
 
-    _MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
+    root = _memory_root()
+    root.mkdir(parents=True, exist_ok=True)
     # Preflight the selected backend BEFORE the retry loop: a backend that can
     # never work (fatal) fails fast with the actionable fix instead of a 30s
     # retry storm; a merely-unreachable one rides into the retry loop with its
@@ -661,9 +667,9 @@ async def run() -> None:
     dirty_queue: queue.Queue[Path] = queue.Queue()
     handler = _MarkdownEventHandler(dirty_queue)
     observer = Observer()
-    observer.schedule(handler, str(_MEMORY_ROOT), recursive=True)
+    observer.schedule(handler, str(root), recursive=True)
     observer.start()
-    _log.info("[indexer] watching %s", _MEMORY_ROOT)
+    _log.info("[indexer] watching %s", root)
 
     try:
         if not await asyncio.to_thread(_reconcile, backend, provider, liveness):

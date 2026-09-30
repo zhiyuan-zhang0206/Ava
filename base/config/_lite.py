@@ -77,7 +77,7 @@ from base.host.env.config_lite_table import (
     REQUIRED_FIELDS,
 )
 from base.host.env.config_registry import DOMAIN_ATTRS
-from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL, checkout_anchored, load_ava_env
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL, load_ava_env
 
 # `AVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
 BOOT_MODE_ENV = "AVA_CONFIG_BOOT"
@@ -143,13 +143,8 @@ def _current_settings() -> Any:
     return settings
 
 
-# `Path.home() / ".ava"` is resolved here, at module import — the same moment
-# the eager path resolves it (the field default is evaluated when
-# base/config/general.py is imported). `path_home_ava` in the table.
-_AVA_HOME_DEFAULT = Path.home() / ".ava"
-
 # The never-dialed placeholder for the required redis URL (mirrors the eager
-# boot path); the db placeholder is UNANCHORED_DB_SENTINEL, which base/db
+# boot path); the db placeholder is PLACEHOLDER_DB_URL, which base/db
 # refuses with an actionable error.
 _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
 
@@ -265,8 +260,6 @@ def _default_value(name: str, default_kind: str, literal: Any) -> Any:
         return None
     if default_kind == "factory_empty_list":
         return []
-    if default_kind == "path_home_ava":
-        return _AVA_HOME_DEFAULT
     if default_kind == "otel_endpoint_from_port":
         # Mirrors ObservabilitySettings._default_local_otlp_endpoint: when the
         # endpoint itself is not explicitly set, it follows the port.
@@ -511,12 +504,8 @@ def _apply_source_decision() -> None:
 
     `_plant_placeholders` keeps the eager boot's env side effect (the
     never-dialed URLs) so a later `Settings()` construction finds the same
-    environment it would have found eagerly. An unanchored checkout (no
-    cluster of its own, `base.host.env.dotenv_boot` rule 4) is asked first and is
-    never a config source nor a fetcher: it boots bare, like a CI checkout."""
-    if not checkout_anchored():
-        _plant_placeholders()
-    elif config_source_is_local():
+    environment it would have found eagerly."""
+    if config_source_is_local():
         _require_local_fields()
     elif os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
         _plant_placeholders()
@@ -554,7 +543,7 @@ def _plant_placeholders() -> None:
     """Plant never-dialed placeholders for the required data-plane URLs so a
     construction succeeds without a gateway fetch. A value already in env/.env
     is left alone — the placeholder only fills the nothing-at-all case."""
-    os.environ.setdefault("AVA_DB_URL", UNANCHORED_DB_SENTINEL)
+    os.environ.setdefault("AVA_DB_URL", PLACEHOLDER_DB_URL)
     os.environ.setdefault("AVA_REDIS_URL", _LITE_REDIS_URL)
 
 

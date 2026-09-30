@@ -113,11 +113,14 @@ def _ensure_index_present() -> None:
 
 # Regeneration must be as repairable as the settings-lite verbs: a broken .env
 # (or an unreachable gateway) must not block the tool that regenerates the
-# config index. `AVA_CONFIG_FETCH=skip` stops the config package's import tail
-# before its env work (load_ava_env / the authority pass); the index is then
-# read for nothing but the surfaces this script rewrites anyway. The registry
-# data itself comes from the model declarations, never from the environment.
-os.environ["AVA_CONFIG_FETCH"] = "skip"
+# config index. The scratch home carries no `.env` and `AVA_CONFIG_FETCH=skip`
+# stops any gateway fetch; the index is read for nothing but the surfaces this
+# script rewrites anyway. The registry data itself comes from the model
+# declarations, never from the environment.
+from base.host.env.dotenv_boot import enter_scratch_home  # noqa: E402
+
+if __name__ == "__main__":
+    enter_scratch_home()
 _ensure_index_present()
 
 from base.host.env.config_registry import (  # noqa: E402 — must follow the bootstrap above
@@ -131,9 +134,7 @@ class LiteField(NamedTuple):
     """One manifest row: the field, its default source, its validity rule, and why."""
 
     name: str
-    default_kind: (
-        str  # literal | none | factory_empty_list | path_home_ava | otel_endpoint_from_port
-    )
+    default_kind: str  # literal | none | factory_empty_list | otel_endpoint_from_port
     check: str | None  # None | iana | port | eval_allowlist — a named rule in _lite.py
     why: str  # the read site that put this field on the boot path
 
@@ -144,12 +145,6 @@ class LiteField(NamedTuple):
 # parity test locks behavior against the eager path, the drift test locks this
 # table against the live registry).
 LITE_MANIFEST: tuple[LiteField, ...] = (
-    LiteField(
-        "ava_home",
-        "path_home_ava",
-        None,
-        "paths.ava_home() — ~19 boot reads (skills/plugins/memory)",
-    ),
     LiteField(
         "timezone",
         "literal",
@@ -220,7 +215,7 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
 # The named validity rules `_lite.py` implements for the `check` column.
 _ALLOWED_CHECKS = frozenset({"iana", "port", "eval_allowlist"})
 _ALLOWED_DEFAULT_KINDS = frozenset(
-    {"literal", "none", "factory_empty_list", "path_home_ava", "otel_endpoint_from_port"}
+    {"literal", "none", "factory_empty_list", "otel_endpoint_from_port"}
 )
 
 
@@ -280,12 +275,6 @@ def _default(row: LiteField, info: FieldInfo, reg: dict[str, Any]) -> tuple[str,
                 f"{info.default_factory!r}/{default!r}"
             )
         return "factory_empty_list", None
-    if row.default_kind == "path_home_ava":
-        if default != Path.home() / ".ava":
-            raise SystemExit(
-                f"{row.name!r}: default_kind=path_home_ava but the field default is {default!r}"
-            )
-        return "path_home_ava", None
     # otel_endpoint_from_port — the field default must really be the port-derived URL.
     port_ref = reg.get("telemetry_otlp_port")
     if port_ref is None or not any(f.name == "telemetry_otlp_port" for f in LITE_MANIFEST):

@@ -162,7 +162,7 @@ def test_backfill_wires_dedup_into_collect(
         _write_mirror_day(logs, day, [])
 
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod, "_mirror_dir", lambda: logs)
     captured: dict[str, list[dict[str, Any]]] = {}
 
     def fake_collect_with_counts(
@@ -205,7 +205,7 @@ def test_backfill_reports_missing_days_and_exits_nonzero(
     _write_mirror_day(logs, days[0], [_row(1, (window_from + timedelta(minutes=5)).isoformat())])
 
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod, "_mirror_dir", lambda: logs)
     monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", _no_records)
 
     path, missing, _counts = backfill_mod.backfill(1, "test-week")
@@ -232,7 +232,7 @@ def test_main_exits_zero_when_all_days_present(
     for day in _window_days(now, 1):
         _write_mirror_day(logs, day, [])
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod, "_mirror_dir", lambda: logs)
     monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", _no_records)
     monkeypatch.setattr(sys, "argv", ["mirror_backfill.py", "1", "test-week"])
 
@@ -335,7 +335,7 @@ def test_backfill_merges_days_and_cleans_up(
     _write_mirror_day(logs, days[2], [])  # today's (still-open) file must exist too
 
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod, "_mirror_dir", lambda: logs)
     captured: dict[str, list[dict[str, Any]]] = {}
 
     def fake_collect_with_counts(
@@ -373,7 +373,7 @@ def test_backfill_restores_fetch_events_window(
     for day in _window_days(now, 1):
         _write_mirror_day(logs, day, [])
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod, "_mirror_dir", lambda: logs)
     monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", _no_records)
     sentinel = object()
     monkeypatch.setattr(backfill_mod.collect, "_fetch_events_window", sentinel)
@@ -395,7 +395,7 @@ def test_backfill_sweeps_stale_orphan_temp_dirs(
     for day in _window_days(now, 1):
         _write_mirror_day(logs, day, [])
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod, "_mirror_dir", lambda: logs)
     monkeypatch.setattr(backfill_mod.collect, "collect_with_counts", _no_records)
     daily = tmp_path / "self_evolution" / "daily"
     daily.mkdir(parents=True)
@@ -462,7 +462,7 @@ def test_collect_from_mirror_returns_records_counts_missing_without_writing(
     for day in days[1:]:
         _write_mirror_day(logs, day, [])
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(backfill_mod, "MIRROR_DIR", logs)
+    monkeypatch.setattr(backfill_mod, "_mirror_dir", lambda: logs)
     captured: dict[str, Any] = {}
 
     def fake_collect_with_counts(

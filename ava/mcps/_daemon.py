@@ -46,6 +46,7 @@ from ava.mcp_config import (
 )
 from base.config import settings
 from base.log.sinks import add_sink
+from base.paths import ava_home
 
 from ._oauth import _OAUTH_FLOW_TIMEOUT_S
 
@@ -593,7 +594,7 @@ def _reap_stale_daemons(project_root: Path | None) -> None:
     import psutil
 
     me = os.getpid()
-    home = str(settings.general.ava_home)
+    home = str(ava_home())
     root = (
         str(project_root) if project_root is not None else str(Path(__file__).resolve().parents[2])
     )

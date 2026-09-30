@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypedDict, cast
+
+from base.host.env.dotenv_boot import resolve_ava_home
 
 _DEFAULT_MANIFEST = Path(__file__).with_name("private-files") / "manifest.json"
 _HASH_CHUNK_SIZE = 1024 * 1024
@@ -170,8 +171,7 @@ def verify(root: Path, manifest: Path) -> list[Outcome]:
 
 
 def _default_root() -> Path:
-    ava_home = os.environ.get("AVA_HOME")
-    return Path(ava_home).expanduser() / "source" if ava_home else Path.cwd()
+    return resolve_ava_home() / "source"
 
 
 def _parse_args(argv: Sequence[str] | None) -> CliArgs:
@@ -182,7 +182,7 @@ def _parse_args(argv: Sequence[str] | None) -> CliArgs:
         "--root",
         type=Path,
         default=None,
-        help="checked tree root (default: $AVA_HOME/source, or cwd when AVA_HOME is unset)",
+        help="checked tree root (default: the home's source checkout, $AVA_HOME/source)",
     )
     verify_parser.add_argument(
         "--manifest",

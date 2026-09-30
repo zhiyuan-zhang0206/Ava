@@ -35,6 +35,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base.host.env.dotenv_boot import enter_scratch_home
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
 from base.deploy.git import host_version
 from base.host.proc import run_bounded
 from base.packages.plugins import manifest as pm

@@ -20,6 +20,7 @@ What is asserted here — the decision logic around `ensure_pgbouncer`:
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock
@@ -197,14 +198,16 @@ _AUTHORITY_ENV = {
     "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
     "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
     "AVA_REDIS_ADMIN_PASSWORD": "redis-admin-" + "r" * 20,
-    "AVA_HOME": "/Users/operator/.ava",
 }
 
 
 def test_the_pooler_daemon_inherits_no_ava_authority(
-    monkeypatch: pytest.MonkeyPatch, _noop_write: None
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _noop_write: None
 ) -> None:
-    for key, value in {**_AUTHORITY_ENV, "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}.items():
+    # The operator's home is a real directory the code may create: `ava_home()` makes
+    # its home, so a made-up `/Users/...` path would be created (or refused) on the host.
+    authority = {**_AUTHORITY_ENV, "AVA_HOME": str(tmp_path / ".ava-operator")}
+    for key, value in {**authority, "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(_pb, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb.ownership, "pooler", Mock(return_value=None))
@@ -234,7 +237,7 @@ def test_the_pooler_daemon_inherits_no_ava_authority(
     env = cast("dict[str, str]", captured)
     assert env["PATH"] == "/usr/bin:/bin" and env["LANG"] == "C.UTF-8"
     assert not [key for key in env if key.startswith("AVA_")]
-    assert not set(_AUTHORITY_ENV.values()) & set(env.values())
+    assert not set(authority.values()) & set(env.values())
 
 
 # ── the reload-vs-restart decision ───────────────────────────────────────────

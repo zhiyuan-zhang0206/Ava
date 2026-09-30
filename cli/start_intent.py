@@ -10,7 +10,6 @@ import argparse
 import hashlib
 import io
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,7 @@ from urllib.parse import SplitResult, urlsplit
 
 from dotenv import dotenv_values
 
+from base.host.env.dotenv_boot import home_checkout_error, resolve_ava_home
 from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.net.predicates import is_loopback_host
 from base.host.private_storage import ensure_private_dir
@@ -33,52 +33,20 @@ _CAP_ARGS = {
 _FIELDS = ("machine_name", "machine_host", "machine_description", "memory_remote", "gateway_url")
 
 
-# An unanchored process pins its private scratch home as AVA_HOME
-# (base/host/env/dotenv_boot.py rule 4: `ava-unanchored-<16 hex>` under the temp dir);
-# a child inheriting it claims no home either. Mirrored here because this entry
-# must not import base.host.env.dotenv_boot, which resolves the home at import.
-_UNANCHORED_SCRATCH = re.compile(r"ava-unanchored-[0-9a-f]{16}")
-
-
 def _checkout() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _home(*, worktree: bool) -> Path:
-    checkout = _checkout()
-    pointer = checkout / ".ava_home"
-    explicit = os.environ.get("AVA_HOME")
-    target = Path(explicit).expanduser() if explicit else None
-    if target is not None and _UNANCHORED_SCRATCH.fullmatch(target.name):
-        target = None
-    claimed = Path(pointer.read_text().strip()).expanduser() if pointer.exists() else None
-    default = Path.home() / ".ava"
-    if target is None:
-        target = claimed or (Path.home() / f".ava-{checkout.name}" if worktree else None)
-    if target is None and checkout == (default / "source").resolve():
-        target = default
-    if target is None:
-        raise ValueError(
-            "unanchored start requires AVA_HOME or --worktree; it cannot select production implicitly"
-        )
-    return _validate_home(target, claimed, checkout, default, worktree=worktree)
+def _home() -> Path:
+    """The home this start acts on: `$AVA_HOME`, else `~/.ava`.
 
-
-def _validate_home(
-    target: Path, claimed: Path | None, checkout: Path, default: Path, *, worktree: bool
-) -> Path:
-    if not target.is_absolute():
-        raise ValueError("AVA_HOME must be absolute")
-    target = target.resolve()
-    if claimed is not None and claimed.resolve() != target:
-        raise ValueError("AVA_HOME contradicts this checkout's .ava_home")
-    if target == default.resolve() and checkout != (default / "source").resolve():
-        raise ValueError(
-            "the production home must be started from its canonical source or verified release"
-        )
-    if worktree and target == default.resolve():
-        raise ValueError("--worktree cannot use the production home")
-    return target
+    A home that carries its own `<home>/source` checkout starts only from that
+    checkout (`base.host.env.dotenv_boot.home_checkout_error`).
+    """
+    error = home_checkout_error(_checkout())
+    if error is not None:
+        raise ValueError(error)
+    return resolve_ava_home().resolve()
 
 
 def _stored(home: Path) -> dict[str, str]:
@@ -98,12 +66,10 @@ def _roles(args: argparse.Namespace, stored: dict[str, str]) -> frozenset[str]:
     roles: set[str] = set()
     for cap, arg in _CAP_ARGS.items():
         selected = _capability_value(cap, stored, explicit=getattr(args, arg))
-        if selected is None:
-            selected = args.worktree and cap in {"gateway", "agent-runner"}
         if selected:
             roles.add(cap)
     if not roles:
-        raise ValueError("first start requires explicit --serve-* capabilities or --worktree")
+        raise ValueError("first start requires explicit --serve-* capabilities")
     if IS_WINDOWS:
         raise ValueError("native Windows is unsupported; use WSL2 or a POSIX host")
     return frozenset(roles)
@@ -142,10 +108,6 @@ def _join(values: dict[str, str], home: Path, capability: str | None) -> None:
     if remote and (not host or is_loopback_host(host)):
         raise ValueError("joining a remote gateway requires a reachable --machine-host")
     bundle, token = _join_credential(home, capability, remote=remote)
-    # The join runs before this start publishes its home. Name it now: the
-    # bootstrap transport refuses an unanchored checkout (base.host.env.dotenv_boot,
-    # resolved at its first import), and this start's home is the claim.
-    os.environ["AVA_HOME"] = str(home)
     payload = fetch_bootstrap_config(gateway, bearer=token)
     if remote and any(
         is_loopback_host(urlsplit(payload[key]).hostname or "")
@@ -211,12 +173,7 @@ def _config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str]
     forbidden = (
         derived_env_keys()
         | env_identity_keys()
-        | {
-            "AVA_HOME",
-            "AVA_HOME_OVERRIDE",
-            "AVA_HOST_STATE_DIR",
-            "AVA_REDIS_ADMIN_PASSWORD",
-        }
+        | {"AVA_HOME", "AVA_HOST_STATE_DIR", "AVA_REDIS_ADMIN_PASSWORD"}
     ) - remote_keys
     unknown = set(values) - set(FIELD_ALIASES.values()) - remote_keys
     if unknown or set(values) & forbidden or any(v is None for v in values.values()):
@@ -305,7 +262,7 @@ def _inputs(
     config, digest = _config_values(args, home)
     values.update(config)
     values["AVA_SERVICE_PATH"] = _service_path(values, home)
-    _apply_identity_options(args, home, stored, values)
+    _apply_identity_options(args, stored, values)
     if config.get("AVA_DB_URL"):
         _validate_remote_inputs(values, roles)
     if "gateway" not in roles:
@@ -317,7 +274,7 @@ def _inputs(
             "--db-capability is for agent-runner units; a gateway unit keeps its own "
             "write-generation ledger"
         )
-    return IdentityInput(home, _checkout(), args.worktree, roles, values, digest, runtime)
+    return IdentityInput(home, _checkout(), roles, values, digest, runtime)
 
 
 def _service_path(values: dict[str, str], home: Path) -> str:
@@ -342,7 +299,6 @@ def _service_path(values: dict[str, str], home: Path) -> str:
 
 def _apply_identity_options(
     args: argparse.Namespace,
-    home: Path,
     stored: dict[str, str],
     values: dict[str, str],
 ) -> None:
@@ -353,9 +309,6 @@ def _apply_identity_options(
             if key in stored and stored[key] != explicit:
                 raise ValueError(f"start input conflicts with persisted {key}")
             values[key] = explicit
-    if args.worktree:
-        values.setdefault("AVA_MACHINE_NAME", home.name.lstrip("."))
-        values.setdefault("AVA_HEALTH_PROBE_AGENT_MIN", "0")
     if not values.get("AVA_MACHINE_NAME"):
         raise ValueError("first start requires --machine-name")
     for key in ("AVA_MACHINE_NAME", "AVA_MACHINE_HOST"):
@@ -384,7 +337,7 @@ def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) 
     try:
         if runtime is None:
             runtime = StartRuntime.development(_checkout())
-        home = _home(worktree=args.worktree)
+        home = _home()
         runtime.validate()
         ensure_private_dir(home)
         with file_lock(home / "start-intent.lock", timeout_s=30):

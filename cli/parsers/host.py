@@ -84,8 +84,8 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     # design, agent has no TTY, missing values fail loud.
     start_p = sub.add_parser(
         "start",
-        help="[host] bring up this unit's full stack (idempotent). Cluster identity "
-        "is checkout-anchored — never a flag. Machine identity is first-run only: "
+        help="[host] bring up this unit's full stack (idempotent). The home is "
+        "$AVA_HOME, else ~/.ava — never a flag. Machine identity is first-run only: "
         "pass --machine-name / --serve-gateway / --serve-agent-runner / "
         "--gateway-url on the FIRST start (or set the env vars / $AVA_HOME files); "
         "the values are persisted and later runs need none of them.",
@@ -166,11 +166,6 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     )
     start_p.add_argument(
         "--config-file", type=str, default=None, help="explicit first-start dotenv configuration"
-    )
-    start_p.add_argument(
-        "--worktree",
-        action="store_true",
-        help="use an isolated checkout home; default to gateway and agent-runner",
     )
     start_p.add_argument(
         "--machine-host", default=None, help="this host's reachable private-network address"

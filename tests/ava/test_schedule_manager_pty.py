@@ -53,9 +53,7 @@ def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 
     (home / ".env").write_text(f"AVA_DB_URL={_settings.data_plane.db_url}\n")
     prior_home = os.environ.get("AVA_HOME")
-    prior_override = os.environ.get("AVA_HOME_OVERRIDE")
     os.environ["AVA_HOME"] = str(home)
-    os.environ["AVA_HOME_OVERRIDE"] = "1"
     try:
         yield str(home)
     finally:
@@ -66,11 +64,10 @@ def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
                 pty_cli.session_request(name, {"op": "kill"})
             except OSError:
                 pty_cli._kill_by_record(name)
-        for key, prior in (("AVA_HOME", prior_home), ("AVA_HOME_OVERRIDE", prior_override)):
-            if prior is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = prior
+        if prior_home is None:
+            os.environ.pop("AVA_HOME", None)
+        else:
+            os.environ["AVA_HOME"] = prior_home
 
 
 @pytest.fixture(scope="module")
@@ -108,18 +105,11 @@ def _insert_schedule(
 
 @pytest.fixture(autouse=True)
 def _point_backend_home(monkeypatch: pytest.MonkeyPatch, _pty_home: str) -> None:
-    # Point EVERY resolver at the dedicated home: the PtySessionBackend CLI
-    # children inherit os.environ (setitem, not setenv — the env is for
-    # subprocess children, not the settings singleton), and the backend's
-    # list/started-at enumeration resolves the record dir in-process from
-    # settings.general.ava_home — pin that too so the in-process resolver and
-    # the spawned hosts agree (they always agree in production, where one
-    # process carries one home).
+    # One variable names the dedicated home for every resolver: the
+    # PtySessionBackend CLI children inherit os.environ, and the backend's
+    # list/started-at enumeration resolves the record dir in-process from the
+    # same variable, so the in-process resolver and the spawned hosts agree.
     monkeypatch.setitem(os.environ, "AVA_HOME", _pty_home)
-    monkeypatch.setitem(os.environ, "AVA_HOME_OVERRIDE", "1")
-    from base.config import settings
-
-    monkeypatch.setattr(settings.general, "ava_home", Path(_pty_home))
 
 
 @pytest.fixture(autouse=True)

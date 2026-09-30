@@ -76,12 +76,8 @@ def _default_root() -> Path:
     entry slug, so a re-run reuses it (dedup).
 
     Resolves `$AVA_HOME` via `base.host.env.dotenv_boot.resolve_ava_home` — the same
-    checkout-anchored resolution every other Ava process uses — rather than
-    guessing `~/.ava` when the env var is unset: an unanchored checkout has no
-    business writing its raw mirror into another cluster's home (2026-09-28,
-    PR #3550's P2 follow-up)."""
-    home, _anchored = resolve_ava_home()
-    return home / "state" / "mirrors" / "rss"
+    resolution every other Ava process uses."""
+    return resolve_ava_home() / "state" / "mirrors" / "rss"
 
 
 def _entry_slug(entry_id: str) -> str:

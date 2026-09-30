@@ -159,9 +159,8 @@ def test_run_explicit_cwd_overrides_default(tmp_path: Path) -> None:
 
 def test_run_default_cwd_is_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No cwd → runs in agent workspace (consistent with ava.files relative path base)."""
-    from base.config import settings
 
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     out = ava.shell.run("pwd")
     expected = tmp_path / "workspaces" / str(ava.agent_identity._agent_id)
     assert Path(out.strip()).resolve() == expected.resolve()

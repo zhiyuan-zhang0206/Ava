@@ -158,13 +158,18 @@ AGENT_BIRTH_CONFIG_ENV = "AVA_AGENT_BIRTH_CONFIG"
 # runner database password. derive_env emits it and process isolation strips it.
 REDIS_PASSWORD_ENV = "AVA_REDIS_PASSWORD"  # noqa: S105 — env key, not a credential
 
+# The home is not a Settings field (`base.host.env.dotenv_boot.resolve_ava_home`
+# reads it before Settings exists): it is the one variable every descendant
+# inherits, so a process tree that set it keeps every child on the same home.
+AVA_HOME_ENV = "AVA_HOME"
+
 # Bootstrap/identity guide keys an agent that self-fetches its config still
-# needs forwarded before Settings: the home to resolve before Settings; the
-# gateway URL to reach /api/bootstrap; the data-plane URL as a boot-time
-# fallback; the TLS bundle for the fetch on corp-MITM hosts. Plus the two JSON
-# carriers above. The Settings aliases are declared by field name so an alias
-# rename follows automatically; the rest are passthrough rows.
-_GUIDE_FIELDS = frozenset({"ava_home", "cluster_secret", "gateway_url", "gateway_port"})
+# needs forwarded before Settings: the gateway URL to reach /api/bootstrap; the
+# data-plane URL as a boot-time fallback; the TLS bundle for the fetch on
+# corp-MITM hosts. Plus the two JSON carriers above. The Settings aliases are
+# declared by field name so an alias rename follows automatically; the rest are
+# passthrough rows.
+_GUIDE_FIELDS = frozenset({"cluster_secret", "gateway_url", "gateway_port"})
 _GUIDE_PASSTHROUGH_KEYS = frozenset(
     {"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", AGENT_CONFIG_OVERLAY_ENV, AGENT_BIRTH_CONFIG_ENV}
 )
@@ -350,7 +355,7 @@ def _enabled_provider_key_envs() -> frozenset[str]:
 def session_forward_keys() -> frozenset[str]:
     """The daemon/session child allowlist (settings half) — the host-scope
     settings aliases (machine identity, per-unit health ports, the gateway URL
-    the fetch dials, AVA_HOME), except the certification proof that only the
+    the fetch dials), plus AVA_HOME, except the certification proof that only the
     agent-host finalizer receives through its targeted launcher projection. No
     cluster-scope value, no agent-scope knob, no non-modeled AVA_* identity
     (audit F-s3-4: the old denylist forwarded AVA_AGENT_ID into daemon
@@ -358,7 +363,7 @@ def session_forward_keys() -> frozenset[str]:
     (DISPLAY/WAYLAND_DISPLAY/HOME/USER/LOGNAME) and the temp-dir vars are applied by
     `child_env`, not part of this set. A new host-scope field is forwarded
     automatically unless it is deliberately finalizer-only."""
-    return _scope_aliases("host") - {MANIFEST_CERTIFICATION_SECRET_ENV}
+    return (_scope_aliases("host") | {AVA_HOME_ENV}) - {MANIFEST_CERTIFICATION_SECRET_ENV}
 
 
 @lru_cache(maxsize=1)
@@ -376,7 +381,12 @@ def launch_input_keys() -> frozenset[str]:
     for the same launch. Positive list: a key a delivery adds later stays out
     of the digest until it is declared here.
     """
-    return _scope_aliases("host") | _OS_CANONICAL_KEYS | {MANIFEST_CERTIFICATION_FINALIZER_ENV}
+    return (
+        _scope_aliases("host")
+        | {AVA_HOME_ENV}
+        | _OS_CANONICAL_KEYS
+        | {MANIFEST_CERTIFICATION_FINALIZER_ENV}
+    )
 
 
 def manifest_certification_secret_env() -> dict[str, str]:

@@ -63,6 +63,7 @@ from base.db import connect, connect_url, direct_db_url
 from base.db.pg_admin import local_owner_authority
 from base.host.private_storage import ensure_private_dir, ensure_private_file
 from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.paths import ava_home
 from services.gateway_side.backup import passphrase as backup_passphrase
 from services.gateway_side.backup.intermediates import sweep_closed_partials
 from services.pitr.stores.logical_dump_names import (
@@ -124,7 +125,7 @@ def backup_dir() -> Path:
     # identity), so the dump dir needs no per-cluster token. Pre-cutover dumps
     # under `backups/<cluster-name>` are left in place (at most ``backup_keep`` of
     # them); rotation continues in the new dir.
-    return Path(settings.general.ava_home).expanduser() / "backups" / "db"
+    return ava_home() / "backups" / "db"
 
 
 @contextmanager

@@ -80,6 +80,10 @@ import yaml
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+from base.host.env.dotenv_boot import enter_scratch_home  # noqa: E402
+
+if __name__ == "__main__":
+    enter_scratch_home()
 from base.packages.docs.okf_graph import logical_path  # noqa: E402
 from scripts.codegen.build_okf_data import resolve_wikilink  # noqa: E402
 

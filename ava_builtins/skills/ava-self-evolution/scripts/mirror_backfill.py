@@ -80,7 +80,11 @@ import collect
 
 from base.paths import ava_home
 
-MIRROR_DIR = ava_home() / "logs"
+
+def _mirror_dir() -> Path:
+    """The gateway's raw event mirror directory, `$AVA_HOME/logs`."""
+    return ava_home() / "logs"
+
 
 # Categories the collect pipeline consumes. Every other category in the
 # mirror (log rows carry exec stdout payloads — the largest rows) is dropped
@@ -248,7 +252,7 @@ def _stage_window(
         end_date = window_to.date()
         while d <= end_date:
             day = d.strftime("%Y%m%d")
-            mf = MIRROR_DIR / f"events-{day}.jsonl"
+            mf = _mirror_dir() / f"events-{day}.jsonl"
             if not mf.exists():
                 missing_days.append(day)
                 d += timedelta(days=1)

@@ -19,6 +19,11 @@ from pathlib import Path
 # this checkout's module (without it, an editable install of another checkout
 # shadows it — same pattern as dump_event_fixtures.py / dump_openapi.py).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from base.host.env.dotenv_boot import enter_scratch_home
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
 
 from base.events.live.projection import EVENT_COALESCE_MS
 

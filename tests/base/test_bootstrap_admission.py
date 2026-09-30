@@ -102,16 +102,18 @@ def test_runner_fetch_replaces_stale_admission(
     gateway_snapshot: dict[str, str],
     gateway_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     runner_token: str,
 ) -> None:
     del runner_token
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))  # the snapshot lives under this home
     env = {
         "AVA_GATEWAY_URL": "http://gateway",
         _TURN_LIMIT: "16",
         "AVA_HOST_DB_POOL_MAX_SIZE": "20",
         "AVA_HOST_CONTROL_POOL_MAX_SIZE": "4",
     }
-    monkeypatch.setattr(bootstrap, "os", SimpleNamespace(environ=env))
+    monkeypatch.setattr(bootstrap, "os", SimpleNamespace(**{**vars(bootstrap.os), "environ": env}))
     requests: list[str] = []
 
     def dial(url: str, *, timeout: float, headers: dict[str, str]) -> httpx2.Response:
@@ -139,7 +141,8 @@ def test_runner_refreshes_an_outdated_admission_snapshot(
     runner_token: str,
 ) -> None:
     del runner_token
-    env = {"AVA_HOME": str(tmp_path), "AVA_GATEWAY_URL": "http://gateway"}
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    env = {"AVA_GATEWAY_URL": "http://gateway"}
     snapshot = tmp_path / "run" / "bootstrap-snapshot.json"
     snapshot.parent.mkdir()
     snapshot.write_text(

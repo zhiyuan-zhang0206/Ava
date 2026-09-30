@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from base import paths
-from base.config import settings
 from base.packages.plugins import enable_config, load_report
 from base.packages.plugins.enable_config import (
     DanglingPlugin,
@@ -29,7 +28,7 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     user.mkdir()
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
     monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path / "ava"))
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     # The once-per-process report memo is interpreter-global module state;
     # reset it so one test's report cannot suppress another test's assertion.

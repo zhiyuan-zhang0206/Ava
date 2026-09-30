@@ -41,6 +41,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
 from psycopg_pool import AsyncConnectionPool
 
+from base import paths
 from base.config import settings
 from base.events.live.publisher import AgentEventPublisher
 
@@ -105,4 +106,4 @@ class AvaContext:
     db_url: str = field(default_factory=lambda: settings.data_plane.db_url, repr=False)
     redis_url: str = field(default_factory=lambda: settings.data_plane.redis_url, repr=False)
     events_channel: str = field(default_factory=lambda: settings.data_plane.events_channel)
-    ava_home: Path = field(default_factory=lambda: settings.general.ava_home)
+    ava_home: Path = field(default_factory=paths.ava_home)

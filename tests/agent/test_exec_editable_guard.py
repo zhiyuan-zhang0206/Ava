@@ -180,7 +180,6 @@ def test_execute_code_child_boot_cannot_rematerialize_manifest_certification_pro
     env.update(
         {
             "AVA_HOME": str(home),
-            "AVA_HOME_OVERRIDE": "1",
             "AVA_CONFIG_FETCH": "skip",
         }
     )
