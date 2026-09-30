@@ -34,7 +34,7 @@ from typing import cast
 
 import psutil
 
-from base.paths import ava_home
+from base.host.env.dotenv_boot import resolve_ava_home
 
 
 def _same_dir(candidate: Path, target: Path) -> bool:
@@ -140,7 +140,8 @@ def find_live_anchors(path: Path, *, records_dir: Path | None = None) -> list[st
     """Human-readable list of live things anchored under `path`.
 
     `records_dir` overrides the pty records location (tests); it defaults to
-    `$AVA_HOME/run/pty`. Process scanning excludes the invoking job tree —
+    `$AVA_HOME/run/pty` (else `~/.ava/run/pty`). The scan only reads: the home is
+    resolved, never created, repaired or chmodded. Process scanning excludes the invoking job tree —
     the caller's chain (issue #3685) and its process group — because the
     check is run by the cleanup from inside the target; a genuinely unrelated
     anchor (another session, a daemon) is in neither.
@@ -151,7 +152,7 @@ def find_live_anchors(path: Path, *, records_dir: Path | None = None) -> list[st
     group = _caller_group()
     fold = _folds_case(target)
 
-    pty_dir = records_dir if records_dir is not None else ava_home() / "run" / "pty"
+    pty_dir = records_dir if records_dir is not None else resolve_ava_home() / "run" / "pty"
     if pty_dir.is_dir():
         for rec in sorted(pty_dir.glob("*.json")):
             try:

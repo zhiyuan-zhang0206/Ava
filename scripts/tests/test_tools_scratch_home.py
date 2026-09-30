@@ -49,6 +49,11 @@ _APPLICATION_PACKAGES = frozenset(
 # resolve the real home: each carries the reason.
 _OPERATOR_TOOLS = {
     "scripts/codegen/build_hierarchy_once.py": "builds one agent's history tree in the running cluster",
+    "scripts/check_worktree_remove.py": (
+        "reads this machine's session registry ($AVA_HOME/run/pty) to find the live anchors "
+        "of a worktree, so it must read the real home; it only skips the gateway config fetch "
+        "(tests/base/test_worktree_guard.py proves it dials nothing and writes nothing)"
+    ),
 }
 
 
@@ -242,7 +247,7 @@ def _scratch_home_tools() -> list[str]:
 
 def test_the_import_test_covers_the_tools_it_is_meant_to_cover() -> None:
     tools = _scratch_home_tools()
-    assert len(tools) >= 18
+    assert len(tools) >= 17
     assert "scripts/lint/no_os_environ.py" in tools
     assert "scripts/content_lint/lint_ava_okf.py" in tools
 

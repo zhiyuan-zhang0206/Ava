@@ -271,20 +271,21 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
 
 @pytest.fixture
 def _restore_machine_env() -> Iterator[None]:
-    """Save/restore AVA_MACHINE_HOST + AVA_HOME around a test. These are Settings
-    aliases, so monkeypatch.setenv on them is banned by the force-settings lint —
-    but `_self_machine_host` (like `_unit_home`) reads os.environ directly at
-    sub-model construction time, so the tests set os.environ directly with
-    explicit restore (the pattern of base/config/tests/test_unit_home.py)."""
-    saved = {k: os.environ.get(k) for k in ("AVA_MACHINE_HOST", "AVA_HOME")}
+    """Save/restore AVA_MACHINE_HOST around a test. It is a Settings alias, so
+    monkeypatch.setenv on it is banned by the force-settings lint — but
+    `_self_machine_host` reads os.environ directly at sub-model construction time, so
+    the tests set os.environ directly with explicit restore (the pattern of
+    base/config/tests/test_unit_home.py). AVA_HOME is not a Settings alias: the tests
+    set it with `monkeypatch.setenv`, which restores it (a bare assignment would leave
+    it behind for every later test in the worker)."""
+    saved = os.environ.get("AVA_MACHINE_HOST")
     try:
         yield
     finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+        if saved is None:
+            os.environ.pop("AVA_MACHINE_HOST", None)
+        else:
+            os.environ["AVA_MACHINE_HOST"] = saved
 
 
 @pytest.mark.usefixtures("_restore_machine_env")
@@ -296,15 +297,19 @@ class TestSelfHostDialsLoopback:
     runners). Machine host is pinned via env/AVA_HOME so the session's real
     environment never leaks in."""
 
-    def _isolate(self, tmp_path: Path, *, machine_host: str | None) -> None:
-        os.environ["AVA_HOME"] = str(tmp_path)  # no machine_host file
+    def _isolate(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_host: str | None
+    ) -> None:
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))  # no machine_host file
         if machine_host is None:
             os.environ.pop("AVA_MACHINE_HOST", None)
         else:
             os.environ["AVA_MACHINE_HOST"] = machine_host
 
-    def test_self_host_rewrites_to_loopback(self, tmp_path: Path) -> None:
-        self._isolate(tmp_path, machine_host="gw.host")
+    def test_self_host_rewrites_to_loopback(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        self._isolate(monkeypatch, tmp_path, machine_host="gw.host")
         s = _settings_with(
             db_url=_pg("STALE", host="gw.host:5433"),
             redis_url=_redis("STALE", host="gw.host:6380"),
@@ -317,9 +322,11 @@ class TestSelfHostDialsLoopback:
         assert s.db_url == _pg("STALE", host="127.0.0.1:5433") + "?hostaddr=127.0.0.1"
         assert s.redis_url == _redis("STALE", host="127.0.0.1:6380")
 
-    def test_foreign_host_is_untouched(self, tmp_path: Path) -> None:
+    def test_foreign_host_is_untouched(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         # A runner whose URLs point at the (remote) gateway must keep dialing it.
-        self._isolate(tmp_path, machine_host="runner.host")
+        self._isolate(monkeypatch, tmp_path, machine_host="runner.host")
         s = _settings_with(
             db_url=_pg("STALE", host="gw.host:5433"),
             redis_url=_redis("STALE", host="gw.host:6380"),
@@ -328,10 +335,12 @@ class TestSelfHostDialsLoopback:
         assert urlsplit(s.db_url).hostname == "gw.host"
         assert urlsplit(s.redis_url).hostname == "gw.host"
 
-    def test_one_url_dial_inherits_loopback_on_pooler_port(self, tmp_path: Path) -> None:
+    def test_one_url_dial_inherits_loopback_on_pooler_port(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         # The one-URL design: AVA_DB_URL itself carries the pooler port (pooling
         # on), and the loopback rewrite applies to that same dial URL.
-        self._isolate(tmp_path, machine_host="gw.host")
+        self._isolate(monkeypatch, tmp_path, machine_host="gw.host")
         s = DataPlaneSettings(
             AVA_DB_URL=_pg("STALE", host="gw.host:6433"),
             AVA_REDIS_URL=_redis("STALE", host="gw.host:6380"),
@@ -342,10 +351,12 @@ class TestSelfHostDialsLoopback:
         # note in test_self_host_rewrites_to_loopback.
         assert s.db_url == _pg("STALE", host="127.0.0.1:6433") + "?hostaddr=127.0.0.1"
 
-    def test_localhost_machine_host_default_is_noop(self, tmp_path: Path) -> None:
+    def test_localhost_machine_host_default_is_noop(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         # The zero-config single box (machine host resolves to `localhost`): an
         # already-loopback URL keeps its host, and no foreign host matches.
-        self._isolate(tmp_path, machine_host=None)
+        self._isolate(monkeypatch, tmp_path, machine_host=None)
         s = _settings_with(
             db_url=_pg("STALE", host="localhost:5433"),
             redis_url=_redis("STALE", host="gw.host:6380"),
@@ -354,10 +365,12 @@ class TestSelfHostDialsLoopback:
         assert urlsplit(s.db_url).hostname == "localhost"
         assert urlsplit(s.redis_url).hostname == "gw.host"
 
-    def test_loopback_machine_host_never_rewrites(self, tmp_path: Path) -> None:
+    def test_loopback_machine_host_never_rewrites(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         # AVA_MACHINE_HOST explicitly `localhost` (hairpin workaround .env): the
         # loopback guard fires before the compare — URLs stay byte-identical.
-        self._isolate(tmp_path, machine_host="localhost")
+        self._isolate(monkeypatch, tmp_path, machine_host="localhost")
         s = _settings_with(
             db_url=_pg("STALE", host="localhost:5433"),
             redis_url=_redis("STALE", host="localhost:6380"),
@@ -366,9 +379,11 @@ class TestSelfHostDialsLoopback:
         assert s.db_url == _pg("STALE", host="localhost:5433")
         assert s.redis_url == _redis("STALE", host="localhost:6380")
 
-    def test_machine_host_file_fallback_matches(self, tmp_path: Path) -> None:
+    def test_machine_host_file_fallback_matches(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         # env unset -> the `$AVA_HOME/machine_host` file (the first start's) wins.
-        self._isolate(tmp_path, machine_host=None)
+        self._isolate(monkeypatch, tmp_path, machine_host=None)
         (tmp_path / "machine_host").write_text("gw.host\n")
         s = _settings_with(
             db_url=_pg("STALE", host="gw.host:5433"),
@@ -378,8 +393,10 @@ class TestSelfHostDialsLoopback:
         assert urlsplit(s.db_url).hostname == "127.0.0.1"
         assert urlsplit(s.redis_url).hostname == "127.0.0.1"
 
-    def test_sentinel_stays_byte_identical(self, tmp_path: Path) -> None:
-        self._isolate(tmp_path, machine_host="gw.host")
+    def test_sentinel_stays_byte_identical(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        self._isolate(monkeypatch, tmp_path, machine_host="gw.host")
         s = _settings_with(
             db_url=PLACEHOLDER_DB_URL,
             redis_url=_redis("STALE", host="h:6379"),
@@ -461,7 +478,6 @@ class TestSelfMachineHostParity:
         # _self_machine_host reads os.environ at construction time; reachable_host
         # reads the settings singleton (machine_host / ava_home fields). Pin both
         # surfaces to the same values so the assertion compares precedence only.
-        os.environ["AVA_HOME"] = str(tmp_path)
         monkeypatch.setenv("AVA_HOME", str(tmp_path))
         if env is None:
             os.environ.pop("AVA_MACHINE_HOST", None)
