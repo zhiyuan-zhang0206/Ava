@@ -229,7 +229,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/heartbeat/tests/test_otel_port_deviation.py",
             "services/agent_host/tests/test_agent_host_identity_probe.py",
         ),
-        119,
+        114,
     ),
     "tests.path_scoped.db_authority_tests": Scope(
         (
@@ -355,7 +355,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/tests",
             "services/agent_host/tests/test_hosted_backlog_recovery.py",
         ),
-        161,
+        128,
     ),
     "tests.path_scoped.structure_tests": Scope(
         (
