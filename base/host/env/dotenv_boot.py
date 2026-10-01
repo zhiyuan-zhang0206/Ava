@@ -132,8 +132,8 @@ def skip_config_fetch() -> None:
 def enter_scratch_home() -> Path:
     """Point this process tree at a fresh temporary home, whatever its environment carries.
 
-    For a tool that imports application code but must not touch the host's
-    cluster (a lint, a codegen dump, a docs check): it sets `AVA_HOME` to a new
+    For a script that imports application code but must not touch the host's
+    cluster (the scripts git hooks launch): it sets `AVA_HOME` to a new
     private directory and `AVA_CONFIG_FETCH=skip`, so nothing in the tree
     resolves `~/.ava`, reads another home's `.env` or dials a gateway. Call it
     before the tool's first application import, and only when the tool runs as a

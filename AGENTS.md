@@ -91,7 +91,7 @@ flags); an initialized home refuses a second one. `ava start` admits only an
 initialized home, creates its data plane on the first start, and retains the service
 selection on repeats. The home is `AVA_HOME`
 when set, else `~/.ava`, read whenever it is needed — production does not depend
-on the variable; a test session, a hook or a tool that imports application code
+on the variable; a test session and a git hook set it in code; a dev tool that imports application code
 sets it once at its top and every descendant inherits it. A home that carries its
 own `<home>/source` checkout is changed only by that checkout's CLI: any other
 checkout's verbs that change state are refused (read-only verbs are not).
