@@ -13,11 +13,8 @@ same grammar the settings parser uses (`export KEY=v` sets `KEY`; #2981).
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import os
 import re
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -263,66 +260,3 @@ def remove_env(
                 trace_id=trace_id,
                 changes=changes,
             )
-
-
-def replace_env_bytes_cas(
-    path: Path,
-    *,
-    payload: bytes,
-    expected_digest: str,
-    target_digest: str,
-    audit_site: str | None = None,
-) -> None:
-    """Restore exact env bytes while holding the shared cross-process lock."""
-
-    if hashlib.sha256(payload).hexdigest() != target_digest:
-        raise RuntimeError(".env rollback payload differs from durable digest")
-    with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
-        current = path.read_bytes()
-        digest = hashlib.sha256(current).hexdigest()
-        if digest == target_digest:
-            return
-        if digest != expected_digest:
-            raise RuntimeError(".env changed concurrently before rollback")
-        snapshot_env(path)
-        fd, raw = tempfile.mkstemp(prefix="..env.rollback-", dir=path.parent)
-        staged = Path(raw)
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "wb") as output:
-                output.write(payload)
-                output.flush()
-                os.fsync(output.fileno())
-            staged.replace(path)
-            directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
-            if audit_site is not None:
-                from base.host.env.audit import env_values_from_text, record_env_write
-
-                before_text = current.decode("utf-8", errors="replace")
-                after_text = payload.decode("utf-8", errors="replace")
-                before_keys = {
-                    key for line in before_text.splitlines() if (key := env_line_key(line))
-                }
-                after_keys = {
-                    key for line in after_text.splitlines() if (key := env_line_key(line))
-                }
-                before_values = env_values_from_text(before_text)
-                after_values = env_values_from_text(after_text)
-                changes = [
-                    {"alias": key, "old": before_values.get(key), "new": after_values.get(key)}
-                    for key in sorted(before_values.keys() | after_values.keys())
-                    if before_values.get(key) != after_values.get(key)
-                ]
-                record_env_write(
-                    path,
-                    after_keys,
-                    before_keys - after_keys,
-                    site=audit_site,
-                    changes=changes,
-                )
-        finally:
-            staged.unlink(missing_ok=True)

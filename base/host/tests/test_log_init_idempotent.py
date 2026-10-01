@@ -127,24 +127,6 @@ def test_init_gateway_process_default_name_is_gateway() -> None:
     mock_file_sink.assert_called_once_with(logs_dir() / "gateway.log")
 
 
-def test_init_restricted_process_opens_only_plain_stderr_once() -> None:
-    """The authority-free worker's init: one stderr sink, no file or pipeline sink."""
-    with (
-        patch.object(slog.logger, "add") as mock_add,
-        patch.object(slog, "_add_file_sink") as mock_file_sink,
-        patch.object(slog, "add_postgres_sink") as mock_pg,
-    ):
-        slog.init_restricted_process()
-        slog.init_restricted_process()
-
-    mock_add.assert_called_once()
-    assert mock_add.call_args.args == (slog.sys.stderr,)
-    assert mock_add.call_args.kwargs["diagnose"] is False
-    assert mock_add.call_args.kwargs["colorize"] is False
-    mock_file_sink.assert_not_called()
-    mock_pg.assert_not_called()
-
-
 def test_init_cli_process_idempotent() -> None:
     """Repeated calls to init_cli_process trigger only one sink chain."""
     with (

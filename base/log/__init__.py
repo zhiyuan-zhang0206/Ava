@@ -117,7 +117,6 @@ __all__ = [
     "init_agent_process",
     "init_cli_process",
     "init_gateway_process",
-    "init_restricted_process",
     "init_subprocess_logger",
     "logger",
 ]
@@ -519,8 +518,7 @@ def init_gateway_process(name: str = "gateway") -> None:
 
 
 def init_cli_process(*, name: str) -> None:
-    """Called once by the CLI verbs that bring a unit up and by the PITR base worker
-    (``pitr-base-worker``). Identical sink set to ``init_gateway_process``,
+    """Called once by the CLI verbs that bring a unit up. Identical sink set to ``init_gateway_process``,
     minus its ``service_started`` row: stderr (human) + file (``<name>.log``)
     + unified event pipeline (agent_id NULL).
 
@@ -547,25 +545,5 @@ def init_cli_process(*, name: str) -> None:
 
     _add_file_sink(logs_dir() / f"{name}.log")
     add_postgres_sink(process=name)
-    _install_stdlib_intercept()
-    _init_done = True
-
-
-def init_restricted_process() -> None:
-    """Called once by a worker that runs with no authority: stderr only.
-
-    The PITR restore worker (`services/pitr/restore_worker.py`) runs in
-    `base.native_process.child_env.restricted_process_env()` — no HOME, no AVA_HOME — so
-    it has no home to write a file sink under and must never build Settings,
-    which would load the home's `.env` and its credentials. Every other init
-    resolves `logs_dir()` and builds Settings, so this one opens only the
-    stderr sink, plain text: the worker's stderr is its operation's
-    `stderr.log`, whose tail a failure carries, never a terminal.
-    """
-    global _init_done  # noqa: PLW0603
-    if _init_done:
-        return
-    _configure_windows_event_loop_policy()
-    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=False)
     _install_stdlib_intercept()
     _init_done = True
