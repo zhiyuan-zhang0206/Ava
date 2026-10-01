@@ -1,5 +1,8 @@
 {
   "complexity": {
     "gateway/ttl_reaper/__init__.py::_reaper_loop": 18
+  },
+  "files": {
+    "gateway/ttl_reaper/tests/test_ttl_reaper.py": 1159
   }
 }

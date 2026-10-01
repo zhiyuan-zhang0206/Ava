@@ -1,20 +1,9 @@
 {
   "complexity": {
-    "tests/ava/test_external.py::test_failed_context_entry_restores_prior_binding_and_allows_next_attachment": 15,
-    "tests/ava/test_shell_background.py::test_run_background_e2e_notice_log_and_close": 16
-  },
-  "directories": {
-    "tests/ava": 56
+    "tests/ava/test_external.py::test_failed_context_entry_restores_prior_binding_and_allows_next_attachment": 15
   },
   "files": {
-    "tests/ava/mcps/test_daemon.py": 2110,
-    "tests/ava/test_agents_sdk.py": 1162,
-    "tests/ava/test_mcps.py": 1367,
-    "tests/ava/test_self_evolution_collect.py": 913,
-    "tests/ava/test_skills.py": 1502,
-    "tests/ava/test_understand.py": 967,
-    "tests/ava/test_watcher.py": 1078,
-    "tests/ava/test_web.py": 1046
+    "tests/ava/test_agents_sdk.py": 1162
   },
   "patch_targets": {
     "tests/ava/sdk_surface/test_metering.py::ava.sdk_surface.metering._instrument_targets": 2,
@@ -37,23 +26,7 @@
     "tests/ava/test_external.py::ava.mcps._run_async": 1,
     "tests/ava/test_external.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 2,
     "tests/ava/test_external_integration.py::ava.gateway_client.transport._client": 2,
-    "tests/ava/test_lazy_plugin_load.py::agent.extensions.__spec__._initializing": 4,
-    "tests/ava/test_mcps.py::ava.mcps._connect": 4,
-    "tests/ava/test_mcps.py::ava.mcps._connect_http": 1,
-    "tests/ava/test_mcps.py::ava.mcps._get_remote_client": 7,
-    "tests/ava/test_mcps.py::ava.mcps._read_cache": 10,
-    "tests/ava/test_mcps.py::ava.mcps._remote": 18,
-    "tests/ava/test_mcps.py::ava.mcps._session_locks": 6,
-    "tests/ava/test_mcps.py::ava.mcps._session_stacks": 1,
-    "tests/ava/test_mcps.py::ava.mcps._sessions": 8,
-    "tests/ava/test_mcps.py::ava.mcps._write_cache": 3,
-    "tests/ava/test_migration_reset.py::base.deploy.schema.migrations._squash_history": 2,
-    "tests/ava/test_migrations.py::base.deploy.schema.migrations._schema_mutation_lock": 1,
     "tests/ava/test_presets_sdk.py::ava.gateway_client.transport._client": 1,
-    "tests/ava/test_session_venv_projection.py::ava.shell.sessions._next_session_index_from_db": 2,
-    "tests/ava/test_session_venv_projection.py::ava.shell.sessions._record_ttl": 2,
-    "tests/ava/test_session_venv_projection.py::ava.shell.sessions._shell_prefix": 2,
-    "tests/ava/test_shell_scan.py::base.sessions.backend._shell_backend": 3,
     "tests/ava/test_ui.py::ava.gateway_client.transport._client": 1,
     "tests/ava/test_ui.py::ava.ui._SERVE_READY_TIMEOUT_S": 2,
     "tests/ava/test_ui.py::ava.ui._reject_foreign_port_occupant": 1,

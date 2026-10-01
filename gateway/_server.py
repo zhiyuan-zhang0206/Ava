@@ -148,7 +148,7 @@ def serve_kwargs(*, host: str, app: str = "gateway.app:app") -> dict[str, Any]:
 
     The single assembly point of the launch contract: ``main()`` hands the dict
     straight to ``serve``, and the shutdown regression
-    (``tests/gateway/test_server_shutdown.py``) starts a real child-process
+    (``gateway/tests/test_server_shutdown.py``) starts a real child-process
     server from the same dict — only the bind address, the app path and the
     port are swapped — so a field dropped here (in particular
     ``timeout_graceful_shutdown``) fails a real server, not just a mock.

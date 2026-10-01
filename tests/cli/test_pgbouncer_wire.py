@@ -4,7 +4,7 @@ Postgres. Proves the load-bearing wire behaviour the unit tests cannot:
 - scram-sha-256 client auth against a userlist entry, with a credential-less
   server hop (here TCP loopback trust — the pooling behavior under test is
   independent of the hop's auth; the production verifier userlist and SCRAM
-  pass-through socket hop are proven in tests/lifecycle/db_authority/test_single_box.py),
+  pass-through socket hop are proven in cli/commands/tests/test_single_box.py),
 - transaction pooling with `prepare_threshold=None` (never prepare) — the same
   query run across many autocommit transactions never hits "prepared statement
   does not exist" as different backends are handed out,

@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "services/ava_root/tests/test_ava_root_selfcheck.py::test_missing_process_opens_one_event_per_episode": 15
+  }
+}

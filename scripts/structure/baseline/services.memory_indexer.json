@@ -1,6 +1,17 @@
 {
   "complexity": {
     "services/memory_indexer/backends/milvus.py::_schema_problem": 19,
-    "services/memory_indexer/daemon.py::_process_paths": 25
+    "services/memory_indexer/daemon.py::_process_paths": 25,
+    "services/memory_indexer/embeddings/tests/test_embeddings.py::_embedding_server.<locals>.Handler.do_POST": 19,
+    "services/memory_indexer/tests/test_memory_indexer.py::test_reconcile_retry_drain_loop_converges_after_embed_failures": 15,
+    "services/memory_indexer/tests/test_memory_indexer.py::test_reconcile_retry_schedule_backoff_and_reset": 21
+  },
+  "files": {
+    "services/memory_indexer/embeddings/tests/test_embeddings.py": 922,
+    "services/memory_indexer/tests/test_memory_indexer.py": 1515
+  },
+  "patch_targets": {
+    "services/memory_indexer/embeddings/tests/test_embeddings.py::base.telemetry.tracing._state": 1,
+    "services/memory_indexer/tests/test_memory_indexer.py::services.memory_indexer.embeddings.gemini._EMBED_POLICY": 1
   }
 }

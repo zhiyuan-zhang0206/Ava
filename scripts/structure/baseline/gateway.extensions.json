@@ -1,0 +1,5 @@
+{
+  "patch_targets": {
+    "gateway/extensions/tests/test_inventory_router.py::gateway.cluster.roster_probe._probe_failures": 3
+  }
+}

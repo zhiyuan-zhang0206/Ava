@@ -21,7 +21,7 @@ from base.config import FIELD_INFOS, get_field
 from base.host.env.port_table import FIXED_PORTS
 
 # The private range the suite draws its own listening ports from when the kernel's
-# ephemeral range is not wanted (tests/cli/test_pooler_stop.py).
+# ephemeral range is not wanted (cli/commands/data_plane/tests/test_pooler_stop.py).
 _PRIVATE_TEST_PORTS_START = 21000
 
 

@@ -1,5 +1,8 @@
 {
   "complexity": {
     "services/hierarchy_worker/scan.py::_scan_tails": 16
+  },
+  "files": {
+    "services/hierarchy_worker/tests/test_hierarchy_worker.py": 897
   }
 }

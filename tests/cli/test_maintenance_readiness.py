@@ -8,10 +8,12 @@ import cli.commands.lifecycle.start as _start_commands
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission
 from base.deploy.state import host_deploy_state
+from cli.commands.lifecycle.tests.test_start_readiness_gate import (
+    _hermetic_start as _hermetic_start,
+)
+from cli.commands.lifecycle.tests.test_start_readiness_gate import _roster
 from gateway.app import app
 from tests.agent.test_maintenance import isolate as isolate
-from tests.cli.test_start_readiness_gate import _hermetic_start as _hermetic_start
-from tests.cli.test_start_readiness_gate import _roster
 from tests.services.test_maintenance_readiness import held as held
 
 pytestmark = pytest.mark.real_service_readiness_gate

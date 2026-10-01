@@ -84,7 +84,7 @@ def test_attribute_logger_is_covered():
 
 
 def test_logger_name_in_any_case_is_covered():
-    # `_global_logger` is tests/gateway/test_log_sink.py's real shape; a name
+    # `_global_logger` is base/agents/tests/test_log_sink.py's real shape; a name
     # that breaks the lowercase convention is still a loguru sink.
     for receiver in ("_global_logger", "LOGGER", "runLogger", "self.Logger"):
         assert len(_violations(f"{receiver}.add(sink)\n")) == 1, receiver

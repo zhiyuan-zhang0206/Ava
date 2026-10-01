@@ -3,7 +3,7 @@
 
 The cmd_* functions import `base.host.net.http_dial` inside their bodies, so patching
 the module attributes here takes effect at call time (same seam as
-`tests/cli/test_agents_cmd.py`). What's under test is the client-side logic:
+`cli/parsers/tests/test_agents_cmd.py`). What's under test is the client-side logic:
 name-or-id resolution, the script-source XOR, the exclude-unset update body,
 the tri-state enable/disable flag, and the error-detail surfacing.
 """

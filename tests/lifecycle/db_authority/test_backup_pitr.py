@@ -37,11 +37,11 @@ from base.host.net.url_secret import url_with_port
 from base.native_process.child_env import restricted_process_env
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
+from cli.commands.tests.test_single_box import Born
+from cli.commands.tests.test_single_box import born as born
+from cli.commands.tests.test_single_box import configured as configured
 from services import backup
 from services.pitr.stores import factory
-from tests.lifecycle.db_authority.test_single_box import Born
-from tests.lifecycle.db_authority.test_single_box import born as born
-from tests.lifecycle.db_authority.test_single_box import configured as configured
 
 pytestmark = pytest.mark.skipif(
     not (Path(pooler.pgbouncer_bin()).exists() or shutil.which(pooler.pgbouncer_bin())),

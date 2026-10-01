@@ -170,7 +170,7 @@ def test_log_sink_pipeline_drain_thread_stays_alive() -> None:
     Postgres pool, only the queue + drain thread + JSONL mirror.
 
     Asserts the emitter pipeline `add_postgres_sink` opens, matching
-    tests/gateway/test_log_sink.py; only the sink handler this call adds is
+    base/agents/tests/test_log_sink.py; only the sink handler this call adds is
     removed, the shared pipeline is left as the rest of the suite expects it.
     """
     sink_id = base.log.add_postgres_sink()

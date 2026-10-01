@@ -9,7 +9,7 @@ touched, a row that moved on is refused, and the reap's CAS composes with the
 admission and resurrection transitions without tearing. Each termination
 also commits the death's recovery wake — one marked system chat (task
 #4039); the attempt that consumes it is locked in
-`tests/services/test_crash_recovery.py`.
+`services/agent_host/tests/test_crash_recovery.py`.
 """
 
 from __future__ import annotations

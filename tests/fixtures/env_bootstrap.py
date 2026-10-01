@@ -119,7 +119,7 @@ os.environ["AVA_CONFIG_FETCH"] = "skip"
 # import) — pin the environment before the first Settings construction instead,
 # and declare the same key in the test home's .env below so the cluster-env
 # authority pass takes its force branch (an undeclared cluster-scope key is
-# DROPPED). Feature tests (tests/agent/test_history_dump.py) flip the singleton
+# DROPPED). Feature tests (agent/tests/test_history_dump.py) flip the singleton
 # back on per test.
 os.environ["AVA_COMPACT_HISTORY_DUMP"] = "false"
 
@@ -291,7 +291,7 @@ os.environ["AVA_GATEWAY_URL"] = "http://test-gateway.invalid:8000"
 # the alerts ingest + im_bridge /send, but the leak class is general (the
 # telegram skill, IM adapters, any future direct caller). Pinned empty like
 # the db/redis sentinels: a test that needs a token monkeypatches
-# `settings.telegram` explicitly (tests/cli/test_cluster_health.py does).
+# `settings.telegram` explicitly (cli/commands/cluster/tests/test_cluster_health.py does).
 os.environ["AVA_TELEGRAM_BOT_TOKEN"] = ""
 os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
 # Terminal/execution transport tests have no inherited desktop-helper route.
@@ -322,7 +322,7 @@ os.environ.pop("AVA_PERMISSIONS_HELPER_PORT", None)
 # inside an agent process carries the production AVA_PITR_* set — including
 # AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE — so a fixture `.env` that deliberately
 # omits the viewer credential is completed into a VALID candidate and the
-# expected rejection returns 200 (tests/gateway/test_config_candidate_api.py::
+# expected rejection returns 200 (gateway/routers/tests/test_config_candidate_api.py::
 # test_put_rejects_invalid_oss_candidate_without_writing, 2026-09-16). CI is green because it carries no such env; scrubbing here makes
 # a local run resolve exactly as CI does. A test that exercises PITR config sets
 # its own keys (monkeypatch / write_fields).
@@ -468,7 +468,7 @@ from base.native_process.os_platform import raise_fd_limit
 assert settings.data_plane.events_channel == _TEST_EVENTS_CHANNEL
 # A dev operator's .env may carry exec_timeout_seconds (≠ the field default),
 # which the module-load settings reads. The timeout-marker tests
-# (tests/agent/test_cancel.py) assert against the documented default, so pin it
+# (agent/graph/exec/tests/test_cancel.py) assert against the documented default, so pin it
 # back — local must match CI, whose fresh .env has no such value (60s).
 settings.sandbox.exec_timeout_seconds = 60.0
 os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"

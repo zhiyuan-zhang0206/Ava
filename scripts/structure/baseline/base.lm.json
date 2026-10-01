@@ -5,6 +5,7 @@
     "base/lm/tests/test_provider_plugins.py::test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract": 17
   },
   "files": {
+    "base/lm/tests/test_llm_factory.py": 1689,
     "base/lm/tests/test_provider_plugins.py": 949
   },
   "patch_targets": {

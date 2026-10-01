@@ -542,7 +542,7 @@ Event = Annotated[
 # One registry listing every live role with its fleet-wide flag (R2-C):
 # SYSTEM_ROLES / GLOBAL_ROLES and the runtime EVENT_ADAPTER derive from it, so
 # adding a role means adding the class + one entry here (and the static `Event`
-# union below — a bidirectional test in tests/agent/test_events_wire_format.py
+# union below — a bidirectional test in base/events/live/tests/test_events_wire_format.py
 # pins union == registry).
 _ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (ChatStart, False),

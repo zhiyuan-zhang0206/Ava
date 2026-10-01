@@ -677,7 +677,7 @@ class TestSendSystemNote:
 class TestGetNeighbors:
     """SDK get_neighbors maps the gateway rows to Neighbor dataclasses (status to
     the AgentStatus enum). The graph behaviors (Loki live tail + archive stitch)
-    are covered in tests/gateway/test_agent_neighbors.py; here we verify the
+    are covered in gateway/tests/test_agent_neighbors.py; here we verify the
     wrapper + wire path only, seeding ties through the FakeLoki live tail."""
 
     @staticmethod
@@ -768,7 +768,7 @@ class TestGetNeighbors:
 class TestGetAncestors:
     """SDK get_ancestors maps the gateway `ancestors` rows to Neighbor
     dataclasses. The chain walk itself is covered in
-    tests/gateway/test_agent_neighbors.py; here we verify the wrapper + wire
+    gateway/tests/test_agent_neighbors.py; here we verify the wrapper + wire
     path only. Ancestry is the immutable `agents_meta.born_spawner` chain, so
     it is seeded on the row; the FakeLoki spawn event only feeds the tie
     graph."""

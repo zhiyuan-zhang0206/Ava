@@ -14,7 +14,7 @@ from base.config import settings
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host import host as host_module
-from tests.agent.test_hosted_compact_failure import _prepare_graph
+from services.agent_host.tests.test_hosted_compact_failure import _prepare_graph
 from tests.agent.test_inbound_ownership import _admit, _agent
 from tests.agent.test_lifecycle_intent import _command
 

@@ -48,7 +48,7 @@ def test_status_cell_identity_mismatch_outranks_online() -> None:
     assert _status_cell(online=False, identity_mismatch=False, stopped_at=stopped) == "stopped"
     assert _status_cell(online=False, identity_mismatch=False, stopped_at=None) == "offline"
     # online + a stop marker is the two sources of truth disagreeing, not a green
-    # host — see tests/cli/test_rollout_robustness.py for why that mattered.
+    # host — see cli/commands/lifecycle/tests/test_rollout_robustness.py for why that mattered.
     assert _status_cell(online=True, identity_mismatch=False, stopped_at=stopped) == "STALE-STOP"
 
 

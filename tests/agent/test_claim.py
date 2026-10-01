@@ -2774,7 +2774,7 @@ async def test_container_mode_continues_without_touching_messages():
     """ops_pool=None → container mode skips all inbound dispatch and heads to
     before_llm without writing messages. The system prompt an eval starts from is
     laid down by `init_context`, which runs before claim (see
-    tests/agent/test_init_context.py)."""
+    agent/graph/tests/test_init_context.py)."""
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="<sys>")]),
         _make_runtime(ops_pool=None),

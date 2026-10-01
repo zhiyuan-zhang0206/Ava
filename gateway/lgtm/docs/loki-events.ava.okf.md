@@ -121,8 +121,8 @@ structured metadata.
   never calls DB/Loki or runs while the budget lock is held. Routes stage their
   Postgres reads outside this boundary, so queueing for Loki does not hold a
   pooled database connection.
-- Tests: `tests/gateway/test_loki_events.py` (httpx-faked unit tests for all
-  three functions), `tests/gateway/test_agent_inspect.py` (route tests with
+- Tests: `gateway/lgtm/tests/test_loki_events.py` (httpx-faked unit tests for all
+  three functions), `gateway/tests/test_agent_inspect.py` (route tests with
   an in-memory `_FakeLoki`).
 - Parent node: [[gateway.ava.okf.md|Gateway]]; write side:
   [[base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]].

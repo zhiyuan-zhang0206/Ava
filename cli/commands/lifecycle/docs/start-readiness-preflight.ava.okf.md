@@ -46,10 +46,10 @@ an already-down host it protects nothing, but a bounce could not have made it
 past the same condition either). The mirror checks inside start stay where they
 are — this gate narrows the window, it does not replace them.
 
-Tests: `tests/cli/test_start_readiness_preflight.py` pins each check family's
+Tests: `cli/commands/lifecycle/tests/test_start_readiness_preflight.py` pins each check family's
 disposition and the `check_launcher` toggle; the caller-level refusal contracts
 live in
-`tests/cli/test_commands_restart_stop.py::test_cmd_restart_aborts_when_start_readiness_fails`.
+`cli/commands/lifecycle/tests/test_commands_restart_stop.py::test_cmd_restart_aborts_when_start_readiness_fails`.
 
 ## Key Dependencies
 
