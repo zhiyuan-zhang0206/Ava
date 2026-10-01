@@ -37,7 +37,9 @@ import pytest
 # Fixture module -> the paths whose tests it governs. One module per former
 # conftest, so the autouse names register in one alphabetical batch, as in a
 # conftest.
-PATH_SCOPES: dict[str, tuple[str, ...]] = {}
+PATH_SCOPES: dict[str, tuple[str, ...]] = {
+    "tests.path_scoped.structure_tests": ("tests/scripts/structure",),
+}
 
 _MODULES_BY_PATH: dict[str, list[str]] = {}
 for _module, _paths in PATH_SCOPES.items():
