@@ -15,9 +15,10 @@ import getpass
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -34,7 +35,6 @@ from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.tests.test_single_box import Born
 from cli.commands.tests.test_single_box import born as born
 from cli.commands.tests.test_single_box import configured as configured
-from services import backup
 from services.gateway_side.backup import offsite
 
 pytestmark = pytest.mark.skipif(
@@ -100,14 +100,16 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
 
     agent_id = _seed_conversation(maintenance)
     dumps: list[tuple[list[str], dict[str, str] | None]] = []
-    real = backup._run_with_progress
+    real = cast("Callable[..., subprocess.CompletedProcess[bytes]]", subprocess.run)
 
+    # Without a progress sink the backup runs each stage as exactly `subprocess.run`, so this
+    # is what the dump child is spawned with.
     def spy(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        if argv[0].endswith("pg_dump"):
+        if str(argv[0]).endswith("pg_dump"):
             dumps.append((argv, kwargs.get("env")))
         return real(argv, **kwargs)
 
-    monkeypatch.setattr(backup, "_run_with_progress", spy)
+    monkeypatch.setattr(subprocess, "run", spy)
     work = tmp_path / "work"
     work.mkdir(mode=0o700)
     # The scheduled worker's own operation, then the controller's publication.
