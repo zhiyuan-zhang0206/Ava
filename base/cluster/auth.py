@@ -48,12 +48,6 @@ def delivered_token() -> str | None:
     return os.environ.get(API_TOKEN_ENV) or None
 
 
-def client_bearer(cluster_secret: str) -> str:
-    """The bearer a client presents: its delivered machine token, else the human
-    secret (an operator on the gateway home); empty = the open posture."""
-    return delivered_token() or cluster_secret
-
-
 def verify_bearer(authorization: str | None, secret: str) -> bool:
     """True iff `authorization` carries exactly `Bearer <secret>`, compared in
     constant time. A blank configured `secret` never verifies — an unset
