@@ -213,16 +213,13 @@ def _leak_lines(
             f"  GUARD FAULT [{stage}] in {len(faulted)} test report(s): {faulted[0]['detail']}"
         )
     # One line per (file, kind, thing leaked): a file whose every test leaks the same key is one line,
-    # not fifty. The identity slots (assigned bare by hundreds of tests) go last: they cannot push the
-    # rest out of the annotation.
+    # not fifty.
     groups: dict[tuple[str, str, str], set[str]] = {}
     for leak in leaks:
         file, _, name = leak["test"].partition("::")
         thing = leak["detail"].split(" ", 1)[0].rstrip(":")
         groups.setdefault((file, leak["kind"], thing), set()).add(name)
-    for (file, kind, thing), names in sorted(
-        groups.items(), key=lambda g: (g[0][1] == "identity", g[0])
-    ):
+    for (file, kind, thing), names in sorted(groups.items()):
         lines.append(f"  {file}  [{kind}] {thing}  x{len(names)} test(s), e.g. {sorted(names)[0]}")
     return lines
 
