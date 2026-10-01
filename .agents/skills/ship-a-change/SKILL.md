@@ -101,20 +101,27 @@ Still on you:
 
 ### Steps
 
-1. `git worktree add -b ava-<id>-<task> .worktrees/ava-<id>-<task> main`
-2. Develop and commit in the new worktree (run `bash scripts/setup-worktree.sh`
-   on first use: it creates the worktree's own real `.venv` when absent, runs the
-   locked install and `npm ci` for `ui/web` — the UI hooks need `node_modules`.
-   Worktree uv iron rule in [runbook](../../../conventions/runbook.md) for a
-   manual setup: discard an inherited `VIRTUAL_ENV`, then
-   `python scripts/host_ops/guard_editable_venv.py .` and
-   `env -u VIRTUAL_ENV uv sync`). A worktree
-   `.venv` must be a real directory under this checkout, **never a symlink**
-   to a shared venv (`ln -s ~/Ava/.venv .venv`): a later `uv sync` then writes
-   through the symlink and re-points the shared venv's editable `.pth` at this
-   worktree — breaking every other checkout that uses that venv (pyright
-   phantom-error storms; a prod exec outage). Setting up manually:
-   `env -u VIRTUAL_ENV python scripts/host_ops/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`,
+1. `bash scripts/setup-worktree.sh <task>` — the only way to create a worktree;
+   run it from the main clone or any worktree. It fetches `origin/main`, creates
+   `.worktrees/<task>` on branch `ava-<task>` under the main clone (`--branch NAME`
+   / `--base REF` override), builds the worktree's own real `.venv`, runs the locked
+   install and `npm ci` for `ui/web`, and fails unless the shared hooks, the
+   editable-install guard and a clean `git status` hold. The last stdout line is
+   `worktree ready: <path> (branch <branch>)`; `cd` there (a script cannot change
+   your shell's directory). Re-running it only re-bootstraps; if it stops midway the
+   worktree is kept, so run `bash scripts/setup-worktree.sh` with no argument inside
+   it to resume. Never hand-make a worktree with `git worktree add`. A worktree
+   made by another tool (Claude Code's own lands in `.claude/worktrees/<name>/`
+   with no dependencies) is completed by the same no-argument run inside it; the
+   main clone is refused.
+2. Develop and commit in that worktree. Its `.venv` is a real directory under the
+   checkout, **never a symlink** to a shared venv (`ln -s ~/Ava/.venv .venv`): a
+   later `uv sync` then writes through the symlink and re-points the shared venv's
+   editable `.pth` at this worktree — breaking every other checkout that uses that
+   venv (pyright phantom-error storms; a prod exec outage). Troubleshooting only
+   (the script already does this; worktree uv iron rule in
+   [runbook](../../../conventions/runbook.md)):
+   `env -u VIRTUAL_ENV python scripts/host_ops/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync --frozen`,
    then confirm `.venv/lib/python3.12/site-packages/_editable_impl_ava.pth`
    names this worktree. For a test-only run with no worktree venv of its own,
    reuse another worktree's real venv instead — see

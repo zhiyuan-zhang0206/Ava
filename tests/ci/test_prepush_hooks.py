@@ -57,9 +57,9 @@ def run_guard(
     )
 
 
-def check_install(repo: Path) -> subprocess.CompletedProcess[str]:
+def check_install(repo: Path, *flags: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(CHECK)],
+        [sys.executable, str(CHECK), *flags],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -565,6 +565,17 @@ def test_missing_hook_warns(checkout: Path) -> None:
     assert "WARNING: missing" in result.stdout and INSTALL in result.stdout
     assert ".git/hooks/pre-commit" in result.stdout
     assert ".git/hooks/pre-push" in result.stdout
+
+
+def test_strict_mode_fails_on_a_problem_and_passes_when_healthy(checkout: Path) -> None:
+    failed = check_install(checkout, "--strict")
+    assert failed.returncode == 1
+    assert "WARNING: missing" in failed.stdout and INSTALL in failed.stdout
+    assert "Warn-only" not in failed.stdout
+
+    install_fixture(checkout)
+    passed = check_install(checkout, "--strict")
+    assert passed.returncode == 0 and passed.stdout == passed.stderr == ""
 
 
 @pytest.mark.parametrize("problem", ["ephemeral", "dot-worktrees", "wrong-stage", "malformed"])
