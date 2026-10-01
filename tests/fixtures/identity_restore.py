@@ -28,7 +28,6 @@ IDENTITY_SLOTS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "ava.agent_identity",
         ("_agent_id", "_owns_loop", "_actor", "_external_agent_id", "_external_identity"),
     ),
-    ("base.native_process.turn_identity", ("_process_agent_id",)),
 )
 # (module, name): ContextVars, read through `.get()` in the main thread's context.
 IDENTITY_CONTEXTVARS: tuple[tuple[str, str], ...] = (

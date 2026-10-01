@@ -141,32 +141,16 @@ def effective_agent_id() -> int | None:
 
 # ── Deferred attribution (log sinks) ──
 
-# The agent a process attributes its records to when no turn is bound. Set by
-# `base.log.init_agent_process`; stays None in a process that hosts many
-# agents' turns, and in one that owns no agent at all (gateway, ops).
-_process_agent_id: int | None = None
-
-
-def set_process_agent_id(agent_id: int | None) -> None:
-    """Declare which agent this process is, for records written outside a turn.
-
-    Deliberately NOT folded into `effective_agent_id`: that read answers "who is
-    executing", and its env fallback is the launched-child channel. This slot
-    answers "whose log file is this", which only the logging init knows.
-    """
-    global _process_agent_id  # noqa: PLW0603 — process-level singleton
-    _process_agent_id = agent_id
-
 
 class TurnScopedAgentId:
     """Deferred `agent_id` for a sink: resolves per record, not per process.
 
     `logger.configure(extra=...)` freezes its values at bind time, which is
-    exactly right for one agent per process and wrong for the hosted runner,
-    where one process writes log lines on behalf of every local agent. Binding
-    an instance of this instead defers the answer to write time:
+    wrong for the hosted runner, where one process writes log lines on behalf
+    of every local agent. Binding an instance of this instead defers the answer
+    to write time:
 
-        turn contextvar  >  this process's agent  >  `-` (no agent)
+        turn contextvar  >  `-` (no agent)
 
     A caller that passes `agent_id=N` explicitly replaces the whole extra value
     and never reaches this — explicit attribution still wins.
@@ -182,11 +166,7 @@ class TurnScopedAgentId:
     def resolve(self) -> str:
         """The agent id for the record being written, or the `-` no-agent sentinel."""
         bound = _TURN_AGENT_ID.get()
-        if bound is not None:
-            return str(bound)
-        if _process_agent_id is not None:
-            return str(_process_agent_id)
-        return "-"
+        return str(bound) if bound is not None else "-"
 
     def __str__(self) -> str:
         return self.resolve()

@@ -1,17 +1,15 @@
 """Turn-scoped log attribution — which agent a log record belongs to.
 
-Prerequisite 3 of `future/infra/agent-runner-as-server.md` Phase 1.
-`init_agent_process` used to freeze the agent id into loguru's `extra` at
-process boot, which is exact for one agent per process and wrong for the hosted
-runner: every record the process writes would carry whichever agent booted it.
-The binding is now a `base.native_process.turn_identity.TurnScopedAgentId` resolved per
-record — turn contextvar first, this process's agent second.
+Prerequisite 3 of `future/infra/agent-runner-as-server.md` Phase 1. The hosted
+runner writes log records for every local agent from one process, so a fixed
+`agent_id` frozen into loguru's `extra` would stamp every record with the same
+agent. The default binding is a
+`base.native_process.turn_identity.TurnScopedAgentId` resolved per record from
+the turn contextvar.
 
-Locked here: process-mode equivalence (the resolved value is the boot agent),
-turn scoping (a bound turn wins), explicit `agent_id=` still winning over both,
-the `-` no-agent sentinel surviving, the human/JSONL renderings resolving rather
-than printing an object repr, the attribution slot staying independent of
-`effective_agent_id`'s env channel, and the same three-layer order in
+Locked here: turn scoping (a bound turn wins), explicit `agent_id=` still
+winning, the `-` no-agent sentinel outside a turn, the human/JSONL renderings
+resolving rather than printing an object repr, and the same turn-first order in
 `base.telemetry.emit`'s ambient fallback.
 """
 
@@ -23,19 +21,11 @@ import pytest
 
 from base import telemetry
 from base.log import _message_to_params
-from base.native_process import turn_identity
 from base.native_process.turn_identity import (
     TURN_SCOPED_AGENT_ID,
     TurnScopedAgentId,
     bind_turn_identity,
-    set_process_agent_id,
 )
-
-
-@pytest.fixture
-def process_agent(monkeypatch: pytest.MonkeyPatch):
-    """Pretend this process booted as agent 7 (what init_agent_process does)."""
-    monkeypatch.setattr(turn_identity, "_process_agent_id", 7)
 
 
 class _FakeMessage:
@@ -59,25 +49,19 @@ def _agent_id_of(extra: dict[str, object]) -> int | None:
 
 
 class TestResolution:
-    def test_unbound_resolves_to_the_process_agent(self, process_agent) -> None:
-        assert TurnScopedAgentId().resolve() == "7"
-        assert _agent_id_of({"agent_id": TURN_SCOPED_AGENT_ID, "event": "log"}) == 7
-
-    def test_turn_binding_wins(self, process_agent) -> None:
+    def test_turn_binding_wins(self) -> None:
         with bind_turn_identity(42):
+            assert TurnScopedAgentId().resolve() == "42"
             assert _agent_id_of({"agent_id": TURN_SCOPED_AGENT_ID, "event": "log"}) == 42
-        assert _agent_id_of({"agent_id": TURN_SCOPED_AGENT_ID, "event": "log"}) == 7
+        assert _agent_id_of({"agent_id": TURN_SCOPED_AGENT_ID, "event": "log"}) is None
 
-    def test_no_process_agent_and_no_turn_is_the_dash_sentinel(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_turn_is_the_dash_sentinel(self) -> None:
         """A host process binds no agent of its own; a record written outside
         any turn (the host's own bookkeeping) stays unattributed."""
-        monkeypatch.setattr(turn_identity, "_process_agent_id", None)
         assert TurnScopedAgentId().resolve() == "-"
         assert _agent_id_of({"agent_id": TURN_SCOPED_AGENT_ID, "event": "log"}) is None
 
-    def test_explicit_agent_id_still_wins(self, process_agent) -> None:
+    def test_explicit_agent_id_still_wins(self) -> None:
         """`logger.bind(agent_id=N)` replaces the extra value outright, so it
         never reaches the deferred binding — attribution stays explicit."""
         with bind_turn_identity(42):
@@ -109,8 +93,8 @@ class TestDefaultBinding:
         The hosted agent-runner inits through `init_gateway_process`. A static
         sentinel there stamps EVERY hosted agent's record with `-`, discarding
         attribution the turn contextvar is holding at that very moment. Binding
-        the deferred object costs an ordinary daemon nothing — with no turn and
-        no process agent it still resolves to `"-"`.
+        the deferred object costs an ordinary daemon nothing — with no turn it
+        still resolves to `"-"`.
 
         Asserted through the init function rather than by reading the live
         logger's `extra`: `logger.configure` REPLACES the whole dict and several
@@ -134,48 +118,17 @@ class TestDefaultBinding:
         bound = configure.call_args.kwargs["extra"]["agent_id"]
         assert isinstance(bound, TurnScopedAgentId)
 
-    def test_daemon_style_process_attributes_a_bound_turn(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The hosted case end to end at the record level: no process agent (a
-        daemon init), a turn bound, so the record belongs to that turn's agent —
-        and outside the turn the same process is back to unattributed."""
-        monkeypatch.setattr(turn_identity, "_process_agent_id", None)
-
-        with bind_turn_identity(314):
-            assert _agent_id_of({"agent_id": TURN_SCOPED_AGENT_ID, "event": "log"}) == 314
-        assert _agent_id_of({"agent_id": TURN_SCOPED_AGENT_ID, "event": "log"}) is None
-
-
-class TestProcessSlot:
-    def test_setter_is_what_the_resolution_reads(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """`init_agent_process` declares the process's agent through the setter;
-        restore it afterwards so a real init in this process is not disturbed."""
-        monkeypatch.setattr(turn_identity, "_process_agent_id", None)
-        set_process_agent_id(11)
-        assert TurnScopedAgentId().resolve() == "11"
-        set_process_agent_id(None)
-        assert TurnScopedAgentId().resolve() == "-"
-
-    def test_slot_does_not_feed_effective_agent_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The two reads answer different questions — "whose log file is this"
-        vs "who is executing" — so the attribution slot must not leak into the
-        execution read, whose second layer is the AVA_AGENT_ID env channel."""
-        monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-        monkeypatch.setattr(turn_identity, "_process_agent_id", 7)
-        assert turn_identity.effective_agent_id() is None
-        with bind_turn_identity(42):
-            assert turn_identity.effective_agent_id() == 42
-
 
 class TestRendering:
-    def test_format_spec_applies_to_the_resolved_value(self, process_agent) -> None:
+    def test_format_spec_applies_to_the_resolved_value(self) -> None:
         # The human stderr format is `a={extra[agent_id]:>3}`.
-        assert f"{TURN_SCOPED_AGENT_ID:>3}" == "  7"
+        assert f"{TURN_SCOPED_AGENT_ID:>3}" == "  -"
+        with bind_turn_identity(7):
+            assert f"{TURN_SCOPED_AGENT_ID:>3}" == "  7"
         with bind_turn_identity(1234):
             assert f"{TURN_SCOPED_AGENT_ID:>3}" == "1234"
 
-    def test_str_resolves_for_the_jsonl_sink(self, process_agent) -> None:
+    def test_str_resolves_for_the_jsonl_sink(self) -> None:
         # loguru's serialize=True dumps extra with `default=str`.
         import json
 

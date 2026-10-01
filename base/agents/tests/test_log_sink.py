@@ -126,7 +126,7 @@ def test_sink_agent_id_numeric_string_converts_to_int(
     sink_logger,
     db_conn: psycopg.Connection,
 ) -> None:
-    """agent_id="42" (init_agent_process bind) → the mirror row carries 42."""
+    """agent_id="42" (the string `init_subprocess_logger` binds) → the mirror row carries 42."""
     tid = _insert_agent(db_conn)
     db_conn.commit()
     sink_logger.bind(agent_id=str(tid)).info("from agent", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
