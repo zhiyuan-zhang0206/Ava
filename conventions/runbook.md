@@ -2166,9 +2166,20 @@ installations pass. It prints the repair commands and passes: v1 is warn-only so
 hook rollout does not block commits; CI independently enforces the checks.
 Review any `core.hooksPath` override before removing it and installing.
 
-Commit hooks keep linting and code-generation checks. Frontend typecheck
-(including Next.js route typegen), ESLint and the full Vitest suite run at
-**pre-push**, scoped by their own `files:` filter to frontend changes. Strict
+A commit hook's cost follows the change, not the repository. The per-file
+Python and content lints take the changed files (`--only FILE...`; the contract,
+and what widens the run to a full scan, is the
+[changed-files mode](../scripts/lint/docs/changed-files-mode.ava.okf.md)). The
+code-generation freshness hooks, whose check needs the whole project, run only
+when one of the inputs in their `files:` filter changed. ESLint lints the changed
+frontend files (`scripts/precommit-eslint.sh`) and the whole project when the
+lint setup itself changed. A hook that scans the whole repository on every
+commit regardless of the diff is a design error, not a price of the check; CI's
+`pre-commit run --all-files` is the full scan of every hook and the merge gate.
+Frontend typecheck (including Next.js route typegen), the whole-project ESLint
+run (`frontend-eslint-full`: a type-aware rule can react to a type that changed
+in another file, which the per-file run cannot see) and the full Vitest suite run
+at **pre-push**, scoped by their own `files:` filter to frontend changes. Strict
 pyright also runs at pre-push, but scoped to the branch's own changed `.py`
 files (`scripts/prepush-pyright-files.sh`, `merge-base(origin/main,
 HEAD)..HEAD`, ACMR + still on disk) — never the whole repository locally
@@ -2197,29 +2208,36 @@ create), and one that a per-file verdict cannot see:
   all, over `git merge-base origin/main HEAD`..`HEAD` instead of whatever two
   endpoints pre-commit's own push-time selection would use — so a
   conflict-resolution or cherry-picked commit gets checked before it can
-  reach `git push` unchecked. It skips (same `scripts/prepush-guard.sh`
-  lock/load/missing-tool convention as `pyright`/`tsc`/`eslint`/`vitest`,
-  under its own `branch-lint` lock) when `origin/main` is not locally
-  resolvable — fetch first for full local coverage.
-- `lint-prepush-artifact-freshness` unconditionally (`always_run: true`)
-  re-checks the generated-artifact family (types/constants codegen, the events
-  registry, the config-lite table, OKF lint, doc references) on every push,
-  ignoring every `files:` filter. A
-  `files:`-filtered hook never sees a purely deleted path on any range —
-  pre-commit's own diff selection passes it only Added/Copied/Modified/Renamed
-  paths — so a change that only deletes the last file behind an event or config
-  field can otherwise reach `git push` with a stale artifact
-  and nothing local catching it. It is cheap (whole-repo, no DB/network) and
-  does not skip under load; `types-codegen-fresh` alone still skips when
+  reach `git push` unchecked. The commit-stage hooks judge only the files they
+  are handed, so this costs about what one commit over the same files costs;
+  that is why it takes no load threshold and no lock (a load-dependent skip
+  would leave rebased commits unchecked at random). It skips loudly only when
+  it cannot know the range (`origin/main` is not locally resolvable — fetch
+  first) or has no `.venv/bin/pre-commit`.
+- `lint-prepush-artifact-freshness` (`scripts/provision/prepush_freshness.py`)
+  re-checks, over the whole repository, the generated-artifact hooks (types and
+  constants codegen, the events registry, the config-lite table, the Pyright
+  tests environments, OKF lint, doc references) whose inputs the branch
+  DELETED. A `files:`-filtered hook never sees a purely deleted path on any
+  range — pre-commit's own diff selection passes it only
+  Added/Copied/Modified/Renamed paths — so a change that only deletes the last
+  file behind an event or config field can otherwise reach `git push` with a
+  stale artifact and nothing local catching it. A whole-repository hook whose
+  inputs the branch also added or changed already ran in the branch-diff run,
+  which judges the deletion with it, so it is not repeated; a per-file hook
+  (`lint-ava-okf`) sees only the files it is handed and is re-checked whenever
+  a deleted path matches. A rename counts as deleting the old path; with no
+  known range every hook runs. `types-codegen-fresh` alone skips when
   `ui/web/node_modules` is missing, same as the frontend pre-push hooks.
-- `lint-patch-targets-full` unconditionally (`always_run: true`) runs the
-  patch-target lint over every test file (about 6 s). A test's home follows what
-  its subject's package imports, so a production import change can move the
-  home of a test the commit-time `lint-patch-targets` never receives; CI's
-  structure job scans everything too.
+- `lint-patch-targets-full` runs the patch-target lint over every test file
+  when the branch touches any `.py` path, deleted ones included
+  (`scripts/prepush-if-changed.sh`; a push with no Python cannot move a test's
+  home). A test's home follows what its subject's package imports, so a
+  production import change can move the home of a test the commit-time
+  `lint-patch-targets` never receives; CI's structure job scans everything too.
 
 `scripts/prepush-guard.sh` holds a separate lock for each of `pyright`,
-`tsc`, `eslint`, `vitest`, and `branch-lint` across all worktrees on the host.
+`tsc`, `eslint` (the whole-project run), and `vitest` across all worktrees on the host.
 The lock is `fcntl.flock(2)` on the fd bash opens via `exec 9<lock_file`, run
 from a fresh `python3 -c` subprocess per attempt — not the `flock(1)` binary,
 which stock macOS does not ship — bound to the *open file description* fd 9
@@ -2267,8 +2285,9 @@ keeps one job with two segments when the frontend/backend classifier selects it:
 - **Structure lint (A)** always runs `pre-commit run --all-files`, skipping the
   hooks owned by other CI jobs, the local installation warning, and the four
   codegen freshness hooks. The pyright, frontend-tsc, frontend-eslint and
-  frontend-vitest SKIP entries are redundant since those hooks run only at pre-push; CI still
-  runs their underlying checks directly in `backend-static` and `frontend`.
+  frontend-vitest SKIP entries name checks other jobs own (`frontend-eslint` is the
+  changed-files commit hook; the other three run only at pre-push); CI runs their
+  underlying whole-project checks directly in `backend-static` and `frontend`.
 - **Codegen freshness (B)** installs Node/frontend dependencies and explicitly
   runs `types-codegen-fresh`, `constants-codegen-fresh`, `events-registry-fresh`
   and `config-lite-table-fresh`. On a PR, the selector compares the fetched,
