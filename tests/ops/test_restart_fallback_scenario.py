@@ -23,7 +23,7 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
     agent_id, _birth, _prompt_id, _attempt_id = create_agent_row(
         spawner="test", machine=machine_name()
     )
-    monkeypatch.setattr(ava.self, "AGENT_ID", agent_id)
+    monkeypatch.setitem(vars(ava.self), "AGENT_ID", agent_id)
     initial = lifecycle_restart.build("diagnostic")
     assert initial.script == lifecycle_restart.RESTART_SCRIPT
     row = db_conn.execute(
@@ -61,7 +61,7 @@ def test_pending_request_does_not_select_post_request_script(
     agent_id, _birth, _prompt_id, _attempt_id = create_agent_row(
         spawner="test", machine=machine_name()
     )
-    monkeypatch.setattr(ava.self, "AGENT_ID", agent_id)
+    monkeypatch.setitem(vars(ava.self), "AGENT_ID", agent_id)
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source,status) "
         "VALUES(%s,'','restart','self','pending')",
