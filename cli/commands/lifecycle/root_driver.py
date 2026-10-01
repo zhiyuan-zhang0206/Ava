@@ -416,11 +416,16 @@ def _stop_root_process(
 def _reconcile_units(
     roster: tuple[ServiceSpec, ...], client: Any, status: dict[str, Any]
 ) -> dict[str, Any]:
-    """Resume stopped units within the same immutable root generation."""
+    """Resume stopped units within the same immutable root generation.
+
+    This command is an explicit operator start, so it also resumes a unit
+    whose recorded intent is stopped: `intent` is the supervisor's policy fact
+    and `state` its observed process state (task #4872).
+    """
     units = _root_units(status)
     for spec in roster:
         unit = units[spec.session]
-        if unit.get("state") != "running" or unit.get("desired") != "running":
+        if unit.get("state") != "running" or unit.get("intent") != "running":
             reason = unit.get("last_error") or unit.get("last_exit") or unit.get("state")
             print(f"  ↑ ava-root unit {session_name(spec.session)} ({reason}) — bringing it up")
             _call_ok(client.up(spec.session), f"up {spec.session}")
