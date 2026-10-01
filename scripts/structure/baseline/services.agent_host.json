@@ -16,6 +16,7 @@
     "services/agent_host/tests/test_host_pool_capacity.py::test_more_than_twenty_workload_leases_share_bounded_backends": 6
   },
   "patch_targets": {
+    "services/agent_host/tests/test_hosted_backlog_recovery.py::agent.turn.progress._PROGRESS": 1,
     "services/agent_host/tests/test_hosted_compact_failure.py::agent.graph.claim._dispatch": 1,
     "services/agent_host/tests/test_hosted_failure_settlement_recovery.py::agent.graph.claim._dispatch": 1,
     "services/agent_host/tests/test_reconcile_after_abort.py::base.agents.history.inbound_sideload._committed_ids_from_all_settled_writes": 1
