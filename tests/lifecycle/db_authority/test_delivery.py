@@ -142,7 +142,9 @@ def boot(monkeypatch: pytest.MonkeyPatch, home: Path) -> Iterator[Path]:
         authority.GENERATION_ENV,
     ):
         os.environ.pop(key, None)
-    os.environ["AVA_DB_URL"] = _ENDPOINT
+    # Not a bare assignment: a test body that monkeypatches this key records the value set here and
+    # undoes it after the `finally` below, so the endpoint would outlive the test.
+    monkeypatch.setitem(os.environ, "AVA_DB_URL", _ENDPOINT)
     try:
         yield home
     finally:
