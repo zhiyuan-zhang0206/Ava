@@ -9,7 +9,6 @@
     "tests/gateway/test_agents_endpoints.py": 1401,
     "tests/gateway/test_agents_internals.py": 1276,
     "tests/gateway/test_alerts_api.py": 1014,
-    "tests/gateway/test_auth.py": 1161,
     "tests/gateway/test_cluster_endpoints.py": 1200
   },
   "patch_targets": {
@@ -24,14 +23,10 @@
     "tests/gateway/test_agents_endpoints.py::top-level": 1,
     "tests/gateway/test_agents_internals.py::top-level": 1,
     "tests/gateway/test_alerts_api.py::top-level": 1,
-    "tests/gateway/test_auth.py::top-level": 1,
     "tests/gateway/test_caller_protocol_path.py::top-level": 1,
     "tests/gateway/test_cluster_endpoints.py::top-level": 1,
     "tests/gateway/test_cluster_status_fields.py::top-level": 1,
-    "tests/gateway/test_config_resolved.py::top-level": 1,
     "tests/gateway/test_delivery_publish.py::top-level": 1,
-    "tests/gateway/test_display_config_bounds.py::top-level": 1,
-    "tests/gateway/test_force_expire_impersonation.py::top-level": 1,
     "tests/gateway/test_labels.py::top-level": 1,
     "tests/gateway/test_okf_graph.py::top-level": 1,
     "tests/gateway/test_operations_config.py::top-level": 1,
