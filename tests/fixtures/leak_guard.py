@@ -41,6 +41,10 @@ Checks (kind: what is compared). Values are never printed.
                 `ava.agent_identity._agent_id` bare. Delete the table when a fixture restores them.
   sys.path      a NOTE, never a leak: entries added or removed (73 test sites insert on purpose)
 
+Cost: two snapshots a test, so the guard stays in bulk C-level passes (`map` / `compress` / one `==`
+per container) and enters a handful of Python frames; under CI's coverage tracer the frame count,
+not the C work, sets the price. `tests/ci/test_leak_guard_cost.py` counts them.
+
 It does not see an existing module attribute re-assigned (a static lint's job), a container
 mutated in place, a module object swapped through `sys.modules`, or the disk, sockets and
 processes. POSIX is the supported platform (`os.environ._data`).
@@ -54,6 +58,8 @@ prints the same list, xdist or not. Design and evidence: `tests/docs/test-leak-g
 from __future__ import annotations
 
 import contextlib
+import importlib
+import operator
 import os
 import re
 import signal
@@ -61,6 +67,7 @@ import sys
 import time
 import types
 from collections.abc import Callable, Iterator
+from itertools import compress, filterfalse, repeat
 from typing import Any, cast
 
 import pytest
@@ -97,9 +104,15 @@ _SIGNALS = tuple(
     )
     if hasattr(signal, name)
 )
+# `signal.getsignal` wraps this C function to turn 0 and 1 into enum members: three Python frames
+# per signal and per read. The raw answer (0, 1, a callable or None) compares just as well.
+_getsignal: Callable[[int], Any] = importlib.import_module("_signal").getsignal
+_now = time.perf_counter_ns
 _IGNORED_ENV = os.environ.encodekey("PYTEST_CURRENT_TEST")  # pytest rewrites it on every phase
-# A path below the rootdir that is not a production module: a tests/ directory, an installed package.
-_EXCLUDED_DIRS = re.compile(r"(?:^|[\\/])(?:tests|site-packages|node_modules)[\\/]")
+# A directory below the rootdir that holds no production module: tests, an installed package.
+_EXCLUDED_DIRS = r"(?:tests|site-packages|node_modules)"
+_module_dict = operator.attrgetter("__dict__")
+_module_file = operator.methodcaller("get", "__file__")
 _HINTS = {
     "env": (
         "monkeypatch.delenv(name, raising=False) records nothing for an absent key, so whatever "
@@ -130,52 +143,133 @@ def _environ_data() -> dict[Any, Any]:
 
 
 def _show(value: object) -> str:
-    if isinstance(value, signal.Handlers):
-        return value.name
     return getattr(value, "__qualname__", None) or repr(value)
+
+
+def _show_handler(handler: object) -> str:
+    """`_signal.getsignal` answers SIG_DFL and SIG_IGN as plain ints: name them as `signal` does."""
+    return signal.Handlers(handler).name if isinstance(handler, int) else _show(handler)
+
+
+def _first_party_pattern(root: str) -> re.Pattern[str]:
+    """What the file of a production module of this repository looks like.
+
+    A path below `root` (ending in a separator) that is not inside a top-level dot-directory
+    (`.venv`, `.git`) and has no tests, site-packages or node_modules directory below it. Test
+    modules mutate themselves by design, an installed package is not ours. The directory walk is
+    one component at a time, so a deep path costs a few dozen steps, not a backtrack per character.
+    """
+    return re.compile(re.escape(root) + rf"(?!\.)(?!(?:[^\\/]*[\\/])*?{_EXCLUDED_DIRS}[\\/])")
 
 
 class _ModuleWatch:
     """Which first-party module dicts gained a name inside one test.
 
-    The fast path is one `sum(map(len, dicts))` per snapshot. Only when the total moved are the
-    modules located; a dict is insertion-ordered, so the names added are the tail past the old
-    length. A module imported during a test is baselined where first seen, and one a test swapped
-    through `sys.modules` under a known name is not re-read.
+    Locating modules is bulk C-level work, and a test costs a handful of Python calls under a
+    coverage tracer. The fast path is one `sum(map(len, dicts))` per snapshot. Only when the total
+    moved are the modules located; a dict is insertion-ordered, so the names added are the tail
+    past the old length. Modules are located once per name: the first pass judges everything
+    already in `sys.modules` (about eight thousand, almost all installed packages, whose
+    submodules `_inside` skips unread), later passes only the names an import added. A module
+    imported during a test is baselined where first seen, and one a test swapped through
+    `sys.modules` under a known name is not re-read.
     """
 
-    def __init__(self, first_party: Callable[[types.ModuleType], bool]) -> None:
-        self._first_party = first_party
+    def __init__(self, match: Callable[[str], object]) -> None:
+        self._match = match  # the file of a first-party module matches, any other file does not
         self._seen = 0  # len(sys.modules) at the last discovery
+        self._order: list[str] = []  # the keys of sys.modules the last discovery saw, in order
         self._judged: set[str] = set()
         self._names: list[str] = []
         self._dicts: list[dict[str, Any]] = []
         self._lens: list[int] = []
         self._total = 0
+        self.discover_ns = 0  # time spent locating modules, one-time pass included
+        self.judged = 0  # modules looked at: the cost of locating, not of watching
+        # Locating passes that found names to judge (the first, then one per import), and scans
+        # that found the total moved (each costs one more pass over the dicts).
+        self.passes = 0
+        self.slow = 0
         # (module dict, attr) of the last check(): what fail mode takes back out.
         self.reported: list[tuple[dict[str, Any], str]] = []
+
+    def _unjudged(self) -> list[str]:
+        """The names in `sys.modules` that no earlier discovery judged.
+
+        The keys, in insertion order, are one list copy. When the list the last discovery saw is
+        still their prefix nothing before it moved or left, so only the tail can hold new names;
+        otherwise (a module was removed, or removed and added back) every key is checked.
+        """
+        current = list(sys.modules)
+        seen = len(self._order)
+        fresh = current[seen:] if current[:seen] == self._order else current
+        self._order = current
+        return list(filterfalse(self._judged.__contains__, fresh))
+
+    def _inside(self, names: list[str]) -> list[str]:
+        """`names` without the submodules of a top-level module that cannot hold first-party files.
+
+        Almost every module in `sys.modules` belongs to an installed package, and reading a module
+        is what costs. A package keeps its submodules below its own directory, so when the file of
+        a top-level module is known and not first-party, its submodules are skipped unread. A
+        top-level module that is not loaded, or has no file (a namespace package, `tests`), keeps
+        all its names. A first-party file loaded under the name of a submodule of an installed
+        package is therefore not watched; `tests/ci/test_leak_guard_cost.py` checks that this
+        process has none.
+        """
+        tops = list(map(operator.itemgetter(0), map(str.partition, names, repeat("."))))
+        unique = list(set(tops))
+        modules = list(map(sys.modules.get, unique))
+        is_module = list(map(isinstance, modules, repeat(types.ModuleType)))
+        unique = list(compress(unique, is_module))
+        files: list[Any] = list(map(_module_file, map(_module_dict, compress(modules, is_module))))
+        has_file = list(map(isinstance, files, repeat(str)))
+        unique, files = list(compress(unique, has_file)), list(compress(files, has_file))
+        outside = set(compress(unique, map(operator.not_, map(self._match, files))))
+        return list(compress(names, map(operator.not_, map(outside.__contains__, tops))))
+
+    def _locate(self, names: list[str]) -> tuple[list[str], list[dict[str, Any]]]:
+        """The first-party modules among `names`: their names, and their module dicts.
+
+        Every step is one `map`, `compress` or `list` over all the names (no Python call per module),
+        and each keeps only what the next one needs: the file of a module is read once, and a
+        non-module entry, a module without a string `__file__` or one outside the repository drops
+        out before the pattern runs. `__dict__` is read, never `__file__`, so a module's own
+        `__getattr__` never runs.
+        """
+        modules = list(map(sys.modules.get, names))
+        is_module = list(map(isinstance, modules, repeat(types.ModuleType)))
+        names = list(compress(names, is_module))
+        dicts: list[dict[str, Any]] = list(map(_module_dict, compress(modules, is_module)))
+        files: list[Any] = list(map(_module_file, dicts))
+        has_file = list(map(isinstance, files, repeat(str)))
+        names, dicts = list(compress(names, has_file)), list(compress(dicts, has_file))
+        ours = list(map(self._match, compress(files, has_file)))
+        return list(compress(names, ours)), list(compress(dicts, ours))
 
     def _discover(self) -> None:
         if len(sys.modules) == self._seen:
             return
         self._seen = len(sys.modules)
-        for name in (
-            sys.modules.keys() - self._judged
-        ):  # a C-level set difference: only the new names are judged
-            module = sys.modules.get(name)
-            self._judged.add(name)
-            if not isinstance(module, types.ModuleType) or not self._first_party(module):
-                continue
-            self._names.append(name)
-            self._dicts.append(module.__dict__)
-            self._lens.append(len(module.__dict__))
-            self._total += len(module.__dict__)
+        started = _now()
+        names = self._unjudged()
+        self._judged.update(names)
+        self.judged += len(names)
+        self.passes += bool(names)
+        found, dicts = self._locate(self._inside(names))
+        lens = list(map(len, dicts))
+        self._names.extend(found)
+        self._dicts.extend(dicts)
+        self._lens.extend(lens)
+        self._total += sum(lens)
+        self.discover_ns += _now() - started
 
     def sync(self) -> None:
         """Rebase on the current sizes: changes between two tests belong to no test."""
         self._discover()
         total = sum(map(len, self._dicts))
         if total != self._total:
+            self.slow += 1
             self._lens = [len(d) for d in self._dicts]
             self._total = total
 
@@ -185,6 +279,7 @@ class _ModuleWatch:
         total = sum(map(len, self._dicts))
         if total == self._total:
             return []
+        self.slow += 1
         found: list[_Finding] = []
         for i, module_dict in enumerate(self._dicts):
             size = len(module_dict)
@@ -231,26 +326,31 @@ def _cwd() -> str | None:
         return None
 
 
+def _handlers() -> tuple[Any, ...]:
+    """The raw handler of every watched signal: one C call, no Python frame per signal."""
+    return tuple(map(_getsignal, _SIGNALS))
+
+
 class _Snapshot:
     __slots__ = ("cwd", "env", "named", "path", "signals")
 
     def __init__(self) -> None:
-        self.env = dict(_environ_data())
+        self.env = _environ_data().copy()
         self.cwd = _cwd()
-        self.path = list(sys.path)
-        self.signals = tuple(signal.getsignal(sig) for sig in _SIGNALS)
+        self.path = sys.path[:]
+        self.signals = _handlers()
         self.named = _read_named()
 
 
-def _env_findings(before: dict[Any, Any]) -> list[_Finding]:
-    env_now = _environ_data()
-    if before.get(_IGNORED_ENV) != env_now.get(_IGNORED_ENV):  # keep the fast equality below true
-        if _IGNORED_ENV in env_now:
-            before[_IGNORED_ENV] = env_now[_IGNORED_ENV]
-        else:
-            before.pop(_IGNORED_ENV, None)
-    if before == env_now:
-        return []
+def _ignore_env_noise(before: dict[Any, Any], env_now: dict[Any, Any]) -> None:
+    """Make the key pytest rewrites on every phase equal on both sides, so one `==` decides."""
+    if _IGNORED_ENV in env_now:
+        before[_IGNORED_ENV] = env_now[_IGNORED_ENV]
+    else:
+        before.pop(_IGNORED_ENV, None)
+
+
+def _env_findings(before: dict[Any, Any], env_now: dict[Any, Any]) -> list[_Finding]:
     found: list[_Finding] = []
     for key in sorted(before.keys() | env_now.keys()):
         old, new = before.get(key), env_now.get(key)
@@ -260,25 +360,24 @@ def _env_findings(before: dict[Any, Any]) -> list[_Finding]:
     return found
 
 
-def _cwd_findings(before: str | None) -> list[_Finding]:
-    now = _cwd()
-    if now == before:
-        return []
+def _cwd_findings(before: str | None, now: str | None) -> list[_Finding]:
     return [("cwd", f"{before} -> {now or 'a directory that no longer exists'}")]
 
 
-def _signal_findings(before: tuple[Any, ...]) -> list[_Finding]:
-    found: list[_Finding] = []
-    for sig, old_handler in zip(_SIGNALS, before, strict=True):
-        now = signal.getsignal(sig)
-        if now != old_handler:
-            name = signal.Signals(sig).name
-            found.append(("signal", f"{name} handler {_show(old_handler)} -> {_show(now)}"))
-    return found
+def _signal_findings(before: tuple[Any, ...], now: tuple[Any, ...]) -> list[_Finding]:
+    return [
+        (
+            "signal",
+            f"{signal.Signals(sig).name} handler {_show_handler(old)} -> {_show_handler(new)}",
+        )
+        for sig, old, new in zip(_SIGNALS, before, now, strict=True)
+        if new != old
+    ]
 
 
-def _identity_findings(before: dict[tuple[str, str], object]) -> list[_Finding]:
-    now = _read_named()
+def _identity_findings(
+    before: dict[tuple[str, str], object], now: dict[tuple[str, str], object]
+) -> list[_Finding]:
     return [
         ("identity", f"{key[0]}.{key[1]}: {_show(old)} -> {_show(now[key])}")
         for key, old in before.items()
@@ -287,8 +386,6 @@ def _identity_findings(before: dict[tuple[str, str], object]) -> list[_Finding]:
 
 
 def _path_findings(before: list[str]) -> list[_Finding]:
-    if before == sys.path:
-        return []
     added = [p for p in sys.path if p not in before]
     removed = [p for p in before if p not in sys.path]
     if not (added or removed):  # a pure reorder (`sys.path.insert(0, p)` of a present entry)
@@ -307,7 +404,7 @@ def _restore_env(before: dict[Any, Any]) -> None:
 
 def _restore_signals(before: tuple[Any, ...]) -> None:
     for sig, old_handler in zip(_SIGNALS, before, strict=True):
-        if old_handler is not None and signal.getsignal(sig) != old_handler:
+        if old_handler is not None and _getsignal(sig) != old_handler:
             signal.signal(sig, old_handler)
 
 
@@ -325,10 +422,11 @@ class _Run:
 
     def __init__(self) -> None:
         self.mode = "off"
-        self.root = ""  # the rootdir prefix a first-party module's file starts with
-        self.watch = _ModuleWatch(self.is_first_party)
+        # Until configured nothing is first-party.
+        self.watch = _ModuleWatch(re.compile(r"(?!)").match)
         self.checked = 0
         self.ns = 0
+        self.scan_ns = 0  # time in the module scans, locating included
         self.fault_counts: dict[str, int] = {}
         self.fault_first: dict[str, str] = {}
         # Controller side: (nodeid, property, kind, detail) of every finding the reports carried.
@@ -340,19 +438,7 @@ class _Run:
         if mode not in MODES:
             raise pytest.UsageError(f"AVA_LEAK_GUARD={mode!r}: expected one of {', '.join(MODES)}")
         self.mode = mode
-        self.root = rootpath.rstrip(os.sep) + os.sep
-
-    def is_first_party(self, module: types.ModuleType) -> bool:
-        """A production module of this repository: a file under the rootdir, outside any tests/ directory.
-
-        Test modules mutate themselves by design. Reading `__dict__` rather than `__file__` never
-        runs a module's own `__getattr__`.
-        """
-        file = module.__dict__.get("__file__")
-        if not isinstance(file, str) or not file.startswith(self.root):
-            return False
-        relative = file[len(self.root) :]
-        return not (relative.startswith(".") or _EXCLUDED_DIRS.search(relative))
+        self.watch = _ModuleWatch(_first_party_pattern(rootpath.rstrip(os.sep) + os.sep).match)
 
     def fault(self, stage: str, exc: Exception) -> bool:
         """Count a fault of the guard itself; True the first time `stage` faults in this process."""
@@ -364,28 +450,47 @@ class _Run:
         return first
 
     def capture(self) -> _Snapshot:
-        started = time.perf_counter_ns()
+        started = _now()
         self.watch.sync()
+        self.scan_ns += _now() - started
         snapshot = _Snapshot()
-        self.ns += time.perf_counter_ns() - started
+        self.ns += _now() - started
         return snapshot
 
     def compare(self, before: _Snapshot) -> list[_Finding]:
-        started = time.perf_counter_ns()
+        started = _now()
         found = self._diff(before)
         self.checked += 1
-        self.ns += time.perf_counter_ns() - started
+        self.ns += _now() - started
         return found
 
     def _diff(self, before: _Snapshot) -> list[_Finding]:
-        return [
-            *_env_findings(before.env),
-            *_cwd_findings(before.cwd),
-            *_signal_findings(before.signals),
-            *_identity_findings(before.named),
-            *self.watch.check(),
-            *_path_findings(before.path),
-        ]
+        """What differs from `before`, in the order the report lists it.
+
+        The clean case is the hot one: each container is decided by one C-level `==`, and only a
+        difference pays for the Python that names it.
+        """
+        found: list[_Finding] = []
+        env_now = _environ_data()
+        if before.env.get(_IGNORED_ENV) != env_now.get(_IGNORED_ENV):
+            _ignore_env_noise(before.env, env_now)
+        if before.env != env_now:
+            found += _env_findings(before.env, env_now)
+        cwd_now = _cwd()
+        if cwd_now != before.cwd:
+            found += _cwd_findings(before.cwd, cwd_now)
+        handlers_now = _handlers()
+        if handlers_now != before.signals:
+            found += _signal_findings(before.signals, handlers_now)
+        named_now = _read_named()
+        if named_now != before.named:
+            found += _identity_findings(before.named, named_now)
+        scanned = _now()
+        found += self.watch.check()
+        self.scan_ns += _now() - scanned
+        if before.path != sys.path:
+            found += _path_findings(before.path)
+        return found
 
     def restore(self, before: _Snapshot, found: list[_Finding]) -> None:
         """Put back what the strict checks name (fail mode): a victim then never sees the leak."""
@@ -407,7 +512,12 @@ class _Run:
         return {
             "checked": self.checked,
             "ns": self.ns,
+            "scan_ns": self.scan_ns,
             "tracked": self.watch.tracked,
+            "discover_ns": self.watch.discover_ns,
+            "judged": self.watch.judged,
+            "passes": self.watch.passes,
+            "slow": self.watch.slow,
             "faults": {
                 stage: [n, self.fault_first[stage]] for stage, n in self.fault_counts.items()
             },
@@ -534,10 +644,16 @@ def _micros_per_test(stats: list[dict[str, Any]]) -> float:
 def _summary_head(stats: list[dict[str, Any]], faults: dict[str, list[Any]]) -> str:
     leaks = [f for f in _RUN.findings if f[1] == LEAK]
     notes = sum(f[1] == NOTE for f in _RUN.findings)
+    checked = sum(s["checked"] for s in stats)
+    locating_ns = sum(s["discover_ns"] for s in stats)
+    scan_us = (sum(s["scan_ns"] for s in stats) - locating_ns) / max(checked, 1) / 1000
     return (
         f"leak guard ({_RUN.mode}): {len(leaks)} leak(s) in {len({f[0] for f in leaks})} test(s), "
         f"{notes} sys.path note(s), {sum(n for n, _ in faults.values())} guard fault(s); "
-        f"{sum(s['checked'] for s in stats)} test(s) checked, {_micros_per_test(stats):.0f} us/test, "
+        f"{checked} test(s) checked, {_micros_per_test(stats):.0f} us/test"
+        f" ({scan_us:.0f} us/test of it module scans, {locating_ns / 1e6:.0f} ms locating "
+        f"{sum(s['judged'] for s in stats)} module(s) in {sum(s['passes'] for s in stats)} pass(es)), "
+        f"{sum(s['slow'] for s in stats)} slow scan(s), "
         f"{max(s['tracked'] for s in stats)} module dicts watched"
     )
 

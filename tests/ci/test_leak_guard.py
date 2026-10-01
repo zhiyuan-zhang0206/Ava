@@ -240,6 +240,15 @@ def test_the_clean_idioms_produce_no_finding(suite: Suite) -> None:
     assert not clean & (set(run.named) | set(run.properties))
 
 
+def test_the_summary_says_what_locating_the_modules_cost(suite: Suite) -> None:
+    """The one-time pass over `sys.modules` is a share of the cost a run reports: say how big it was."""
+    head = (
+        r"\d+ test\(s\) checked, \d+ us/test \(\d+ us/test of it module scans, \d+ ms locating "
+        r"\d+ module\(s\) in \d+ pass\(es\)\), \d+ slow scan\(s\), \d+ module dicts watched"
+    )
+    assert re.search(head, suite.run().out)
+
+
 def test_warn_changes_no_test_outcome(suite: Suite) -> None:
     """Warn neither fails a leaker nor puts state back: the victims stay red, as without the guard."""
     off, warn = suite.run(mode="off"), suite.run(mode="warn")
