@@ -47,7 +47,7 @@ def _restore_authority_env() -> Iterator[None]:
     # Snapshot EVERY touched key (absent = None, restored as a pop): the
     # authority pass can rewrite a touched key's value, and a key added by a
     # test must not leak into the next one.
-    snapshot = {k: os.environ.get(k) for k in touched}
+    snapshot = {k: os.environ.get(k) for k in touched | {"AVA_AGENT_HOST_HEALTH_PORT"}}
     yield
     for key, val in snapshot.items():
         if val is None:
