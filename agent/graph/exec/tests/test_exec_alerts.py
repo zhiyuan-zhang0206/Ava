@@ -31,7 +31,7 @@ class _InlineThread:
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_alerts, "_last_posted_at", None)
+    monkeypatch.setattr(_alerts, "_last_posted_at", {})
     monkeypatch.setattr(_alerts.threading, "Thread", _InlineThread)  # pyright: ignore[reportUnknownArgumentType]
 
 
@@ -63,6 +63,57 @@ def test_one_alert_per_rate_window(monkeypatch: pytest.MonkeyPatch) -> None:
     clock["t"] = 601.0  # window elapsed: a fresh alert fires
     _alerts.maybe_alert_exec_boot_failure(7, exc)
     assert len(posted) == 2
+
+
+def _record_posted_agents(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Replace the POST with a recorder of the agent ids that reached it."""
+    posted: list[int] = []
+
+    def _post(agent_id: int, _exc_type: str, _exc_msg: str) -> None:
+        posted.append(agent_id)
+
+    monkeypatch.setattr(_alerts, "_post", _post)
+    return posted
+
+
+def test_agents_do_not_suppress_each_others_alerts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The host serves many agents: agent 7's alert must not hide agent 8's for
+    the window, while each agent is still limited on its own."""
+    clock = {"t": 0.0}
+    monkeypatch.setattr(_alerts.time, "monotonic", lambda: clock["t"])  # pyright: ignore[reportUnknownArgumentType]
+    posted = _record_posted_agents(monkeypatch)
+
+    exc = ExecChildError("BootstrapFetchError", "down", None)
+    _alerts.maybe_alert_exec_boot_failure(7, exc)
+    clock["t"] = 10.0
+    _alerts.maybe_alert_exec_boot_failure(8, exc)  # another agent, inside 7's window
+    _alerts.maybe_alert_exec_boot_failure(7, exc)  # same agent, inside its window: dropped
+    _alerts.maybe_alert_exec_boot_failure(8, exc)  # same agent, inside its window: dropped
+    assert posted == [7, 8]
+
+    clock["t"] = 601.0  # 7's window elapsed, 8's (opened at t=10) has not
+    _alerts.maybe_alert_exec_boot_failure(7, exc)
+    _alerts.maybe_alert_exec_boot_failure(8, exc)
+    assert posted == [7, 8, 7]
+
+
+def test_expired_stamps_are_dropped_so_the_map_stays_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"t": 0.0}
+    monkeypatch.setattr(_alerts.time, "monotonic", lambda: clock["t"])  # pyright: ignore[reportUnknownArgumentType]
+    posted = _record_posted_agents(monkeypatch)
+
+    exc = ExecChildError("BootstrapFetchError", "down", None)
+    for agent_id in range(1, 6):
+        _alerts.maybe_alert_exec_boot_failure(agent_id, exc)
+    assert posted == [1, 2, 3, 4, 5]
+    assert set(_alerts._last_posted_at) == {1, 2, 3, 4, 5}
+
+    clock["t"] = 601.0  # every stamp has expired; the next call sweeps them
+    _alerts.maybe_alert_exec_boot_failure(9, exc)
+    assert posted[-1] == 9
+    assert set(_alerts._last_posted_at) == {9}
 
 
 def test_post_swallows_transport_failure(monkeypatch: pytest.MonkeyPatch) -> None:
