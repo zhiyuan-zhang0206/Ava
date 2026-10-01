@@ -10,11 +10,18 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.config import settings
 from cli.commands.data_plane import walg as walg_cmd
 from cli.parsers import build_parser
 from services.gateway_side.walg import config as walg_config
 from services.gateway_side.walg import probe
-from services.gateway_side.walg.tests.support import SECRETS, Sandbox, make_sandbox
+from services.gateway_side.walg.tests.support import (
+    SECRETS,
+    PgInstance,
+    Sandbox,
+    archiving_postgres,
+    make_sandbox,
+)
 
 
 @pytest.fixture
@@ -101,3 +108,66 @@ def test_status_reports_an_unusable_configuration_instead_of_raising(
     out = capsys.readouterr().out
     assert "configuration: UNUSABLE" in out
     assert "health: WAL archiving: the WAL-G configuration is unusable" in out
+
+
+# ── the start-time warning for a retained postmaster ─────────────────────────
+
+
+def _dial(pg: PgInstance, monkeypatch: pytest.MonkeyPatch) -> None:
+    @contextmanager
+    def admin() -> Generator[psycopg.Connection[Any]]:
+        with pg.connect() as conn:
+            yield conn
+
+    monkeypatch.setattr(probe, "admin_connection", admin)
+
+
+def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The retained-postmaster case: archiving was configured after Postgres launched."""
+    sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
+    with archiving_postgres() as pg:
+        _dial(pg, monkeypatch)
+        monkeypatch.setattr(settings.walg, "walg_config_file", sandbox.config_file)
+
+        walg_cmd.warn_archive_inactive()
+
+    err = capsys.readouterr().err
+    assert "this Postgres is not running with the configured archive settings" in err
+    assert "`ava stop` and `ava start`" in err
+
+
+def test_a_postgres_launched_with_the_arguments_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    make_sandbox(tmp_path, monkeypatch)
+    with archiving_postgres() as pg:
+        _dial(pg, monkeypatch)
+
+        walg_cmd.warn_archive_inactive()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_nothing_is_dialed_while_wal_g_is_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    make_sandbox(tmp_path, monkeypatch, enabled=False)
+
+    def explode() -> object:
+        raise AssertionError("dialed Postgres while WAL-G is off")
+
+    monkeypatch.setattr(probe, "admin_connection", explode)
+
+    walg_cmd.warn_archive_inactive()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_an_unreadable_postgres_is_a_warning_not_a_failure(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+) -> None:
+    walg_cmd.warn_archive_inactive()
+
+    assert "WAL archiving state not read (OperationalError" in capsys.readouterr().err
