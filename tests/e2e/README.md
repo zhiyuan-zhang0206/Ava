@@ -16,11 +16,11 @@ Design doc: see `docs/superpowers/specs/2026-05-07-e2e-happy-path-design.md`
 uv sync
 .venv/bin/playwright install chromium
 
-# Run all
-.venv/bin/pytest tests/e2e/ -v
+# Run one scenario file (the whole directory is CI's e2e job, never a local run)
+.venv/bin/pytest tests/e2e/test_message_flow.py -v
 
 # See the real browser (development debugging)
-HEADED=1 .venv/bin/pytest tests/e2e/ -v
+HEADED=1 .venv/bin/pytest tests/e2e/test_message_flow.py -v
 ```
 
 On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and

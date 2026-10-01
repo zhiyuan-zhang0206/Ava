@@ -39,3 +39,8 @@ npm run lint      # errors and warnings absent from scripts/eslint-warning-basel
 npx tsc --noEmit  # type check
 npm run build:analyze  # optional local Webpack bundle report
 ```
+
+Locally, run eslint and vitest on the paths you changed (`npx eslint <files>`,
+`npx vitest related --run <files>`) and `tsc --noEmit` once after your last edit;
+the project-wide `vitest run` and `npm run lint` belong to CI (see
+[the local-test skill](../../.agents/skills/run-local-tests/SKILL.md)).
