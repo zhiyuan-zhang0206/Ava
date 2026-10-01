@@ -61,8 +61,10 @@ def register_agent_source(code: str) -> None:
 
     Stores the source under the ``<agent_code>`` key with a None mtime, which
     `linecache.checkcache` leaves untouched (no real file to validate against).
-    Overwritten each turn with the current code; one agent per process means the
-    shared key never races across agents.
+    The key is process-global, so call this only from the exec child
+    (`agent/exec_child.py`): a fresh process per execute_code call, whose
+    linecache holds exactly that execution's code. The agent host's one process
+    serves many agents and must never call it.
     """
     linecache.cache[AGENT_CODE_FILENAME] = (
         len(code),
