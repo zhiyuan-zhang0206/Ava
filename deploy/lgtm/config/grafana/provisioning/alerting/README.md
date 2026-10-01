@@ -51,8 +51,8 @@ The rules are split between `ava-ops` (33 rules, evaluated every minute:
 R1-R6, the root-health-round and gateway-metrics silence rules, the checkpoint
 guards, R8-R12, R14-R16, R24, and the R25/R26 backup-operation custody
 rules) and
-`ava-ops-slow` (ten rules, evaluated every five minutes: R7, R13, R17's two
-fast-route tiers, R18, and R19's two slow-route tiers, plus the PITR-storage / Tempo-backend / LLM-rate-limit checks). Each rule retains its
+`ava-ops-slow` (nine rules, evaluated every five minutes: R7, R13, R17's two
+fast-route tiers, R18, and R19's two slow-route tiers, plus the Tempo-backend / LLM-rate-limit checks). Each rule retains its
 own `for` window.
 
 Application layer — the Loki event stream plus the LLM latency histogram:
@@ -82,7 +82,6 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-backup-operation-blocked` | `ava-ops` | backup operation kind blocked on unproven closure | `backup_operation_custody` custody=blocked (level=error) by operation in 1h > 0 (Loki) | 0m | error |
 | `ava-ops-backup-operation-quarantined` | `ava-ops` | backup operation failed or cancelled, quarantined | `backup_operation_custody` custody=quarantined (level=error) by operation in 1h > 0 (Loki) | 0m | warning |
 | `ava-ops-llm-rate-limit` | `ava-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
-| `ava-ops-pitr-storage-growth` | `ava-ops-slow` | remote PITR storage growth | ratio vs 7d-ago footprint > 1.25 (Prometheus) | 1h | warning |
 | `ava-ops-llm-stall-pair` | `ava-ops` | LLM stream stall pair | `stream_stall_pair_terminated` in 15m > 0 (Loki) | 0m | warning |
 | `ava-ops-llm-stall-burst` | `ava-ops` | LLM provider stall burst | `stream_stalled_retry` per vendor in 15m > 4 (Loki) | 0m | warning |
 
@@ -156,8 +155,7 @@ collector logs alone miss the latter. The window rationale and acceptance
 runbook are in the [LGTM README](../../../../README.md#otlp-late-sample-window-out-of-order-intake).
 
 Storage and store growth — absolute-size gauges from the OTLP metric mirror
-(`ava_checkpoint_table_sizes` / `ava_memory_search_stats` /
-`ava_pitr_remote_inventory`), queried from Prometheus. The exporter's unit
+(`ava_checkpoint_table_sizes` / `ava_memory_search_stats`), queried from Prometheus. The exporter's unit
 translation renders the dimensionless gauges with a `_ratio` suffix — the
 series the rules read are e.g. `ava_checkpoint_table_sizes_blobs_bytes_ratio`:
 
@@ -169,7 +167,6 @@ series the rules read are e.g. `ava_checkpoint_table_sizes_blobs_bytes_ratio`:
 | `ava-ops-checkpoint-blobs-growth` | `ava-ops` | checkpoint_blobs growth rate | +1 GiB in the trailing 6h (Prometheus) | 1h | warning |
 | `ava-ops-memory-search-rows-warning` | `ava-ops` | memory-search store rows | > 30000 (Prometheus) | 2h | warning |
 | `ava-ops-memory-search-rows-critical` | `ava-ops` | memory-search store rows | > 100000 (Prometheus) | 2h | critical |
-| `ava-ops-pitr-storage-growth` | `ava-ops-slow` | remote PITR storage footprint | ratio vs 7d-ago footprint > 1.25 (Prometheus) | 1h | warning |
 
 The two checkpoint guards came out of the #4002 evaluation items (#4004/#4005).
 The freshness rule fires on the silent-NoData class itself — the absolute tiers
