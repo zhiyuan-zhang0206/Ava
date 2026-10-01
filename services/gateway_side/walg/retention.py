@@ -95,6 +95,10 @@ def check_prefixes(keys: list[str]) -> None:
 
 def check_newest_chain_untouched(keys: list[str], backups: list[Backup]) -> None:
     """Invariant 2: no key belongs to the newest backup or to a backup it builds on."""
+    if not backups:
+        raise RetentionAbortedError(
+            "there is no backup to keep, so retention has nothing to protect"
+        )
     try:
         protected = chain_of(backups, backups[-1].name)
     except BackupChainError as exc:
