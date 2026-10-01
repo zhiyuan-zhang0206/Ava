@@ -110,9 +110,9 @@ def home_checkout_error(repo: Path) -> str | None:
     return (
         f"this checkout ({repo}) is not the checkout of the home it would act on: "
         f"{home} carries its own source checkout ({source}), and only that "
-        f"checkout may start, stop or reconfigure it. Run {source}/.venv/bin/ava "
-        f"instead, or set AVA_HOME to a home of your own (a temporary directory, for a "
-        f"test or a tool)."
+        f"checkout may operate it. Run {source}/.venv/bin/ava (the bare `ava` of a "
+        f"production host) instead, or set AVA_HOME to a home of your own (a "
+        f"temporary directory, for a test or a tool)."
     )
 
 

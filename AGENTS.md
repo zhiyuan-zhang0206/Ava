@@ -93,8 +93,8 @@ selection on repeats. The home is `AVA_HOME`
 when set, else `~/.ava`, read whenever it is needed — production does not depend
 on the variable; a test session and a git hook set it in code; a dev tool that imports application code
 sets it once at its top and every descendant inherits it. A home that carries its
-own `<home>/source` checkout is changed only by that checkout's CLI: any other
-checkout's verbs that change state are refused (read-only verbs are not).
+own `<home>/source` checkout is operated only by that checkout's CLI: any other
+checkout refuses every command (a dev CLI names a temporary `AVA_HOME`).
 
 `ava init` takes the machine name, capability flags and reachable host. A
 remote agent-runner joins through it with `--gateway-url` and its

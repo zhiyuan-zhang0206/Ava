@@ -94,11 +94,6 @@ their packages' own `tests/` directories under the locality work.
   approve it again, and `unregister_helper` checks the plist it retires against
   the home's own label and socket, so a fixed label also means reworking that
   check. It is its own change, taken with the approval cost in view.
-- **`ava --help` with no subcommand is refused from a checkout that is not the
-  home's own `source`.** The guard in `cli/preflight.py` (`require_own_checkout`)
-  matches the verb path against the read-only allowlist, and an empty path
-  matches none of its entries. A minor flaw: nothing is changed or exposed, the
-  help text just is not printed.
 
 ## Not yet known
 

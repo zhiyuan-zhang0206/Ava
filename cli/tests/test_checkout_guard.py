@@ -1,4 +1,4 @@
-"""A home that carries its own `<home>/source` checkout is changed only by that checkout.
+"""A home that carries its own `<home>/source` checkout is operated only by that checkout.
 
 The rule (`base.host.env.dotenv_boot.home_checkout_error`) is shared by the CLI's
 pre-Settings gate (`cli.preflight.require_own_checkout`), the identity
@@ -73,63 +73,95 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
     assert home_checkout_error(tmp_path / "Ava") is not None
 
 
-# ── the CLI gate: a read-only list, everything else refused ──
+# ── the CLI gate: every command refused, bare `ava` and a lone help flag parsed ──
 
 
 @pytest.mark.parametrize(
     "argv",
     [
+        # What a read-only list once let through.
         ["status"],
         ["maintenance", "status"],
         ["cluster", "status"],
         ["agents", "ls"],
         ["config", "get", "AVA_TIMEZONE"],
         ["mcp", "ls"],
-    ],
-)
-def test_gate_passes_the_read_only_verbs(
-    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _home_with_source(tmp_path, monkeypatch)
-    assert preflight.require_own_checkout(argv, tmp_path / "dev") is None
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
+        # What changes a home, and what no one has named yet.
         ["start"],
         ["stop"],
         ["pause"],
         ["restart"],
         ["converge"],
-        ["maintenance", "start"],
         ["maintenance", "stop"],
         ["cluster", "destroy"],
         ["cluster", "db-authority", "issue-unit"],
         ["config", "set", "A=B"],
         ["config", "unset", "A"],
         ["boot"],
-        ["some-verb-the-list-never-heard-of"],
+        ["some-verb-nobody-has-heard-of"],
+        # Help of a verb is a command like any other: a development checkout that
+        # wants to read it names a temporary AVA_HOME.
+        ["start", "--help"],
+        ["status", "-h"],
+        ["--help", "start"],
+        ["-h", "--help"],
+        # `--help` as data after `--`, and `boot`, which never reaches argparse.
+        ["config", "unset", "--", "--help"],
+        ["boot", "--help"],
     ],
 )
-def test_gate_refuses_every_other_verb_including_unknown_ones(
+def test_gate_refuses_every_command_from_a_foreign_checkout(
     argv: list[str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Fail closed: a verb that is not on the read-only list is refused, so a
-    verb added later is gated until someone decides it changes nothing."""
-    _home_with_source(tmp_path, monkeypatch)
+    """Fail closed with no list to keep: a verb added later is refused without
+    anyone having to decide that it changes something. The message names both
+    ways out."""
+    home = _home_with_source(tmp_path, monkeypatch)
     assert preflight.require_own_checkout(argv, tmp_path / "dev") == 1
-    assert " ".join(argv[:2]) in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert str(home / "source" / ".venv" / "bin" / "ava") in err, "run the home's own CLI"
+    assert "set AVA_HOME" in err, "or name a home of your own"
 
 
+def test_gate_does_not_echo_the_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _home_with_source(tmp_path, monkeypatch)
+    argv = ["config", "set", "DEEPSEEK_API_KEY=sk-not-for-the-terminal"]
+    assert preflight.require_own_checkout(argv, tmp_path / "dev") == 1
+    assert "sk-not-for-the-terminal" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [[], ["--help"], ["-h"]])
+def test_gate_passes_bare_ava_and_a_lone_help_flag(
+    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Argparse answers these without running a verb: nothing to protect."""
+    _home_with_source(tmp_path, monkeypatch)
+    assert preflight.require_own_checkout(argv, tmp_path / "dev") is None
+
+
+@pytest.mark.parametrize(
+    "argv", [["status"], ["stop"], ["boot"], ["start", "--help"], ["config", "set", "A=B"]]
+)
 def test_gate_passes_everything_for_the_homes_own_checkout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = _home_with_source(tmp_path, monkeypatch)
-    assert preflight.require_own_checkout(["stop"], home / "source") is None
+    assert preflight.require_own_checkout(argv, home / "source") is None
+
+
+@pytest.mark.parametrize(
+    "argv", [["status"], ["stop"], ["boot"], ["start", "--help"], ["config", "set", "A=B"]]
+)
+def test_gate_passes_everything_for_a_home_without_a_source(
+    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    assert preflight.require_own_checkout(argv, tmp_path / "dev") is None
 
 
 # ── init and start ──
