@@ -105,11 +105,11 @@ CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-hos
 # ruling (Task #2183, C2): gateway / frontend / restarter / the hosted
 # agent-runner / im-bridge / the two watchdogs (see
 # `cli.commands._probe.CRITICAL_SERVICE_SESSIONS`). Everything else —
-# pitr-uploader, labeler, the browser, ... — shares one short window instead,
+# the labeler, the browser, ... — shares one short window instead,
 # sized so a slow-but-healthy daemon still gets its beat to bind its port
 # while a dead one stops taxing every start. 2026-08-30 rollout-1788074072
-# spent 182 s of its 197.5 s local start waiting on a pitr-uploader healthz
-# that never answered; the service's failure did not block the rollout's
+# spent 182 s of its 197.5 s local start waiting on one non-critical daemon's
+# healthz that never answered; the service's failure did not block the rollout's
 # conclusion (the watchdog covers it), so the gate was waiting on a service
 # whose verdict nothing depended on.
 #

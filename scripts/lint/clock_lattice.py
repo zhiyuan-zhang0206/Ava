@@ -154,12 +154,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     "confirmed group closure; the same class as base/host/proc.py's TERM->KILL ladder wait, "
     "no lattice neighbour",
     (
-        "services/pitr/restore/operation_runtime.py",
-        "DRILL_GRACE_S",
-    ): "independent: the same courtesy window for an operator `ava pitr drill`, long enough "
-    "for its bounded sandbox stop, residue scan and evidence write; an operator command "
-    "outside every daemon stop budget, no lattice neighbour",
-    (
         "base/host/proc.py",
         "_REAP_TIMEOUT_S",
     ): "independent: single wait_procs bound when reaping a process tree, no lattice neighbour",

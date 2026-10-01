@@ -138,7 +138,6 @@ def test_pg_hba_body_authenticates_without_secret(monkeypatch: pytest.MonkeyPatc
     no reachable/cidr lines (the bind stays loopback-only)."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("")
     assert "trust" not in body
     assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
@@ -153,12 +152,9 @@ def test_pg_ident_maps_only_the_os_user_to_the_monitoring_role() -> None:
 
 
 def test_pg_hba_body_scram_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With a secret, the reachable host and trusted CIDRs join as SCRAM lines.
-    No replication rows without a PITR replication URL (pinned explicitly —
-    ambient prod env must not leak in)."""
+    """With a secret, the reachable host and trusted CIDRs join as SCRAM lines."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("s3cret")
     assert body.splitlines() == [
         _admin_peer_line(),
@@ -166,48 +162,6 @@ def test_pg_hba_body_scram_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
         "host all all 10.0.0.5/32 scram-sha-256",
         "host all all 10.0.0.0/8 scram-sha-256",
     ]
-
-
-def test_pg_hba_body_emits_replication_rows_for_pitr_role(monkeypatch: pytest.MonkeyPatch) -> None:
-    """PITR configured + secret cluster -> loopback `replication` rows for the
-    parsed role: pg_basebackup's physical replication connection matches only
-    the literal `replication` keyword, never `all` (2026-08-30 activation)."""
-    monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "")
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "127.0.0.1")
-    monkeypatch.setattr(
-        settings.physical_backup,
-        "pitr_replication_db_url",
-        "postgresql://ava_pitr_repl:s3cret@127.0.0.1:5433/ava_main",
-    )
-    body = _ci._pg_hba_body("s3cret")
-    assert "host replication ava_pitr_repl 127.0.0.1/32 scram-sha-256" in body.splitlines()
-    assert "host replication ava_pitr_repl ::1/128 scram-sha-256" in body.splitlines()
-
-
-def test_pg_hba_body_no_replication_rows_without_pitr_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No PITR replication URL -> no replication rows."""
-    monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "")
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "127.0.0.1")
-    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
-    body = _ci._pg_hba_body("s3cret")
-    assert "replication" not in body
-    assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
-
-
-def test_pg_hba_body_replication_rows_follow_pitr_whatever_the_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The always-authenticated posture carries PITR's SCRAM replication rows on
-    a no-secret cluster too; the secret decides only reach."""
-    monkeypatch.setattr(
-        settings.physical_backup,
-        "pitr_replication_db_url",
-        "postgresql://ava_pitr_repl:s3cret@127.0.0.1:5433/ava_main",
-    )
-    body = _ci._pg_hba_body("")
-    assert "host replication ava_pitr_repl 127.0.0.1/32 scram-sha-256" in body.splitlines()
 
 
 # ─── Task #1113: the passed secret wins over ambient settings ────────────────
@@ -235,7 +189,6 @@ def test_pg_hba_body_follows_passed_secret_not_ambient_settings(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "foreign-sibling-secret")
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("")
     assert "10.0.0" not in body
     assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
