@@ -38,6 +38,7 @@ from base.sessions.pty import host as pty_host
 from base.sessions.pty._paths import host_identity, record_path, socket_path
 from base.sessions.pty.cli import write_env_file
 from base.sessions.pty.host import PtySession
+from base.sessions.pty.tests.job_wait import wait_for_job
 from base.sessions.record import SessionRecord
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
@@ -1218,8 +1219,7 @@ def test_kill_reaps_process_tree_no_orphans(sessions: Path) -> None:
     assert rec is not None
     shell = psutil.Process(rec.pid)
     _send(home, name, "sleep 300")  # foreground job in the shell's group
-    assert _wait(shell.children), "sleep never appeared as a child"
-    sleeper = shell.children()[0].pid
+    sleeper = wait_for_job(shell, ["sleep", "300"]).pid
 
     _kill_until_no_orphans(home, name)
     assert _wait(lambda: not psutil.pid_exists(rec.pid)), "shell survived the kill"
@@ -1373,12 +1373,10 @@ def test_kill_idle_reports_not_interrupted(sessions: Path) -> None:
 
 
 def _wait_shell_child(home: Path, name: str) -> psutil.Process:
-    """Wait until the named session's shell has a live child (the job is up)."""
+    """Wait until the named session's `sleep 300` job is up; returns the job."""
     rec = _record(home, name)
     assert rec is not None
-    shell = psutil.Process(rec.pid)
-    assert _wait(shell.children), f"{name} shell never grew a child"
-    return shell
+    return wait_for_job(psutil.Process(rec.pid), ["sleep", "300"])
 
 
 def test_kill_foreground_job_reports_interrupted(sessions: Path) -> None:
