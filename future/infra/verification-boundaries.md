@@ -151,9 +151,9 @@ Steps, each logged to its own file in the evidence directory:
    hashes the tracked and non-ignored files); nothing depends on the mount afterwards.
 2. `uv sync --locked` in the checkout; `npm ci` in `ui/web`.
 3. Write the start profile and upload the observer.
-4. `ava start --serve-gateway --serve-agent-runner --machine-name verify --machine-host
-   127.0.0.1 --config-file <profile> --only-service gateway frontend ops agent-host`:
-   the first start of a single box. `~/.ava` lives on the container's own filesystem,
+4. `ava init --serve-gateway --serve-agent-runner --machine-name verify --machine-host
+   127.0.0.1 --config-file <profile>`, then `ava start --only-service gateway frontend ops
+   agent-host`: the first start of a single box. `~/.ava` lives on the container's own filesystem,
    never a bind mount (unix sockets, peer authentication, fsync).
 5. `observe`: the observer below.
 6. Copy out `observer.json` and the cluster's logs; `docker rm -f -v`.

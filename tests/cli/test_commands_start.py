@@ -54,9 +54,9 @@ def test_cmd_start_aborts_when_schema_mismatched(
 def test_start_missing_capability_reports_serve_flags_only(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
-    """serve-capability is the entry to the role-aware filter; when both are missing (host serves nothing)
-    other fields cannot be judged for relevance, so the error lists only the two --serve-* flags
-    rather than listing all fields."""
+    """serve-capability is the entry to the role-aware filter; when none is declared (host serves nothing)
+    other fields cannot be judged for relevance, so the error lists only the capability
+    declarations rather than listing all fields."""
 
     monkeypatch.setattr(settings.general, "machine_name", "")
     monkeypatch.setattr(settings.general, "machine_serve_gateway", None)
@@ -72,18 +72,18 @@ def test_start_missing_capability_reports_serve_flags_only(
     rc = _start_commands.cmd_start()
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert "missing required" in err
-    assert "--serve-gateway" in err
-    assert "--serve-agent-runner" in err
-    # When capability is not resolved, the example should give both gateway + agent-runner commands
-    assert "ava start --machine-name <name> --serve-gateway " in err
-    assert "ava start --machine-name <name> --serve-agent-runner " in err
+    assert "recorded setup is incomplete" in err
+    assert "AVA_MACHINE_SERVE_GATEWAY" in err
+    assert "AVA_MACHINE_SERVE_AGENT_RUNNER" in err
+    assert "AVA_MACHINE_NAME" not in err  # no capability, so no value field is judged
+    # A start never takes identity input: a home with none declared needs `ava init`.
+    assert "`ava init`" in err
 
 
 def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
-    """capability is agent-runner, other fields missing → error lists agent-runner needed flags (--gateway-url)."""
+    """capability is agent-runner, other fields missing → error lists the agent-runner's needed keys."""
 
     monkeypatch.setattr(settings.general, "machine_name", "")
     monkeypatch.setattr(settings.general, "machine_serve_gateway", None)
@@ -98,14 +98,14 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     rc = _start_commands.cmd_start()
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert "--machine-name" in err
-    assert "--gateway-url" in err
+    assert "AVA_MACHINE_NAME" in err
+    assert "AVA_GATEWAY_URL" in err
 
 
 def test_start_missing_gateway_fields_reports_gateway_flags(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
-    """capability=gateway, other fields missing → error lists gateway needed flags (--gateway-url)."""
+    """capability=gateway, other fields missing → error lists the gateway's needed keys."""
 
     monkeypatch.setattr(settings.general, "machine_name", "")
     monkeypatch.setattr(settings.general, "machine_serve_gateway", True)
@@ -121,15 +121,15 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     rc = _start_commands.cmd_start()
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert "--machine-name" in err
-    assert "--gateway-url" in err
+    assert "AVA_MACHINE_NAME" in err
+    assert "AVA_GATEWAY_URL" in err
 
 
-def test_setup_field_resolves_env_then_home_file_then_arg_without_persisting(
+def test_setup_field_resolves_env_then_home_file_and_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """env > `$AVA_HOME/<name>` file > CLI arg; a validator gates every source,
-    and a CLI arg is never written back to the home (start identity owns it)."""
+    """env > `$AVA_HOME/<name>` file; a validator gates every source, and
+    resolution never writes the home (`ava init` owns its identity)."""
     from base import paths
 
     home = tmp_path / "home"
@@ -138,20 +138,46 @@ def test_setup_field_resolves_env_then_home_file_then_arg_without_persisting(
     checked: list[str] = []
     field = _setup_commands._SetupField(
         name="machine_name",
-        cli_flag="--machine-name",
         env_var="AVA_MACHINE_NAME",
         hint="<name>",
         validator=checked.append,
     )
 
     monkeypatch.setattr(settings.general, "machine_name", "")
-    assert _setup_commands._resolve_setup_field(field, None) is None
-    assert _setup_commands._resolve_setup_field(field, "from-arg") == "from-arg"
+    assert _setup_commands._resolve_setup_field(field) is None
     assert not (home / "machine_name").exists()
 
     (home / "machine_name").write_text(" from-file \n")
-    assert _setup_commands._resolve_setup_field(field, "from-arg") == "from-file"
+    assert _setup_commands._resolve_setup_field(field) == "from-file"
 
     monkeypatch.setattr(settings.general, "machine_name", " from-env ")
-    assert _setup_commands._resolve_setup_field(field, "from-arg") == "from-env"
-    assert checked == ["from-arg", "from-file", "from-env"]
+    assert _setup_commands._resolve_setup_field(field) == "from-env"
+    assert checked == ["from-file", "from-env"]
+
+
+def test_start_refuses_capabilities_that_differ_from_the_ones_init_recorded(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The capability set is fixed when a home is initialized: a start whose
+    resolved capabilities differ from the intent's refuses before any effect."""
+    from base import paths
+    from cli import start_identity
+
+    home = tmp_path / "recorded"
+    start_identity.prepare_identity(
+        start_identity.IdentityInput(
+            home,
+            tmp_path,
+            frozenset({"agent-runner"}),
+            {"AVA_MACHINE_NAME": "t", "AVA_GATEWAY_URL": "http://127.0.0.1:1"},
+        )
+    )
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    launch = MagicMock()
+    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
+
+    # The hermetic start resolves a gateway-only unit; the intent says agent-runner.
+    assert _start_commands.cmd_start() == 1
+    err = capsys.readouterr().err
+    assert "differ from the ones `ava init` recorded" in err
+    launch.assert_not_called()

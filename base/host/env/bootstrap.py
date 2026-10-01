@@ -398,8 +398,8 @@ def _gateway_base_url() -> str:
             "this host is a pure agent-runner but has no AVA_GATEWAY_URL — its cluster "
             "config comes from the gateway at startup. Join it to its gateway first:\n"
             "    set AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run:\n"
-            "    ava start --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> --machine-host "
-            "<this-host-addr> --db-capability <bundle from `ava cluster db-authority issue-unit`>"
+            "    ava init --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> --machine-host "
+            "<this-host-addr> --db-capability <bundle from `ava cluster db-authority issue-unit`>, then ava start"
         )
     return base_url
 

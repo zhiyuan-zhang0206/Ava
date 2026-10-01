@@ -24,6 +24,7 @@ describes only itself (`base/cluster/record.py`).
 |---------|----------|
 | `status` | this cluster's multi-machine roster |
 | `db-authority issue-unit` | gateway only: seal one remote unit's capability bundle (its join, emergencies) ([[base/cluster/authority/docs/wiring.ava.okf.md]]) |
+| `db-authority install-unit BUNDLE` | an initialized agent-runner unit only: install a bundle sealed for it, the same join `ava init --db-capability` makes (a newer write generation after a rotation; stop the unit first); the key comes from `AVA_DB_CAPABILITY_KEY` and the bundle file is deleted once installed. Refused on a gateway home and on an uninitialized home (`cli/unit_join.py`) |
 | `destroy` | decommission this host's cluster: stop it, retire its OS jobs and the permissions helper, mark the home detached; `--drop-db` deletes pg/redis data too. Asks for the home path typed at a terminal: stdin and stdout must both be terminals, and no flag skips the prompt |
 | `health-probe` | Observation-only OS job (exit 0/1; wrong-checkout refusal is 2). Every outage episode persists its start in `$AVA_HOME/health_probe_alert`, stays silent through normal recovery, then grades WARNING → ERROR. An open deploy window (a cohort machine whose `host_deploy_state` posture is not `idle`, read through `ops.deploy_window.deploy_in_flight()`) pauses explained grading without resetting its start, and disk pressure remains independent. Low agent population remains unhealthy during local maintenance and keeps global alert grading. The probe neither rolls back releases nor publishes known-good state. Provider balance and halted-agent checks remain part of health observation. |
 | `health-probe-register` / `health-probe-unregister` | Register/remove the observation-only OS job; registration accepts its interval, with no rollback threshold |
@@ -46,8 +47,8 @@ describes only itself (`base/cluster/record.py`).
   `ensure_cluster_role` re-sets the role password to the current secret on every
   bring-up, so a rotation self-heals — the cost of losing `.env` is credentials
   and config, not data.) The leftover home stays *un-bootable* instead: its
-  `destroy-intent.json` is `detached`, which `cli/start_identity.py:prepare_identity`
-  refuses.
+  `destroy-intent.json` is `detached`, which `ava init` and `ava start` both refuse
+  (`cli/start_identity.py`).
 - `health-probe` is a cron payload that exits 0/1, not a human-readable view —
   the roster is `status`.
 - `status`'s `code` column is a live per-host probe reading: the commit the

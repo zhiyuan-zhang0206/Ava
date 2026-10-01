@@ -27,7 +27,7 @@ expires it installs on any unit that names itself that machine and home.
 
 The machine binding is a guard against mistakes, not against theft:
 `install_bundle` compares the bundle's machine and home with the installing
-unit's own first-start `--machine-name` and home, which that unit asserts
+unit's own `ava init --machine-name` and home, which that unit asserts
 about itself, and the credentials work without any installation.
 
 Containment is therefore rotation, not revocation of a per-unit record: rotate

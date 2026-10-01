@@ -107,8 +107,9 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 - Explicit editable-install inspection and write-window primitives are described
   in [[editable-install-guard.ava.okf.md]]. Ordinary start and converge never
   repair or reinstall a separate production virtualenv.
-- `cli/start_intent.py` is routed **before** settings-gated imports in `main()`,
-  so first start records complete home identity before runtime configuration loads.
+- `cli/init_intent.py` and `cli/start_intent.py` are routed **before** settings-gated
+  imports in `main()`: `ava init` records complete home identity (and starts nothing),
+  and `ava start` admits that identity, before runtime configuration loads.
 - `cli/mcp_server.py` is the third top-level module a verb routes to
   (`ava mcp serve`) rather than a `commands/` module: it is a long-running
   stdio server, not a command that renders and exits, and it pulls in the mcp

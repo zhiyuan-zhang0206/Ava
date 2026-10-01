@@ -155,7 +155,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
 
     Default role="gateway" (full service set). To test secondary, explicitly override:
         monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-        monkeypatch.setattr(_cli, "_collect_setup_values", lambda _a: (..., []))"""
+        monkeypatch.setattr(_cli, "_collect_setup_values", lambda: (..., []))"""
     from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 
     def fixture_runtime(_self: object) -> LoadedRuntimeIdentity:
@@ -163,7 +163,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr("cli.start_runtime.StartRuntime.identity", fixture_runtime)
 
-    def _fake_collect(_args: dict[str, str | None]) -> tuple[dict[str, str], list]:
+    def _fake_collect() -> tuple[dict[str, str], list]:
         return {
             "machine_name": "test-machine",
             "machine_role": "gateway",

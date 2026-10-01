@@ -10,7 +10,7 @@ tags:
 
 # Start readiness
 
-`ava start` first validates the persisted home and service selection. The
+`ava start` first validates the persisted home (initialized by `ava init`) and service selection. The
 pre-bind gate in `cli/commands/lifecycle/start.py:_refuse_occupied_health_ports` refuses
 ports held by another unit before launching application processes. It reads the
 same selected roster that the root will own. A matching HTTP response from an
@@ -39,5 +39,5 @@ record through `base/deploy/lifecycle/launch_failures.py`.
 
 - [[cli/commands/lifecycle/docs/readiness-verdict.ava.okf.md]] — exit codes,
   generation evidence, deadlines and alerts.
-- [[cli/docs/start_identity.ava.okf.md]] — first-start identity and operation admission.
+- [[cli/docs/start_identity.ava.okf.md]] — init identity and start admission.
 - [[base/cluster/docs/machine.ava.okf.md]] — capabilities and the selected service roster.
