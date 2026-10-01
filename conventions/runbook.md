@@ -2326,4 +2326,6 @@ platform ancestry and actual application execution. There is no local branch-pre
 controller: validate a branch with CI, the throwaway test clusters, and the Linux
 verification container (`python3 scripts/verify/container.py --ref <ref>`: a fresh
 container, the commit cloned to `~/.ava/source`, `ava init` and the first `ava start`, a scripted agent;
-[verification boundaries](../future/infra/verification-boundaries.md)).
+[verification boundaries](../future/infra/verification-boundaries.md)); what only macOS can show
+(the signed helper chain, the desktop grants) runs in a throwaway Tart VM cloned from the golden
+image (`python3 scripts/verify/tart_run.py --ref <ref>`, same flow, plus the helper chain check).
