@@ -1,27 +1,25 @@
 # deploy/lgtm/docker-compose.yml — container half of the observability backend.
-# Compose copies of Tempo and Grafana are rollback assets; converge installs
-# native Grafana, Loki, and Prometheus as launchd jobs. Tempo remains remote
-# per cluster. The marker-host watchdog re-runs start.sh after a
-# connection-level readiness failure; it probes native jobs first and never
-# restarts an already-live backend.
+# Compose copies of Tempo and Grafana are rollback assets; native Grafana, Loki,
+# and Prometheus are `ava-root` services whose binaries and configuration
+# converge prepares (see README.md). Tempo remains remote per cluster.
 #
 # Role: required serving infrastructure while the gateway serves /ops and the
 # inspect endpoints. The native per-machine collector on host 4318 is the OTLP
 # entry and fans out to these loopback backends.
 #
 # Operations:
-#   bash start.sh   # native launchd backends
-#   bash stop.sh    # stop native backends; volumes persist
+#   `ava lgtm on` / `ava lgtm off`   # native backends, through normal `ava start`;
+#                                    # observation data persists
 #   rollback: stop, restore the prior compose + backend configs from git, then
 #             docker compose up -d (the rollback volumes remain on disk)
 #   docker compose down -v   # permanently wipe observability history
 #
 # Ports (host):
 #   3003  Grafana UI (container; anonymous read-only viewer)
-#   3100  Loki API (native launchd backend)
+#   3100  Loki API (native backend)
 #   3200  Tempo query API (container)
 #   14318 Tempo OTLP/HTTP intake (container)
-#   9090  Prometheus API and OTLP receiver (native launchd backend)
+#   9090  Prometheus API and OTLP receiver (native backend)
 #
 # Resource posture: native limits are GOMEMLIMIT=2GiB (Loki), 1GiB
 # (Prometheus), and 256MiB (Promtail). Tempo has a 1-core/768MiB container
@@ -48,7 +46,7 @@ services:
   grafana:
     image: grafana/grafana:13.1.3
     env_file:
-      # Shared with the future native launcher; behavior must not live only in
+      # Shared with native Grafana; behavior must not live only in
       # the container transport.
       - ./config/grafana/runtime.env
     environment:

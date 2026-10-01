@@ -214,8 +214,9 @@ def run_browser_gate(
     state_path, state, golden = _load_gate_state(output_root)
     with sync_playwright() as playwright:
         # Repo-pinned Playwright Chromium, headless on the host — the bundled
-        # engine (uv.lock playwright==1.59.0) keeps goldens comparable across
-        # runs; never the system Chrome channel, which auto-updates under them.
+        # engine (the playwright version locked in uv.lock) keeps goldens
+        # comparable across runs; never the system Chrome channel, which
+        # auto-updates under them.
         browser = playwright.chromium.launch(headless=True)
         try:
             browser_engine = f"playwright-chromium {browser.version} (headless, host)"

@@ -129,8 +129,10 @@ caps. Loki retains normal streams for 84 hours, preserves the configured
 archive-stream exception, and keeps bounded query splitting, fan-out, and
 embedded result caches. Prometheus retains data for 15 days or 8GB, whichever
 limit is reached first. Tempo declares its 168-hour block retention. The two
-container services retain explicit CPU and memory capsules, and native logs
-are written to `$AVA_HOME/lgtm/native/logs/`.
+container services retain explicit CPU and memory capsules. Each native backend's
+stdout and stderr go to `$AVA_HOME/run/ava-root/logs/<name>/output.log` (`<name>`
+is `loki`, `prometheus`, or `grafana`); Grafana's own log files are written to
+`$AVA_HOME/lgtm/native/logs/`.
 
 All unauthenticated backend APIs remain loopback-only: Loki 3100, Prometheus
 9090, Tempo 3200 and 14318. Grafana 3003 is the intended wider,
