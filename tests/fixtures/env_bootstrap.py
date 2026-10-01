@@ -190,7 +190,7 @@ os.environ["AVA_TRANSPORT_ENCRYPTION"] = "overlay"
 # the provisioning fixtures write (names-as-data — Settings keeps the URL
 # verbatim, credentials included). The throwaway pg/redis provide the
 # `ava_citest` role/db/ACL user (tests/_containers.py), while the prod-db guard
-# (tests/ava/conftest.py, which refuses `ava`/`ava_main`) still fires if a test
+# (tests/path_scoped/ava_tests.py, which refuses `ava`/`ava_main`) still fires if a test
 # ever points at the real production database.
 
 # PgBouncer defaults ON in prod, but the suite pins it OFF for determinism: with

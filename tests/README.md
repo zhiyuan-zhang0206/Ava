@@ -44,17 +44,22 @@ The top-level `tests/{module}/` holds the unit tests of code whose package has n
 ```
 tests/
 ├── {module}/              # Unit tests, directory name corresponds to top-level source module
-│   ├── conftest.py        # Shared fixtures for this module
 │   └── test_{file}.py     # One test file per source file
 ├── integration/           # Integration tests (requires Gateway process)
-│   ├── conftest.py
 │   └── test_{scenario}.py
-├── e2e/                   # End-to-end tests (full stack)
+├── e2e/                   # End-to-end tests (full stack; keeps its own conftest.py)
 ├── factories/             # Test data factories (to be created)
 │   ├── messages.py
 │   └── state.py
-└── fixtures/              # Global fixture plugins (DB/Redis isolation, guards), loaded by the repo-root conftest.py
+├── fixtures/              # Global fixture plugins (DB/Redis isolation, guards), loaded by the repo-root conftest.py
+└── path_scoped/           # Per-directory fixtures (the former conftests), registered by path in tests/fixtures/path_scopes.py
 ```
+
+Fixtures that only some directories' tests take (autouse isolation stand-ins, `short_tmp`,
+`as_machine`, ...) are not in a `conftest.py`, because a conftest does not follow a test into a
+package's `tests/` directory. They live in `tests/path_scoped/` and `PATH_SCOPES` in
+`tests/fixtures/path_scopes.py` lists the paths each applies to; a test moved elsewhere gets its
+new path added there (the file's docstring says how).
 
 ### Directory Mapping
 

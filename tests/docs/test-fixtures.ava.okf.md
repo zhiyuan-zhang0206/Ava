@@ -22,8 +22,14 @@ Every test in the repository runs under the same isolation: a private `AVA_HOME`
 - `guards` — autouse host guards and the `_stub_everywhere` helper
 - `units` — gateway / runner unit, per-test unit home and workspace, write-generation ledger, `spawn_agent`
 - `milvus`, `log_capture`, `retry_waits` — opt-in `milvus_client`, `loguru_records`, and `retry_waits` (records the waits `base.host.net.resilience` retry loops request instead of sleeping them; never autouse, because a no-op wait under a wall-clock-bounded loop spins until memory runs away, issue #1001)
+- `path_scopes` — registers the per-directory fixture modules of `tests/path_scoped/` for the paths in its `PATH_SCOPES` table (below); a plugin with hooks only, it adds no fixture of its own
 - `_asyncio_stall_probe`, `collection_guard` — hook-only plugins (stall forensics; one collector node per directory)
 - **List order is load order and is load-bearing.** Same-scope autouse fixtures are set up in registration order and, inside one module, alphabetically — which is why `provisioning` (`_clean_state`) precedes `guards` (`_guard_*`). Adding a plugin means checking its autouse names against that order.
+
+### Path-scoped fixtures (the former directory conftests)
+- A conftest's fixtures reach only the tests below it, so a test moved into a package's `tests/` directory would silently lose them. The modules in `tests/path_scoped/` (one per former conftest, plus `api_keys` and `pty_reaper` that several take) are registered for directories or single test files listed in `PATH_SCOPES` (`tests/fixtures/path_scopes.py`) when pytest starts collecting that node (`parsefactories(holder=, node=)`, the interface pytest uses for a conftest). A governed test therefore sees exactly the fixture closure it saw under the conftest: the same autouse names in the same order, the same visibility, and a session-scoped autouse fixture (the provider-plugin load for the gateway tests) instantiated only when a governed test runs.
+- The table is a migration device: the end state is each package's tests declaring the environment they need, or a local conftest providing it, so entries only come out. Moving a test edits its `paths`; each entry's `test_files` (how many test files the paths hold) does not change on a move, and `tests/ci/test_path_scopes.py` fails when fewer are found (a test moved out without its new path listed) or a listed path no longer exists (the run stops at configure). The test also locks the pytest interface the plugin relies on; a pytest upgrade must re-check it.
+- Hooks (`collect_ignore`, `pytest_configure`) are not fixtures and stay in their conftest: `services` (win32 `collect_ignore`), `lifecycle/native_root` (works without the repo-root conftest), `e2e`.
 
 ### Isolation invariants
 - **Per xdist worker / session** a pair of throwaway pg/redis + per-session databases; per-test isolation via autouse TRUNCATE + checkpoint re-setup (**not** a full instance per test)

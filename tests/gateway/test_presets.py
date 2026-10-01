@@ -2,7 +2,7 @@
 spawn-with-preset config merge in gateway/agents/router.py.
 
 Driven through TestClient(app) against the real test DB. Spawn tests rely on the
-autouse `_local_spawn_in_process` fixture (tests/gateway/conftest.py) to run the
+autouse `_local_spawn_in_process` fixture (tests/path_scoped/gateway_tests.py) to run the
 spawn op in-process, so a preset-seeded spawn actually persists its merged
 `config_overlay`, which the test reads back through `db_conn`.
 """

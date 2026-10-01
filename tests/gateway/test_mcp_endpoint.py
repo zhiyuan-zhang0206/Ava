@@ -9,7 +9,7 @@ text/event-stream).
 
 Tests run the real app via TestClient (its lifespan builds the MCP session
 manager and enters `manager.run()`), with the ops-routing autouse fixtures
-from tests/gateway/conftest.py standing in for the local runner.
+from tests/path_scoped/gateway_tests.py standing in for the local runner.
 """
 
 from __future__ import annotations
