@@ -712,16 +712,15 @@ def test_dashboard_per_agent_dismissal_has_no_arithmetic_effect(
 
 
 def test_dashboard_live_count_excludes_terminated(db_conn: psycopg.Connection) -> None:
-    """live_count = all non-terminated agents, including idling / restarting."""
+    """live_count = all non-terminated agents, running and idling."""
     _insert_agent(db_conn, status="running")
     _insert_agent(db_conn, status="idling")
     _insert_agent(db_conn, status="terminated")
     _insert_agent(db_conn, status="idling")
-    _insert_agent(db_conn, status="restarting")
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get("/api/stats/dashboard")
-    assert resp.json()["live_count"] == 4
+    assert resp.json()["live_count"] == 3
 
 
 def test_dashboard_aggregates_llm_usage_payload(

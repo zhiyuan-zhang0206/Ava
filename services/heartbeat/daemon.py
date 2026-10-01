@@ -138,7 +138,7 @@ def _select_idle_agents_needing_heartbeat(
     The idle clock is `last_active_at` — the timestamp of the agent's last
     completed LLM turn (real work), NOT `status_changed_at`. status_changed_at is
     bumped by every status flip including ops lifecycle churn (rollout quiesce /
-    respawn / update cycles an agent idling -> restarting -> ... -> idling),
+    respawn / update cycles an agent through idling and back),
     so keying idle time off it let an ops restart reset the whole fleet's idle
     timers. last_active_at is written only by a real turn and is untouched by that
     cycle (an idle agent runs no LLM turn through it), so an ops event never resets

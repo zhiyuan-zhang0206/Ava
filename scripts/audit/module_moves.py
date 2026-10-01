@@ -19,9 +19,7 @@ are blanked before matching.
 
 The invariant is that committed repository content carries no reference to the
 old path. Scan working-tree text for `git ls-files` entries, excluding the frozen
-decisions/, postmortems/, and docs/history/ axes, the byte-frozen `db/schema.sql`
-(the squashed baseline: its comments keep their paths until a migration rewrites
-them), and this script itself. Untracked
+decisions/, postmortems/, and docs/history/ axes and this script itself. Untracked
 environments, caches, and operator scaffolding are outside that universe. Stage
 new files before auditing. Binary files are skipped. Any failed check exits 1.
 """
@@ -37,9 +35,6 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent.parent
 _FROZEN = ("decisions/", "postmortems/", "docs/history/")
-# Fixed single files outside the frozen axes. Byte-frozen: db/schema.sql, the
-# squashed baseline.
-_FROZEN_FILES = frozenset({"db/schema.sql"})
 _HISTORY_READ_RE = re.compile(r"""git\s+show\s+(?:"[^"]*"|'[^']*'|\S+)""")
 
 
@@ -50,7 +45,7 @@ def _mask_history_reads(text: str) -> str:
 
 def _is_excluded(name: str) -> bool:
     """Whether a tracked path is outside the audit's live-content universe."""
-    return not name or name.startswith(_FROZEN) or name in _FROZEN_FILES
+    return not name or name.startswith(_FROZEN)
 
 
 def _tracked_text() -> list[tuple[str, str]]:

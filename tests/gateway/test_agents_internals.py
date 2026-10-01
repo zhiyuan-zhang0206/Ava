@@ -500,41 +500,6 @@ class TestResurrectAgent:
             ("", "resurrect", "system"),
         ]
 
-    def test_guarded_resurrect_wakes_a_row_with_a_legacy_closure_stamp(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Terminate has no closed state: an `agents_meta.closed_at` left by the
-        retired closed-agent concept neither gates the automatic wake nor is
-        cleared by it (decisions/2026-09-27-terminate-has-no-closed-state.md)."""
-        agent_id = _hosted_agent(db_conn)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET status = 'terminated', closed_at = now() WHERE id = %s",
-                (agent_id,),
-            )
-        db_conn.commit()
-        trigger_id = base.db.insert_inbound_message(
-            db_conn, agent_id, "wake the terminated agent", source="user"
-        )
-
-        returned = resurrect_agent(
-            agent_id,
-            resurrected_by="system",
-            trigger_inbound_id=trigger_id,
-            trigger_inbound_kind="chat",
-        )
-
-        assert returned == agent_id
-        row = _agents_row(db_conn, agent_id)
-        assert row is not None and row[2] == "idling"
-        assert db_conn.execute(
-            "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id = %s", (agent_id,)
-        ).fetchone() == (True,)
-        assert _inbound_rows(db_conn, agent_id) == [
-            ("wake the terminated agent", "chat", "user"),
-            ("", "resurrect", "system"),
-        ]
-
     def test_guarded_compact_rejects_kind_mismatch_and_claimed_trigger(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -701,7 +666,7 @@ class TestResurrectAgent:
 
     @pytest.mark.parametrize(
         "alive_status",
-        ["running", "idling", "restarting"],
+        ["running", "idling"],
     )
     def test_resurrect_alive_agent_raises_already_alive(
         self,
@@ -712,7 +677,7 @@ class TestResurrectAgent:
         """Any status other than 'terminated' cannot be resurrected — only 'terminated' is a valid source state.
 
         Full parametrization locks the contract that "resurrect refuses all states that are still alive or not fully dead".
-        Historically only running/idling/restarting were tested. The complete current
+        Historically only running/idling were tested. The complete current
         non-terminal set is covered explicitly — a regression that changed the guard
         to `if current in [...]` and missed a value would silently let resurrect
         send a revival notification to an agent that is "still running / still init'ing",

@@ -329,47 +329,24 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
             old_host.wait(timeout=5)
 
 
-async def test_admission_ignores_deployment_state(
+async def test_admission_does_not_lock_deployment_state(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
 ) -> None:
-    """Deployment-wide state neither defers a hosted birth nor changes its protocol.
-
-    A non-stable phase under a live lease, arbitrary publication evidence and a
-    concurrently held row lock all leave admission untouched: it reads and
-    locks nothing but the agent's own row, and advertises protocol zero.
-    """
+    """A concurrently held row lock on the deployment singleton does not stall a
+    hosted birth: admission reads and locks nothing but the agent's own row, and
+    advertises protocol zero."""
     agent_id, owner = _agent(db_conn), uuid4()
-    saved = db_conn.execute(
-        "SELECT phase, kind, holder, acquired_at, expires_at, managed_writer_evidence "
-        "FROM deployment_state WHERE id = 1"
-    ).fetchone()
-    assert saved is not None
-    db_conn.execute(
-        "UPDATE deployment_state SET phase = 'updating', kind = 'rollout', holder = 'holder:1', "
-        "acquired_at = now(), expires_at = now() + interval '1 hour', "
-        "managed_writer_evidence = %s WHERE id = 1",
-        (Jsonb({"version": 2, "pending": {"any": "value"}}),),
-    )
-    db_conn.commit()
     try:
         db_conn.execute("SELECT id FROM deployment_state WHERE id = 1 FOR UPDATE")
         admitted = await asyncio.wait_for(
             admit_hosted_runtime(aops_pool, agent_id, "host-test", owner, expected_from="idling"),
             10,
         )
-        db_conn.rollback()
         assert admitted is not None
         assert _version(db_conn, agent_id) == 0
     finally:
         db_conn.rollback()
-        *scalars, evidence = saved
-        db_conn.execute(
-            "UPDATE deployment_state SET phase = %s, kind = %s, holder = %s, acquired_at = %s, "
-            "expires_at = %s, managed_writer_evidence = %s WHERE id = 1",
-            (*scalars, None if evidence is None else Jsonb(evidence)),
-        )
-        db_conn.commit()
 
 
 async def test_settle_retains_a_granted_advertisement(

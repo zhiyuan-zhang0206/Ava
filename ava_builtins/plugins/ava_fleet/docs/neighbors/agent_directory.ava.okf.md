@@ -50,7 +50,6 @@ class AgentRow:
 |----|------|
 | `RUNNING` | Executing |
 | `IDLING` | Idle, waiting for wake-up |
-| `RESTARTING` | Restarting |
 | `TERMINATED` | Terminated |
 
 ## `list_machines`

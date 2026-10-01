@@ -121,7 +121,7 @@ class OpenNotice(BaseModel):
 class AgentSnapshot(BaseModel):
     """Full lifecycle state of one agent.
 
-    `status` values: running / idling / restarting / terminated.
+    `status` values: running / idling / terminated.
 
     `spawner` shape: "user" / "agent:<id>" / arbitrary external name — the
     frontend builds a spawn tree from this.

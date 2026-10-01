@@ -19,8 +19,7 @@ Two signals, merged per agent:
   agent process renews it every 60s while alive, so expiry with the machine up
   means a dead/wedged process. An unclaimed `idling` row has no process yet, so
   it stays
-  `unknown` until its atomic claim writes `started_at`; `restarting` judges on
-  machine reachability alone.
+  `unknown` until its atomic claim writes `started_at`.
 
 Per-agent merge (`liveness_state`):
 

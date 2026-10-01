@@ -255,7 +255,6 @@ def test_lifecycle_intervals_follow_transactional_status_not_telemetry(
     ).fetchone()
     assert first is not None and first[1] is None
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=71")
-    db_conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=71")
     assert db_conn.execute(
         "SELECT count(*) FROM agent_lifecycle_intervals WHERE agent_id=71"
     ).fetchone() == (1,)

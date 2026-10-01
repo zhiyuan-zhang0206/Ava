@@ -22,8 +22,7 @@ Six jobs on one fast tick (user-confirmed design, 2026-08-02 — see
    re-reporting every still-stalled inbound (the 5,184-event burst, 2026-08-06 audit).
 
 `running` owners are never dispatched or alerted: a chat queued behind a long
-in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot states
-(restarting) is left to its own reaper.
+in-flight turn is normal — the claim's turn-end SELECT picks it up.
 
 3. **Terminated-owner resurrect retry** — every tick, for each DISTINCT
    terminated agent that still holds a `pending` chat created after its latest
@@ -44,7 +43,7 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_IDLING_THRESHOLD_SECONDS` (default 2h),
    to `done` (age from `claimed_at`, falling back to `created_at`). Hosted
    idling agents may never boot again to reconcile their completed claims;
-   running/restarting owners remain untouched. The same cadence completes the
+   running owners remain untouched. The same cadence completes the
    stale pending `terminate` / `system_note` / `restart_completed` rows of
    terminated owners (no consumer), and the reconcile-side cutoff
    (`agent/db/__init__.py::reconcile_claimed_inbounds`) still closes the resurrect race at boot.
@@ -140,10 +139,9 @@ def select_stale_pending(
 
     An owner mid-turn (status='running') queues inbound legitimately — the
     claim's turn-end SELECT picks them up, so they are NOT stalls (a long LLM
-    turn with a queued user message is normal). 'restarting' has its own reaper
-    (boot_reap_grace_seconds); alerting at the 30s threshold would fire
-    during a mass rollout. Only waiting/terminal owners signal a real stall:
-    'idling' (lost wake), 'terminated' (delivery auto-resurrect failed).
+    turn with a queued user message is normal). Only waiting/terminal owners signal
+    a real stall: 'idling' (lost wake), 'terminated' (delivery auto-resurrect
+    failed).
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

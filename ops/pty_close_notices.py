@@ -12,7 +12,7 @@ session that outlived its SIGKILL.
 The ops daemon flushes the journal at its next startup, once that start has
 released its maintenance hold (`services/agent_ops/close_notices.py`): a
 notice for a live owner becomes a system inbound message, one for a
-terminated/restarting owner is dropped without delivery (a closure notice
+terminated owner is dropped without delivery (a closure notice
 must never resurrect a dead agent — the TTL reaper's boundary,
 gateway/ttl_reaper/__init__.py:83).
 
@@ -47,7 +47,7 @@ from base.paths import ava_home
 from ops.cluster_status import AGENT_SHELL_RE
 
 # The reaper's notifiable boundary: only these statuses receive a closure
-# notice; anything else (terminated / restarting / missing) drops the record.
+# notice; anything else (terminated / missing) drops the record.
 _NOTIFIABLE_STATUSES = ("running", "idling")
 
 # Why a unit closed the session, as the owner's notice names it. A pause

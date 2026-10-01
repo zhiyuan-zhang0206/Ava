@@ -1108,8 +1108,8 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
 
 
   it("shows 'due' when the projected check-in is in the past", async () => {
-    // A restarting agent's idle clock runs on while the daemon skips it, so a
-    // projected next_at can land in the past — the cell must render "due",
+    // The daemon dispatches at its next poll tick, so a projected next_at can
+    // land in the past — the cell must render "due",
     // never "4m ago" for a *next* heartbeat (the "one hour ago" bug family).
     const nextAt = new Date(Date.now() - 240_000).toISOString(); // 4m overdue
     getAgentInspectLive.mockResolvedValue(
