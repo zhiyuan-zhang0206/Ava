@@ -126,6 +126,25 @@ class PlatformBackend(abc.ABC):
         """Remove the recurring content-refresh pass."""
         ...
 
+    # -- WAL-G physical backup ----------------------------------------------
+
+    @abc.abstractmethod
+    def register_walg_job(self) -> None:
+        """Register the daily WAL-G tick (`ava backup walg run`).
+
+        Reached only through ``base.host.system.walg_job.register_walg_job``, which
+        applies the ``os_jobs_enabled()`` and default-home gates — call that, not this.
+
+        Idempotent — re-running replaces the definition. Raises ``RuntimeError``
+        on registration failure.
+        """
+        ...
+
+    @abc.abstractmethod
+    def unregister_walg_job(self) -> None:
+        """Remove the daily WAL-G tick. Safe when none is registered."""
+        ...
+
     # -- pr flow -------------------------------------------------------------
 
     @abc.abstractmethod
@@ -281,6 +300,19 @@ class MacPlatformBackend(PlatformBackend):
 
         _unregister_macos()
 
+    # -- WAL-G physical backup --
+
+    def register_walg_job(self) -> None:
+        from base.host.system.walg_job import _register_macos
+
+        if _register_macos() != 0:
+            raise RuntimeError("WAL-G tick registration failed on macOS")
+
+    def unregister_walg_job(self) -> None:
+        from base.host.system.walg_job import _unregister_macos
+
+        _unregister_macos()
+
     # -- process --
 
     def process_alive(self, pid: int) -> bool:
@@ -387,6 +419,19 @@ class LinuxPlatformBackend(PlatformBackend):
 
     def unregister_pr_flow_job(self) -> None:
         from base.host.system.pr_flow_job import _unregister_linux
+
+        _unregister_linux()
+
+    # -- WAL-G physical backup --
+
+    def register_walg_job(self) -> None:
+        from base.host.system.walg_job import _register_linux
+
+        if _register_linux() != 0:
+            raise RuntimeError("WAL-G tick registration failed on Linux")
+
+    def unregister_walg_job(self) -> None:
+        from base.host.system.walg_job import _unregister_linux
 
         _unregister_linux()
 

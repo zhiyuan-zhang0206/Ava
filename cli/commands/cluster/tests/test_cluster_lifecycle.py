@@ -309,8 +309,10 @@ def test_interrupted_cleanup_retries_to_completion(
 # --- the OS jobs ----------------------------------------------------------------
 
 
-def test_every_scheduled_job_is_retired_including_pr_flow(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job
+def test_every_scheduled_job_is_retired_including_pr_flow_and_the_walg_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
 
     retired: list[str] = []
     for module, name, label in (
@@ -319,6 +321,7 @@ def test_every_scheduled_job_is_retired_including_pr_flow(monkeypatch: pytest.Mo
         (logs_job, "unregister_logs_job", "logs maintenance"),
         (packages_job, "unregister_packages_job", "packages refresh"),
         (pr_flow_job, "unregister_pr_flow_job", "PR flow"),
+        (walg_job, "unregister_walg_job", "WAL-G tick"),
     ):
         monkeypatch.setattr(module, name, lambda label=label: retired.append(label))
 
@@ -330,6 +333,7 @@ def test_every_scheduled_job_is_retired_including_pr_flow(monkeypatch: pytest.Mo
         "logs maintenance",
         "packages refresh",
         "PR flow",
+        "WAL-G tick",
     ]
 
 

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from base.config import settings
-from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job
+from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
 
 
 class _ExplodingBackend:
@@ -36,6 +36,9 @@ class _ExplodingBackend:
     def register_pr_flow_job(self) -> None:
         raise AssertionError("register_pr_flow_job reached the OS with the gate off")
 
+    def register_walg_job(self) -> None:
+        raise AssertionError("register_walg_job reached the OS with the gate off")
+
     def unregister_cron(self) -> None:
         raise AssertionError("unregister_cron reached the OS outside the default home")
 
@@ -50,6 +53,9 @@ class _ExplodingBackend:
 
     def unregister_pr_flow_job(self) -> None:
         raise AssertionError("unregister_pr_flow_job reached the OS outside the default home")
+
+    def unregister_walg_job(self) -> None:
+        raise AssertionError("unregister_walg_job reached the OS outside the default home")
 
 
 class _RecordingBackend:
@@ -71,6 +77,9 @@ class _RecordingBackend:
     def register_pr_flow_job(self) -> None:
         self.calls.append("pr-flow")
 
+    def register_walg_job(self) -> None:
+        self.calls.append("walg")
+
     def unregister_cron(self) -> None:
         self.calls.append("unregister-cron")
 
@@ -85,6 +94,9 @@ class _RecordingBackend:
 
     def unregister_pr_flow_job(self) -> None:
         self.calls.append("unregister-pr-flow")
+
+    def unregister_walg_job(self) -> None:
+        self.calls.append("unregister-walg")
 
 
 @pytest.fixture()
@@ -119,6 +131,7 @@ _REGISTERS = [
     pytest.param(logs_job.register_logs_job, id="logs-maintenance"),
     pytest.param(packages_job.register_packages_job, id="packages-refresh"),
     pytest.param(pr_flow_job.register_pr_flow_job, id="pr-flow"),
+    pytest.param(walg_job.register_walg_job, id="walg"),
 ]
 _UNREGISTER_CALLS: dict[str, Callable[[], None]] = {
     "health-probe": cron.unregister_os_cron,
@@ -126,6 +139,7 @@ _UNREGISTER_CALLS: dict[str, Callable[[], None]] = {
     "logs-maintenance": logs_job.unregister_logs_job,
     "packages-refresh": packages_job.unregister_packages_job,
     "pr-flow": pr_flow_job.unregister_pr_flow_job,
+    "walg": walg_job.unregister_walg_job,
 }
 _UNREGISTERS = [pytest.param(call, id=name) for name, call in _UNREGISTER_CALLS.items()]
 
@@ -148,12 +162,14 @@ def test_registration_dispatches_when_enabled(
     logs_job.register_logs_job()
     packages_job.register_packages_job()
     pr_flow_job.register_pr_flow_job()
+    walg_job.register_walg_job()
     assert backend.calls == [
         "cron",
         "autostart",
         "logs-maintenance",
         "packages-refresh",
         "pr-flow",
+        "walg",
     ]
 
 
@@ -170,6 +186,7 @@ def test_deregistration_is_not_gated_by_the_os_jobs_switch(
         "unregister-logs-maintenance",
         "unregister-packages-refresh",
         "unregister-pr-flow",
+        "unregister-walg",
     ]
 
 

@@ -28,7 +28,8 @@ import subprocess
 from pathlib import Path
 
 # The crontab comment markers the registrars stamp their lines with
-# (`base.host.system.cron` / `autostart` / `logs_job` / `packages_job` / `pr_flow_job`).
+# (`base.host.system.cron` / `autostart` / `logs_job` / `packages_job` / `pr_flow_job` /
+# `walg_job`).
 # A line carrying one is an Ava job; anything else in the user's crontab is theirs
 # and is ignored.
 _CRON_MARKERS = (
@@ -37,6 +38,7 @@ _CRON_MARKERS = (
     "# ava-logs-maintenance",
     "# ava-packages-refresh",
     "# ava-pr-flow",
+    "# ava-walg",
 )
 
 
