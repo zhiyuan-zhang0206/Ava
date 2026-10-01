@@ -30,8 +30,6 @@ def _rec(tmp_path: Path):
             "agent_host": 18019,
             "pg_backup": 18021,
             "memory_search": 18024,
-            "gateway_watchdog": 18025,
-            "agent_runner_watchdog": 18026,
             "page_server": 18018,
         },
         gateway_home=str(tmp_path / ".ava-t1"),

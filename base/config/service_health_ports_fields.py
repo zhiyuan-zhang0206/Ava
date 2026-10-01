@@ -27,34 +27,6 @@ from pydantic import Field
 class ServiceHealthPortFields:
     """The per-unit daemon /healthz port overrides, in their former order."""
 
-    gateway_watchdog_health_port: int | None = Field(
-        default=None,
-        alias="AVA_GATEWAY_WATCHDOG_HEALTH_PORT",
-        description="Gateway watchdog /healthz port override (per unit). Unset = default 8119.",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    agent_runner_watchdog_health_port: int | None = Field(
-        default=None,
-        alias="AVA_AGENT_RUNNER_WATCHDOG_HEALTH_PORT",
-        description="Agent-runner watchdog /healthz port override (per unit). Unset = default 8120.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     labeler_health_port: int | None = Field(
         default=None,
         alias="AVA_LABELER_HEALTH_PORT",

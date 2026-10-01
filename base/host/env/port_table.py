@@ -10,6 +10,8 @@ needs it and must import neither `base.config` nor `base.cluster`.
 The table is closed. A home's recorded `ports` must carry exactly these keys
 (`cli.start_identity` refuses a record with more or fewer), so adding or removing
 a slot means rewriting every existing record by hand before its next start.
+The numbers 8117 to 8120 belonged to removed slots and are not handed to another
+service.
 
 Tests never use these numbers: every port a test binds or dials comes from the
 kernel or from a private range above 21000, and `base/cluster/tests/test_fixed_ports.py`
@@ -49,8 +51,6 @@ FIXED_PORTS: dict[str, int] = {
     "page_server": 8112,
     "agent_host": 8114,
     "pg_backup": 8116,
-    "gateway_watchdog": 8119,
-    "agent_runner_watchdog": 8120,
     # The memory search service's TCP port (like milvus's 19530, not a health
     # port — its healthcheck probes the real /search endpoint).
     "memory_search": 19531,
