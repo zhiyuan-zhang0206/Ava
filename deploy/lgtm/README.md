@@ -12,38 +12,39 @@ The observability station owns its native services by home path. Default
 ports preserve the single-station layout; isolated homes require explicit,
 non-overlapping native listen ports. Provider identity has two equivalent forms:
 
-- **`$AVA_HOME/lgtm-host` marker** (legacy): `ava lgtm on` writes the marker,
-  installs missing pinned native binaries, and runs the idempotent launcher.
-  A home without the marker never installs, starts, or stops these backends.
+- **`$AVA_HOME/lgtm-host` marker** (legacy): `ava lgtm on` writes the marker and
+  enables the three backend services through normal `ava start`, whose converge
+  installs any missing pinned native binaries.
 - **`observability-station` unit capability** (declarative): a machine that
   declares the capability (`ava init --serve-observability-station`, or
   `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` / the
   `$AVA_HOME/machine_serve_observability_station` file) converges the full
-  native set — configs, native service definitions, storage dirs — with no marker, and its
-  watchdog keepalive, producer OTLP export, collector lifecycle, and Loki read
+  native set — pinned binaries, rendered configs, storage dirs — with no marker, and its
+  producer OTLP export, collector lifecycle, and Loki read
   gates all treat it as the station. The capability is orthogonal to
   `AVA_OBSERVABILITY_URL`: the role decides who PROVIDES the stack, the switch
   decides where CONSUMERS point.
 
-With either form present, every converge runs the same launcher and the gateway
-watchdog re-runs it after a connection-level readiness failure. The launcher
-uses launchd on Darwin arm64 and user systemd on Linux amd64. It skips a
-service only when the owned job and its local HTTP listener are alive. On
-Linux, both the loaded unit path and `/proc/<MainPID>/exe` must match this
-home. `ava lgtm status` and `ava status` show native PIDs and local probes.
+With either form present, Loki, Prometheus, and Grafana are ordinary `ava-root`
+services on Darwin arm64 and Linux amd64: the ops roster defines their commands
+and readiness, and every converge prepares the binaries and rendered
+configuration of the selected backends without registering any OS job. A probe
+never restarts a backend. `ava lgtm status` and `ava status` show each backend's
+root-owned readiness verdict. A home with neither form never installs or runs
+these backends.
 
-The identity gate also protects dev worktrees: their converge and watchdog
-paths are no-ops unless that worktree home is explicitly marked or declares the
+The identity gate also protects dev worktrees: their converge is a no-op for
+these backends unless that worktree home is explicitly marked or declares the
 capability.
 
 ## What it runs
 
 | Backend | Delivery | Version / limit | Port | Role |
 |---|---|---|---|---|
-| Loki | native launchd / user systemd | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
-| Prometheus | native launchd / user systemd | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
+| Loki | native, `ava-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
+| Prometheus | native, `ava-root` service | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
 | Tempo | remote per cluster config | native backend on the station host; compose copy is the rollback asset | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
-| Grafana | native launchd / user systemd | 13.1.3 | 3003 | anonymous read-only UI |
+| Grafana | native, `ava-root` service | 13.1.3 | 3003 | anonymous read-only UI |
 
 The pinned release assets and SHA256 values live in
 [`native/versions.yml`](native/versions.yml). Converge verifies an archive
@@ -79,17 +80,14 @@ store yourself (`rsync` the previous data dir to the new location before the
 first start on the new path) or accept the history loss.
 
 
-### Linux user services and isolated listeners
+### Isolated listeners
 
-Linux requires an active user systemd manager (`systemctl --user`). Converge
-writes `com.ava.<backend>.<home-slug>.service` into the user's
-`$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`). The slug
-includes the full home path's hash. Only those exact three units are enabled,
-started, restarted, disabled, or removed; other homes and Docker services are
-not enumerated or retired. Services recover with `Restart=on-failure`, use a
-30-second stop timeout and `KillMode=control-group`, and append logs under
-`$AVA_HOME/lgtm/native/logs`. User lingering / boot orchestration is a host
-prerequisite, not something `ava lgtm on` silently configures.
+The three backends are `ava-root` services of the home that owns them, started
+and stopped only by that home's `ava start` and `ava stop` (see Start, stop, and
+rollback below). Converge registers no launchd job, systemd unit, or other OS
+job for them, and nothing enumerates or retires another home's processes.
+`ava lgtm on` does not configure boot orchestration; the application root's boot
+job is separate.
 
 Host-scoped ports default to the existing values:
 
@@ -103,10 +101,9 @@ Host-scoped ports default to the existing values:
 An isolated acceptance home must set all four to unused ports, and point its
 consumer query URLs at those listeners. The regular cluster port registry
 does not allocate observability ports. These settings do not migrate storage,
-change the pinned releases, or alter remote Tempo. On Linux, changed rendered
-configs or service definitions restart only already running owned services;
-`ava lgtm on` subsequently starts any stopped services. Missing user manager,
-invalid Loki config, or failed service operations propagate as failures.
+change the pinned releases, or alter remote Tempo. A changed rendered
+configuration or service roster takes effect through a normal stop before start,
+and an invalid Loki config fails converge before the root is started.
 
 ## Why this stack
 

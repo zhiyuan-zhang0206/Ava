@@ -32,11 +32,10 @@ Split by kind: code/AST/Python-convention guards in [[scripts/lint/docs/lint.ava
 `Dockerfile` (the image: the repository's own provisioning scripts, an ordinary user, no source or secret), `container.py` (host side, stdlib only: builds the image when its inputs changed, starts one container per commit, clones the commit into `~/.ava/source`, runs `ava init` and the first `ava start`, copies the evidence out, removes the container) and `observe.py` (runs inside the container: toolchain, service identity probes, frontend, CORS and a scripted agent executing `print(1 + 2)`). Design and claims: [verification boundaries](../../future/infra/verification-boundaries.md).
 
 ### Startup / Deployment / Multi-host
-- `start_agent.py` (derives an agent via gateway `/api/agents`), `start_gateway.py` (directly starts the gateway FastAPI body, ≈ `.venv/bin/python -m gateway`) — **the latter does not derive an agent**
-- `cloud-bench-bootstrap.sh`, `metrics.py`
-- `rotate_cluster_secret.py` — the human-bearer `AVA_CLUSTER_SECRET` rotation on the gateway (`advance`): journaled as fingerprints, it verifies the pinned logical-backup passphrase (pinning `sha256(secret)` only on a home without a pin) before writing the new secret; default dry run; it does not change the data plane
-- `rotate_data_plane_secrets.py` — routine gateway-local data-plane rotation (`--scope admin`, `runner`, or `both`) with a 0600 recovery state
-- `restore_drill.py` — decrypts a managed database backup, restores it into throwaway Postgres, and verifies schema, checkpoint counts, and a readable conversation without touching the live databaserypted daily artifacts)
+- `start_agent.py` (spawns a root agent through gateway `POST /api/agents`; the gateway must already be up), `start_gateway.py` (directly starts the gateway FastAPI body, ≈ `.venv/bin/python -m gateway`) — **the latter does not spawn an agent**
+- `data_plane_ops/rotate_cluster_secret.py` — the human-bearer `AVA_CLUSTER_SECRET` rotation on the gateway (`advance`): journaled as fingerprints, it verifies the pinned logical-backup passphrase (pinning `sha256(secret)` only on a home without a pin) before writing the new secret; default dry run (`--execute` performs it); it does not change the data plane
+- `data_plane_ops/rotate_data_plane_secrets.py` — gateway-host rotation of the Redis credentials (`--scope admin` for the `requirepass` password, `runner` for the runtime ACL password, `both` by default); default dry run (`--execute` performs it), resumable from a 0600 state file; PostgreSQL has no rotatable password here
+- `data_plane_ops/restore_drill.py` — decrypts a managed database backup, restores it into throwaway Postgres, and verifies schema, table counts, and a readable checkpoint conversation without touching the live database; scratch files and the throwaway cluster are removed afterwards
 
 ## Key Dependencies
 
