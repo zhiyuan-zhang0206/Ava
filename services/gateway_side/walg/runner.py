@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -48,15 +49,25 @@ def walg_env(
     return env
 
 
-def run_walg(
+@dataclass(frozen=True)
+class WalgOutput:
+    """What a successful call printed: JSON and tables on stdout, WAL-G's log on stderr."""
+
+    stdout: str
+    stderr: str
+
+
+def run_walg_logged(
     args: Sequence[str],
     *,
     timeout_s: float,
     pg_admin_url: str | None = None,
     extra_env: Mapping[str, str] | None = None,
-    as_json: bool = False,
-) -> Any:
-    """Run `wal-g --config <file> *args`; stdout text, or parsed JSON with `as_json`.
+) -> WalgOutput:
+    """Run `wal-g --config <file> *args` and return both streams.
+
+    For the commands whose result is in WAL-G's log (`delete` lists what it would
+    remove only there). Everything else uses `run_walg`.
 
     Raises:
         WalgConfigError: WAL-G is not configured.
@@ -82,4 +93,24 @@ def run_walg(
         raise WalgCommandError(
             f"wal-g {args[0]} failed (exit {result.returncode}): {' | '.join(tail)}"
         )
-    return json.loads(result.stdout) if as_json else result.stdout
+    return WalgOutput(stdout=result.stdout, stderr=result.stderr)
+
+
+def run_walg(
+    args: Sequence[str],
+    *,
+    timeout_s: float,
+    pg_admin_url: str | None = None,
+    extra_env: Mapping[str, str] | None = None,
+    as_json: bool = False,
+) -> Any:
+    """Run `wal-g --config <file> *args`; stdout text, or parsed JSON with `as_json`.
+
+    Raises:
+        WalgConfigError: WAL-G is not configured.
+        WalgCommandError: non-zero exit or timeout (the stderr tail is attached).
+    """
+    output = run_walg_logged(
+        args, timeout_s=timeout_s, pg_admin_url=pg_admin_url, extra_env=extra_env
+    )
+    return json.loads(output.stdout) if as_json else output.stdout

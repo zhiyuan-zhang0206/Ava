@@ -7,6 +7,14 @@
 #   <dir>/store/      the object store: `wal-push` copies a segment to store/<basename>,
 #                     `st put/ls/get/rm` read and write store/ (put adds ".lz4", like wal-g)
 #   <dir>/calls.log   one line per call: the arguments after --config
+#   <dir>/env.log     `backup-push` only: the environment the tick handed it
+#   <dir>/fail-commands  space-separated command names (backup-list, backup-push,
+#                     wal-verify, delete) that exit 1; every other command works
+#   <dir>/backups.json   what `backup-list` prints (default: one backup, name only);
+#                     `backup-push` replaces it with backups-after.json when that exists
+#   <dir>/wal-verify.json, wal-verify.rc   what `wal-verify` prints and its exit code (default 0)
+#   <dir>/delete-dry.log, delete-confirm.log  WAL-G's log (stderr) of `delete`
+#                     without and with --confirm
 #
 # Not a test module. It needs no environment: the test and Postgres' archive
 # command both reach it through `--config <dir>/walg.json`.
@@ -38,12 +46,41 @@ esac
 
 command=$1
 shift
+for failing in $(cat "$dir/fail-commands" 2>/dev/null || true); do
+    if [ "$failing" = "$command" ]; then
+        echo "fake wal-g: simulated failure of $command" >&2
+        exit 1
+    fi
+done
 case "$command" in
     --version)
         echo "wal-g version v3.0.9 fake"
         ;;
     backup-list)
-        echo '[{"backup_name":"base_000000010000000000000002"}]'
+        if [ -f "$dir/backups.json" ]; then
+            cat "$dir/backups.json"
+        else
+            echo '[{"backup_name":"base_000000010000000000000002"}]'
+        fi
+        ;;
+    backup-push)
+        echo "PGHOST=${PGHOST:-} PGPORT=${PGPORT:-} PGUSER=${PGUSER:-} WALG_DELTA_MAX_STEPS=${WALG_DELTA_MAX_STEPS:-}" >> "$dir/env.log"
+        if [ -f "$dir/backups-after.json" ]; then
+            cp "$dir/backups-after.json" "$dir/backups.json"
+        fi
+        ;;
+    wal-verify)
+        cat "$dir/wal-verify.json"
+        exit "$(cat "$dir/wal-verify.rc" 2>/dev/null || echo 0)"
+        ;;
+    delete)
+        log=delete-dry.log
+        for arg in "$@"; do
+            if [ "$arg" = "--confirm" ]; then
+                log=delete-confirm.log
+            fi
+        done
+        cat "$dir/$log" >&2
         ;;
     wal-push)
         cp "$1" "$store/$(basename "$1")"

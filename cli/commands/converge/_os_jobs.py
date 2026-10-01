@@ -1,6 +1,6 @@
 """Converge steps that register this host's OS-level scheduled jobs.
 
-Five jobs, one concept — everything Ava asks the platform scheduler (launchd /
+Six jobs, one concept — everything Ava asks the platform scheduler (launchd /
 crontab) to run on its behalf:
 
 - **health probe** — periodic cluster health check reporting observations and
@@ -10,6 +10,8 @@ crontab) to run on its behalf:
 - **packages refresh** — the content channel's recurring pass (skills fast lane).
 - **PR flow** — the daily merge-pipeline sampler, credential-gated to the
   production home that can reach GitHub and Trunk (task #2139).
+- **WAL-G tick** — the daily physical backup, present exactly while
+  `AVA_WALG_CONFIG_FILE` is set.
 
 They share a shape worth keeping together: each is idempotent, each delegates the
 platform branching to a ``base.os_*`` module, and each fails the converge loudly
@@ -66,6 +68,23 @@ def ensure_pr_flow_job(_ctx: ConvergeCtx) -> None:
     from base.host.system.pr_flow_job import register_pr_flow_job
 
     register_pr_flow_job()
+
+
+def ensure_walg_job(_ctx: ConvergeCtx) -> None:
+    """Keep the daily WAL-G tick registered exactly while WAL-G is switched on.
+
+    Key set: register (idempotent). Key unset: remove a job a previous
+    configuration left behind, so turning WAL-G off leaves no schedule that runs
+    a command which now does nothing. Both directions only act in the default
+    home (`owns_os_jobs`), and registration is a no-op where
+    `AVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`."""
+    from base.host.system.walg_job import register_walg_job, unregister_walg_job
+    from services.gateway_side.walg.config import enabled
+
+    if enabled():
+        register_walg_job()
+    else:
+        unregister_walg_job()
 
 
 def ensure_cluster_autostart(_ctx: ConvergeCtx) -> None:

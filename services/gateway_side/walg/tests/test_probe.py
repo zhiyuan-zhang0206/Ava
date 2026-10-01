@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,7 @@ import pytest
 
 from services.gateway_side.walg import config as walg_config
 from services.gateway_side.walg import probe
+from services.gateway_side.walg import state as walg_state
 from services.gateway_side.walg.archive import ARCHIVE_TIMEOUT_S, RPO_OBJECTIVE_S, expected_archive
 from services.gateway_side.walg.tests.support import (
     SECRETS,
@@ -32,6 +35,11 @@ _ALL_TEXTS = (
     probe.ARCHIVER_FAILING,
     probe.ARCHIVE_BEHIND,
     probe.UNREADABLE,
+    probe.TICK_NOT_RUNNING,
+    probe.CHAIN_BROKEN,
+    probe.TICK_STATE_UNREADABLE,
+    probe.RUN_FAILED,
+    *probe.RUN_FAILED_AT.values(),
 )
 
 
@@ -309,3 +317,196 @@ def test_the_admin_dial_is_custody_checked_and_bounded(
         "connect_timeout": probe._CONNECT_TIMEOUT_S,
     }
     assert seen["statement"].startswith("SET statement_timeout")
+
+
+# ── the daily tick: A5 (run failed), A6 (tick not running), A7 (chain broken) ─
+
+NOW = datetime(2026, 10, 3, 12, 0, 0, tzinfo=UTC)
+
+
+def _run(status: walg_state.RunStatus = "ok", step: str | None = None) -> walg_state.RunRecord:
+    return walg_state.RunRecord(
+        started_at=NOW - timedelta(hours=1),
+        finished_at=NOW - timedelta(minutes=30),
+        status=status,
+        step=step,
+        detail="d",
+    )
+
+
+def _tick(age: timedelta, skipped: str | None = None) -> walg_state.TickRecord:
+    return walg_state.TickRecord(started_at=NOW - age, skipped=skipped)
+
+
+def _verify(integrity: str, timeline: str = "OK") -> walg_state.VerifyRecord:
+    return walg_state.VerifyRecord(at=NOW, integrity=integrity, timeline=timeline)
+
+
+def _judge(recorded: walg_state.State, *, since: datetime | None = None) -> str | None:
+    return probe.tick_judge(recorded, NOW, enabled_since=since)
+
+
+def test_a_recent_successful_tick_is_healthy() -> None:
+    recorded = walg_state.State(tick=_tick(timedelta(hours=1)), run=_run(), verify=_verify("OK"))
+
+    assert _judge(recorded) is None
+
+
+def test_a_warning_from_wal_verify_is_not_a_chain_failure() -> None:
+    recorded = walg_state.State(tick=_tick(timedelta(hours=1)), verify=_verify("WARNING"))
+
+    assert _judge(recorded) is None
+
+
+@pytest.mark.parametrize(("integrity", "timeline"), [("FAILURE", "OK"), ("OK", "FAILURE")])
+def test_a_broken_chain_is_reported_whichever_check_found_it(integrity: str, timeline: str) -> None:
+    recorded = walg_state.State(
+        tick=_tick(timedelta(hours=1)), run=_run(), verify=_verify(integrity, timeline)
+    )
+
+    assert _judge(recorded) == probe.CHAIN_BROKEN
+
+
+def test_a_chain_failure_outranks_the_failed_run_it_caused() -> None:
+    recorded = walg_state.State(
+        tick=_tick(timedelta(hours=1)),
+        run=_run("failed", walg_state.STEP_VERIFY),
+        verify=_verify("FAILURE"),
+    )
+
+    assert _judge(recorded) == probe.CHAIN_BROKEN
+
+
+@pytest.mark.parametrize("step", walg_state.STEPS)
+def test_a_failed_run_is_reported_with_its_step(step: str) -> None:
+    recorded = walg_state.State(tick=_tick(timedelta(hours=1)), run=_run("failed", step))
+
+    assert _judge(recorded) == probe.RUN_FAILED_AT[step]
+
+
+def test_every_step_has_its_own_text() -> None:
+    assert set(probe.RUN_FAILED_AT) == set(walg_state.STEPS)
+    assert len(set(probe.RUN_FAILED_AT.values())) == len(walg_state.STEPS)
+
+
+def test_a_failed_run_stays_reported_while_later_ticks_only_skip() -> None:
+    recorded = walg_state.State(
+        tick=_tick(timedelta(hours=1), skipped="a deploy window is open"),
+        run=_run("failed", walg_state.STEP_BACKUP),
+    )
+
+    assert _judge(recorded) == probe.RUN_FAILED_AT[walg_state.STEP_BACKUP]
+
+
+def test_a_tick_that_started_within_a_period_is_running() -> None:
+    just_inside = timedelta(hours=24) - timedelta(seconds=1)
+
+    assert _judge(walg_state.State(tick=_tick(just_inside))) is None
+    assert _judge(walg_state.State(tick=_tick(timedelta(hours=24)))) is None
+
+
+def test_no_tick_for_longer_than_a_period_is_reported() -> None:
+    just_outside = timedelta(hours=24) + timedelta(seconds=1)
+
+    assert _judge(walg_state.State(tick=_tick(just_outside))) == probe.TICK_NOT_RUNNING
+
+
+def test_a_skipped_tick_counts_as_a_tick_that_ran() -> None:
+    recorded = walg_state.State(tick=_tick(timedelta(hours=2), skipped="postgres is down"))
+
+    assert _judge(recorded) is None
+
+
+def test_before_any_tick_the_time_since_enabling_is_what_counts() -> None:
+    empty = walg_state.State()
+
+    assert _judge(empty) is None, "no tick and no enabling time: nothing to compare"
+    assert _judge(empty, since=NOW - timedelta(hours=23)) is None
+    assert _judge(empty, since=NOW - timedelta(hours=25)) == probe.TICK_NOT_RUNNING
+
+
+def test_the_enabling_time_is_the_key_pins_mtime(sandbox: Sandbox) -> None:
+    walg_config.load_walg_config()
+    assert probe._enabled_since() is not None
+    pinned_at = datetime(2026, 10, 1, 0, 0, tzinfo=UTC).timestamp()
+    os.utime(walg_config.key_id_path(), (pinned_at, pinned_at))
+
+    assert probe.tick_failure(now=datetime(2026, 10, 3, 0, 0, tzinfo=UTC)) == probe.TICK_NOT_RUNNING
+    assert probe.tick_failure(now=datetime(2026, 10, 1, 12, 0, tzinfo=UTC)) is None
+
+
+def test_without_a_pin_there_is_no_enabling_time(sandbox: Sandbox) -> None:
+    assert probe._enabled_since() is None
+    assert probe.tick_failure(now=NOW) is None
+
+
+def test_tick_failure_reads_the_state_file(sandbox: Sandbox) -> None:
+    walg_state.write_state(
+        walg_state.State(tick=_tick(timedelta(hours=1)), run=_run("failed", walg_state.STEP_VERIFY))
+    )
+
+    assert probe.tick_failure(now=NOW) == probe.RUN_FAILED_AT[walg_state.STEP_VERIFY]
+
+
+def test_an_unreadable_state_file_is_its_own_fixed_failure_not_an_exception(
+    sandbox: Sandbox,
+) -> None:
+    walg_state.state_path().parent.mkdir(parents=True)
+    walg_state.state_path().write_text("{broken " + "".join(SECRETS))
+
+    assert probe.tick_failure(now=NOW) == probe.TICK_STATE_UNREADABLE
+
+
+def _healthy_archiver(monkeypatch: pytest.MonkeyPatch, **changes: Any) -> None:
+    @contextmanager
+    def admin() -> Generator[None]:
+        yield None
+
+    def read(_conn: object) -> probe.ArchiverState:
+        return replace(_healthy_state(), **changes)
+
+    monkeypatch.setattr(probe, "admin_connection", admin)
+    monkeypatch.setattr(probe, "read_archiver_state", read)
+
+
+def test_failure_reports_the_tick_when_the_archiver_is_fine(
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _healthy_archiver(monkeypatch)
+    now = datetime.now(UTC)
+    walg_state.write_state(
+        walg_state.State(
+            tick=walg_state.TickRecord(started_at=now),
+            run=walg_state.RunRecord(
+                started_at=now,
+                finished_at=now,
+                status="failed",
+                step=walg_state.STEP_RETENTION,
+                detail="d",
+            ),
+        )
+    )
+
+    assert probe.failure() == probe.RUN_FAILED_AT[walg_state.STEP_RETENTION]
+
+
+def test_an_archiver_failure_outranks_a_tick_failure(
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _healthy_archiver(monkeypatch, failing_now=True)
+    walg_state.write_state(
+        walg_state.State(verify=_verify("FAILURE"), tick=walg_state.TickRecord(started_at=NOW))
+    )
+
+    assert probe.failure() == probe.ARCHIVER_FAILING
+
+
+def test_off_does_not_read_the_tick_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    make_sandbox(tmp_path, monkeypatch, enabled=False)
+
+    def explode(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("read the tick state while WAL-G is off")
+
+    monkeypatch.setattr(walg_state, "read_state", explode)
+
+    assert probe.failure() is None

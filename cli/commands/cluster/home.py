@@ -137,7 +137,7 @@ def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
 
 def _unregister_scheduled_jobs() -> None:
     """Remove every OS-scheduled job the host registered (health probe, boot
-    autostart, logs maintenance, packages refresh and PR flow).
+    autostart, logs maintenance, packages refresh, PR flow and the WAL-G tick).
 
     Labels name jobs, not homes, and each `unregister_*` is a no-op outside the
     default home, so a scratch home's destroy never touches the host's jobs.
@@ -150,6 +150,7 @@ def _unregister_scheduled_jobs() -> None:
     from base.host.system.logs_job import unregister_logs_job
     from base.host.system.packages_job import unregister_packages_job
     from base.host.system.pr_flow_job import unregister_pr_flow_job
+    from base.host.system.walg_job import unregister_walg_job
 
     jobs: list[tuple[str, Callable[[], None]]] = [
         ("health probe", unregister_os_cron),
@@ -157,6 +158,7 @@ def _unregister_scheduled_jobs() -> None:
         ("logs maintenance", unregister_logs_job),
         ("packages refresh", unregister_packages_job),
         ("PR flow", unregister_pr_flow_job),
+        ("WAL-G tick", unregister_walg_job),
     ]
     failed: list[str] = []
     for name, unregister in jobs:

@@ -25,7 +25,7 @@ Source of truth = services in `build_services()` of `ops/spec.py` whose `Service
 | memory-indexer | memory pool vector index | [[memory_indexer.ava.okf.md]] |
 | labeler | agent auto-naming | [[labeler.ava.okf.md]] |
 | pg-backup | Daily local Postgres backup (scheduler daemon, ServiceSpec service) | [[services/gateway_side/backup/docs/backup.ava.okf.md]] |
-| walg (no service) | WAL archiving to OSS through WAL-G: launch arguments, configuration, key pin, health probe | [[services/gateway_side/walg/docs/walg.ava.okf.md]] |
+| walg (no service) | WAL archiving to OSS through WAL-G: launch arguments, configuration, key pin, health probe; the daily base-backup tick | [[services/gateway_side/walg/docs/walg.ava.okf.md]], [[services/gateway_side/walg/docs/walg-tick.ava.okf.md]] |
 
 ## Also Owned by Gateway Capability, Documented Elsewhere
 The following services also run on the gateway capability (core `_GATEWAY` entries or plugin-folded-in entries), but their concept docs live in their own subtrees and are not repeated here:

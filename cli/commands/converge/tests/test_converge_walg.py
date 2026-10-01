@@ -109,3 +109,52 @@ def test_a_remote_managed_data_plane_cannot_archive(
         converge_walg_module.converge_walg(_ctx(sandbox))
 
     assert installs == []
+
+
+# ── the daily tick job follows the key ───────────────────────────────────────
+
+
+@pytest.fixture
+def job_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record the registrar calls: nothing here reaches a scheduler."""
+    from base.host.system import walg_job
+
+    calls: list[str] = []
+    monkeypatch.setattr(walg_job, "register_walg_job", lambda: calls.append("register"))
+    monkeypatch.setattr(walg_job, "unregister_walg_job", lambda: calls.append("unregister"))
+    return calls
+
+
+def test_the_job_step_runs_on_gateways_after_the_other_scheduled_jobs() -> None:
+    from cli.commands.converge._os_jobs import ensure_walg_job
+
+    names = [step.name for step in converge_host.CONVERGE_STEPS]
+    step = converge_host.CONVERGE_STEPS[names.index("WAL-G backup job")]
+
+    assert step.apply is ensure_walg_job
+    assert step.roles == frozenset({"gateway"})
+    assert names.index("PR flow sampler job") < names.index("WAL-G backup job")
+
+
+def test_the_key_being_set_registers_the_tick(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, job_calls: list[str]
+) -> None:
+    from cli.commands.converge._os_jobs import ensure_walg_job
+
+    sandbox = make_sandbox(tmp_path, monkeypatch)
+
+    ensure_walg_job(_ctx(sandbox))
+
+    assert job_calls == ["register"]
+
+
+def test_the_key_being_unset_removes_the_tick(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, job_calls: list[str]
+) -> None:
+    from cli.commands.converge._os_jobs import ensure_walg_job
+
+    sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
+
+    ensure_walg_job(_ctx(sandbox))
+
+    assert job_calls == ["unregister"]

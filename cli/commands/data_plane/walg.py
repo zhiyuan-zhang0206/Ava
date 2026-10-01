@@ -1,12 +1,13 @@
-"""`ava backup walg`: check that WAL-G can work, and show what it is doing."""
+"""`ava backup walg`: check that WAL-G can work, run the daily tick, show what it is doing."""
 
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from base.cluster.dataplane import walg_binary
-from services.gateway_side.walg import check, probe
+from services.gateway_side.walg import check, probe, state, tick
 from services.gateway_side.walg import config as walg_config
 from services.gateway_side.walg.archive import expected_archive
 
@@ -17,6 +18,20 @@ def cmd_walg_check() -> int:
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")
     return 0 if all(step.ok for step in steps) else 1
+
+
+def cmd_walg_run() -> int:
+    """Run one daily tick (backup, verify, retention); non-zero only when a step failed.
+
+    The OS job runs exactly this, and so can an operator: concurrent runs stand down
+    and a skipped or repeated run is harmless. Every output line carries a UTC
+    timestamp because the job's output is appended to `$AVA_HOME/logs/walg.log`.
+    """
+
+    def report(line: str) -> None:
+        print(f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
+
+    return tick.run_tick(report)
 
 
 def _config_lines(path: Path) -> list[str]:
@@ -55,15 +70,49 @@ def _postgres_lines() -> list[str]:
     ]
 
 
+def _tick_lines() -> list[str]:
+    try:
+        recorded = state.read_state()
+    except state.StateError as exc:
+        return [f"daily tick: state UNREADABLE: {exc}"]
+    if recorded.tick is None:
+        return ["daily tick: never ran"]
+    lines = [f"daily tick: last started {recorded.tick.started_at.isoformat()}"]
+    if recorded.tick.skipped is not None:
+        lines[0] += f", skipped ({recorded.tick.skipped})"
+    if recorded.run is not None:
+        failed_at = f" at {recorded.run.step}" if recorded.run.status == "failed" else ""
+        lines.append(
+            f"last run: {recorded.run.status}{failed_at} "
+            f"({recorded.run.finished_at.isoformat()}): {recorded.run.detail}"
+        )
+    if recorded.backup is not None:
+        lines.append(
+            f"last backup: {recorded.backup.name} ({recorded.backup.kind}, "
+            f"{recorded.backup.finished_at.isoformat()})"
+        )
+    if recorded.verify is not None:
+        lines.append(
+            f"last verify: integrity {recorded.verify.integrity}, "
+            f"timeline {recorded.verify.timeline} ({recorded.verify.at.isoformat()})"
+        )
+    if recorded.retention is not None:
+        lines.append(
+            f"last retention: {recorded.retention.deleted} objects deleted "
+            f"({recorded.retention.at.isoformat()})"
+        )
+    return lines
+
+
 def cmd_walg_status() -> int:
-    """Print configuration, binary, key fingerprint and archiver facts; always exits 0."""
+    """Print configuration, binary, key fingerprint, archiver and daily-tick facts; exits 0."""
     path = walg_config.configured_path()
     if path is None:
         print("WAL-G archiving is off (AVA_WALG_CONFIG_FILE is not set)")
         return 0
     binary_problem = walg_binary.installed_problem()
     print(f"binary: {binary_problem or f'pinned wal-g {walg_binary.WALG_VERSION}'}")
-    for line in (*_config_lines(path), *_postgres_lines()):
+    for line in (*_config_lines(path), *_postgres_lines(), *_tick_lines()):
         print(line)
     failure = probe.failure()
     print(f"health: {failure or 'ok'}")
