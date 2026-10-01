@@ -140,10 +140,11 @@ class UnitHealth:
     """Detail string of the last probe verdict."""
 
 
-# The supervisor's deferral reason for a unit the operator holds down
-# (`desired != RUNNING`). That state is EXPECTED, never a failure: it is the one
-# reason a down verdict neither counts toward the breaker nor alerts. Every
-# other reason (an in-flight retry, a `never` policy) suppresses the action only.
+# The supervisor's deferral reason for a unit whose explicit intent is stopped
+# (`intent != RUNNING`, set by the operator or the service selection). That
+# state is EXPECTED, never a failure: it is the one reason a down verdict
+# neither counts toward the breaker nor alerts. Every other reason (an
+# in-flight retry, a `never` policy) suppresses the action only.
 _HELD_DOWN = "held down"
 
 # The reason held for a unit that is not in this tree at all (the static probe
