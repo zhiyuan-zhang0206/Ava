@@ -63,7 +63,6 @@
     "tests/services/test_maintenance_readiness.py::top-level": 1,
     "tests/services/test_native_storage_diagnostics.py::top-level": 1,
     "tests/services/test_numpy_backend.py::top-level": 1,
-    "tests/services/test_pgbouncer_healthcheck.py::top-level": 1,
     "tests/services/test_pitr_activation_evidence.py::top-level": 1,
     "tests/services/test_pitr_activation_state.py::top-level": 1,
     "tests/services/test_pitr_archive_shim.py::top-level": 1,

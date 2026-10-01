@@ -1,10 +1,14 @@
 """Keep a test out of the top-level `tests/` unless it is registered there.
 
-Run: `.venv/bin/python scripts/structure/tests_location.py [path ...]` (no argument checks every
-tracked `tests/**/test_*.py`; an explicit path that does not exist is an error (stderr + exit 1)).
-`--suggest PATH ...` prints where a test belongs and exits 0: the one mode that reads the
-production code (`scripts/structure/tests_location_suggest.py`); the checks never do. Also run via
-pre-commit and in the CI structure job (`pre-commit run --all-files`).
+Run: `.venv/bin/python scripts/structure/tests_location.py [path ...] [--only FILE ...]` (no
+argument checks every tracked `tests/**/test_*.py`; explicit paths judge exactly those tests; an
+explicit path that does not exist is an error (stderr + exit 1)). `--only FILE ...` is the commit
+hook's changed-files mode (`scripts/lint/docs/changed-files-mode.ava.okf.md`): it judges the
+changed top-level tests, and a changed lint tool, registry or baseline shard (everything under
+`scripts/structure/`) widens it to every tracked test. `--suggest PATH ...` prints where a test
+belongs and exits 0: the one mode that reads the production code
+(`scripts/structure/tests_location_suggest.py`); the checks never do. Also run via pre-commit and
+in the CI structure job (`pre-commit run --all-files`).
 
 ## Why
 
@@ -23,11 +27,11 @@ holds, all decided from its path alone:
 1. its directory or file is in `BY_DESIGN` (`scripts/structure/tests_location_allowed.py`): the
    end-to-end tests, the browser UI tests, the shared fixtures and factories, the real-process
    proofs, none of which has a package to live in;
-2. it is in `ALLOWED` (same file) with a category and a one-line reason: `contract` (it reads
-   repository artifacts no package owns: workflows, `pyproject.toml`, `db/schema.sql`,
-   migrations, `ui/`, `schedules/`, skill scripts, the test harness itself, or scans the whole
-   tree) or `integration` (it spans units that may not import each other, so no package may hold
-   it);
+2. it is in `ALLOWED` (same file) with a category and a one-line reason: `contract` (the
+   test's subject is a repository artifact (workflows, `pyproject.toml`, the schema, migrations,
+   `ui/`, `schedules/`, skill scripts) or the test harness itself, which no package owns; a scan
+   over the whole tree counts) or `integration` (it spans units that may not import each other,
+   so no package may hold it);
 3. its `path::top-level` key is frozen in the `tests_location` section of the structure baseline
    shards (`scripts/structure/baseline/`): the debt of tests still to move. The section is
    shrink-only against the base revision and a renamed file carries its key
@@ -51,13 +55,16 @@ missing). A test that cannot live in a package is registered in `ALLOWED`, `cont
 
 ## Scope and cost
 
-Only paths: the checked files, the registry and the baseline shards are read; no module index, no
-import graph, no `place()`. A hook run costs a process start plus reading the shards. The rule's
-inputs (this file, the registry module, the suggestion module, any baseline shard) re-check every
-test; the pre-push hook and the CI structure job check every tracked top-level test. Whether a
-registered test still has a package home (a test frozen as "to move" may by now sit at its home's
-legal top) is deliberately not checked here: it needs the placement rule, which is not
-sub-second.
+Only paths, and only relative ones: every judgment is on the repo-relative POSIX path of a tracked
+file, never on where the checkout sits (a repository under `/tmp/...` or inside a `tests/` or
+`e2e/` directory gets the same verdicts). The checked files, the registry and the baseline shards
+are read; no module index, no import graph, no `place()`. A commit hook (`--only`) costs a process
+start plus reading the shards, in proportion to the changed test files; the registry's entries are
+checked for existence on every run (a stat each). The pre-push hook and CI's `backend-structure`
+(`pre-commit run --all-files`) check every tracked top-level test, which is also where a deleted
+or renamed test's stale entry is found when no commit hook saw it. Whether a registered test still
+has a package home (a test frozen as "to move" may by now sit at its home's legal top) is
+deliberately not checked here: it needs the placement rule, which is not sub-second.
 """
 
 from __future__ import annotations
@@ -80,11 +87,6 @@ from scripts.structure import (  # noqa: E402 — standalone script
 
 SECTION = "tests_location"
 FROZEN_TARGET = "top-level"
-_RULE_INPUTS = (
-    "scripts/structure/tests_location.py",
-    "scripts/structure/tests_location_allowed.py",
-    "scripts/structure/tests_location_suggest.py",
-)
 _CATEGORIES = ("contract", "integration")
 
 _SUGGEST = "--suggest"
@@ -95,9 +97,9 @@ _GUIDE = (
     "directory there too, or the autouse isolation fixtures silently stop applying to the "
     "moved test (tests/ci/test_path_scopes.py fails).\n"
     "  - scripts/structure/tests_location_allowed.py: a test that cannot live in a package is "
-    "registered as `contract` (it reads repository artifacts no package owns, or scans the "
-    "whole tree) or `integration` (it spans units that may not import each other), with a "
-    "one-line reason.\n"
+    "registered as `contract` (its subject is a repository artifact or the test harness itself, "
+    "which no package owns) or `integration` (it spans units that may not import each other), "
+    "with a one-line reason.\n"
     "Rule: scripts/structure/tests_location.py."
 )
 
@@ -206,32 +208,25 @@ def _tracked_tests(repo_root: Path) -> list[str]:
     return [path for path in out.stdout.split("\0") if path]
 
 
-def _explicit_files(argv: list[str], repo_root: Path) -> tuple[list[str], bool] | None:
-    """(checked top-level tests, whether the run must be full) for explicit paths.
-
-    None when a path does not exist. A path that is no test at all (this lint, its registry, a
-    baseline shard) changes what every test is judged against: full run. A test that is not a
-    top-level one is not this lint's business.
-    """
-    resolved = [lint_common.resolve_targets([arg], repo_root) for arg in argv]
-    missing = [arg for _, bad in resolved for arg in bad]
+def _named_tests(argv: list[str], repo_root: Path) -> list[str] | None:
+    """The top-level tests the explicit paths name; None when a path does not exist."""
+    files, missing = lint_common.resolve_targets(argv, repo_root)
     if missing:
         print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
         return None
-    names = sorted({rel for files, _ in resolved for rel in files})
-    full = any(not lint_common.is_test_path(rel) for rel in names)
-    return [rel for rel in names if is_top_level_test(rel)], full
+    return [rel for rel in files if is_top_level_test(rel)]
 
 
-def _files_to_check(argv: list[str], repo_root: Path) -> list[str] | None:
-    """The tests to judge: every tracked one, or the top-level tests the arguments name."""
-    if not argv:
+def _files_to_check(argv: list[str], only: list[str] | None, repo_root: Path) -> list[str] | None:
+    """The tests to judge: the explicit paths or every tracked test, narrowed to `--only`'s
+    changed files unless a changed path is lint tooling (then the whole default set)."""
+    scope = lint_common.changed_scope(only, repo_root)
+    if argv:
+        named = _named_tests(argv, repo_root)
+        return None if named is None else [rel for rel in named if scope is None or rel in scope]
+    if scope is None:
         return _tracked_tests(repo_root)
-    explicit = _explicit_files(argv, repo_root)
-    if explicit is None:
-        return None
-    files, full = explicit
-    return _tracked_tests(repo_root) if full else files
+    return sorted(rel for rel in scope if is_top_level_test(rel))
 
 
 def _suggest(argv: list[str], repo_root: Path) -> int:
@@ -257,8 +252,11 @@ def main(
     repo_root = repo_root.resolve()
     if argv[:1] == [_SUGGEST]:
         return _suggest(argv[1:], repo_root)
+    argv, only = lint_common.split_only(argv)
+    if only == []:
+        return 0  # nothing changed, nothing to judge
     allowed = tests_location_allowed.ALLOWED if allowed is None else allowed
-    files = _files_to_check(argv, repo_root)
+    files = _files_to_check(argv, only, repo_root)
     if files is None:
         return 1
     try:

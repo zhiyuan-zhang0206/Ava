@@ -36,7 +36,6 @@
     "tests/ava/sdk_surface/test_metering.py::top-level": 1,
     "tests/ava/sdk_surface/test_validation.py::top-level": 1,
     "tests/ava/test_agents_sdk.py::top-level": 1,
-    "tests/ava/test_composer_commands.py::top-level": 1,
     "tests/ava/test_external.py::top-level": 1,
     "tests/ava/test_external_integration.py::top-level": 1,
     "tests/ava/test_presets_sdk.py::top-level": 1,
