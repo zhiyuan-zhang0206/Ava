@@ -22,7 +22,7 @@ import shlex
 from dataclasses import dataclass
 
 from base.cluster.dataplane.walg_binary import walg_path
-from services.gateway_side.walg.config import configured_path
+from services.gateway_side.walg.config import WalgConfigError, configured_path
 
 ARCHIVE_TIMEOUT_S = 60
 """Force a WAL segment switch at least this often. Design ruling (RPO <= 5 minutes);
@@ -47,21 +47,36 @@ def _percent_escaped(text: str) -> str:
     return text.replace("%", "%%")
 
 
-def expected_archive() -> ExpectedArchive | None:
-    """The archive settings for the configured WAL-G, or None when WAL-G is off."""
+def postgres_command(*walg_args: str) -> str:
+    """A shell command Postgres runs: the pinned wal-g, `--config <file>`, then `walg_args`.
+
+    `walg_args` are written as given (they hold Postgres' own `%p` / `%f`
+    placeholders); the two paths have their `%` escaped. Used for the archive
+    command and for the restore command of a recovering instance.
+
+    Raises:
+        WalgConfigError: WAL-G is not configured.
+    """
     config_file = configured_path()
     if config_file is None:
-        return None
-    command = shlex.join(
+        raise WalgConfigError("AVA_WALG_CONFIG_FILE is not set")
+    return shlex.join(
         [
             _percent_escaped(str(walg_path())),
             "--config",
             _percent_escaped(str(config_file)),
-            "wal-push",
-            "%p",
+            *walg_args,
         ]
     )
-    return ExpectedArchive(mode="on", timeout_s=ARCHIVE_TIMEOUT_S, command=command)
+
+
+def expected_archive() -> ExpectedArchive | None:
+    """The archive settings for the configured WAL-G, or None when WAL-G is off."""
+    if configured_path() is None:
+        return None
+    return ExpectedArchive(
+        mode="on", timeout_s=ARCHIVE_TIMEOUT_S, command=postgres_command("wal-push", "%p")
+    )
 
 
 def archive_pg_args() -> list[str]:
