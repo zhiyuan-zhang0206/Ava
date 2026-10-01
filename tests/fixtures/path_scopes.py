@@ -14,13 +14,14 @@ names, their order, their visibility and their override chain are exactly a
 conftest's, and a session-scoped autouse fixture is instantiated only for the tests
 under the path.
 
-Moving a test: edit the path in `PATH_SCOPES` (a directory or a single test file,
-relative to the repo root, forward slashes); list the new path next to the old one
-while both exist. A path may be as narrow as one file, so tests that came from
-different directories can sit together. Nothing else changes: the fixture modules do
-not know where their tests live. A path that does not exist stops the run, and
-`tests/ci/test_path_scopes.py` fails when a test that should be governed is not
-under a listed path.
+Moving a test: edit `paths` in its `PATH_SCOPES` entry (directories or single test
+files, relative to the repo root, forward slashes); list the new path next to the old
+one while both exist. A path may be as narrow as one file, so tests that came from
+different directories can sit together. `test_files` does not change on a move: it
+counts the test files the paths hold, and `tests/ci/test_path_scopes.py` fails when
+fewer are found, which is what a test moved out without its new path listed looks
+like. Nothing else changes: the fixture modules do not know where their tests live.
+A path that does not exist stops the run.
 
 Depends on `FixtureManager.parsefactories(holder=, node=)`, the semi-internal
 interface pytest's own conftest handling uses. `tests/ci/test_path_scopes.py` locks
@@ -31,27 +32,64 @@ re-check it.
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
-# Fixture module -> the paths whose tests it governs. One module per former
-# conftest, so the autouse names register in one alphabetical batch, as in a
-# conftest.
-PATH_SCOPES: dict[str, tuple[str, ...]] = {
-    "tests.path_scoped.db_authority_tests": ("tests/lifecycle/db_authority",),
-    "tests.path_scoped.integration_tests": ("tests/integration",),
-    "tests.path_scoped.gateway_tests": ("tests/gateway",),
-    "tests.path_scoped.cli_tests": ("tests/cli",),
-    "tests.path_scoped.ava_tests": ("tests/ava",),
-    "tests.path_scoped.agent_tests": ("tests/agent",),
-    "tests.path_scoped.services_tests": ("tests/services",),
-    "tests.path_scoped.structure_tests": ("tests/scripts/structure",),
+
+class Scope(NamedTuple):
+    paths: tuple[str, ...]  # directories or test files whose tests the module governs
+    test_files: int  # how many test files those paths hold; unchanged by a move
+
+
+# Fixture module -> its scope. One module per former conftest, so the autouse names
+# register in one alphabetical batch, as in a conftest.
+PATH_SCOPES: dict[str, Scope] = {
+    "tests.path_scoped.agent_tests": Scope(("tests/agent",), 128),
+    "tests.path_scoped.ava_tests": Scope(("tests/ava",), 65),
+    "tests.path_scoped.cli_tests": Scope(("tests/cli",), 119),
+    "tests.path_scoped.db_authority_tests": Scope(("tests/lifecycle/db_authority",), 9),
+    "tests.path_scoped.gateway_tests": Scope(("tests/gateway",), 116),
+    "tests.path_scoped.integration_tests": Scope(("tests/integration",), 17),
+    "tests.path_scoped.services_tests": Scope(("tests/services",), 161),
+    "tests.path_scoped.structure_tests": Scope(("tests/scripts/structure",), 16),
 }
 
-_MODULES_BY_PATH: dict[str, list[str]] = {}
-for _module, _paths in PATH_SCOPES.items():
-    for _path in _paths:
-        _MODULES_BY_PATH.setdefault(_path, []).append(_module)
+
+def modules_by_path(scopes: dict[str, Scope]) -> dict[str, list[str]]:
+    by_path: dict[str, list[str]] = {}
+    for module, scope in scopes.items():
+        for path in scope.paths:
+            by_path.setdefault(path, []).append(module)
+    return by_path
+
+
+def scope_problems(scopes: dict[str, Scope], root: Path) -> list[str]:
+    """What is wrong with the table: a missing path, or fewer test files than recorded."""
+    problems: list[str] = []
+    for module, scope in scopes.items():
+        missing = [path for path in scope.paths if not (root / path).exists()]
+        if missing:
+            problems.append(f"{module}: paths do not exist: {missing}")
+            continue
+        found = {
+            file.resolve()
+            for path in scope.paths
+            for file in (
+                [root / path] if (root / path).is_file() else (root / path).rglob("test_*.py")
+            )
+        }
+        if len(found) < scope.test_files:
+            problems.append(
+                f"{module}: its paths hold {len(found)} test files, {scope.test_files} are "
+                "recorded; a test that moved without its new path listed here has lost "
+                "these fixtures"
+            )
+    return problems
+
+
+_MODULES_BY_PATH = modules_by_path(PATH_SCOPES)
 
 
 def pytest_configure(config: pytest.Config) -> None:
