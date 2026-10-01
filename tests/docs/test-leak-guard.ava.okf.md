@@ -23,7 +23,7 @@ A test that leaves an environment key, a stored module attribute, the cwd or a s
 | `signal` | `signal.getsignal` of the common signals | a handler that raises, installed and not put back |
 | `sys.path` | a note, never a leak: entries added or removed | tests insert on purpose |
 
-First-party means a module's `__file__` is below the rootdir, outside top-level dot-directories (`.venv`, `.git`) and any `tests`, `site-packages` or `node_modules` directory. Dicts are scanned by total length (`sum(map(len, ...))`); only when it moved are the dicts that moved located.
+First-party means a module's `__file__` is below the rootdir, outside top-level dot-directories (`.venv`, `.git`) and any `tests`, `site-packages` or `node_modules` directory. Dicts are scanned by total length (`sum(map(len, ...))`); only when it moved are the dicts that moved located. A module some thread is still importing (`__spec__._initializing`) is left out until the pass after its import finished, or its body's names would be blamed on the running test.
 
 ## Cost
 
