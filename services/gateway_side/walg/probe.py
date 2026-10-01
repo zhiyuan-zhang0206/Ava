@@ -15,7 +15,10 @@ would start a new episode at every run and the alert would never escalate.
   `archive_status/`, the archiver's own work queue, so a database that is merely idle
   (nothing complete, nothing to ship) never looks late. This is the one signal that
   also catches an archive command that hangs, which neither succeeds nor fails;
-- the encryption key file must still be the key whose fingerprint this home pinned.
+- the encryption key file must still be the key whose fingerprint this home pinned;
+- the daily tick (`tick.py`, read from its state file): the last run that executed must not
+  have failed, the archived WAL chain the last verification saw must not be broken, and
+  a tick must have started (run or skipped on purpose) within one scheduling period.
 
 Listing the `.ready` markers needs superuser (or `pg_monitor`): the application
 login the health probe normally uses is refused (`permission denied for function
@@ -30,6 +33,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -37,7 +41,12 @@ import psycopg
 from base.db import pg_admin
 from base.log import logger
 from services.gateway_side.walg import config as walg_config
+from services.gateway_side.walg import state as walg_state
 from services.gateway_side.walg.archive import RPO_OBJECTIVE_S, ExpectedArchive, expected_archive
+
+TICK_PERIOD = timedelta(hours=24)
+"""How often the tick is scheduled (one run a day). The only time threshold of the tick
+conditions: no tick started within this long means the job is not running."""
 
 _CONNECT_TIMEOUT_S = 5
 _STATEMENT_TIMEOUT = "10s"
@@ -51,6 +60,17 @@ SETTINGS_DIFFER = (
 ARCHIVER_FAILING = "WAL archiving: the archiver is failing"
 ARCHIVE_BEHIND = "WAL archiving: complete WAL has been waiting for archive beyond the RPO objective"
 UNREADABLE = "WAL archiving: the archiver state is unreadable"
+
+TICK_NOT_RUNNING = "WAL backup: the daily tick has not started within its scheduling period"
+CHAIN_BROKEN = "WAL backup: the archived WAL chain is not continuous"
+TICK_STATE_UNREADABLE = "WAL backup: the daily tick state is unreadable"
+RUN_FAILED = "WAL backup: the daily run failed"
+RUN_FAILED_AT = {
+    walg_state.STEP_PREFLIGHT: "WAL backup: the daily run failed its preflight",
+    walg_state.STEP_BACKUP: "WAL backup: the daily run failed to take the base backup",
+    walg_state.STEP_VERIFY: "WAL backup: the daily run failed to verify the archived WAL chain",
+    walg_state.STEP_RETENTION: "WAL backup: the daily run failed to apply backup retention",
+}
 
 
 @dataclass(frozen=True)
@@ -144,6 +164,44 @@ def configuration_failure() -> str | None:
     return None
 
 
+def tick_judge(
+    recorded: walg_state.State, now: datetime, *, enabled_since: datetime | None
+) -> str | None:
+    """The first broken daily-tick condition in `recorded`, or None.
+
+    `enabled_since` stands in for the tick's start before any tick has ever started
+    (the moment the key was first pinned, i.e. converge first saw WAL-G on): a job
+    that never got registered would otherwise stay silent forever.
+    """
+    verify = recorded.verify
+    if verify is not None and "FAILURE" in (verify.integrity, verify.timeline):
+        return CHAIN_BROKEN
+    run = recorded.run
+    if run is not None and run.status == "failed":
+        return RUN_FAILED_AT.get(run.step or "", RUN_FAILED)
+    last_start = recorded.tick.started_at if recorded.tick is not None else enabled_since
+    if last_start is not None and now - last_start > TICK_PERIOD:
+        return TICK_NOT_RUNNING
+    return None
+
+
+def _enabled_since() -> datetime | None:
+    try:
+        return datetime.fromtimestamp(walg_config.key_id_path().stat().st_mtime, tz=UTC)
+    except FileNotFoundError:
+        return None
+
+
+def tick_failure(now: datetime | None = None) -> str | None:
+    """The daily tick's condition from its state file; never raises."""
+    try:
+        recorded = walg_state.read_state()
+        return tick_judge(recorded, now or datetime.now(UTC), enabled_since=_enabled_since())
+    except Exception as exc:  # the probe must never raise; the cause is logged
+        logger.warning(f"[walg] probe: tick state unreadable: {type(exc).__name__}: {exc}")
+        return TICK_STATE_UNREADABLE
+
+
 def failure() -> str | None:
     """The first thing wrong with WAL archiving, or None (also None while it is off)."""
     expected = expected_archive()
@@ -158,4 +216,4 @@ def failure() -> str | None:
     except Exception as exc:  # the probe must never raise; the cause is logged
         logger.warning(f"[walg] probe: archiver state unreadable: {type(exc).__name__}: {exc}")
         return UNREADABLE
-    return judge(state, expected)
+    return judge(state, expected) or tick_failure()

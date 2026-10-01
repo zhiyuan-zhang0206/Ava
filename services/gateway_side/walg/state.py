@@ -33,6 +33,13 @@ from base.paths import ava_home
 _VERSION = 1
 _MAX_BYTES = 256 * 1024
 
+STEP_PREFLIGHT = "preflight"
+STEP_BACKUP = "backup"
+STEP_VERIFY = "verify"
+STEP_RETENTION = "retention"
+STEPS = (STEP_PREFLIGHT, STEP_BACKUP, STEP_VERIFY, STEP_RETENTION)
+"""The tick's steps in order; `RunRecord.step` names the one that failed."""
+
 RunStatus = Literal["ok", "failed"]
 _RUN_STATUSES = ("ok", "failed")
 
@@ -141,6 +148,8 @@ def _run(r: dict[str, Any]) -> RunRecord:
     status, step = r["status"], r["step"]
     if status not in _RUN_STATUSES:
         raise StateError(f"unknown run status {status!r}")
+    if step is not None and step not in STEPS:
+        raise StateError(f"unknown run step {step!r}")
     return RunRecord(
         started_at=_parse(r["started_at"]),
         finished_at=_parse(r["finished_at"]),
