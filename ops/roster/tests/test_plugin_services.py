@@ -4,8 +4,9 @@ A plugin ships a `services.py` exposing `services() -> tuple[ServiceSpec, ...]`;
 `ops.spec.plugin_services()` discovers the INSTALLED plugins (by code presence,
 via `base.packages.plugins.enable_config`) and folds their specs onto `build_services()` so the
 roster stays single-source. These lock the load-bearing invariants:
-- the real ava_fleet plugin registers task-maintenance (venv-direct cmd +
-  healthcheck_module point at the plugin namespace, not core `services.*`);
+- the real ava_fleet plugin registers task-maintenance (venv-direct cmd whose
+  module lives in the plugin namespace, not core `services.*`, as a standard
+  `/healthz` daemon);
 - discovery keys on presence, NOT the agent-facing enable-state (a plugin
   disabled via plugins_config still contributes its service);
 - no installed plugins -> nothing folded;
@@ -27,12 +28,12 @@ from ops.roster import service_spec
 
 def test_fleet_plugin_registers_task_maintenance() -> None:
     """task-maintenance is contributed by the ava_fleet plugin, not hardcoded in
-    ops — its cmd + healthcheck_module live under the plugin namespace."""
+    ops — its entry module lives under the plugin namespace."""
     by_session = {s.session: s for s in roster.build_services()}
     tm = by_session["task-maintenance"]
     # venv-direct launch (no `uv run` wrapper), relative to the source checkout.
     assert tm.cmd == ".venv/bin/python -m ava_builtins.plugins.ava_fleet.task_maintenance.daemon"
-    assert tm.healthcheck_module == "ava_builtins.plugins.ava_fleet.task_maintenance.healthcheck"
+    assert tm.health_name == "task_maintenance"
     assert tm.capabilities == frozenset({"gateway"})
     # It carries its own gate (the fleet toggle travels with the plugin).
     assert tm.gate is not None

@@ -1,23 +1,24 @@
 """Canonical service roster and identity-probe declarations.
 
 This package door holds the roster. Its `service_spec` submodule defines the
-`ServiceSpec` contract every roster entry carries, and `observe` derives
-read-only service status from the roster.
+`ServiceSpec` contract every roster entry carries, its `healthz` submodule builds
+the entry of a standard `/healthz` daemon from four declarations, and `observe`
+derives read-only service status from the roster.
 """
 
 from __future__ import annotations
 
 import shlex
-from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from base.cluster import frontend_service_cmd
 from base.config import settings
-from base.daemon.health import DaemonProbe, health_port, probe_daemon, probe_home
+from base.daemon.health import DaemonProbe, probe_home
 from base.paths import ava_home, otel_collector_binary, otel_collector_config
+from ops.roster.healthz import daemon_identity as daemon_identity  # public: plugin services
+from ops.roster.healthz import healthz_daemon as healthz_daemon  # public: plugin services
 from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 
 # After uvicorn's connection drain the gateway runs its lifespan cleanup and the
@@ -41,24 +42,6 @@ def _assert_unique_sessions(core: tuple[ServiceSpec, ...], plugin: tuple[Service
     from ops.spec import _assert_unique_sessions as assert_unique_sessions
 
     assert_unique_sessions(core, plugin)
-
-
-def _hz(name: str) -> str:
-    """Build the /healthz URL for a daemon using its settings-derived port."""
-    return f"http://localhost:{health_port(name)}/healthz"
-
-
-def daemon_identity(name: str, pidfile: Path) -> Callable[[], DaemonProbe]:
-    """The ``identity_probe`` for a daemon that serves the standard Ava ``/healthz``.
-
-    Binds ``probe_daemon`` to the three facts that identify one daemon: its
-    ``name``, its ``/healthz`` URL (derived from this unit's health port at
-    call time, like every other probe target on the roster) and the pidfile this
-    unit recorded for it. Public because plugin-registered services declare their
-    own specs and must be able to state the same contract without restating the
-    probe (``ava_builtins/plugins/*/services.py``).
-    """
-    return partial(probe_daemon, name, _hz(name), pidfile=pidfile)
 
 
 def _frontend_probe() -> DaemonProbe:
@@ -174,54 +157,39 @@ def build_services() -> tuple[ServiceSpec, ...]:
                 + _GATEWAY_LIFESPAN_ALLOWANCE_S
             ),
         ),
-        ServiceSpec(
-            session="im-bridge",
-            cmd=".venv/bin/python -m services.im_bridge.daemon",
+        healthz_daemon(
+            "im-bridge",
+            module="services.im_bridge.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # R3 door ④: notice_bridge SELECT/UPDATEs agent_notices directly
-            curl_url=_hz("im_bridge"),
-            identity_probe=daemon_identity("im_bridge", settings.services.im_bridge_pidfile),
-            healthcheck_module="services.healthchecks.im_bridge",
         ),
-        ServiceSpec(
-            session="labeler",
-            cmd=".venv/bin/python -m services.labeler.daemon",
+        healthz_daemon(
+            "labeler",
+            module="services.labeler.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot, then polls the DB
-            curl_url=_hz("labeler"),
-            identity_probe=daemon_identity("labeler", settings.services.labeler_pidfile),
-            healthcheck_module="services.healthchecks.labeler",
             # The labeler builds chat models (it generates labels), so it
             # consumes the agent-runner-capability LLM provider keys its own
             # .env declares. The gateway profile's env-authority pass would pop
             # them (DEEPSEEK_API_KEY among them) and every label generation
-            # would fail with RuntimeError — issue #1128 (respawn path) /
-            # task #1230 (initial start). No marker = full Settings, exactly
-            # like the watchdog's respawn path (services/healthchecks/labeler.py).
+            # would fail with RuntimeError — issue #1128 / task #1230. No marker
+            # = full Settings.
             no_profile_marker=True,
         ),
-        ServiceSpec(
-            session="heartbeat",
-            cmd=".venv/bin/python -m services.heartbeat.daemon",
+        healthz_daemon(
+            "heartbeat",
+            module="services.heartbeat.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; INSERTs inbound rows
-            curl_url=_hz("heartbeat"),
-            identity_probe=daemon_identity("heartbeat", settings.services.heartbeat_pidfile),
-            healthcheck_module="services.healthchecks.heartbeat",
         ),
         # delivery-watchdog: cluster-wide stale-pending-inbound tripwire. A
         # gateway daemon — it owns the data plane. Config-gated by
         # AVA_DELIVERY_WATCHDOG_ENABLED.
-        ServiceSpec(
-            session="delivery-watchdog",
-            cmd=".venv/bin/python -m services.delivery_watchdog.daemon",
+        healthz_daemon(
+            "delivery-watchdog",
+            module="services.delivery_watchdog.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; polls inbound_messages
-            curl_url=_hz("delivery_watchdog"),
-            identity_probe=daemon_identity(
-                "delivery_watchdog", settings.services.delivery_watchdog_pidfile
-            ),
-            healthcheck_module="services.healthchecks.delivery_watchdog",
         ),
         # events-maintenance: gateway-owned maintenance daemon. ALWAYS runs (no
         # roster gate): its checkpoint reaper (Rule A fast loop + Rule B hourly)
@@ -229,16 +197,11 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # without them (2026-08-12 regression). The PG events-archive slices
         # were removed with the task #1281/#1823 cleanup (table dropped; rows
         # live in the Loki archive stream).
-        ServiceSpec(
-            session="events-maintenance",
-            cmd=".venv/bin/python -m services.events_maintenance.daemon",
+        healthz_daemon(
+            "events-maintenance",
+            module="services.events_maintenance.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; checkpoint tables live in PG
-            curl_url=_hz("events_maintenance"),
-            identity_probe=daemon_identity(
-                "events_maintenance", settings.services.events_maintenance_pidfile
-            ),
-            healthcheck_module="services.healthchecks.events_maintenance",
         ),
         # milvus before memory-indexer: memory-indexer cold-start connects to milvus.
         # Gated by _gate_reason to the milvus memory-search backend — numpy
@@ -292,15 +255,11 @@ def build_services() -> tuple[ServiceSpec, ...]:
             identity_probe=_frontend_probe,
             healthcheck_module="services.healthchecks.frontend",
         ),
-        ServiceSpec(
-            session="pg-backup",
-            cmd=".venv/bin/python -m services.backup_scheduler.daemon",
+        healthz_daemon(
+            "pg-backup",
+            module="services.backup_scheduler.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # dumps that very database
-            pidfile=settings.services.pg_backup_pidfile,
-            curl_url=_hz("pg_backup"),
-            identity_probe=daemon_identity("pg_backup", settings.services.pg_backup_pidfile),
-            healthcheck_module="services.healthchecks.pg_backup",
         ),
     )
 
@@ -312,38 +271,27 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # page-server: supervises page servers per agent_pages row (R3 door 3).
         # One per runner — it spawns/kills the detached page server processes
         # for rows whose host is this host.
-        ServiceSpec(
-            session="page-server",
-            cmd=".venv/bin/python -m services.page_server.daemon",
+        healthz_daemon(
+            "page-server",
+            module="services.page_server.daemon",
             capabilities=_AGENT_RUNNER,
             requires_db=True,  # the agent_pages table is its truth source
-            pidfile=settings.services.page_server_pidfile,
-            curl_url=_hz("page_server"),
-            identity_probe=daemon_identity("page_server", settings.services.page_server_pidfile),
-            healthcheck_module="services.healthchecks.page_server",
         ),
         # One agent host per runner owns every local agent's turn tasks.
-        ServiceSpec(
-            session="agent-host",
-            cmd=".venv/bin/python -m services.agent_host.daemon",
+        healthz_daemon(
+            "agent-host",
+            module="services.agent_host.daemon",
             capabilities=_AGENT_RUNNER,
             profile="agent",  # the host runs the agent kernel in-process; the runner-derived marker crashes it at import
             requires_db=True,  # assert_schema_current at boot; every turn reads/writes agents_meta
-            pidfile=settings.services.agent_host_pidfile,
-            curl_url=_hz("agent_host"),
-            identity_probe=daemon_identity("agent_host", settings.services.agent_host_pidfile),
-            healthcheck_module="services.healthchecks.agent_host",
         ),
         # ops: inbound server. Binds 0.0.0.0:<ops_port>, serves POST /ops; the
         # gateway dials it directly (HTTP-uniform, even on a co-located single box).
-        ServiceSpec(
-            session="ops",
-            cmd=".venv/bin/python -m services.agent_ops.daemon",
+        healthz_daemon(
+            "ops",
+            module="services.agent_ops.daemon",
             capabilities=_AGENT_RUNNER,
             requires_db=True,  # assert_schema_current at boot; serves DB-backed ops calls
-            curl_url=_hz("ops"),
-            identity_probe=daemon_identity("ops", settings.services.ops_pidfile),
-            healthcheck_module="services.healthchecks.ops",
         ),
         # browser: config/capability-gated (AVA_BROWSER_ENABLED + display/Chrome/npx).
         # CDP exposes HTTP at /json/version, so probe via curl_url (not tcp_port).

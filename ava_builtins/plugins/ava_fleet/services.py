@@ -22,8 +22,7 @@ from __future__ import annotations
 
 from base.cluster.machine import MachineRole
 from base.config import settings
-from base.daemon.health import health_port
-from ops.roster import daemon_identity
+from ops.roster import healthz_daemon
 from ops.roster.service_spec import ServiceSpec
 
 # task-maintenance runs on the gateway capability, like the other cluster-wide
@@ -56,20 +55,13 @@ def services() -> tuple[ServiceSpec, ...]:
     source checkout the service starts in) — no `uv run` wrapper.
     """
     return (
-        ServiceSpec(
-            session="task-maintenance",
-            cmd=".venv/bin/python -m ava_builtins.plugins.ava_fleet.task_maintenance.daemon",
+        healthz_daemon(
+            "task-maintenance",
+            module="ava_builtins.plugins.ava_fleet.task_maintenance.daemon",
             capabilities=_GATEWAY,
             # assert_schema_current at boot, then it scans the tasks tables — a
             # revive under a dead or drifted DB would just crash-loop it.
             requires_db=True,
-            curl_url=f"http://localhost:{health_port('task_maintenance')}/healthz",
-            # Same identity contract as every core /healthz daemon: a 2xx is only
-            # believed once name/home/pid say the answering process is this unit's.
-            identity_probe=daemon_identity(
-                "task_maintenance", settings.services.task_maintenance_pidfile
-            ),
-            healthcheck_module="ava_builtins.plugins.ava_fleet.task_maintenance.healthcheck",
             gate=_task_maintenance_gate,
         ),
     )

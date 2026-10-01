@@ -46,6 +46,9 @@ def _spec(session: str, capabilities: frozenset[MachineRole], cmd: str) -> Servi
         cmd=cmd,
         capabilities=capabilities,
         requires_db=True,
+        # A both-capability database service must name its login class: construction
+        # refuses the spec otherwise (the launcher could not deliver a credential).
+        db_access="gateway" if capabilities == _BOTH else None,
     )
 
 

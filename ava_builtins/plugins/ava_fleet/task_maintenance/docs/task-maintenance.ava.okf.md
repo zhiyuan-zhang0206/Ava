@@ -26,7 +26,7 @@ A gateway-owned daemon — every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (defaul
 ## Entry Points
 - `ava_builtins/plugins/ava_fleet/services.py:services()` — declares this service's `ServiceSpec` (session `task-maintenance`, gateway capability, carries `gate` reading `AVA_TASK_MAINTENANCE_ENABLED`)
 - `plugins/ava_fleet/task_maintenance/daemon.py` — `.venv/bin/python -m plugins.ava_fleet.task_maintenance.daemon`
-- Healthcheck `plugins/ava_fleet/task_maintenance/healthcheck.py` (HTTP `/healthz` :8108 protocol, centrally bound to captured root ancestry)
+- Health: the standard `/healthz` identity probe on :8108, built by `ops/roster/healthz.py:healthz_daemon` and centrally bound to captured root ancestry (no module of its own)
 
 ## Notes
 - Configuration gate `AVA_TASK_MAINTENANCE_ENABLED` (default on): turning it off disables reminders for the whole cluster. The gating logic (`gate`) travels with the plugin's `ServiceSpec`, not hardcoded in `ops/spec.py:_gate_reason`; operational configuration (interval/backoff/escalate_n + pidfile + port 8108) remains in global `base.config` / `base.daemon.health`, isomorphic with other gateway daemons.

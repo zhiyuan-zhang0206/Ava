@@ -11,7 +11,7 @@ import pytest
 
 import base.daemon.health as dh
 import cli.commands._repo as repo
-import ops.roster as spec_mod  # build_services + health_port live here; repo re-exports the roster
+import ops.roster.healthz as healthz_mod  # the /healthz URL of a standard daemon is built here
 
 
 def _spec_by_session(specs, session: str):
@@ -24,8 +24,8 @@ def test_daemon_probe_url_follows_health_port(monkeypatch: pytest.MonkeyPatch) -
     def _fake_health_port(name: str) -> int:
         return 18003 if name == "labeler" else dh.DEFAULT_PORTS.get(name, 8000)
 
-    # build_services reads health_port from ops.spec's namespace (repo just re-exports it).
-    monkeypatch.setattr(spec_mod, "health_port", _fake_health_port)
+    # healthz_daemon reads health_port from ops.roster.healthz's namespace.
+    monkeypatch.setattr(healthz_mod, "health_port", _fake_health_port)
     specs = repo.build_services()
     spec = _spec_by_session(specs, "labeler")
     assert spec.curl_url is not None
@@ -136,7 +136,7 @@ def test_ops_probe_follows_health_port(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fake_health_port(name: str) -> int:
         return 18106 if name == "ops" else dh.DEFAULT_PORTS.get(name, 8000)
 
-    monkeypatch.setattr(spec_mod, "health_port", _fake_health_port)
+    monkeypatch.setattr(healthz_mod, "health_port", _fake_health_port)
     spec = _spec_by_session(repo.build_services(), "ops")
     assert spec.curl_url is not None
     assert "18106" in spec.curl_url

@@ -216,8 +216,8 @@ def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="pg-backup")
-    install_graceful_shutdown("pg-backup")
+    init_gateway_process(name="pg_backup")
+    install_graceful_shutdown("pg_backup")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
     # awaits `shutdown_default_executor`, joining the default executor's

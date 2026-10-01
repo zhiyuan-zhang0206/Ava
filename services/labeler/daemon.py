@@ -11,7 +11,8 @@ the Gateway; can be deployed independently.
 Usage:
     .venv/bin/python -m services.labeler.daemon
 
-Kept alive by the gateway watchdog's 60s healthcheck (`services/healthchecks/labeler.py`).
+Kept alive by the root supervisor's health monitor through the roster's `/healthz`
+identity probe (`ops/roster/healthz.py`).
 """
 
 import asyncio

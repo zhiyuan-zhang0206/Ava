@@ -17,7 +17,8 @@ wake-rate ceiling. See the "Wakeup-storm flattening" note below.
 Usage:
     .venv/bin/python -m services.heartbeat.daemon
 
-Kept alive via `services/healthchecks/heartbeat.py` (the gateway watchdog).
+Kept alive by the root supervisor's health monitor through the roster's `/healthz`
+identity probe (`ops/roster/healthz.py`).
 """
 
 import asyncio
