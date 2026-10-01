@@ -30,11 +30,26 @@ from pydantic import SecretStr
 from base.cluster import machines as _machines
 from base.cluster.machine import machine_name
 from base.config import settings as _settings
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from gateway.agents import forward as _agents_forward_router
 from gateway.agents import router as _agents_router
 from gateway.app import app
 from ops.lifecycle import launch_agent_op, lifecycle_op
 from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _provider_plugins_loaded() -> None:
+    """Load the provider plugins once, before any test isolates the plugin paths.
+
+    The app's lifespan loads provider plugins once per process
+    (`ensure_provider_plugins_loaded`) and raises when it finds none. A test that
+    points `paths.repo_plugins_dir` at an empty temp directory and then starts the
+    app finds none, so it passed only when an earlier test in the same worker had
+    already loaded the real set, and failed when run alone or first. This session
+    fixture runs before every function-scoped monkeypatch.
+    """
+    ensure_provider_plugins_loaded()
 
 
 @pytest.fixture(autouse=True)
