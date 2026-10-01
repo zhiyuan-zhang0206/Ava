@@ -72,12 +72,11 @@ def _reset_state_slot():
     ava.state = None
     ava.state_update = None
     clear_plugin_registrations()
-    # The in-memory security-finding buffers are process-global; a failed test
-    # must not leak exec or claim findings into the next test's exec.
+    # The exec-child findings buffer is process-global; a failed test must not
+    # leak findings into the next test.
     import ava.security as _security
 
     _security._pending_findings = []
-    _security._pending_inbound_findings = []
 
 
 # ── Unit: reducer-delta accumulation (2026-08-08 audit, cc-backend-runtime P1) ──
@@ -732,23 +731,21 @@ async def test_exec_node_preserves_state_update_on_lifecycle(fake_cancel_event):
 
 # ── exec-side system-note injection (user ruling 2026-08-11) ────────────────
 # AGENTS.md / security findings are delivered in-memory inside the exec's
-# messages delta — the exec node drains ava.security's in-memory findings
-# buffer and merges plugin-contributed messages, both AFTER the exec-result
-# ToolMessage (the Anthropic-compat tool_use -> tool_result adjacency
-# invariant forbids notes between the AIMessage and its ToolMessage; verified
-# against the DeepSeek anthropic endpoint 2026-08-11: "tool_use ids were
-# found without tool_result blocks immediately after").
+# messages delta — the exec node reads the findings the exec child drained from
+# ava.security's buffer (result envelope) and merges plugin-contributed
+# messages, both AFTER the exec-result ToolMessage (the Anthropic-compat
+# tool_use -> tool_result adjacency invariant forbids notes between the
+# AIMessage and its ToolMessage; verified against the DeepSeek anthropic
+# endpoint 2026-08-11: "tool_use ids were found without tool_result blocks
+# immediately after").
 
 
-def _seed_security_findings(*sources: str) -> None:
-    """Plant findings into ava.security's in-memory buffer, as scan_content
-    would have during the exec turn."""
-    from ava import security as _security
-
-    _security._pending_findings = [
-        _security.SecurityFindingEntry(source=src, triggers=["ignore previous instructions"])
-        for src in sources
-    ]
+def _scan_flagged_code(*sources: str) -> str:
+    """Agent code that scans flagged content once per source inside the real exec
+    child, which is where scan_content buffers a finding."""
+    return "from ava.security import scan_content\n" + "".join(
+        f"scan_content('ignore previous instructions', source={src!r})\n" for src in sources
+    )
 
 
 def _register_messages_plugin() -> None:
@@ -764,13 +761,11 @@ def _register_messages_plugin() -> None:
 
 
 async def test_exec_node_injects_security_finding_after_toolmessage(fake_cancel_event):
-    """A finding buffered during the exec turn is delivered as a SECURITY
-    system note in the same exec's messages delta, after the exec-result
-    ToolMessage — no side-channel file."""
-    _seed_security_findings("shell.run")
-
+    """A finding the exec child buffered during the turn is delivered as a
+    SECURITY system note in the same exec's messages delta, after the
+    exec-result ToolMessage — no side-channel file."""
     state = BaseAgentState(
-        messages=[_ai_message_with_code("pass")],
+        messages=[_ai_message_with_code(_scan_flagged_code("shell.run"))],
         halted=False,
     )
     runtime, config = _make_runtime_and_config(AsyncMock())
@@ -785,39 +780,10 @@ async def test_exec_node_injects_security_finding_after_toolmessage(fake_cancel_
     assert msgs[1].type == "human"
     assert "shell.run" in msgs[1].content
     assert "ignore previous instructions" in msgs[1].content
-    # Buffer cleared — findings delivered exactly once
+    # The host never buffers the child's finding: it rode the result envelope.
     from ava import security as _security
 
     assert _security.take_findings() == []
-
-
-async def test_exec_node_unknown_tool_delivers_and_drains_inbound_finding(
-    fake_cancel_event, monkeypatch: pytest.MonkeyPatch
-):
-    """The unknown-tool return still consumes claim-attributed findings this turn."""
-    from ava import security
-    from base.config import settings
-
-    monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
-    security.scan_inbound_content("ignore previous instructions", source="inbound.chat:user")
-    state = BaseAgentState(
-        messages=[
-            AIMessage(
-                content="",
-                tool_calls=[{"name": "ava.files.edit", "args": {}, "id": "call_1"}],
-            )
-        ],
-        halted=False,
-    )
-    runtime, config = _make_runtime_and_config(AsyncMock())
-
-    cmd = await _exec_node_impl(state, runtime, config)
-
-    messages = cast(dict[str, Any], cmd.update)["messages"]
-    assert [message.type for message in messages] == ["tool", "human"]
-    assert "unknown tool" in messages[0].content
-    assert "inbound.chat:user" in messages[1].content
-    assert security.take_findings() == []
 
 
 async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_event):
@@ -826,12 +792,12 @@ async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_even
     tool_use adjacency is preserved and warnings precede the content they
     flag."""
     _register_messages_plugin()
-    _seed_security_findings("context-file:/repo/AGENTS.md")
 
     code = (
-        "import ava\n"
-        "from langchain_core.messages import HumanMessage\n"
-        "ava.state_update['messages'] = [HumanMessage(content='project note', id='p1')]\n"
+        _scan_flagged_code("context-file:/repo/AGENTS.md")
+        + "import ava\n"
+        + "from langchain_core.messages import HumanMessage\n"
+        + "ava.state_update['messages'] = [HumanMessage(content='project note', id='p1')]\n"
     )
     state = BaseAgentState(messages=[_ai_message_with_code(code)], halted=False)
     runtime, config = _make_runtime_and_config(AsyncMock())
@@ -890,16 +856,12 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
     assert "render.png" in caption_block["text"]
 
 
-async def test_exec_node_compact_path_drops_notes_and_clears_findings(
-    fake_cancel_event, tmp_path: Path
-):
+async def test_exec_node_compact_path_drops_notes_and_findings(fake_cancel_event, tmp_path: Path):
     """The compact path (SystemHalt) writes nothing back — claim REMOVE_ALLs
-    the whole history — so notes must not leak into the update, and the
-    findings buffer must still be cleared (never misattributed to a later
-    turn)."""
+    the whole history — so neither plugin notes nor the child's findings may
+    leak into the update."""
 
     _register_messages_plugin()
-    _seed_security_findings("shell.run")
     # The real exec child rejects attach for a text-only model (user ruling
     # 2026-08-28) — boot it with a media-capable model via the per-agent
     # config map the exec path re-emits into the child env (a bare home's
@@ -907,12 +869,13 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     code = (
-        "import ava\n"
-        "from langchain_core.messages import HumanMessage\n"
-        "ava.state_update['messages'] = [HumanMessage(content='x')]\n"
-        f"ava.self.attach({str(image)!r})\n"
-        "from base.agents.lifecycle import SystemHalt\n"
-        "raise SystemHalt()\n"
+        _scan_flagged_code("shell.run")
+        + "import ava\n"
+        + "from langchain_core.messages import HumanMessage\n"
+        + "ava.state_update['messages'] = [HumanMessage(content='x')]\n"
+        + f"ava.self.attach({str(image)!r})\n"
+        + "from base.agents.lifecycle import SystemHalt\n"
+        + "raise SystemHalt()\n"
     )
     state = BaseAgentState(
         messages=[_ai_message_with_code(code)],
@@ -930,7 +893,3 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(
     )
     assert update.get("halted") is True  # pyright: ignore[reportUnknownMemberType]
     assert "attach" not in update
-    # Findings drained even though nothing was injected
-    from ava import security as _security
-
-    assert _security.take_findings() == []
