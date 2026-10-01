@@ -722,9 +722,9 @@ The recovery points are the daily encrypted logical dumps (`pg-backup`, due at
 by the weekly isolated logical restore drill. There is no point-in-time
 recovery: the self-written PITR stack was deleted
 (`decisions/2026-10-02-delete-the-self-written-pitr-stack.md`) and WAL-G
-(["WAL-G archiving"](#wal-g-archiving) below) so far archives WAL only: there is
-no base backup and no restore path, so archived WAL is not a recovery point. Never
-state a recovery point newer than the last published dump.
+(["WAL-G archiving"](#wal-g-archiving) below) archives WAL and takes a daily base
+backup but has no restore path yet, so neither is a recovery point. Never state a
+recovery point newer than the last published dump.
 
 Backup operations (the daily dump and the weekly logical restore drill) each
 run as one owned worker group of their kind. A failed or cancelled operation
@@ -1371,8 +1371,9 @@ WAL archiving ships every completed WAL segment, encrypted, to an OSS prefix
 through a pinned WAL-G
 ([decision](../decisions/2026-10-02-walg-physical-backup.md),
 [node](../services/gateway_side/walg/docs/walg.ava.okf.md)). It is off until
-`AVA_WALG_CONFIG_FILE` is set; unset, nothing of it runs. It archives WAL only: there
-is no base backup, retention or restore yet, so it is not a recovery path.
+`AVA_WALG_CONFIG_FILE` is set; unset, nothing of it runs. It archives WAL and, once a
+day, takes a base backup, verifies the archived chain and applies retention; there is
+no restore yet, so it is not a recovery path.
 
 **Files the operator places** (0600, owned by the gateway's OS user):
 
@@ -1402,8 +1403,7 @@ is no base backup, retention or restore yet, so it is not a recovery path.
   off the gateway host and decrypt-verify a copy before enabling. There is no rotation:
   a new key means a new prefix (a new `gen`).
 - A bucket lifecycle rule must not expire objects under the WAL-G prefix: two independent
-  deleters break the chain (the retention that comes with the base backups is the only
-  one). Keep any bucket-wide expiry scoped to the other prefixes. Cleaning up abandoned
+  deleters break the chain (the daily tick's retention is the only one). Keep any bucket-wide expiry scoped to the other prefixes. Cleaning up abandoned
   multipart uploads can stay bucket-wide.
 
 **Switching it on.** `ava backup walg check` proves the binary, the configuration, the
@@ -1414,6 +1414,7 @@ prefix). Then:
 ava config set AVA_WALG_CONFIG_FILE=<path of the JSON>
 ava stop && ava start          # archive_mode is read only when Postgres is launched
 ava backup walg status         # archive_mode=on, failing_now=False, health: ok
+ava backup walg run            # the first base backup, supervised (see "The daily tick")
 ```
 
 Converge installs the pinned binary (`$AVA_HOME/runtime/walg/wal-g`; Linux x86_64 only,
@@ -1425,9 +1426,37 @@ archiving: `ava start` prints a warning when the running Postgres differs, and t
 health probe reports it. After a start, `SELECT pg_switch_wal();` and an increase of
 `archived_count` in `pg_stat_archiver` show a segment arriving in the bucket.
 
+**The daily tick.** While the key is set, converge keeps one OS job registered
+(crontab line `# ava-walg` on Linux, LaunchAgent `com.ava.walg` on macOS; default home
+only) that runs `ava backup walg run` once a day, three hours after the daily dump
+becomes due (`AVA_BACKUP_HOUR`), writing to `$AVA_HOME/logs/walg.log`. The command is safe
+to run by hand at any time and to repeat: a second run while one is going stands down
+(exit 0), and a run during a deploy window or while Postgres does not accept
+connections is recorded as skipped (exit 0), not failed. A run is: preflight (binary,
+configuration, key pin, one `backup-list`), `backup-push` with `WALG_DELTA_MAX_STEPS=6`
+(WAL-G makes a full backup when the increment chain is six deep, so a daily run makes a
+full backup every seventh time, and a failed full backup is retried the next day), `wal-verify
+integrity timeline --json` (only the JSON status counts; WAL-G exits 0 while it reports a
+gap, and `WARNING` is archiving in flight, not a failure), then retention. The first
+failing step ends the run and is recorded; the next day starts over. Run the first full
+backup by hand and watch it: its duration and upload volume are not yet measured on this
+bucket.
+
+Retention is `delete retain FULL 3 --use-sentinel-time`, run first without `--confirm`.
+The objects WAL-G lists are written to the log, then three invariants must hold or the
+run fails at `retention` with nothing deleted: every key is under `basebackups_005/` or
+`wal_005/`; no key belongs to the newest backup or a backup it is an increment of; at
+least one full backup survives. Nothing is asked of WAL-G until more than three full
+backups exist. `wal-g delete garbage` is not used: the orphan files a failed full backup
+leaves cost only storage.
+
+`ava backup walg status` shows the last tick, run, backup, verification and retention from
+`$AVA_HOME/backups/walg/state.json` (0600; the tick writes it, the health probe reads it;
+remove it only to reset a state the tick reports as unreadable).
+
 **Switching it off.** `ava config unset AVA_WALG_CONFIG_FILE`, then `ava stop && ava
-start`. Nothing is left in the data directory (the archive settings are launch
-arguments). The objects stay in the bucket; deleting them is a manual storage action.
+start`; converge removes the daily job. Nothing is left in the data directory (the archive
+settings are launch arguments). The objects stay in the bucket; deleting them is a manual storage action.
 There is no way to stop archiving without a restart: when archiving misbehaves, repair
 its cause (credentials, network, disk).
 
@@ -1437,8 +1466,15 @@ configured archive settings (restart pending); the archiver is failing; complete
 waited in `archive_status/` for longer than the 300 s RPO objective (this is also how a
 hung archive command shows, since it neither succeeds nor fails); the key file is not the
 pinned key (restore the pinned key or start a new prefix; never replace the key under an
-existing prefix). The probe reads the queue over the admin socket because the application
-login may not list `archive_status/`.
+existing prefix). From the daily tick's state file: the last executed run failed (one
+text per step: preflight, backup, verification, retention; read `ava backup walg status`
+and the end of `walg.log`); the last verification saw a broken chain (`FAILURE`; a missing
+segment cannot be repaired, so take a new full backup and treat the older recovery points
+as lost); no tick has started within 24 hours (the job is not registered or not running;
+a deliberate skip counts as started, and before the first tick the age of the key pin
+stands in). A failed run stays reported until a later run succeeds; skipped ticks do not
+clear it. The probe reads the queue over the admin socket because the application login
+may not list `archive_status/`.
 
 **Before a planned stop**, look at `ava backup walg status`: Postgres' shutdown waits for
 the archiver to finish its queue, so a backlog (or a hung `wal-g`) delays `ava stop` and
