@@ -90,8 +90,11 @@ agent onto a gateway-only node where only the scheduling/DB layer lives".
   `conventions/python-conventions.md`.
 - Enrolling a split runner (`ava start`) does not birth a cluster — its cluster
   identity **is** the gateway URL + the capability bundle it installed.
-- `gateway_auth_headers` presents this process's delivered machine API token
-  (`AVA_API_TOKEN`), else the gateway home's human secret; empty when open.
+- `gateway_auth_headers` presents `gateway_bearer()`: this process's delivered machine
+  API token (`AVA_API_TOKEN`), else the human secret of an operator or gateway-profile
+  process; a process launched with the agent or runner profile, a set secret and no token raises
+  `GatewayApiTokenMissing` (a remote-managed plane delivers none, so it is exempt);
+  empty when open.
 
 ## Key Dependencies
 

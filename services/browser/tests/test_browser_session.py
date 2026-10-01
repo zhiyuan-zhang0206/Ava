@@ -250,6 +250,35 @@ async def test_inject_once_injects_with_settings(monkeypatch: pytest.MonkeyPatch
     assert calls == [(gateway_session.settings.services.browser_cdp_port, GATEWAY, SECRET)]
 
 
+def test_session_params_present_the_delivered_runner_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
+    monkeypatch.setenv("AVA_PROCESS_PROFILE", "runner")
+    monkeypatch.setenv("AVA_API_TOKEN", "delivered-runner-token")
+    assert gateway_session._gateway_session_params() == (GATEWAY, "delivered-runner-token")
+
+
+def test_session_params_without_a_token_log_the_defect_instead_of_using_the_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The daemon keeps serving without the cookie (best effort), but a launch
+    that delivered no token is an error, and the human secret never stands in."""
+    errors: list[str] = []
+    monkeypatch.setattr(gateway_session.logger, "error", errors.append)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
+    monkeypatch.setenv("AVA_PROCESS_PROFILE", "runner")
+    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
+
+    assert gateway_session._gateway_session_params() is None
+
+    assert len(errors) == 1
+    assert "AVA_API_TOKEN" in errors[0]
+    assert SECRET not in errors[0]
+
+
 async def test_inject_once_swallows_injection_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     async def boom(port: int, url: str, secret: str) -> None:
         raise RuntimeError("cdp down")

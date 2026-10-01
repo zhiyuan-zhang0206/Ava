@@ -281,8 +281,9 @@ class DataPlaneSettings(EnvSettings):
         description=(
             "The gateway's human/control-plane bearer (gateway API, frontend login). "
             "It stays on the gateway: machine callers present their write "
-            "generation's API token, and remote units never receive or hold this "
-            "secret (bootstrap does not serve it). EMPTY = the single-box posture: "
+            "generation's API token (an agent or runner process without one fails "
+            "instead of presenting this secret), and remote units never receive or "
+            "hold this secret (bootstrap does not serve it). EMPTY = the single-box posture: "
             "the user-facing API and /ops serve without auth and every data-plane "
             "listener binds loopback alone. The internal data plane authenticates "
             "whatever the secret: Postgres/PgBouncer admit only SCRAM write-generation "

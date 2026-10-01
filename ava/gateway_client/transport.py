@@ -13,7 +13,8 @@ from base.agents.messages.delivery_outbox import (
 )
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency
-from base.cluster.auth import bearer_header, client_bearer
+from base.cluster.auth import bearer_header
+from base.cluster.machine import gateway_bearer
 from base.config import settings
 from base.host.net.resilience import Policy, http_classifier, retry
 
@@ -43,10 +44,11 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
         # cluster. The SDK is a script/agent caller, so it presents a bearer
         # (the cookie path is the browser's): the machine API token its launch
         # environment carries (an agent inherits the agent-host's), else the
-        # human secret (an operator on the gateway home). Neither (the open
-        # posture / an unprovisioned checkout) sends no header — matches the
-        # gateway's fail-open when its own secret is unset.
-        bearer = client_bearer(settings.data_plane.cluster_secret)
+        # human secret (an operator on the gateway home; never an agent or
+        # runner process, which raises `GatewayApiTokenMissing` instead).
+        # Neither (the open posture / an unprovisioned checkout) sends no
+        # header — matches the gateway's fail-open when its own secret is unset.
+        bearer = gateway_bearer()
         headers = bearer_header(bearer) if bearer else {}
         _client = httpx.Client(
             base_url=ava.GATEWAY_URL,
