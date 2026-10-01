@@ -431,12 +431,12 @@ def test_settings_load_failure_prints_env_template(
     assert "AVA_DB_URL" in captured.err
 
 
-# -- checkout gate on the state-changing verbs --------------------------------
+# -- checkout gate: every command from a foreign checkout -----------------------
 
 
 def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A home that carries its own `source` checkout, named by AVA_HOME. This
-    checkout is not it, so the gate must refuse every verb that changes it."""
+    checkout is not it, so the gate must refuse every command."""
     home = tmp_path / ".ava"
     (home / "source").mkdir(parents=True)
     monkeypatch.setenv("AVA_HOME", str(home))
