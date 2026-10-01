@@ -25,10 +25,10 @@ from cli.parsers import build_parser
 from ops import agent_pause
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
-from tests.cli.conftest import PtyReaper
 from tests.cli.test_maintenance_stop import Launcher
 from tests.cli.test_maintenance_stop import home as home
 from tests.cli.test_maintenance_stop import launch as launch
+from tests.path_scoped.pty_reaper import PtyReaper
 
 _NORMAL = "import signal,sys,time\nsignal.signal(signal.SIGTERM,lambda *_:sys.exit(0))\nprint('ready',flush=True)\nwhile True:time.sleep(.02)"
 _IGNORE = "import signal,time\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nprint('ready',flush=True)\nwhile True:time.sleep(.02)"

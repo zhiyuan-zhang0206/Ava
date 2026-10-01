@@ -13,7 +13,7 @@ other end.
 
 ## How two machines are simulated honestly
 
-The `as_machine` fixture (`tests/cli/conftest.py`) holds the mechanism and the
+The `as_machine` fixture (`tests/path_scoped/cli_tests.py`) holds the mechanism and the
 reason the identity cache has to be reset on both edges.
 
 What it does NOT simulate: two machines racing concurrently, and network

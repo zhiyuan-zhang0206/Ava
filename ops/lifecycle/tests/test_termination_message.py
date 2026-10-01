@@ -20,8 +20,8 @@ from base.db import create_agent
 from base.telemetry import Event
 from ops.lifecycle import termination
 from ops.rpc_schemas import TerminateAgentRequest
-from tests.cli.conftest import PtyReaper
-from tests.cli.conftest import pty_reaper as pty_reaper
+from tests.path_scoped.pty_reaper import PtyReaper
+from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
 
 @pytest.fixture
