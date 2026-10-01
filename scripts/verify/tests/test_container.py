@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from base.host.env.config_lite_table import FIELD_ALIASES
-from scripts.verify import container
+from scripts.verify import boundary, container
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DOCKERFILE = _REPO_ROOT / "scripts/verify/Dockerfile"
@@ -52,7 +52,7 @@ def test_host_home_and_its_sealed_directories_are_refused(
     monkeypatch.setenv("HOME", str(home))
 
     with pytest.raises(ValueError, match="refusing to mount host state"):
-        container.refuse_host_state(home / relative)
+        boundary.refuse_host_state(home / relative)
     with pytest.raises(ValueError, match="refusing to mount host state"):
         _run_argv(home / relative)
 
@@ -61,7 +61,7 @@ def test_the_container_runtime_socket_is_refused(tmp_path: Path) -> None:
     socket = tmp_path / "docker.sock"
     socket.touch()
     with pytest.raises(ValueError, match="refusing to mount host state"):
-        container.refuse_host_state(socket)
+        boundary.refuse_host_state(socket)
 
 
 def test_a_repository_object_store_inside_home_is_allowed(
@@ -72,7 +72,7 @@ def test_a_repository_object_store_inside_home_is_allowed(
     objects.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
 
-    container.refuse_host_state(objects)
+    boundary.refuse_host_state(objects)
 
 
 # ----------------------------------------------------------------- the one docker run
@@ -123,9 +123,9 @@ def test_a_ref_cannot_smuggle_a_git_option(tmp_path: Path) -> None:
     _git(tmp_path, "init", "--initial-branch=main", str(repo))
     _git(repo, "commit", "--allow-empty", "-m", "seed")
 
-    assert container.resolve_commit(repo, "HEAD") == _git(repo, "rev-parse", "HEAD")
+    assert boundary.resolve_commit(repo, "HEAD") == _git(repo, "rev-parse", "HEAD")
     with pytest.raises(subprocess.CalledProcessError):
-        container.resolve_commit(repo, "--all")
+        boundary.resolve_commit(repo, "--all")
 
 
 # ------------------------------------------------------------------ the image definition
@@ -197,21 +197,21 @@ def test_the_image_tag_follows_what_the_build_can_see(tmp_path: Path) -> None:
 
 
 def test_the_profile_admits_no_provider_key_and_only_known_configuration() -> None:
-    assert not [key for key in container.PROFILE if re.search(r"KEY|TOKEN|SECRET|PASSWORD", key)]
+    assert not [key for key in boundary.PROFILE if re.search(r"KEY|TOKEN|SECRET|PASSWORD", key)]
     # `ava init --config-file` refuses any key that is not a Settings field alias.
-    assert set(container.PROFILE) <= set(FIELD_ALIASES.values())
+    assert set(boundary.PROFILE) <= set(FIELD_ALIASES.values())
 
 
 def test_the_start_selects_the_services_the_observer_checks() -> None:
     from scripts.verify import observe
 
-    assert set(container.SERVICES) == observe.SERVICES
+    assert set(boundary.SERVICES) == observe.SERVICES
     selected = [
         container.START_ARGV[i + 1]
         for i, arg in enumerate(container.START_ARGV)
         if arg == "--only-service"
     ]
-    assert selected == list(container.SERVICES)
+    assert selected == list(boundary.SERVICES)
     assert "--worktree" not in container.START_ARGV
 
 
@@ -224,9 +224,9 @@ def test_init_records_the_identity_and_start_takes_only_the_selection() -> None:
     assert container.START_ARGV[:2] == [".venv/bin/ava", "start"]
     parser = build_parser()
     init = parser.parse_args(container.INIT_ARGV[1:])
-    assert init.machine_name == container.MACHINE_NAME
+    assert init.machine_name == boundary.MACHINE_NAME
     assert init.serve_gateway is True and init.serve_agent_runner is True
     assert init.config_file == f"{container.WORK}/profile.env"
     start = parser.parse_args(container.START_ARGV[1:])
-    assert start.only_service == list(container.SERVICES)
+    assert start.only_service == list(boundary.SERVICES)
     assert {"init", "start"} <= set(container.TIMEOUTS)  # every step a run records is bounded
