@@ -7,7 +7,7 @@ Small core, minimal by design. One tool (`execute_code`), one namespace (`ava.*`
 
 1. **Small core, minimal** — each layer considered for removal as models improve.
 2. **Fail fast** — no fallbacks for model mistakes; use `[]` not `.get()`, explode on unknown enums.
-3. **Don't reinvent** — LangGraph, psycopg, uv; swap only when they get in the way.
+3. **Don't reinvent** — LangGraph, psycopg, uv; swap only when they get in the way ([how to choose](conventions/technology-selection.md)).
 4. **Single tool** — `execute_code(code: str)` + `ava.*` namespace = all capabilities.
 5. **Approved stable** — Python 3.12, Postgres 17, Redis 8.2; upgrades require manual approval; no beta/nightly.
 6. **English only — no raw CJK** — docs, comments, prompts, error messages
