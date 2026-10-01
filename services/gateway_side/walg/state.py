@@ -10,7 +10,8 @@ its sections are facts, not messages:
   and the step that failed). A skipped tick leaves it alone, so a failure stays
   visible until a run succeeds.
 - `backup`, `verify`, `retention`: the last result of each step.
-- `drill`: owned by the recovery drill; carried through unchanged.
+- `drill`: the latest recovery drill (`drill.py`) and when one last succeeded. Written by
+  whoever runs the drill: the tick, or `ava backup walg drill`, both under the lock.
 
 Only the tick writes, and only while holding the per-home run lock; readers never
 lock. A missing file is an empty state; an unreadable or malformed one is an error
@@ -112,13 +113,27 @@ class RetentionRecord:
 
 
 @dataclass(frozen=True)
+class DrillRecord:
+    """One recovery drill. A failed drill keeps `last_ok_at` of the last success, so
+    "no drill has succeeded lately" stays readable across failures."""
+
+    finished_at: datetime
+    ok: bool
+    backup: str
+    target_lsn: str | None  # None: no target (nothing newer than the backup was archived)
+    seconds: float
+    detail: str
+    last_ok_at: datetime | None
+
+
+@dataclass(frozen=True)
 class State:
     tick: TickRecord | None = None
     run: RunRecord | None = None
     backup: BackupRecord | None = None
     verify: VerifyRecord | None = None
     retention: RetentionRecord | None = None
-    drill: dict[str, Any] | None = None
+    drill: DrillRecord | None = None
 
 
 def _timestamps_to_json(record: object) -> dict[str, Any]:
@@ -130,10 +145,9 @@ def _timestamps_to_json(record: object) -> dict[str, Any]:
 
 def to_json(state: State) -> bytes:
     sections: dict[str, Any] = {"version": _VERSION}
-    for name in ("tick", "run", "backup", "verify", "retention"):
+    for name in ("tick", "run", "backup", "verify", "retention", "drill"):
         record = getattr(state, name)
         sections[name] = None if record is None else _timestamps_to_json(record)
-    sections["drill"] = state.drill
     return (json.dumps(sections, indent=2, sort_keys=True) + "\n").encode()
 
 
@@ -182,6 +196,22 @@ def _retention(r: dict[str, Any]) -> RetentionRecord:
     return RetentionRecord(at=_parse(r["at"]), marked=int(r["marked"]), deleted=int(r["deleted"]))
 
 
+def _drill(r: dict[str, Any]) -> DrillRecord:
+    target_lsn, last_ok_at = r["target_lsn"], r["last_ok_at"]
+    ok = r["ok"]
+    if not isinstance(ok, bool):
+        raise StateError(f"drill ok is {ok!r}, not a boolean")
+    return DrillRecord(
+        finished_at=_parse(r["finished_at"]),
+        ok=ok,
+        backup=str(r["backup"]),
+        target_lsn=None if target_lsn is None else str(target_lsn),
+        seconds=float(r["seconds"]),
+        detail=str(r["detail"]),
+        last_ok_at=None if last_ok_at is None else _parse(last_ok_at),
+    )
+
+
 def _section[R](raw: dict[str, Any], name: str, build: Callable[[dict[str, Any]], R]) -> R | None:
     body = raw[name]
     return None if body is None else build(cast(dict[str, Any], body))
@@ -207,7 +237,7 @@ def from_json(data: bytes) -> State:
             backup=_section(raw, "backup", _backup),
             verify=_section(raw, "verify", _verify),
             retention=_section(raw, "retention", _retention),
-            drill=cast("dict[str, Any] | None", raw["drill"]),
+            drill=_section(raw, "drill", _drill),
         )
     except StateError:
         raise

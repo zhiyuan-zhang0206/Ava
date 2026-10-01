@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import stat
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ import pytest
 from services.gateway_side.walg import state
 from services.gateway_side.walg.state import (
     BackupRecord,
+    DrillRecord,
     RetentionRecord,
     RunRecord,
     State,
@@ -44,7 +46,15 @@ def _full_state() -> State:
         ),
         verify=VerifyRecord(at=T1, integrity="WARNING", timeline="OK"),
         retention=RetentionRecord(at=T1, marked=21, deleted=21),
-        drill={"finished_at": "2026-09-28T06:00:00+00:00", "ok": True},
+        drill=DrillRecord(
+            finished_at=T1,
+            ok=False,
+            backup="base_000000010000000000000087",
+            target_lsn="0/A3000000",
+            seconds=612.5,
+            detail="recovery failed",
+            last_ok_at=T0,
+        ),
     )
 
 
@@ -114,6 +124,8 @@ _DROP = object()
         ("tick", "started_at", "2026-10-02T06:25:00"),
         ("retention", "deleted", _DROP),
         ("verify", "at", None),
+        ("drill", "ok", "yes"),
+        ("drill", "seconds", _DROP),
     ],
     ids=[
         "version",
@@ -124,6 +136,8 @@ _DROP = object()
         "naive-timestamp",
         "missing-field",
         "null-timestamp",
+        "drill-ok-not-boolean",
+        "drill-missing-field",
     ],
 )
 def test_a_malformed_file_is_an_error_never_an_empty_state(
@@ -156,3 +170,20 @@ def test_a_naive_timestamp_cannot_be_written(sandbox: Sandbox) -> None:
 
     with pytest.raises(ValueError, match="timezone-aware"):
         state.write_state(naive)
+
+
+def test_a_drill_without_a_target_or_a_success_round_trips(sandbox: Sandbox) -> None:
+    record = DrillRecord(
+        finished_at=T1,
+        ok=True,
+        backup="base_1",
+        target_lsn=None,
+        seconds=3.0,
+        detail="ok",
+        last_ok_at=T1,
+    )
+    never = replace(record, ok=False, last_ok_at=None)
+
+    for drill in (record, never):
+        state.write_state(State(drill=drill))
+        assert state.read_state().drill == drill

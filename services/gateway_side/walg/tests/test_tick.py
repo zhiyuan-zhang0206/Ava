@@ -27,6 +27,7 @@ FULL_4 = "base_0000000100000006000000C0"
 T0 = datetime(2026, 10, 2, 6, 25, 0, tzinfo=UTC)
 
 PG_DATA = Path("/pg/data")
+DATABASE = "ava_main"
 ADMIN_URL = "postgresql://tester@/postgres?host=/sockets/ava-pg-home&port=5433"
 
 
@@ -49,6 +50,14 @@ def _refuses(_target: tick.PgTarget) -> bool:
     return False
 
 
+def _never_due(*_args: Any) -> bool:
+    return False
+
+
+def _always_due(*_args: Any) -> bool:
+    return True
+
+
 def _backup_lists() -> tuple[str, str]:
     before = json.loads(fixture_text("backup-list.json"))
     newest = dict(before[-1])
@@ -65,9 +74,10 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     box.put("wal-verify.json", fixture_text("wal-verify-warning.json"))
     box.put("delete-dry.log", fixture_text("retention-dry-run.log"))
     box.put("delete-confirm.log", _confirm_log())
-    monkeypatch.setattr(tick, "pg_target", lambda: tick.PgTarget(ADMIN_URL, PG_DATA))
+    monkeypatch.setattr(tick, "pg_target", lambda: tick.PgTarget(ADMIN_URL, PG_DATA, DATABASE))
     monkeypatch.setattr(tick, "postgres_accepts_connections", _accepts)
     monkeypatch.setattr(tick, "deploy_window_reason", lambda: None)
+    monkeypatch.setattr(tick.drill, "drill_due", _never_due)  # the drill has its own tests below
     return box
 
 
@@ -463,7 +473,7 @@ def test_postgres_reachability_is_a_custody_checked_dial_of_the_admin_socket(
 
     monkeypatch.setattr(pg_admin, "connect", connect)
 
-    assert tick.postgres_accepts_connections(tick.PgTarget(ADMIN_URL, PG_DATA)) is True
+    assert tick.postgres_accepts_connections(tick.PgTarget(ADMIN_URL, PG_DATA, DATABASE)) is True
     assert dialed == [(ADMIN_URL, PG_DATA)]
 
 
@@ -473,7 +483,7 @@ def test_a_refused_connection_is_not_reachable(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(pg_admin, "connect", refuse)
 
-    assert tick.postgres_accepts_connections(tick.PgTarget(ADMIN_URL, PG_DATA)) is False
+    assert tick.postgres_accepts_connections(tick.PgTarget(ADMIN_URL, PG_DATA, DATABASE)) is False
 
 
 def test_the_clock_reaches_the_records(sandbox: Sandbox) -> None:
@@ -483,3 +493,162 @@ def test_the_clock_reaches_the_records(sandbox: Sandbox) -> None:
     assert recorded.run is not None and recorded.backup is not None
     assert recorded.run.started_at == T0
     assert recorded.run.finished_at > recorded.backup.finished_at > T0
+
+
+# ── the weekly recovery drill ────────────────────────────────────────────────
+
+
+class FakeDrill:
+    """Stands in for `drill.run_drill`; records when it ran relative to wal-g's calls."""
+
+    def __init__(self, sandbox: Sandbox, *, ok: bool = True) -> None:
+        self.sandbox = sandbox
+        self.ok = ok
+        self.wal_g_calls_before: list[list[str]] = []
+        self.backups: list[str] = []
+
+    def __call__(
+        self,
+        _target: tick.PgTarget,
+        backup: Any,
+        previous: state.DrillRecord | None,
+        _report: Any,
+        now: Any,
+    ) -> state.DrillRecord:
+        self.wal_g_calls_before.append(self.sandbox.calls())
+        self.backups.append(backup.name)
+        finished = now()
+        return state.DrillRecord(
+            finished_at=finished,
+            ok=self.ok,
+            backup=backup.name,
+            target_lsn="0/A3000000",
+            seconds=12.0,
+            detail="restored" if self.ok else "recovery failed: no segment",
+            last_ok_at=finished if self.ok else (previous.last_ok_at if previous else None),
+        )
+
+
+@pytest.fixture
+def due_drill(sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch) -> FakeDrill:
+    fake = FakeDrill(sandbox)
+    monkeypatch.setattr(tick.drill, "drill_due", _always_due)
+    monkeypatch.setattr(tick.drill, "run_drill", fake)
+    return fake
+
+
+def test_a_due_drill_restores_yesterdays_backup_before_todays_backup_is_taken(
+    sandbox: Sandbox, due_drill: FakeDrill
+) -> None:
+    code, lines = _run()
+
+    assert code == 0
+    # only the preflight listing had run when the drill started, and it drilled the newest
+    # backup that existed then (not the one this run is about to make)
+    assert due_drill.wal_g_calls_before == [["backup-list --detail --json"]]
+    assert due_drill.backups == [json.loads(fixture_text("backup-list.json"))[-1]["backup_name"]]
+    assert any(line.startswith("drill: ok in 12s (restored)") for line in lines)
+    recorded = state.read_state()
+    assert recorded.drill is not None and recorded.drill.ok
+    assert recorded.run is not None and recorded.run.status == "ok"
+
+
+def test_a_failed_drill_is_recorded_and_the_backup_still_runs(
+    sandbox: Sandbox, due_drill: FakeDrill
+) -> None:
+    due_drill.ok = False
+
+    code, lines = _run()
+
+    assert code == 0  # the drill's failure is its own alert, not the run's
+    assert any(f"backup-push {PG_DATA}" == call for call in sandbox.calls())
+    assert any(line == "drill: FAILED after 12s: recovery failed: no segment" for line in lines)
+    recorded = state.read_state()
+    assert recorded.drill is not None and not recorded.drill.ok
+    assert recorded.run is not None and recorded.run.status == "ok"
+
+
+def test_a_drill_that_is_not_due_does_not_run(
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeDrill(sandbox)
+    monkeypatch.setattr(tick.drill, "run_drill", fake)
+
+    code, _ = _run()
+
+    assert code == 0
+    assert fake.backups == []
+    assert state.read_state().drill is None
+
+
+def test_the_drill_is_due_by_the_state_the_tick_read(
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[Any, ...]] = []
+
+    def due(previous: Any, backups: list[Any], now: datetime) -> bool:
+        seen.append((previous, [b.name for b in backups], now))
+        return False
+
+    monkeypatch.setattr(tick.drill, "drill_due", due)
+
+    _run()
+
+    ((previous, names, now),) = seen
+    assert previous is None
+    assert len(names) == 4 and now == T0 + timedelta(minutes=1)
+
+
+def test_drill_now_runs_the_drill_and_records_it(sandbox: Sandbox, due_drill: FakeDrill) -> None:
+    lines: list[str] = []
+
+    code = tick.run_drill_now(lines.append, now=Clock())
+
+    assert code == 0
+    assert state.read_state().drill is not None
+    assert not [call for call in sandbox.calls() if call.startswith("backup-push")]
+
+
+def test_drill_now_exits_non_zero_when_the_drill_fails(
+    sandbox: Sandbox, due_drill: FakeDrill
+) -> None:
+    due_drill.ok = False
+
+    assert tick.run_drill_now(lambda _line: None, now=Clock()) == 1
+    drill_record = state.read_state().drill
+    assert drill_record is not None and not drill_record.ok
+
+
+def test_drill_now_refuses_without_a_backup(sandbox: Sandbox, due_drill: FakeDrill) -> None:
+    sandbox.put("backups.json", "[]")
+    lines: list[str] = []
+
+    assert tick.run_drill_now(lines.append, now=Clock()) == 1
+    assert lines == ["failed: no backup exists yet; run `ava backup walg run` first"]
+    assert due_drill.backups == []
+
+
+def test_drill_now_needs_postgres_and_the_run_lock(
+    sandbox: Sandbox, due_drill: FakeDrill, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lines: list[str] = []
+    monkeypatch.setattr(tick, "postgres_accepts_connections", _refuses)
+    assert tick.run_drill_now(lines.append, now=Clock()) == 1
+    assert lines == ["failed: postgres is not accepting connections"]
+
+    monkeypatch.setattr(tick, "postgres_accepts_connections", _accepts)
+    tick.ensure_private_dir(state.walg_dir())
+    with file_lock(state.lock_path(), timeout_s=0):
+        assert tick.run_drill_now(lines.append, now=Clock()) == 1
+    assert lines[-1] == "failed: a WAL-G tick or drill is still running"
+    assert due_drill.backups == []
+
+
+def test_drill_now_while_wal_g_is_off_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_sandbox(tmp_path, monkeypatch, enabled=False)
+    lines: list[str] = []
+
+    assert tick.run_drill_now(lines.append) == 1
+    assert "WAL-G is off" in lines[0]
