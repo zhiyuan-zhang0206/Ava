@@ -276,3 +276,13 @@ def test_strict_listeners_raises_when_lsof_is_unreachable(
 
     with pytest.raises(port_preflight.ListenerDiscoveryError, match="lsof is not on PATH"):
         port_preflight.strict_listeners_on(6433)
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost", "ip6-localhost"])
+def test_bind_addrs_adds_nothing_for_a_loopback_reachable_host(
+    monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    """A single box names itself by any loopback alias; none of them is a second address
+    to bind, so a secret-bearing cluster still binds loopback alone."""
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: host)
+    assert port_preflight.bind_addrs("s3cret") == ["127.0.0.1"]
