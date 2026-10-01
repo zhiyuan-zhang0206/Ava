@@ -1135,6 +1135,12 @@ root = "tests/services"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
+# The former directory conftests (tests/path_scoped/) come from the directories above.
+[[tool.pyright.executionEnvironments]]
+root = "tests/path_scoped"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
 [[tool.pyright.executionEnvironments]]
 root = "cli"
 reportUnknownMemberType = "error"

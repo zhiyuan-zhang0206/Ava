@@ -66,7 +66,7 @@ def _fresh_unresolved_skill_warnings(monkeypatch: pytest.MonkeyPatch) -> None:
     test that renders the index or resolves a config list can trip it."""
     from agent.graph import capabilities
 
-    monkeypatch.setattr(capabilities, "_warned_unresolved", set())
+    monkeypatch.setattr(capabilities, "_warned_unresolved", set())  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture

@@ -104,9 +104,9 @@ def _local_lifecycle_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
         # against the test DB. AvaAgentError raises propagate directly — the
         # same exception types the wire round-trip would reconstruct. model_dump
         # mirrors the daemon serializing the response model onto the wire dict.
-        return (await lifecycle_op(path, json_body, app.state.db_pool)).model_dump(mode="json")
+        return (await lifecycle_op(path, json_body, app.state.db_pool)).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
 
-    monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)
+    monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture(autouse=True)
@@ -158,4 +158,4 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
             idempotency_key=idempotency_key,
         )
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _in_process_config)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _in_process_config)  # pyright: ignore[reportUnknownArgumentType]
