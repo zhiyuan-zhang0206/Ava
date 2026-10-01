@@ -59,7 +59,6 @@ from base.db.pg_admin import local_owner_authority
 from base.host.private_storage import ensure_private_dir, ensure_private_file
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.paths import ava_home
-from services.gateway_side.backup import offsite
 from services.gateway_side.backup import passphrase as backup_passphrase
 from services.gateway_side.backup.intermediates import sweep_closed_partials
 from services.gateway_side.backup.names import DUMP_NAME_RE, REMOTE_ROOT, TS_FORMAT, stamp_utc
@@ -397,6 +396,11 @@ def run_backup(
             progress=progress,
         )
         if publish:
+            # Imported where used: the scheduler daemon imports this module for
+            # `is_due` and must not carry the OSS SDK; its backup worker, which
+            # reaches this line, loads it.
+            from services.gateway_side.backup import offsite
+
             offsite.publish(target)
         if staging is None:
             _log_written(target, _prune(target.parent))
@@ -601,6 +605,8 @@ def _main(argv: list[str] | None = None) -> int:
         parser.error("--publish-offsite ARTIFACT must be an absolute path")
     if not args.offsite_root or args.offsite_root != args.offsite_root.strip("/"):
         parser.error("--offsite-root must be a non-empty prefix without surrounding slashes")
+    from services.gateway_side.backup import offsite  # the SDK loads only on this entry
+
     offsite.publish(artifact, root=args.offsite_root)
     return 0
 
