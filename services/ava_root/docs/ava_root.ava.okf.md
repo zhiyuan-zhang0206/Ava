@@ -96,9 +96,13 @@ The user channel is the gateway's `/api/alerts` ingest, posted by the
 deployment-side notifier with the health probe's client posture
 (`gateway_api_base` + `gateway_auth_headers`, plus `X-Alerts-Token` when this
 home carries the cluster webhook token). A failed post is retried once and then
-given up — the store stays authoritative, and the outcome lands on the event
-stream. A firing the channel never accepted is never given a fabricated
-resolution: its resolve reports `delivery="skipped"` and posts nothing.
+given up for that edge — the store stays authoritative, and the outcome
+lands on the event stream. While the episode stays open and the firing was
+never accepted, each later observation re-posts it (idempotent under the
+(fingerprint, startsAt) key), repairing a crash between acceptance and the
+record stamp or a gateway unreachable at fire time; a firing still never
+accepted at resolve time reports `delivery="skipped"` and posts nothing —
+no fabricated row.
 
 ## Control contract
 

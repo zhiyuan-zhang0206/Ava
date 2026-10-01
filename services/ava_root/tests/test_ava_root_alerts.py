@@ -270,6 +270,25 @@ def test_resolve_is_skipped_when_the_firing_never_landed(
     assert len(notifier.calls) == 1, "a never-delivered firing has no open row to close"
 
 
+def test_pending_delivery_is_repaired_on_a_later_observation(
+    tmp_path: Path, recorder: _Recorder, clock: _Clock
+) -> None:
+    notifier = _Notifier(accept=False)
+    router = AlertRouter(tmp_path, notifier=notifier)
+    view = _view(breaker_open=True)
+    router.observe([view])  # the channel rejects the firing
+    assert recorder.events("root_unit_alert_fired")[0]["delivery"] == "failed"
+    notifier.accept = True
+    router.observe([view])  # a later observation re-posts the pending firing
+    assert len(recorder.events("root_unit_alert_fired")) == 1, "no re-fire, only re-delivery"
+    stored = read_record(tmp_path, "svc")
+    assert stored is not None and stored.delivered_at is not None
+    router.observe([_view()])
+    resolved = recorder.events("root_unit_alert_resolved")[0]
+    assert resolved["delivery"] == "posted"
+    assert notifier.calls[-1][2] is True
+
+
 def test_no_notifier_keeps_store_and_events(
     tmp_path: Path, recorder: _Recorder, clock: _Clock
 ) -> None:
