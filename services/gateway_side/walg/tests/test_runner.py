@@ -82,3 +82,14 @@ def test_off_means_no_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         runner.run_walg(["st", "ls"], timeout_s=30)
 
     assert sandbox.calls() == []
+
+
+def test_the_logged_variant_returns_both_streams(sandbox: Sandbox) -> None:
+    sandbox.put(
+        "delete-dry.log", "INFO: Object marked for deletion: wal_005/X.lz4 storage=default\n"
+    )
+
+    output = runner.run_walg_logged(["delete", "retain", "FULL", "3"], timeout_s=30)
+
+    assert output.stdout == ""
+    assert "Object marked for deletion: wal_005/X.lz4" in output.stderr

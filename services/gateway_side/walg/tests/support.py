@@ -33,6 +33,7 @@ from base.config import settings
 from services.gateway_side.walg.archive import archive_pg_args
 
 FAKE_WALG = Path(__file__).with_name("fake_walg.sh")
+FIXTURES = Path(__file__).with_name("fixtures")
 
 # Values that must never appear in argv, postgresql.conf, a log line or an error.
 ACCESS_KEY_ID = "LTAI-test-access-key-id"
@@ -60,6 +61,18 @@ class Sandbox:
     def set_mode(self, mode: str) -> None:
         (self.store_dir / "mode").write_text(mode)
 
+    def put(self, name: str, text: str) -> None:
+        """Script the fake: write one of the files it reads from its directory."""
+        (self.store_dir / name).write_text(text)
+
+    def fail(self, *commands: str) -> None:
+        """Make these wal-g commands exit 1 (the rest keep working)."""
+        self.put("fail-commands", " ".join(commands))
+
+    def env_log(self) -> list[str]:
+        log = self.store_dir / "env.log"
+        return log.read_text().splitlines() if log.exists() else []
+
     def calls(self) -> list[str]:
         log = self.store_dir / "calls.log"
         return log.read_text().splitlines() if log.exists() else []
@@ -67,6 +80,11 @@ class Sandbox:
     def stored(self) -> list[str]:
         root = self.store_dir / "store"
         return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+
+
+def fixture_text(name: str) -> str:
+    """A file of real WAL-G output, kept in `tests/fixtures/` (see the test that uses it)."""
+    return (FIXTURES / name).read_text()
 
 
 def valid_config(key_file: Path, **overrides: Any) -> dict[str, Any]:
