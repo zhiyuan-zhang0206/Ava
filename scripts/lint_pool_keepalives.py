@@ -59,6 +59,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.structure import lint_common  # noqa: E402 — standalone script
 from scripts.structure.locality import DECISIONS  # noqa: E402 — standalone script
 
 _DIAL = DECISIONS["postgres-dial"]
@@ -196,16 +197,19 @@ def default_targets() -> list[Path]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    argv, only = lint_common.split_only(argv)
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    # argv non-empty = explicit paths, scanned whole; empty = the default scope.
+    # argv non-empty = explicit paths, scanned whole; empty = the default scope, or the
+    # `--only` changed files (the commit hook) under that same scope.
     targets = [Path(a).resolve() for a in argv] if argv else default_targets()
+    scope = lint_common.changed_scope(only, _REPO_ROOT)
 
     total = 0
-    for path in sorted(_iter_py_files(targets)):
+    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, _REPO_ROOT)):
         try:
             rel = path.relative_to(_REPO_ROOT).as_posix()
         except ValueError:

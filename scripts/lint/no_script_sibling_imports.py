@@ -55,6 +55,9 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
 
 # Directories that are never scanned (vendored / generated / scratch).
 _EXCLUDED_DIRS = frozenset(
@@ -249,21 +252,41 @@ def _fix_hint(rel: str) -> str:
     )
 
 
+def _excluded(parts: tuple[str, ...]) -> bool:
+    """Whether a path BELOW the scanned root runs through a vendored/generated directory.
+
+    Only the part of the path under the root counts: a checkout that itself lives in a
+    directory named `tmp` or `build` (a CI scratch dir, a pytest temp dir) must still be scanned.
+    """
+    return any(part in _EXCLUDED_DIRS for part in parts)
+
+
 def _iter_py_files(roots: list[Path]) -> list[Path]:
     files: list[Path] = []
     for root in roots:
         if root.is_file() and root.suffix == ".py":
             files.append(root)
         elif root.is_dir():
-            for p in root.rglob("*.py"):
-                if any(part in _EXCLUDED_DIRS for part in p.parts):
-                    continue
-                files.append(p)
+            files.extend(p for p in root.rglob("*.py") if not _excluded(p.relative_to(root).parts))
     return files
+
+
+def _files_to_scan(targets: list[Path], scope: frozenset[str] | None) -> list[Path]:
+    """Every `.py` under the targets, or just the changed files a full walk would reach.
+
+    The walk skips vendored/generated directories; the changed-files path applies the same
+    rule without walking them.
+    """
+    if scope is None:
+        return _iter_py_files(targets)
+    return [
+        _REPO_ROOT / rel for rel in scope if rel.endswith(".py") and not _excluded(Path(rel).parts)
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    argv, only = lint_common.split_only(argv)
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
@@ -271,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT]
     total = 0
-    for path in sorted(_iter_py_files(targets)):
+    for path in sorted(_files_to_scan(targets, lint_common.changed_scope(only, _REPO_ROOT))):
         rel = (
             path.relative_to(_REPO_ROOT).as_posix()
             if path.is_relative_to(_REPO_ROOT)

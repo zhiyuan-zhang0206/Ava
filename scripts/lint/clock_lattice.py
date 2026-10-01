@@ -290,7 +290,7 @@ def _stale_allowlist_entries() -> list[str]:
     return errors
 
 
-def _scan(paths: list[Path]) -> list[str]:
+def _scan(paths: list[Path], scope: frozenset[str] | None = None) -> list[str]:
     errors: list[str] = []
     for path in paths:
         if path.is_dir():
@@ -301,6 +301,8 @@ def _scan(paths: list[Path]) -> list[str]:
                     rel = p.as_posix()
                 if any(pat.search(rel) for pat in _TEST_PATTERNS):
                     continue
+                if scope is not None and rel not in scope:
+                    continue
                 errors.extend(_scan_file(p))
         elif path.suffix == ".py":
             errors.extend(_scan_file(path))
@@ -309,6 +311,7 @@ def _scan(paths: list[Path]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    argv, only = lint_common.split_only(argv)
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
@@ -319,7 +322,10 @@ def main(argv: list[str] | None = None) -> int:
         if argv
         else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
     )
-    errors = _scan(paths)
+    # `--only` (the commit hook) judges the changed files under the default scope; the
+    # lattice's own family modules are inputs: editing one re-judges every file.
+    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_FAMILY_MODULES)
+    errors = _scan(paths, scope)
     if not argv:
         errors.extend(_stale_allowlist_entries())
     for err in errors:
