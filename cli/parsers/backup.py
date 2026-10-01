@@ -1,4 +1,4 @@
-"""`ava backup` parser: custody of the scheduled backup operations."""
+"""`ava backup` parser: custody of the scheduled backup operations and the WAL-G pre-flight."""
 
 from __future__ import annotations
 
@@ -17,8 +17,22 @@ def _h_backup_operations_retire(args: argparse.Namespace) -> int:
     return cmd_backup_operations_retire(confirm=args.confirm)
 
 
+def _h_backup_walg_check(_args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.walg import cmd_walg_check
+
+    return cmd_walg_check()
+
+
+def _h_backup_walg_status(_args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.walg import cmd_walg_status
+
+    return cmd_walg_status()
+
+
 def _add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    backup = sub.add_parser("backup", help="inspect the scheduled backup operations")
+    backup = sub.add_parser(
+        "backup", help="inspect the scheduled backup operations and the WAL-G physical backup"
+    )
     backup_sub = backup.add_subparsers(dest="backup_cmd", required=True)
     operations = backup_sub.add_parser(
         "operations",
@@ -39,3 +53,16 @@ def _add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         help="quarantine every proven operation; without it the command only previews",
     )
     retire.set_defaults(func=_h_backup_operations_retire)
+
+    walg = backup_sub.add_parser("walg", help="WAL-G physical backup: pre-flight check and status")
+    walg_sub = walg.add_subparsers(dest="walg_cmd", required=True)
+    walg_check = walg_sub.add_parser(
+        "check",
+        help="prove the binary, configuration, key and storage permissions work before "
+        "switching WAL archiving on (writes and deletes one small object under the prefix)",
+    )
+    walg_check.set_defaults(func=_h_backup_walg_check)
+    walg_status = walg_sub.add_parser(
+        "status", help="show the WAL-G configuration, key fingerprint and archiver state"
+    )
+    walg_status.set_defaults(func=_h_backup_walg_status)

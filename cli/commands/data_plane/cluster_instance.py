@@ -73,6 +73,8 @@ from base.host.private_storage import write_private_bytes
 from base.host.system.backend import get_backend
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.paths import ava_home
+from cli.commands.data_plane.walg import warn_archive_inactive
+from services.gateway_side.walg.archive import archive_pg_args
 
 
 def _pg_dial_host() -> str:
@@ -371,6 +373,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
             f"max_connections={_PG_MAX_CONNECTIONS}",
             *shlex.split(pg_tz_args()),
             *shlex.split(pg_shm_args()),
+            *archive_pg_args(),
         ],
         pg_start_env(),
         ready=lambda: _pg_running(pg_port, dial_host),
@@ -380,6 +383,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
     ownership.require_postgres(data, pg_port)
     require_authenticated_hba(pg_port, dial_host)
     print(f"  ✓ postgres ready ({dial_host}:{pg_port}, password authentication enforced)")
+    warn_archive_inactive()
     return 0
 
 

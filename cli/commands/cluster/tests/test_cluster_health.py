@@ -345,6 +345,39 @@ def test_deploy_never_explains_full_disk(
     assert "disk usage" in _sent_alerts[0]
 
 
+def test_wal_archiving_failure_alerts_with_a_stable_message(
+    _all_checks_pass: None,
+    _home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _sent_alerts: list[str],
+) -> None:
+    """A broken archiver fails the probe like the disk check does; the text is the
+    episode's identity, so the state file holds exactly the message."""
+    failure = "WAL archiving: the archiver is failing"
+    monkeypatch.setattr(cluster_health, "_walg_archive_failure", lambda: failure)
+    _write_aged_alert_state(_home, f"FAIL: {failure}")
+
+    assert cluster_health.run_health_probe() == 1
+
+    assert len(_sent_alerts) == 1 and failure in _sent_alerts[0]
+    assert (_home / cluster_health.ALERT_STATE_FILE).read_text().splitlines()[0] == (
+        f"FAIL: {failure}"
+    )
+
+
+def test_wal_archiving_is_never_dialed_while_off(
+    _all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from services.gateway_side.walg import probe
+
+    def explode() -> object:
+        raise AssertionError("the probe dialed Postgres while WAL-G is off")
+
+    monkeypatch.setattr(probe, "admin_connection", explode)
+
+    assert cluster_health.run_health_probe() == 0
+
+
 def test_disk_under_watermark_passes(_all_checks_pass: None, _home: Path) -> None:
     """Healthy disk usage keeps the probe green (no alert, exit 0)."""
     rc = cluster_health.run_health_probe()

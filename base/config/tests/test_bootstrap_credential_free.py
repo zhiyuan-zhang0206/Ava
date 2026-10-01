@@ -117,8 +117,9 @@ def test_served_payload_excludes_the_offsite_backup_destination(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The off-site backup destination is a gateway-local fact: the gateway alone
-    runs the dump and holds the credentials file. Whatever the gateway's .env
-    says, the destination must never ride the bootstrap payload to a runner."""
+    runs the dump and holds the credentials file; the WAL-G config path likewise
+    names a file on the gateway. Whatever the gateway's .env says, neither may ride
+    the bootstrap payload to a runner."""
     _write_gateway_env(tmp_path)
     env_path = tmp_path / ".env"
     env_path.write_text(
@@ -126,11 +127,13 @@ def test_served_payload_excludes_the_offsite_backup_destination(
         + "AVA_BACKUP_OFFSITE_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com\n"
         + "AVA_BACKUP_OFFSITE_BUCKET=backups\n"
         + "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE=/private/oss.json\n"
+        + "AVA_WALG_CONFIG_FILE=/private/walg.json\n"
     )
     vals = _served(monkeypatch, tmp_path)
     for alias in (
         "AVA_BACKUP_OFFSITE_ENDPOINT",
         "AVA_BACKUP_OFFSITE_BUCKET",
         "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
+        "AVA_WALG_CONFIG_FILE",
     ):
         assert alias not in vals

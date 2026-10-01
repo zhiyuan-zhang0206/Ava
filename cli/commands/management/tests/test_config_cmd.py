@@ -564,6 +564,21 @@ def test_the_offsite_keys_are_official_local_config(local_env_home: Path) -> Non
     assert not set(keys) & set(runtime_config.read_env_aliases())
 
 
+def test_the_walg_key_is_official_local_config(local_env_home: Path) -> None:
+    """WAL archiving is switched on, and off again, through `ava config`: the one
+    key is writable, so an operator never hand-edits the `.env` to remove it."""
+    (local_env_home / ".env").write_text("AVA_MACHINE_SERVE_GATEWAY=true\nOTHER=kept\n")
+    config_file = local_env_home / "walg.json"
+
+    assert cfg.cmd_config_set([f"AVA_WALG_CONFIG_FILE={config_file}"], None, local=True) == 0
+    aliases = runtime_config.read_env_aliases()
+    assert aliases["AVA_WALG_CONFIG_FILE"] == str(config_file)
+    assert "OTHER" in aliases
+
+    assert cfg.cmd_config_unset(["AVA_WALG_CONFIG_FILE"], None, local=True) == 0
+    assert "AVA_WALG_CONFIG_FILE" not in runtime_config.read_env_aliases()
+
+
 def test_local_set_can_pin_the_hosted_runner_health_port(
     local_env_home: Path,
 ) -> None:

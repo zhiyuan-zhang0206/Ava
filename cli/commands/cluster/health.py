@@ -1,7 +1,7 @@
 """Observe cluster health from the CLI or an OS-scheduled probe.
 
 Checks cover gateway liveness, agent population, crash loops, schema, selected
-services, Redis relay, disk usage, editable-install records, source integrity,
+services, Redis relay, disk usage, WAL archiving, editable-install records, source integrity,
 and provider account health. Any failed check returns unhealthy.
 
 Outage episodes retain their first observation and grade by elapsed time:
@@ -381,6 +381,13 @@ def _disk_usage_failure(watermark: float = DEFAULT_DISK_USAGE_WATERMARK) -> str 
     return f"data volume {fraction:.1%} used (watermark {watermark:.0%})"
 
 
+def _walg_archive_failure() -> str | None:
+    """The first broken WAL-archiving condition, or None (also None while WAL-G is off)."""
+    from services.gateway_side.walg import probe
+
+    return probe.failure()
+
+
 def _editable_install_failure() -> str | None:
     """Alert text when the prod venv's editable-install records name source
     outside the allowlist, else None.
@@ -568,6 +575,20 @@ def _check_alert_only_health(home: Path) -> int:
     # 6. Data-volume usage passed before gateway liveness. A full disk alerts
     # directly instead of being graded as a code failure.
     print("  ✓ disk usage")
+
+    # 6b. WAL archiving — alert-only, same class as checks 5 and 6: a stuck or
+    # misconfigured archiver is fixed by repairing the archive path, not by rolling
+    # code back. Silent unless AVA_WALG_CONFIG_FILE switches WAL-G on.
+    archive_failure = _walg_archive_failure()
+    if archive_failure is not None:
+        message = f"FAIL: {archive_failure}"
+        print(message, file=sys.stderr)
+        _grade(home, message)
+        return 1
+    from services.gateway_side.walg.config import enabled as walg_enabled
+
+    if walg_enabled():
+        print("  ✓ WAL archiving")
 
     # 7. Editable-install records — alert-only, same class as checks 5 and 6:
     # the 2026-08-27 outage class (a worktree uv sync under a polluted

@@ -618,6 +618,38 @@ def test_start_pg_waits_for_reachable_bind_before_starting(
     assert calls != []
 
 
+def test_start_pg_adds_no_archive_arguments_while_wal_g_is_off(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(settings.walg, "walg_config_file", None)
+    calls = _wire_pg_start(monkeypatch, tmp_path)
+
+    assert _ci._start_pg(5433, "") == 0
+
+    assert not [arg for arg in calls[0] if arg.startswith("archive_")]
+
+
+def test_start_pg_launches_with_the_archive_arguments_when_wal_g_is_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.gateway_side.walg.archive import archive_pg_args
+    from services.gateway_side.walg.tests.support import make_sandbox
+
+    make_sandbox(tmp_path, monkeypatch)
+    warned: list[bool] = []
+    monkeypatch.setattr(_ci, "warn_archive_inactive", lambda: warned.append(True))
+    calls = _wire_pg_start(monkeypatch, tmp_path)
+
+    assert _ci._start_pg(5433, "") == 0
+
+    args = archive_pg_args()
+    assert args and args[1] == "archive_mode=on"
+    assert calls[0][-len(args) :] == args, (
+        "the archive settings are launch arguments of the postmaster"
+    )
+    assert warned == [True], "a retained postmaster is checked after the start"
+
+
 def test_the_postmaster_inherits_no_ava_authority(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

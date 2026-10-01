@@ -324,6 +324,10 @@ os.environ.pop("AVA_PERMISSIONS_HELPER_PORT", None)
 # destination sets its own keys (monkeypatch / write_fields).
 for _offsite_key in [key for key in os.environ if key.startswith("AVA_BACKUP_OFFSITE_")]:
     del os.environ[_offsite_key]
+# The WAL-G switch is the same class: a shell that carries it would turn archiving
+# on for every Postgres a test starts. The key is off by default and a test that
+# needs it sets it itself.
+os.environ.pop("AVA_WALG_CONFIG_FILE", None)
 
 # Repository providers read the process environment while spawn validation reads
 # the cluster `.env` file. Seed every default provider's inert key through both
