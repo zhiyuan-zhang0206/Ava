@@ -1,8 +1,8 @@
-"""`base.log.init_*` three init functions idempotent protection.
+"""`base.log.init_*` init functions idempotent protection.
 
 Bug origin: `logger.add()` not idempotent, adds sink each time → same path multiple handlers → fd accumulation. Watchdog daemon runs 6 healthcheck.main() every 60s, each calls ``init_gateway_process()`` → ~1000 fds per hour then OSError errno 24.
 
-Guard makes repeated calls silent skip, consistent with three functions docstring "call once at startup" contract.
+Guard makes repeated calls silent skip, consistent with the init functions' docstring "call once at startup" contract.
 """
 
 from __future__ import annotations
@@ -53,23 +53,6 @@ def test_init_gateway_process_idempotent() -> None:
     assert mock_pg.call_count == 1, "postgres sink should be added only once"
 
 
-def test_init_agent_process_idempotent() -> None:
-    """Repeated calls to init_agent_process trigger only one sink chain."""
-    with (
-        patch.object(slog.logger, "add") as mock_add,
-        patch.object(slog.logger, "configure") as mock_configure,
-        patch.object(slog, "_add_file_sink") as mock_file_sink,
-        patch.object(slog, "add_postgres_sink") as mock_pg,
-    ):
-        slog.init_agent_process(agent_id=1)
-        slog.init_agent_process(agent_id=1)
-
-    assert mock_add.call_count == 1
-    assert mock_configure.call_count == 1
-    assert mock_file_sink.call_count == 1
-    assert mock_pg.call_count == 1
-
-
 def test_init_subprocess_logger_idempotent() -> None:
     """Repeated calls to init_subprocess_logger trigger only one sink chain."""
     with (
@@ -84,23 +67,24 @@ def test_init_subprocess_logger_idempotent() -> None:
 
 
 def test_first_init_wins_subsequent_silent_skip() -> None:
-    """Call init_gateway first, then init_agent → second silent skip doesn't mix sink types.
+    """Call init_gateway first, then init_subprocess_logger → second silent skip doesn't mix sink types.
 
-    Single-init contract: at process startup, one role (gateway / agent / subprocess) is determined,
+    Single-init contract: at process startup, one role (gateway / subprocess / cli) is determined,
     then _init_done locked, init of other roles also goes silent skip. Otherwise, beyond watchdog daemon
-    (gateway init) calling healthcheck.main() (also gateway init), if healthcheck mistakenly calls different role like init_agent_process, sinks would accumulate again.
+    (gateway init) calling healthcheck.main() (also gateway init), if healthcheck mistakenly calls different role like init_subprocess_logger, sinks would accumulate again.
     """
     with (
         patch.object(slog.logger, "add") as mock_add,
         patch.object(slog.logger, "configure"),
-        patch.object(slog, "_add_file_sink"),
+        patch.object(slog, "_add_file_sink") as mock_file_sink,
         patch.object(slog, "add_postgres_sink"),
     ):
         slog.init_gateway_process()
         # second time switching roles — still skip
-        slog.init_agent_process(agent_id=1)
+        slog.init_subprocess_logger(agent_id=1)
 
     assert mock_add.call_count == 1, "second cross-role init still must silent skip"
+    assert mock_file_sink.call_count == 1, "the subprocess role must not add its agent log file"
 
 
 def test_init_gateway_process_per_daemon_log_file() -> None:

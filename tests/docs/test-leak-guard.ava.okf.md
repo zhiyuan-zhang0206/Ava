@@ -53,7 +53,7 @@ An existing module attribute assigned a new value (a static lint's job; the agen
 
 ## The agent identity is restored, not compared
 
-`ava.agent_identity._agent_id` and its siblings are assigned bare by hundreds of tests, so reporting them would turn the convention into a defect. The root plugin `identity_restore` (`tests/fixtures/identity_restore.py`) puts them back after every test instead: the five slots of `ava.agent_identity`, `turn_identity._process_agent_id` and the `_TURN_AGENT_ID` contextvar. Its table owns which slots make up the identity; `tests/ci/test_leak_guard.py` checks that each exists and that every annotated slot of `ava.agent_identity` is listed. `ava.self.AGENT_ID` is not touched: the module `__getattr__` serves it, and writing a read value back would store it for good (PR #3791); a test that stores it is a `module-attr` leak.
+`ava.agent_identity._agent_id` and its siblings are assigned bare by hundreds of tests, so reporting them would turn the convention into a defect. The root plugin `identity_restore` (`tests/fixtures/identity_restore.py`) puts them back after every test instead: the five slots of `ava.agent_identity` and the `_TURN_AGENT_ID` contextvar. Its table owns which slots make up the identity; `tests/ci/test_leak_guard.py` checks that each exists and that every annotated slot of `ava.agent_identity` is listed. `ava.self.AGENT_ID` is not touched: the module `__getattr__` serves it, and writing a read value back would store it for good (PR #3791); a test that stores it is a `module-attr` leak.
 
 ## Fixing a finding
 

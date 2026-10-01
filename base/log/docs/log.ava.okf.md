@@ -14,15 +14,14 @@ tags:
 
 `base/log/__init__.py` is the single structural logging **module** (not a package) spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields (`agent_id`) and assemble sinks. All `from base.log import logger` get the same logger that automatically carries these fields.
 
-`agent_id` is the one field bound **deferred** rather than frozen: `init_agent_process` binds `base/native_process/turn_identity.py:TURN_SCOPED_AGENT_ID`, which resolves per record — turn contextvar, else this process's agent, else the `-` sentinel (an explicit `logger.bind(agent_id=N)` still wins outright). Identical to a fixed binding with one agent per process; it is what lets a multi-agent process attribute each record to the turn that wrote it. `base/telemetry/emitter.py:emit` applies the same order.
+`agent_id` is the one field bound **deferred** rather than frozen: the module default and `init_gateway_process` bind `base/native_process/turn_identity.py:TURN_SCOPED_AGENT_ID`, which resolves per record — turn contextvar, else the `-` sentinel (an explicit `logger.bind(agent_id=N)` still wins outright). It is what lets the agent host, one process serving many agents, attribute each record to the turn that wrote it. `base/telemetry/emitter.py:emit` applies the same order, then falls back to the process-level agent id of an exec subprocess.
 
 Every log line is also an **event** in the unified event stream (event-system design §1): the loguru side derives `(ts, agent_id, level, event, payload, source)` and enqueues into `base/telemetry` — the unified emitter — which writes the JSONL mirror and OTLP export (the legacy `agent_events` mirror was removed with the migration window). Business (audit) events flow through the same emitter via `base/telemetry/audit_events.py`.
 
 ## Core Responsibilities
 
-### Four process entry points
-- `init_agent_process(agent_id)` — kernel: stderr + file `agent-{N}.log` + unified event pipeline (process=`agent-kernel`).
-- `init_subprocess_logger(agent_id)` — exec subprocess: **only** file sink, no stderr (subprocess stderr is captured by the parent and injected as exec_output fed to the LLM; framework logs on stderr would pollute the agent context). Writes the same `agent-{N}.log`.
+### Three process entry points
+- `init_subprocess_logger(agent_id)` — exec subprocess: **only** file sink, no stderr (subprocess stderr is captured by the parent and injected as exec_output fed to the LLM; framework logs on stderr would pollute the agent context). Writes `agent-{N}.log`.
 - `init_gateway_process(name)` — gateway and every long-running daemon, including agent-host, ops, watchdog, labeler, memory-indexer, heartbeat and maintenance services: stderr + `<name>.log` + unified event pipeline (process=`name`, agent_id NULL on rows); each daemon has its own `<name>.log` for easier postmortem. Also freezes this process's commit — earliest shared seam, see `base/native_process/loaded_commit.py`.
 - `init_cli_process(name)` — CLI verbs that bring a unit up (`cli-<verb>`): gateway's sinks, no `service_started` row.
 - All are **idempotent** (`_init_done` process-level guard) — `logger.add` is not idempotent; repeated calls accumulate sinks until fd exhaustion (errno 24); watchdog reusing healthcheck every 60s would hit this, the guard blocks it.
@@ -63,7 +62,7 @@ aggregates alive across the retirement.
 
 ## Notes
 
-- `agent-{N}.log` is the only file co-written by two processes (kernel + exec subprocess use O_APPEND atomic append, single-line JSONL < PIPE_BUF 4KB won't interleave); `enqueue=False` is deliberate (see semaphore leak above).
+- `agent-{N}.log` is the only file co-written by several processes (the exec subprocesses of agent N use O_APPEND atomic append, single-line JSONL < PIPE_BUF 4KB won't interleave); `enqueue=False` is deliberate (see semaphore leak above).
 - Agent graph `node_enter` / `node_exit` / timeline snapshot logging in `agent/graph/node_log.py` (agent domain) are merely consumers of this module's logger.
 
 ## Key Dependencies
