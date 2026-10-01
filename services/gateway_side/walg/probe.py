@@ -18,7 +18,10 @@ would start a new episode at every run and the alert would never escalate.
 - the encryption key file must still be the key whose fingerprint this home pinned;
 - the daily tick (`tick.py`, read from its state file): the last run that executed must not
   have failed, the archived WAL chain the last verification saw must not be broken, and
-  a tick must have started (run or skipped on purpose) within one scheduling period.
+  a tick must have started (run or skipped on purpose) within one scheduling period;
+- the recovery drill (`drill.py`, run by the tick once a week): the latest one must not have
+  failed, and one must have succeeded within its period (plus one tick, the drill's only
+  chance to run).
 
 Listing the `.ready` markers needs superuser (or `pg_monitor`): the application
 login the health probe normally uses is refused (`permission denied for function
@@ -48,6 +51,11 @@ TICK_PERIOD = timedelta(hours=24)
 """How often the tick is scheduled (one run a day). The only time threshold of the tick
 conditions: no tick started within this long means the job is not running."""
 
+DRILL_PERIOD = timedelta(days=7)
+"""How often the recovery drill should succeed (user ruling: weekly, in step with the weekly
+full backup). The drill can only run when a tick does, so it falls due one tick period early
+and is overdue only one tick period late (`drill.drill_due`, `tick_judge`)."""
+
 _CONNECT_TIMEOUT_S = 5
 _STATEMENT_TIMEOUT = "10s"
 
@@ -64,6 +72,8 @@ UNREADABLE = "WAL archiving: the archiver state is unreadable"
 TICK_NOT_RUNNING = "WAL backup: the daily tick has not started within its scheduling period"
 CHAIN_BROKEN = "WAL backup: the archived WAL chain is not continuous"
 TICK_STATE_UNREADABLE = "WAL backup: the daily tick state is unreadable"
+DRILL_FAILED = "WAL backup: the latest recovery drill failed"
+DRILL_OVERDUE = "WAL backup: no recovery drill has succeeded within its schedule"
 RUN_FAILED = "WAL backup: the daily run failed"
 RUN_FAILED_AT = {
     walg_state.STEP_PREFLIGHT: "WAL backup: the daily run failed its preflight",
@@ -182,6 +192,22 @@ def tick_judge(
     last_start = recorded.tick.started_at if recorded.tick is not None else enabled_since
     if last_start is not None and now - last_start > TICK_PERIOD:
         return TICK_NOT_RUNNING
+    return drill_judge(recorded.drill, now, enabled_since=enabled_since)
+
+
+def drill_judge(
+    drill: walg_state.DrillRecord | None, now: datetime, *, enabled_since: datetime | None
+) -> str | None:
+    """The recovery drill's condition: the latest one failed, or none succeeded in time.
+
+    A failed drill is retried by every following tick, so it is "latest failed" until one
+    succeeds. `enabled_since` stands in for the last success before any drill has run.
+    """
+    if drill is not None and not drill.ok:
+        return DRILL_FAILED
+    last_ok = drill.last_ok_at if drill is not None else enabled_since
+    if last_ok is not None and now - last_ok > DRILL_PERIOD + TICK_PERIOD:
+        return DRILL_OVERDUE
     return None
 
 

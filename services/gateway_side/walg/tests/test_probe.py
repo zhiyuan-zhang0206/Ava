@@ -39,6 +39,8 @@ _ALL_TEXTS = (
     probe.CHAIN_BROKEN,
     probe.TICK_STATE_UNREADABLE,
     probe.RUN_FAILED,
+    probe.DRILL_FAILED,
+    probe.DRILL_OVERDUE,
     *probe.RUN_FAILED_AT.values(),
 )
 
@@ -455,6 +457,65 @@ def test_an_unreadable_state_file_is_its_own_fixed_failure_not_an_exception(
     walg_state.state_path().write_text("{broken " + "".join(SECRETS))
 
     assert probe.tick_failure(now=NOW) == probe.TICK_STATE_UNREADABLE
+
+
+# ── the recovery drill: A8 (latest failed) and "none succeeded in time" ─────
+
+
+def _drill(
+    *, ok: bool = True, last_ok_age: timedelta | None = timedelta(days=1)
+) -> walg_state.DrillRecord:
+    return walg_state.DrillRecord(
+        finished_at=NOW - timedelta(hours=1),
+        ok=ok,
+        backup="base_1",
+        target_lsn="0/A3000000",
+        seconds=600.0,
+        detail="d",
+        last_ok_at=None if last_ok_age is None else NOW - last_ok_age,
+    )
+
+
+def _with_drill(drill: walg_state.DrillRecord | None) -> walg_state.State:
+    return walg_state.State(tick=_tick(timedelta(hours=1)), drill=drill)
+
+
+def test_a_drill_that_succeeded_within_its_period_is_healthy() -> None:
+    assert _judge(_with_drill(_drill())) is None
+    assert _judge(_with_drill(_drill(last_ok_age=timedelta(days=7)))) is None
+
+
+def test_a_failed_latest_drill_is_reported_even_with_a_recent_earlier_success() -> None:
+    assert _judge(_with_drill(_drill(ok=False))) == probe.DRILL_FAILED
+    assert _judge(_with_drill(_drill(ok=False, last_ok_age=None))) == probe.DRILL_FAILED
+
+
+def test_a_drill_is_overdue_one_tick_after_its_period() -> None:
+    deadline = probe.DRILL_PERIOD + probe.TICK_PERIOD
+
+    assert _judge(_with_drill(_drill(last_ok_age=deadline))) is None
+    assert (
+        _judge(_with_drill(_drill(last_ok_age=deadline + timedelta(seconds=1))))
+        == probe.DRILL_OVERDUE
+    )
+
+
+def test_before_any_drill_the_time_since_enabling_counts() -> None:
+    since = NOW - (probe.DRILL_PERIOD + probe.TICK_PERIOD + timedelta(seconds=1))
+
+    assert _judge(_with_drill(None), since=since) == probe.DRILL_OVERDUE
+    assert _judge(_with_drill(None), since=NOW - timedelta(days=3)) is None
+    assert _judge(_with_drill(None), since=None) is None
+
+
+def test_the_tick_conditions_outrank_the_drill_conditions() -> None:
+    recorded = walg_state.State(
+        tick=_tick(timedelta(hours=1)),
+        run=_run("failed", walg_state.STEP_BACKUP),
+        drill=_drill(ok=False),
+    )
+
+    assert _judge(recorded) == probe.RUN_FAILED_AT[walg_state.STEP_BACKUP]
 
 
 def _healthy_archiver(monkeypatch: pytest.MonkeyPatch, **changes: Any) -> None:

@@ -241,3 +241,44 @@ def write_some_wal_and_switch(conn: psycopg.Connection[Any]) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS walg_probe (n int)")
     conn.execute("INSERT INTO walg_probe SELECT generate_series(1, 100)")
     conn.execute("SELECT pg_switch_wal()")
+
+
+def archive_current_segment(conn: psycopg.Connection[Any], sandbox: Sandbox) -> str:
+    """Close the current WAL segment and wait until the fake store holds it; returns its name.
+
+    A segment that has had no WAL since it started is not switched, so one record is
+    emitted first.
+    """
+    conn.execute("SELECT pg_logical_emit_message(false, 'walg-test', 'x')")
+    row = conn.execute("SELECT pg_walfile_name(pg_current_wal_lsn())").fetchone()
+    assert row is not None
+    segment = str(row[0])
+    conn.execute("SELECT pg_switch_wal()")
+    wait_for(lambda: segment in sandbox.stored(), what=f"{segment} in the store")
+    return segment
+
+
+def take_basebackup(sandbox: Sandbox, pg: PgInstance, name: str) -> str:
+    """A base backup of `pg` as the fake's `backup-fetch` serves it (no WAL inside, like WAL-G's)."""
+    destination = sandbox.store_dir / "basebackups" / name
+    subprocess.run(  # noqa: S603 — the resolved pg_basebackup with static flags
+        [
+            str(pg_tool("pg_basebackup")),
+            "-D",
+            str(destination),
+            "-h",
+            str(pg.root),
+            "-p",
+            str(pg.port),
+            "-U",
+            "ava",
+            "-X",
+            "none",
+            "--checkpoint=fast",
+            "--no-sync",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    return name

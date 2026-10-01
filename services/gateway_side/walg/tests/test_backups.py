@@ -28,6 +28,7 @@ def test_the_real_list_parses_oldest_first_with_sizes() -> None:
     assert [b.is_full for b in listed] == [True, False, True, True]
     assert listed[0].uncompressed_bytes == 2452668013
     assert listed[0].compressed_bytes == 288734812
+    assert (listed[0].start_lsn, listed[0].finish_lsn) == (2264924200, 2610125464)
     assert listed[1].parent_segment == "000000010000000000000087"
     assert listed[0].parent_segment is None
 
@@ -66,6 +67,8 @@ def test_a_chain_of_increments_is_followed_to_its_full_backup() -> None:
         start_time=listed[1].start_time.replace(day=listed[1].start_time.day + 1),
         uncompressed_bytes=1,
         compressed_bytes=1,
+        start_lsn=1,
+        finish_lsn=2,
     )
 
     chain = chain_of([*listed, second_delta], second_delta.name)

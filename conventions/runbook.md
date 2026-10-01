@@ -719,12 +719,11 @@ The recovery points are the daily encrypted logical dumps (`pg-backup`, due at
 `$AVA_HOME/backups/db/`, published off-site under `ava-logical/` when
 `AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and
 `AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` are set through `ava config set`), proved
-by the weekly isolated logical restore drill. There is no point-in-time
-recovery: the self-written PITR stack was deleted
-(`decisions/2026-10-02-delete-the-self-written-pitr-stack.md`) and WAL-G
-(["WAL-G archiving"](#wal-g-archiving) below) archives WAL and takes a daily base
-backup but has no restore path yet, so neither is a recovery point. Never state a
-recovery point newer than the last published dump.
+by the weekly isolated logical restore drill. The self-written PITR stack was
+deleted (`decisions/2026-10-02-delete-the-self-written-pitr-stack.md`). Point-in-time
+recovery exists only while WAL-G is on (["WAL-G archiving"](#wal-g-archiving) below):
+`ava backup walg restore`, proved weekly by the recovery drill. Never state a
+recovery point newer than the last published dump unless the latest drill has passed.
 
 Backup operations (the daily dump and the weekly logical restore drill) each
 run as one owned worker group of their kind. A failed or cancelled operation
@@ -1450,9 +1449,55 @@ least one full backup survives. Nothing is asked of WAL-G until more than three 
 backups exist. `wal-g delete garbage` is not used: the orphan files a failed full backup
 leaves cost only storage.
 
-`ava backup walg status` shows the last tick, run, backup, verification and retention from
-`$AVA_HOME/backups/walg/state.json` (0600; the tick writes it, the health probe reads it;
-remove it only to reset a state the tick reports as unreadable).
+`ava backup walg status` shows the last tick, run, backup, verification, retention and
+recovery drill from `$AVA_HOME/backups/walg/state.json` (0600; the tick writes it, the
+health probe reads it; remove it only to reset a state the tick reports as unreadable).
+
+**The weekly recovery drill.** A backup nobody has restored is not a recovery path, so the
+tick restores one every week, before that day's backup (it therefore restores yesterday's:
+the one a lost host would need). The drill is due one tick period before a week since the
+last success, and a failed drill is retried by the next tick. It fetches the newest backup
+into a scratch directory (`AVA_PG_THROWAWAY_BASE`, else the platform default, else the disk
+fallback; room is the backup's uncompressed size plus the WAL since it started plus
+`max_wal_size`, and a base that cannot hold that is refused), recovers it with a scratch
+postmaster to the start of the newest archived WAL segment, and reads a real conversation
+back through the checkpoint reader. Reaching that point proves every segment between the
+backup and it is in the bucket, decrypts and replays: a missing one ends recovery in
+Postgres' own FATAL, which the record carries (`ava backup walg status`, "last drill").
+The scratch copy and its process are removed in every outcome, and a failed drill never
+stops the backup that follows. `ava backup walg drill` runs it now (same lock as the tick);
+after switching WAL-G on, run it by hand once after the first `run` and check the result
+before trusting the schedule. Its download saturates the downlink for roughly the length of
+a base-backup fetch (an estimate, not measured on this bucket): schedule hand runs
+accordingly.
+
+**Restoring** (`ava backup walg restore --dir <empty directory> [--backup NAME]
+[--time 'YYYY-MM-DD HH:MM:SS+00' | --lsn X/X]`). It never touches this home's data
+directory (a `--dir` that is or contains `$AVA_HOME/pg` is refused) or its ports. Steps:
+
+1. Pick the backup. `LATEST` is the default; to recover to a time or LSN, name the newest
+   backup that *started* before it (`wal-g backup-list --detail` shows start times; an
+   increment resolves its whole chain by name). `LATEST` can name a backup newer than the
+   target, which cannot be recovered to it.
+2. Run the verb on a host with the same Postgres major (17), the same extensions
+   (pgvector), the configuration JSON and a copy of the encryption key. Without `--time`
+   or `--lsn` it recovers to the end of the archive. It fetches the backup, writes
+   `recovery.signal`, and starts a scratch postmaster on that directory (unix socket only,
+   its own temporary socket directory and port, `archive_mode=off`, the capacity settings
+   `pg_controldata` records, `restore_command` = `wal-g wal-fetch %f %p`) until it is
+   promoted, then shuts it down cleanly. The directory is left as a promoted database on a
+   new timeline; it is not started.
+3. A missing segment, a wrong key or an unreachable target ends in Postgres' FATAL, printed
+   with the end of its log; the directory is left for inspection, and must be emptied
+   before a retry.
+4. Before this database replaces the live one or backs a new primary: **use a new WAL-G
+   prefix (a new "generation", e.g. `.../gen2/`) and take a new full backup first.** The
+   recovered database is on a new timeline; archiving it into the old prefix would mix two
+   histories there.
+
+Scope: this recovers the **database** under the same home identity. A whole-host rebuild
+(the `$AVA_HOME/db-authority/` ledger, `.env`, `start-intent.json`) is not covered or
+exercised; see `conventions/disaster-recovery.md`.
 
 **Switching it off.** `ava config unset AVA_WALG_CONFIG_FILE`, then `ava stop && ava
 start`; converge removes the daily job. Nothing is left in the data directory (the archive
@@ -1472,7 +1517,10 @@ and the end of `walg.log`); the last verification saw a broken chain (`FAILURE`;
 segment cannot be repaired, so take a new full backup and treat the older recovery points
 as lost); no tick has started within 24 hours (the job is not registered or not running;
 a deliberate skip counts as started, and before the first tick the age of the key pin
-stands in). A failed run stays reported until a later run succeeds; skipped ticks do not
+stands in); the latest recovery drill failed (read "last drill" in `ava backup walg
+status`: the detail is Postgres' own error or the content check that failed); no drill has
+succeeded within a week plus a tick (the same age stands in before the first drill). A
+failed run or drill stays reported until a later one succeeds; skipped ticks do not
 clear it. The probe reads the queue over the admin socket because the application login
 may not list `archive_status/`.
 

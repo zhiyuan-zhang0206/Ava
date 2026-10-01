@@ -22,9 +22,10 @@ verified or pruned either hides a broken chain or fills the bucket. It is one co
   `backup-list`), `backup-push` with `WALG_DELTA_MAX_STEPS=6` (WAL-G itself makes a
   full backup when the chain is six deep and retries a failed one the next day; a
   backup that is not in the list afterwards is a failure), chain verification,
-  retention. The first failing step ends the run and is recorded under its name. The
-  weekly recovery drill belongs before the backup step so that it restores yesterday's
-  backup; it is not implemented yet.
+  retention. The first failing step ends the run and is recorded under its name. When
+  due, the weekly recovery drill ([[walg-restore.ava.okf.md|restore and drill]]) runs
+  between preflight and backup, so that it restores yesterday's backup; its failure is
+  recorded in `drill` and never ends the run.
 - **Chain verification** (`verify.py`): `wal-verify integrity timeline --json`, only the
   JSON status is read, because WAL-G exits 0 while reporting a gap. `FAILURE` in either
   check fails the run; `WARNING` (segments still uploading) does not; an unknown status
@@ -40,8 +41,8 @@ verified or pruned either hides a broken chain or fills the bucket. It is one co
 - **State file** (`state.py`): `$AVA_HOME/backups/walg/state.json`, 0600, replaced
   atomically, strict on read: `tick` (latest start, or why it skipped), `run` (latest
   executed run: ok or failed, and the step), `backup`, `verify`, `retention`, and
-  `drill` (reserved for the recovery drill, carried through unchanged). Only the tick
-  writes, under the lock; the probe reads. A corrupt file fails the tick instead of
+  `drill` (the latest recovery drill and when one last succeeded). Only the tick (or
+  `ava backup walg drill`) writes, under the lock; the probe reads. A corrupt file fails the tick instead of
   being replaced by an empty one.
 - **The OS job** (`base/host/system/walg_job.py`): one crontab line (`# ava-walg`) or
   LaunchAgent (`com.ava.walg`) running the command daily, three hours after the logical

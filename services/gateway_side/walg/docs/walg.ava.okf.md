@@ -1,7 +1,7 @@
 ---
 type: doc
 title: WAL-G — physical backup, WAL archiving base
-description: One config key (AVA_WALG_CONFIG_FILE) turns on WAL archiving to Aliyun OSS through a pinned WAL-G binary; Postgres is launched with the archive settings as -c arguments, converge validates the configuration and pins the encryption key's fingerprint, the health probe reports a broken archive or daily tick in seven fixed-text state conditions, and the daily backup tick is its own node.
+description: One config key (AVA_WALG_CONFIG_FILE) turns on WAL archiving to Aliyun OSS through a pinned WAL-G binary; Postgres is launched with the archive settings as -c arguments, converge validates the configuration and pins the encryption key's fingerprint, the health probe reports a broken archive, daily tick or recovery drill in nine fixed-text state conditions, and the daily backup tick and the restore path are their own nodes.
 tags: []
 ---
 
@@ -18,8 +18,8 @@ lock, credential or bucket prefix with it.
 
 This node covers the archiving base and the health probe. The daily tick that takes
 base backups, verifies the chain and applies retention is
-[[walg-tick.ava.okf.md|WAL-G daily tick]]. Restore and the recovery drill are not part
-of either: backups nobody has restored are not a recovery path yet.
+[[walg-tick.ava.okf.md|WAL-G daily tick]]; restoring a backup and the weekly drill that
+proves it are [[walg-restore.ava.okf.md|WAL-G restore and recovery drill]].
 
 ## Core Responsibilities
 - **One key, WAL-G's own format** (`base/config/walg.py`, domain `walg`):
@@ -56,7 +56,7 @@ of either: backups nobody has restored are not a recovery path yet.
 - **Pre-flight** (`check.py`, `ava backup walg check`): binary, configuration, key,
   then one put / list / get / delete / list round trip under the prefix. The delete
   matters: retention would be the first delete, weeks after setup.
-- **Health** (`probe.py`, called by `ava health-probe`): seven states, each with a
+- **Health** (`probe.py`, called by `ava health-probe`): nine states, each with a
   fixed text so an outage stays one alert episode. (1) The running Postgres carries
   the configured archive settings. (2) The archiver is not failing
   (`last_failed_time` newer than `last_archived_time`). (3) No complete WAL segment
@@ -68,11 +68,13 @@ of either: backups nobody has restored are not a recovery path yet.
   writes nothing and never raises. From the state file: (5) the last executed run did
   not fail (one text per step), (6) the last verification did not see a broken chain,
   (7) a tick started within 24 hours (a skip counts; before any tick the key pin's age
-  stands in). The only time thresholds are the 300 s RPO objective and the 24 h
-  scheduling period.
+  stands in), (8) the latest recovery drill did not fail, (9) one succeeded within a
+  week plus a tick. The only time thresholds are the 300 s RPO objective, the 24 h
+  scheduling period and the 7 d drill period.
 
 ## Key Dependencies
 - [[walg-tick.ava.okf.md|WAL-G daily tick]] — writes the state file the probe reads
+- [[walg-restore.ava.okf.md|WAL-G restore and recovery drill]] — the restore the drill runs, and its record in the state file
 - [[backup.ava.okf.md|PG-Backup]] — the independent logical path; its off-site namespace root is excluded from the WAL-G prefix
 - [[data-plane-startup.ava.okf.md|Data plane startup]] — `_start_pg` passes the launch arguments
 

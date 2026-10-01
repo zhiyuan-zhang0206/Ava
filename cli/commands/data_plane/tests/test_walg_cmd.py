@@ -1,4 +1,4 @@
-"""`ava backup walg check|run|status`: what an operator reads, and the parser that reaches it."""
+"""`ava backup walg check|run|restore|status`: what an operator reads, and the parser that reaches it."""
 
 from __future__ import annotations
 
@@ -45,7 +45,18 @@ def test_the_parser_reaches_every_verb() -> None:
     check = parser.parse_args(["backup", "walg", "check"])
     run = parser.parse_args(["backup", "walg", "run"])
     status = parser.parse_args(["backup", "walg", "status"])
+    restore = parser.parse_args(["backup", "walg", "restore", "--dir", "/srv/restored"])
+    drill = parser.parse_args(["backup", "walg", "drill"])
 
+    assert drill.func.__name__ == "_h_backup_walg_drill"
+
+    assert restore.func.__name__ == "_h_backup_walg_restore"
+    assert (restore.dir, restore.backup, restore.time, restore.lsn) == (
+        "/srv/restored",
+        "LATEST",
+        None,
+        None,
+    )
     assert check.func.__name__ == "_h_backup_walg_check"
     assert run.func.__name__ == "_h_backup_walg_run"
     assert status.func.__name__ == "_h_backup_walg_status"
@@ -238,3 +249,132 @@ def test_an_unreadable_postgres_is_a_warning_not_a_failure(
     walg_cmd.warn_archive_inactive()
 
     assert "WAL archiving state not read (OperationalError" in capsys.readouterr().err
+
+
+@contextmanager
+def _fake_restore(calls: list[dict[str, Any]], **kwargs: Any) -> Generator[None]:
+    calls.append(kwargs)
+    yield
+
+
+def test_restore_passes_the_target_and_keeps_the_data_directory(
+    sandbox: Sandbox,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake(directory: Path, **kwargs: Any) -> Any:
+        return _fake_restore(calls, directory=directory, **kwargs)
+
+    monkeypatch.setattr(walg_cmd, "restored_instance", fake)
+
+    code = walg_cmd.cmd_walg_restore(
+        directory=str(tmp_path / "out"), backup="base_0001", time=None, lsn="0/3000060"
+    )
+
+    assert code == 0
+    (call,) = calls
+    assert call["directory"] == (tmp_path / "out").resolve()
+    assert call["backup"] == "base_0001"
+    assert call["target"].lsn == "0/3000060"
+    assert call["keep_data"] is True
+    assert "Postgres is not running on it" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"time": None, "lsn": "not-an-lsn"}, "is not an LSN"),
+        ({"time": "2026-10-01", "lsn": "0/1"}, "not both"),
+    ],
+)
+def test_restore_rejects_a_bad_target_before_fetching(
+    sandbox: Sandbox,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    kwargs: dict[str, str | None],
+    message: str,
+) -> None:
+    code = walg_cmd.cmd_walg_restore(directory=str(tmp_path / "out"), backup="LATEST", **kwargs)  # type: ignore[arg-type]
+
+    assert code == 1
+    assert message in capsys.readouterr().err
+    assert not sandbox.calls()
+
+
+def test_restore_reports_a_failed_recovery_and_exits_non_zero(
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from services.gateway_side.walg.restore import RestoreError
+
+    @contextmanager
+    def failing(*_args: Any, **_kwargs: Any) -> Generator[None]:
+        raise RestoreError("recovery failed, postgres exited 1: FATAL: no segment")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(walg_cmd, "restored_instance", failing)
+
+    code = walg_cmd.cmd_walg_restore(
+        directory="/srv/restored", backup="LATEST", time=None, lsn=None
+    )
+
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "restore failed: recovery failed" in err
+    assert "remove any partly restored content" in err
+
+
+def test_restore_while_wal_g_is_off_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    make_sandbox(tmp_path, monkeypatch, enabled=False)
+
+    assert walg_cmd.cmd_walg_restore(directory="/x", backup="LATEST", time=None, lsn=None) == 1
+    assert "WAL-G is off" in capsys.readouterr().out
+
+
+def test_drill_hands_the_tick_module_a_timestamping_reporter_and_returns_its_exit_code(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fake_drill(report: Any) -> int:
+        report("drill: FAILED after 3s: recovery failed")
+        return 1
+
+    monkeypatch.setattr(walg_cmd.tick, "run_drill_now", fake_drill)
+
+    assert walg_cmd.cmd_walg_drill() == 1
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z drill: FAILED after 3s: recovery failed\n",
+        capsys.readouterr().out,
+    )
+
+
+def test_status_shows_the_last_drill_and_the_last_success(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stamp = datetime(2026, 10, 2, 6, 25, tzinfo=UTC)
+    state.write_state(
+        state.State(
+            tick=state.TickRecord(started_at=stamp),
+            drill=state.DrillRecord(
+                finished_at=stamp,
+                ok=False,
+                backup="base_000000010000000000000087",
+                target_lsn="0/A3000000",
+                seconds=612.4,
+                detail="recovery failed: no segment",
+                last_ok_at=None,
+            ),
+        )
+    )
+
+    assert walg_cmd.cmd_walg_status() == 0
+
+    out = capsys.readouterr().out
+    assert (
+        "last drill: FAILED (2026-10-02T06:25:00+00:00): base_000000010000000000000087 to 0/A3000000 in 612s; recovery failed: no segment"
+        in out
+    )
+    assert "last successful drill: never" in out
