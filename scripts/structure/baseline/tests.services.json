@@ -58,7 +58,6 @@
     "tests/services/test_backup_scheduler_shutdown.py::top-level": 1,
     "tests/services/test_gate_root.py::top-level": 1,
     "tests/services/test_healthcheck_browser_reach.py::top-level": 1,
-    "tests/services/test_hosted_backlog_recovery.py::top-level": 1,
     "tests/services/test_hosted_db_wait_liveness.py::top-level": 1,
     "tests/services/test_maintenance_readiness.py::top-level": 1,
     "tests/services/test_native_storage_diagnostics.py::top-level": 1,

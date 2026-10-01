@@ -58,7 +58,6 @@
     "tests/base/test_history.py::top-level": 1,
     "tests/base/test_impersonation_review.py::top-level": 1,
     "tests/base/test_kwargs.py::top-level": 1,
-    "tests/base/test_lgtm_local.py::top-level": 1,
     "tests/base/test_logs_job.py::top-level": 1,
     "tests/base/test_no_secrets_on_argv.py::top-level": 1,
     "tests/base/test_packages_job.py::top-level": 1,
