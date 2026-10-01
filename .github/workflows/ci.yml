@@ -1484,7 +1484,20 @@ jobs:
           python3 scripts/ci/shard_counts.py total --dir shard-counts
           --expected "$COUNT_GROUPS" --baseline baseline/test-count-baseline.json
           --out test-count-baseline.json --summary "$GITHUB_STEP_SUMMARY"
+          --leak-report test-leak-report.json
           --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+
+      - name: Upload the leak report
+        # What the root leak guard (tests/fixtures/leak_guard.py) found across every shard: the
+        # full list behind the one `leak guard (warn)` annotation of the step above, so a leak is
+        # read from this job and its artifact, never from the shards' logs.
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-leak-report
+          path: test-leak-report.json
+          if-no-files-found: ignore
 
       - name: Record the total as the next baseline
         # Only main's own totals are baselines; a PR reads them and leaves none.

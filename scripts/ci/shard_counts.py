@@ -16,11 +16,20 @@ collected a second time:
 
     shard_counts.py total --dir counts/ --expected "1 2 ... 16 serial" [--baseline b.json] \\
                           --out test-count-baseline.json --summary "$GITHUB_STEP_SUMMARY" \\
+                          --leak-report test-leak-report.json \\
                           --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
         adds the shards' counts up and prints how the total, and each directory, moved against
         a baseline (the previous main run's total). Informational: it never fails a run over a
         difference. `--out` is written only when every expected count file arrived, so a
         baseline is never partial.
+
+The root leak guard (`tests/fixtures/leak_guard.py`) writes each finding as a JUnit property of the
+test that leaked. `shard` carries them into its count file (`leaks`, `notes`, `faults`; a clean
+shard's file has none of those keys) and `total` reports them for the whole run from this ONE job:
+the job summary, ONE `::warning title=leak guard (warn)` annotation of at most `ANNOTATION_LINES`
+lines (read it with `gh api repos/R/check-runs/<job id>/annotations`; the job summary is not in
+that API), and the full list as `--leak-report`. A fault in this reporting is one annotation,
+never the job's result.
 
 A directory is a bucket: `tests/<area>` for the top-level tests, and the outermost `<pkg>/tests`
 for a package's own tests, the same directories `scripts/codegen/gen_pyright_test_environments.py`
@@ -49,9 +58,17 @@ def bucket_of(test_file: str) -> str:
     return "/".join(parts[: index + 1])
 
 
+# The leak guard's JUnit properties -> the key their findings are kept under.
+GUARD_PROPERTIES = {"leak_guard": "leaks", "leak_guard_note": "notes", "leak_guard_fault": "faults"}
+ANNOTATION_LINES = 40  # the annotation is the digest; the artifact has the full list
+
+
 def count_junit(path: Path) -> dict[str, Any]:
-    """Tests, skips and failures in one JUnit report, and the tests per directory."""
+    """Tests, skips and failures in one JUnit report, the tests per directory, and the guard's findings."""
     buckets: dict[str, int] = {}
+    guard: dict[
+        str, list[dict[str, str]]
+    ] = {}  # only the kinds that occurred: a clean report adds no key
     tests = skipped = failed = 0
     for _, element in ET.iterparse(path):  # noqa: S314 - pytest's own report, written by this job
         if element.tag != "testcase":
@@ -63,12 +80,22 @@ def count_junit(path: Path) -> dict[str, Any]:
                 "attribute (a pytest internal error, or -o junit_family=xunit1 is missing)"
             )
         tests += 1
+        for prop in element.findall("properties/property"):
+            key = GUARD_PROPERTIES.get(prop.get("name") or "")
+            if key is not None:
+                kind, _, detail = (prop.get("value") or "").partition(": ")
+                finding = {
+                    "test": f"{test_file}::{element.get('name')}",
+                    "kind": kind,
+                    "detail": detail,
+                }
+                guard.setdefault(key, []).append(finding)
         skipped += element.find("skipped") is not None
         failed += element.find("failure") is not None or element.find("error") is not None
         bucket = bucket_of(test_file)
         buckets[bucket] = buckets.get(bucket, 0) + 1
         element.clear()
-    return {"tests": tests, "skipped": skipped, "failed": failed, "buckets": buckets}
+    return {"tests": tests, "skipped": skipped, "failed": failed, "buckets": buckets, **guard}
 
 
 def latest_report(pattern: str) -> Path:
@@ -105,6 +132,12 @@ def run_shard(group: str, junit: str, out: Path, summary_path: Path | None, min_
         f"shard {group}: {counts['tests']} tests executed "
         f"({counts['skipped']} skipped, {counts['failed']} failed), from {report.name}"
     )
+    if "leaks" in counts or "faults" in counts:
+        leaks = counts.get("leaks", [])
+        headline += (
+            f"; leak guard: {len(leaks)} leak finding(s) in {len({x['test'] for x in leaks})} test(s), "
+            f"{len(counts.get('faults', []))} guard fault(s)"
+        )
     text = "\n".join([headline, *(f"  {name:<50} {n:>6}" for name, n in rows)])
     _emit(
         text,
@@ -141,6 +174,95 @@ def _baseline_lines(total: int, buckets: dict[str, int], baseline: Path | None) 
     changed = _diff(buckets, base["buckets"])
     lines.extend(f"    {name:<50} {change:>+6}" for name, change in changed)
     return lines if changed else [*lines, "    no directory changed"]
+
+
+def _workflow_command(command: str, title: str, message: str) -> str:
+    """A GitHub Actions workflow command on one line (`%`, CR and LF are the escapes of its data)."""
+    escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return f"::{command} title={title}::{escaped}"
+
+
+def _guard_findings(arrived: dict[str, dict[str, Any]]) -> dict[str, list[dict[str, str]]]:
+    """Every leak-guard finding of the run, each tagged with the shard whose report it came from."""
+    return {
+        key: [
+            dict(x, shard=group) for group, counts in arrived.items() for x in counts.get(key, [])
+        ]
+        for key in GUARD_PROPERTIES.values()
+    }
+
+
+def _leak_lines(
+    found: dict[str, list[dict[str, str]]], arrived: int, expected: list[str], missing: list[str]
+) -> list[str]:
+    """The run's leak-guard digest: a head, the count by kind, the guard's faults, one line per leak group."""
+    leaks = found["leaks"]
+    by_kind: dict[str, int] = {}
+    for leak in leaks:
+        by_kind[leak["kind"]] = by_kind.get(leak["kind"], 0) + 1
+    incomplete = f" (INCOMPLETE: no file for {', '.join(missing)})" if missing else ""
+    lines = [
+        f"leak guard (warn): {len(leaks)} leak finding(s) in {len({x['test'] for x in leaks})} test(s), "
+        f"{len(found['notes'])} sys.path note(s), {len(found['faults'])} guard fault(s), "
+        f"from {arrived}/{len(expected)} count files{incomplete}",
+        "  by kind: " + (", ".join(f"{kind}={n}" for kind, n in sorted(by_kind.items())) or "none"),
+    ]
+    for stage in sorted({x["kind"] for x in found["faults"]}):
+        faulted = [x for x in found["faults"] if x["kind"] == stage]
+        lines.append(
+            f"  GUARD FAULT [{stage}] in {len(faulted)} test report(s): {faulted[0]['detail']}"
+        )
+    # One line per (file, kind, thing leaked): a file whose every test leaks the same key is one line,
+    # not fifty. The identity slots (assigned bare by hundreds of tests) go last: they cannot push the
+    # rest out of the annotation.
+    groups: dict[tuple[str, str, str], set[str]] = {}
+    for leak in leaks:
+        file, _, name = leak["test"].partition("::")
+        thing = leak["detail"].split(" ", 1)[0].rstrip(":")
+        groups.setdefault((file, leak["kind"], thing), set()).add(name)
+    for (file, kind, thing), names in sorted(
+        groups.items(), key=lambda g: (g[0][1] == "identity", g[0])
+    ):
+        lines.append(f"  {file}  [{kind}] {thing}  x{len(names)} test(s), e.g. {sorted(names)[0]}")
+    return lines
+
+
+def _report_leaks(
+    arrived: dict[str, dict[str, Any]],
+    expected: list[str],
+    missing: list[str],
+    args: argparse.Namespace,
+) -> None:
+    """The cluster-wide leaker list, readable from this ONE job without pulling any shard log.
+
+    Three channels, same data: the job summary (humans), one `::warning` annotation (readable with
+    `gh api repos/R/check-runs/<job id>/annotations`; the Actions job summary itself is NOT in the
+    check-run API), and the `--leak-report` JSON (the full list, one artifact). The annotation is
+    only raised when there is a leak or a guard fault to say.
+    """
+    found = _guard_findings(arrived)
+    lines = _leak_lines(found, len(arrived), expected, missing)
+    text = "\n".join(lines)
+    _emit(text, f"### Leak guard\n\n```\n{text}\n```", args.summary)
+    if args.leak_report is not None:
+        payload = {
+            "sha": args.sha,
+            "run_id": args.run_id,
+            "complete": not missing,
+            "digest": lines,
+            **found,
+        }
+        args.leak_report.write_text(
+            json.dumps(payload, indent=1, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    if found["leaks"] or found["faults"]:
+        shown = lines[:ANNOTATION_LINES]
+        if len(lines) > ANNOTATION_LINES:
+            shown = [
+                *lines[: ANNOTATION_LINES - 1],
+                f"  (+{len(lines) - ANNOTATION_LINES + 1} more: artifact test-leak-report)",
+            ]
+        print(_workflow_command("warning", "leak guard (warn)", "\n".join(shown)))
 
 
 def run_total(args: argparse.Namespace) -> int:
@@ -188,6 +310,16 @@ def run_total(args: argparse.Namespace) -> int:
             "run_id": args.run_id,
         }
         out.write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        _report_leaks(arrived, expected, missing, args)
+    except (
+        Exception
+    ) as exc:  # informational and last: a fault here is one annotation, never the job's result
+        print(
+            _workflow_command(
+                "warning", "leak guard (report fault)", f"{type(exc).__name__}: {exc}"
+            )
+        )
     return 0
 
 
@@ -210,6 +342,11 @@ def main(argv: list[str] | None = None) -> int:
     total.add_argument("--baseline", type=Path)
     total.add_argument("--out", type=Path, help="write the total here as the next baseline")
     total.add_argument("--summary", type=Path, help="the GitHub job summary file to append to")
+    total.add_argument(
+        "--leak-report",
+        type=Path,
+        help="write the full leak-guard list here (uploaded as an artifact)",
+    )
     total.add_argument("--sha", default="", help="the commit the total describes")
     total.add_argument("--run-id", default="", help="the workflow run the total describes")
     args = parser.parse_args(argv)

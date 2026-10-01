@@ -374,3 +374,213 @@ def test_only_a_push_to_main_records_the_baseline() -> None:
     fetch = steps[_index(steps, "Fetch the previous main total")]["run"]
     assert "--name test-count-baseline" in fetch
     assert "--branch main" in fetch
+
+
+# ── the leak guard's findings ───────────────────────────────────────────────
+
+
+def _guarded(file: str, name: str, *props: tuple[str, str]) -> str:
+    """A testcase carrying the leak guard's JUnit properties."""
+    body = "".join(f'<property name="{key}" value="{value}"/>' for key, value in props)
+    return _case(file, name, f"<properties>{body}</properties>")
+
+
+def _leaks_in(directory: Path, group: str, *cases: str) -> None:
+    """A shard count file written by the real counter from a JUnit report holding `cases`."""
+    directory.mkdir(parents=True, exist_ok=True)
+    report = _junit(directory / f"junit-{group}.xml", *cases)
+    counts = {"group": group, **shard_counts.count_junit(report)}
+    (directory / f"shard-counts-{group}.json").write_text(json.dumps(counts), encoding="utf-8")
+    report.unlink()
+
+
+def _annotation(log: str) -> list[str]:
+    """The lines of the one `leak guard (warn)` annotation in `log`, decoded."""
+    commands = [x for x in log.splitlines() if x.startswith("::warning title=leak guard (warn)::")]
+    assert len(commands) == 1, "one annotation, on one line"
+    return commands[0].split("::", 2)[2].replace("%0A", "\n").replace("%25", "%").split("\n")
+
+
+def test_the_guards_properties_are_counted_with_the_test_that_carries_them(tmp_path: Path) -> None:
+    report = _junit(
+        tmp_path / "r.xml",
+        _guarded("tests/a/test_x.py", "test_1", ("leak_guard", "env: AVA_X was added")),
+        _guarded("tests/a/test_x.py", "test_2[p]", ("leak_guard_note", "sys.path: added ['/p']")),
+        _guarded("tests/a/test_y.py", "test_3", ("leak_guard_fault", "snapshot: KeyError: 'x'")),
+        _case("tests/a/test_y.py", "test_4"),
+    )
+    counted = shard_counts.count_junit(report)
+    assert counted["tests"] == 4
+    assert counted["leaks"] == [
+        {"test": "tests/a/test_x.py::test_1", "kind": "env", "detail": "AVA_X was added"}
+    ]
+    assert counted["notes"] == [
+        {"test": "tests/a/test_x.py::test_2[p]", "kind": "sys.path", "detail": "added ['/p']"}
+    ]
+    assert counted["faults"] == [
+        {"test": "tests/a/test_y.py::test_3", "kind": "snapshot", "detail": "KeyError: 'x'"}
+    ]
+
+
+def test_a_property_of_any_shape_never_breaks_the_count(tmp_path: Path) -> None:
+    """The shard step is a gate: whatever the guard wrote, counting the tests must still succeed."""
+    report = _junit(
+        tmp_path / "r.xml",
+        _case(
+            "tests/a/test_x.py", "test_1", '<properties><property name="leak_guard"/></properties>'
+        ),
+        _guarded("tests/a/test_x.py", "test_2", ("leak_guard", "no separator at all")),
+        _guarded("tests/a/test_x.py", "test_3", ("leak_guard", ": leading separator")),
+        _guarded("tests/a/test_x.py", "test_4", ("somebody_else", "env: X was added")),
+    )
+    counted = shard_counts.count_junit(report)
+    assert counted["tests"] == 4
+    assert [x["kind"] for x in counted["leaks"]] == ["", "no separator at all", ""]
+    assert "notes" not in counted
+
+
+def test_the_shard_step_reports_the_findings_and_still_passes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _junit(
+        tmp_path / "junit-1-a1.xml",
+        _guarded("tests/a/test_x.py", "test_1", ("leak_guard", "env: AVA_X was added")),
+        _guarded("tests/a/test_x.py", "test_2", ("leak_guard_fault", "compare: OSError: gone")),
+    )
+    out = tmp_path / "c.json"
+    argv = ["shard", "--group", "1", "--junit", str(tmp_path / "junit-1-a*.xml"), "--out", str(out)]
+    assert shard_counts.main([*argv, "--min-tests", "1"]) == 0
+    assert "leak guard: 1 leak finding(s) in 1 test(s), 1 guard fault(s)" in capsys.readouterr().out
+    written = json.loads(out.read_text())
+    assert written["leaks"][0]["test"] == "tests/a/test_x.py::test_1"
+    assert written["faults"][0]["kind"] == "compare"
+
+
+def test_a_clean_total_says_so_and_raises_no_annotation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    counts = tmp_path / "counts"
+    _counts(counts, "1", {"tests/base": 5})
+    report = tmp_path / "leaks.json"
+    argv = ["total", "--dir", str(counts), "--expected", "1", "--leak-report", str(report)]
+    assert shard_counts.main([*argv, "--sha", "c" * 40, "--run-id", "9"]) == 0
+    log = capsys.readouterr().out
+    assert "leak guard (warn): 0 leak finding(s) in 0 test(s), 0 sys.path note(s)" in log
+    assert "from 1/1 count files" in log
+    assert "::warning" not in log
+    written = json.loads(report.read_text())
+    assert (written["complete"], written["leaks"], written["sha"], written["run_id"]) == (
+        True,
+        [],
+        "c" * 40,
+        "9",
+    )
+
+
+def test_the_total_raises_one_annotation_with_a_line_per_file_kind_and_thing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    counts = tmp_path / "counts"
+    env = ("leak_guard", "env: AVA_X was added")
+    identity = ("leak_guard", "identity: ava.agent_identity._agent_id: 1 -> 7")
+    _leaks_in(
+        counts,
+        "1",
+        _guarded("tests/a/test_x.py", "test_1", env),
+        _guarded("tests/a/test_x.py", "test_2", env),  # the same key again: one line, x2
+        _guarded("tests/a/test_a.py", "test_3", identity),
+        _guarded("tests/z/test_z.py", "test_4", ("leak_guard", "cwd: /a -> /b")),
+    )
+    _leaks_in(counts, "2", _guarded("tests/a/test_x.py", "test_5", env))
+    _counts(counts, "3", {"tests/base": 1})
+    summary = tmp_path / "summary.md"
+    report = tmp_path / "leaks.json"
+    argv = ["total", "--dir", str(counts), "--expected", "1 2 3 4"]
+    assert shard_counts.main([*argv, "--summary", str(summary), "--leak-report", str(report)]) == 0
+    lines = _annotation(capsys.readouterr().out)
+    assert lines[0].startswith("leak guard (warn): 5 leak finding(s) in 5 test(s)")
+    assert "from 3/4 count files (INCOMPLETE: no file for 4)" in lines[0]
+    assert lines[1] == "  by kind: cwd=1, env=3, identity=1"
+    assert lines[
+        2:
+    ] == [  # identity last: hundreds of tests assign it bare and must not push the rest out
+        "  tests/a/test_x.py  [env] AVA_X  x3 test(s), e.g. test_1",
+        "  tests/z/test_z.py  [cwd] /a  x1 test(s), e.g. test_4",
+        "  tests/a/test_a.py  [identity] ava.agent_identity._agent_id  x1 test(s), e.g. test_3",
+    ]
+    assert "### Leak guard" in summary.read_text()
+    written = json.loads(report.read_text())
+    assert written["complete"] is False
+    assert sorted(x["shard"] for x in written["leaks"]) == ["1", "1", "1", "1", "2"]
+
+
+def test_the_annotation_is_capped_and_the_artifact_keeps_everything(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    counts = tmp_path / "counts"
+    cases = [
+        _guarded(f"tests/a/test_{i:03d}.py", "test_1", ("leak_guard", f"env: KEY_{i} was added"))
+        for i in range(100)
+    ]
+    _leaks_in(counts, "1", *cases)
+    report = tmp_path / "leaks.json"
+    argv = ["total", "--dir", str(counts), "--expected", "1", "--leak-report", str(report)]
+    shard_counts.main(argv)
+    lines = _annotation(capsys.readouterr().out)
+    assert len(lines) == shard_counts.ANNOTATION_LINES == 40
+    assert lines[-1] == "  (+63 more: artifact test-leak-report)"  # 102 lines, 39 shown
+    assert len(json.loads(report.read_text())["leaks"]) == 100
+
+
+def test_a_guard_fault_is_named_in_the_annotation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    counts = tmp_path / "counts"
+    fault = ("leak_guard_fault", "snapshot: AttributeError: _gone")
+    _leaks_in(counts, "1", _guarded("tests/a/test_x.py", "test_1", fault))
+    _leaks_in(counts, "2", _guarded("tests/a/test_x.py", "test_2", fault))
+    shard_counts.main(["total", "--dir", str(counts), "--expected", "1 2"])
+    lines = _annotation(capsys.readouterr().out)
+    assert "0 leak finding(s) in 0 test(s)" in lines[0]
+    assert "2 guard fault(s)" in lines[0]
+    assert lines[2] == "  GUARD FAULT [snapshot] in 2 test report(s): AttributeError: _gone"
+
+
+def test_the_annotation_data_is_escaped_onto_one_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    counts = tmp_path / "counts"
+    _leaks_in(counts, "1", _guarded("tests/a/test_x.py", "test_50%[a-b]", ("leak_guard", "env: K")))
+    shard_counts.main(["total", "--dir", str(counts), "--expected", "1"])
+    command = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("::warning"))
+    assert "%0A" in command
+    assert "e.g. test_50%25[a-b]" in command
+
+
+def test_a_fault_in_the_leak_report_is_one_annotation_and_never_the_jobs_result(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Whatever the count files hold, the total (and the baseline it writes first) succeeds."""
+    counts = tmp_path / "counts"
+    _counts(counts, "1", {"tests/base": 5})
+    broken = json.loads((counts / "shard-counts-1.json").read_text())
+    broken["leaks"] = [{"detail": "a leak without a test or a kind"}]
+    (counts / "shard-counts-1.json").write_text(json.dumps(broken), encoding="utf-8")
+    out = tmp_path / "out.json"
+    argv = ["total", "--dir", str(counts), "--expected", "1", "--out", str(out)]
+    assert shard_counts.main(argv) == 0
+    log = capsys.readouterr().out
+    assert "::warning title=leak guard (report fault)::KeyError" in log
+    assert json.loads(out.read_text())["tests"] == 5
+
+
+def test_the_total_job_reports_and_uploads_the_leak_list_without_being_able_to_fail() -> None:
+    steps = _steps("backend-test-counts")
+    total = steps[_index(steps, "Sum the executed test counts")]
+    assert "--leak-report test-leak-report.json" in total["run"]
+    upload = steps[_index(steps, "Upload the leak report")]
+    assert upload["continue-on-error"] is True
+    assert upload["if"] == "${{ !cancelled() }}"
+    assert upload["with"]["name"] == "test-leak-report"
+    assert upload["with"]["path"] == "test-leak-report.json"
+    assert _index(steps, "Sum the executed test counts") < _index(steps, "Upload the leak report")
