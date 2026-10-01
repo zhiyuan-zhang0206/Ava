@@ -18,8 +18,7 @@ process and creates no database, so a home that stops at `configured` holds noth
 native. `cli/start_intent.py` (`ava start`) admits only such a home
 (`require_initialized`: the intent is past `claiming`, `.env` carries the identity the
 roles require, `AVA_SERVICE_PATH` is declared, a remote unit holds no human secret) and
-refuses everything else naming `ava init`. A runner home that predates the intent
-journal is still admitted on what its `.env` and `machine_*` files declare. The intent is the home's record of itself: a gateway's ports and
+refuses everything else naming `ava init`, a home with no intent included. The intent is the home's record of itself: a gateway's ports and
 data-plane host live in its `record` (`base/cluster/record.py`), and no host
 file lists clusters. A new home records the fixed port table
 (`base/host/env/port_table.py`) after a bind probe finds every port free; a

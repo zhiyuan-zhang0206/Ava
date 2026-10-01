@@ -88,3 +88,7 @@ initialized.
 - Documentation and error messages that told an operator to pass a birth flag to
   `ava start` now name `ava init` or `install-unit`; the doc-reference lint keeps
   them honest.
+
+Follow-up: [a home's identity lives in its `.env`](2026-10-01-retire-machine-identity-files.md)
+retires the `machine_*` files and the admission of a home with no intent that the
+second consequence above leaves in place.

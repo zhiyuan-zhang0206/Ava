@@ -344,10 +344,9 @@ def _gateway_base() -> str:
 
     The host must be one the user's browser can dial: the login page posts the
     cluster secret to this origin, and a remote browser resolving `127.0.0.1`
-    would hit itself. `reachable_host()` (AVA_MACHINE_HOST >
-    `$AVA_HOME/machine_host` > `localhost`) is the same operator-declared
-    address `ava.ui.show` hands the user for direct page URLs and the bootstrap
-    rewrites loopback data-plane URLs to; a single box falls back to
+    would hit itself. `reachable_host()` (`AVA_MACHINE_HOST`, else `localhost`) is the
+    same operator-declared address `ava.ui.show` hands the user for direct page URLs
+    and the bootstrap rewrites loopback data-plane URLs to; a single box falls back to
     `localhost` unchanged. The server-side auth probe follows the same base —
     on a gateway host the gateway binds all interfaces, so dialing the host's
     own reachable address is equivalent to loopback and keeps one origin

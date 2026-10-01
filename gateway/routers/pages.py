@@ -128,10 +128,9 @@ _FORWARDED_RESPONSE_HEADERS = frozenset(
 def _absolute_url(request: Request, path: str) -> str:
     """Render a gateway-relative path as the absolute URL the browser dials.
 
-    The base is the configured Gateway URL (`AVA_GATEWAY_URL` /
-    `$AVA_HOME/gateway_url`), NOT the request's own Host: the SDK dials the
-    gateway at its local loopback URL on a single box, so absolutizing
-    against the request would hand every SDK caller a `localhost` link that
+    The base is the configured Gateway URL (`AVA_GATEWAY_URL`), NOT the request's own
+    Host: the SDK dials the gateway at its local loopback URL on a single box, so
+    absolutizing against the request would hand every SDK caller a `localhost` link that
     is unreachable from the user's other devices. The Gateway URL variable is
     the single source of truth for how the gateway is reached from outside —
     whatever the caller's dial address is (localhost / VPN overlay / LAN), the

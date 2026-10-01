@@ -76,15 +76,12 @@ their packages' own `tests/` directories under the locality work.
   test fixture must still run before any project import. Making it lazy is the
   same fix as slice 2's for the home, applied to configuration, and is its own
   work.
-- **The older identity channels outlive slice 5**, because a home may still
-  declare its identity through them and removing one needs a per-home check and
-  a hand migration: the `$AVA_HOME/machine_*` files that identity fields and
-  capability flags can still be read from (`cli/start_identity.py:stored_values`,
-  `cli/commands/_setup.py`, `base/cluster/machine.py`), and `ava start`'s
-  admission of a runner home that has no `start-intent.json`
-  (`cli/start_identity.py:_admit_without_intent`). `ava init` already refuses
-  such a home. Retiring both means giving every such home an intent and its
-  identity in `.env`, then deleting the readers.
+- **The older identity channels are retired** (done; see
+  [a home's identity lives in its `.env`](../../decisions/2026-10-01-retire-machine-identity-files.md)).
+  The `$AVA_HOME/machine_*`, `gateway_url` and `memory_remote` files are no longer
+  read, and `ava start` admits a home only through its intent. A home that still has the
+  files gets their values into its `.env` by a hand step before the first start of the
+  code that contains the change, and the files deleted.
 - **The permissions helper's launchd label is still per home**
   (`com.ava.permissions-helper.<slug>`, `helper_job_label` in
   `services/permissions_helper/launchd_job.py`), while every other OS job label is
