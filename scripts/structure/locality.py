@@ -320,17 +320,9 @@ DECISIONS: dict[str, Decision] = {
             ),
             # base.db.connections resolves a home (base.host.env.dotenv_boot) and imports
             # settings at load; the modules below run where neither may happen.
-            "services/pitr/restore/drill.py": (
-                "restore-drill dials inside the restricted restore worker, which runs "
-                "without a home or settings and holds only its sealed live_db_url"
-            ),
-            "services/pitr/restore/postgres.py": (
-                "restore-sandbox and live-identity dials inside the restricted restore "
-                "worker, which runs without a home or settings"
-            ),
             "base/cluster/dataplane/pg_tools.py": (
-                "provisions the throwaway Postgres it just started; imported by the "
-                "restricted restore worker and run config-free by scripts/ci/migration_smoke.py"
+                "provisions the throwaway Postgres it just started; run config-free by "
+                "scripts/ci/migration_smoke.py"
             ),
             "base/cluster/dataplane/pg_stall_watchdog.py": (
                 "probes the throwaway Postgres base/cluster/dataplane/pg_tools.py started, under the same "

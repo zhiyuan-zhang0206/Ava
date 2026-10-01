@@ -134,10 +134,7 @@ def pg_start_env() -> dict[str, str]:
     The postmaster outlives the `ava start` that spawns it (it is retained
     across releases), and that process may hold the delivered gateway login,
     write generation and API token, the human secret and the Redis admin
-    password; none of it crosses. The commands the postmaster runs need no
-    more: the PITR archive shim finds `python3` through PATH (its shebang) and
-    takes everything else on argv, and the restore drill's `restore_command`
-    names its interpreter by absolute path."""
+    password; none of it crosses. Nothing the postmaster runs needs it."""
     env = daemon_process_env()
     if is_macos() and not env.get("LC_ALL") and not env.get("LANG"):
         env["LC_ALL"] = _MACOS_PG_LOCALE

@@ -86,20 +86,20 @@ def test_domain_floor_fails_below_minimum(
 def test_subdomain_floor_aggregates_over_prefix(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A floor on "services/pitr" covers every file under that prefix,
+    """A floor on "services/backup_scheduler" covers every file under that prefix,
     independent of other services subdomains."""
-    monkeypatch.setattr(gates, "FLOORS", {"services/pitr": 50.0})
+    monkeypatch.setattr(gates, "FLOORS", {"services/backup_scheduler": 50.0})
     files = _files(
         {
             **_core_classes(),
-            "services/pitr/wal/uploader.py": (8, 10),
-            "services/pitr/wal/state.py": (4, 10),
+            "services/backup_scheduler/daemon.py": (8, 10),
+            "services/backup_scheduler/worker.py": (4, 10),
             "services/backup.py": (9, 10),
         }
     )
     assert gates.check(files, threshold=85.0) == 0
     out = capsys.readouterr().out
-    assert "services/pitr" in out and "60.0%" in out
+    assert "services/backup_scheduler" in out and "60.0%" in out
 
 
 def test_zero_line_floored_domain_fails(

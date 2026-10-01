@@ -29,7 +29,6 @@ from cli.parsers import cluster as _cluster
 from cli.parsers import host as _host
 from cli.parsers import logs as _logs
 from cli.parsers import mcp as _mcp
-from cli.parsers import pitr as _pitr
 from cli.parsers import plugins as _plugins
 from cli.parsers import pty as _pty
 
@@ -307,11 +306,6 @@ def test_logs_retention_help_explains_defaults_and_dry_run(
     assert "without\n                        deleting" in help_text
 
 
-def test_pitr_retention_inspect_parser_binds_read_only_handler() -> None:
-    args = _main._build_parser().parse_args(["pitr", "retention", "inspect"])
-    assert args.func is _pitr._h_pitr_retention_inspect
-
-
 def test_backup_operations_parser_binds_status_and_retire() -> None:
     parser = _main._build_parser()
     status = parser.parse_args(["backup", "operations", "status"])
@@ -322,10 +316,20 @@ def test_backup_operations_parser_binds_status_and_retire() -> None:
     assert (retire.confirm, confirmed.confirm) == (False, True)
 
 
-def test_pitr_operations_moved_to_backup_operations() -> None:
-    """Operation custody is the backup domain's: `ava pitr operations` no longer parses."""
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["pitr", "operations", "status"],
+        ["pitr", "retention", "inspect"],
+        ["pitr", "drill"],
+        ["pitr", "multipart", "list"],
+        ["pitr", "snapshot", "verify"],
+    ],
+)
+def test_the_pitr_verbs_no_longer_parse(argv: list[str]) -> None:
+    """The self-written PITR stack is gone; operation custody is `ava backup operations`."""
     with pytest.raises(SystemExit) as exited:
-        _main._build_parser().parse_args(["pitr", "operations", "status"])
+        _main._build_parser().parse_args(argv)
 
     assert exited.value.code == 2
 
