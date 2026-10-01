@@ -23,5 +23,14 @@
     "tests/ava/test_ui.py::ava.ui._SERVE_READY_TIMEOUT_S": 2,
     "tests/ava/test_ui.py::ava.ui._reject_foreign_port_occupant": 1,
     "tests/ava/test_ui.py::ava.ui._wait_until_serving": 1
+  },
+  "tests_location": {
+    "tests/ava/sdk_surface/test_metering.py::top-level": 1,
+    "tests/ava/sdk_surface/test_validation.py::top-level": 1,
+    "tests/ava/test_agents_sdk.py::top-level": 1,
+    "tests/ava/test_external.py::top-level": 1,
+    "tests/ava/test_external_integration.py::top-level": 1,
+    "tests/ava/test_presets_sdk.py::top-level": 1,
+    "tests/ava/test_ui.py::top-level": 1
   }
 }
