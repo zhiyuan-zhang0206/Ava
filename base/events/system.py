@@ -263,6 +263,40 @@ class RootRestartCleared(TypedDict):
     failed_for_s: float
 
 
+class RootUnitAlertFired(TypedDict):
+    """One root unit entered an alertable failure state (task #4872, B route).
+
+    Emitted once per episode — a unit whose intent is running and which sits
+    in a recorded replacement failure, an open restart breaker, or retained
+    native custody — while later rounds, backoff retries, and kind changes on
+    the same episode stay silent. ``delivery`` records the user-channel post:
+    "posted" when the gateway accepted it, "failed" after the single retry.
+    """
+
+    unit: str
+    kind: str
+    since_timestamp_seconds: float
+    detail: str
+    delivery: str
+
+
+class RootUnitAlertResolved(TypedDict):
+    """One root unit's alert episode closed — the derived condition disappeared.
+
+    Emitted once per episode when the condition clears (including after a root
+    restart), replaying the episode identity. ``delivery`` records the
+    user-channel resolve post: "posted", "failed" after the single retry, or
+    "skipped" when the firing was never delivered — there is no open row to
+    close, and posting one would fabricate it.
+    """
+
+    unit: str
+    kind: str
+    since_timestamp_seconds: float
+    failed_for_s: float
+    delivery: str
+
+
 class ScheduleStalled(TypedDict):
     """`schedule_stalled` payload — gateway/schedules/manager.py.
 

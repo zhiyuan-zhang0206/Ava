@@ -34,6 +34,7 @@ from base.native_process.root_control.ipc import (
     ok_response,
 )
 from services.ava_root import intent_store
+from services.ava_root.alerts import UnitAlertFacts
 from services.ava_root.custody import ServiceCustody, require_clear
 from services.ava_root.group_scope import group_closed, record_survivors
 from services.ava_root.intent_store import (
@@ -390,6 +391,21 @@ class Supervisor(StoppingMixin):
         if runtime.manifest.restart is RestartPolicy.NEVER:
             return "policy never"
         return None
+
+    def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
+        """The alert-relevant facts of one unit: intent, recorded failure, custody.
+
+        `custody_held` reads `revival_deferral`'s reconciliation clause — a
+        retained generation that is not active holds revival until reconciled.
+        """
+        runtime = self._units.get(unit_id)
+        if runtime is None:
+            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        return UnitAlertFacts(
+            intent_running=runtime.intent is UnitIntent.RUNNING,
+            restart_failed=runtime.restart_failed,
+            custody_held=runtime.generation is not None and not self._is_active(runtime),
+        )
 
     async def dispatch(self, request: RequestPayload) -> ResponsePayload:
         """Serve one validated K1 request; business errors become error codes."""

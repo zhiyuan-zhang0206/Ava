@@ -31,6 +31,13 @@ and an operator-held unit cannot authorize recovery. A protocol response alone
 cannot certify a service: its responding listener must belong to the captured
 root generation. No service probe starts a session or an OS job.
 
+The reference wiring additionally supplies the alert episode router
+(`services/ava_root/alerts.py`) to `HealthMonitor`: derived unit failure states
+become fired/resolved episodes on the event stream and on the gateway's user
+alert channel (`/api/alerts`). The drill assembly deliberately leaves the
+router unset, so a dry run never posts its throwaway units to the real alert
+store.
+
 `RootHealthRounds` drives one service health round and the independent
 [[services/ava_root_glue/docs/diagnostics.ava.okf.md|diagnostic roster]]. Diagnostic
 failures never acquire service or native-resource lifecycle authority.
