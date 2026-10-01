@@ -12,6 +12,8 @@ the same on every machine.
 
 from __future__ import annotations
 
+import gc
+import importlib.machinery
 import os
 import re
 import signal
@@ -34,20 +36,35 @@ _FRAMES_TO_LOCATE = 15
 _FAKE_MODULES = 400
 
 
+class _ImportingSpec(importlib.machinery.ModuleSpec):
+    """`ModuleSpec` as the import system leaves it: `_initializing` is set while a body runs."""
+
+    _initializing: bool = False
+
+
 def _python_calls(fn: Callable[[], object]) -> int:
-    """How many Python-level function calls `fn` makes (C functions are not counted)."""
+    """How many Python-level function calls `fn` makes (C functions are not counted).
+
+    Garbage is collected before and not during: a finalizer of an earlier test's object (a redis
+    connection's `__del__`, seen in a cold run) would otherwise be counted as the guard's own frames.
+    """
     calls = 0
+    gc.collect()
 
     def profile(_frame: types.FrameType, event: str, _arg: object) -> None:
         nonlocal calls
         calls += event == "call"
 
     previous = sys.getprofile()
+    was_enabled = gc.isenabled()
+    gc.disable()
     sys.setprofile(profile)
     try:
         fn()
     finally:
         sys.setprofile(previous)
+        if was_enabled:
+            gc.enable()
     return calls
 
 
@@ -101,6 +118,30 @@ def test_a_module_is_judged_once_and_only_a_new_name_is_judged_again(
     run.watch.sync()
     assert run.watch.judged == judged + 1
     assert run.watch.tracked == _FAKE_MODULES + 1
+
+
+def test_a_module_another_thread_is_still_importing_is_watched_once_it_is_done(
+    run: leak_guard._Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A background thread's lazy import registers the module before its body ran. The names the body
+    then defines are that import's, not a leak of the test that happens to be running."""
+    spec = _ImportingSpec("leak_cost_fake_importing", None)
+    spec._initializing = True  # what the import system sets until the body is done
+    importing = types.ModuleType(spec.name)
+    importing.__spec__ = spec
+    importing.__file__ = str(repo_root / "pkg" / "importing.py")
+    monkeypatch.setitem(sys.modules, importing.__name__, importing)
+
+    before = run.capture()
+    assert run.watch.tracked == _FAKE_MODULES  # half built: not watched yet
+    importing.__dict__.update(defined_by_the_body=1)
+    spec._initializing = False
+    assert run.compare(before) == []
+    assert run.watch.tracked == _FAKE_MODULES + 1  # done: watched from here on
+
+    before = run.capture()
+    importing.__dict__["added_by_a_test"] = 1
+    assert [kind for kind, _ in run.compare(before)] == ["module-attr"]
 
 
 def test_an_unchanged_state_names_nothing_and_makes_no_second_look(

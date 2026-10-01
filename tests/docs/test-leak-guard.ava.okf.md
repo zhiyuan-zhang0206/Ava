@@ -23,7 +23,7 @@ A test that leaves an environment key, a stored module attribute, the cwd or a s
 | `signal` | `signal.getsignal` of the common signals | a handler that raises, installed and not put back |
 | `sys.path` | a note, never a leak: entries added or removed | tests insert on purpose |
 
-First-party means a module's `__file__` is below the rootdir, outside top-level dot-directories (`.venv`, `.git`) and any `tests`, `site-packages` or `node_modules` directory. Dicts are scanned by total length (`sum(map(len, ...))`); only when it moved are the dicts that moved located.
+First-party means a module's `__file__` is below the rootdir, outside top-level dot-directories (`.venv`, `.git`) and any `tests`, `site-packages` or `node_modules` directory. Dicts are scanned by total length (`sum(map(len, ...))`); only when it moved are the dicts that moved located. A module some thread is still importing (`__spec__._initializing`) is left out until the pass after its import finished, or its body's names would be blamed on the running test.
 
 ## Cost
 
@@ -33,9 +33,11 @@ Two snapshots a test per xdist worker, under CI's coverage tracer, where the pri
 
 `AVA_LEAK_GUARD` is read at configure; any value but these stops the run.
 
-- `warn` (default): observe only. No outcome changes, no state is put back, and a fault of the guard itself (an exception in the snapshot, the comparison, the property write, the controller hooks or the summary) is one report line plus one `leak_guard_fault` property, never a test result.
-- `fail`: put back what the strict checks name (so victims stay green), then fail the leaker at its own teardown with the nodeid and a fix hint per kind. A guard that cannot work is loud here: its fault propagates.
+- `fail` (default): put back what the strict checks name (so victims stay green), then fail the leaker at its own teardown with the nodeid and a fix hint per kind.
+- `warn`: observe only. No outcome changes, no state is put back; a leak is a JUnit property and a report line.
 - `off`: the fixture is a no-op.
+
+A fault of the guard itself (an exception in the snapshot, the comparison, the property write, the controller hooks or the summary) is one report line plus one `leak_guard_fault` property, never a test result. Except in `fail` mode a fault of the snapshot or the comparison propagates: without either there is no verdict, so the gate would pass silently. A deterministic guard bug is caught first by `tests/ci/test_leak_guard.py`, which runs the guard on a synthetic suite in every mode.
 
 ## Why it is second in `pytest_plugins`
 
@@ -45,11 +47,11 @@ pytest tears fixtures down in reverse setup order. As the first function-scoped 
 
 - Each finding is a JUnit property on the leaker's testcase: `leak_guard`, `leak_guard_note` (`sys.path`), `leak_guard_fault`; value `<kind>: <detail>`.
 - The terminal prints a `leak guard` section (always in CI: the line proves the guard ran and its us/test).
-- `scripts/ci/shard_counts.py shard` carries them into `shard-counts-N.json` (`leaks`, `notes`, `faults`; absent when empty). The `backend test counts (all shards)` job reports the whole run: the job summary, one `::warning title=leak guard (warn)` annotation of at most 40 lines (one line per file, kind and thing leaked) and the `test-leak-report` artifact (the full list). Read it without any shard log: [[../../.github/test-gate.ava.okf.md]].
+- `scripts/ci/shard_counts.py shard` carries them into `shard-counts-N.json` (`leaks`, `notes`, `faults`; absent when empty). The `backend test counts (all shards)` job reports the whole run: the job summary, one `::warning title=leak guard` annotation of at most 40 lines (one line per file, kind and thing leaked) and the `test-leak-report` artifact (the full list). Read it without any shard log: [[../../.github/test-gate.ava.okf.md]].
 
 ## What it cannot see
 
-An existing module attribute assigned a new value (a static lint's job; the agent identity is one, see below), a container mutated in place, a module object swapped through `sys.modules` (a per-test `del sys.modules[...]` and re-import), and the disk, sockets, processes and the databases (`_clean_state` owns those). In warn mode only the first leaker of a key is named: a later test that `delenv`s the now-present key is recorded and undone by monkeypatch, so the full list needs a fail-mode run, which restores after every leaker.
+An existing module attribute assigned a new value (a static lint's job; the agent identity is one, see below), a container mutated in place, a module object swapped through `sys.modules` (a per-test `del sys.modules[...]` and re-import), and the disk, sockets, processes and the databases (`_clean_state` owns those). In `warn` mode only the first leaker of a key is named: a later test that `delenv`s the now-present key is recorded and undone by monkeypatch; `fail` restores after every leaker, so it names them all.
 
 ## The agent identity is restored, not compared
 
@@ -59,8 +61,6 @@ An existing module attribute assigned a new value (a static lint's job; the agen
 
 Recipes per kind are in the fail-mode message and in [flaky-tests §9](../../conventions/flaky-tests.md): `setenv(name, "")` before `delenv`; `monkeypatch.setitem(vars(module), name, value)` or `mock.patch.object`; `monkeypatch.chdir`; restore the handler in a `finally`; nothing for the agent identity: `identity_restore` puts it back (below).
 
-## Switching `warn` to `fail`
-
-One default changes, and the `AVA_HOME` hook in `tests/fixtures/guards.py` (covered by the `env` check) goes. The conditions are about correctness only: warn running through a full nightly duration refresh with complete 17/17 reports; three consecutive main pushes with no leak finding (the agent identity is not among them: `identity_restore` undoes it); a drain run (the CI workflow dispatched on a scratch branch that forces `AVA_LEAK_GUARD=fail` on all shards, since a draft PR skips CI; it restores after each leaker and so shows the ones warn masks) with zero guard errors; and no exemption list.
+## Cost threshold
 
 The cost (`us/test` of the shard line) is reported but has no threshold: about 0.5 ms a test on CI, roughly 0.3% of a shard's time, and getting under a chosen number means watching fewer module dicts, trading detection for the number.

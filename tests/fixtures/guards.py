@@ -4,8 +4,8 @@ Each fixture here is autouse and either forbids a real host effect (native helpe
 converge, os.exec*, the bootstrap fetch, service readiness / health-port probes,
 the schedule manager's session backend, the label LLM) or restores process-global
 state a test may have leaked (metering wraps, OTLP export, the stdlib logging
-bridge and its logger levels, the database-authority refusal, the `AVA_HOME` a test
-changed: `pytest_runtest_teardown` names it). Opt-outs are per-test
+bridge and its logger levels, the database-authority refusal; a leaked environment key,
+`AVA_HOME` included, is the root leak guard's: `tests/fixtures/leak_guard.py`). Opt-outs are per-test
 markers documented on the fixture that honours them.
 
 Order matters and is kept: pytest sets same-scope autouse fixtures up in
@@ -21,60 +21,6 @@ from collections.abc import Generator, Iterator
 from typing import Any
 
 import pytest
-
-_HOME_BEFORE_SETUP = pytest.StashKey[str | None]()
-_HOME_AT_CALL = pytest.StashKey[str | None]()
-_session_home: list[str | None] = []  # the worker's home when its first test starts
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_runtest_setup(item: pytest.Item) -> None:
-    home = os.environ.get("AVA_HOME")
-    if not _session_home:
-        _session_home.append(home)
-    item.stash[_HOME_BEFORE_SETUP] = home
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_runtest_call(item: pytest.Item) -> None:
-    item.stash[_HOME_AT_CALL] = os.environ.get("AVA_HOME")
-
-
-@pytest.hookimpl(wrapper=True)
-def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> Iterator[None]:
-    """A test leaves `AVA_HOME` as it found it, or it is named here.
-
-    The home is read whenever it is asked for (`resolve_ava_home`), so a test that
-    assigns `os.environ["AVA_HOME"]` and does not undo it redirects every later test
-    in the same worker: a `tests/.../test_x0/.env` that does not exist, a machine name
-    that is not there. The leak surfaces in some other test, far from its cause. This
-    hook runs around ALL of the test's teardown (fixture finalizers, `monkeypatch`
-    included, whatever their order), restores the value and fails the test that changed
-    it. Undo through `monkeypatch.setenv` (or a `patch.dict(os.environ)` scope), never a
-    bare assignment.
-
-    A module- or session-scoped fixture may set the home for the tests it serves and
-    restore it in its own finalizer (which runs in the last of those tests' teardown), so
-    three values are accepted: the one before the test's setup, the one its body ran
-    with, and the home the worker started with.
-    """
-    try:
-        return (yield)
-    finally:
-        before = item.stash.get(_HOME_BEFORE_SETUP, None)
-        at_call = item.stash.get(_HOME_AT_CALL, before)
-        after = os.environ.get("AVA_HOME")
-        if after not in (before, at_call, *_session_home):
-            if before is None:
-                os.environ.pop("AVA_HOME", None)
-            else:
-                os.environ["AVA_HOME"] = before
-            pytest.fail(
-                f"{item.nodeid} left AVA_HOME={after!r} (it was {before!r}). Every later test in "
-                "this worker would read that home. Set it with monkeypatch.setenv, "
-                "not os.environ[...].",
-                pytrace=False,
-            )
 
 
 @pytest.fixture(autouse=True)

@@ -26,7 +26,7 @@ collected a second time:
 The root leak guard (`tests/fixtures/leak_guard.py`) writes each finding as a JUnit property of the
 test that leaked. `shard` carries them into its count file (`leaks`, `notes`, `faults`; a clean
 shard's file has none of those keys) and `total` reports them for the whole run from this ONE job:
-the job summary, ONE `::warning title=leak guard (warn)` annotation of at most `ANNOTATION_LINES`
+the job summary, ONE `::warning title=leak guard` annotation of at most `ANNOTATION_LINES`
 lines (read it with `gh api repos/R/check-runs/<job id>/annotations`; the job summary is not in
 that API), and the full list as `--leak-report`. A fault in this reporting is one annotation,
 never the job's result.
@@ -202,7 +202,7 @@ def _leak_lines(
         by_kind[leak["kind"]] = by_kind.get(leak["kind"], 0) + 1
     incomplete = f" (INCOMPLETE: no file for {', '.join(missing)})" if missing else ""
     lines = [
-        f"leak guard (warn): {len(leaks)} leak finding(s) in {len({x['test'] for x in leaks})} test(s), "
+        f"leak guard: {len(leaks)} leak finding(s) in {len({x['test'] for x in leaks})} test(s), "
         f"{len(found['notes'])} sys.path note(s), {len(found['faults'])} guard fault(s), "
         f"from {arrived}/{len(expected)} count files{incomplete}",
         "  by kind: " + (", ".join(f"{kind}={n}" for kind, n in sorted(by_kind.items())) or "none"),
@@ -259,7 +259,7 @@ def _report_leaks(
                 *lines[: ANNOTATION_LINES - 1],
                 f"  (+{len(lines) - ANNOTATION_LINES + 1} more: artifact test-leak-report)",
             ]
-        print(_workflow_command("warning", "leak guard (warn)", "\n".join(shown)))
+        print(_workflow_command("warning", "leak guard", "\n".join(shown)))
 
 
 def run_total(args: argparse.Namespace) -> int:
