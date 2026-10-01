@@ -48,3 +48,41 @@ def test_anything_short_of_the_executed_output_three_is_not_completion(
     items: list[dict[str, Any]],
 ) -> None:
     assert not observe.execution_completed(items, REPLY)
+
+
+# ------------------------------------------------------------------- the macOS-only check
+
+
+def _chain(*pids: int) -> list[dict[str, Any]]:
+    names = {1: "launchd", 10: "AvaPermissionsHelper", 20: "ava-root", 30: "python3.12"}
+    return [{"pid": pid, "name": names[pid]} for pid in pids]
+
+
+def test_the_chain_launchd_helper_root_unit_is_accepted() -> None:
+    assert observe.ancestry_problem(_chain(30, 20, 10, 1), [20, 10]) is None
+    assert observe.ancestry_problem(_chain(20, 10, 1), [20, 10]) is None
+    assert observe.ancestry_problem(_chain(10, 1), [10]) is None
+
+
+@pytest.mark.parametrize(
+    "chain",
+    [
+        _chain(30, 20, 1),  # the helper is not in the chain
+        _chain(30, 10, 20, 1),  # root and helper in the wrong order
+        _chain(30, 20, 10),  # the chain does not end at launchd
+        [*_chain(30, 20), {"pid": 5, "name": "zsh"}, *_chain(10, 1)],  # a stranger in between
+    ],
+)
+def test_any_other_process_chain_is_a_problem(chain: list[dict[str, Any]]) -> None:
+    assert observe.ancestry_problem(chain, [20, 10]) is not None
+
+
+def test_a_check_that_exists_on_one_platform_is_listed_not_failed_on_the_other() -> None:
+    assert set(observe.ONLY_ON_MACOS) <= set(observe.CHECKS)
+
+    runnable, skipped = observe.applicable_checks(macos=False)
+    assert "helper_chain" not in runnable and set(skipped) == set(observe.ONLY_ON_MACOS)
+    assert set(runnable) | set(skipped) == set(observe.CHECKS)
+
+    runnable, skipped = observe.applicable_checks(macos=True)
+    assert set(runnable) == set(observe.CHECKS) and skipped == {}
