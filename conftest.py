@@ -30,6 +30,8 @@ pytest_plugins = [
     "tests.fixtures.milvus",
     "tests.fixtures.log_capture",
     "tests.fixtures.retry_waits",
+    # Directory-level fixtures that follow their tests (`PATH_SCOPES`), not a conftest.
+    "tests.fixtures.path_scopes",
     # Stall forensics (task #3513: the asyncio probe under `-o faulthandler_timeout=N`)
     # and the split-directory collection guard — see each docstring.
     "tests._asyncio_stall_probe",
