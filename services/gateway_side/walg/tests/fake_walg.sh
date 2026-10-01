@@ -1,8 +1,9 @@
 #!/bin/sh
 # A stand-in for the wal-g binary, driven only by its --config file's directory:
 #
-#   <dir>/mode        "ok" (default), "fail" (every call exits 1) or "hang" (every call
-#                     blocks until the mode file changes or disappears)
+#   <dir>/mode        "ok" (default), "fail" (every call exits 1), "hang" (every call
+#                     blocks until the mode file changes or disappears), "nodelete"
+#                     (`st rm` is refused) or "corrupt" (`st get` returns other bytes)
 #   <dir>/store/      the object store: `wal-push` copies a segment to store/<basename>,
 #                     `st put/ls/get/rm` read and write store/ (put adds ".lz4", like wal-g)
 #   <dir>/calls.log   one line per call: the arguments after --config
@@ -59,9 +60,17 @@ case "$command" in
                 (cd "$store" && find "${1:-.}" -type f 2>/dev/null | sed 's|^\./||' | sort)
                 ;;
             get)
-                cp "$store/$1" "$2"
+                if [ "$mode" = corrupt ]; then
+                    echo "not what was written" > "$2"
+                else
+                    cp "$store/$1" "$2"
+                fi
                 ;;
             rm)
+                if [ "$mode" = nodelete ]; then
+                    echo "fake wal-g: AccessDenied: delete refused" >&2
+                    exit 1
+                fi
                 rm -f "$store/$1"
                 ;;
             *)
