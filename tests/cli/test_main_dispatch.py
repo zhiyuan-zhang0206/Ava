@@ -331,7 +331,7 @@ def test_backup_operations_parser_binds_status_and_retire() -> None:
         ["pitr", "snapshot", "verify"],
     ],
 )
-def test_the_pitr_verbs_no_longer_parse(argv: list[str]) -> None:
+def test_the_removed_wal_verbs_no_longer_parse(argv: list[str]) -> None:
     """The self-written PITR stack is gone; operation custody is `ava backup operations`."""
     with pytest.raises(SystemExit) as exited:
         _main._build_parser().parse_args(argv)
