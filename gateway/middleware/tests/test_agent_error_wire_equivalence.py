@@ -27,6 +27,10 @@ from ava.gateway_client.transport import raise_from_response
 from base.agents import EXCEPTION_BY_REASON, AgentLaunchFailed, AvaAgentError
 from gateway.middleware.error_handlers import ava_agent_error_handler
 
+# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
+# pyright: reportUnknownMemberType = warning
+# pyright: reportUnknownArgumentType = warning
+
 
 @pytest.mark.parametrize(
     ("reason", "cls"),

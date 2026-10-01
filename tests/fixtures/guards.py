@@ -335,7 +335,7 @@ def _test_homes_get_their_own_ports(
     up storage, probe or dial the real cluster, and its endpoint would read as the
     real home's (`dotenv_boot._endpoint_key` tells homes apart by port). Every test
     home therefore records the session's kernel-assigned table instead; the table
-    itself is pinned by `tests/base/test_fixed_ports.py`.
+    itself is pinned by `base/cluster/tests/test_fixed_ports.py`.
 
     The patch covers this process only: a subprocess that births a home would take
     the real table (no test does)."""

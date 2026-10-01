@@ -23,7 +23,7 @@ from pydantic import AliasChoices
 
 from base.config import FIELD_INFOS, Settings
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _env_example_values() -> dict[str, str]:

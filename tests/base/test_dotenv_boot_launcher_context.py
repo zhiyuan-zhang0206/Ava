@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from base.host.env import dotenv_boot
-from tests.base.test_dotenv_boot import (
+from base.host.env.tests.test_dotenv_boot import (
     _IDENTITY_LINES,
     _point_env_at_without_db_url,
     _restore_authority_env,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import

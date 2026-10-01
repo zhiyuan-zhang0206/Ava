@@ -56,7 +56,10 @@ def test_mirror_env_fills_unset_keys(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     # npm reads the lowercase `npm_config_<key>` env form; the uppercase spelling
     # SIM112 prefers is not what npm honors, so the lowercase key is load-bearing.
-    monkeypatch.delenv("npm_config_registry", raising=False)
+    # setenv first: delenv alone records nothing for an absent key, so the key load_dotenv
+    # sets below would outlive the test
+    monkeypatch.setenv("npm_config_registry", "")
+    monkeypatch.delenv("npm_config_registry")
     load_dotenv(mirror_env)
     assert os.environ["npm_config_registry"] == "https://registry.example"  # noqa: SIM112
 
@@ -81,7 +84,10 @@ def test_unit_boot_preserves_single_index_precedence_across_aliases(
         "UV_EXTRA_INDEX_URL",
         "UV_NO_INDEX",
     ):
-        monkeypatch.delenv(key, raising=False)
+        # setenv first: delenv alone records nothing for an absent key, so a key the boot
+        # below sets would outlive the test
+        monkeypatch.setenv(key, "")
+        monkeypatch.delenv(key)
     if source_layer == "environment":
         monkeypatch.setenv(higher_key, "https://pypi.org/simple")
         unit.write_text(f"{lower_key}=https://unit.example/simple\n")

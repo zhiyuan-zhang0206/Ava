@@ -4,6 +4,9 @@
     "base/host/env/dotenv_boot.py::_enforce_cluster_env_authority": 18,
     "base/host/env/runtime_config.py::write_fields": 22
   },
+  "files": {
+    "base/host/env/tests/test_dotenv_boot.py": 969
+  },
   "patch_targets": {
     "base/host/converge/tests/test_browser_deps.py::base.host.system.probes._platform_chrome_binary": 1
   }

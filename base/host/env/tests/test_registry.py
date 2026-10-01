@@ -124,7 +124,10 @@ class TestScopeDerivationRules:
         use_env_files(monkeypatch, env_file, tmp_path / "mirror.env")
         monkeypatch.setattr(dotenv_boot, "_enforce_cluster_env_authority", skip_authority_pass)
         monkeypatch.setattr(dotenv_boot, "_manifest_finalizer_boot_authorized", False)
-        monkeypatch.delenv(MANIFEST_CERTIFICATION_SECRET_ENV, raising=False)
+        # setenv first: delenv alone records nothing for an absent key, so the secret the boot
+        # below loads would outlive the test
+        monkeypatch.setenv(MANIFEST_CERTIFICATION_SECRET_ENV, "")
+        monkeypatch.delenv(MANIFEST_CERTIFICATION_SECRET_ENV)
         monkeypatch.setenv(MANIFEST_CERTIFICATION_FINALIZER_ENV, "1")
 
         dotenv_boot.load_ava_env()
@@ -370,7 +373,7 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
             "-c",
             "import base.host.env.registry; import base.config; print('ok')",
         ],
-        cwd=Path(__file__).resolve().parents[2],  # repo root
+        cwd=Path(__file__).resolve().parents[4],  # repo root
         capture_output=True,
         text=True,
         timeout=120,

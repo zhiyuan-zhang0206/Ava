@@ -226,7 +226,7 @@ def test_ava_binary_path_prefers_this_checkout_over_path(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(shutil, "which", lambda _n: "/somewhere/else/bin/ava")  # pyright: ignore[reportUnknownArgumentType]
     resolved = Path(cron.ava_binary_path())
-    assert resolved.parent.parent.parent == Path(__file__).resolve().parents[2]
+    assert resolved.parent.parent.parent == Path(__file__).resolve().parents[3]
     assert resolved.parent.parent.name == ".venv"
 
 

@@ -169,7 +169,7 @@ frontend 3000, pg 5433, redis 6380, pgbouncer 6433, daemon healthz ports in
 every later read is `rec.ports[...]` off that record; a unit whose `.env` names no
 port binds the same numbers. Watchdog probe URLs + daemon/milvus/frontend ports
 derive from settings. The table is closed: a record with more or fewer slots is
-refused at start. Tests never use these numbers (`tests/base/test_fixed_ports.py`).
+refused at start. Tests never use these numbers (`base/cluster/tests/test_fixed_ports.py`).
 
 prod runtime and dev workspace are split at the filesystem level:
 
