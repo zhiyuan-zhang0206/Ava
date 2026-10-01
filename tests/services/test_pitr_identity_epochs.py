@@ -18,7 +18,7 @@ import sys
 import psutil
 import pytest
 
-from services.pitr.operation.custody import NativeProcess
+from services.backup_scheduler.operation.custody import NativeProcess
 from services.pitr.restore import postgres, proof
 from services.pitr.restore.postgres import SandboxPostgresIdentity
 

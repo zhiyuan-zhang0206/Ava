@@ -2273,7 +2273,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── R25: backup/PITR operation blocked on unproven closure ──
+      # ── R25: backup operation blocked on unproven closure ──
       # The controller could not prove its worker group closed, or found controls
       # whose closure no controller proved (controller death). That operation kind
       # refuses new work until an operator re-proves closure, so its schedule has
@@ -2294,8 +2294,8 @@ groups:
           description: >-
             Operations of kind {{ $labels.attributes_operation }} are blocked:
             group closure of an earlier operation is unproven, so no new work of
-            that kind starts. Run `ava pitr operations status`, then
-            `ava pitr operations retire` (preview) and `--confirm` once it
+            that kind starts. Run `ava backup operations status`, then
+            `ava backup operations retire` (preview) and `--confirm` once it
             reports closure proven; the next scheduled run then proceeds.
         data:
           - refId: A
@@ -2345,7 +2345,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── R26: backup/PITR operation quarantined after proven closure ──
+      # ── R26: backup operation quarantined after proven closure ──
       # A failed or cancelled operation whose group closure was proven: its
       # controls moved into the bounded quarantine and the next run proceeds.
       # Routine stop/drain during a scheduled job lands here too, so it warns.
@@ -2365,7 +2365,7 @@ groups:
           description: >-
             An operation of kind {{ $labels.attributes_operation }} failed or was
             cancelled after its worker group was proven closed. Its controls and
-            receipts are in the quarantine root (`ava pitr operations status`),
+            receipts are in the quarantine root (`ava backup operations status`),
             plaintext database material was removed, and the next scheduled run
             proceeds. Read the entry's failure.txt and stderr.log; repeated
             quarantines of one kind mean its schedule is not producing backups.

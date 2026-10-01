@@ -768,23 +768,25 @@ To re-prove a protected chain at an operator-chosen target LSN, run the
 isolated drill: `ava pitr drill` (procedure:
 `.agents/skills/operating-ava-cluster/references/physical-restore-drill.md`).
 
-Backup and PITR operations (daily dump, weekly logical restore drill, base
-candidate, restore proof, operator drill) each run as one owned worker group of
-their kind. A failed or cancelled operation whose group closure was proven --
-including an `ava stop` during the nightly dump -- is
-quarantined under its kind's `$AVA_HOME/backups/quarantine/<kind>/` or
-`$AVA_HOME/physical-backup/quarantine/<kind>/` (request, logs, `failure.txt`,
-receipts; plaintext database material removed), raises the
+Backup operations (the daily dump and the weekly logical restore drill) each
+run as one owned worker group of their kind. A failed or cancelled operation
+whose group closure was proven -- including an `ava stop` during the nightly
+dump -- is quarantined under its kind's `$AVA_HOME/backups/quarantine/<kind>/`
+(request, logs, `failure.txt`, receipts; plaintext database material
+removed), raises the
 `ava-ops-backup-operation-quarantined` warning, and the next scheduled run
 proceeds. Unproven closure (or a controller killed mid-operation) blocks only
 that kind and raises `ava-ops-backup-operation-blocked`:
 
 ```bash
-ava pitr operations status            # blocked kinds, reasons, newest quarantine entries
-ava pitr operations retire            # preview: re-prove closure of each blocked operation
-ava pitr operations retire --confirm  # quarantine every proven one; the kind proceeds
-ava pitr operations discard-candidate CHAIN [--confirm]  # drop one stale unfinished base capture
+ava backup operations status            # blocked kinds, reasons, newest quarantine entries
+ava backup operations retire            # preview: re-prove closure of each blocked operation
+ava backup operations retire --confirm  # quarantine every proven one; the kind proceeds
 ```
+
+The default-off PITR operations (base candidate, restore proof, operator drill)
+run on the same core under `$AVA_HOME/physical-backup/`; these two verbs cover
+the two logical kinds only.
 
 Closure covers the PostgreSQL children that `setsid` out of the worker group:
 retire also requires every recorded postgres birth dead and no process working
@@ -793,8 +795,7 @@ involved (`worker-present`, `group-members`, `postgres-family-alive`,
 `birth-unrecorded`, `unverifiable`, `quarantine-failed`); wait for them (or stop
 them) and retry. A controller killed while launching can only be proven after
 a reboot. A closed operation whose quarantine keeps failing shows as blocked
-and `retire --confirm` retries it. A leftover weekly `.ready` capture refuses
-an activation's forced candidate: clear it with `discard-candidate`. An upload-interrupted dump keeps
+and `retire --confirm` retries it. An upload-interrupted dump keeps
 its complete encrypted artifact in quarantine: restore from it directly
 (`.agents/skills/operating-ava-cluster/references/db-restore.md`) or copy it
 into `backups/db/` (0600); the next scheduled run dumps again.

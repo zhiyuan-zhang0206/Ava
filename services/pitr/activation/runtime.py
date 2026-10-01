@@ -479,7 +479,7 @@ async def _restore_activation_candidate(
     A cancelled proof reports its custody: an unresolved group closure names
     the blocked controls instead of hiding behind the cancellation.
     """
-    from services.pitr.operation.custody import OperationCustodyError
+    from services.backup_scheduler.operation.custody import OperationCustodyError
     from services.pitr.restore.operation_runtime import publish_restore, run_restore
 
     task = asyncio.create_task(run_restore(candidate))

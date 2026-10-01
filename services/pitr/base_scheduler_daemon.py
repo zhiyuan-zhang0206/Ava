@@ -21,6 +21,7 @@ from base.host.private_storage import ensure_private_dir
 from base.log import init_gateway_process
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.paths import ava_home
+from services.backup_scheduler.operation.custody import OperationBusyError, OperationDeferred
 from services.pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.activation.state import load_record as load_activation_record
 from services.pitr.activation.state import lock_path as activation_lock_path
@@ -28,7 +29,6 @@ from services.pitr.base_backup.candidate import reconcile_committed_cleanup
 from services.pitr.base_backup.manifest import CandidateManifest
 from services.pitr.base_backup.scheduler_health import components as _components
 from services.pitr.base_worker import run_candidate
-from services.pitr.operation.custody import OperationBusyError, OperationDeferred
 from services.pitr.restore.manifest import ProtectedManifest
 from services.pitr.restore.operation_runtime import (
     RestoreWorkerInput,

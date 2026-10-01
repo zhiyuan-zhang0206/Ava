@@ -14,6 +14,7 @@ One module per domain:
 - ``host`` — init/start/stop/restart/status/converge/firewall/trace
 - ``cluster`` — the whole-cluster verbs
 - ``agents`` — agents + notices
+- ``backup`` — scheduled backup operation custody
 - ``plugins`` — plugins + skill
 - ``mcp`` — mcp + memory initialization, refresh, and search
 - ``management`` — config + presets + schedules
@@ -24,6 +25,7 @@ from __future__ import annotations
 import argparse
 
 from cli.parsers.agents import _add_agents_parser
+from cli.parsers.backup import _add_backup_parser
 from cli.parsers.cluster import _add_cluster_parser
 from cli.parsers.computer import _add_computer_parser
 from cli.parsers.host import (
@@ -80,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_computer_parser(sub)
     _add_trace_parser(sub)
     _add_logs_parser(sub)
+    _add_backup_parser(sub)
     _add_pitr_parser(sub)
     _add_agents_parser(sub)
     _add_impersonation_parser(sub)

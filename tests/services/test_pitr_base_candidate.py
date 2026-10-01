@@ -455,8 +455,8 @@ def _prepared(tmp_path: Path, chain_id: str = "20260926T000000Z"):
 def test_commit_accepts_only_the_recorded_worker_then_retires_staging(tmp_path: Path) -> None:
     import psutil
 
+    from services.backup_scheduler.operation.custody import NativeProcess
     from services.pitr.base_backup.manifest import CandidateManifest
-    from services.pitr.operation.custody import NativeProcess
 
     root, ready, candidate = _prepared(tmp_path)
     candidate_module._record_owner(root, candidate.chain_id)
@@ -476,7 +476,7 @@ def test_commit_refusal_after_closure_retains_every_staged_file(
 
     import psutil
 
-    from services.pitr.operation.custody import NativeProcess
+    from services.backup_scheduler.operation.custody import NativeProcess
 
     root, ready, candidate = _prepared(tmp_path)
     candidate_module._record_owner(root, candidate.chain_id)
@@ -546,9 +546,9 @@ def test_a_capture_that_fails_its_own_verification_is_rejected_not_resumed(
 
     import psutil
 
+    from services.backup_scheduler.operation.custody import NativeProcess, OperationWorker
     from services.pitr.base_backup.candidate import CandidateFacts
     from services.pitr.base_backup.space_budget import CandidateSpaceBudget
-    from services.pitr.operation.custody import NativeProcess, OperationWorker
 
     root, ready, candidate = _prepared(tmp_path)
     owner = root / "base-facts" / f"{candidate.chain_id}.owner.json"

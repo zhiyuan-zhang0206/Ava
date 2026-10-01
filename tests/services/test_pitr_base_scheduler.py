@@ -15,10 +15,10 @@ import services.pitr.restore.operation_runtime as restore_runtime
 from base import telemetry
 from base.native_process.child_env import restricted_process_env
 from base.native_process.os_platform import LockTimeoutError
+from services.backup_scheduler.operation import worker_process as workers
 from services.pitr.activation.state import ActivationRecord, write_record
 from services.pitr.base_backup.manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.base_scheduler_daemon import BaseCandidateState, _components, is_due
-from services.pitr.operation import worker_process as workers
 from services.pitr.restore.manifest import (
     ProtectedManifest,
     RestoreObject,

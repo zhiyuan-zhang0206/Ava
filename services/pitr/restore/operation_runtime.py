@@ -15,9 +15,9 @@ from base.config import settings
 from base.config.physical_backup import PhysicalBackupSettings
 from base.native_process.child_env import forwarded_proxy_env, restricted_process_env
 from base.paths import ava_home
+from services.backup_scheduler.operation.custody import OperationKind
+from services.backup_scheduler.operation.worker_process import run_operation
 from services.pitr.base_backup.manifest import CandidateManifest
-from services.pitr.operation.custody import OperationKind
-from services.pitr.operation.worker_process import run_operation
 from services.pitr.restore.drill import validate_drill_inputs
 from services.pitr.restore.manifest import ProtectedManifest
 from services.pitr.restore.proof import (
