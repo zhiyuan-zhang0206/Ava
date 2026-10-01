@@ -54,11 +54,10 @@ def venv() -> DaemonProbe:
 
 def redis_acl() -> DaemonProbe:
     from base.cluster import ownership
-    from cli.commands.data_plane import cluster_instance as instance
     from services.healthchecks import owned_service
     from services.healthchecks import redis_acl as check
 
-    port = instance.configured_redis_port()
+    port = ownership.configured_redis_port()
     if port is None:
         return DaemonProbe.unavailable("no explicit local Redis endpoint")
 
@@ -82,7 +81,7 @@ def redis_acl() -> DaemonProbe:
             return await custody.capture(
                 client,
                 port=port,
-                data_dir=instance.redis_data_dir(),
+                data_dir=ownership.redis_data_dir(),
                 deadline=time.monotonic() + 5,
             )
         finally:
@@ -106,9 +105,9 @@ def redis_acl() -> DaemonProbe:
 
 def pgbouncer() -> DaemonProbe:
     from base.cluster import get_record, ownership
-    from base.cluster.authority import AuthorityRefusedError, read_pooler_admin
+    from base.cluster.authority import POOLER_ADMIN, AuthorityRefusedError, read_pooler_admin
+    from base.cluster.dataplane import pooler
     from base.paths import ava_home
-    from cli.commands.data_plane import pgbouncer as pooler
     from services.healthchecks import owned_service
 
     record = get_record(ava_home())
@@ -126,7 +125,7 @@ def pgbouncer() -> DaemonProbe:
     def protocol() -> DaemonProbe:
         loopback = pooler.pgbouncer_listener_reachable(port, admin_password)
         public = loopback and pooler.pgbouncer_public_listener_reachable(
-            port, pooler.POOLER_ADMIN, settings.data_plane.cluster_secret
+            port, POOLER_ADMIN, settings.data_plane.cluster_secret
         )
         if loopback and public:
             return DaemonProbe.up("native pooler admin console and required listeners answered")

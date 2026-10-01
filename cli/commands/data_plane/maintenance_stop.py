@@ -30,6 +30,7 @@ from redis.exceptions import RedisError
 
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
+from base.cluster.dataplane import pooler as pooler_files
 from base.config import settings
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
@@ -48,14 +49,14 @@ def capture_postgres() -> OwnedProcess | None:
 
 
 def _capture_pooler() -> OwnedProcess | None:
-    return ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
+    return ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path())
 
 
 def _require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
     """A missing pidfile or refused port is not evidence of no local process."""
     directories = {
         "postgres": instance._pg_data_dir().resolve(),
-        "redis-server": instance.redis_data_dir().resolve(),
+        "redis-server": ownership.redis_data_dir().resolve(),
     }
     for process in psutil.process_iter(["pid", "name"]):
         name = process.info["name"]
@@ -111,7 +112,7 @@ async def _request_stop(
         with contextlib.suppress(RedisConnectionError):
             await _redis_command(client, deadline, "SHUTDOWN", "SAVE" if save else "NOSAVE")
     else:
-        custodian = OwnedPooler.from_config(identity, pooler.ini_path())
+        custodian = OwnedPooler.from_config(identity, pooler_files.ini_path())
         if not custodian.stop(deadline=deadline):
             raise TimeoutError("PgBouncer stop incomplete; custody retained")
 
@@ -119,7 +120,7 @@ async def _request_stop(
 async def _stop(deadline: float, *, save: bool = True) -> list[str]:
     pg = capture_postgres()
     pgb = _capture_pooler()
-    port = instance.configured_redis_port()
+    port = ownership.configured_redis_port()
     if port is None:
         raise RuntimeError("maintenance requires this home's explicit Redis endpoint")
     # The default user is the native instance's admin identity. The runtime URL
@@ -138,7 +139,7 @@ async def _stop(deadline: float, *, save: bool = True) -> list[str]:
     custody = ownership.RedisConnectionCustody()
     try:
         redis_process = await custody.capture(
-            client, port=port, data_dir=instance.redis_data_dir(), deadline=deadline
+            client, port=port, data_dir=ownership.redis_data_dir(), deadline=deadline
         )
         captured = {
             name: process

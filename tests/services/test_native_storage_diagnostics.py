@@ -11,8 +11,8 @@ import pytest
 import redis
 
 from base import cluster
+from base.cluster import ownership
 from base.config import settings
-from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.tests.test_pooler_stop import native_pooler as native_pooler
 from services.ava_root.health import ProbeRunner
@@ -33,7 +33,7 @@ async def test_native_redis_diagnostic_observes_custody_without_acl_or_config_wr
             configuration = client.config_get("*")  # pyright: ignore[reportUnknownMemberType] — redis command stubs
             acl = client.acl_list()  # pyright: ignore[reportUnknownMemberType] — redis command stubs
             directory = Path(str(configuration["dir"])) if owned else tmp_path / "another-home"
-            monkeypatch.setattr(instance, "redis_data_dir", lambda: directory)
+            monkeypatch.setattr(ownership, "redis_data_dir", lambda: directory)
             result = await ProbeRunner().observe(probes.redis_acl, 5)
             assert result.verdict.value == ("alive" if owned else "unavailable"), result.detail
             assert client.ping(), "diagnostics must leave the native server running"  # pyright: ignore[reportUnknownMemberType] — redis command stubs
@@ -47,7 +47,7 @@ async def test_absent_native_redis_diagnostic_is_down(
     port = _free_port()
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{port}/0")
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
-    monkeypatch.setattr(instance, "redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
     result = await ProbeRunner().observe(probes.redis_acl, 5)
     assert result.verdict.value == "down", result.detail
     assert "no native Redis listener" in result.detail

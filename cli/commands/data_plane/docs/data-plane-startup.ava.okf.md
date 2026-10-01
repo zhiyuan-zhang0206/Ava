@@ -48,6 +48,13 @@ provisioning, checkpoint, grant and migration dials verify their native
 backend against the home's postmaster before DDL, which acts as the schema
 owner (`base.db.pg_admin`).
 
+The layout and bind facts the cli and the root diagnostics must agree on live in
+`base.cluster`, not in the cli: the Redis data directory and port
+(`ownership.redis_data_dir`, `ownership.configured_redis_port`), the data plane's
+bind posture (`port_preflight.bind_addrs`: loopback alone without a cluster secret,
+loopback plus the reachable address with one) and the pooler's files and listener
+probes (`dataplane.pooler`). The cli owns bring-up and stop; the diagnostics only look.
+
 ## Pooler
 
 PgBouncer starts only after schema and group grants exist, always with SCRAM

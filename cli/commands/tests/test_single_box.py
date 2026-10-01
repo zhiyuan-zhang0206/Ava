@@ -31,6 +31,7 @@ from base import cluster
 from base.cluster import authority, ownership
 from base.cluster.authority import fence
 from base.cluster.authority.api import API_TOKEN_ENV
+from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
 from base.host.net.url_secret import url_with_userinfo
 from cli.commands.data_plane import bringup
@@ -262,8 +263,8 @@ def test_generation_logins_work_with_group_privileges(born: Born) -> None:
 
 def test_pooler_admin_console_is_the_userlist_only_operator_entry(born: Born) -> None:
     admin = authority.read_pooler_admin(born.home)
-    assert pooler.pgbouncer_listener_reachable(born.pooler_port, admin.password)
-    assert not pooler.pgbouncer_listener_reachable(born.pooler_port, "wrong-password-xxxxx")
+    assert base_pooler.pgbouncer_listener_reachable(born.pooler_port, admin.password)
+    assert not base_pooler.pgbouncer_listener_reachable(born.pooler_port, "wrong-password-xxxxx")
     userlist = (born.home / "pgbouncer" / "userlist.txt").read_bytes()
     assert userlist == authority.render_userlist(born.home, authority.active_generation(born.home))
     names = [line.split('"')[1] for line in userlist.decode().splitlines()]
@@ -278,7 +279,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(born: Born) -
     name, password = born.login("gateway")
     with psycopg.connect(born.dsn("gateway"), prepare_threshold=None) as conn:
         conn.execute("SELECT 1")
-    owner_before = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
+    owner_before = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert owner_before is not None
     admin = authority.read_pooler_admin(born.home)
     userlist = authority.render_userlist(born.home, authority.active_generation(born.home))
@@ -296,15 +297,15 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(born: Born) -
         admin_password=admin.password,
     )
     assert rc == 0
-    owner_after = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
+    owner_after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert owner_after is not None and owner_after.pid != owner_before.pid
     _refused(host="127.0.0.1", port=born.pooler_port, user=name, password=password, dbname="ava")
 
 
 def test_unchanged_userlist_reloads_without_restart(born: Born) -> None:
-    before = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
+    before = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     bringup.complete_gateway_data_plane()
-    after = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
+    after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert before is not None and after is not None and before.pid == after.pid
 
 

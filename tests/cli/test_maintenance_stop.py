@@ -19,6 +19,8 @@ import psutil
 import pytest
 
 import cli.commands.lifecycle.root_driver as _root_driver_commands
+from base.cluster import ownership
+from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
 from base.native_process import pid_starttime_ticks
 from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend
@@ -285,7 +287,7 @@ def test_real_redis_stops_owned_instance_only(
             client.save()  # pyright: ignore[reportUnknownMemberType] — redis stubs
             client.set("owned-test", "latest-unsaved")
         monkeypatch.setattr(settings.data_plane, "redis_url", url)
-        monkeypatch.setattr(plane.instance, "redis_data_dir", lambda: data)
+        monkeypatch.setattr(ownership, "redis_data_dir", lambda: data)
         assert stop.stop_data_plane(3) == ["redis"]
         assert (
             not stop.OwnedProcess.capture(psutil.Process(pid)).live()
@@ -408,7 +410,7 @@ def test_redis_admin_credential_is_independent_of_runtime_url(
             settings.data_plane, "redis_url", url.replace("redis://", "redis://restricted:wrong@")
         )
         monkeypatch.setattr(settings.data_plane, "redis_admin_password", password)
-        monkeypatch.setattr(plane.instance, "redis_data_dir", lambda: Path(directory))
+        monkeypatch.setattr(ownership, "redis_data_dir", lambda: Path(directory))
         assert stop.stop_data_plane(3) == ["redis"]
 
 
@@ -583,9 +585,9 @@ def _launch_incident_shape_pooler(
     if addr is None:
         pytest.skip("this host has no non-loopback address for the reachable bind")
 
-    monkeypatch.setattr(pb, "ava_home", lambda: home)
-    monkeypatch.setattr(pb, "reachable_host", lambda: addr)
-    monkeypatch.setattr(plane.instance, "reachable_host", lambda: addr)
+    monkeypatch.setattr(base_pooler, "ava_home", lambda: home)
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: addr)
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: addr)
     monkeypatch.setattr(pb, "_pg_socket_dir", lambda: home / "pg-socket")  # pyright: ignore[reportUnknownArgumentType] — private fixture home
 
     port = _free_port()
@@ -599,7 +601,7 @@ def _launch_incident_shape_pooler(
         userlist=f'"{role}" "{secret}"\n'.encode(),
     )
     subprocess.run(  # noqa: S603 — private config, test-owned process
-        [binary, "-d", str(pb.ini_path())], check=True, capture_output=True, timeout=5
+        [binary, "-d", str(base_pooler.ini_path())], check=True, capture_output=True, timeout=5
     )
     try:
         _wait_port(port, timeout=5)
@@ -618,16 +620,16 @@ def _wait_pidfile(timeout: float = 5.0) -> int:
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if pb.pidfile_path().exists():
+        if base_pooler.pidfile_path().exists():
             with contextlib.suppress(ValueError):
-                return int(pb.pidfile_path().read_text().strip())
+                return int(base_pooler.pidfile_path().read_text().strip())
         time.sleep(0.05)
     raise AssertionError("the pooler never wrote its pidfile")
 
 
 def _pidfile_pid() -> set[int]:
     """The pid recorded in the (test-home) pooler pidfile, when readable."""
-    pidfile = pb.pidfile_path()
+    pidfile = base_pooler.pidfile_path()
     if not pidfile.exists():
         return set()
     with contextlib.suppress(ValueError):
@@ -653,7 +655,7 @@ def test_real_start_retains_pooler_with_held_client(
 
     port, role, secret, pid = _launch_incident_shape_pooler(home, monkeypatch)
     old = stop.OwnedProcess.capture(psutil.Process(pid))
-    config = (pb.ini_path().read_bytes(), pb._userlist_path().read_bytes())
+    config = (base_pooler.ini_path().read_bytes(), pb._userlist_path().read_bytes())
     try:
         with psycopg.connect(
             f"postgresql://{role}:{secret}@127.0.0.1:{port}/pgbouncer", autocommit=True
@@ -662,7 +664,7 @@ def test_real_start_retains_pooler_with_held_client(
             os.kill(pid, signal.SIGTERM)
             deadline = time.monotonic() + 5.0
             while time.monotonic() < deadline:
-                if not pb.pgbouncer_public_listener_reachable(port, role, secret):
+                if not base_pooler.pgbouncer_public_listener_reachable(port, role, secret):
                     break
                 time.sleep(0.05)
             else:
@@ -679,7 +681,7 @@ def test_real_start_retains_pooler_with_held_client(
                 )
             assert old.live(), "normal start must retain a pooler still draining its client"
             assert pb._running_pid() == pid, "no replacement may be launched"
-            assert (pb.ini_path().read_bytes(), pb._userlist_path().read_bytes()) == config
+            assert (base_pooler.ini_path().read_bytes(), pb._userlist_path().read_bytes()) == config
     finally:
         _kill_test_poolers(pid)
 
