@@ -6,9 +6,11 @@ the JUnit properties. The suite holds the leak classes seen in this repository, 
 that only fails because of it, and clean write-ups of the idioms the repository uses, which must
 stay silent.
 
-Also locked here: the guard is the first function-scoped autouse fixture of the real root stack
-(the design rests on teardown running in reverse), warn mode never changes a test result even when
-the guard itself breaks, and the JUnit properties are exactly what `scripts/ci/shard_counts.py` reads.
+Also locked here: `fail` is the default mode, the guard is the first function-scoped autouse
+fixture of the real root stack (the design rests on teardown running in reverse), a fault of the
+guard never changes a test result (the one exception is a fault of the snapshot or the comparison
+in fail mode, which is loud), and the JUnit properties are exactly what `scripts/ci/shard_counts.py`
+reads.
 """
 
 from __future__ import annotations
@@ -245,8 +247,15 @@ def test_without_the_guard_the_victims_are_the_red_tests(suite: Suite) -> None:
     assert not off.properties.keys() & (LEAKERS.keys() | NOTES.keys())
 
 
-def test_warn_is_the_default_and_names_exactly_the_leakers(suite: Suite) -> None:
-    run = suite.run()  # AVA_LEAK_GUARD unset
+def test_fail_is_the_default(suite: Suite) -> None:
+    default, fail = suite.run(), suite.run(mode="fail")  # AVA_LEAK_GUARD unset, and set to fail
+    assert default.outcomes == fail.outcomes
+    assert default.code == fail.code != 0
+    assert "leak guard (fail):" in default.out
+
+
+def test_a_warn_run_names_exactly_the_leakers(suite: Suite) -> None:
+    run = suite.run(mode="warn")
     assert run.named == {**LEAKERS, **NOTES}
     assert set(run.properties) == set(run.named), (
         "every finding is a property of that very testcase"
@@ -292,7 +301,7 @@ def test_the_guard_never_prints_a_value(suite: Suite) -> None:
 
 
 def test_under_xdist_the_controller_names_the_same_leakers(suite: Suite) -> None:
-    run = suite.run(xdist=True)
+    run = suite.run(mode="warn", xdist=True)
     assert run.named == {**LEAKERS, **NOTES}
     assert set(run.properties) == set(run.named)
     assert run.bad() <= VICTIMS  # a victim is red only when it shares a worker with its leaker
@@ -338,9 +347,13 @@ def test_fail_mode_reds_only_the_leakers_at_their_own_teardown(suite: Suite, xdi
     assert "fix (env): monkeypatch.delenv(name, raising=False) records nothing" in run.out
 
 
-def test_fail_mode_is_loud_about_a_guard_that_cannot_work(suite: Suite) -> None:
-    """A snapshot that raises, which warn contains, stops every test of a fail-mode run."""
-    run = suite.run(mode="fail", fault="snapshot", select=_CLEAN_FILE)
+@pytest.mark.parametrize("fault", ["snapshot", "compare"])
+def test_fail_mode_is_loud_about_a_guard_that_cannot_take_a_verdict(
+    suite: Suite, fault: str
+) -> None:
+    """A snapshot or a comparison that raises, which warn contains, stops every test of a fail-mode run:
+    without either there is no verdict, and the gate would pass silently."""
+    run = suite.run(mode="fail", fault=fault, select=_CLEAN_FILE)
     assert run.code != 0
     assert "passed" not in set(run.outcomes.values())
     assert "RuntimeError" in run.out
@@ -368,7 +381,7 @@ def test_registered_after_an_autouse_monkeypatch_plugin_the_guard_compares_too_e
     assert "leakdemo.selfmod.AGENT_ID (int) was added" in run.out  # still patched, not yet undone
 
 
-# -- warn mode never changes a result --------------------------------------------------------------
+# -- a fault of the guard never changes a result (fail mode: but for the snapshot and the comparison) --
 
 
 @pytest.mark.parametrize(
@@ -384,10 +397,10 @@ def test_registered_after_an_autouse_monkeypatch_plugin_the_guard_compares_too_e
         ),  # the controller cannot record a finding: no test is at hand
     ],
 )
-def test_a_fault_of_the_guard_is_one_report_line_and_changes_no_result(
+def test_in_warn_mode_a_fault_of_the_guard_is_one_report_line_and_changes_no_result(
     suite: Suite, fault: str, error: str, properties: list[str]
 ) -> None:
-    off, broken = suite.run(mode="off"), suite.run(fault=fault)
+    off, broken = suite.run(mode="off"), suite.run(mode="warn", fault=fault)
     assert broken.outcomes == off.outcomes
     assert broken.code == off.code
     assert "INTERNALERROR" not in broken.out
@@ -395,16 +408,32 @@ def test_a_fault_of_the_guard_is_one_report_line_and_changes_no_result(
     assert [v.partition(":")[0] for v in broken.fault_properties()] == properties
 
 
-def test_a_fault_of_the_summary_is_one_line_and_changes_no_result(suite: Suite) -> None:
-    off, broken = suite.run(mode="off"), suite.run(fault="summary")
+def test_in_warn_mode_a_fault_of_the_summary_is_one_line_and_changes_no_result(
+    suite: Suite,
+) -> None:
+    off, broken = suite.run(mode="off"), suite.run(mode="warn", fault="summary")
     assert broken.outcomes == off.outcomes
     assert broken.code == off.code
     assert "INTERNALERROR" not in broken.out
     assert "leak guard (warn): the summary failed: RuntimeError: injected fault" in broken.out
 
 
-def test_a_clean_session_with_a_broken_guard_still_passes(suite: Suite) -> None:
-    run = suite.run(fault="snapshot", select=_CLEAN_FILE)
+@pytest.mark.parametrize("fault", ["report", "collect", "summary"])
+def test_in_fail_mode_a_fault_of_the_reporting_is_not_a_result(suite: Suite, fault: str) -> None:
+    """Writing the property, handing findings to the controller and the summary cannot hide a leak from
+    the gate (the teardown error is the gate), so a fault there never fails a test or crashes the run."""
+    clean, broken = suite.run(mode="fail"), suite.run(mode="fail", fault=fault)
+    assert broken.outcomes == clean.outcomes
+    assert broken.code == clean.code
+    assert "INTERNALERROR" not in broken.out
+    if fault == "summary":
+        assert "leak guard (fail): the summary failed: RuntimeError: injected fault" in broken.out
+    else:
+        assert re.search(rf"^  FAULT {fault} x\d+: RuntimeError", broken.out, re.M)
+
+
+def test_a_clean_session_with_a_broken_guard_still_passes_in_warn_mode(suite: Suite) -> None:
+    run = suite.run(mode="warn", fault="snapshot", select=_CLEAN_FILE)
     assert run.code == 0
     assert run.bad() == set()
     assert "FAULT snapshot" in run.out
@@ -419,5 +448,7 @@ def test_the_properties_the_guard_writes_are_what_shard_counts_reads(suite: Suit
     assert [x["kind"] for x in counted["notes"]] == ["sys.path"]
     assert shard_counts.bucket_of(counted["leaks"][0]["test"].partition("::")[0]) == _TESTS
     assert "faults" not in counted
-    broken = shard_counts.count_junit(suite.run(fault="snapshot", select=_LEAKS_FILE).junit)
+    broken = shard_counts.count_junit(
+        suite.run(mode="warn", fault="snapshot", select=_LEAKS_FILE).junit
+    )
     assert [x["kind"] for x in broken["faults"]] == ["snapshot"]

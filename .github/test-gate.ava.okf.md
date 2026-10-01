@@ -49,7 +49,7 @@ It is not required and cannot fail the run.
 
 ### Leak-guard findings
 
-The root leak guard ([[../tests/docs/test-leak-guard.ava.okf.md]]) writes each finding as a JUnit property of the test that leaked. The same shard step carries them into `shard-counts-N.json` (`leaks`, `notes`, `faults`; absent when there are none), and the counts job reports the whole run from that one job, so a leak is read without pulling any shard log: the job summary, one `leak guard (warn)` annotation of at most 40 lines (one line per file, kind and thing leaked), and the `test-leak-report` artifact with the full list.
+The root leak guard ([[../tests/docs/test-leak-guard.ava.okf.md]]) writes each finding as a JUnit property of the test that leaked. The same shard step carries them into `shard-counts-N.json` (`leaks`, `notes`, `faults`; absent when there are none), and the counts job reports the whole run from that one job, so a leak is read without pulling any shard log: the job summary, one `leak guard` annotation of at most 40 lines (one line per file, kind and thing leaked), and the `test-leak-report` artifact with the full list.
 
 ```bash
 gh api repos/OWNER/REPO/check-runs/JOB_ID/annotations --jq '.[]|select(.title|startswith("leak guard"))|.message'
