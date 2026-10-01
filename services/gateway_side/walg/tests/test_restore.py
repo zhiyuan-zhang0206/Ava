@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, LiteralString, cast
@@ -55,6 +56,7 @@ def _scalar(conn: psycopg.Connection[Any], sql: str) -> Any:
 class Scenario:
     backup: str
     target: str  # right after B1b
+    target_time: str  # after B1b committed, before B2 started
     b1_segment: str  # the archived segment holding B1
 
 
@@ -72,10 +74,12 @@ def _scenario(sandbox: Sandbox, pg: PgInstance) -> Scenario:
     b1_segment = archive_current_segment(conn, sandbox)
     conn.execute("INSERT INTO t VALUES ('B1b')")
     target = str(_scalar(conn, "SELECT pg_current_wal_insert_lsn()"))
+    target_time = str(_scalar(conn, "SELECT clock_timestamp()"))
+    time.sleep(0.1)  # B2 commits strictly after the target time
     conn.execute("INSERT INTO t VALUES ('B2')")
     archive_current_segment(conn, sandbox)
     conn.close()
-    return Scenario(backup, target, b1_segment)
+    return Scenario(backup, target, target_time, b1_segment)
 
 
 def _restored_rows(instance: restore.RestoredInstance) -> list[str]:
@@ -131,6 +135,21 @@ def test_recovers_to_the_target_lsn_and_never_touches_the_source(
         assert _scalar(pg.connect(), "SELECT count(*) FROM t") == 4
     assert any("promoted on timeline 2" in line for line in reports)
     _assert_data_directory_left_behind(destination, socket_dirs)
+
+
+def test_recovers_to_a_target_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sandbox = make_sandbox(tmp_path, monkeypatch)
+    with archiving_postgres() as pg:
+        scenario = _scenario(sandbox, pg)
+        with restored_instance(
+            tmp_path / "restored",
+            backup=scenario.backup,
+            target=RecoveryTarget(time=scenario.target_time),
+            report=lambda _line: None,
+            user="ava",
+            keep_data=False,
+        ) as instance:
+            assert _restored_rows(instance) == ["A", "B1", "B1b"]
 
 
 def test_without_a_target_recovery_replays_all_archived_wal(
