@@ -5,7 +5,7 @@
     "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17
   },
   "directories": {
-    "tests/cli": 28
+    "tests/cli": 27
   },
   "files": {
     "tests/cli/test_impersonation_bridge.py": 965
