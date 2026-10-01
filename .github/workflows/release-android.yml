@@ -125,6 +125,11 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ui/app/src-tauri
+          # Only the main push saves. A cache written on an android-v* tag ref
+          # is readable only by that tag, so no later release ever reuses it,
+          # and each copy counts against the repository's 10 GB cache cap. Tag
+          # runs still restore main's entry (the key family shared with App CI).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the Tauri CLI
         run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
