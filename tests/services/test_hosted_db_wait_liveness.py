@@ -23,9 +23,9 @@ from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host import daemon, db_recovery
 from services.agent_host.dispatcher import InboundWakeDispatcher, PendingInboundWake, TurnScheduler
 from services.agent_host.host import AgentHost
+from services.agent_host.tests.test_hosted_db_recovery import _admit, _graph
 from services.delivery_watchdog import turn_liveness
-from tests.agent.test_hosted_db_recovery import _admit, _graph
-from tests.services.test_delivery_watchdog_turn_liveness import FakeRedis
+from services.delivery_watchdog.tests.test_delivery_watchdog_turn_liveness import FakeRedis
 
 
 @pytest.fixture(autouse=True)

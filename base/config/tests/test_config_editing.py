@@ -3,7 +3,7 @@
 the ConfigPatchPlan parser that PUT /api/config and the host-side
 config_write_op both consume.
 
-The HTTP behavior-level coverage lives in tests/gateway/test_config_api.py;
+The HTTP behavior-level coverage lives in gateway/routers/tests/test_config_api.py;
 these tests lock the policy itself (gate matrix, scope routing, reducer
 semantics, scalar coercion) with synthetic metadata, no fixtures.
 """

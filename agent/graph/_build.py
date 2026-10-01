@@ -222,7 +222,7 @@ class _TurnScopedRetryPolicy(RetryPolicy):
     never iterated field-wise.
 
     That is a dependency's internal read timing, so it is pinned by
-    `tests/agent/test_turn_scoped_retry.py`, which drives LangGraph's real retry
+    `agent/graph/tests/test_turn_scoped_retry.py`, which drives LangGraph's real retry
     loop rather than asserting on this class alone. If a future version snapshots
     the policy instead, that test fails loudly — and the constructor below still
     fills the underlying tuple slots with the build-time values, so even an

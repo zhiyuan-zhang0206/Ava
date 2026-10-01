@@ -194,7 +194,7 @@ def test_bootstrap_keeps_existing_reachable_url_host(
     serve_generation(tmp_path)
     monkeypatch.setattr(config, "_self_machine_host", lambda: "10.0.0.3")
     dp = config.settings.data_plane
-    # parts-built, scanner-safe (same convention as tests/cli/test_converge.py)
+    # parts-built, scanner-safe (same convention as cli/commands/converge/tests/test_converge.py)
     host_url = f"postgresql://ava_main:{'sek'}@10.0.0.2:5433/ava_main"
     monkeypatch.setattr(dp, "db_url", host_url)
     upsert_env(tmp_path / ".env", {"AVA_DB_URL": host_url})

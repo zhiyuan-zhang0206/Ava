@@ -418,10 +418,10 @@ check-typed-exception = true
 # The typed S110 findings in scripts/tests were outside the retired lint's
 # production scan; preserve that boundary.
 "scripts/codegen/gen_config_lite_table.py" = ["S110"]
-"tests/ava/mcps/test_daemon.py" = ["S110"]
-"tests/ava/test_core.py" = ["S110"]
-"tests/ava/test_migration_reset.py" = ["S110"]
-"tests/gateway/test_schedule_runner.py" = ["S110"]
+"ava/mcps/tests/test_daemon.py" = ["S110"]
+"agent/graph/claim/tests/test_core.py" = ["S110"]
+"base/deploy/tests/test_migration_reset.py" = ["S110"]
+"gateway/tests/test_schedule_runner.py" = ["S110"]
 "tests/integration/test_grafana_native_runtime.py" = ["S110"]
 "tests/services/test_backup_scheduler_shutdown.py" = ["S110"]
 # T20 exemptions — print() is legitimate here: cli/ writes to the user's
@@ -456,7 +456,7 @@ check-typed-exception = true
 "services/agent_host/runtime.py" = ["TID251"]
 # tests may import contextvars to exercise the propagation contracts
 "tests/base/test_turn_identity.py" = ["TID251"]
-"tests/agent/test_turn_scoped_retry.py" = ["TID251"]
+"agent/graph/tests/test_turn_scoped_retry.py" = ["TID251"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["ava", "cli", "base", "runtime"]
@@ -675,6 +675,21 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "ava/gateway_client/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "ava/mcps/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "ava/sdk_surface/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "ava/shell/coding_tools/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -690,6 +705,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "ava_builtins/plugins/ava_code/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "ava_builtins/plugins/ava_fleet/task_maintenance/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -701,6 +721,16 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "ava_builtins/plugins/ava_memory/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "ava_builtins/plugins/ava_silent_idle/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "ava_builtins/plugins/ava_syntax_fix/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -765,6 +795,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/cluster/authority/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/cluster/dataplane/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -806,6 +841,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/deploy/maintenance/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/deploy/schema/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -886,6 +926,16 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/packages/skills/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/packages/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/paths/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1005,6 +1055,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/structure/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -1015,7 +1070,67 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/agent_host/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_ops/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/ava_root/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/ava_root_glue/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/backup_scheduler/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/browser/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/computer/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/delivery_watchdog/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/events_maintenance/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/gate/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/gateway_side/backup/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/healthchecks/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/heartbeat/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1030,7 +1145,52 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/im_bridge/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/labeler/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/memory_indexer/backends/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/memory_indexer/embeddings/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/memory_indexer/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/memory_search/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/page_server/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/permissions_helper/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/redis_bridge/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

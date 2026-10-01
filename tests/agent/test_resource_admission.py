@@ -24,8 +24,8 @@ from base.agents.incarnation.resources import (
     decode_resources,
     register_exec,
 )
+from base.agents.incarnation.tests.test_resources import _admitted, _entry, _force, _process
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from tests.agent.test_resources import _admitted, _entry, _force, _process
 
 
 async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(

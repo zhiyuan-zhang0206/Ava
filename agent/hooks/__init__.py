@@ -50,7 +50,7 @@ from ._registry import (
 )
 
 # Current built-in plugin list (lives under `ava_builtins/plugins/`).
-# Only used as a test fixture: tests/agent/test_builtin_metadata.py uses it
+# Only used as a test fixture: agent/hooks/tests/test_builtin_metadata.py uses it
 # to confirm each name has a corresponding directory + parseable plugin.py.
 # Runtime loading uses `plugins_config.discover_plugins()` filesystem scan,
 # does not read this constant.

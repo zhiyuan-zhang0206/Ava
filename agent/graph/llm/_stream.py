@@ -269,7 +269,7 @@ async def _consume_stream_with_stall_timeout(
 
     Extracted to module-level helper: reduces `_llm_node_impl`'s statement
     count (PLR0915) + lets unit tests drive directly
-    (`tests/agent/test_llm_stream_stall.py`).
+    (`agent/graph/llm/tests/test_llm_stream_stall.py`).
     """
     chunk_idx = 0
     first_ts: float | None = None

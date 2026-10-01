@@ -5,6 +5,9 @@
     "services/browser/page_lifecycle.py::reap_dead_agent_pages": 17,
     "services/browser/probe.py::_probe_browser": 17
   },
+  "files": {
+    "services/browser/tests/test_browser_mcp_daemon.py": 1511
+  },
   "nesting": {
     "services/browser/mcp_daemon.py::_handle_client": 7
   }

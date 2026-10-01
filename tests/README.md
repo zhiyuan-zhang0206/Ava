@@ -66,9 +66,9 @@ new path added there (the file's docstring says how).
 | Source | Test |
 |------|------|
 | `base/packages/plugins/manifest.py` | `base/packages/plugins/tests/test_manifest.py` |
-| `agent/graph/exec/node.py` | `tests/agent/test_exec_output.py` |
-| `gateway/agents/timeline.py` | `tests/gateway/test_timeline.py` |
-| `ava/shell.py` | `tests/ava/test_shell.py` |
+| `agent/graph/exec/node.py` | `agent/graph/exec/tests/test_exec_output.py` |
+| `gateway/agents/timeline.py` | `gateway/agents/tests/test_timeline.py` |
+| `ava/shell.py` | `ava/shell/tests/test_shell.py` |
 
 If adding a new sub-module (e.g., `ava/new_module.py`), create `test_new_module.py` in
 the package's own `tests/` directory when it has one (`ava/tests/`), otherwise under

@@ -9,7 +9,7 @@ Two surfaces:
 
 Skills are faked by running in a per-test unit home (`unit_home`) and treating
 every dir under `<home>/skills` as an enabled overlay entry — same shape as
-tests/ava/test_skills.py.
+ava/tests/test_skills.py.
 """
 
 from __future__ import annotations

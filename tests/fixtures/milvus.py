@@ -93,7 +93,7 @@ def milvus_client(milvus_server: str, monkeypatch: pytest.MonkeyPatch) -> Iterat
     """
     # Settings module-loaded once BaseSettings, setenv then settings.services.milvus_uri
     # does not re-read env. Directly monkeypatch.setattr change Settings instance field, consistent with
-    # tests/ava/test_web.py and other monkeypatch patterns.
+    # ava/tests/test_web.py and other monkeypatch patterns.
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "milvus_uri", milvus_server)

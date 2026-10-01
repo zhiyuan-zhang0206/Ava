@@ -26,10 +26,10 @@ from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
-from tests.agent.test_hosted_db_recovery import _admit, _graph
+from services.agent_host.tests.test_hosted_db_recovery import _admit, _graph
+from services.agent_host.tests.test_turn_dispatcher import _ScanScheduler, _stale_age
 from tests.base.poll_until import poll_until_async
 from tests.services.test_agent_host import _PendingScanPool
-from tests.services.test_turn_dispatcher import _ScanScheduler, _stale_age
 
 
 def _accept_model_config(**_kwargs: object) -> str:

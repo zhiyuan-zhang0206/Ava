@@ -22,7 +22,7 @@
 >
 > The design's own S2 lock — *install on home A materializes on home B, two
 > homes one PG* — is exercised by
-> `tests/cli/test_extension_two_home_chain.py`.
+> `cli/commands/extensions/tests/test_extension_two_home_chain.py`.
 >
 > A prerequisite the slice walked into rather than introduced: the `extensions`
 > migration is the first post-baseline one to CREATE a table, and a cluster's

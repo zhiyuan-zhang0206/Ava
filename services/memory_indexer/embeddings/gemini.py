@@ -6,7 +6,7 @@ class behind `embeddings.factory`). This is a thin wrapper over the
 Gemini Developer API `batchEmbedContents` endpoint, moved verbatim from
 the pre-abstraction `services/memory_indexer/embedder.py` — the wire
 contract (endpoint, payload, auth header, retry policies, dim, shape
-validation) is unchanged, pinned by `tests/services/test_embeddings.py`.
+validation) is unchanged, pinned by `services/memory_indexer/embeddings/tests/test_embeddings.py`.
 
 Deliberately does NOT use the `google-genai` SDK: importing it eagerly
 pulls an MCP + ASGI (starlette / uvicorn) + aiohttp stack into the
@@ -315,7 +315,7 @@ class GeminiEmbeddingProvider:
     Behavior-identical to the legacy `embedder` module it replaced: the
     same endpoint, payload, auth, per-site retry policies, dim, and shape
     validation — pinned by the contract tests in
-    `tests/services/test_embeddings.py`.
+    `services/memory_indexer/embeddings/tests/test_embeddings.py`.
     """
 
     name = "gemini"

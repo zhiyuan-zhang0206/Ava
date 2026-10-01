@@ -12,7 +12,7 @@ from base.config import settings
 
 # The capability constants are typed frozenset[MachineRole]; capability values
 # are irrelevant to the roster-driven assertions here (same precedent as
-# tests/cli/test_cluster_health.py).
+# cli/commands/cluster/tests/test_cluster_health.py).
 from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 from services.ava_root.manifest import ManifestError, load_manifests
 from services.ava_root.supervisor import SupervisorConfig

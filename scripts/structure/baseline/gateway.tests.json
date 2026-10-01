@@ -1,0 +1,41 @@
+{
+  "complexity": {
+    "gateway/tests/test_mcp_clients.py::test_create_shows_token_once_and_list_redacts_credentials": 18,
+    "gateway/tests/test_metrics_router.py::test_metrics_agents_multi_agent": 17,
+    "gateway/tests/test_notices_endpoint.py::test_escalations_return_open_task_notices_with_task_context": 16,
+    "gateway/tests/test_ops_monitor.py::test_ops_monitor_empty_envelope_and_zero_fill": 15,
+    "gateway/tests/test_ops_monitor.py::test_ops_monitor_llm_wires_prometheus_and_loki": 16,
+    "gateway/tests/test_routes.py::test_dashboard_shards_long_loki_windows_and_merges_aggregates": 20,
+    "gateway/tests/test_status_cluster.py::TestClusterPanel.test_machines_list_local_plus_remote": 17,
+    "gateway/tests/test_status_cluster.py::TestDetachedRecoveryDial.test_transition_window_simulation": 21
+  },
+  "files": {
+    "gateway/tests/test_agent_inspect.py": 823,
+    "gateway/tests/test_idempotency.py": 859,
+    "gateway/tests/test_notices_endpoint.py": 1402,
+    "gateway/tests/test_routes.py": 1221,
+    "gateway/tests/test_sse.py": 842,
+    "gateway/tests/test_status_cluster.py": 1156
+  },
+  "patch_targets": {
+    "gateway/tests/test_agent_inspect.py::gateway.inspect._live": 1,
+    "gateway/tests/test_cache.py::gateway.cluster._stats_dashboard": 2,
+    "gateway/tests/test_cache.py::gateway.cluster.status._compute_stats_dashboard": 8,
+    "gateway/tests/test_cache.py::gateway.lgtm._loki_transport": 1,
+    "gateway/tests/test_idempotency.py::gateway.agents.state._prepare_message_content": 2,
+    "gateway/tests/test_idempotency.py::gateway.middleware.idempotency._MAX_WAIT_SECONDS": 1,
+    "gateway/tests/test_idempotency.py::gateway.middleware.idempotency._claim": 2,
+    "gateway/tests/test_idempotency.py::gateway.middleware.idempotency._drain_and_store": 1,
+    "gateway/tests/test_idempotency.py::gateway.middleware.idempotency._fetch": 2,
+    "gateway/tests/test_idempotency.py::gateway.middleware.idempotency._monotonic": 2,
+    "gateway/tests/test_inspect_metrics.py::gateway.inspect._metrics": 1,
+    "gateway/tests/test_mcp_endpoint.py::gateway.agents.router._forward_spawn_to_remote": 1,
+    "gateway/tests/test_routes.py::gateway.cluster._stats_dashboard": 3,
+    "gateway/tests/test_sse.py::gateway.events.sse._HEARTBEAT_SECONDS": 1,
+    "gateway/tests/test_status_cluster.py::gateway.cluster.roster_probe._start_recovery_thread": 3,
+    "gateway/tests/test_status_cluster.py::gateway.cluster.status._STATUS_CACHE_TTL_S": 1,
+    "gateway/tests/test_status_cluster.py::gateway.cluster.status._probe_agent_runner": 1,
+    "gateway/tests/test_terminate_forward.py::gateway.agents.lifecycle._forward_to_home_machine": 7,
+    "gateway/tests/test_terminate_forward.py::gateway.agents.lifecycle._open_tasks_hint_blocking": 1
+  }
+}

@@ -24,9 +24,9 @@ from ops.roster import build_services
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.ava_root.server import ControlServer
 from services.ava_root.supervisor import Supervisor, SupervisorConfig
+from services.gate.tests.test_gate import _FakeApp, _FakeGateway, _request, _Servers
+from services.gate.tests.test_gate import servers as servers
 from services.healthchecks import gate
-from tests.services.test_gate import _FakeApp, _FakeGateway, _request, _Servers
-from tests.services.test_gate import servers as servers
 
 
 async def _ready(probe: Callable[[], DaemonProbe]) -> DaemonProbe:

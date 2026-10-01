@@ -74,7 +74,7 @@ async def test_llm_node_collects_chunks_into_final_message(
 ) -> None:
     """llm_node merges streaming chunks into AIMessage into state.messages.
 
-    streaming → Redis behavior is separately tested in tests/agent/test_callbacks.py
+    streaming → Redis behavior is separately tested in agent/graph/tests/test_callbacks.py
     via RedisStreamHandler (agent/graph/_callbacks.py) inline dispatch inside _stream loop;
     this test only verifies node's chunk-to-AIMessage merging semantics.
     """
@@ -413,4 +413,4 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
 # After Step 2 cancel-in-node RAII exec_node no longer catches top-level
 # SubprocessCancelledPartial (task.cancel() path deleted); real cancel goes through
 # cancel_event race → _cancel_subprocess_task internal catch. Coverage path see
-# tests/agent/test_cancel.py::test_exec_node_cancel_event_race_captures_partial_stdout
+# agent/graph/exec/tests/test_cancel.py::test_exec_node_cancel_event_race_captures_partial_stdout
