@@ -153,7 +153,7 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     rest stay green while quietly testing a different world.
 
     The opt-in for the installed meaning is `_installed_machine_identity` in
-    `tests/cli/conftest.py` — a module takes it with one line:
+    `tests/path_scoped/cli_tests.py` — a module takes it with one line:
     `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
     """
     from base.cluster.machine import reset_identity

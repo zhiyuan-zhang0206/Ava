@@ -34,8 +34,8 @@ from base.sessions.pty import cli as pty_cli
 from base.sessions.pty import host as pty_host
 from base.sessions.pty import orphan_reaper, session_tree
 from base.sessions.record import SessionRecord, pid_starttime_ticks
-from tests.cli.conftest import PtyReaper
-from tests.cli.conftest import pty_reaper as pty_reaper
+from tests.path_scoped.pty_reaper import PtyReaper
+from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
 
