@@ -12,8 +12,8 @@ span if the external side dies.
 
 ## Start a named session
 
-Run the commands with a bare `ava`: it acts on the cluster `AVA_HOME` names and
-refuses without it. A checkout's own `.venv/bin/ava` acts on that checkout's
+Run the commands with a bare `ava`: it acts on the cluster `AVA_HOME` names,
+else `~/.ava`. A checkout's own `.venv/bin/ava` acts on that checkout's
 cluster.
 
 ```bash
