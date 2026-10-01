@@ -153,7 +153,9 @@ _DOWNLOAD_POLICY = Policy(
 )
 
 
-def _download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
+def _download(
+    url: str, *, headers: dict[str, str] | None = None, what: str = "vendored Postgres"
+) -> bytes:
     attempt = 0
 
     def _fetch_once() -> bytes:
@@ -175,7 +177,7 @@ def _download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
     try:
         return retry(_DOWNLOAD_POLICY)(_fetch_once)
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"failed to download vendored Postgres from {url}: {exc}") from exc
+        raise RuntimeError(f"failed to download {what} from {url}: {exc}") from exc
 
 
 def _extract_pg(jar_bytes: bytes, target: Path) -> None:
