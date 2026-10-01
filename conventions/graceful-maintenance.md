@@ -146,10 +146,8 @@ switching it to the new lifecycle.
 
 Cold preparation can retain an expired owned idle row only when its native
 consumers are absent, resources are empty and the latest persisted checkpoint
-is a complete halted END. The same boundary can park a completed legacy
-restart stranded in `restarting`: its done, untargeted command must precede
-the final exit checkpoint. Only the parked status changes; historical leases,
-identity, messages, checkpoints and lifecycle acknowledgements are preserved.
+is a complete halted END. Nothing is written: historical leases, identity,
+messages, checkpoints and lifecycle acknowledgements are preserved.
 An expired lease alone, unfinished lifecycle/graph work or an uncertain
 checkpoint still refuses; queued ordinary messages remain available for resume.
 Preparation settles orphaned ordinary claims on non-cold parked agents and

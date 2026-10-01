@@ -82,30 +82,18 @@ state.
    - `$AVA_HOME/deploy-state.json`, the retired updater's Gate marker, has no
      reader or writer; Gate never renders an update page. Delete it in the
      cutover record.
-   - The `cluster_pin` row keeps frozen legacy values that nothing reads.
-     Retire it with the controller storage below.
 
-## Planned: remove retired controller storage
+## Retired controller storage
 
 The old controller graph, hold-watchdog state machine, stranded-hold writers,
-alerts and status fields are removed from code. A separate explicit cleanup
-migration/cutover must remove the now-unused `host_deploy_state` columns
-`stranded_hold_since`, `stranded_hold_reason`, `stranded_hold_attempts`,
-`stranded_hold_attempted_at`, and `stranded_hold_recovery_note`. No current
-reader or writer treats these historical values as maintenance authority.
-Physical schema deletion is not implemented in this slice.
-The same cutover must retire `cluster_last_update` and the unused updater-outcome
-columns in `host_deploy_state`. Their controller producers and status projections
-are removed together; historical values must not masquerade as a current release
-operation. The same cutover drops `deployment_state.managed_writer_evidence` and
-the `lock_runtime_publication_admission()` function, which no code reads or
-calls. Preserve active maintenance and deployment guards until their replacement
-authority is implemented and verified. Mixed deployment-clock
-and telemetry helpers still serve live deployment-window settlement; deleting
-their retired callers does not authorize removing those shared guards.
-The cutover must also reconcile any historical `deploy-probe` alert named
-`update failed: host left held`; its retired heartbeat writer no longer resolves
-such records. No runtime alert cleanup was performed by the source deletion.
+alerts and status fields were removed from code, and migration
+`20261001T055030_drop-retired-deploy-and-watcher-storage` dropped their storage
+([decision](../../decisions/2026-10-01-contract-the-retired-deploy-storage.md)).
+
+Not done: the cutover must also reconcile any historical `deploy-probe` alert
+named `update failed: host left held`; its retired heartbeat writer no longer
+resolves such records. That is alert data, not schema, and no runtime alert
+cleanup was performed by the source deletion.
 
 ## Planned: unowned-termination follow-ups
 

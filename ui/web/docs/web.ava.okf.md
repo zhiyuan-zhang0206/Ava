@@ -11,11 +11,11 @@ description: Overview index of the Ava frontend subsystem—Next.js 16 Web UI (f
 Ava frontend subsystem—Next.js 16 web interface for fleet supervision, agent conversation management, task tracking, cluster configuration. All source code is in `ui/web/src/`.
 
 The console exposes four agent statuses: `running`, `idling`, `impersonated`,
-and `terminated`. The gateway wire deliberately retains its finer control-plane
-states (`allocated`, `starting`, and `restarting`); every
-frontend ingest path (`/api/agents`, lifecycle SSE snapshots, and the fleet
-graph) exhaustively projects those non-executing transitions to `idling` before
-they enter a cache. Machine/process reachability remains the separate
+and `terminated`. The first, second and last are the gateway's lifecycle
+states (`AgentStatus`); every frontend ingest path (`/api/agents`, lifecycle SSE
+snapshots, and the fleet graph) projects them through an exhaustive switch
+before they enter a cache, so a new wire state fails type-checking instead of
+inventing a display fallback. Machine/process reachability remains the separate
 `liveness_state` axis, so this projection never hides an offline runner.
 `impersonated` is a separate, card-level projection (`projectAgentStatus` in
 `src/lib/types.ts`): only the roster/directory card carries the open

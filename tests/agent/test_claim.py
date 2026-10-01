@@ -1551,14 +1551,10 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Veto half 1: a same-batch chat newer than the terminate keeps the agent
-    alive. A `closed_at` stamped by the retired closed-agent concept no longer
-    exempts the terminate (decisions/2026-09-27-terminate-has-no-closed-state.md)."""
+    alive."""
     from agent.db import ClaimedInbound
 
     tid = spawn_agent()
-    with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET closed_at = now() WHERE id = %s", (tid,))
-    db_conn.commit()
     terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     chat_id = insert_inbound_message(db_conn, tid, "message in the batch", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
@@ -1982,7 +1978,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
 ):
     """compact_request + restart in same batch → compact_request is the discarded loser:
     does **not** run the backend Compaction LLM (if it raised, the already consumed restart row
-    would be lost before the RESTARTING marker), restart exits normally. Re-trigger /compact afterwards."""
+    would be lost before the restart is applied), restart exits normally. Re-trigger /compact afterwards."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")

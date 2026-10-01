@@ -195,7 +195,7 @@ def test_insert_restart_completed_inbound_traces_newest_restart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The completion marker retains the restart envelope the claim will render."""
-    agent_id = _seed_agent(db_conn, "restarting")
+    agent_id = _seed_agent(db_conn, "idling")
     payload = {"config_overlay": {"model": "gpt-5"}}
     post_commit_events: list[Event] = []
     emitted: list[Event] = []
@@ -232,7 +232,7 @@ def test_insert_restart_completed_inbound_without_restart_returns_none(
     db_conn: psycopg.Connection,
 ) -> None:
     """Callers decide how to handle a missing restart inbound; the helper does not insert."""
-    agent_id = _seed_agent(db_conn, "restarting")
+    agent_id = _seed_agent(db_conn, "idling")
     with db_conn.cursor() as cur:
         assert db.insert_restart_completed_inbound(cur, agent_id, post_commit_events=[]) is None
     db_conn.commit()
@@ -242,11 +242,10 @@ def test_insert_restart_completed_inbound_without_restart_returns_none(
 
 def test_signal_live_agents_restart_only_live(db_conn: psycopg.Connection) -> None:
     """One restart inbound (content='', the given source) per running/idling agent;
-    terminated/restarting get none. Returns the ids signalled."""
+    terminated get none. Returns the ids signalled."""
     running = _seed_agent(db_conn, "running")
     idling = _seed_agent(db_conn, "idling")
     terminated = _seed_agent(db_conn, "terminated")
-    restarting = _seed_agent(db_conn, "restarting")
 
     ids = db.signal_live_agents_restart(source="system:update")
 
@@ -254,7 +253,6 @@ def test_signal_live_agents_restart_only_live(db_conn: psycopg.Connection) -> No
     assert _inbound_rows(db_conn, running) == [("restart", "system:update", "")]
     assert _inbound_rows(db_conn, idling) == [("restart", "system:update", "")]
     assert _inbound_rows(db_conn, terminated) == []
-    assert _inbound_rows(db_conn, restarting) == []
 
 
 def test_signal_live_agents_restart_requires_an_unexpired_lease(
@@ -288,7 +286,6 @@ def test_agent_is_alive_predicate() -> None:
     assert db.agent_is_alive("running", None) is False  # pre-lease row
     assert db.agent_is_alive("running", past) is False  # expired
     assert db.agent_is_alive("terminated", future) is False
-    assert db.agent_is_alive("restarting", future) is False
 
 
 def test_signal_live_agents_restart_none_live(db_conn: psycopg.Connection) -> None:

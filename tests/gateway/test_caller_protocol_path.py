@@ -128,7 +128,6 @@ _MUTATIONS: dict[str, LiteralString] = {
     "no_lease": "lease_expires_at = NULL",
     "expired": "lease_expires_at = clock_timestamp() - interval '1 second'",
     "terminated": "status = 'terminated'",
-    "restarting": "status = 'restarting'",
     "terminated_before_legacy": "status = 'terminated', runtime_protocol_version = 0",
     "owner_before_legacy": "runtime_owner = NULL, runtime_protocol_version = 0",
     "legacy_before_expired_lease": (
@@ -148,7 +147,6 @@ _EXPECTED_REFUSAL: dict[str, tuple[str, str]] = {
     "no_lease": ("lease_expires_at is NULL", "no lease"),
     "expired": ("lease_expires_at is", "expired; must be in the future"),
     "terminated": ("status is 'terminated'", "requires running or idling"),
-    "restarting": ("status is 'restarting'", "requires running or idling"),
     "terminated_before_legacy": ("status is 'terminated'", "requires running or idling"),
     "owner_before_legacy": ("runtime_owner is NULL", "records both"),
     "legacy_before_expired_lease": (

@@ -515,7 +515,7 @@ export interface paths {
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
          *     `already_alive`: agent is still alive
-         *         (running/idling/restarting); resurrect does not
+         *         (running/idling); resurrect does not
          *         apply — idempotent.
          */
         post: operations["post_agent_resurrect_api_agents__agent_id__resurrect_post"];
@@ -2991,7 +2991,7 @@ export interface paths {
          * @description Pull all data for the sidebar-top stats card in one shot.
          *
          *     Data sources:
-         *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting)
+         *     - `live_count`: agents_meta table — all non-terminated agents (running/idling)
          *     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
          *     - average turn duration: Loki's unified event stream in 12-hour shards
          *     - warning/error counts: per-class counts via the resolution daemon's
@@ -3263,7 +3263,7 @@ export interface paths {
          *     agent — are excluded by default (user ruling 2026-08-09 #1104: terminated
          *     agents never appear in the graph, mirroring the sidebar's agent tree). The
          *     filter ORDER is liveness first: the node set is live-only (`status !=
-         *     'terminated'`, so restarting etc. stay), and edges only ever
+         *     'terminated'`), and edges only ever
          *     connect two live endpoints — a live node whose lineage partner has since
          *     terminated simply renders without that edge. Raw source rows are filtered
          *     during the merge; pass `?include_terminated=true` for the full graph.
@@ -3639,7 +3639,7 @@ export interface components {
          * AdmissionOutcome
          * @enum {string}
          */
-        AdmissionOutcome: "admitted" | "maintenance_hold" | "publication_deferred" | "resource_fence" | "admission_guard_refused";
+        AdmissionOutcome: "admitted" | "maintenance_hold" | "resource_fence" | "admission_guard_refused";
         /**
          * AgentActivity
          * @description Active-rate: the share of an agent's alive wall-clock it spent actively
@@ -4181,7 +4181,7 @@ export interface components {
          * AgentStatus
          * @enum {string}
          */
-        AgentStatus: "running" | "idling" | "restarting" | "terminated";
+        AgentStatus: "running" | "idling" | "terminated";
         /**
          * AgentTps
          * @description Token-per-second metrics for one agent — two views of throughput.
@@ -5261,9 +5261,9 @@ export interface components {
          * @description Idle check-in heartbeat state for one agent — mutually-exclusive display
          *     states the panel renders:
          *
-         *     - idle-family (idling / restarting — the statuses the fleet view
-         *       projects to "Idle") & not paused & no fresh wake queued: `next_at` is
-         *       set — the daemon's projected check-in due time: the later of
+         *     - idling (the status the fleet view projects to "Idle") & not paused & no
+         *       fresh wake queued: `next_at` is set — the daemon's projected check-in due
+         *       time: the later of
          *       `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)` and
          *       `last_heartbeat_at + interval_s` when a prior check-in exists. The daemon
          *       dispatches the actual check-in at its first poll tick at/after that (at
@@ -5271,7 +5271,7 @@ export interface components {
          *       check-in, and never later than what the daemon does. An overdue
          *       projection renders as "due" in the frontend, never as a past time;
          *       everything else off.
-         *     - idle-family & not paused & a *fresh* wake already queued (created within
+         *     - idling & not paused & a *fresh* wake already queued (created within
          *       the daemon's 900s `STALE_PENDING_S` freshness window): `heartbeat_pending`
          *       is True — the daemon suppresses check-ins while a fresh inbound is pending
          *       (its `NOT EXISTS` guard, windowed by `STALE_PENDING_S`), so no future
@@ -6946,7 +6946,7 @@ export interface components {
          *         (LangGraph state preserved; agent wakes up from where it left
          *         off).
          *     `already_alive`: agent is still alive
-         *         (running/idling/restarting); resurrect does
+         *         (running/idling); resurrect does
          *         not apply.
          */
         ResurrectAgentResponse: {

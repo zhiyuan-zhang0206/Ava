@@ -17,7 +17,7 @@ tags:
 - **posture** (`idle` / `paused`) — `paused` marks service shutdown after native drain; the admission journal keeps in-flight APIs available during the drain. A missing row reads as `idle` — every consumer's default. A transition writes `posture` and `updated_at` and nothing else.
 - **`db_now`** — every `HostDeployState` carries the database's own clock, selected in the same statement as the row, so an age judgment never subtracts across two machines' clocks.
 
-The row's `updater_lease_expires_at`, `paused_at` and `stranded_hold_*` columns are neither written nor read; they stay in the schema until the explicit cleanup migration.
+The table carries only `machine`, `posture` and `updated_at`: the updater lease, the pause-window anchor and the stranded-hold record were dropped by `20261001T055030_drop-retired-deploy-and-watcher-storage`.
 
 ## Core Responsibilities
 

@@ -565,8 +565,8 @@ def _probe_daemon(
     pytest-leaked restarter daemon — a different ``$AVA_HOME``, but fallen back
     to prod's default health port because the test session pinned none —
     answered 200 for 98 minutes while prod's own restarter was dead. The watchdog
-    saw green every round, never respawned, and every `restarting` agent in the
-    cluster stayed frozen. A status-code-only probe cannot distinguish that from
+    saw green every round, never respawned, and every agent it should have
+    restarted stayed frozen. A status-code-only probe cannot distinguish that from
     health, so the body's identity is checked too:
 
     - ``name`` — the daemon kind asked for.

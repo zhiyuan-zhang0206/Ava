@@ -285,7 +285,7 @@ async def post_agent_resurrect(
 
     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
     `already_alive`: agent is still alive
-        (running/idling/restarting); resurrect does not
+        (running/idling); resurrect does not
         apply — idempotent.
     """
     forwarded = await _forward_to_home_machine(

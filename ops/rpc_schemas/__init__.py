@@ -294,7 +294,7 @@ class ResurrectAgentResponse(BaseModel):
         (LangGraph state preserved; agent wakes up from where it left
         off).
     `already_alive`: agent is still alive
-        (running/idling/restarting); resurrect does
+        (running/idling); resurrect does
         not apply.
     """
 

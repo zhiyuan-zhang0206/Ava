@@ -59,7 +59,7 @@ def _agent_updated_event(agent_id: int) -> dict[str, Any]:
     return json.loads(event.model_dump_json())
 
 
-@pytest.mark.parametrize("status", ["idling", "running", "restarting", "terminated"])
+@pytest.mark.parametrize("status", ["idling", "running", "terminated"])
 def test_target_hint_reads_current_status(
     monkeypatch: pytest.MonkeyPatch,
     status: str,
