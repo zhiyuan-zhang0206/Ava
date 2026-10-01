@@ -78,7 +78,7 @@ from agent.graph.tool_calls import code_from_args, normalize_tool_calls
 from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
-from ava.security import SecurityFindingEntry, take_findings
+from ava.security import SecurityFindingEntry
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
 from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
@@ -385,7 +385,6 @@ async def _exec_single_call(
     agent_id: int,
     call: ToolCall,
     exec_msg_idx: int,
-    parent_findings: list[SecurityFindingEntry],
 ) -> tuple[dict[str, Any], bool]:
     """Execute one invocation; return its state delta and whether it compacted."""
     assert ctx.event_publisher is not None, (  # noqa: S101
@@ -410,10 +409,7 @@ async def _exec_single_call(
                 agent_id=agent_id, item_id=f"{exec_msg_idx}.0", content=str(error.content)
             ).model_dump_json()
         )
-        return {
-            "messages": merge_exec_notes([error], None, parent_findings),
-            "halted": False,
-        }, False
+        return {"messages": [error], "halted": False}, False
 
     # Streaming chunks and the final ExecOutput share the same item_id
     # computed above; the frontend uses it to append chunks to the same
@@ -429,7 +425,7 @@ async def _exec_single_call(
         result,
         plugin_state_update,
         exec_ms,
-        envelope_findings,
+        findings,
         envelope_attachments,
         envelope_sdk_calls,
     ) = await _run_agent_code(
@@ -448,9 +444,6 @@ async def _exec_single_call(
     # clobber the ToolMessage). Popped + drained unconditionally so a compact
     # turn (REMOVE_ALL'd by claim) leaks nothing to later turns.
     plugin_messages = plugin_state_update.pop("messages", None)
-    # Parent findings were drained before exec-call resolution; add the
-    # child-drained findings from the result envelope in execution order.
-    findings = parent_findings + envelope_findings
 
     # Compact path (SystemHalt): write nothing back — claim REMOVE_ALLs the
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
@@ -552,7 +545,6 @@ async def _exec_node_impl(
     config: RunnableConfig,
 ) -> Command[ExecGoto]:
     """Run one call; LangGraph owns reducer application and the next snapshot."""
-    parent_findings = take_findings()
     replacements, calls = _remaining_exec_calls(state.messages)
     if not calls:
         # Recovery may already have paired the interrupted remainder.
@@ -562,7 +554,7 @@ async def _exec_node_impl(
         )
     agent_id = agent_id_from_config(config)
     delta, compacted = await _exec_single_call(
-        state, runtime.context, agent_id, calls[0], len(state.messages), parent_findings
+        state, runtime.context, agent_id, calls[0], len(state.messages)
     )
     if compacted:
         delta["pending_exec_notes"] = []

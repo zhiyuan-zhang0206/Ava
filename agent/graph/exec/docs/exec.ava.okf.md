@@ -34,7 +34,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 - Each exec-result ToolMessage carries `additional_kwargs["sdk_calls"]` — the run's real top-level `ava.*` call tally, measured in the child by `base.agents.sdk.telemetry` (`[]` = ran, called none; omitted = unknown, e.g. a boot crash). The timeline's collapsed-code chip renders these counts only — no source-text scan.
 
 ### In-memory system-note injection (`_notes.py`, user ruling 2026-08-11)
-- AGENTS.md / CLAUDE.md context notes (ava_code plugin) and prompt-injection security findings (ava.security) are delivered **inside the exec's own messages delta** — no side-channel file
+- AGENTS.md / CLAUDE.md context notes (ava_code plugin) and the exec child's prompt-injection findings (inbound: [[inbound-findings.ava.okf.md]]) are delivered **inside the exec's own messages delta** — no side-channel file
 - `agent/graph/exec/_notes.py:merge_exec_notes()` prepares both for delivery after all of the assistant message's tool results; intermediate exec steps park them in `pending_exec_notes`: the Anthropic-compat wire contract requires `tool_use` to be immediately followed by `tool_result` (verified against the DeepSeek anthropic endpoint 2026-08-11), so notes must not be sandwiched between the AIMessage and its ToolMessage; the compact path (`SystemHalt`) drops both (history is REMOVE_ALL'd anyway)
 
 ## Key Dependencies
