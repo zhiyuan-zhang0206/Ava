@@ -165,33 +165,13 @@ def test_boot_config_failure_writes_crashed_envelope(
     """
     monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
     monkeypatch.setenv("AVA_CONFIG_BOOT", "eager")
-    for name in tuple(os.environ):
-        if name.startswith("AVA_PITR_"):
-            monkeypatch.delenv(name)
     home = tmp_path / "home"
     home.mkdir()
-    backup_key = tmp_path / "backup.key"
-    backup_key.write_bytes(b"k" * 32)
-    backup_key.chmod(0o600)
-    oss_credentials = tmp_path / "oss-credentials.json"
-    oss_credentials.write_text(
-        json.dumps({"access_key_id": "test-ak", "access_key_secret": "test-secret"}),
-        encoding="utf-8",
-    )
-    oss_credentials.chmod(0o600)
     (home / ".env").write_text(
         "AVA_DB_URL=postgresql://u@127.0.0.1:1/x\n"
         "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
-        "AVA_PITR_ENABLED=true\n"
-        "AVA_PITR_BASE_BACKUP_ENABLED=true\n"
-        "AVA_PITR_RESTORE_PROOF_ENABLED=true\n"
-        "AVA_PITR_STORE_BACKEND=oss\n"
-        "AVA_PITR_OSS_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com\n"
-        "AVA_PITR_OSS_BUCKET=some-bucket\n"
-        f"AVA_PITR_OSS_CREDENTIALS_FILE={oss_credentials}\n"
-        f"AVA_PITR_BACKUP_KEY_FILE={backup_key}\n"
-        "AVA_PITR_BACKUP_KEY_ID=test\n"
-        "AVA_PITR_REPLICATION_DB_URL=postgresql://repl@127.0.0.1:1/x\n",
+        "AVA_EXEC_TIMEOUT_SECONDS=1200\n"
+        "AVA_EXEC_NODE_TIMEOUT_SECONDS=300\n",
         encoding="utf-8",
     )
 
@@ -210,7 +190,7 @@ def test_boot_config_failure_writes_crashed_envelope(
     payload = read_result(result)
     assert payload.kind == "crashed"
     assert payload.exc_type == "ValidationError"
-    assert "viewer-only OSS credential" in (payload.exc_msg or "")
+    assert "exec_timeout_seconds" in (payload.exc_msg or "")
     assert "exec_child" in (payload.full_traceback or "")
     assert result.stat().st_mode & 0o777 == 0o600
     assert payload.code_reached is False  # P0 #2100: boot crash, the code never ran

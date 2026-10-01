@@ -202,6 +202,9 @@ def test_unconfigured_publish_skips_with_one_info_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Not configured is a supported state: no ERROR, no traceback, no store opened."""
+    monkeypatch.setattr(settings.services, "backup_offsite_endpoint", "")
+    monkeypatch.setattr(settings.services, "backup_offsite_bucket", "")
+    monkeypatch.setattr(settings.services, "backup_offsite_credentials_file", None)
 
     def _never_opened(_target: object) -> None:
         raise AssertionError("an unconfigured destination must never be opened")

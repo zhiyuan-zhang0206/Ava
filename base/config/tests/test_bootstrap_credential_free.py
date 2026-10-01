@@ -113,29 +113,24 @@ def test_missing_url_refuses_before_boot_time_fallback(
     assert "new-private-password" not in str(caught.value)
 
 
-def test_served_payload_excludes_pitr_enablement_flags(
+def test_served_payload_excludes_the_offsite_backup_destination(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The physical-backup enablement flags are gateway-local facts. When the
-    activation wrote them into the gateway .env they rode the bootstrap
-    payload to agent-runners, which built PhysicalBackupSettings with
-    pitr_enabled=True but held no gateway-local GCS credentials — every
-    runner service then refused to start (2026-08-30 incident). Whatever the
-    gateway's .env says, these flags must never reach a runner."""
+    """The off-site backup destination is a gateway-local fact: the gateway alone
+    runs the dump and holds the credentials file. Whatever the gateway's .env
+    says, the destination must never ride the bootstrap payload to a runner."""
     _write_gateway_env(tmp_path)
     env_path = tmp_path / ".env"
     env_path.write_text(
         env_path.read_text()
-        + "AVA_PITR_ENABLED=true\n"
-        + "AVA_PITR_BASE_BACKUP_ENABLED=true\n"
-        + "AVA_PITR_RESTORE_PROOF_ENABLED=true\n"
-        + "AVA_PITR_RETENTION_PLANNER_ENABLED=true\n"
+        + "AVA_BACKUP_OFFSITE_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com\n"
+        + "AVA_BACKUP_OFFSITE_BUCKET=backups\n"
+        + "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE=/private/oss.json\n"
     )
     vals = _served(monkeypatch, tmp_path)
     for alias in (
-        "AVA_PITR_ENABLED",
-        "AVA_PITR_BASE_BACKUP_ENABLED",
-        "AVA_PITR_RESTORE_PROOF_ENABLED",
-        "AVA_PITR_RETENTION_PLANNER_ENABLED",
+        "AVA_BACKUP_OFFSITE_ENDPOINT",
+        "AVA_BACKUP_OFFSITE_BUCKET",
+        "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
     ):
         assert alias not in vals
