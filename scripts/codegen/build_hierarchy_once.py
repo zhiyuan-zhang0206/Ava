@@ -17,8 +17,6 @@ or a budget no compression could fit) writes nothing; re-running retries
 exactly those, and the exit code is 1 whenever any node failed.
 """
 
-# operates-on-cluster: agent-records, database -- builds one agent's history tree in the running cluster
-
 from __future__ import annotations
 
 import argparse

@@ -23,8 +23,6 @@ is listed under `not_applicable` with its reason: it neither passes nor fails.
   grants held, and the process tree is launchd -> helper -> ava-root -> every unit.
 """
 
-# operates-on-cluster: host-services -- runs only in the verification container, observing its own cluster
-
 from __future__ import annotations
 
 import json

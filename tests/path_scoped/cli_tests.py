@@ -33,10 +33,9 @@ def _installed_machine_identity(unit_home: pathlib.Path) -> Iterator[None]:
     unit, not a virgin one. Modules exercising the install paths opt in with
     `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
     """
-    from base.cluster.machine import reset_identity
+    from base.cluster.machine import reset_identity, set_identity
 
-    (unit_home / "machine_name").write_text("unit-test-machine", encoding="utf-8")
-    reset_identity()
+    set_identity(name="unit-test-machine")
     yield
     reset_identity()
 
@@ -61,15 +60,15 @@ def as_machine(
     Shared rather than copied because it is exactly the kind of helper whose
     subtle half (the cache reset) gets dropped in the copy.
     """
-    from base.cluster.machine import reset_identity
+    from base.cluster.machine import reset_identity, set_identity
 
     @contextmanager
     def _enter(home: pathlib.Path) -> Generator[pathlib.Path]:
         home.mkdir(parents=True, exist_ok=True)
-        (home / "machine_name").write_text(home.name, encoding="utf-8")
         with monkeypatch.context() as m:
             m.setenv("AVA_HOME", str(home))
             reset_identity()
+            set_identity(name=home.name)
             try:
                 yield home
             finally:

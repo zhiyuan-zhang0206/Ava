@@ -300,7 +300,7 @@ class TestSelfHostDialsLoopback:
     def _isolate(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_host: str | None
     ) -> None:
-        monkeypatch.setenv("AVA_HOME", str(tmp_path))  # no machine_host file
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))  # a home with no `.env`
         if machine_host is None:
             os.environ.pop("AVA_MACHINE_HOST", None)
         else:
@@ -379,20 +379,6 @@ class TestSelfHostDialsLoopback:
         assert s.db_url == _pg("STALE", host="localhost:5433")
         assert s.redis_url == _redis("STALE", host="localhost:6380")
 
-    def test_machine_host_file_fallback_matches(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        # env unset -> the `$AVA_HOME/machine_host` file (the first start's) wins.
-        self._isolate(monkeypatch, tmp_path, machine_host=None)
-        (tmp_path / "machine_host").write_text("gw.host\n")
-        s = _settings_with(
-            db_url=_pg("STALE", host="gw.host:5433"),
-            redis_url=_redis("STALE", host="gw.host:6380"),
-            secret=_SECRET,
-        )
-        assert urlsplit(s.db_url).hostname == "127.0.0.1"
-        assert urlsplit(s.redis_url).hostname == "127.0.0.1"
-
     def test_sentinel_stays_byte_identical(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -461,9 +447,8 @@ class TestPinIpv4Hostaddr:
 class TestSelfMachineHostParity:
     """`_self_machine_host` is a leaf duplicate of `base.cluster.machine.reachable_host`
     (the config sub-model cannot import base.cluster.machine — circular), so pin its
-    precedence (env AVA_MACHINE_HOST > $AVA_HOME/machine_host file > localhost)
-    to the real resolver: each source case asserts both return the same value,
-    so a future drift in either side fails here."""
+    precedence (env AVA_MACHINE_HOST > localhost) to the real resolver: each source case
+    asserts both return the same value, so a future drift in either side fails here."""
 
     @pytest.fixture(autouse=True)
     def _fresh_identity(self) -> Iterator[None]:
@@ -486,15 +471,16 @@ class TestSelfMachineHostParity:
             os.environ["AVA_MACHINE_HOST"] = env
             monkeypatch.setattr(settings.general, "machine_host", env)
 
-    def test_env_wins_over_file(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_env_wins(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         self._pin(monkeypatch, tmp_path, env="gw.env-host")
-        (tmp_path / "machine_host").write_text("gw.file-host\n")  # env must shadow it
         assert _self_machine_host() == reachable_host() == "gw.env-host"
 
-    def test_file_when_env_unset(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_a_machine_host_file_is_not_read(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         self._pin(monkeypatch, tmp_path, env=None)
         (tmp_path / "machine_host").write_text("gw.file-host\n")
-        assert _self_machine_host() == reachable_host() == "gw.file-host"
+        assert _self_machine_host() == reachable_host() == "localhost"
 
     def test_localhost_default(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         self._pin(monkeypatch, tmp_path, env=None)

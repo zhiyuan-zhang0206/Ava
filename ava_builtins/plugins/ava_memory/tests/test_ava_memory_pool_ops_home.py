@@ -84,15 +84,31 @@ def test_machine_name_short_circuits_on_its_own_env_var() -> None:
     assert res.stdout.strip() == "testbox"
 
 
-def test_machine_name_reads_the_default_homes_file_when_ava_home_is_unset(tmp_path: Path) -> None:
+def test_machine_name_reads_the_default_homes_env_file_when_ava_home_is_unset(
+    tmp_path: Path,
+) -> None:
+    fake_home = tmp_path / "home"
+    (fake_home / ".ava").mkdir(parents=True)
+    (fake_home / ".ava" / ".env").write_text("OTHER=kept\nAVA_MACHINE_NAME=planted-runner\n")
+
+    res = _run("machine_name", {}, home=fake_home)
+
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip() == "planted-runner"
+
+
+def test_machine_name_refuses_when_nothing_names_the_machine(tmp_path: Path) -> None:
+    """A `machine_name` file older homes kept is not read, and there is no made-up
+    fallback: the steward would push under `machine-unknown`."""
     fake_home = tmp_path / "home"
     (fake_home / ".ava").mkdir(parents=True)
     (fake_home / ".ava" / "machine_name").write_text("planted-runner\n")
 
     res = _run("machine_name", {}, home=fake_home)
 
-    assert res.returncode == 0, res.stderr
-    assert res.stdout.strip() == "planted-runner"
+    assert res.returncode != 0
+    assert "AVA_MACHINE_NAME" in res.stderr
+    assert res.stdout.strip() == ""
 
 
 # ── import side effects (path_imports refactor, pool_ops now a plugin submodule) ──

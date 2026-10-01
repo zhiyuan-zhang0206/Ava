@@ -30,11 +30,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from base.host.env.dotenv_boot import enter_scratch_home  # noqa: E402
-
-if __name__ == "__main__":
-    enter_scratch_home()
-
 from base.native_process.child_env import inherited_process_env  # noqa: E402
 from scripts.post_deploy_visual.matrix import (  # noqa: E402
     VisualGateBudgetExceeded,

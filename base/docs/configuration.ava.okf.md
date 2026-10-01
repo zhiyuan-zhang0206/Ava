@@ -47,10 +47,11 @@ sensitivity, and editability policy from diverging. `base/host/env/bootstrap.py`
 remains the authority for whether a unit's `.env` owns cluster configuration or
 a pure runner must fetch it from the gateway. The home is not configuration:
 `AVA_HOME` is read by `dotenv_boot.resolve_ava_home` before Settings exists (there
-is no `ava_home` field), and a tool that imports application code without owning
-a cluster calls `dotenv_boot.enter_scratch_home()` first (behind
+is no `ava_home` field), and a script a git hook launches that reaches application
+code calls `dotenv_boot.enter_scratch_home()` first (behind
 `if __name__ == "__main__":`, never at import; it refuses inside pytest), so its
-imports never read another unit's `.env` or present a gateway bearer.
+imports never read another unit's `.env` or present a gateway bearer. Other
+development tools set a temporary `AVA_HOME` by convention (`conventions/dev-setup.md`).
 
 Bootstrap serves `AVA_HOST_MAX_CONCURRENT_TURNS` verbatim, including zero for
 unlimited admission. Runner requests select only the credential role. Snapshot

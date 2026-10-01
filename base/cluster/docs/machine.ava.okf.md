@@ -23,8 +23,8 @@ Two labels define a host in a multi-machine deployment, both resolved by
   Prefer `is_gateway()` / `is_agent_runner()` / `is_observability_station()`
   over comparing the set.
 
-Precedence for both: env var > `$AVA_HOME/<field>` file > fail loud
-(`MachineNameMissing` / `MachineRoleMissing`). The role comes from three
+Source for both: the home's `.env`, read through Settings, else fail loud
+(`MachineNameMissing` / `MachineRoleMissing`); there is no second channel. The role comes from three
 *independent* booleans — `AVA_MACHINE_SERVE_GATEWAY` /
 `AVA_MACHINE_SERVE_AGENT_RUNNER` / `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` —
 so a single box is not a third role, just the relevant flags true.
@@ -96,5 +96,5 @@ agent onto a gateway-only node where only the scheduling/DB layer lives".
 ## Key Dependencies
 
 - [[services/docs/services.ava.okf.md]] — which services each capability contributes
-- [[paths.ava.okf.md]] — where the `machine_*` files live
+- [[paths.ava.okf.md]] — where the home's `.env` lives
 - [[cli/docs/cli.ava.okf.md]] — `ava start`, which persists these labels

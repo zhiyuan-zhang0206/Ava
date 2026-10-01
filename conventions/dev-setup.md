@@ -89,19 +89,28 @@ For a manual dependency operation in an existing worktree, clear inherited
 
 **Which home a worktree reads.** With `AVA_HOME` unset the home is `~/.ava`; on a
 development machine that also runs production, that is the production cluster. A
-worktree's CLI may read it (`status`, `ls`, `get`), but a home that carries its own
-`<home>/source` checkout is started, stopped and reconfigured only by that
-checkout's CLI: every other verb refuses and names the CLI to run. A script,
-subagent or tool that imports application code must not reach that home at all —
-set a home of your own first, once, at the top of the process tree:
+home that carries its own `<home>/source` checkout is operated only by that
+checkout's CLI: a worktree's CLI refuses every command against it, `status`
+included (bare `ava` and a lone `-h`/`--help` excepted), and names the CLI to run;
+read production with the host's bare `ava`.
+
+**The convention: a development tool that imports application code runs in a home of
+its own.** Any script, test run or subagent that imports application code, run in a
+development checkout, sets a temporary `AVA_HOME` first, once, at the top of the process
+tree (or runs inside the Docker or Tart verification boundary). Left unset, the home is
+`~/.ava`, and on a host that runs production that is production:
 
 ```bash
 export AVA_HOME="$(mktemp -d)" AVA_CONFIG_FETCH=skip   # a throwaway home: no .env, no gateway fetch
 ```
 
-The test harness does this itself (a temporary home before any import), and so does
-every lint, codegen and docs tool the git hooks run (`dotenv_boot.enter_scratch_home()`,
-called only when the tool runs as a program).
+Code enforces this in one place only, where the convention is sure to be broken by
+nobody's choice: the git hooks. pre-commit and pre-push launch scripts on every commit,
+so each hook script that reaches application code calls `dotenv_boot.enter_scratch_home()`
+itself (only when run as a program; `scripts/tests/test_hooks_scratch_home.py` derives the
+hook scripts from `.pre-commit-config.yaml`). The test harness sets a temporary home
+before any import. Every other script is run by a person or an agent on purpose, and the
+convention is its only guard.
 
 Do not rebase or rewrite a checkout while a cluster runs from it: its root manifest
 and loaded source must remain coherent. Source checkout editing is development work;

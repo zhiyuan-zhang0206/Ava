@@ -17,8 +17,7 @@ non-overlapping native listen ports. Provider identity has two equivalent forms:
   installs any missing pinned native binaries.
 - **`observability-station` unit capability** (declarative): a machine that
   declares the capability (`ava init --serve-observability-station`, or
-  `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` / the
-  `$AVA_HOME/machine_serve_observability_station` file) converges the full
+  `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` in the home's `.env`) converges the full
   native set — pinned binaries, rendered configs, storage dirs — with no marker, and its
   producer OTLP export, collector lifecycle, and Loki read
   gates all treat it as the station. The capability is orthogonal to
