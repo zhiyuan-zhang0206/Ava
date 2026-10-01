@@ -36,6 +36,7 @@ from cli.commands.converge._os_jobs import (
     ensure_logs_maintenance,
     ensure_packages_refresh_job,
     ensure_pr_flow_job,
+    ensure_walg_job,
 )
 from cli.commands.converge._ownership_preflight import (
     ensure_ownership_preflight as _ensure_ownership_preflight,
@@ -462,6 +463,14 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "PR flow sampler job",
         ensure_pr_flow_job,
+        requires_unit_config=True,
+    ),
+    # The WAL-G daily tick: registered while AVA_WALG_CONFIG_FILE is set, removed
+    # when it is not. The gateway owns the Postgres it backs up.
+    ConvergeStep(
+        "WAL-G backup job",
+        ensure_walg_job,
+        roles=frozenset({"gateway"}),
         requires_unit_config=True,
     ),
     ConvergeStep(

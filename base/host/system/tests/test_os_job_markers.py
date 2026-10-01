@@ -1,4 +1,4 @@
-"""The four crontab jobs carry fixed markers, and a crontab written by an older
+"""The five crontab jobs carry fixed markers, and a crontab written by an older
 version migrates by itself.
 
 Older versions stamped every line with a per-home suffix (`# ava-logs-maintenance.ava-<hash>`).
@@ -9,7 +9,8 @@ unregister removes it: no manual step and no second line per job.
 `_OLD_CRONTAB` is the four Ava lines of a production Linux host's real crontab
 (read with `crontab -l`), with the user's home directory replaced by
 `/home/operator` and the hash of that path by a placeholder. Nothing else was in
-that crontab, and no line carried a credential.
+that crontab, and no line carried a credential. The WAL-G tick has no older version,
+so it has no old line: it is only added and removed.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from base.host.system import cron, logs_job, packages_job, pr_flow_job
+from base.host.system import cron, logs_job, packages_job, pr_flow_job, walg_job
 
 _OLD_CRONTAB = """\
 40 4 * * * AVA_HOME=/home/operator/.ava /bin/sh -c '/home/operator/.ava/source/.venv/bin/ava logs rotate && /home/operator/.ava/source/.venv/bin/ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3'  # ava-logs-maintenance.ava-0a1b2c3d
@@ -34,11 +35,18 @@ _MARKERS = (
     "# ava-pr-flow",
     "# ava-health-probe",
 )
-_REGISTERS = (logs_job._register_linux, packages_job._register_linux, pr_flow_job._register_linux)
+_WALG_MARKER = "# ava-walg"
+_REGISTERS = (
+    logs_job._register_linux,
+    packages_job._register_linux,
+    pr_flow_job._register_linux,
+    walg_job._register_linux,
+)
 _UNREGISTERS = (
     logs_job._unregister_linux,
     packages_job._unregister_linux,
     pr_flow_job._unregister_linux,
+    walg_job._unregister_linux,
 )
 
 
@@ -84,9 +92,9 @@ def test_one_old_line_carries_each_fixed_marker_as_a_prefix(marker: str) -> None
 def test_register_leaves_exactly_one_line_per_job_and_no_old_suffix(crontab: _Crontab) -> None:
     _register_all()
 
-    assert len(crontab.lines) == 4
+    assert len(crontab.lines) == 5
     assert "ava-0a1b2c3d" not in crontab.text
-    for marker in _MARKERS:
+    for marker in (*_MARKERS, _WALG_MARKER):
         assert len([line for line in crontab.lines if marker in line]) == 1, marker
         # The new line ends with its fixed marker, with no per-home suffix after it.
         assert len([line for line in crontab.lines if line.endswith(marker)]) == 1, marker
@@ -102,7 +110,8 @@ def test_registering_again_changes_nothing(crontab: _Crontab) -> None:
 
 def test_unregister_removes_the_old_lines_and_only_them(crontab: _Crontab) -> None:
     unrelated = "0 3 * * * /usr/local/bin/backup"
-    crontab.text = unrelated + "\n" + _OLD_CRONTAB
+    walg = "25 6 * * * /home/operator/.ava/source/.venv/bin/ava backup walg run  # ava-walg"
+    crontab.text = unrelated + "\n" + _OLD_CRONTAB + walg + "\n"
 
     assert cron._unregister_linux() == 0
     for unregister in _UNREGISTERS:
