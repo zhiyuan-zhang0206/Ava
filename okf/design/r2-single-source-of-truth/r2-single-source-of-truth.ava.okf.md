@@ -15,9 +15,9 @@ tags:
 > `base/host/env/registry.py` projections (child_env / env_authority_drop_set /
 > env_keep_set) derive from the field registry, and test_registry.py +
 > test_gateway_consumer_guard.py are derivation-rule verifiers, not snapshot
-> seams. Residual: `_DERIVED_FIELDS` / `_IDENTITY_FIELDS` / `_GUIDE_FIELDS` /
+> seams. Residual: `_DERIVED_FIELDS` / `_IDENTITY_FIELDS` /
 > `_HEALTH_PORT_SERVICES` in base/host/env/registry.py stay hand-written consumption
-> declarations — A3 holds for scope-derived projections, not for those four
+> declarations — A3 holds for scope-derived projections, not for those three
 > hand sets (test-anchor TODO). B/C/D below are still planned.
 
 ## Problem in one sentence

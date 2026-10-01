@@ -202,9 +202,6 @@ class TestScopeDerivationRules:
             | _aliases_with(scope=("agent",))
             | {
                 "AVA_HOME",
-                "AVA_CLUSTER_SECRET",
-                "AVA_GATEWAY_URL",
-                "AVA_GATEWAY_PORT",
                 "SSL_CERT_FILE",
                 "REQUESTS_CA_BUNDLE",
                 "AVA_AGENT_CONFIG_OVERLAY",
@@ -212,9 +209,26 @@ class TestScopeDerivationRules:
             }
         )
         assert agent_forward_keys() == expected
-        # An agent child is a single agent — its identity is set by the launcher
-        # (ops/agent_launch.py), never inherited from the parent env.
+        # The gateway URL and port the self-fetch dials ride the session view (host scope).
+        assert {"AVA_GATEWAY_URL", "AVA_GATEWAY_PORT"} <= session_forward_keys()
+        # An agent child is a single agent — its identity is set by its launcher,
+        # never inherited from the parent env.
         assert "AVA_AGENT_ID" not in agent_forward_keys()
+
+    def test_the_cluster_secret_rides_no_forwarded_view(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The human bearer stays on the gateway: no role's child receives it, even
+        when the launcher's environment carries it (an agent child presents its API
+        token instead)."""
+        from base.host.env.registry import agent_forward_keys, child_env, session_forward_keys
+
+        # `child_env` reads the live environment, so the environment is the seam here.
+        monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "human-bearer")
+        assert "AVA_CLUSTER_SECRET" not in session_forward_keys()
+        assert "AVA_CLUSTER_SECRET" not in agent_forward_keys()
+        for role in ("gateway", "runner", "agent"):
+            assert "AVA_CLUSTER_SECRET" not in child_env(role)
 
     def test_agent_runner_cluster_aliases_are_capability_plus_cluster_scope(self) -> None:
         from base.host.env.registry import agent_runner_cluster_aliases
