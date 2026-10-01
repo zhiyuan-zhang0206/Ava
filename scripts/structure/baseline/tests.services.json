@@ -7,7 +7,7 @@
     "tests/services/test_pitr_oss_roles.py::test_put_base_if_absent_streams_multipart_and_writes_sidecar": 15
   },
   "directories": {
-    "tests/services": 65
+    "tests/services": 64
   },
   "files": {
     "tests/services/test_agent_host.py": 1770,
