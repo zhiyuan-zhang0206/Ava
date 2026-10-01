@@ -252,8 +252,7 @@ def gateway_otel_ingress_endpoint() -> str:
 def station_otel_ingress_endpoint() -> str:
     """The selected station's ingress, independent of this unit's listen port."""
     from base.config import settings
-
-    from .observatory_urls import validated_observability_base
+    from base.telemetry.station_endpoint import validated_observability_base
 
     base = validated_observability_base(settings.observability.observability_url)
     if not base:
@@ -440,8 +439,7 @@ def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
     it always relays to the gateway collector.
     """
     from base.config import settings
-
-    from .observatory_urls import validated_observability_base
+    from base.telemetry.station_endpoint import validated_observability_base
 
     obs = settings.observability
     base = validated_observability_base(obs.observability_url)
