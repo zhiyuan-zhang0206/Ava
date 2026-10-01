@@ -14,8 +14,7 @@ does not.
 
 Note that the rest of `scripts/provision/` is **not** self-hosted-runner
 machinery and stays: `_lib.sh` / `database.sh` / `node.sh` / `toolchain.sh` are
-package-acquisition helpers used by image/toolchain preparation, and
-`install-playwright.sh` installs Playwright and Chromium for a host that needs them.
+package-acquisition helpers used by image/toolchain preparation.
 Deleting the directory wholesale, as an earlier version of this checklist said
 to, would remove those dependency-acquisition primitives.
 

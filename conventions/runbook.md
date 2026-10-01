@@ -1892,12 +1892,10 @@ home/role producer gate additionally prevents an unmarked gateway from using
 the default loopback endpoint; explicitly setting `AVA_TELEMETRY_OTLP_ENDPOINT`
 bypasses that gate without creating a local collector.
 
-**LGTM backend lifecycle** — home-scoped native launchd jobs on Darwin arm64
-and user systemd units on Linux amd64 run Loki, Prometheus (GOMEMLIMIT
-2GiB / 1GiB), and Grafana. Unit names include the home slug; Linux ownership
-also checks the loaded unit file and exact executable. Explicit host listen
-ports permit isolated homes; defaults remain 3100/9090/3003 plus Loki gRPC
-9095. See [native lifecycle](../cli/commands/observability/docs/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
+**LGTM backend lifecycle** — Loki, Prometheus (GOMEMLIMIT 2GiB / 1GiB), and
+Grafana run as native processes on Darwin arm64 and Linux amd64, owned by
+`ava-root` (below). Explicit host listen ports permit isolated homes; defaults
+remain 3100/9090/3003 plus Loki gRPC 9095. See [native lifecycle](../cli/commands/observability/docs/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
 override targets the remote WSL Tempo. No
 service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
