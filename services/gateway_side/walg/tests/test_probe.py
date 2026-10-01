@@ -270,3 +270,42 @@ def test_the_application_login_cannot_list_the_archive_queue(sandbox: Sandbox) -
             pytest.raises(psycopg.errors.InsufficientPrivilege),
         ):
             app.execute("SELECT count(*) FROM pg_ls_archive_statusdir()")
+
+
+def test_the_admin_dial_is_custody_checked_and_bounded(
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The probe reaches the postmaster only through the home's owner-only admin
+    socket, bound to its own data directory, with a connect timeout and a statement timeout."""
+    from base.db import pg_admin
+
+    seen: dict[str, Any] = {}
+
+    class _Conn:
+        def execute(self, statement: str) -> None:
+            seen["statement"] = statement
+
+    @contextmanager
+    def connect(url: str, **kwargs: Any) -> Generator[_Conn]:
+        seen["url"], seen["kwargs"] = url, kwargs
+        yield _Conn()
+
+    authority = pg_admin.OwnerAuthority(
+        admin_url="postgresql://zzy@/postgres?host=/sockets/ava-pg-home&port=5433",
+        database="db",
+        owner="owner",
+        data_dir=sandbox.home / "pg",
+    )
+    monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
+    monkeypatch.setattr(pg_admin, "connect", connect)
+
+    with probe.admin_connection():
+        pass
+
+    assert seen["url"] == authority.admin_url
+    assert seen["kwargs"] == {
+        "expected_data_dir": sandbox.home / "pg",
+        "autocommit": True,
+        "connect_timeout": probe._CONNECT_TIMEOUT_S,
+    }
+    assert seen["statement"].startswith("SET statement_timeout")
