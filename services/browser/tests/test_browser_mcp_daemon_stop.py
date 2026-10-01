@@ -152,13 +152,13 @@ def _daemon_env(home: Path, bin_dir: Path, chrome: _ChromeFake, mode: str) -> di
     # stop event beats the timeout rather than the other way around.
     home.mkdir(parents=True, exist_ok=True)
     (home / ".env").write_text(
-        f"AVA_BROWSER_CDP_PORT={chrome.port}\nAVA_MCP_CONNECT_TIMEOUT_SECONDS=120\n",
+        f"AVA_BROWSER_CDP_PORT={chrome.port}\nAVA_MCP_CONNECT_TIMEOUT_SECONDS=120\n"
+        # A real unit always carries a machine identity (`ava init --machine-name`
+        # records it in `.env`); the daemon's boot seam (init_gateway_process) stamps
+        # the name into every event record.
+        "AVA_MACHINE_NAME=browser-mcp-test\n",
         encoding="utf-8",
     )
-    # A real unit always carries a machine identity (`ava start
-    # --machine-name` persists this file); the daemon's boot seam
-    # (init_gateway_process) stamps the name into every event record.
-    (home / "machine_name").write_text("browser-mcp-test\n", encoding="utf-8")
     env = dict(os.environ)
     env.update(
         {

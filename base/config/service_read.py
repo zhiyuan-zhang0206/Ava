@@ -80,7 +80,7 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str]) -> None:
     the data plane binds loopback first (`_dial_self_host_via_loopback` /
     `_bind_addrs`). A REMOTE agent-runner materializing that payload would dial
     ITS OWN loopback and hit itself — a remote runner's join only works because
-    the reachable host (`AVA_MACHINE_HOST` / `$AVA_HOME/machine_host`) is
+    the reachable host (`AVA_MACHINE_HOST`) is
     substituted here. A single box (reachable host = localhost) and an
     already-reachable URL host pass through unchanged; only the host is swapped
     — scheme / userinfo / port / database / query survive verbatim.

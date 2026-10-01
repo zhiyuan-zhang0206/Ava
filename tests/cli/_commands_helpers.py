@@ -200,10 +200,10 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     )
 
     # _roles_or_none (stop/status/converge) + machine_role (cmd_start service
-    # resolution) both read settings + the machine_serve_* files; test env has
-    # no file → empty/Missing. Pin both to gateway so the default path is the
+    # resolution) both read the AVA_MACHINE_SERVE_* settings; the test env sets only
+    # the agent-runner flag. Pin both to gateway so the default path is the
     # full-service gateway box, deterministic regardless of the dev host's
-    # machine_serve_* files. Agent-runner tests override machine_role explicitly.
+    # environment. Agent-runner tests override machine_role explicitly.
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
     # register_self goes to central DB UPSERT; test does not need real writes. cmd_start goes

@@ -25,7 +25,7 @@ addresses for the same unit.
 Three rules:
 
 1. **The advertised host is always `reachable_host()`** (`AVA_MACHINE_HOST` >
-   `$AVA_HOME/machine_host` > `localhost`). A unit never advertises its bare
+   `localhost`). A unit never advertises its bare
    gateway URL and never hardcodes loopback: a machine with a reachable
    identity must advertise it, or every consumer that dials the advertised
    address dials the wrong host — the 2026-08-30 page-serve 400, where a

@@ -316,15 +316,9 @@ def _create_claim(inputs: IdentityInput) -> None:
 
 
 def stored_values(home: Path) -> dict[str, str]:
-    """What the home already declares: its `.env`, then the `machine_*` files older
-    homes keep their identity fields and capability flags in."""
-    values = {k: v for k, v in dotenv_values(home / ".env").items() if v is not None}
-    for field in (*IDENTITY_FIELDS, *("machine_" + v for v in CAP_ARGS.values())):
-        path = home / field
-        key = "AVA_" + field.upper()
-        if key not in values and path.exists():
-            values[key] = path.read_text().strip()
-    return values
+    """What the home already declares: its `.env`, the only place a home keeps its
+    identity fields and capability flags."""
+    return {k: v for k, v in dotenv_values(home / ".env").items() if v is not None}
 
 
 def capability_value(cap: str, stored: dict[str, str], *, explicit: bool | None) -> bool | None:
@@ -357,11 +351,10 @@ def capability_roles(stored: dict[str, str], explicit: dict[str, bool | None]) -
 
 @dataclass(frozen=True)
 class InitializedHome:
-    """What `ava start` admitted: the capability set, and the intent (None for a
-    runner home that predates the intent journal)."""
+    """What `ava start` admitted: the capability set and the intent it comes from."""
 
     roles: frozenset[str]
-    intent: dict[str, Any] | None
+    intent: dict[str, Any]
 
 
 def require_initialized(home: Path) -> InitializedHome:
@@ -372,9 +365,13 @@ def require_initialized(home: Path) -> InitializedHome:
     """
     _refuse_detached(home)
     intent = read_intent(home)
-    env = dotenv_values(home / ".env")
     if intent is None:
-        return _admit_without_intent(home, env)
+        _require_unclaimed_state(home)
+        raise RuntimeError(
+            f"home {home} is not initialized: run `ava init` first (it takes the machine name, "
+            "the capabilities and, for a runner, the gateway; see `ava init --help`)"
+        )
+    env = dotenv_values(home / ".env")
     if intent["phase"] == "claiming":
         raise RuntimeError(
             f"home {home} was only partly initialized: an earlier `ava init` was interrupted "
@@ -391,30 +388,6 @@ def require_initialized(home: Path) -> InitializedHome:
         raise RuntimeError("existing remote unit has no gateway identity")
     _require_host_declarations(home, roles, env)
     return InitializedHome(roles, intent)
-
-
-def _admit_without_intent(home: Path, env: dict[str, str | None]) -> InitializedHome:
-    if env.get("AVA_DB_URL") or env.get("AVA_GATEWAY_URL"):
-        # A runner home born before the intent journal starts as it always has, on
-        # what its `.env` and `machine_*` files declare; a gateway never does.
-        roles = capability_roles(stored_values(home), {})
-        if "gateway" in roles:
-            raise RuntimeError(
-                "existing home has no recorded identity (start-intent.json) or is "
-                "incomplete; explicit reattachment is required"
-            )
-        if not env.get("AVA_GATEWAY_URL"):
-            raise RuntimeError("existing remote unit has no gateway identity")
-        _require_host_declarations(home, roles, env)
-        return InitializedHome(roles, None)
-    if _holds_resources(home):
-        raise RuntimeError(
-            "existing resource state has no initialization authority; refusing start"
-        )
-    raise RuntimeError(
-        f"home {home} is not initialized: run `ava init` first (it takes the machine name, "
-        "the capabilities and, for a runner, the gateway; see `ava init --help`)"
-    )
 
 
 def _require_host_declarations(

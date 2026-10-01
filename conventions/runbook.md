@@ -1909,8 +1909,8 @@ observability station. Provider identity is either the operator-created
 `$AVA_HOME/lgtm-host` marker file (in practice prod `~/.ava`;
 `touch ~/.ava/lgtm-host` once, or `ava lgtm on`) or the declarative
 `observability-station` unit capability (`ava init
---serve-observability-station` / `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` /
-`$AVA_HOME/machine_serve_observability_station`). On the station home, converge
+--serve-observability-station`, recorded as `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` in the
+home's `.env`). On the station home, converge
 prepares pins from `deploy/lgtm/native/versions.yml` and rendered configuration.
 Loki, Prometheus and Grafana belong to the normal root service roster, on both
 macOS and Linux. They have no separate OS jobs. `AVA_LGTM_STORAGE_DIR` selects

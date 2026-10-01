@@ -496,15 +496,14 @@ def test_gateway_base_reads_local_env_without_settings(
     assert cfg._gateway_base() == "http://gateway.test:8000"
 
 
-def test_gateway_base_prefers_the_homes_gateway_url_file_over_aliases(
+def test_gateway_base_reads_the_homes_env_not_a_gateway_url_file(
     local_env_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The home's persisted `gateway_url` identity wins over the `.env`
-    aliases — the 2026-09-07 worktree incident wrote prod config because an
-    alias fallback outranked the home identity."""
+    """The home's gateway identity is its `.env` (`AVA_GATEWAY_URL`, recorded by
+    `ava init`); a `gateway_url` file older homes kept is not read."""
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
-    (local_env_home / "gateway_url").write_text("http://own-cluster.test:8000\n")
-    (local_env_home / ".env").write_text("AVA_GATEWAY_URL=http://alias.test:9000\n")
+    (local_env_home / "gateway_url").write_text("http://legacy-file.test:8000\n")
+    (local_env_home / ".env").write_text("AVA_GATEWAY_URL=http://own-cluster.test:8000\n")
 
     assert cfg._gateway_base() == "http://own-cluster.test:8000"
 
@@ -512,8 +511,8 @@ def test_gateway_base_prefers_the_homes_gateway_url_file_over_aliases(
 def test_gateway_base_refuses_a_home_with_no_gateway_identity(
     local_env_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A home that carries no gateway identity yet (a fresh install before its
-    first start) gets a refusal with guidance, not a guessed gateway."""
+    """A home that carries no gateway identity yet (before `ava init`) gets a
+    refusal with guidance, not a guessed gateway."""
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
     (local_env_home / ".env").write_text("OTHER=kept\n")
 
@@ -537,7 +536,7 @@ def test_put_config_refuses_env_override_mismatching_home_identity(
 ) -> None:
     """An explicit AVA_GATEWAY_URL that contradicts this home's own gateway
     identity must not write foreign config."""
-    (local_env_home / "gateway_url").write_text("http://own-cluster.test:8000\n")
+    (local_env_home / ".env").write_text("AVA_GATEWAY_URL=http://own-cluster.test:8000\n")
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://other-cluster.test:9000")
 
     with pytest.raises(cfg._ConfigError, match="does not match this home's gateway"):

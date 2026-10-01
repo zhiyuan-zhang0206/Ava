@@ -36,7 +36,7 @@ secret channel. Do not transfer the gateway environment file to a runner.
 
 For locally owned storage, keep the generated DB and Redis URLs (the DB URL is
 a credential-free endpoint). Bootstrap serves that endpoint without a login
-and rewrites loopback hosts to the gateway's reachable `machine_host`; each
+and rewrites loopback hosts to the gateway's reachable `AVA_MACHINE_HOST`; each
 runner's login is its issued unit capability. The gateway itself dials its local
 storage. Off-box reachability requires both the configured private network and
 the credential for the caller's role.

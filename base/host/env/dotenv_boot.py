@@ -419,8 +419,8 @@ def _enforce_cluster_env_authority(home: Path) -> None:
     The MACHINE-IDENTITY keys (`env_identity_keys()`: the serve-capability flags, machine
     name/description, memory remote) get the same treatment, with one exemption: a value the
     unit's own `.env` declares is forced in, an inherited one is DROPPED. A unit's machine
-    identity is a per-unit fact — it belongs in its own `.env` (`ava start` writes it there) or
-    its `$AVA_HOME/machine_*` files, never in whatever a parent process happened to inherit.
+    identity is a per-unit fact — it belongs in its own `.env` (`ava init` writes it there),
+    never in whatever a parent process happened to inherit.
     The leak that motivated this was real: the gateway host's login shell carries prod's
     `~/.ava/.env` (AVA_MACHINE_SERVE_GATEWAY=true among it), so a watcher child booting an
     isolated $AVA_HOME with no `.env` resolved as a gateway-capable unit —

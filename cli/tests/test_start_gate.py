@@ -245,39 +245,32 @@ def test_a_remote_unit_that_records_the_human_secret_is_refused(
     assert start == []
 
 
-def _legacy_runner(home: Path, tools: str, *, flag: str = "agent-runner") -> None:
-    """A runner home that predates the intent journal: `.env` plus `machine_*` files."""
-    home.mkdir(mode=0o700)
-    (home / ".env").write_text(f"AVA_GATEWAY_URL=http://10.0.0.7:8000\nAVA_SERVICE_PATH={tools}\n")
-    (home / f"machine_serve_{flag.replace('-', '_')}").write_text("true\n")
-
-
-def test_a_runner_home_without_an_intent_starts_as_it_always_has(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tools: str, start: list[dict[str, Any]]
-) -> None:
-    home = tmp_path / "legacy"
-    _legacy_runner(home, tools)
-    monkeypatch.setenv("AVA_HOME", str(home))
-
-    assert start_identity.require_initialized(home) == start_identity.InitializedHome(
-        frozenset({"agent-runner"}), None
-    )
-    assert _start() == 0
-    assert not (home / start_identity.INTENT_NAME).exists()  # a start never writes an identity
-
-
-def test_a_gateway_home_without_an_intent_is_refused(
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param("AVA_GATEWAY_URL=http://10.0.0.7:8000\n", id="runner"),
+        pytest.param("AVA_DB_URL=postgresql://db.invalid/ava\n", id="gateway"),
+    ],
+)
+def test_a_home_with_an_identity_but_no_intent_is_refused(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     tools: str,
     start: list[dict[str, Any]],
     capsys: pytest.CaptureFixture[str],
+    env: str,
 ) -> None:
-    home = tmp_path / "legacy-gateway"
-    _legacy_runner(home, tools, flag="gateway")
+    """A home with no `start-intent.json` has no admission, whatever its `.env` and
+    capability flags declare: `ava start` takes an identity only from `ava init`."""
+    home = tmp_path / "predates-the-intent"
+    home.mkdir(mode=0o700)
+    (home / ".env").write_text(
+        f"{env}AVA_SERVICE_PATH={tools}\nAVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
+    )
     monkeypatch.setenv("AVA_HOME", str(home))
 
     assert _start() == 1
 
     assert "no recorded identity" in capsys.readouterr().err
     assert start == []
+    assert not (home / start_identity.INTENT_NAME).exists()  # a start never writes an identity

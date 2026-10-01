@@ -208,8 +208,9 @@ def spawn_child(
     # dialing the operator's real collector.
     home = tmp_path / "ava-home"
     home.mkdir()
-    (home / ".env").write_text(f"{_ENDPOINT_ENV}={endpoint}\n", encoding="utf-8")
-    (home / "machine_name").write_text(f"{label}-shutdown-test\n", encoding="utf-8")
+    (home / ".env").write_text(
+        f"{_ENDPOINT_ENV}={endpoint}\nAVA_MACHINE_NAME={label}-shutdown-test\n", encoding="utf-8"
+    )
     env = os.environ.copy()
     env["AVA_HOME"] = str(home)
     env[_MARKERS_ENV] = str(markers_path)
