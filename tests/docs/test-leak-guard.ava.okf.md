@@ -53,7 +53,7 @@ An existing module attribute assigned a new value (a static lint's job; the agen
 
 ## The agent identity is restored, not compared
 
-`ava.agent_identity._agent_id` and its siblings are assigned bare by hundreds of tests (the pattern `env_bootstrap` documents), so reporting them would turn the convention into a defect. The root plugin `identity_restore` (`tests/fixtures/identity_restore.py`, third in `pytest_plugins`) puts them back after every test instead: the five slots of `ava.agent_identity`, `turn_identity._process_agent_id` and the `_TURN_AGENT_ID` contextvar. Its table is the one owner of which slots make up the identity; `tests/ci/test_leak_guard.py` checks that each exists and that every annotated slot of `ava.agent_identity` is in it. `ava.self.AGENT_ID` is not touched: the module `__getattr__` serves it from those slots, and writing a value that was read back would store it for good (PR #3791). A test that stores it is a `module-attr` leak, which the guard names.
+`ava.agent_identity._agent_id` and its siblings are assigned bare by hundreds of tests, so reporting them would turn the convention into a defect. The root plugin `identity_restore` (`tests/fixtures/identity_restore.py`) puts them back after every test instead: the five slots of `ava.agent_identity`, `turn_identity._process_agent_id` and the `_TURN_AGENT_ID` contextvar. Its table owns which slots make up the identity; `tests/ci/test_leak_guard.py` checks that each exists and that every annotated slot of `ava.agent_identity` is listed. `ava.self.AGENT_ID` is not touched: the module `__getattr__` serves it, and writing a read value back would store it for good (PR #3791); a test that stores it is a `module-attr` leak.
 
 ## Fixing a finding
 
@@ -61,4 +61,6 @@ Recipes per kind are in the fail-mode message and in [flaky-tests §9](../../con
 
 ## Switching `warn` to `fail`
 
-One default changes, and the `AVA_HOME` hook in `tests/fixtures/guards.py` (covered by the `env` check) goes. It waits for: warn running through a full nightly duration refresh with complete 17/17 reports; three consecutive main pushes with no leak; a drain run (the CI workflow dispatched on a scratch branch that forces `AVA_LEAK_GUARD=fail` on all shards, since a draft PR skips CI; it restores after each leaker and so shows the ones warn masks) with zero guard errors; the measured cost on CI at most 0.2 ms a test (`us/test` of the shard line, with the steady figure beside it); and no exemption list.
+One default changes, and the `AVA_HOME` hook in `tests/fixtures/guards.py` (covered by the `env` check) goes. The conditions are about correctness only: warn running through a full nightly duration refresh with complete 17/17 reports; three consecutive main pushes with no leak finding (the agent identity is not among them: `identity_restore` undoes it); a drain run (the CI workflow dispatched on a scratch branch that forces `AVA_LEAK_GUARD=fail` on all shards, since a draft PR skips CI; it restores after each leaker and so shows the ones warn masks) with zero guard errors; and no exemption list.
+
+The cost (`us/test` of the shard line) is reported but has no threshold: about 0.5 ms a test on CI, roughly 0.3% of a shard's time, and getting under a chosen number means watching fewer module dicts, trading detection for the number.
