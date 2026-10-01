@@ -1,7 +1,4 @@
 {
-  "complexity": {
-    "tests/ava/test_external.py::test_failed_context_entry_restores_prior_binding_and_allows_next_attachment": 15
-  },
   "files": {
     "tests/ava/test_agents_sdk.py": 1162
   },
@@ -20,11 +17,6 @@
     "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._write_atomically": 1,
     "tests/ava/test_agents_sdk.py::ava.gateway_client.transport._client": 1,
     "tests/ava/test_agents_sdk.py::gateway.agents.router._forward_spawn_to_remote": 1,
-    "tests/ava/test_external.py::ava.external._deliver_telemetry_before_detach": 1,
-    "tests/ava/test_external.py::ava.external.attach._seal_manifest_participant": 2,
-    "tests/ava/test_external.py::ava.mcps._get_remote_client": 2,
-    "tests/ava/test_external.py::ava.mcps._run_async": 1,
-    "tests/ava/test_external.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 2,
     "tests/ava/test_external_integration.py::ava.gateway_client.transport._client": 2,
     "tests/ava/test_presets_sdk.py::ava.gateway_client.transport._client": 1,
     "tests/ava/test_ui.py::ava.gateway_client.transport._client": 1,
@@ -36,7 +28,6 @@
     "tests/ava/sdk_surface/test_metering.py::top-level": 1,
     "tests/ava/sdk_surface/test_validation.py::top-level": 1,
     "tests/ava/test_agents_sdk.py::top-level": 1,
-    "tests/ava/test_external.py::top-level": 1,
     "tests/ava/test_external_integration.py::top-level": 1,
     "tests/ava/test_presets_sdk.py::top-level": 1,
     "tests/ava/test_ui.py::top-level": 1

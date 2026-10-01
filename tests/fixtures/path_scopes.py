@@ -155,6 +155,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "gateway/schedules/tests/test_schedule_manager_pty.py",
             "services/agent_host/tests/test_hosted_dispatcher_cancellation.py",
             "ava/tests/test_composer_commands.py",
+            "agent/tests/test_external.py",
         ),
         65,
     ),
