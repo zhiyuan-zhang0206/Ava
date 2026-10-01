@@ -269,6 +269,21 @@ type = "forbidden"
 source_modules = ["base"]
 forbidden_modules = ["services"]
 
+# `services` is not a layer, but one direction is fixed: the supervised daemons
+# sit below the `cli` command surface, which starts, stops and reports on them,
+# and a daemon never reaches back into it. A primitive both sides need (a
+# data-plane path, a listener probe, a URL validator) lives in `base` and both
+# import it. There is no `ignore_imports` list: a function-local import counts
+# like a module-level one, so a lazy `from cli... import` inside a service
+# fails too. Not seen by import-linter: a string-form
+# `importlib.import_module("cli....")` and the test modules under
+# `services/**/tests` (no `__init__.py`, so not in the graph).
+[[tool.importlinter.contracts]]
+name = "services must not import cli"
+type = "forbidden"
+source_modules = ["services"]
+forbidden_modules = ["cli"]
+
 # Ops layer: base < ops < {gateway, cli}. The ops module (Spec / Status /
 # controllers) sits above base and is consumed by gateway + cli (and by the
 # services daemons, which become thin mains over the controllers) — but must never

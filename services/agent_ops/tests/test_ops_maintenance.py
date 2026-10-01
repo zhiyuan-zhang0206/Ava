@@ -1,18 +1,25 @@
-"""Actual request and executor lifetime must outlive a disconnected awaiter."""
+"""Actual request and executor lifetime must outlive a disconnected awaiter, and a stopped
+generation still answers a status probe through the real dispatch."""
 
 import asyncio
+import json
 import socket
 import struct
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest
+from psycopg_pool import ConnectionPool
 
+from base.config import settings
 from base.daemon.health import stop_health_server
 from base.daemon.http_transport import start_daemon_http
-from base.deploy.maintenance import pause_owner
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.state import host_deploy_state
 from services.agent_ops import daemon
 from services.agent_ops import maintenance as activity
 from tests.agent.test_maintenance import WHEN
@@ -143,3 +150,39 @@ async def test_server_close_after_client_reset_is_not_request_completion() -> No
         await asyncio.wait_for(returned.wait(), 2)
         await stop_health_server(server)
     assert activity.progress()["requests"] == 0
+
+
+@pytest.fixture
+def held(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A stopped generation: the update hold is published and the host is paused."""
+    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "serving.json")
+    pause_owner.begin_maintenance("update", WHEN)
+    pause_owner.change_maintenance("update", WHEN, MaintenanceHold(), MaintenanceHold("stopped"))
+    host_deploy_state.set_posture("paused")
+    start_serving.begin_start()
+
+
+@pytest.mark.usefixtures("held")
+async def test_real_ops_status_reports_the_hold_without_releasing_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Real dispatch, executor, PostgreSQL posture and journal; no service is launched.
+    with (
+        ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool,
+        ThreadPoolExecutor(max_workers=2) as executor,
+    ):
+        monkeypatch.setattr(daemon, "_db_pool", pool)
+        monkeypatch.setattr(daemon, "_op_executor", executor)
+        monkeypatch.setattr(daemon, "_dispatch_sem", asyncio.Semaphore(2))
+
+        async def request(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+            status, raw, _ = await daemon._ops_route(
+                json.dumps({"kind": kind, "payload": payload}).encode()
+            )
+            assert status == 200
+            return json.loads(raw)
+
+        status = await request("status_probe", {})
+        assert status["status"] == "completed"
+        assert status["result"]["paused"] is True
+        assert admission.held()

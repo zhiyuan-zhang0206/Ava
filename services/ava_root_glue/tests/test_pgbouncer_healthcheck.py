@@ -1,4 +1,9 @@
-"""Native pooler diagnostics retain evidence without gaining repair authority."""
+"""Native pooler diagnostics retain evidence without gaining repair authority.
+
+The diagnostic reads the pooler through `base.cluster` only. It cannot start one: the start
+(`ensure_pgbouncer`) lives in `cli`, and the `services must not import cli` contract in
+`pyproject.toml` is what keeps a diagnostic from importing it.
+"""
 
 from collections.abc import Callable
 from pathlib import Path
