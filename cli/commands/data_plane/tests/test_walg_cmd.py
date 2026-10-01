@@ -1,9 +1,11 @@
-"""`ava backup walg check|status`: what an operator reads, and the parser that reaches it."""
+"""`ava backup walg check|run|status`: what an operator reads, and the parser that reaches it."""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +16,7 @@ from base.config import settings
 from cli.commands.data_plane import walg as walg_cmd
 from cli.parsers import build_parser
 from services.gateway_side.walg import config as walg_config
-from services.gateway_side.walg import probe
+from services.gateway_side.walg import probe, state
 from services.gateway_side.walg.tests.support import (
     SECRETS,
     PgInstance,
@@ -37,14 +39,79 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     return sandbox
 
 
-def test_the_parser_reaches_both_verbs() -> None:
+def test_the_parser_reaches_every_verb() -> None:
     parser = build_parser()
 
     check = parser.parse_args(["backup", "walg", "check"])
+    run = parser.parse_args(["backup", "walg", "run"])
     status = parser.parse_args(["backup", "walg", "status"])
 
     assert check.func.__name__ == "_h_backup_walg_check"
+    assert run.func.__name__ == "_h_backup_walg_run"
     assert status.func.__name__ == "_h_backup_walg_status"
+
+
+def test_run_hands_the_tick_a_timestamping_reporter_and_returns_its_exit_code(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fake_tick(report: Any) -> int:
+        report("skipped: postgres is not accepting connections")
+        return 1
+
+    monkeypatch.setattr(walg_cmd.tick, "run_tick", fake_tick)
+
+    assert walg_cmd.cmd_walg_run() == 1
+
+    out = capsys.readouterr().out
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z skipped: postgres is not accepting connections\n",
+        out,
+    )
+
+
+def test_status_says_when_the_tick_never_ran(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert walg_cmd.cmd_walg_status() == 0
+
+    assert "daily tick: never ran" in capsys.readouterr().out
+
+
+def test_status_shows_the_last_run_and_its_failed_step(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+) -> None:
+    started = datetime(2026, 10, 2, 6, 25, tzinfo=UTC)
+    state.write_state(
+        state.State(
+            tick=state.TickRecord(started_at=started),
+            run=state.RunRecord(
+                started_at=started,
+                finished_at=started,
+                status="failed",
+                step="verify",
+                detail="the archived WAL chain is broken",
+            ),
+            verify=state.VerifyRecord(at=started, integrity="FAILURE", timeline="OK"),
+        )
+    )
+
+    assert walg_cmd.cmd_walg_status() == 0
+
+    out = capsys.readouterr().out
+    assert "daily tick: last started 2026-10-02T06:25:00+00:00" in out
+    assert "last run: failed at verify (2026-10-02T06:25:00+00:00): the archived WAL chain" in out
+    assert "last verify: integrity FAILURE, timeline OK" in out
+
+
+def test_status_reports_an_unreadable_state_file(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state.state_path().parent.mkdir(parents=True)
+    state.state_path().write_text("{broken")
+
+    assert walg_cmd.cmd_walg_status() == 0
+
+    assert "daily tick: state UNREADABLE" in capsys.readouterr().out
 
 
 def test_check_prints_a_mark_per_step_and_exits_zero_when_all_pass(
