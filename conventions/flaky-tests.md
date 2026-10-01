@@ -31,9 +31,7 @@ a dead process; CI reports `assert not True` and a rerun is green.
 `ExecProcessDomain.close()` promises `SIGKILL` delivery, not immediate
 process-table removal. A descendant can remain a zombie until an OS reaper
 asynchronously collects it, and `pid_exists` remains true meanwhile. PR #964
-applied the same discipline to the forced-shutdown PITR test in
-`tests/services/test_pitr_base_scheduler.py`; its root-cause fix was a daemon
-ownership-adoption `Event`, not a test relaxation. PR #1303 made
+applied the same discipline to a forced-shutdown daemon test; its root-cause fix was a daemon ownership-adoption `Event`, not a test relaxation. PR #1303 made
 `base/sessions/posixproc.py` liveness zombie-aware
 (`is_running()` and `status() != STATUS_ZOMBIE`) and exposed a separate
 regression: `_FakeProc` did not implement the new `status()` probe, so CI shard

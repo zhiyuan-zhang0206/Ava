@@ -24,7 +24,7 @@ a changed or vanished expected birth is never replaced by warm start. The
 pidfile's wall timestamp is file data, never a native birth comparison.
 
 `base.cluster.ownership.postgres` reads this evidence. Provisioning, admin
-connections, ordinary stop and PITR consume the same owner. Missing receipts do
+connections and ordinary stop consume the same owner. Missing receipts do
 not adopt running or pidfile-recorded servers. An interrupted pending launch
 without a captured birth requires explicit reconciliation. SIGINT/SIGTERM are
 deferred across child creation and receipt publication with Python handlers;
@@ -37,7 +37,7 @@ data directory/inode, no process in the retained session, and no listener.
 Linux signals use a PID-retaining descriptor. Reload uses the same receipt and
 native identity gate. Unknown metadata, surviving archive children or a replaced
 pidfile refuse. Clean stop retains the receipt; a subsequent launch replaces it
-only after positive native closure. PITR can then swap PGDATA and the next
+only after positive native closure. A restore can then swap PGDATA and the next
 launch records the new directory identity. No clock tolerance or automatic
 legacy adoption exists; old unrecorded installations require operator cutover.
 
@@ -54,6 +54,5 @@ survives transaction rollback and `RESET ROLE`, and is verified before use.
 The owner therefore never logs in: it is created `NOLOGIN` without a password,
 and application processes log in only as write generations
 (`base.cluster.authority`). `OwnerAuthority.verified_conninfo` gives a
-client that cannot run the custody check itself (`pg_dump`, the PITR restore
-worker) the same password-free, owner-equivalent view after one custody-checked
+client that cannot run the custody check itself (`pg_dump`) the same password-free, owner-equivalent view after one custody-checked
 session.

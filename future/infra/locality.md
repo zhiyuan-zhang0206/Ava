@@ -43,8 +43,8 @@ lifecycle; those items wait for it to land and are then designed on its code.
 
 1. **Postgres door burn-down** (`owner_bypasses`, 19 modules / 29 sites).
    Extend `base.db.connect()` / `pool()` so the door owns the transport
-   posture while the caller owns the target (an explicit URL for provisioning,
-   PITR, and restore drills), and add the async pool factory the agent host
+   posture while the caller owns the target (an explicit URL for provisioning
+   and restore drills), and add the async pool factory the agent host
    and eval pools lack. Migrate the sites; genuine exceptions become reasoned
    `allowed` entries. Collapse the three drifted `watch_idle.py` reference
    copies into one. Then narrow `scripts/lint_pool_keepalives.py` to what
