@@ -18,7 +18,7 @@ from base.cluster.authority import (
     retire_legacy_logins,
     vacuum_or_fail,
 )
-from tests.lifecycle.db_authority.conftest import OWNER, AuthorityCluster
+from tests.path_scoped.db_authority_tests import OWNER, AuthorityCluster
 
 # (mutation run by the admin, expected violation fragment)
 _UNKNOWN_EFFECTS = [
