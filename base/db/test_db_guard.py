@@ -12,7 +12,7 @@ never loaded.
 ``base.config.settings`` then resolved the operator's real ``~/.ava/.env``,
 and the test helper that seeds agent rows wrote straight into the main
 cluster's database. The per-helper guard that existed
-(``tests/ava/conftest.py::_ensure_agents_meta_row``) was on a different seed
+(``tests/path_scoped/ava_tests.py::_ensure_agents_meta_row``) was on a different seed
 path in a different conftest tree and never ran.
 
 The rule below is the single source of truth for "is this database one a test
