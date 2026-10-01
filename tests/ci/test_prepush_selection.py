@@ -16,6 +16,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -48,7 +49,7 @@ def _init_repo_with_origin_main(path: Path) -> str:
     return base_sha
 
 
-def _hooks() -> dict[str, dict]:
+def _hooks() -> dict[str, dict[str, Any]]:
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
     return {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
 
@@ -120,8 +121,6 @@ def test_eslint_runs_over_changed_files_at_commit_and_over_the_project_at_push()
 
 
 # ── the commit-stage ESLint run over changed files ──────────────────────────────
-
-PRECOMMIT_ESLINT = ROOT / "scripts/precommit-eslint.sh"
 
 
 @pytest.fixture

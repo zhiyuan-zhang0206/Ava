@@ -200,6 +200,14 @@ class _Index:
         self.fixed = _FixedMap(self._is_module, self._fixed_names)  # module -> fixed-instant names
         self._summary: dict[tuple[str, str], tuple[bool, bool, bool]] = {}
 
+    def functions(self, mod: str) -> _Functions:
+        """The module's top-level functions; none for an unknown or unparseable module."""
+        return self.fns.get(mod) or {}
+
+    def fixed_names(self, mod: str) -> frozenset[str]:
+        """The module's fixed-instant names; none when it defines no such constant."""
+        return self.fixed.get(mod) or frozenset()
+
     def _path(self, mod: str) -> Path:
         return self.root / (mod.replace(".", "/") + ".py")
 
@@ -263,16 +271,16 @@ class _Index:
     def _resolve(self, mod: str, call: ast.Call) -> tuple[str, str] | None:
         f = call.func
         if isinstance(f, ast.Name):
-            if f.id in self.fns.get(mod, {}):
+            if f.id in self.functions(mod):
                 return mod, f.id
             return self._imports(mod, f.id)
         if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
             direct = self._imports(mod, f.value.id)
             if direct is not None:
-                if f.attr in self.fns.get(direct[0], {}):
+                if f.attr in self.functions(direct[0]):
                     return direct[0], f.attr
                 sub = f"{direct[0]}.{direct[1]}"
-                if sub in self.fns and f.attr in self.fns[sub]:
+                if f.attr in self.functions(sub):
                     return sub, f.attr
         return None
 
@@ -317,7 +325,7 @@ class _Index:
         self, call: ast.Call, callee: tuple[str, str], caller_clock: frozenset[str]
     ) -> bool:
         mod, name = callee
-        info = self.fns.get(mod, {}).get(name)
+        info = self.functions(mod).get(name)
         if info is None:
             return False
         node, params = info
@@ -370,7 +378,7 @@ class _Index:
         cached = self._summary.get(key)
         if cached is not None:
             return cached
-        info = self.fns.get(mod, {}).get(name)
+        info = self.functions(mod).get(name)
         if info is None:
             return (False, True, False)
         node, params = info
@@ -449,7 +457,7 @@ def _lint_source(
 def _lint_source_file(index: _Index, path: Path, rel: str) -> list[str]:
     mod = rel[:-3].replace("/", ".")
     errors: list[str] = []
-    fns = index.fns.get(mod, {})
+    fns = index.functions(mod)
     for name, (fn_node, params) in fns.items():
         clock = params & _CLOCK_PARAMS
         if not clock:
@@ -537,7 +545,7 @@ def _local_derives(
                 isinstance(n, ast.Attribute)
                 and isinstance(n.value, ast.Name)
                 and n.value.id in aliases
-                and n.attr in index.fixed.get(aliases[n.value.id], ())
+                and n.attr in index.fixed_names(aliases[n.value.id])
             ):
                 return True
         return False
@@ -583,7 +591,7 @@ def _expr_refs_fixed(
             isinstance(n, ast.Attribute)
             and isinstance(n.value, ast.Name)
             and n.value.id in aliases
-            and n.attr in index.fixed.get(aliases[n.value.id], ())
+            and n.attr in index.fixed_names(aliases[n.value.id])
         ):
             return True
     return False

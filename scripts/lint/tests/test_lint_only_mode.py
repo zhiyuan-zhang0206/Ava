@@ -86,8 +86,8 @@ class Case:
     bad_path: str
     bad_source: str
     clean_path: str = ""
-    extra: dict[str, str] = field(default_factory=dict)
-    patches: dict[str, object] = field(default_factory=dict)
+    extra: dict[str, str] = field(default_factory=dict[str, str])
+    patches: dict[str, object] = field(default_factory=dict[str, object])
 
     def clean(self) -> str:
         return self.clean_path or str(
@@ -272,7 +272,7 @@ def test_a_module_is_built_when_first_reached_and_only_once() -> None:
     assert built == [], "asking whether a module exists must not build it"
     assert modules.get("a") == "A" and modules["a"] == "A"
     assert built == ["a"], "a module is built once"
-    assert modules.get("missing", "default") == "default"
-    assert modules.get("empty", "default") == "default"
+    assert modules.get("missing") is None
+    assert modules.get("empty") is None
     with pytest.raises(KeyError):
         modules["empty"]
