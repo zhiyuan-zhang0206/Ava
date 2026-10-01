@@ -2,9 +2,9 @@
 # Serialize one heavy tool across host worktrees. CI independently enforces it.
 set -euo pipefail
 
-tool="${1:?usage: prepush-guard.sh pyright|tsc|eslint|vitest|branch-lint -- command...}"
+tool="${1:?usage: prepush-guard.sh pyright|tsc|eslint|vitest -- command...}"
 shift
-case "$tool" in pyright|tsc|eslint|vitest|branch-lint) ;; *) echo "Unknown heavy tool: $tool" >&2; exit 2 ;; esac
+case "$tool" in pyright|tsc|eslint|vitest) ;; *) echo "Unknown heavy tool: $tool" >&2; exit 2 ;; esac
 [[ "${1:-}" == -- && $# -ge 2 ]] || { echo "Expected -- command..." >&2; exit 2; }
 shift
 
@@ -32,9 +32,6 @@ case "$tool" in
         for bin in "${required_bins[@]}"; do
             [[ -x "ui/web/node_modules/.bin/$bin" ]] || skip "missing frontend executable $bin; run (cd ui/web && npm ci)"
         done
-        ;;
-    branch-lint)
-        [[ -x .venv/bin/pre-commit ]] || skip "missing .venv/bin/pre-commit; run env -u VIRTUAL_ENV uv sync"
         ;;
 esac
 

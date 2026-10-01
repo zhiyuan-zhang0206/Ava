@@ -26,9 +26,11 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   - **Never repeat a check on unchanged code.** Re-run a check only after you
     edited something it covers; after a failure, fix and re-run just the failing
     files. A second identical run with no edit in between tells you nothing.
-- **Commit hooks** run lints and codegen checks. For targeted local verification,
-  skip the full-suite `frontend-vitest` pre-push hook by name and record the
-  targeted tests run instead; do not bypass the other hooks.
+- **Commit hooks** judge what the commit changes: the per-file lints take the
+  changed files, a whole-project check runs only when one of its inputs changed,
+  and ESLint lints the changed frontend files. They run no tests. For targeted
+  local verification, skip the full-suite `frontend-vitest` pre-push hook by name
+  and record the targeted tests run instead; do not bypass the other hooks.
 - **Local tests before push** — mandatory. After commit and before `git push`,
   run the checks above for the areas you touched:
   - Python tests: `.venv/bin/pytest -n 2 <selected-test-files-or-node-ids>`.
@@ -111,9 +113,11 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   a directory.
 - **Full non-e2e + e2e + coverage threshold runs in CI** — it's the merge gate.
 - **Framework pre-push hooks** run pyright (scoped to the branch's own changed
-  `.py` files, same local-only-changed-files rule as above), frontend tsc, eslint
-  and vitest, plus a branch-diff rerun of the pre-commit stage and an
-  unconditional generated-artifact freshness sweep (neither runs pytest). Install
+  `.py` files, same local-only-changed-files rule as above) and, on frontend
+  changes, tsc, whole-project eslint and vitest. They also rerun the pre-commit
+  stage over the branch diff, re-check the generated-artifact hooks whose inputs
+  the branch deleted, and scan every test for patch targets when the branch
+  touches Python (none of this runs pytest). Install
   both stages from the main clone's stable `.venv`, never a worktree:
   `.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push`.
   See [the hook runbook](../../../conventions/runbook.md#git-hooks-pre-commit--pre-push)

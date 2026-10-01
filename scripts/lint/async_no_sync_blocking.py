@@ -208,7 +208,26 @@ def _stale_repo_helpers() -> list[str]:
     return sorted(remaining)
 
 
-def main() -> int:
+def _scanned_files(scope: frozenset[str] | None) -> list[Path]:
+    """The source files of the scanned dirs (all of them, or the `--only` changed ones)."""
+    return sorted(
+        lint_common.restrict(
+            (
+                p
+                for d in _SCAN_DIRS
+                for p in (_ROOT / d).rglob("*.py")
+                if "__pycache__" not in p.parts and not lint_common.is_repo_test_file(p, _ROOT)
+            ),
+            scope,
+            _ROOT,
+        )
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = argv if argv is not None else sys.argv[1:]
+    _, only = lint_common.split_only(argv)
+    scope = lint_common.changed_scope(only, _ROOT)
     stale = _stale_repo_helpers()
     if stale:
         for name in stale:
@@ -218,12 +237,7 @@ def main() -> int:
                 "drop it"
             )
         return 1
-    files = sorted(
-        p
-        for d in _SCAN_DIRS
-        for p in (_ROOT / d).rglob("*.py")
-        if "__pycache__" not in p.parts and not lint_common.is_repo_test_file(p, _ROOT)
-    )
+    files = _scanned_files(scope)
     all_errors: list[tuple[Path, list[tuple[int, str]]]] = []
     for path in files:
         try:

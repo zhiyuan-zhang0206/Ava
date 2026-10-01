@@ -10,12 +10,17 @@
 # This closes that gap by nesting a nested `pre-commit run` invocation scoped
 # to the real branch diff. It does NOT close the separate delete-only gap
 # (a files:-filtered hook never sees a purely deleted path, on any range) —
-# see scripts/prepush-artifact-freshness.sh for that companion fix.
+# see scripts/provision/prepush_freshness.py for that companion fix.
 #
-# Best-effort like the other scripts/prepush-guard.sh tools: skips loudly
-# under load, a missing lock, or an unresolvable origin/main. A local skip is
-# never evidence the check ran; CI (backend-structure / merged-tree-structure)
-# independently re-verifies the pushed and merged tree.
+# The commit-stage hooks judge only the files they are handed, so this run costs about
+# what one commit over the same files costs. That is why it takes no load threshold and no
+# lock (unlike the heavy tools behind scripts/prepush-guard.sh): it is light enough to run
+# every time, and a load-dependent skip would leave rebased commits unchecked at random.
+#
+# It still skips loudly when it cannot know the range (no origin/main) or has no
+# pre-commit to run. A local skip is never evidence the check ran; CI
+# (backend-structure / merged-tree-structure) independently re-verifies the pushed and
+# merged tree.
 set -euo pipefail
 
 skip() {
@@ -30,6 +35,6 @@ git rev-parse --verify -q origin/main >/dev/null 2>&1 \
 base_sha="$(git merge-base origin/main HEAD 2>/dev/null)" \
     || skip "could not compute 'git merge-base origin/main HEAD'"
 [[ -n "$base_sha" ]] || skip "empty merge-base with origin/main"
+[[ -x .venv/bin/pre-commit ]] || skip "missing .venv/bin/pre-commit; run env -u VIRTUAL_ENV uv sync"
 
-exec bash scripts/prepush-guard.sh branch-lint -- \
-    .venv/bin/pre-commit run --hook-stage pre-commit --from-ref "$base_sha" --to-ref HEAD
+exec .venv/bin/pre-commit run --hook-stage pre-commit --from-ref "$base_sha" --to-ref HEAD

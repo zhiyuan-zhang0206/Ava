@@ -43,6 +43,7 @@ Error format `file:line: U+XXXX 'c' | <line content>` + non-zero exit.
 from __future__ import annotations
 
 import io
+import re
 import sys
 import tokenize
 from pathlib import Path
@@ -103,7 +104,17 @@ _EMOJI_RANGES: tuple[tuple[int, int], ...] = (
 _VARIATION_SELECTOR = "️"
 
 
+# One C-speed pass rules out the overwhelming majority of lines: `_first_emoji` can only
+# return a character inside `_EMOJI_RANGES` (the plain text marks are dingbats too), so a
+# line with no such character has no verdict to compute.
+_EMOJI_PREFILTER = re.compile(
+    "[" + "".join(f"{chr(lo)}-{chr(hi)}" for lo, hi in _EMOJI_RANGES) + "]"
+)
+
+
 def _first_emoji(line: str) -> str | None:
+    if _EMOJI_PREFILTER.search(line) is None:
+        return None
     for i, ch in enumerate(line):
         nxt = line[i + 1] if i + 1 < len(line) else ""
         if ch in _TEXT_MARK_ALLOW:
@@ -172,20 +183,23 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    argv, only = lint_common.split_only(argv)
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    # argv = explicit file list (manual run / pre-commit changed files); empty = scan every in-scope dir.
+    # argv = explicit file list (manual run); empty = scan every in-scope dir, or only the
+    # changed files of `--only` (the commit hook) under that same scope.
     targets = (
         [Path(a).resolve() for a in argv]
         if argv
         else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
     )
+    scope = lint_common.changed_scope(only, _REPO_ROOT)
 
     total = 0
-    for path in sorted(_iter_py_files(targets)):
+    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, _REPO_ROOT)):
         if "__pycache__" in path.parts:
             continue
         try:

@@ -12,7 +12,6 @@
     "scripts/lint/no_plugin_wrap.py::_scan_file": 17,
     "scripts/lint/no_script_sibling_imports.py::_scan_file.<locals>.walk": 21,
     "scripts/lint/time_bomb.py::_Index._inside_fallback": 15,
-    "scripts/lint/time_bomb.py::_Index._scan": 30,
     "scripts/lint/time_bomb.py::_Index.summary": 20,
     "scripts/lint/time_bomb.py::_lint_fixture_dates": 17,
     "scripts/lint/time_bomb.py::_lint_source_file": 15,

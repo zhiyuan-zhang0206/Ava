@@ -520,7 +520,11 @@ def main() -> int:
     ava_surface_files = _discover_agent_surface_modules(repo_root)
     files = sorted(
         p
-        for p in repo_root.rglob("*.py")
+        for root in (
+            repo_root / "ava",
+            repo_root / "ava_builtins/plugins",
+        )  # all `_is_in_scope` accepts
+        for p in root.rglob("*.py")
         if ".venv" not in p.parts
         and _is_in_scope(p.relative_to(repo_root), plugin_namespace_files, ava_surface_files)
     )
