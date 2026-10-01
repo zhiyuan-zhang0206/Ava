@@ -132,8 +132,8 @@ connection facts from the gateway at Settings construction. See
 
 A worktree owns no cluster. Acquire dependencies into its own real `.venv` and
 verify with selected tests and CI ([development in a worktree](../../../conventions/dev-setup.md#development-in-a-worktree)).
-A home that carries its own `source` checkout (`~/.ava`) is started, stopped and
-updated only by that checkout's `ava`.
+A home that carries its own `source` checkout (`~/.ava`) is operated only by that
+checkout's `ava`; any other checkout's `ava` refuses every command.
 
 ## Verify the result
 

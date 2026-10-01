@@ -86,7 +86,7 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
         ["agents", "ls"],
         ["config", "get", "AVA_TIMEZONE"],
         ["mcp", "ls"],
-        # What changes a home, and what no one has named yet.
+        # Commands that start, stop or reconfigure a home, and one nobody has named yet.
         ["start"],
         ["stop"],
         ["pause"],

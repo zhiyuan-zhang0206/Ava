@@ -13,7 +13,7 @@ hooks and tools that import application code. Every descendant inherits it.
 
 What keeps development code off the host's cluster is that rule plus the
 checkout guard (`home_checkout_error`): a home that carries its own
-`<home>/source` checkout is changed only by that checkout's code.
+`<home>/source` checkout is operated only by that checkout's code.
 
 Callers:
     base/config.py            - before importing Settings
@@ -90,15 +90,15 @@ def resolve_ava_home() -> Path:
 
 
 def home_checkout_error(repo: Path) -> str | None:
-    """Why `repo` may not change this process's home, or None when it may.
+    """Why `repo` may not operate this process's home, or None when it may.
 
     A home that carries its own `<home>/source` checkout (the production home
-    `~/.ava`, and every unit started from source) is started, stopped and
-    reconfigured only by that checkout's code: a disposable checkout driving it
-    would bind its daemons to code that disappears with the checkout (the 01:13
-    worktree accident, Task #966) or apply un-reviewed migrations to its
-    database. A home with no `source` (a test session's temporary home, a
-    scratch `AVA_HOME`) accepts any checkout.
+    `~/.ava`, and every unit started from source) is operated only by that
+    checkout's code: a disposable checkout driving it would bind its daemons to
+    code that disappears with the checkout (the 01:13 worktree accident, Task
+    #966) or apply un-reviewed migrations to its database. A home with no
+    `source` (a test session's temporary home, a scratch `AVA_HOME`) accepts any
+    checkout.
 
     Both sides are compared resolved, so a symlinked or `..`-spelled path to
     the same directory is the same checkout.
