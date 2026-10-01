@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from collections.abc import Iterable
@@ -98,7 +99,8 @@ def changed_scope(
     """
     if only is None:
         return None
-    missing = [a for a in only if not (repo_root / a).exists()]
+    # lexists: a tracked symlink whose target is gone is still a path pre-commit hands us.
+    missing = [a for a in only if not os.path.lexists(repo_root / a)]
     if missing:
         raise SystemExit(f"error: target path(s) not found: {', '.join(missing)}")
     changed = frozenset(_rel_or_abs((repo_root / a).absolute(), repo_root) for a in only)
