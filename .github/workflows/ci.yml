@@ -340,7 +340,14 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: 0.10.2
-          enable-cache: true
+          # No project cache here. setup-uv keys the cache on pyproject.toml +
+          # uv.lock only, every job shares that key, and an entry is immutable:
+          # the first job to finish writes it. This job installs nothing from the
+          # lockfile (only `uvx uv==0.11.16`) and finishes in ~20s, so it always
+          # won that race and left a ~46 MB entry without the project wheels,
+          # which every other job then restored as a "hit" and re-downloaded
+          # all 265 packages from PyPI anyway.
+          enable-cache: false
 
       - name: Audit locked Python dependencies
         # The canonical CI uv (0.10.2) predates `uv audit`; pin the
