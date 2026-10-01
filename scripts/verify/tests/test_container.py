@@ -198,7 +198,7 @@ def test_the_image_tag_follows_what_the_build_can_see(tmp_path: Path) -> None:
 
 def test_the_profile_admits_no_provider_key_and_only_known_configuration() -> None:
     assert not [key for key in container.PROFILE if re.search(r"KEY|TOKEN|SECRET|PASSWORD", key)]
-    # `ava start --config-file` refuses any key that is not a Settings field alias.
+    # `ava init --config-file` refuses any key that is not a Settings field alias.
     assert set(container.PROFILE) <= set(FIELD_ALIASES.values())
 
 
@@ -213,3 +213,20 @@ def test_the_start_selects_the_services_the_observer_checks() -> None:
     ]
     assert selected == list(container.SERVICES)
     assert "--worktree" not in container.START_ARGV
+
+
+def test_init_records_the_identity_and_start_takes_only_the_selection() -> None:
+    """The recipe runs `ava init` (machine, capabilities, profile) and then `ava start`
+    with nothing but the service selection: the same split the CLI parsers enforce."""
+    from cli.parsers import build_parser
+
+    assert container.INIT_ARGV[:2] == [".venv/bin/ava", "init"]
+    assert container.START_ARGV[:2] == [".venv/bin/ava", "start"]
+    parser = build_parser()
+    init = parser.parse_args(container.INIT_ARGV[1:])
+    assert init.machine_name == container.MACHINE_NAME
+    assert init.serve_gateway is True and init.serve_agent_runner is True
+    assert init.config_file == f"{container.WORK}/profile.env"
+    start = parser.parse_args(container.START_ARGV[1:])
+    assert start.only_service == list(container.SERVICES)
+    assert {"init", "start"} <= set(container.TIMEOUTS)  # every step a run records is bounded

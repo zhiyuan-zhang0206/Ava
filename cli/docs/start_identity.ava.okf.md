@@ -1,19 +1,25 @@
 ---
 type: doc
-title: Idempotent cluster start
-description: One settings-free identity phase followed by native provisioning and root-owned readiness.
+title: Home identity, init and start
+description: '`ava init` records a home''s identity once, settings-free and starting nothing; `ava start` admits that home, then runs native provisioning and root-owned readiness.'
 tags:
 - cli
 - cluster-lifecycle
 ---
 
-# Idempotent cluster start
+# Home identity, init and start
 
-`cli/start_intent.py` resolves and validates first-start inputs without importing
-runtime Settings: the home is `AVA_HOME` (else `~/.ava`), and a home that carries its
-own `<home>/source` checkout starts only from that checkout. `cli/start_identity.py`
-persists the complete private intent under the home's start-intent lock before
-publishing `.env`. The intent is the home's record of itself: a gateway's ports and
+`cli/init_intent.py` (`ava init`) resolves and validates the first-start inputs without
+importing runtime Settings: the home is `AVA_HOME` (else `~/.ava`), and a home that
+carries its own `<home>/source` checkout is initialized and started only from that
+checkout. `cli/start_identity.py` persists the complete private intent under the
+home's start-intent lock before publishing `.env`, and init ends there: it starts no
+process and creates no database, so a home that stops at `configured` holds nothing
+native. `cli/start_intent.py` (`ava start`) admits only such a home
+(`require_initialized`: the intent is past `claiming`, `.env` carries the identity the
+roles require, `AVA_SERVICE_PATH` is declared, a remote unit holds no human secret) and
+refuses everything else naming `ava init`. A runner home that predates the intent
+journal is still admitted on what its `.env` and `machine_*` files declare. The intent is the home's record of itself: a gateway's ports and
 data-plane host live in its `record` (`base/cluster/record.py`), and no host
 file lists clusters. A new home records the fixed port table
 (`base/host/env/port_table.py`) after a bind probe finds every port free; a
@@ -22,35 +28,40 @@ home's admitted runtime: the database-authority delivery admits only a process r
 from it (`base/cluster/authority/delivery.py`). An intent that still carries the
 `worktree` key an older start recorded is refused by name rather than read. An
 interrupted claim
-resumes the same ports and credentials: the intent carries
+resumes the same ports and credentials with `ava init` and no flags (a flag is
+refused): the intent carries
 the `.env` payload only while claiming and drops it once `.env` is published, so
-no stale copy of a credential outlives a rotation there. A gateway claim
+no stale copy of a credential outlives a rotation there. An initialized home
+(`configured`, `provisioned` or `ready`) refuses a second `ava init` and changes
+nothing; its identity changes only through `ava cluster destroy` and a new init. A gateway claim
 also pins a minted logical-backup passphrase before it publishes `.env`
 (`services/gateway_side/backup/passphrase.ensure_minted`; an interrupted birth
-keeps the first one). Conflicting identity,
-unregistered existing resources, or a terminal destroy intent refuses startup.
+keeps the first one). Unregistered existing resources, a terminal destroy intent, or a capability set
+that differs from the intent's refuses a start.
 
-First start needs explicit capabilities (`--serve-gateway`, `--serve-agent-runner`,
-`--serve-observability-station`) and a machine name. A remote runner uses the
-same entry with `--gateway-url` and `--db-capability` (a sealed bundle minted by
+`ava init` needs explicit capabilities (`--serve-gateway`, `--serve-agent-runner`,
+`--serve-observability-station`) and a machine name. A remote runner gives it
+`--gateway-url` and `--db-capability` (a sealed bundle minted by
 `ava cluster db-authority issue-unit`, opened with its transport key from
 `AVA_DB_CAPABILITY_KEY`); the bundle's machine API token authenticates the join
-and, once verified, installs the unit's runner DB login and API token — a remote
-runner never holds the human cluster secret (`AVA_CLUSTER_SECRET`; its presence
-in a remote unit's `.env` refuses startup). First-start configuration
-can come from `--config-file`; home, credentials and derived resource identity
-cannot be overridden by generic configuration. Reusing a different configuration
-file for the same recorded initialization refuses.
+and, once verified, installs the unit's runner DB login and API token. That join
+(`cli/unit_join.py`) is also what `ava cluster db-authority install-unit` runs for a
+later bundle on an initialized unit; `ava start` makes no join, since a started
+runner fetches its configuration through Settings and probes its gateway itself. A
+remote runner never holds the human cluster secret (`AVA_CLUSTER_SECRET`; its
+presence in a remote unit's `.env` refuses startup). Initial configuration
+can come from `--config-file`, for a home with no `.env` yet; home, credentials and
+derived resource identity cannot be overridden by generic configuration.
 
-First start admits the host's ordered tool directories into `AVA_SERVICE_PATH`
-in the existing intent and `.env`, excluding the caller's virtualenv. Retries
-reuse that declaration even when the caller PATH changes. Managed root children
+`ava init` admits the host's ordered tool directories into `AVA_SERVICE_PATH`
+in the intent and `.env`, excluding the caller's virtualenv. A resumed init
+reuses that declaration even when the caller PATH changes. Managed root children
 prepend the current runtime virtualenv, then the admitted host directories and
 provisioned tool defaults. The declared value wins over an inherited copy;
 interactive terminals retain their separate environment policy. PATH remains
 part of the live generation digest, so editing the declaration requires stop
 before another start. An existing home without this declaration requires an
-explicit cutover edit; repeat start never silently recaptures its caller PATH.
+explicit cutover edit: `ava start` refuses it and never silently recaptures its caller PATH.
 Admitted directories must be absolute and survive literal `.env` round-trip;
 comment-sensitive names and interpolation expressions fail before intent creation.
 
@@ -77,8 +88,12 @@ starts directly or under systemd. Ordinary application services have no named-se
 launcher or separate watchdog spawn owner. Terminal sessions and native data-plane
 custody remain distinct resources.
 
-The start intent records `claiming`, `configured`, `provisioned`, then `ready`.
-This phase journal preserves initialization authority; it is not evidence of current
+The start intent records `claiming`, `configured`, `provisioned`, then `ready`:
+`ava init` takes a home to `configured`, the first start's data-plane birth to
+`provisioned`, and a start that reaches full readiness to `ready`. A start accepts any
+of the last three and a `configured` home is born by it (the birth branches of
+`cli/commands/data_plane/bringup.py` follow the phase, not the command). This phase
+journal preserves initialization authority; it is not evidence of current
 process health. Current readiness is freshly observed from the owned generation.
 
 Destroy retains the home lock while closing native custody, then retires the home's

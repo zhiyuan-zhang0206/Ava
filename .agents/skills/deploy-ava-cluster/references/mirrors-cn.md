@@ -15,7 +15,7 @@ env -u VIRTUAL_ENV uv run --no-project --python 3.12 python cli/python_install.p
 ```
 
 The profile does not select a home, allocate resources, or launch a cluster.
-Run normal `ava start` separately with the intended home and capabilities.
+Run `ava init` (the intended home and capabilities) and `ava start` separately.
 For subsequent commands, existing unit `mirror.env` files remain supported with
 precedence real environment > `.env` > `mirror.env`; selecting a shell profile
 does not automatically persist it into a home.

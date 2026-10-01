@@ -340,7 +340,8 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
     endpoint bootstrap serves, bound to (`machine`, `home`) and expiring after
     `ttl_hours`. It is written 0600 to `out` (never overwritten) and sealed under
     a transport key printed once here; the unit installs it with
-    `ava start --db-capability <bundle>` and that key in AVA_DB_CAPABILITY_KEY.
+    `ava cluster db-authority install-unit <bundle>` (a first join passes it to
+    `ava init --db-capability`) and that key in AVA_DB_CAPABILITY_KEY.
     Refused on a pure agent-runner, a remote-managed plane and a home without an
     active generation.
     """
@@ -372,8 +373,47 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
         f"{expires}) written to {target} (0600)\n"
         f"  transport key (shown once, carry it separately): {issued.transport_key}\n"
         "  on the unit: export AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run its\n"
-        "  checkout's `.venv/bin/ava start --db-capability <bundle>` (first start also takes "
-        "--gateway-url, --machine-name and --machine-host; the unit never needs "
-        "AVA_CLUSTER_SECRET; a bare `ava` exists only once that start has linked it)"
+        "  checkout's `.venv/bin/ava init --db-capability <bundle>` for a first join (init also "
+        "takes --gateway-url, --machine-name and --machine-host), or `ava cluster db-authority "
+        "install-unit <bundle>` on an initialized unit; the unit never needs "
+        "AVA_CLUSTER_SECRET; a bare `ava` exists only once the unit's first start has linked it)"
     )
+    return 0
+
+
+def cmd_db_authority_install_unit(*, bundle: str) -> int:
+    """`ava cluster db-authority install-unit` — install a sealed capability on this unit.
+
+    Runs on an initialized agent-runner home, with the bundle's transport key in
+    AVA_DB_CAPABILITY_KEY. The bundle must name this unit (machine and home), the
+    endpoint the gateway serves now and a generation not older than the installed
+    one; the unit's gateway answers the bundle's own API token before anything is
+    written, and the bundle file is deleted once installed. After a write-generation
+    rotation: stop the unit, install the new bundle, start it. Refused on a gateway
+    home (it keeps its own ledger) and on a home `ava init` has not initialized.
+    """
+    from base.cluster.authority import AuthorityRefusedError
+    from base.host.env.bootstrap import BootstrapFetchError
+    from base.host.env.dotenv_boot import resolve_ava_home
+    from cli.start_identity import require_initialized, stored_values
+    from cli.unit_join import join_gateway
+
+    home = resolve_ava_home().resolve()
+    try:
+        admitted = require_initialized(home)
+    except (RuntimeError, ValueError, OSError) as exc:
+        print(f"✗ ava cluster db-authority install-unit: {exc}", file=sys.stderr)
+        return 1
+    if "gateway" in admitted.roles:
+        print(
+            "✗ ava cluster db-authority install-unit: a gateway unit keeps its own "
+            "write-generation ledger; install-unit is for agent-runner units",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        join_gateway(stored_values(home), home, bundle)
+    except (AuthorityRefusedError, BootstrapFetchError, ValueError, RuntimeError, OSError) as exc:
+        print(f"✗ ava cluster db-authority install-unit: {exc}", file=sys.stderr)
+        return 1
     return 0

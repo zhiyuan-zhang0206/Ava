@@ -60,8 +60,9 @@ instead of experimenting on the data plane.
 ## Start / Stop / Status
 
 ```bash
-ava start     # initialize or resume this checkout's home, provision owned storage,
-              # and wait for the selected root services to become ready.
+ava init ...  # once per home: record its identity (see `ava init --help`); starts nothing
+ava start     # provision owned storage on the first start, and wait for the selected
+              # root services to become ready.
 ava pause     # normal agent drain; keep infrastructure, browser and persistent PTYs
 ava stop      # normal drain, then full local stop; durable data and agent IDs survive
               # --keep-infra / --keep-service retain resources; --force is explicit
@@ -102,15 +103,16 @@ printf 'Capability transport key: ' >&2
 IFS= read -rs AVA_DB_CAPABILITY_KEY
 printf '\n' >&2
 export AVA_DB_CAPABILITY_KEY
-ava start --serve-agent-runner --no-serve-gateway --gateway-url <URL> \
+ava init --serve-agent-runner --no-serve-gateway --gateway-url <URL> \
   --machine-name <NAME> --machine-host <HOST> --db-capability <NAME>.bundle
 unset AVA_DB_CAPABILITY_KEY
+ava start
 ```
 
 The sealed bundle carries the active write generation's runner login (it
 inherits the least-privilege `ava_runner` group) and machine API token, bound
 to this machine and home and installed into the runner's private
-`$AVA_HOME/db-authority/`. First start presents that API token to the gateway's
+`$AVA_HOME/db-authority/`. `ava init` presents that API token to the gateway's
 authenticated `/api/bootstrap`, which returns the cluster's configuration (the
 credential-free database endpoint, the Redis URL with its runtime ACL password,
 channels). The runner never holds the gateway's human cluster secret; the
@@ -118,7 +120,9 @@ gateway's schema owner never logs in, and its Redis-admin credential stays
 gateway-local. `--machine-host` is the runner's own reachable address (how the
 gateway dials back to its ops server) and is **required**. The runner starts no
 gateway process of its own; it needs network reachability to the gateway and
-its capability bundle.
+its capability bundle. A later bundle (after a write-generation rotation) is
+installed on the stopped runner with `ava cluster db-authority install-unit
+<NAME>.bundle` before `ava start`.
 
 ## Update and recover
 

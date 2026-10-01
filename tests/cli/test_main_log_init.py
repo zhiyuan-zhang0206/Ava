@@ -27,8 +27,8 @@ import cli.main as _main
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-# The real `ava start` dispatch into a fresh home: identity
-# preparation, then the sinks, then a service phase replaced by the real
+# The real `ava init` then `ava start` dispatch into a fresh home: identity
+# publication, then the sinks, then a service phase replaced by the real
 # pgvector pre-create against a port nothing listens on.
 _FIRST_START = r"""
 import os
@@ -51,9 +51,8 @@ def start(**kwargs):
     return 0
 sys.modules["cli.commands.lifecycle.start"] = types.SimpleNamespace(cmd_start=start)
 sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
-raise SystemExit(
-    main.main(["start", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"])
-)
+assert main.main(["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"]) == 0
+raise SystemExit(main.main(["start"]))
 """
 
 
