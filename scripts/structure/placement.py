@@ -4,9 +4,10 @@ The placement rule (one owner, reused by every test-locality lint):
 
 1. Collect the first-party modules the file *tests*: import statements (also inside
    functions), string targets of `importlib.import_module` / `importorskip` and friends,
-   repo-path literals naming a source file (`ROOT / "scripts" / "lint" / "x.py"`) and
-   imports embedded in source strings. Evidence that exists only because the file
-   *patches* something does not count (see "Patch evidence").
+   paths below the repository root naming a source file (`ROOT / "scripts" / "lint" /
+   "x.py"`) and imports in source strings the file runs. Evidence that exists only because
+   the file *patches* something, or only because it carries sample data, does not count
+   (see "Patch evidence" and "Data is not evidence").
 2. Each module belongs to a *unit*: a top-level package, except `services.<x>`, which is a
    unit of its own (import-linter says `services` is not a layer).
 3. The home unit is the referenced unit that may legally import every other referenced
@@ -49,6 +50,14 @@ would read as "own package". Fallback (documented, tested): when every strong fi
 reference of a file is patch evidence, nothing is dropped, so such a file keeps the home
 its patch targets give it rather than losing its home.
 
+## Data is not evidence
+
+A test of a linter or a gate carries sample paths and sample source: the input of its subject,
+not the subject. A path counts only as a chain from the repository root (`repo_root()`, a name
+bound only to it, a climb from `Path(__file__)` ending exactly there): `tmp_path / "scripts"`
+and a bare `"scripts/x.py"` name no root. Source in a string counts only in a file that spawns
+an interpreter (`sys.executable`). Both gates: `scripts/structure/placement_evidence.py`.
+
 ## What a home depends on
 
 A result depends on the file's own text, `pyproject.toml` and the non-test source's direct
@@ -75,7 +84,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import import_cache, lint_common
+from scripts.structure import import_cache, lint_common, placement_evidence
 
 # First-party code tops that take part in placement (import-linter roots + scripts).
 CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts")
@@ -152,9 +161,6 @@ _EMBEDDED_IMPORT = re.compile(
     r"^[ \t]*(?:from[ \t]+([A-Za-z_][\w.]*)[ \t]+import[ \t]+([^\n#]+)"
     r"|import[ \t]+([A-Za-z_][\w.]*(?:[ \t]*,[ \t]*[A-Za-z_][\w.]*)*))",
     re.MULTILINE,
-)
-_PATH_LITERAL = re.compile(
-    rf"^(?:\./)?((?:{'|'.join(map(re.escape, CODE_TOPS))})(?:/[\w.\-]+)+/?)$"
 )
 
 
@@ -445,11 +451,13 @@ def _div_operands(node: ast.AST) -> list[str | None]:
 
 
 class _Collector(ast.NodeVisitor):
-    def __init__(self, index: ModuleIndex) -> None:
+    def __init__(self, index: ModuleIndex, tree: ast.AST, rel_path: str) -> None:
         self.index = index
         self.refs: list[Ref] = []
         self._handled: set[int] = set()
         self._div_seen: set[int] = set()
+        self._roots = placement_evidence.RepoRoots(tree, rel_path)
+        self._spawns_python = placement_evidence.spawns_interpreter(tree)
 
     def _add(
         self, line: int, kind: str, module: str, via: str = "", names: tuple[str, ...] = ()
@@ -488,7 +496,13 @@ class _Collector(ast.NodeVisitor):
         constants = _const_strings(node.args)
         if last == "load_skill_script" and constants:
             self._note_path(node.lineno, "ava_builtins/skills/" + "/".join(constants))
-        if last == "joinpath" and constants and constants[0] in _PATH_ROOTS:
+        if (
+            last == "joinpath"
+            and constants
+            and constants[0] in _PATH_ROOTS
+            and isinstance(node.func, ast.Attribute)
+            and self._roots.is_root(node.func.value)
+        ):
             self._note_path(node.lineno, "/".join(c.strip("/") for c in constants))
         if last in _STRING_TARGET_CALLEES and node.args:
             first = node.args[0]
@@ -507,23 +521,20 @@ class _Collector(ast.NodeVisitor):
             while isinstance(inner, ast.BinOp):
                 self._div_seen.add(id(inner))
                 inner = inner.left
-            operands = _div_operands(node)
-            for position, part in enumerate(operands):
-                if part and part.split("/")[0] in _PATH_ROOTS:
-                    chunk: list[str] = []
-                    for operand in operands[position:]:
-                        if operand is None:
-                            break
-                        chunk.append(operand.strip("/"))
-                    self._note_path(node.lineno, "/".join(chunk))
+            chunk: list[str] = []
+            for operand in _div_operands(node)[1:]:  # `inner` is the leftmost operand
+                if operand is None:
                     break
+                chunk.append(operand.strip("/"))
+            if chunk and chunk[0].split("/")[0] in _PATH_ROOTS and self._roots.is_root(inner):
+                self._note_path(node.lineno, "/".join(chunk))
         self.generic_visit(node)
 
     def visit_Constant(self, node: ast.Constant) -> None:
         value = node.value
         if not isinstance(value, str):
             return
-        if "\n" in value and "import " in value:
+        if "\n" in value and "import " in value and self._spawns_python:
             self._embedded_imports(node.lineno, value)
         if len(value) > 200 or "\n" in value or " " in value or id(node) in self._handled:
             return
@@ -532,9 +543,6 @@ class _Collector(ast.NodeVisitor):
             if module and module.count(".") >= 1:
                 self._add(node.lineno, "string-loose", module)
                 return
-        literal = _PATH_LITERAL.match(value)
-        if literal:
-            self._note_path(node.lineno, literal.group(1))
 
     def _note_path(self, line: int, rel: str) -> None:
         if rel.split("/", maxsplit=1)[0] not in CODE_TOPS:
@@ -565,9 +573,12 @@ class _Collector(ast.NodeVisitor):
             self._add_dotted(line, "embedded-import", module)
 
 
-def collect_references(tree: ast.AST, index: ModuleIndex) -> list[Ref]:
-    """Every first-party reference of a parsed file, patch evidence included."""
-    collector = _Collector(index)
+def collect_references(tree: ast.AST, index: ModuleIndex, rel_path: str = "") -> list[Ref]:
+    """Every first-party reference of a parsed file, patch evidence included.
+
+    `rel_path` (repo-relative, POSIX) says which climb from `Path(__file__)` is the repo root.
+    """
+    collector = _Collector(index, tree, rel_path)
     collector.visit(tree)
     return collector.refs
 
@@ -626,13 +637,13 @@ def without_patch_evidence(nodes: Sequence[ast.AST], refs: list[Ref]) -> list[Re
 
 
 def placement_references(
-    tree: ast.AST, index: ModuleIndex, nodes: Sequence[ast.AST] | None = None
+    tree: ast.AST, index: ModuleIndex, nodes: Sequence[ast.AST] | None = None, rel_path: str = ""
 ) -> tuple[list[Ref], bool]:
     """(the references that decide the home, whether the patch-evidence fallback applied).
 
     Fallback: a file whose every strong reference is patch evidence keeps all of them.
     """
-    refs = collect_references(tree, index)
+    refs = collect_references(tree, index, rel_path)
     pruned = without_patch_evidence(list(ast.walk(tree)) if nodes is None else nodes, refs)
     if _has_strong(refs) and not _has_strong(pruned):
         return refs, True
@@ -776,7 +787,7 @@ def place(
     """
     if is_top_level(rel_path):
         return Placement(None)
-    found, fallback = placement_references(tree, index, nodes)
+    found, fallback = placement_references(tree, index, nodes, rel_path)
     refs = list(found)
     basis = [ref for ref in refs if ref.kind in STRONG_KINDS] or refs  # loose evidence last
     if not basis:

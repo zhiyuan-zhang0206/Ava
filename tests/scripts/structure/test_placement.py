@@ -170,19 +170,160 @@ def test_a_pair_the_contracts_are_silent_about_follows_the_source_import_directi
 
 
 def test_evidence_that_is_not_an_import_still_places_the_file(root: pathlib.Path) -> None:
-    by_path = _place(
+    by_climb = _place(
         root,
         "tests/test_m.py",
-        "import pathlib\n\nSOURCE = pathlib.Path('.') / 'base' / 'net' / 'retry.py'\n",
+        "import pathlib\n\nROOT = pathlib.Path(__file__).resolve().parents[1]\n"
+        "SOURCE = ROOT / 'base' / 'net' / 'retry.py'\n",
     )
-    assert by_path.home == "base/net"
+    assert by_climb.home == "base/net"
 
     embedded = _place(
         root,
         "tests/test_n.py",
-        "SNIPPET = '''\nfrom base.db import pool\npool.acquire()\n'''\n",
+        "import subprocess\nimport sys\n\nSNIPPET = '''\nfrom base.db import pool\npool.acquire()\n'''\n\n"
+        "def test_x():\n    subprocess.run([sys.executable, '-c', SNIPPET])\n",
     )
     assert embedded.home == "base/db"
+
+
+@pytest.mark.parametrize(
+    ("rel", "root_expression"),
+    [
+        ("tests/test_o.py", "pathlib.Path(__file__).resolve().parents[1]"),
+        ("tests/sub/test_o.py", "pathlib.Path(__file__).resolve().parents[2]"),
+        ("tests/sub/test_o.py", "pathlib.Path(__file__).parent.parent.parent"),
+        ("test_o.py", "pathlib.Path(__file__).parent"),
+        ("tests/test_o.py", "repo_root()"),
+    ],
+)
+def test_a_path_chain_from_the_repository_root_is_evidence(
+    root: pathlib.Path, rel: str, root_expression: str
+) -> None:
+    found = _place(
+        root,
+        rel,
+        f"import pathlib\n\nSOURCE = {root_expression} / 'base' / 'net' / 'retry.py'\n",
+    )
+    assert found.home == "base/net"
+
+
+def test_a_name_bound_only_to_the_repository_root_is_the_root_in_any_scope(
+    root: pathlib.Path,
+) -> None:
+    found = _place(
+        root,
+        "tests/test_p.py",
+        "import pathlib\n\nHERE = pathlib.Path(__file__).resolve().parents[1]\nROOT = HERE\n\n"
+        "def test_x():\n    checkout = ROOT\n    (checkout / 'base' / 'net' / 'retry.py').read_text()\n",
+    )
+    assert found.home == "base/net"
+
+
+@pytest.mark.parametrize(
+    "anchor",
+    [
+        "tmp_path",  # a sample tree
+        "pathlib.Path(__file__).parent",  # the directory beside the test
+        "pathlib.Path(__file__).resolve().parents[0]",  # one short of the root
+        "pathlib.Path(__file__).resolve().parents[2]",  # past the root
+        "pathlib.Path('.')",  # no declared root
+        "repo_root(1)",
+    ],
+)
+def test_a_path_chain_not_rooted_at_the_repository_root_is_data(
+    root: pathlib.Path, anchor: str
+) -> None:
+    found = _place(
+        root,
+        "tests/test_q.py",
+        f"import pathlib\n\nSAMPLE = {anchor} / 'base' / 'net' / 'retry.py'\n",
+    )
+    assert found.home is None
+
+
+def test_a_chain_must_begin_with_a_code_directory_right_after_the_root(root: pathlib.Path) -> None:
+    found = _place(
+        root,
+        "tests/test_r.py",
+        "import pathlib\n\nROOT = pathlib.Path(__file__).resolve().parents[1]\n"
+        "FIXTURE = ROOT / 'tests' / 'base' / 'net' / 'retry.py'\n",
+    )
+    assert found.home is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # bound to a sample tree in one test and to the root in another
+        "def test_a(tmp_path):\n    repo = tmp_path / 'repo'\n"
+        "    (repo / 'base' / 'net' / 'retry.py').write_text('')\n\n"
+        "def test_b():\n    repo = pathlib.Path(__file__).resolve().parents[1]\n"
+        "    (repo / 'base' / 'net' / 'retry.py').read_text()\n",
+        # a parameter of the same name is not the module constant
+        "ROOT = pathlib.Path(__file__).resolve().parents[1]\n\n"
+        "def test_a(ROOT):\n    (ROOT / 'base' / 'net' / 'retry.py').write_text('')\n",
+    ],
+)
+def test_a_name_with_another_binding_is_not_the_root(root: pathlib.Path, body: str) -> None:
+    found = _place(root, "tests/test_s.py", f"import pathlib\n\n{body}")
+    assert found.home is None
+
+
+def test_a_bare_path_string_names_no_root(root: pathlib.Path) -> None:
+    found = _place(
+        root,
+        "tests/test_t.py",
+        "import pytest\n\n"
+        "@pytest.mark.parametrize('path', ['base/net/retry.py', 'cli/commands/run.py'])\n"
+        "def test_x(path):\n    assert path\n",
+    )
+    assert found.home is None
+
+
+def test_source_in_a_string_is_evidence_only_where_the_file_runs_it(root: pathlib.Path) -> None:
+    sample = "SNIPPET = '''\nfrom base.db import pool\npool.acquire()\n'''\n"
+    handed_to_a_linter = _place(
+        root, "tests/test_u.py", f"{sample}\ndef test_x():\n    lint(SNIPPET)\n"
+    )
+    assert handed_to_a_linter.home is None
+
+    run = _place(
+        root,
+        "tests/test_v.py",
+        f"import subprocess\nimport sys\n\n{sample}\n"
+        "def test_x():\n    subprocess.run([sys.executable, '-c', SNIPPET])\n",
+    )
+    assert run.home == "base/db"
+
+
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+
+
+@pytest.mark.parametrize(
+    ("name", "home"),
+    [
+        ("test_path_imports.py", "scripts/lint"),
+        ("test_placement_dependencies.py", "scripts/structure"),
+        ("test_coverage_gates.py", "scripts/ci"),
+        ("test_lint_doc_roster.py", "scripts/content_lint"),
+        ("test_lint_time_bomb.py", "scripts/lint"),
+        ("test_repo_change.py", "base/deploy/git"),
+    ],
+)
+def test_tests_of_tools_that_carry_sample_paths_and_source_have_one_home(
+    name: str, home: str
+) -> None:
+    """Their sample trees and sample source named other units; the tool under test is their home."""
+    found_files = [
+        p for top in ("tests", "scripts", "base") for p in (_REPO_ROOT / top).rglob(name)
+    ]
+    assert len(found_files) == 1, found_files
+    path = found_files[0]
+    rel = path.relative_to(_REPO_ROOT).as_posix()
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found = placement.place(rel, tree, placement.ModuleIndex(_REPO_ROOT))
+    assert (found.home, found.ambiguous) == (home, False)
 
 
 def test_a_missing_services_directory_is_a_legal_repository(root: pathlib.Path) -> None:
