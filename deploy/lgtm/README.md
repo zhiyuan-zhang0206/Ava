@@ -16,7 +16,7 @@ non-overlapping native listen ports. Provider identity has two equivalent forms:
   installs missing pinned native binaries, and runs the idempotent launcher.
   A home without the marker never installs, starts, or stops these backends.
 - **`observability-station` unit capability** (declarative): a machine that
-  declares the capability (`ava start --serve-observability-station`, or
+  declares the capability (`ava init --serve-observability-station`, or
   `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` / the
   `$AVA_HOME/machine_serve_observability_station` file) converges the full
   native set — configs, native service definitions, storage dirs — with no marker, and its

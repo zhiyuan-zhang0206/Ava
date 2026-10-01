@@ -312,8 +312,8 @@ def test_pitr_retention_inspect_parser_binds_read_only_handler() -> None:
 
 
 def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`ava start --machine-name foo --serve-gateway ...` reaches _h_start with
-    the parsed argparse Namespace."""
+    """`ava start --only-service gateway ...` reaches _h_start with the parsed
+    argparse Namespace: the service selection is all `start` takes."""
     captured: dict[str, argparse.Namespace] = {}
 
     def _fake(args: argparse.Namespace) -> int:
@@ -324,9 +324,18 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
     # `start` is the one verb with a pre-dispatch side effect (the settings-free
     # installed-home gate), which this test neutralizes — it asserts flag
     # forwarding, not bring-up behaviour.
-    rc = _main.main(
+    rc = _main.main(["start", "--only-service", "gateway", "--only-service", "frontend"])
+    assert rc == 7
+    ns = captured["args"]
+    assert ns.only_service == ["gateway", "frontend"]
+    assert ns.disable_service == [] and ns.all_services is False and ns.persist_services is True
+
+
+def test_init_subcommand_binds_its_handler_and_takes_the_identity_flags() -> None:
+    """`ava init` owns the first-start inputs: machine name, capabilities, gateway."""
+    args = _main._build_parser().parse_args(
         [
-            "start",
+            "init",
             "--machine-name",
             "mac",
             "--serve-gateway",
@@ -336,13 +345,12 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
             "https://ava.example.com",
         ]
     )
-    assert rc == 7
-    ns = captured["args"]
-    assert ns.machine_name == "mac"
-    assert ns.serve_gateway is True
-    assert ns.serve_agent_runner is None  # unset -> falls back to file
-    assert ns.memory_remote == "git@x:y.git"
-    assert ns.gateway_url == "https://ava.example.com"
+    assert args.func is _host._h_init
+    assert args.machine_name == "mac"
+    assert args.serve_gateway is True
+    assert args.serve_agent_runner is None  # unset: no flag given
+    assert args.memory_remote == "git@x:y.git"
+    assert args.gateway_url == "https://ava.example.com"
 
 
 def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
@@ -537,8 +545,9 @@ def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParse
     return parser
 
 
-def test_first_start_is_settings_free_until_identity_is_published(tmp_path: Path) -> None:
-    """Deny settings and network; the real public dispatch must reach its runtime boundary."""
+def test_init_and_start_are_settings_free_until_the_home_is_admitted(tmp_path: Path) -> None:
+    """Deny settings and network; the real public dispatch of `init`, then `start`,
+    must reach its runtime boundary."""
     repo = Path(__file__).resolve().parents[2]
     code = r"""
 import importlib.abc
@@ -585,7 +594,11 @@ sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(
 sys.modules["base.deploy.lifecycle.start_serving"] = types.SimpleNamespace(
     clear_serving=lambda: calls.append("clear-serving")
 )
-assert main.main(["start", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"]) == 0
+assert main.main(["start"]) == 1 and not home.exists()  # nothing to start yet, and nothing made
+assert main.main(["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"]) == 0
+configured()
+assert calls == []  # init started nothing
+assert main.main(["start"]) == 0
 assert calls == ["logging", "runtime", "boot-complete"]
 assert "base.config" not in sys.modules
 """

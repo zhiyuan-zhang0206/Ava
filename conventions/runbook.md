@@ -88,39 +88,46 @@ A machine carries a **capability set** — `gateway`, `agent-runner`, or both:
   `gateway` capability of its own.
 
 A **single-box** deployment carries gateway and runner capabilities in one
-home. A split deployment starts a gateway with `--serve-gateway
---no-serve-agent-runner` and joins each runner through `ava start
+home. A split deployment initializes a gateway with `ava init --serve-gateway
+--no-serve-agent-runner` and joins each runner through `ava init
 --serve-agent-runner --no-serve-gateway --gateway-url URL` with its machine
 identity and environment bearer. Separate units use separate homes.
 
-**Cluster identity is bound by first start.** The settings-free entry validates
-home and capabilities, then durably records credentials and the port table
-before publishing configuration or starting resources. The same `ava start`
-converges host prerequisites, starts owned PG/Redis, prepares the database and
-checkpoints, applies migrations and runner grants, starts PgBouncer, then waits
-for every selected root service to become ready. A failure preserves the same
-initialization intent; a retry does not rotate credentials or select new ports.
+**Cluster identity is bound by `ava init`.** The settings-free entry validates
+home and capabilities, then durably records credentials and the port table and
+publishes configuration. It starts nothing and creates no resource; an interrupted
+init resumes with `ava init` and no flags, and an initialized home refuses a second
+one. The first `ava start` then converges host prerequisites, starts owned PG/Redis,
+prepares the database and checkpoints, applies migrations and runner grants, starts
+PgBouncer, then waits for every selected root service to become ready. A failure
+preserves the same initialization intent; a retry does not rotate credentials or
+select new ports. Between `ava init` and the first start the home's `.env` can be
+edited (provider keys, for one) without a restart.
 
 The home is `AVA_HOME`, else `~/.ava`, never the current directory. A bare
-repeated start keeps identity and desired service selection. Unknown existing resources, conflicting inputs, missing reservations,
-and a terminal destroy intent refuse rather than reconstructing ownership.
+repeated start keeps identity and desired service selection, and takes no identity
+flag. A home `ava init` has not initialized, unknown existing resources, missing
+reservations, and a terminal destroy intent refuse rather than reconstructing
+ownership.
 A home describes only itself: its record is its own start intent, and no host
 file lists clusters; the state a host shares (vendored runtime, initdb template,
 PTY freeze, coding-session owners) lives in the home too. See
 [[cli/docs/start_identity.ava.okf.md]].
 
 A runner fetches the gateway's authenticated bootstrap configuration before
-recording local identity. Bootstrap serves no database login: `AVA_DB_URL` is the
+`ava init` records local identity. Bootstrap serves no database login: `AVA_DB_URL` is the
 credential-free endpoint. The runner's login arrives in a capability bundle the
-gateway operator issues for that one unit and the runner installs at start:
+gateway operator issues for that one unit and the runner installs at `ava init` (and, for
+a later bundle, with `install-unit`):
 
 ```bash
 # on the gateway (its checkout's CLI), for one unit:
 ava cluster db-authority issue-unit --machine <name> --home <unit $AVA_HOME> --out <bundle>
 # carry the 0600 bundle to the unit and the printed transport key separately; then, on the
-# unit (its checkout's `.venv/bin/ava` — the home's own CLI link does not exist until this start):
+# unit (its checkout's `.venv/bin/ava` — the home's own CLI link does not exist until its first start):
 read -rs AVA_DB_CAPABILITY_KEY && export AVA_DB_CAPABILITY_KEY
-.venv/bin/ava start --db-capability <bundle>        # plus the first-start identity flags
+.venv/bin/ava init --db-capability <bundle>         # first join, plus the identity flags
+ava cluster db-authority install-unit <bundle>      # a later bundle: stop the unit first, start it after
 ```
 
 The bundle is sealed (AES-256-GCM) under a transport key printed once; it names
@@ -1246,12 +1253,12 @@ terminal: with no terminal on stdin and stdout it refuses, and no flag skips the
 prompt (over ssh, use `ssh -t`). A home that is not the default home neither
 registers nor removes OS jobs, because their names carry no home.
 
-A runner joins through the same first-start entry. Supply the capability
+A runner joins through `ava init`. Supply the capability
 bundle's `AVA_DB_CAPABILITY_KEY` without echoing it, then use its checkout's
-`.venv/bin/ava start --serve-agent-runner --no-serve-gateway --gateway-url URL
---machine-name NAME --machine-host HOST --db-capability BUNDLE` (`ava` on PATH
-does not exist until this start; the bundle comes from `ava cluster
-db-authority issue-unit` on the gateway). Bootstrap publishes no database
+`.venv/bin/ava init --serve-agent-runner --no-serve-gateway --gateway-url URL
+--machine-name NAME --machine-host HOST --db-capability BUNDLE` and `ava start`
+(`ava` on PATH does not exist until the first start; the bundle comes from `ava
+cluster db-authority issue-unit` on the gateway). Bootstrap publishes no database
 credential and not the human secret; the runner's login, API token and
 telemetry token arrive only in that unit's bundle (they are shared by every
 runner unit of the generation), and a runner never holds
@@ -1396,6 +1403,13 @@ itself (its own public key in its own `authorized_keys`):
   rerun the whole half, which is idempotent. `--dry-run` runs only the
   read-only checks and prints the effects. Output is redacted and tee'd to
   `DIR`.
+- **A manual step that rewrites a state file comes before any command of the new
+  code.** When a release's manual steps change a file the code reads (a key dropped
+  from `start-intent.json`, a renamed file), finish them on every host already switched
+  to NEW before that host runs any NEW command, `ava stop` included. A rerun of `down`
+  is such a command: it runs `ava stop` again on a host already on NEW, and NEW refuses
+  the state file that is not yet converted. Rerun `down` only after the step is done on
+  the hosts it has switched.
 - A unit `down` could not reach (a laptop offline) keeps running its old
   processes. The gateway's start in `up` raises the cluster's minimum code
   version, and those processes exit when they next touch the database
@@ -1640,7 +1654,8 @@ PY
 6. **Every runner**: on the gateway `ava cluster db-authority issue-unit
    --machine <name> --home <unit $AVA_HOME> --out <bundle>`, carry the bundle and
    its printed transport key separately, then on the runner
-   `AVA_DB_CAPABILITY_KEY=<key> ava start --db-capability <bundle>` (the flow in
+   `AVA_DB_CAPABILITY_KEY=<key> ava cluster db-authority install-unit <bundle>` with the unit
+   stopped, then `ava start` (the flow in
    [Clusters, units, prod, and dev clone paths](#clusters-units-prod-and-dev-clone-paths)).
    The runner's old login was revoked in step 4, so its previous bundle cannot
    start it. A runner also fetches its Redis URL from the gateway at start, so
@@ -1894,7 +1909,7 @@ singleton** owned by the lifecycle on exactly one home per host — the
 observability station. Provider identity is either the operator-created
 `$AVA_HOME/lgtm-host` marker file (in practice prod `~/.ava`;
 `touch ~/.ava/lgtm-host` once, or `ava lgtm on`) or the declarative
-`observability-station` unit capability (`ava start
+`observability-station` unit capability (`ava init
 --serve-observability-station` / `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` /
 `$AVA_HOME/machine_serve_observability_station`). On the station home, converge
 prepares pins from `deploy/lgtm/native/versions.yml` and rendered configuration.
@@ -2313,5 +2328,5 @@ custody, IPC and readiness; an isolated native cluster is still required to veri
 platform ancestry and actual application execution. There is no local branch-preview
 controller: validate a branch with CI, the throwaway test clusters, and the Linux
 verification container (`python3 scripts/verify/container.py --ref <ref>`: a fresh
-container, the commit cloned to `~/.ava/source`, the first `ava start`, a scripted agent;
+container, the commit cloned to `~/.ava/source`, `ava init` and the first `ava start`, a scripted agent;
 [verification boundaries](../future/infra/verification-boundaries.md)).

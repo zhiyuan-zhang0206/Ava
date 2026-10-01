@@ -1,4 +1,4 @@
-"""First/repeated/interrupted start preserves one home identity before effects."""
+"""`ava init` records one home identity before effects; `ava start` admits it."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ from dotenv import dotenv_values
 
 from base import cluster
 from base.native_process.os_platform import file_lock
+from cli import init_intent, start_intent
 from cli import start_identity as identity
-from cli import start_intent
-from tests.lifecycle._start_identity import prepare_start_identity
+from tests.lifecycle._init_identity import prepare_init_identity
 
 
 @pytest.fixture(autouse=True)
@@ -66,17 +66,26 @@ def test_fresh_identity_committed_before_native_work(inputs: identity.IdentityIn
     assert not (inputs.home / "pg").exists()
 
 
-def test_repeat_preserves_identity_credentials_and_bytes(inputs: identity.IdentityInput) -> None:
+def test_an_initialized_home_is_refused_again_and_keeps_its_bytes(
+    inputs: identity.IdentityInput,
+) -> None:
     inputs = replace(inputs, roles=frozenset({"gateway"}))
     identity.prepare_identity(inputs)
     paths = [inputs.home / ".env", inputs.home / identity.INTENT_NAME]
     before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
-    identity.prepare_identity(inputs)
-    assert [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths] == before
     env = dotenv_values(paths[0])
     keys = ("AVA_CLUSTER_SECRET", "AVA_REDIS_ADMIN_PASSWORD", "AVA_REDIS_PASSWORD")
     assert len({env[k] for k in keys}) == len(keys)
     assert all(env[k] for k in keys)
+    for phase in ("configured", "provisioned", "ready"):
+        identity.mark_phase(inputs.home, phase)
+        with pytest.raises(RuntimeError, match=rf"already initialized \(phase {phase}\)"):
+            identity.prepare_identity(inputs)
+        with pytest.raises(RuntimeError, match="already initialized"):
+            identity.resume_claim(inputs.home)
+        if phase == "configured":
+            assert [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths] == before
+    assert dotenv_values(paths[0]) == env
 
 
 def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
@@ -99,7 +108,7 @@ def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
     assert minted is not None and minted != passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE
     assert passphrase.pin_path(inputs.home).stat().st_mode & 0o777 == 0o600
     monkeypatch.setattr(identity, "upsert_env", upsert)
-    identity.prepare_identity(inputs)
+    identity.resume_claim(inputs.home)
     assert dotenv_values(inputs.home / ".env")["AVA_CLUSTER_SECRET"] == ""
     assert passphrase.resolve(inputs.home) == minted
 
@@ -159,7 +168,7 @@ def test_crash_after_intent_before_env_resumes_same_claim(
     pending = identity.read_intent(inputs.home)
     assert pending is not None and pending["phase"] == "claiming"
     monkeypatch.setattr(identity, "upsert_env", write)
-    identity.prepare_identity(inputs)
+    identity.resume_claim(inputs.home)
     assert cluster.get_record(inputs.home) == cluster.ClusterRecord(**pending["record"])
     assert dict(dotenv_values(inputs.home / ".env")) == pending["env"]
 
@@ -228,29 +237,35 @@ def test_existing_data_without_intent_refuses(inputs: identity.IdentityInput) ->
 def _args(*extra: str):
     from cli.parsers import build_parser
 
+    return build_parser().parse_args(["init", *extra])
+
+
+def _start_args(*extra: str):
+    from cli.parsers import build_parser
+
     return build_parser().parse_args(["start", *extra])
 
 
 def _single_box(*extra: str):
-    """A first start of a single-box home: gateway and agent-runner, named."""
+    """An init of a single-box home: gateway and agent-runner, named."""
     return _args("--serve-gateway", "--serve-agent-runner", "--machine-name", "preview", *extra)
 
 
-def test_start_uses_explicit_home_not_ambient_projection(
+def test_init_uses_explicit_home_not_ambient_projection(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     monkeypatch.setenv("AVA_DB_URL", "postgresql://foreign@foreign.invalid/production")
     monkeypatch.setenv("AVA_CLUSTER_SECRET", "foreign-secret")
-    prepare_start_identity(_single_box())
+    prepare_init_identity(_single_box())
     env = dotenv_values(inputs.home / ".env")
     db_url = env["AVA_DB_URL"]
     assert db_url is not None and "foreign" not in db_url
     assert env["AVA_CLUSTER_SECRET"] == ""
 
 
-def test_interrupted_start_keeps_admitted_tool_path(
+def test_interrupted_init_keeps_admitted_tool_path(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
@@ -273,13 +288,13 @@ def test_interrupted_start_keeps_admitted_tool_path(
 
     monkeypatch.setattr(identity, "upsert_env", crash)
     with pytest.raises(OSError, match="power loss"):
-        prepare_start_identity(_single_box())
+        prepare_init_identity(_single_box())
     pending = identity.read_intent(inputs.home)
     assert pending is not None and pending["phase"] == "claiming"
     assert pending["env"]["AVA_SERVICE_PATH"] == tools
     monkeypatch.setattr(identity, "upsert_env", write)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "different-tools"))
-    prepare_start_identity(_single_box())
+    prepare_init_identity(_args())  # the resume takes no flags
     assert dotenv_values(inputs.home / ".env")["AVA_SERVICE_PATH"] == tools
 
 
@@ -289,7 +304,7 @@ def test_existing_home_cannot_recapture_caller_tool_path(
     identity.prepare_identity(inputs)
     monkeypatch.setenv("AVA_SERVICE_PATH", str(inputs.checkout.parent / "unadmitted"))
     with pytest.raises(ValueError, match="explicit AVA_SERVICE_PATH"):
-        start_intent._service_path(start_intent._stored(inputs.home), inputs.home)
+        init_intent._service_path(identity.stored_values(inputs.home), inputs.home)
 
 
 def test_lossy_tool_path_is_rejected_before_identity_publication(
@@ -300,7 +315,7 @@ def test_lossy_tool_path_is_rejected_before_identity_publication(
     monkeypatch.delenv("AVA_SERVICE_PATH", raising=False)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "tools #1"))
     with pytest.raises(ValueError, match="round-trip literally"):
-        prepare_start_identity(_single_box())
+        prepare_init_identity(_single_box())
     assert identity.read_intent(inputs.home) is None
 
 
@@ -311,7 +326,7 @@ def test_config_file_cannot_choose_identity(inputs: identity.IdentityInput, key:
     config = inputs.home.parent / "input.env"
     config.write_text(f"{key}=wrong\n")
     with pytest.raises(ValueError, match="config file"):
-        start_intent._config_values(_args("--config-file", str(config)), inputs.home)
+        init_intent._config_values(_args("--config-file", str(config)), inputs.home)
 
 
 _RUNNER_ENDPOINT = "postgresql://ava@remote.invalid/db"
@@ -361,7 +376,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
 
     args = _runner_start(inputs, monkeypatch)
     with pytest.raises(ValueError, match="holds no database capability"):
-        prepare_start_identity(args)
+        prepare_init_identity(args)
     assert not (inputs.home / ".env").exists()
     # An installed capability (a bundle the operator carried earlier) admits it.
     gateway = tmp_path / "gateway"
@@ -383,7 +398,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
         probe=lambda _dsn: None,
     )
     _FETCH_BEARERS.clear()
-    prepare_start_identity(args)
+    prepare_init_identity(args)
     env = dotenv_values(inputs.home / ".env")
     assert env["AVA_MACHINE_HOST"] == "runner.invalid"
     assert "AVA_DB_URL" not in env and "AVA_REDIS_URL" not in env
@@ -402,18 +417,18 @@ def test_capability_bundle_needs_its_transport_key(
     monkeypatch.delenv("AVA_DB_CAPABILITY_KEY", raising=False)
     args = _runner_start(inputs, monkeypatch, "--db-capability", str(bundle))
     with pytest.raises(ValueError, match="AVA_DB_CAPABILITY_KEY"):
-        prepare_start_identity(args)
+        prepare_init_identity(args)
     assert bundle.exists()
     assert not (inputs.home / ".env").exists()
 
 
-def test_gateway_start_refuses_a_capability_bundle(
+def test_gateway_init_refuses_a_capability_bundle(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     with pytest.raises(ValueError, match="agent-runner units"):
-        prepare_start_identity(_single_box("--db-capability", str(tmp_path / "unit.bundle")))
+        prepare_init_identity(_single_box("--db-capability", str(tmp_path / "unit.bundle")))
     assert identity.read_intent(inputs.home) is None
 
 
@@ -494,11 +509,11 @@ def test_corrupt_foreign_reservation_never_publishes(inputs: identity.IdentityIn
     path.write_text(json.dumps(data))
     before = (inputs.home / ".env").read_bytes()
     with pytest.raises(RuntimeError, match="another home"):
-        identity.prepare_identity(inputs)
+        identity.resume_claim(inputs.home)
     assert (inputs.home / ".env").read_bytes() == before
 
 
-def test_config_retry_keeps_first_snapshot_and_rejects_changed_input(
+def test_config_file_is_taken_once_and_a_second_init_is_refused(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
@@ -506,14 +521,16 @@ def test_config_retry_keeps_first_snapshot_and_rejects_changed_input(
     config = inputs.home.parent / "config.env"
     config.write_text("AVA_LLM_OVERRIDE=fixture:model\n")
     args = _single_box("--config-file", str(config))
-    prepare_start_identity(args)
+    prepare_init_identity(args)
     first = (inputs.home / ".env").read_bytes()
-    prepare_start_identity(args)
-    assert (inputs.home / ".env").read_bytes() == first
+    assert b"AVA_LLM_OVERRIDE" in first
     config.write_text("AVA_LLM_OVERRIDE=other:model\n")
-    with pytest.raises(ValueError, match="differs"):
-        prepare_start_identity(args)
+    with pytest.raises(RuntimeError, match="already initialized"):
+        prepare_init_identity(args)
     assert (inputs.home / ".env").read_bytes() == first
+    # A home that already has an `.env` without an intent takes no config file either.
+    with pytest.raises(ValueError, match=r"no `\.env` yet"):
+        init_intent._config_values(args, inputs.home)
 
 
 def _remote_config(
@@ -527,7 +544,7 @@ def _remote_config(
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setattr(
-        start_intent,
+        init_intent,
         "_local_addresses",
         lambda _machine: {"this-host", "192.0.2.1"},  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     )
@@ -544,11 +561,11 @@ def _remote_config(
     return _single_box("--config-file", str(config))
 
 
-def test_remote_start_preserves_provider_urls_and_runner_credential(
+def test_remote_init_preserves_provider_urls_and_runner_credential(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     args = _remote_config(inputs, monkeypatch)
-    prepare_start_identity(args)
+    prepare_init_identity(args)
     env = dotenv_values(inputs.home / ".env")
     assert env["AVA_DB_URL"] == "postgresql://owner:provider@db.invalid:6543/app"
     assert env["AVA_REDIS_URL"] == "rediss://acl:provider@redis.invalid:6381/0"
@@ -556,7 +573,8 @@ def test_remote_start_preserves_provider_urls_and_runner_credential(
     assert "AVA_DB_ADMIN_PASSWORD" not in env
     assert "AVA_REDIS_ADMIN_PASSWORD" not in env
     before = (inputs.home / ".env").read_bytes()
-    prepare_start_identity(args)
+    with pytest.raises(RuntimeError, match="already initialized"):
+        prepare_init_identity(args)
     assert (inputs.home / ".env").read_bytes() == before
 
 
@@ -566,7 +584,7 @@ def test_remote_input_refuses_local_or_mixed_ownership(
 ) -> None:
     args = _remote_config(inputs, monkeypatch, host=host)
     with pytest.raises(ValueError, match="foreign"):
-        prepare_start_identity(args)
+        prepare_init_identity(args)
     assert identity.read_intent(inputs.home) is None
 
 
@@ -576,7 +594,7 @@ def test_remote_input_cannot_redirect_libpq_identity(
 ) -> None:
     args = _remote_config(inputs, monkeypatch, query=query)
     with pytest.raises(ValueError, match="redirect"):
-        prepare_start_identity(args)
+        prepare_init_identity(args)
     assert identity.read_intent(inputs.home) is None
 
 
@@ -598,12 +616,13 @@ def test_public_start_holds_home_lock_through_runtime_start(
         return 0
 
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
-    assert start_intent.run_start(_single_box()) == 0
+    prepare_init_identity(_single_box())
+    assert start_intent.run_start(_start_args()) == 0
 
 
 def test_start_parser_rejects_retired_updater_telemetry() -> None:
     with pytest.raises(SystemExit) as error:
-        _args("--updater-telemetry")
+        _start_args("--updater-telemetry")
     assert error.value.code == 2
 
 
@@ -624,7 +643,8 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
 
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     monkeypatch.setattr(root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
-    assert start_intent.run_start(_single_box()) == result
+    prepare_init_identity(_single_box())
+    assert start_intent.run_start(_start_args()) == result
     assert calls == ["complete wrapped start"] + (["publish PID"] if result == 0 else [])
 
 
@@ -649,5 +669,6 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
         raise RuntimeError("manager refused native custody")
 
     monkeypatch.setattr(root_driver, "complete_boot_start", fail)
-    assert start_intent.run_start(_single_box()) == 1
+    prepare_init_identity(_single_box())
+    assert start_intent.run_start(_start_args()) == 1
     assert calls == ["cleared"]

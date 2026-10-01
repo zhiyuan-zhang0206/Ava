@@ -4,7 +4,7 @@ A split cluster has a gateway that owns the application schema and one or more
 runners. Start the gateway before joining runners. Each host has its own home;
 the gateway supplies runner connection facts through authenticated bootstrap.
 
-## Gateway first start
+## Gateway init and first start
 
 Acquire dependencies in the canonical checkout as described in
 [the deployment guide](../SKILL.md). Prepare a private dotenv configuration file
@@ -19,17 +19,19 @@ Use `overlay` only when the deployment actually has that encrypted
 transport; the other supported declarations are `tls` and `mtls`. Then run:
 
 ```bash
-.venv/bin/ava start --serve-gateway --no-serve-agent-runner \
+.venv/bin/ava init --serve-gateway --no-serve-agent-runner \
   --machine-name machine-1 --machine-host <this-host-addr> \
   --gateway-url http://<reachable-address>:8000 \
   --config-file /absolute/path/gateway.env
+.venv/bin/ava start
 ```
 
 The gateway-only identity mints the control-plane bearer and the independent
-Redis-admin and Redis-runtime credentials before provisioning; the first start
-then mints Postgres write generation 0 (one gateway and one runner login) into
-the gateway's private `$AVA_HOME/db-authority/`. The schema owner never logs in. The configuration input is bound to this initialization; retry
-with the same bytes or omit it. Transfer the bearer through the operator's
+Redis-admin and Redis-runtime credentials at `ava init`, before any provisioning; the
+first start then mints Postgres write generation 0 (one gateway and one runner login) into
+the gateway's private `$AVA_HOME/db-authority/`. The schema owner never logs in. The
+configuration input is read once, by `ava init`; an interrupted init resumes with no
+flags and an initialized home refuses a second one. Transfer the bearer through the operator's
 secret channel. Do not transfer the gateway environment file to a runner.
 
 For locally owned storage, keep the generated DB and Redis URLs (the DB URL is
@@ -47,8 +49,8 @@ for binding and firewall ownership. No-secret single-box storage remains local.
 
 ## Join each runner
 
-Acquire its dependencies and follow [join a runner](join-a-runner.md). Its one
-first-start command validates bootstrap, records identity, registers the host,
+Acquire its dependencies and follow [join a runner](join-a-runner.md). Its `ava init`
+validates bootstrap and records identity; its first `ava start` registers the host
 and launches its root-owned services. The gateway must reach the runner's
 `--machine-host` and ops port; a successful connection from the runner to the
 gateway alone does not establish that return path.
@@ -61,7 +63,7 @@ remain local to the runner.
 ## External data plane
 
 A gateway may explicitly name a paired foreign Postgres and Redis service in
-its first-start config, together with the existing runner DB credential:
+the `ava init` config file, together with the existing runner DB credential:
 `AVA_DB_URL`, `AVA_REDIS_URL`, and `AVA_RUNNER_DB_PASSWORD`. The DB URL must use
 the application-owner identity. The three fields are required together; local,
 mixed-ownership, or query-redirected endpoints are rejected.

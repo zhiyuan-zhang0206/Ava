@@ -363,21 +363,12 @@ def _preflight_probes() -> int:
     Returns 0 when both checks pass, non-zero otherwise.
     """
 
-    from cli.commands._setup import _collect_setup_values, _print_missing_setup_error
+    from cli.commands._setup import _collect_setup_values, _missing_setup_message
 
-    # Resolve setup from persisted env/files (all None args = read-only, no writes).
-    args: dict[str, str | bool | None] = {
-        "machine_name": None,
-        "machine_serve_gateway": None,
-        "machine_serve_agent_runner": None,
-        "machine_serve_observability_station": None,
-        "machine_description": None,
-        "memory_remote": None,
-        "gateway_url": None,
-    }
-    resolved, missing = _collect_setup_values(args)
+    # Resolve setup from the home's persisted env/files (read-only, no writes).
+    resolved, missing = _collect_setup_values()
     if missing:
-        _print_missing_setup_error(missing, resolved.get("machine_role"))
+        print(_missing_setup_message(missing), file=sys.stderr)
         return 1
 
     roles_raw = resolved.get("machine_role", "")

@@ -101,8 +101,9 @@ def no_capability_message(home: Path) -> str:
         f"this agent-runner home ({home}) holds no database capability. On the gateway run "
         f"`ava cluster db-authority issue-unit --machine <this machine> --home {home} --out "
         "<bundle>`, carry the bundle here, export AVA_DB_CAPABILITY_KEY from a non-echoing "
-        "prompt with the transport key it printed, and start with "
-        "`ava start --db-capability <bundle>`"
+        "prompt with the transport key it printed, and install it with "
+        "`ava cluster db-authority install-unit <bundle>` (a first join passes it to "
+        "`ava init --db-capability <bundle>`)"
     )
 
 
