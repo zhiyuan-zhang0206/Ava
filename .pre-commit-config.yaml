@@ -79,21 +79,19 @@ repos:
       # `# async-blocking-ok: <reason>`; see the script header for the full rules.
       - id: lint-async-no-sync-blocking
         name: lint async bodies (no sync blocking calls)
-        entry: .venv/bin/python scripts/lint/async_no_sync_blocking.py
+        entry: .venv/bin/python scripts/lint/async_no_sync_blocking.py --only
         language: system
         # A package's own tests/ directory is not scanned by the lint, so it does not trigger it.
         files: ^((gateway|ops)/(?!(?:.*/)?tests/).*|scripts/lint/async_no_sync_blocking)\.py$
-        pass_filenames: false
 
       # Ban raw os.environ / os.getenv — runtime config must go through base.config.settings.
       # Legitimate exceptions (3rd-party secret / IPC handoff / container entrypoints)
       # use an inline `# env-ok: <reason>` exemption, see scripts/lint/no_os_environ.py header.
       - id: lint-no-os-environ
         name: lint os.environ (force settings)
-        entry: .venv/bin/python scripts/lint/no_os_environ.py
+        entry: .venv/bin/python scripts/lint/no_os_environ.py --only
         language: system
         types: [python]
-        pass_filenames: false
 
       # PYTHONSAFEPATH=1 (2026-08-22 hardening) keeps a script's own directory
       # off sys.path, so a script-mode file importing a same-dir sibling without
@@ -101,20 +99,18 @@ repos:
       # The lint enforces the restore-before-import guard; see the script header.
       - id: lint-no-script-sibling-imports
         name: lint script sibling imports (PYTHONSAFEPATH guard)
-        entry: .venv/bin/python scripts/lint/no_script_sibling_imports.py
+        entry: .venv/bin/python scripts/lint/no_script_sibling_imports.py --only
         language: system
         types: [python]
-        pass_filenames: false
 
       # per_agent config fields read through the bare settings singleton in
       # turn-scoped code silently ignore the agent's overlay in hosted-runner
       # mode — force the per-turn view (base/config/turn_view.py).
       - id: lint-turn-scoped-config
         name: lint per-agent config reads (force turn_settings)
-        entry: .venv/bin/python scripts/lint/turn_scoped_config.py
+        entry: .venv/bin/python scripts/lint/turn_scoped_config.py --only
         language: system
         types: [python]
-        pass_filenames: false
 
       # A fixture whose scope outlives the blast radius of the process global it
       # mutates. A session-scoped fixture in a SUBDIRECTORY conftest restores env in
@@ -126,11 +122,10 @@ repos:
       # is exempt only in tests/fixtures/provisioning.py; see the script header.
       - id: lint-fixture-scope
         name: lint fixture scope (no session-scoped mutation of a process global)
-        entry: .venv/bin/python scripts/lint/fixture_scope.py
+        entry: .venv/bin/python scripts/lint/fixture_scope.py --only
         language: system
         # Every tests/ directory: the top-level one and each package's own <pkg>/**/tests/.
         files: (^|/)tests/.*\.py$
-        pass_filenames: false
 
       # A test may not patch a private name of a package it does not belong to
       # (structure Rule 8): every such reach-in is a missing injection seam, and
@@ -170,10 +165,9 @@ repos:
       # decision allows. See scripts/lint_pool_keepalives.py header.
       - id: lint-pool-keepalives
         name: lint pool keepalives (no pool without PG_KEEPALIVE_KWARGS outside Rule 5)
-        entry: .venv/bin/python scripts/lint_pool_keepalives.py
+        entry: .venv/bin/python scripts/lint_pool_keepalives.py --only
         language: system
         types: [python]
-        pass_filenames: false
 
       # Ban a logger.add(...) sink that does not explicitly pass diagnose=False.
       # loguru's diagnose defaults to True, so logger.exception(...) on an
@@ -183,10 +177,9 @@ repos:
       # scripts/lint/logger_add_diagnose.py header.
       - id: lint-logger-add-diagnose
         name: lint logger.add diagnose (no sink without diagnose=False)
-        entry: .venv/bin/python scripts/lint/logger_add_diagnose.py
+        entry: .venv/bin/python scripts/lint/logger_add_diagnose.py --only
         language: system
         types: [python]
-        pass_filenames: false
 
       # Each logger keeps its own message format. loguru formats with
       # str.format, so `logger.warning("x %s", v)` logs the literal `%s` and
@@ -197,10 +190,9 @@ repos:
       # `# log-format-ok: <reason>`; see scripts/lint/loguru_format.py header.
       - id: lint-loguru-format
         name: lint log format (loguru takes {}, stdlib logging takes %s)
-        entry: .venv/bin/python scripts/lint/loguru_format.py
+        entry: .venv/bin/python scripts/lint/loguru_format.py --only
         language: system
         types: [python]
-        pass_filenames: false
 
       # Ban raw CJK characters anywhere in the repo — English-only source
       # (user ruling 2026-08-27, tightening English-primary). Exemption: i18n /
@@ -211,9 +203,8 @@ repos:
       # Whole-repo scan via git ls-files; see scripts/content_lint/lint_no_cjk.py header.
       - id: lint-no-cjk
         name: lint no CJK (repo-wide, English-only source)
-        entry: .venv/bin/python scripts/content_lint/lint_no_cjk.py
+        entry: .venv/bin/python scripts/content_lint/lint_no_cjk.py --only
         language: system
-        pass_filenames: false
 
       # Ban tailnet IP literals (100.64.0.0/10 host addresses) repo-wide — the
       # cluster's user-visible URL derives from AVA_GATEWAY_URL / reachable_host(),
@@ -222,9 +213,8 @@ repos:
       # `# tailnet-ip-ok: <reason>`. See scripts/content_lint/lint_no_tailnet.py header.
       - id: lint-no-tailnet
         name: lint no tailnet IP literals (repo-wide)
-        entry: .venv/bin/python scripts/content_lint/lint_no_tailnet.py
+        entry: .venv/bin/python scripts/content_lint/lint_no_tailnet.py --only
         language: system
-        pass_filenames: false
 
       # The root supervisor's own code (services/ava_root/) must stay free of
       # permission-domain and macOS-specific symbols — the privileged helper
@@ -245,10 +235,9 @@ repos:
       # `# emoji-ok: <reason>`; see scripts/lint/no_emoji.py header for scope.
       - id: lint-no-emoji
         name: lint no emoji (core code stays glyph-free)
-        entry: .venv/bin/python scripts/lint/no_emoji.py
+        entry: .venv/bin/python scripts/lint/no_emoji.py --only
         language: system
         types: [python]
-        pass_filenames: false
 
       # Ban bare `ava.x.y = ...` / setattr monkey-patching in plugins — SDK wraps
       # go through `ava.extend.wrap` so the stack stays introspectable + reversible.
@@ -256,10 +245,9 @@ repos:
       # scripts/lint/no_plugin_wrap.py header.
       - id: lint-no-plugin-wrap
         name: lint no plugin wrap (force ava.extend.wrap)
-        entry: .venv/bin/python scripts/lint/no_plugin_wrap.py
+        entry: .venv/bin/python scripts/lint/no_plugin_wrap.py --only
         language: system
         types: [python]
-        pass_filenames: false
 
       # Agent-visible docstring lint — docstrings in ava/*.py + plugin namespace
       # modules + plugin.py wrap targets are spliced into the LLM system prompt
@@ -270,7 +258,8 @@ repos:
         name: lint agent-visible docstrings (no CJK, no impl-detail leak)
         entry: .venv/bin/python scripts/lint/agent_docstrings.py
         language: system
-        types: [python]
+        # Judges only the agent-visible docstrings of ava/ and plugin modules (plus AGENTS.md).
+        files: ^(ava/|ava_builtins/plugins/|AGENTS\.md$|scripts/lint/agent_docstrings\.py$)
         pass_filenames: false
 
       # Structural lints for agent legibility — bans `if TYPE_CHECKING:` import
@@ -285,10 +274,12 @@ repos:
       # header. (print() bans are enforced by ruff T20, not here.)
       - id: lint-code-structure
         name: lint code structure (AST rules, file/directory budgets, package doors, single owners)
-        entry: .venv/bin/python scripts/lint/code_structure.py
+        entry: .venv/bin/python scripts/lint/code_structure.py --only
         language: system
-        always_run: true  # Baseline JSON and directories can change without Python edits.
-        pass_filenames: false
+        # The baseline JSON is an input: editing it (like any lint tooling file) widens the run
+        # to the full scan. One process, so a `--all-files` run is that single full scan.
+        files: ^(.*\.py|scripts/structure/baseline/.*\.json)$
+        require_serial: true
 
       # AGENTS.md line-count ceiling (constants in the script; hard + a
       # transitional note zone below it). Prevents progressive bloat —
@@ -419,16 +410,14 @@ repos:
       - id: lint-termination-source
         name: lint termination_source stamping (every terminated-write names its source)
         language: system
-        entry: .venv/bin/python scripts/lint/termination_source.py
+        entry: .venv/bin/python scripts/lint/termination_source.py --only
         files: \.py$
-        pass_filenames: false
 
       - id: lint-clock-lattice
         name: lint clock lattice (lattice-vocabulary clocks only in the family modules)
         language: system
-        entry: .venv/bin/python scripts/lint/clock_lattice.py
+        entry: .venv/bin/python scripts/lint/clock_lattice.py --only
         files: \.py$
-        pass_filenames: false
 
       # A test that exactly asserts a value derived from a repo fixed-instant
       # constant while the derivation can reach the real clock is correct only
@@ -441,20 +430,18 @@ repos:
       # scripts/lint/time_bomb.py.
       - id: lint-time-bomb
         name: lint time bombs (fixed instant x real clock)
-        entry: .venv/bin/python scripts/lint/time_bomb.py
+        entry: .venv/bin/python scripts/lint/time_bomb.py --only
         language: system
         types: [python]
-        pass_filenames: false
 
       # Pyright's Unknown/Missing ladder leaves ignores inert when a rule is
       # warning-only for that file. With that debt cleared, every zombie is an
       # error instead of a grandfathered exception.
       - id: lint-zombie-pyright-ignores
         name: lint zombie Pyright ignores (zero warning-tier ignores)
-        entry: .venv/bin/python scripts/lint/zombie_pyright_ignores.py --check
+        entry: .venv/bin/python scripts/lint/zombie_pyright_ignores.py --check --only
         language: system
         files: ^(.*\.py|pyproject\.toml)$
-        pass_filenames: false
 
       # (Config-scope ownership is now enforced at import by the config package's
       # registry builder — base/config/__init__.py:_build_registry fails fast on
