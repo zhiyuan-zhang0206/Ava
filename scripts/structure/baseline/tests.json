@@ -12,5 +12,14 @@
     "tests/test_helperproc.py::base.sessions.helperproc._process_for_record": 1,
     "tests/test_helperproc.py::base.sessions.helperproc._process_is_live": 1,
     "tests/test_helperproc.py::base.sessions.helperproc._read_record": 2
+  },
+  "tests_location": {
+    "tests/test_checkpoint_cleanup.py::top-level": 1,
+    "tests/test_ci_utils.py::top-level": 1,
+    "tests/test_event_fixtures.py::top-level": 1,
+    "tests/test_goal_watch_filter.py::top-level": 1,
+    "tests/test_helperproc.py::top-level": 1,
+    "tests/test_lint_fixture_scope.py::top-level": 1,
+    "tests/test_pool_keepalives.py::top-level": 1
   }
 }
