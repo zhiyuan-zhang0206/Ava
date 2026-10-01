@@ -57,7 +57,8 @@ async def test_token_derived_mcp_source_reaches_real_claim(
             "instance": str(credential["id"]),
         }
     }
-    content = build_chat_inbound(claimed[0]).model_dump()["content"]
+    message, _ = build_chat_inbound(claimed[0])
+    content = message.model_dump()["content"]
     assert isinstance(content, str)
     assert "External agent" in content
 

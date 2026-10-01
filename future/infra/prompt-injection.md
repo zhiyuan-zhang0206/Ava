@@ -15,14 +15,19 @@
 > | `ava/web.py` — `web.search` results, `web.fetch` answers | `web.search` / `web.fetch` |
 > | `ava/mcps/__init__.py` — **every MCP tool return** | `mcps.<server>.<tool>` |
 > | `agent/graph/_chat_inbound.py` — **inbound chat** | `inbound.chat:<source>` |
+| `agent/graph/claim/_dispatch.py` — **inbound system notes** (peer-authored task notes) | `inbound.system_note:<source>` |
 > | `ava_builtins/plugins/ava_code/plugin.py` — the `AGENTS.md` auto-injection | `context-file:<path>` |
 >
 > Design points worth keeping: a hit **does not mutate the content** (no marker
 > prepended, so the scan is trivially idempotent and never corrupts what the agent
-> reads) — findings are buffered in-memory during the exec turn and surface as a
-> SECURITY system note in the same exec's messages delta, injected by the exec
-> node (`agent/graph/exec/node.py`) after the exec-result ToolMessage; there is no
-> side-channel file (user ruling 2026-08-11). Memory writes have their own guard
+> reads) — findings raised during an exec turn are buffered in the exec child and
+> surface as a SECURITY system note in the same exec's messages delta, injected by
+> the exec node (`agent/graph/exec/node.py`) after the exec-result ToolMessage;
+> findings on inbound chat / system notes are returned by the scan and appended by
+> the claim node (`agent/graph/claim/_dispatch.py`) in its own delta right behind the
+> flagged message — the agent host holds no findings buffer, because one process
+> interleaves many agents' turns; there is no side-channel file (user ruling
+> 2026-08-11). Memory writes have their own guard
 > in `ava/files.py`, stamping `injection-risk: flagged` on a note whose body
 > carries already-flagged content, which is candidate defense #3 below in its
 > cheap form.

@@ -12,15 +12,13 @@
     "tests/agent": 34
   },
   "files": {
-    "tests/agent/test_claim.py": 3195,
+    "tests/agent/test_claim.py": 3069,
     "tests/agent/test_compact.py": 1142,
     "tests/agent/test_impersonation.py": 935
   },
   "patch_targets": {
     "tests/agent/test_claim.py::agent.graph.claim._dispatch": 2,
     "tests/agent/test_claim.py::agent.graph.claim.node._claim_node_impl": 1,
-    "tests/agent/test_claim.py::ava.security._pending_findings": 3,
-    "tests/agent/test_claim.py::ava.security._pending_inbound_findings": 2,
     "tests/agent/test_compact.py::base.telemetry.tracing._state": 1,
     "tests/agent/test_exec_domain_confirmation.py::base.native_process.exec_domain._process_group_has_live_member": 2,
     "tests/agent/test_hosted_force_quiescence.py::agent.graph.exec._process": 2,
