@@ -164,9 +164,11 @@ def _under_plugins(path: Path) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    argv, only = lint_common.split_only(argv)
     # argv non-empty = explicit paths (any dir); keep only plugin paths (the
     # plugins dir itself included, so it enumerates its members).
-    # Empty = default full scan of the plugins dir.
+    # Empty = default full scan of the plugins dir, or the `--only` changed files
+    # (the commit hook) under that same scope.
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
@@ -176,8 +178,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         targets = lint_common.scan_roots(_REPO_ROOT, (_SCAN_DIR,))
 
+    scope = lint_common.changed_scope(only, _REPO_ROOT)
+
     total = 0
-    for path in sorted(_iter_plugin_files(targets)):
+    for path in sorted(lint_common.restrict(_iter_plugin_files(targets), scope, _REPO_ROOT)):
         try:
             rel = path.relative_to(_REPO_ROOT).as_posix()
         except ValueError:

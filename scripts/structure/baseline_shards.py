@@ -131,14 +131,34 @@ def read_at(repo_root: Path, rev: str) -> dict[str, str] | None:
     listing = git("ls-tree", "--name-only", f"{rev}:{SHARD_DIR}")
     if listing.returncode:
         return None
+    filenames = [
+        name for name in listing.stdout.split() if name.endswith(".json") and name != RULES_FILE
+    ]
+    if not filenames:
+        return {}
+    # One `cat-file --batch` for every shard: a process per shard costs ~30ms each, and the
+    # baseline has dozens of them.
+    batch = subprocess.run(  # noqa: S603 — local git query, no shell
+        ["git", "-C", str(repo_root), "cat-file", "--batch"],
+        input="".join(f"{rev}:{SHARD_DIR}/{name}\n" for name in filenames).encode(),
+        capture_output=True,
+        check=False,
+    )
+    if batch.returncode:
+        return None
     texts: dict[str, str] = {}
-    for filename in listing.stdout.split():
-        if not filename.endswith(".json") or filename == RULES_FILE:
-            continue
-        shown = git("show", f"{rev}:{SHARD_DIR}/{filename}")
-        if shown.returncode:
+    cursor = 0
+    for filename in filenames:
+        header_end = batch.stdout.index(b"\n", cursor)
+        header = batch.stdout[cursor:header_end].split()
+        if len(header) != 3:  # `<object> missing`
             return None
-        texts[filename.removesuffix(".json")] = shown.stdout
+        size = int(header[2])
+        body_start = header_end + 1
+        texts[filename.removesuffix(".json")] = batch.stdout[
+            body_start : body_start + size
+        ].decode()
+        cursor = body_start + size + 1  # the newline that follows each object
     return texts
 
 

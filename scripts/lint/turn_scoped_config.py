@@ -67,6 +67,9 @@ if __name__ == "__main__":
     enter_scratch_home()
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
 
 _SCAN_DIRS = (
     "agent",
@@ -109,17 +112,23 @@ def _iter_files(paths: list[str]) -> list[Path]:
     return files
 
 
+# The config registry decides which fields are per-agent for every file.
+_RULE_INPUTS = ("base/config/", "base/host/env/")
+
+
 def main(argv: list[str]) -> int:
     from base.config import per_agent_field_names
 
+    argv, only = lint_common.split_only(argv)
     missing = [a for a in argv if not Path(a).exists()]
     if missing:
         print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
         return 1
+    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_RULE_INPUTS)
     per_agent = set(per_agent_field_names())
     errors: list[str] = []
     plugin_errors: list[str] = []
-    for path in _iter_files(argv):
+    for path in lint_common.restrict(_iter_files(argv), scope, _REPO_ROOT):
         resolved = path.resolve()
         try:
             rel = resolved.relative_to(_REPO_ROOT).as_posix()

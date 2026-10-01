@@ -33,6 +33,10 @@ from pathlib import Path, PurePosixPath
 from typing import Literal, cast
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
+
 _PYPROJECT_PATH = _REPO_ROOT / "pyproject.toml"
 _PYRIGHT_PATH = _REPO_ROOT / ".venv/bin/pyright"
 
@@ -609,8 +613,21 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _changed_python(only: list[str] | None) -> list[str] | None:
+    """The `--only` changed `.py` files to check, or None for every tracked file.
+
+    The tier configuration the ignores are judged against is an input: editing it
+    re-checks everything.
+    """
+    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=("pyproject.toml",))
+    return None if scope is None else sorted(rel for rel in scope if rel.endswith(".py"))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    # `--only FILE...` (the commit hook) checks just the changed files, unless the tier
+    # configuration they are judged against changed too.
+    arguments, only = lint_common.split_only(list(sys.argv[1:] if argv is None else argv))
+    args = _build_parser().parse_args(arguments)
     if args.all_tier and args.strip is None:
         _build_parser().error("--all-tier requires --strip")
 
@@ -647,7 +664,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
 
-    scan = classify_ignores(scan_repository(), _TIER_CONFIG)
+    scan = classify_ignores(scan_repository(files=_changed_python(only)), _TIER_CONFIG)
     return check_scan(scan)
 
 

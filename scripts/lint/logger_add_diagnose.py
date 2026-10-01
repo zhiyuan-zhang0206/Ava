@@ -157,20 +157,23 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    argv, only = lint_common.split_only(argv)
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    # argv non-empty = pre-commit passed the changed-file list; empty = full scan.
+    # argv non-empty = explicit paths; empty = full scan, or the `--only` changed files
+    # (the commit hook) under the same scope.
     targets = (
         [Path(a).resolve() for a in argv]
         if argv
         else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
     )
+    scope = lint_common.changed_scope(only, _REPO_ROOT)
 
     total = 0
-    for path in sorted(_iter_py_files(targets)):
+    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, _REPO_ROOT)):
         try:
             rel = path.relative_to(_REPO_ROOT).as_posix()
         except ValueError:

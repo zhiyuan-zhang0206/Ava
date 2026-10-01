@@ -94,11 +94,17 @@ def _scan_file(rel_path: str) -> list[tuple[int, str, str]]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    argv, only = lint_common.split_only(argv)
+    scope = lint_common.changed_scope(only, _REPO_ROOT)
     if argv:
         scan, missing = lint_common.resolve_targets(argv, _REPO_ROOT)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
+    elif scope is not None:
+        scan = sorted(
+            scope
+        )  # the commit hook's changed files; the lint's scope is every tracked file
     else:
         scan = _tracked_files()
 
