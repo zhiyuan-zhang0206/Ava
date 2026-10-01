@@ -208,7 +208,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         return 1
 
     # reset identity holder so downstream base.cluster.machine.machine_name() /
-    # machine_role() see the just-written machine_serve_* files.
+    # machine_role() re-resolve from settings.
     from base.cluster.machine import machine_role, reset_identity
 
     reset_identity()

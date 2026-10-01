@@ -218,7 +218,7 @@ os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
 # The native LGTM installer renders Tempo targets from the host-scope
 # telemetry settings (`settings.observability.telemetry_tempo_query_url` /
 # `telemetry_tempo_endpoint`), and `_self_machine_host()` prefers the
-# AVA_MACHINE_HOST env var over the home's `machine_host` file. The login
+# AVA_MACHINE_HOST env var. The login
 # shell exports the operator's real ~/.ava/.env into every child process (the
 # 2026-08-04 shell-env leak class), and host-scope keys survive the
 # cluster-scope drop in `_enforce_cluster_env_authority` — so on a dev box a
@@ -383,6 +383,11 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
             f"AVA_TELEMETRY_TEMPO_QUERY_URL={os.environ['AVA_TELEMETRY_TEMPO_QUERY_URL']}",
             f"AVA_TELEMETRY_TEMPO_ENDPOINT={os.environ['AVA_TELEMETRY_TEMPO_ENDPOINT']}",
             f"AVA_MACHINE_HOST={os.environ['AVA_MACHINE_HOST']}",
+            # The session unit's identity, as an initialized home records it: spawn_agent /
+            # claim_agent_row read machine_name(), and a runner flag with a gateway URL is a
+            # configured agent-runner. Subprocess tests that spawn the real CLI read it here.
+            f"AVA_MACHINE_NAME=test-{_SESSION_SUFFIX}",
+            "AVA_MACHINE_SERVE_AGENT_RUNNER=true",
             f"GRAFANA_ADMIN_PASSWORD={os.environ['GRAFANA_ADMIN_PASSWORD']}",
             # Same force-branch reasoning: exec timeout is cluster-scoped; without a
             # declaration the drop deletes the pinned 60s and the D5 fallback reads the
@@ -454,6 +459,7 @@ assert settings.observability.telemetry_tempo_endpoint == "http://127.0.0.1:1431
 assert settings.observability.telemetry_otlp_port == 4318
 assert settings.observability.telemetry_otlp_endpoint == "http://127.0.0.1:4318"
 assert settings.general.machine_host == "localhost"
+assert settings.general.machine_name == f"test-{_SESSION_SUFFIX}"
 assert settings.alerts.grafana_admin_password is None or (
     settings.alerts.grafana_admin_password.get_secret_value() == ""
 )
@@ -505,23 +511,19 @@ os.environ.pop("AVA_AGENT_ID", None)
 # `_TEST_AVA_HOME` is created and exported as AVA_HOME in the env block at the
 # top of this file — the one source of the home; it is removed in
 # `pytest_sessionfinish`.
-# multi-machine setup: spawn_agent / claim_agent_row reads machine_name()
-# from `$AVA_HOME/machine_name`; must write one into tmpfs first otherwise MachineNameMissing.
-(_TEST_AVA_HOME / "machine_name").write_text(f"test-{_SESSION_SUFFIX}")
+# multi-machine setup: spawn_agent / claim_agent_row read machine_name(); the test home's
+# `.env` (written in the block above) declares the session machine's name and its
+# agent-runner flag, so Settings resolves both with nothing else to plant.
 # machine capabilities default to agent-runner-only: gateway lifespan +
 # post_agents preflight both read it, tests default to agent-runner path so that
 # launch_agent_op locally launches the process; gateway-only tests monkeypatch
-# override themselves.
-# gateway-only tests monkeypatch override themselves. Both serve files respectively declare:
-# serve_agent_runner=true, serve_gateway left empty (=off).
-(_TEST_AVA_HOME / "machine_serve_agent_runner").write_text("true")
-# _resolve_role reads the settings bool (env wins over the file), so pin both to
-# the session default. This used to be a correction: `settings` module-loaded
-# before AVA_HOME was redirected and therefore captured the host operator's
-# AVA_MACHINE_SERVE_* out of their real ~/.ava/.env. With the home redirected
-# before that import there is no host `.env` on the path to capture, so this is
-# now belt-and-braces — kept because the default a test inherits should be stated
-# here rather than left to whatever the environment happens not to contain.
+# override themselves. serve_agent_runner=true, serve_gateway left unset (=off).
+# Pin both settings bools to the session default as well. Before the home was redirected
+# ahead of the `settings` import, a module-loaded `settings` captured the host operator's
+# AVA_MACHINE_SERVE_* out of their real ~/.ava/.env; with the redirect there is no host
+# `.env` on the path to capture, so this is belt-and-braces — kept because the default a
+# test inherits should be stated here rather than left to whatever the environment happens
+# not to contain.
 settings.general.machine_serve_agent_runner = True
 settings.general.machine_serve_gateway = None
 

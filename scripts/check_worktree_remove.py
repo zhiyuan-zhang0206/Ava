@@ -13,8 +13,6 @@ be imported (the wrong interpreter: no verdict was reached, so neither "clean"
 nor "refused"). See base/deploy/git/worktree_guard.py for the scan.
 """
 
-# operates-on-cluster: pty-sessions -- reads this machine's session registry for live anchors
-
 from __future__ import annotations
 
 import sys

@@ -25,40 +25,23 @@ def _truncate_machines() -> None:
         conn.commit()
 
 
-# ─── gateway_url() precedence ─────────────────────────────────────────────────
+# ─── gateway_url() source ─────────────────────────────────────────────────────
 
 
-def test_gateway_url_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """env `AVA_GATEWAY_URL` set > file — env wins."""
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://from-env:8000")
-    monkeypatch.setattr("base.cluster.machine.ava_home", lambda: tmp_path)
+def test_gateway_url_comes_from_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`AVA_GATEWAY_URL` is the only source: a `gateway_url` file in the home is not read."""
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     (tmp_path / "gateway_url").write_text("http://from-file:8000")
+    monkeypatch.setattr(settings.gateway, "gateway_url", "http://from-env:8000/")
     assert machines.gateway_url() == "http://from-env:8000"
-
-
-def test_gateway_url_file_when_env_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """env not set → reads `$AVA_HOME/gateway_url`."""
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("base.cluster.machine.ava_home", lambda: tmp_path)
-    (tmp_path / "gateway_url").write_text("http://from-file:8000\n")  # trailing \n trimmed
-    assert machines.gateway_url() == "http://from-file:8000"
-
-
-def test_gateway_url_raises_when_neither(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """env not set + file doesn't exist → GatewayUrlMissing."""
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("base.cluster.machine.ava_home", lambda: tmp_path)
     with pytest.raises(machines.GatewayUrlMissing):
         machines.gateway_url()
 
 
-def test_gateway_url_raises_when_file_blank(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Blank file treated as not set — protects users who wrote echo "" without cat check."""
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("base.cluster.machine.ava_home", lambda: tmp_path)
-    (tmp_path / "gateway_url").write_text("   \n")
+def test_gateway_url_raises_when_blank(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A blank value is not set."""
+    monkeypatch.setattr(settings.gateway, "gateway_url", "   ")
     with pytest.raises(machines.GatewayUrlMissing):
         machines.gateway_url()
 
@@ -230,13 +213,11 @@ def test_mark_stopping_stamps_then_register_clears(_machine_setup) -> None:
 def test_register_self_does_not_fall_back_to_gateway_url_when_url_none(
     _machine_setup,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """url=None does not use gateway_url() env/file fallback. Even if AVA_GATEWAY_URL is set,
+    """url=None does not use the gateway_url() fallback. Even if AVA_GATEWAY_URL is set,
     register_self(url=None) still writes NULL."""
     _machine_setup(name="test-no-fallback", role="agent-runner")
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://should-be-ignored:8000")
-    monkeypatch.setattr("base.cluster.machine.ava_home", lambda: tmp_path)
     machines.register_self(url=None)
     assert machines.list_all() == [("test-no-fallback", None)]
 
@@ -527,17 +508,13 @@ def test_unit_dial_url_split_runner_is_reachable_ops(monkeypatch: pytest.MonkeyP
     assert machines.unit_dial_url(frozenset({"agent-runner"})) == "http://10.0.0.2:8600"
 
 
-def test_unit_dial_url_gateway_only_is_reachable_host(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_unit_dial_url_gateway_only_is_reachable_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """gateway-only advertises reachable_host + the gateway URL's port, NOT the
     bare gateway URL — a gateway_url naming loopback on a host with a
     reachable identity would advertise a self-dialing address that breaks
     page serves (WP4, 2026-08-30 serve 400)."""
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("base.cluster.machine.ava_home", lambda: tmp_path)
-    (tmp_path / "gateway_url").write_text("https://ava.example:8000")
+    monkeypatch.setattr(settings.gateway, "gateway_url", "https://ava.example:8000")
     assert machines.unit_dial_url(frozenset({"gateway"})) == "http://10.0.0.2:8000"
 
 

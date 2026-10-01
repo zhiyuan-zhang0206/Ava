@@ -20,8 +20,6 @@ status is nonzero when any check failed.
   body is `3` (not a model claim, not a digit in a timestamp).
 """
 
-# operates-on-cluster: host-services -- runs only in the verification container, observing its own cluster
-
 from __future__ import annotations
 
 import json

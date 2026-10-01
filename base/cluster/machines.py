@@ -22,9 +22,8 @@ On an agent-runner-capable host the composed `gateway_url` holds the ops URL (th
 dial target spawn/lifecycle forwarding POSTs to), matching the single-box
 behavior before the split.
 
-Local URL source for gateway = env `AVA_GATEWAY_URL` > file
-`$AVA_HOME/gateway_url` > raise GatewayUrlMissing (same precedence as
-[[machine]] / [[memory_repo]]).
+Local URL source for gateway = `AVA_GATEWAY_URL` > raise GatewayUrlMissing (same
+source as [[machine]] / [[memory_repo]]: the home's `.env`).
 """
 
 from __future__ import annotations
@@ -70,8 +69,7 @@ __all__ = [
 
 
 class GatewayUrlMissing(RuntimeError):  # noqa: N818 — state description; same style as [[MachineNameMissing]] / [[MemoryRemoteMissing]]
-    """Neither env `AVA_GATEWAY_URL` nor `$AVA_HOME/gateway_url` is set
-    — multi-machine setup is incomplete.
+    """`AVA_GATEWAY_URL` is not set — multi-machine setup is incomplete.
 
     Local setup error, not on the wire (same style as
     [[MachineNameMissing]] / [[MemoryRemoteMissing]]).
@@ -101,16 +99,11 @@ class LoopbackDialUrlRefused(RuntimeError):  # noqa: N818 — state description;
 
 
 def gateway_url() -> str:
-    """Get this host's gateway URL. env > file > raise.
-
-    Precedence:
-    1. `AVA_GATEWAY_URL` env var (the home's `.env`, which `ava init` records, or the
-       process environment)
-    2. `$AVA_HOME/gateway_url` file (older homes)
-    3. neither -> GatewayUrlMissing
+    """Get this host's gateway URL: `AVA_GATEWAY_URL` (the home's `.env`, which
+    `ava init` records, or the process environment), else raise.
 
     Raises:
-        GatewayUrlMissing: env var empty + file missing or empty.
+        GatewayUrlMissing: `AVA_GATEWAY_URL` is empty.
 
     Delegates resolution to base.cluster.machine._resolve_gateway_url() so this answer
     never drifts from gateway_api_base(); only the raised exception type differs.
@@ -118,9 +111,8 @@ def gateway_url() -> str:
     url = _resolve_gateway_url()
     if url is None:
         raise GatewayUrlMissing(
-            f"gateway URL not set — `ava init --gateway-url <url>` records it for a new home; "
-            f"for an initialized one set AVA_GATEWAY_URL in its `.env` (or `echo <url> > "
-            f"{ava_home() / 'gateway_url'}`)."
+            "gateway URL not set — `ava init --gateway-url <url>` records it for a new home; "
+            "for an initialized one set AVA_GATEWAY_URL in its `.env`."
         )
     return url
 
@@ -187,15 +179,15 @@ def unit_dial_url(roles: MachineRoles) -> str | None:
     different addresses for the same unit, and the loser would be a host the
     gateway dials at an address nothing answers on.
 
-    Every advertised URL is built on `reachable_host()` (env AVA_MACHINE_HOST >
-    machine_host file > localhost), never on the bare gateway URL and never on a
+    Every advertised URL is built on `reachable_host()` (`AVA_MACHINE_HOST`, else
+    localhost), never on the bare gateway URL and never on a
     hardcoded loopback: a machine with a reachable identity must advertise it, or
     the page proxy's SSRF guard (which only dials a machine's advertised
     addresses) refuses every page server on the host (2026-08-30 serve 400).
 
     - agent-runner + gateway (single box): `http://<reachable_host()>:<ops_port>`.
-      On a true single box `reachable_host()` resolves to localhost (env >
-      machine_host file > localhost), so the zero-config shape is unchanged; on a
+      On a true single box `reachable_host()` resolves to localhost (no
+      `AVA_MACHINE_HOST`), so the zero-config shape is unchanged; on a
       multi-machine cluster it is the machine's private-network address — the
       address the rest of the cluster (and the page proxy's SSRF guard, which
       only dials registered machine addresses) reaches it at. The old

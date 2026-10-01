@@ -252,7 +252,7 @@ class GeneralSettings(EnvSettings):
     machine_name: str = Field(
         default="",
         alias="AVA_MACHINE_NAME",
-        description="Stable machine identifier for this host. Empty = fall back to the `$AVA_HOME/machine_name` file; neither set raises.",
+        description="Stable machine identifier for this host. Empty raises: a unit's name is recorded by `ava init`.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
@@ -265,7 +265,7 @@ class GeneralSettings(EnvSettings):
     machine_serve_gateway: bool | None = Field(
         default=None,
         alias="AVA_MACHINE_SERVE_GATEWAY",
-        description="Whether this host serves the gateway capability (Postgres/Redis + HTTP gateway + gateway daemons). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = fall back to the `$AVA_HOME/machine_serve_gateway` file.",
+        description="Whether this host serves the gateway capability (Postgres/Redis + HTTP gateway + gateway daemons). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = off.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
@@ -278,7 +278,7 @@ class GeneralSettings(EnvSettings):
     machine_serve_agent_runner: bool | None = Field(
         default=None,
         alias="AVA_MACHINE_SERVE_AGENT_RUNNER",
-        description="Whether this host serves the agent-runner capability (agent host, ops server, and watchdog). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = fall back to the `$AVA_HOME/machine_serve_agent_runner` file.",
+        description="Whether this host serves the agent-runner capability (agent host, ops server, and watchdog). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = off.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
@@ -291,7 +291,7 @@ class GeneralSettings(EnvSettings):
     machine_serve_observability_station: bool | None = Field(
         default=None,
         alias="AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
-        description="Whether this host serves the observability-station capability (owns the native LGTM observability backends — the declarative form of the `$AVA_HOME/lgtm-host` marker). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = fall back to the `$AVA_HOME/machine_serve_observability_station` file.",
+        description="Whether this host serves the observability-station capability (owns the native LGTM observability backends — the declarative form of the `$AVA_HOME/lgtm-host` marker). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = off.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
@@ -304,7 +304,7 @@ class GeneralSettings(EnvSettings):
     machine_description: str = Field(
         default="",
         alias="AVA_MACHINE_DESCRIPTION",
-        description="Free-text note of what this host is for, surfaced to agents via ava.self.MACHINE_SPEC and ava.agents.list_machines(). Empty = fall back to the `$AVA_HOME/machine_description` file; absence is legal.",
+        description="Free-text note of what this host is for, surfaced to agents via ava.self.MACHINE_SPEC and ava.agents.list_machines(). Empty is legal.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
@@ -317,7 +317,7 @@ class GeneralSettings(EnvSettings):
     machine_host: str = Field(
         default="",
         alias="AVA_MACHINE_HOST",
-        description="This host's reachable address — the IP/hostname other nodes and the browser dial it at, and the address authenticated Postgres, its pooler and Linux Redis bind in addition to loopback (macOS Redis retains its loopback relay). Empty (default): fall back to the `$AVA_HOME/machine_host` file, then `localhost`. Left empty on purpose — a `localhost` default here would shadow the file and register an enrolled agent-runner at a self-dialing address. A split deployment sets each node's real private-network address.",
+        description="This host's reachable address — the IP/hostname other nodes and the browser dial it at, and the address authenticated Postgres, its pooler and Linux Redis bind in addition to loopback (macOS Redis retains its loopback relay). Empty (default): `localhost`, which the registration loopback guard refuses for an enrolled agent-runner. A split deployment sets each node's real private-network address.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
@@ -330,7 +330,7 @@ class GeneralSettings(EnvSettings):
     memory_remote: str = Field(
         default="",
         alias="AVA_MEMORY_REMOTE",
-        description="Central git remote URL for the memory pool (each host pushes to a machine-<name> branch). Empty = fall back to the `$AVA_HOME/memory_remote` file; neither set raises. Ignored when AVA_MEMORY_KEEP_LOCAL is true.",
+        description="Central git remote URL for the memory pool (each host pushes to a machine-<name> branch). Empty raises on a remote-backed memory operation. Ignored when AVA_MEMORY_KEEP_LOCAL is true.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
