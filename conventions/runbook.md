@@ -2254,12 +2254,15 @@ exit 0. Hook verbosity makes these successful skips visible. Install frontend
 dependencies with `(cd ui/web && npm ci)`; Python dependencies use
 `env -u VIRTUAL_ENV uv sync` after the worktree venv preflight above.
 
-`AVA_PREPUSH_LOCK_WAIT_SECONDS` defaults to `120`: enough for a normal pyright
-run to release its lock, while bounding a contended push. Waiting prints the
-tool name. `AVA_PREPUSH_MAX_LOAD_PER_CORE` defaults to `1.5` for the one-minute
-load average divided by logical CPUs: allow short bursts but avoid adding work
-to a sustained CPU queue. Load is checked before and after acquiring the lock.
-The tool's actual failure status propagates unchanged; a local skip is never
+`AVA_PREPUSH_LOCK_WAIT_SECONDS` bounds how long a contended push waits for a
+tool's lock before it skips; waiting prints the tool name.
+`AVA_PREPUSH_MAX_LOAD_PER_CORE` is the one-minute load average per logical CPU
+above which a heavy tool skips rather than add work to a sustained CPU queue;
+load is checked before and after acquiring the lock. Both exist for the heavy
+tools only: a hook light enough to run every time takes neither (the nested
+branch-diff run), because a skip that depends on host load makes a check present
+on some pushes and absent on others. The tool's actual failure status propagates
+unchanged; a local skip is never
 evidence that the check ran. CI bypasses the wrapper: `backend-static` runs
 `uv run pyright` (full repository — CI is where the complete strict pass
 lives); `frontend` runs `npx next typegen`, `npx tsc --noEmit`, `npm run lint`
