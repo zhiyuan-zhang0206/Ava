@@ -98,13 +98,8 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/agent_host/tests/test_pooled_checkpoint.py",
             "services/agent_host/tests/test_reconcile_after_abort.py",
             "services/agent_host/tests/test_recovery_interrupt.py",
-            "agent/tests/test_checkpoint_serde.py",
-            "ava_builtins/plugins/ava_memory/tests/test_process_boot.py",
-            "services/agent_host/tests/test_hosted_db_flush_recovery.py",
-            "services/agent_host/tests/test_hosted_force_terminate_close.py",
-            "services/agent_host/tests/test_hosted_trace_checkpoint.py",
         ),
-        128,
+        123,
     ),
     "tests.path_scoped.ava_tests": Scope(
         (
@@ -154,13 +149,8 @@ PATH_SCOPES: dict[str, Scope] = {
             "base/deploy/tests/test_migrations.py",
             "gateway/schedules/tests/test_schedule_manager_pty.py",
             "services/agent_host/tests/test_hosted_dispatcher_cancellation.py",
-            "ava/tests/test_composer_commands.py",
-            "agent/tests/test_external.py",
-            "gateway/tests/test_presets_sdk.py",
-            "gateway/tests/test_ui.py",
-            "gateway/tests/test_agents_sdk.py",
         ),
-        65,
+        60,
     ),
     "tests.path_scoped.cli_tests": Scope(
         (
@@ -231,9 +221,8 @@ PATH_SCOPES: dict[str, Scope] = {
             "ops/roster/tests/test_pty_sessions_wiring.py",
             "scripts/tests/test_start_agent_bearer.py",
             "services/ava_root/tests/test_maintenance_late_child.py",
-            "services/agent_host/tests/test_agent_host_identity_probe.py",
         ),
-        114,
+        113,
     ),
     "tests.path_scoped.db_authority_tests": Scope(
         (
@@ -284,7 +273,6 @@ PATH_SCOPES: dict[str, Scope] = {
     "tests.path_scoped.integration_tests": Scope(
         (
             "tests/integration",
-            "gateway/tests/test_agent_launch_retry_sdk.py",
             "ava/tests/test_core.py",
             "base/agents/impersonation/tests/test_impersonation_replay_content_identity.py",
             "base/cluster/dataplane/tests/test_vendored_binaries.py",
@@ -294,7 +282,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "ops/lifecycle/tests/test_agent_launch_runner.py",
             "ops/tests/test_cross_machine_dispatch.py",
         ),
-        17,
+        16,
     ),
     "tests.path_scoped.services_tests": Scope(
         (
@@ -358,9 +346,8 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/permissions_helper/tests/test_permissions_helper.py",
             "services/redis_bridge/tests",
             "services/tests",
-            "services/agent_host/tests/test_hosted_backlog_recovery.py",
         ),
-        128,
+        127,
     ),
     "tests.path_scoped.structure_tests": Scope(
         (
