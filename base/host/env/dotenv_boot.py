@@ -13,7 +13,7 @@ hooks and tools that import application code. Every descendant inherits it.
 
 What keeps development code off the host's cluster is that rule plus the
 checkout guard (`home_checkout_error`): a home that carries its own
-`<home>/source` checkout is changed only by that checkout's code.
+`<home>/source` checkout is operated only by that checkout's code.
 
 Callers:
     base/config.py            - before importing Settings
@@ -90,15 +90,15 @@ def resolve_ava_home() -> Path:
 
 
 def home_checkout_error(repo: Path) -> str | None:
-    """Why `repo` may not change this process's home, or None when it may.
+    """Why `repo` may not operate this process's home, or None when it may.
 
     A home that carries its own `<home>/source` checkout (the production home
-    `~/.ava`, and every unit started from source) is started, stopped and
-    reconfigured only by that checkout's code: a disposable checkout driving it
-    would bind its daemons to code that disappears with the checkout (the 01:13
-    worktree accident, Task #966) or apply un-reviewed migrations to its
-    database. A home with no `source` (a test session's temporary home, a
-    scratch `AVA_HOME`) accepts any checkout.
+    `~/.ava`, and every unit started from source) is operated only by that
+    checkout's code: a disposable checkout driving it would bind its daemons to
+    code that disappears with the checkout (the 01:13 worktree accident, Task
+    #966) or apply un-reviewed migrations to its database. A home with no
+    `source` (a test session's temporary home, a scratch `AVA_HOME`) accepts any
+    checkout.
 
     Both sides are compared resolved, so a symlinked or `..`-spelled path to
     the same directory is the same checkout.
@@ -110,9 +110,9 @@ def home_checkout_error(repo: Path) -> str | None:
     return (
         f"this checkout ({repo}) is not the checkout of the home it would act on: "
         f"{home} carries its own source checkout ({source}), and only that "
-        f"checkout may start, stop or reconfigure it. Run {source}/.venv/bin/ava "
-        f"instead, or set AVA_HOME to a home of your own (a temporary directory, for a "
-        f"test or a tool)."
+        f"checkout may operate it. Run {source}/.venv/bin/ava (the bare `ava` of a "
+        f"production host) instead, or set AVA_HOME to a home of your own (a "
+        f"temporary directory, for a test or a tool)."
     )
 
 
@@ -132,8 +132,8 @@ def skip_config_fetch() -> None:
 def enter_scratch_home() -> Path:
     """Point this process tree at a fresh temporary home, whatever its environment carries.
 
-    For a tool that imports application code but must not touch the host's
-    cluster (a lint, a codegen dump, a docs check): it sets `AVA_HOME` to a new
+    For a script that imports application code but must not touch the host's
+    cluster (the scripts git hooks launch): it sets `AVA_HOME` to a new
     private directory and `AVA_CONFIG_FETCH=skip`, so nothing in the tree
     resolves `~/.ava`, reads another home's `.env` or dials a gateway. Call it
     before the tool's first application import, and only when the tool runs as a
@@ -419,8 +419,8 @@ def _enforce_cluster_env_authority(home: Path) -> None:
     The MACHINE-IDENTITY keys (`env_identity_keys()`: the serve-capability flags, machine
     name/description, memory remote) get the same treatment, with one exemption: a value the
     unit's own `.env` declares is forced in, an inherited one is DROPPED. A unit's machine
-    identity is a per-unit fact — it belongs in its own `.env` (`ava start` writes it there) or
-    its `$AVA_HOME/machine_*` files, never in whatever a parent process happened to inherit.
+    identity is a per-unit fact — it belongs in its own `.env` (`ava init` writes it there),
+    never in whatever a parent process happened to inherit.
     The leak that motivated this was real: the gateway host's login shell carries prod's
     `~/.ava/.env` (AVA_MACHINE_SERVE_GATEWAY=true among it), so a watcher child booting an
     isolated $AVA_HOME with no `.env` resolved as a gateway-capable unit —

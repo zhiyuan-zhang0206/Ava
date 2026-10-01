@@ -242,17 +242,13 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     _AVA_HOME.mkdir(parents=True, exist_ok=True)
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["AVA_HOME"] = str(_AVA_HOME)
-    # multi-machine setup: spawn_agent / claim_agent_row / post_agents read
-    # $AVA_HOME/machine_name + the serve-capability files; write them or resolution
-    # raises.
-    (_AVA_HOME / "machine_name").write_text(f"e2e-{_E2E_SUFFIX}")
-    (_AVA_HOME / "machine_serve_agent_runner").write_text("true")
-    (_AVA_HOME / "machine_serve_gateway").write_text("true")
     # Set the identity env explicitly: the host operator's real ~/.ava/.env may
-    # have exported AVA_MACHINE_NAME / AVA_MACHINE_SERVE_* (and `_resolve_*` reads
-    # env before the file), which would leak the host's identity (e.g. name=test-host)
-    # into the gateway/ops subprocesses — so the gateway would dispatch a spawn to
-    # the host's name instead of the e2e machine registered below.
+    # have exported AVA_MACHINE_NAME / AVA_MACHINE_SERVE_*, which would leak the
+    # host's identity (e.g. name=test-host) into the gateway/ops subprocesses — so the
+    # gateway would dispatch a spawn to the host's name instead of the e2e machine
+    # registered below. The same keys are declared in the e2e home's `.env` below: a
+    # unit's identity is read from its own `.env`, and an inherited value it does not
+    # declare is dropped.
     os.environ["AVA_MACHINE_NAME"] = f"e2e-{_E2E_SUFFIX}"
     os.environ["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
     os.environ["AVA_MACHINE_SERVE_GATEWAY"] = "true"
@@ -309,6 +305,14 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
         f"{key}={os.environ[key]}"
         for key in sorted(cluster_scope_aliases())
         if key in os.environ and key not in _health_port_keys
+    ]
+    env_lines += [
+        f"{key}={os.environ[key]}"
+        for key in (
+            "AVA_MACHINE_NAME",
+            "AVA_MACHINE_SERVE_AGENT_RUNNER",
+            "AVA_MACHINE_SERVE_GATEWAY",
+        )
     ]
     (_AVA_HOME / ".env").write_text("\n".join(env_lines) + "\n")
     try:

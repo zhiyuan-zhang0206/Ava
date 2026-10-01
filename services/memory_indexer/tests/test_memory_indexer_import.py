@@ -20,6 +20,7 @@ _CONCRETE_BACKENDS = {
 def _run_fresh_daemon_import(tmp_path: Path, code: str) -> subprocess.CompletedProcess[str]:
     """Import the daemon in a fresh interpreter with an isolated unit home."""
     (tmp_path / ".env").write_text(
+        "AVA_MACHINE_NAME=test-box\n"
         "AVA_MACHINE_SERVE_GATEWAY=true\n"
         "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
         "AVA_DB_URL=postgresql://unprovisioned@127.0.0.1:1/unprovisioned\n"
@@ -30,7 +31,6 @@ def _run_fresh_daemon_import(tmp_path: Path, code: str) -> subprocess.CompletedP
         "AVA_PGBOUNCER_ENABLED=false\n"
         "AVA_TRANSPORT_ENCRYPTION=overlay\n"
     )
-    (tmp_path / "machine_name").write_text("test-box")
     env = os.environ.copy()
     env["AVA_HOME"] = str(tmp_path)
     env["AVA_CONFIG_FETCH"] = "skip"

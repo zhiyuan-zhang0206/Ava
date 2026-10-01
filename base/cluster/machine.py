@@ -19,14 +19,12 @@ wifi).
   each capability needs. Prefer `is_gateway()` / `is_agent_runner()` /
   `is_observability_station()` over comparing the set directly.
 
-Precedence:
-- machine_name: env `AVA_MACHINE_NAME` > `$AVA_HOME/machine_name` file >
-  MachineNameMissing.
-- machine_role: derived from independent capability flags, each resolved env
+Source: the home's `.env` (read through Settings), nothing else.
+- machine_name: `AVA_MACHINE_NAME`, else MachineNameMissing.
+- machine_role: derived from independent capability flags, each the bool of
   `AVA_MACHINE_SERVE_GATEWAY` / `AVA_MACHINE_SERVE_AGENT_RUNNER` /
-  `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` (bool) > `$AVA_HOME/machine_serve_gateway` /
-  `machine_serve_agent_runner` / `machine_serve_observability_station` file >
-  False. A host with no capability raises MachineRoleMissing.
+  `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` (unset = off). A host with no
+  capability raises MachineRoleMissing.
 
 `ava init --machine-name X --serve-gateway` records these in the home's `.env`;
 if no capability is set, a start fails loud and prints an actionable hint.
@@ -39,15 +37,13 @@ from typing import Literal
 
 from base.cluster.auth import bearer_header, client_bearer
 from base.config import settings
-from base.paths import ava_home
 
 # A machine carries a SET of capabilities, not a single role. `gateway` owns
 # Postgres/Redis + the HTTP gateway; `agent-runner` runs agent processes;
 # `observability-station` owns the native LGTM observability backends. A
 # single-box deployment carries gateway+agent-runner. Each capability is
-# declared independently by its own boolean flag (env `AVA_MACHINE_SERVE_*` >
-# the matching `$AVA_HOME/machine_serve_*` file > False); `_resolve_role`
-# collapses the booleans into the frozenset.
+# declared independently by its own boolean flag (`AVA_MACHINE_SERVE_*`, unset =
+# off); `_resolve_role` collapses the booleans into the frozenset.
 # The DB still encodes the set as a TEXT[] of capability tokens. `MachineRole`
 # is one capability; `MachineRoles` is the set machine_role() returns.
 MachineRole = Literal["gateway", "agent-runner", "observability-station"]
@@ -62,11 +58,11 @@ _VALID_CAPABILITIES: frozenset[str] = frozenset(
 
 
 class MachineNameMissing(RuntimeError):  # noqa: N818 — "state description" naming, same as AgentNotFound / IndexerUnavailable
-    """Neither env `AVA_MACHINE_NAME` nor `$AVA_HOME/machine_name` is set — multi-machine setup is incomplete."""
+    """`AVA_MACHINE_NAME` is not set — multi-machine setup is incomplete."""
 
 
 class MachineRoleMissing(RuntimeError):  # noqa: N818
-    """This host serves no capability (every AVA_MACHINE_SERVE_* flag + its file off) — multi-machine setup is incomplete."""
+    """This host serves no capability (every AVA_MACHINE_SERVE_* flag off or unset) — multi-machine setup is incomplete."""
 
 
 class MachineRoleInvalid(ValueError):  # noqa: N818
@@ -74,7 +70,7 @@ class MachineRoleInvalid(ValueError):  # noqa: N818
 
 
 class GatewayApiBaseMissing(RuntimeError):  # noqa: N818 — state description, same style as MachineNameMissing
-    """gateway_url unset (env and file both absent) — cannot resolve where to reach the gateway."""
+    """gateway_url unset — cannot resolve where to reach the gateway."""
 
 
 class _Unset(enum.Enum):
@@ -150,16 +146,16 @@ _identity = _IdentityHolder()
 
 
 def machine_name() -> str:
-    """Get this host's identifier. settings (env-backed) > file > raise.
+    """Get this host's identifier from settings (`AVA_MACHINE_NAME`).
 
     Raises:
-        MachineNameMissing: settings.general.machine_name empty + file missing or empty.
+        MachineNameMissing: settings.general.machine_name is empty.
     """
     return _identity.name()
 
 
 def machine_role() -> MachineRoles:
-    """Get this host's capability set. settings (env-backed) > file > raise.
+    """Get this host's capability set, from the `AVA_MACHINE_SERVE_*` settings.
 
     Returns a frozenset of capabilities, each `gateway`, `agent-runner`, or
     `observability-station`. Prefer `is_gateway()` / `is_agent_runner()` /
@@ -220,7 +216,7 @@ def format_capabilities(
 
 
 def machine_description() -> str | None:
-    """Get this host's free-text description. settings (env-backed) > file > None.
+    """Get this host's free-text description (settings, `AVA_MACHINE_DESCRIPTION`) or None.
 
     Unlike machine_name / machine_role, absence is legal: a machine without a
     description is valid, so this returns None instead of raising.
@@ -236,16 +232,13 @@ def reachable_host() -> str:
     the data-plane endpoint enrolled agent-runners connect to.
 
     Precedence:
-    1. `settings.general.machine_host` (env `AVA_MACHINE_HOST`), when non-empty
-    2. `$AVA_HOME/machine_host` file (older homes; `ava init --machine-host` records `.env`)
-    3. `localhost` — a single box is reachable only at loopback (zero-config).
+    1. `settings.general.machine_host` (env `AVA_MACHINE_HOST`, which
+       `ava init --machine-host` records in `.env`), when non-empty
+    2. `localhost` — a single box is reachable only at loopback (zero-config).
 
     The operator declares this address; it is not auto-detected, so the codebase
     makes no assumption about how the machines reach each other (VPN / LAN /
-    overlay network / etc.). The `localhost` fallback is deliberately last so an
-    enrolled agent-runner's `$AVA_HOME/machine_host` file wins over it — a
-    non-empty default here would shadow the file and register the runner at a
-    self-dialing loopback address. A misconfigured remote host that falls through
+    overlay network / etc.). A misconfigured remote host that falls through
     to `localhost` is caught downstream by the loopback guard in
     `base.cluster.machines.register_self`, not by this resolver.
 
@@ -261,7 +254,7 @@ def set_identity(
     description: str | _Unset | None = _UNSET,
     host: str | _Unset = _UNSET,
 ) -> None:
-    """Inject machine identity, overriding env/file resolution for the fields
+    """Inject machine identity, overriding settings resolution for the fields
     provided. Fields left unset keep their current resolved/injected value.
     Used by tests and by explicit bootstrap. Call reset_identity() to clear.
     """
@@ -270,7 +263,7 @@ def set_identity(
 
 def reset_identity() -> None:
     """Clear all injected/resolved identity; the next read re-resolves from
-    env/file.
+    settings.
     """
     _identity.reset()
 
@@ -279,60 +272,16 @@ def _resolve_name() -> str:
     env = settings.general.machine_name.strip()
     if env:
         return env
-    p = ava_home() / "machine_name"
-    if p.exists():
-        name = p.read_text().strip()
-        if name:
-            return name
     raise MachineNameMissing(
         "machine name not set — `ava init --machine-name <name>` records it for a new "
         "home; for an initialized one set AVA_MACHINE_NAME in its `.env` (e.g. host-a / host-b)."
     )
 
 
-def parse_serve_value(value: str, source: str) -> bool:
-    """Parse a capability flag's textual value (a `$AVA_HOME/machine_serve_*` file)
-    strictly. Blank is off; a recognized true / false token resolves; anything else
-    raises. A typo (`treu`, `gateway`, `2`) must NOT silently become False — that
-    would start the host the wrong shape (e.g. gateway-only when agent-runner was meant too)
-    while looking healthy.
-
-    Raises:
-        MachineRoleInvalid: a non-blank value that is not a true/false token.
-    """
-    v = value.strip().lower()
-    if not v:
-        return False
-    if v in ("1", "true", "yes", "on"):
-        return True
-    if v in ("0", "false", "no", "off"):
-        return False
-    raise MachineRoleInvalid(
-        f"{source} has unrecognized value {value.strip()!r} — expected true/false"
-    )
-
-
-def _resolve_serve(env_value: bool | None, file_name: str) -> bool:  # noqa: FBT001 — tri-state capability flag, passed by name from _resolve_role
-    """Resolve one capability flag: env (settings bool) > `$AVA_HOME/<file>` > False.
-    None means the env var is unset (fall through to the file); an explicit
-    true/false in either source is honored (a malformed file value raises)."""
-    if env_value is not None:
-        return env_value
-    p = ava_home() / file_name
-    if p.exists():
-        return parse_serve_value(p.read_text(), str(p))
-    return False
-
-
 def _resolve_role() -> MachineRoles:
-    serve_gateway = _resolve_serve(settings.general.machine_serve_gateway, "machine_serve_gateway")
-    serve_agent_runner = _resolve_serve(
-        settings.general.machine_serve_agent_runner, "machine_serve_agent_runner"
-    )
-    serve_observability_station = _resolve_serve(
-        settings.general.machine_serve_observability_station,
-        "machine_serve_observability_station",
-    )
+    serve_gateway = bool(settings.general.machine_serve_gateway)
+    serve_agent_runner = bool(settings.general.machine_serve_agent_runner)
+    serve_observability_station = bool(settings.general.machine_serve_observability_station)
     caps = {
         cap
         for cap, on in (
@@ -354,69 +303,45 @@ def _resolve_role() -> MachineRoles:
 
 
 def _resolve_description() -> str | None:
-    env = settings.general.machine_description.strip()
-    if env:
-        return env
-    p = ava_home() / "machine_description"
-    if p.exists():
-        text = p.read_text().strip()
-        if text:
-            return text
-    return None
+    return settings.general.machine_description.strip() or None
 
 
 def _resolve_host() -> str:
     env = settings.general.machine_host.strip()
     if env:
         return env
-    p = ava_home() / "machine_host"
-    if p.exists():
-        host = p.read_text().strip()
-        if host:
-            return host
-    # Zero-config single box: reachable only at loopback. This fallback is last
-    # so the `machine_host` file (older homes) wins —
-    # the config field's default is empty for the same reason (a non-empty
-    # default would shadow the file). A remote runner that wrongly lands here is
-    # rejected at registration time by the loopback guard in
+    # Zero-config single box: reachable only at loopback. A remote runner that
+    # wrongly lands here is rejected at registration time by the loopback guard in
     # base.cluster.machines.register_self, so this never silently registers a
     # self-dialing address.
     return "localhost"
 
 
 def _resolve_gateway_url() -> str | None:
-    """Resolve the configured gateway base URL: env `AVA_GATEWAY_URL` > file
-    `$AVA_HOME/gateway_url` > None. Trailing slash stripped.
+    """Resolve the configured gateway base URL (`AVA_GATEWAY_URL`) or None.
+    Trailing slash stripped.
 
     The single source both gateway_api_base() (this module) and
     base.cluster.machines.gateway_url() read, so the "where is the gateway" answer
     never drifts between them.
     """
     env = settings.gateway.gateway_url.strip()
-    if env:
-        return env.rstrip("/")
-    p = ava_home() / "gateway_url"
-    if p.exists():
-        url = p.read_text().strip()
-        if url:
-            return url.rstrip("/")
-    return None
+    return env.rstrip("/") if env else None
 
 
 def gateway_api_base() -> str:
     """Base URL this unit uses to call the gateway over HTTP.
 
     One role-blind resolver for every client-side caller (the agent SDK, the
-    monitor wrapper, the runner, the watchdog, and
-    dev bootstrap): the configured gateway address, env `AVA_GATEWAY_URL` > file
-    `$AVA_HOME/gateway_url` > raise. A gateway-capable host resolves the *same*
-    configured address as any other caller — on a single box that address is the
+    monitor wrapper, the runner, the watchdog, and dev bootstrap): the configured
+    gateway address, `AVA_GATEWAY_URL`, else raise. A gateway-capable host resolves
+    the *same* configured address as any other caller — on a single box that address is the
     box's own reachable address, so its agent-runner half dials its gateway half
     the same way a remote runner would. No localhost shortcut: single-box and
     split deployments share one path.
 
     Raises:
-        GatewayApiBaseMissing: gateway_url unset (env and file both absent).
+        GatewayApiBaseMissing: gateway_url unset.
     """
     url = _resolve_gateway_url()
     if url is None:

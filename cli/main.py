@@ -180,15 +180,13 @@ def main(argv: list[str] | None = None) -> int:
     _normalize_process_profile()
     args_in = sys.argv[1:] if argv is None else argv
     # The checkout gate comes first, before `boot` and before anything loads a
-    # home's configuration: a verb that changes a home is refused unless this
-    # CLI belongs to that home (`cli.preflight.require_own_checkout`). Skips
-    # --help (parse-only invocations).
-    if args_in and not ({"-h", "--help"} & set(args_in)):
-        from cli.preflight import require_own_checkout
+    # home's configuration: every command is refused unless this CLI belongs to
+    # the home (`cli.preflight.require_own_checkout`).
+    from cli.preflight import require_own_checkout
 
-        rc = require_own_checkout(args_in, Path(__file__).resolve().parents[1])
-        if rc is not None:
-            return rc
+    rc = require_own_checkout(args_in, Path(__file__).resolve().parents[1])
+    if rc is not None:
+        return rc
     # `ava boot` is what the OS boot job runs on the platforms whose scheduler
     # cannot retry a failed job for us (Linux cron `@reboot`, Windows ONLOGON):
     # `ava start` re-run while the machine is still coming up. Dispatched here,
