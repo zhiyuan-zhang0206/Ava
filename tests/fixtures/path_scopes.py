@@ -283,7 +283,7 @@ PATH_SCOPES: dict[str, Scope] = {
     "tests.path_scoped.integration_tests": Scope(
         (
             "tests/integration",
-            "ava/tests/test_agent_launch_retry_sdk.py",
+            "gateway/tests/test_agent_launch_retry_sdk.py",
             "ava/tests/test_core.py",
             "base/agents/impersonation/tests/test_impersonation_replay_content_identity.py",
             "base/cluster/dataplane/tests/test_vendored_binaries.py",
