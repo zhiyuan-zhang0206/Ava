@@ -171,10 +171,10 @@ def _scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
         else:
             fields, body = {}, content
         # Canonical display spelling: dash for every segment (a plugin's
-        # namespace is its directory name — `ava_code`, a Python package dir —
+        # namespace is its directory name — `ava_fleet`, a Python package dir —
         # and the skill tree may hold legacy underscore folders), and `:`
         # between segments, exactly like skills.identifier() renders
-        # skill-as-commands (`ava-code:pr`, `web-ai:deep-research`). Inbound
+        # skill-as-commands (`ava-memory:consolidation`, `web-ai:deep-research`). Inbound
         # matching still folds either spelling (split_commands -> match_key),
         # so nothing breaks.
         name = ":".join(display_name(seg) for seg in (*base_ns, f.stem))

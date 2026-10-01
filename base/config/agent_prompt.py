@@ -78,7 +78,7 @@ class AgentPromptSettings(EnvSettings):
             "Comma-separated skill names whose name + one-line description are "
             "injected into the system prompt as an always-on index; the agent loads "
             "the full body on demand. Each entry resolves by `.`-identifier "
-            "(`ava-code.pr`) then bare frontmatter name, dash and underscore "
+            "(`ava-memory.consolidation`) then bare frontmatter name, dash and underscore "
             "spellings alike; `*` (the default) injects every loaded skill. "
             "Unresolved names are skipped. Set an explicit list per agent to "
             "NARROW the index below the full catalog. Empty injects no "

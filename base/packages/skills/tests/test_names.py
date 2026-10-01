@@ -24,8 +24,8 @@ from base.packages.skills.names import (
         ("ava-goal", "ava_goal"),
         ("ava_goal", "ava_goal"),
         ("write-a-pr-description", "write_a_pr_description"),
-        ("ava-code:pr", "ava_code.pr"),
-        ("ava-code.pr", "ava_code.pr"),
+        ("ava-memory:consolidation", "ava_memory.consolidation"),
+        ("ava-memory.consolidation", "ava_memory.consolidation"),
         ("gmail", "gmail"),
     ],
 )
@@ -36,7 +36,7 @@ def test_match_key_folds_every_spelling_of_one_name(name: str, expected: str) ->
 def test_match_key_is_idempotent() -> None:
     """It is applied at several boundaries in sequence; folding twice must not
     drift."""
-    assert match_key(match_key("ava-code:pr")) == match_key("ava-code:pr")
+    assert match_key(match_key("ava-memory:consolidation")) == match_key("ava-memory:consolidation")
 
 
 @pytest.mark.parametrize(
@@ -54,7 +54,7 @@ def test_display_name_renders_the_canonical_dash_form(name: str, expected: str) 
 def test_display_name_leaves_namespace_dots_alone() -> None:
     """Ava renders namespace separation with `.` — a bare name string cannot say
     which segment is a plugin boundary, so nothing turns a `.` into a `:`."""
-    assert display_name("ava_code.pr") == "ava-code.pr"
+    assert display_name("ava_memory.consolidation") == "ava-memory.consolidation"
 
 
 def test_find_prefers_an_exact_hit() -> None:
@@ -89,8 +89,8 @@ def test_identity_constructors_fold_every_spelling() -> None:
         ident = SkillIdentity.from_dir(spelling)
         assert ident.key == "ava_code"
         assert ident.display == "ava-code"
-    assert SkillIdentity.from_cli("ava-code:pr").key == "ava_code.pr"
-    assert SkillIdentity.from_cli("ava-code:pr").display == "ava-code:pr"
+    assert SkillIdentity.from_cli("ava-memory:consolidation").key == "ava_memory.consolidation"
+    assert SkillIdentity.from_cli("ava-memory:consolidation").display == "ava-memory:consolidation"
     assert SkillIdentity.from_frontmatter("web_ai.deep_research").key == "web_ai.deep_research"
 
 

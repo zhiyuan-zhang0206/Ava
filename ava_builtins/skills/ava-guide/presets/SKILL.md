@@ -81,7 +81,7 @@ config = {
     # Full SKILL.md text loaded before the first turn — the field that actually
     # differentiates a role. Keep it to short disciplinary skills; a large
     # reference skill is already one ava.help() away via the index.
-    "skills_to_expand_at_start": ["ava-code.conventions"],
+    "skills_to_expand_at_start": ["ava-ultra-speed"],
     "llm_model": "deepseek-flash",
 }
 ```

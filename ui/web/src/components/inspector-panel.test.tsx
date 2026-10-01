@@ -861,8 +861,8 @@ describe("InspectorPanel", () => {
 
   it("renders skill-list config keys in canonical dash spelling (display_name)", async () => {
     // The runtime stores skill lists in the underscore Python projection
-    // (ava_code_worktree); the overlay must present the canonical dash form
-    // (ava-code-worktree) while non-skill values stay untouched.
+    // (ava_qa_inspection); the overlay must present the canonical dash form
+    // (ava-qa-inspection) while non-skill values stay untouched.
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         config_overlay: {
