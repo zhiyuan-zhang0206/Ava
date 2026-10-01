@@ -35,11 +35,10 @@ def _artifact(tmp_path: Path, data: bytes = b"encrypted artifact") -> Path:
 
 
 def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    config = settings.physical_backup
-    monkeypatch.setattr(config, "pitr_store_backend", "oss")
-    monkeypatch.setattr(config, "pitr_oss_endpoint", "https://oss-cn-test.example.com/")
-    monkeypatch.setattr(config, "pitr_oss_bucket", "backups")
-    monkeypatch.setattr(config, "pitr_oss_credentials_file", tmp_path / "oss.json")
+    config = settings.services
+    monkeypatch.setattr(config, "backup_offsite_endpoint", "https://oss-cn-test.example.com/")
+    monkeypatch.setattr(config, "backup_offsite_bucket", "backups")
+    monkeypatch.setattr(config, "backup_offsite_credentials_file", tmp_path / "oss.json")
 
 
 # ── the upload itself ──
@@ -203,7 +202,6 @@ def test_unconfigured_publish_skips_with_one_info_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Not configured is a supported state: no ERROR, no traceback, no store opened."""
-    monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "gcs")
 
     def _never_opened(_target: object) -> None:
         raise AssertionError("an unconfigured destination must never be opened")
@@ -213,25 +211,27 @@ def test_unconfigured_publish_skips_with_one_info_line(
 
     assert offsite.publish(_artifact(tmp_path)) is None
 
-    assert [(r.levelno, r.exc_info) for r in caplog.records] == [(logging.INFO, None)]
-    assert "AVA_PITR_STORE_BACKEND=gcs" in caplog.records[0].getMessage()
+    [record] = caplog.records
+    assert (record.levelno, record.exc_info) == (logging.INFO, None)
+    for key in ("ENDPOINT", "BUCKET", "CREDENTIALS_FILE"):
+        assert f"AVA_BACKUP_OFFSITE_{key}" in record.getMessage()
 
 
-def test_oss_with_unset_keys_skips_naming_them(
+def test_a_partly_configured_destination_skips_naming_the_unset_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     _configure(monkeypatch, tmp_path)
-    monkeypatch.setattr(settings.physical_backup, "pitr_oss_bucket", "")
-    monkeypatch.setattr(settings.physical_backup, "pitr_oss_credentials_file", None)
+    monkeypatch.setattr(settings.services, "backup_offsite_bucket", "")
+    monkeypatch.setattr(settings.services, "backup_offsite_credentials_file", None)
     caplog.set_level(logging.INFO, logger=offsite.__name__)
 
     assert offsite.publish(_artifact(tmp_path)) is None
 
     [record] = caplog.records
     assert record.levelno == logging.INFO
-    assert "AVA_PITR_OSS_BUCKET" in record.getMessage()
-    assert "AVA_PITR_OSS_CREDENTIALS_FILE" in record.getMessage()
-    assert "AVA_PITR_OSS_ENDPOINT" not in record.getMessage()
+    assert "AVA_BACKUP_OFFSITE_BUCKET" in record.getMessage()
+    assert "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE" in record.getMessage()
+    assert "AVA_BACKUP_OFFSITE_ENDPOINT" not in record.getMessage()
 
 
 def test_a_configured_destination_publishes_to_the_opened_bucket(

@@ -596,6 +596,29 @@ def test_local_set_applies_valid_patch(
     assert "restart to apply" in capsys.readouterr().out
 
 
+def test_the_offsite_keys_are_official_local_config(local_env_home: Path) -> None:
+    """The daily dump's off-site destination is configured, and removed, through
+    `ava config`: an operator never hand-edits the `.env` for it. The gateway unit
+    owns the cluster-pinned endpoint and bucket, so its own `.env` is the target."""
+    (local_env_home / ".env").write_text("AVA_MACHINE_SERVE_GATEWAY=true\nOTHER=kept\n")
+    credentials = local_env_home / "oss-credentials.json"
+    keys = {
+        "AVA_BACKUP_OFFSITE_ENDPOINT": "https://oss-cn-shanghai.aliyuncs.com",
+        "AVA_BACKUP_OFFSITE_BUCKET": "backups",
+        "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE": str(credentials),
+    }
+
+    rc = cfg.cmd_config_set([f"{key}={value}" for key, value in keys.items()], None, local=True)
+
+    assert rc == 0
+    aliases = runtime_config.read_env_aliases()
+    assert {key: aliases[key] for key in keys} == keys
+    assert "OTHER" in aliases
+
+    assert cfg.cmd_config_unset(list(keys), None, local=True) == 0
+    assert not set(keys) & set(runtime_config.read_env_aliases())
+
+
 def test_local_set_can_pin_the_hosted_runner_health_port(
     local_env_home: Path,
 ) -> None:

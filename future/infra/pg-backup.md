@@ -72,9 +72,9 @@
 >
 > **Update 2026-10-01:** the daily logical backup no longer depends on the
 > physical PITR stack. The off-site leg is OSS-only
-> (`services/gateway_side/backup/offsite.py`; the `AVA_PITR_STORE_BACKEND=oss`
-> and `AVA_PITR_OSS_*` keys are unchanged, and a home without them skips the leg
-> with one INFO line). The managed-name grammar
+> (`services/gateway_side/backup/offsite.py`; the destination is the
+> `AVA_BACKUP_OFFSITE_*` keys, and a home without them skips the leg with one
+> INFO line). The managed-name grammar
 > (`services/gateway_side/backup/names.py`) is `<db>-<UTC stamp>.dump.enc`: the
 > `.pre-update` and `.pitr-activation-*` kinds and the pre-cutover wall-clock
 > stamp have no writer and are no longer managed, so prune keeps the newest
