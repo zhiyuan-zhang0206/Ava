@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from base.config import settings
 from base.host.atomic_io import write_text_atomic
+from base.telemetry.station_endpoint import validated_observability_base
 
 
 def _observability_datasource_urls() -> tuple[str, str, str]:
@@ -81,40 +82,6 @@ def _pg_datasource_host_port(*, remote_observatory: bool) -> str:
             file=sys.stderr,
         )
     return _host_port(host, port)
-
-
-def validated_observability_base(observability_url: str) -> str:
-    """Return the observatory base URL when well-formed, else "" after a warning.
-
-    The setting's contract is ``scheme://host`` with no port and no path (each
-    consumer appends its own port). A malformed value would silently render
-    broken datasource URLs on every converge, so validate once and warn — the
-    same pattern as the Tempo topology warning in _render_configs. A malformed
-    value falls back to local loopback (the safe default) instead of rendering
-    garbage URLs.
-    """
-    base = observability_url.strip().rstrip("/")
-    if not base:
-        return ""
-    parsed = urlparse(base)
-    problems: list[str] = []
-    if parsed.scheme not in ("http", "https"):
-        problems.append(f"scheme must be http/https (got {parsed.scheme!r})")
-    if not parsed.hostname:
-        problems.append("missing host")
-    if parsed.port is not None:
-        problems.append("port must be omitted (consumers append their own)")
-    if parsed.path not in ("", "/"):
-        problems.append(f"path must be omitted (got {parsed.path!r})")
-    if problems:
-        print(
-            "lgtm native: AVA_OBSERVABILITY_URL "
-            f"{observability_url!r} is malformed ({'; '.join(problems)}) — "
-            "falling back to local loopback endpoints",
-            file=sys.stderr,
-        )
-        return ""
-    return base
 
 
 def _alerts_webhook_url() -> str:
