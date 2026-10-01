@@ -147,7 +147,11 @@ async def cancel_agent_op(agent_id: int, db_pool: ConnectionPool) -> CancelReque
 
 
 async def terminate_agent_op(
-    agent_id: int, body: TerminateAgentRequest, db_pool: ConnectionPool
+    agent_id: int,
+    body: TerminateAgentRequest,
+    db_pool: ConnectionPool,
+    *,
+    recovery_wake: str | None = None,
 ) -> TerminateAgentResponse:
     """Local-target graceful or force terminate. Caller handles cross-machine.
 
@@ -159,10 +163,16 @@ async def terminate_agent_op(
     runtime kills the sessions right before the termination applies, after the
     agent's last step (`agent.ownership.hosted.apply_hosted_lifecycle`). The
     response's `shell_sessions` reports which of the two happened.
+
+    `recovery_wake` is the delivery watchdog's in-process request (never part
+    of the HTTP body): a force terminate also commits that marked system chat
+    in its own transaction, so the agent it ends is always resurrectable.
     """
+    if recovery_wake is not None and not body.force:
+        raise ValueError("recovery_wake rides a force terminate")
     if body.force:
         _old_status, pid, killed_page_names, command_id = await asyncio.to_thread(
-            _terminate_force_blocking, agent_id, body, db_pool
+            _terminate_force_blocking, agent_id, body, db_pool, recovery_wake
         )
         await _cancel_hosted_turn_best_effort(agent_id, command_id)
         for page_name in killed_page_names:
@@ -255,6 +265,7 @@ def _terminate_force_blocking(
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
+    recovery_wake: str | None,
 ) -> tuple[AgentStatus, int | None, list[str], int]:
     """Commit the force fence before publishing its wake and lifecycle hint."""
     old_status, pid, killed_page_names, inbound_id = _force_terminate_transaction(
@@ -263,6 +274,7 @@ def _terminate_force_blocking(
         source=body.source,
         message=body.message,
         kill_all_shell_sessions=body.kill_all_shell_sessions,
+        recovery_wake=recovery_wake,
     )
     _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
     publish_agent_updated_sync(agent_id)

@@ -51,7 +51,8 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up.
    running rows whose DB activity is older than the 2400s wedged-agent budget,
    then confirm them against the agent-host's 15s Redis progress heartbeat
    (60s TTL). Missing host heartbeats or stale per-turn marks trigger a
-   terminate-then-resurrect recovery with a 10-minute per-agent cooldown.
+   terminate-then-resurrect recovery with a 10-minute per-agent cooldown; the
+   recovery wake commits in the same transaction as the force terminate.
 
 6. **Stalled crash-marked harvest request** — escalate a chat still `pending`
    past the stall threshold whose owner is a crash-marked idling corpse over
