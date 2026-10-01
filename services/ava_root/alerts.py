@@ -278,8 +278,11 @@ class AlertRouter:
             return
         if record is None:
             self._fire(view, kind)
-        elif record.kind is not kind:
-            self._update_kind(view.unit, record, kind, describe(view, kind))
+            return
+        if record.kind is not kind:
+            record = self._update_kind(view.unit, record, kind, describe(view, kind))
+        if record.delivered_at is None:
+            self._redeliver(view.unit, record)
 
     def _fire(self, view: UnitAlertView, kind: AlertKind) -> None:
         now = time()
@@ -292,15 +295,34 @@ class AlertRouter:
             write_record(self._run_dir, view.unit, replace(record, delivered_at=time()))
         _emit_fired(view.unit, record, delivery)
 
-    def _update_kind(self, unit: str, record: EpisodeRecord, kind: AlertKind, detail: str) -> None:
+    def _update_kind(
+        self, unit: str, record: EpisodeRecord, kind: AlertKind, detail: str
+    ) -> EpisodeRecord:
         """The open episode's failure kind moved; keep its identity, no re-fire."""
-        write_record(self._run_dir, unit, replace(record, kind=kind, detail=detail))
+        updated = replace(record, kind=kind, detail=detail)
+        write_record(self._run_dir, unit, updated)
         _log.info(
             "unit %s: alert episode stays open; failure state moved %s -> %s (no re-fire)",
             unit,
             record.kind.value,
             kind.value,
         )
+        return updated
+
+    def _redeliver(self, unit: str, record: EpisodeRecord) -> None:
+        """Re-post a firing the channel has not accepted yet.
+
+        The (fingerprint, startsAt) key makes the re-send idempotent, so this
+        repairs both a crash between the gateway's acceptance and the
+        `delivered_at` stamp, and a channel that was unreachable when the
+        episode fired; a success stamps the record, and the resolve then
+        closes the real row. The L1 fired event already carries the original
+        attempt — only the late acceptance is logged.
+        """
+        if self._deliver(unit, record, resolved=False) != _POSTED:
+            return
+        write_record(self._run_dir, unit, replace(record, delivered_at=time()))
+        _log.info("unit %s: pending alert delivery accepted on a later observation", unit)
 
     def _resolve(self, unit: str, record: EpisodeRecord) -> None:
         clear_record(self._run_dir, unit)
@@ -336,12 +358,14 @@ class AlertWebhookNotifier:
     once, then given up — the outcome lands in the event stream, and the
     store stays authoritative either way.
 
-    Transport bounds (written reasons, protocol class): one post is bounded by
-    `timeout_s` so an unreachable gateway cannot stall the caller for longer
-    than a bounded attempt (the call site runs off the root event loop), and
-    the retry is capped at one extra attempt — "retry once, then drop":
-    alerting is a side channel, and a channel needing more than two tries is
-    itself the incident.
+    Transport self-protection, fixed by the design rather than cluster config
+    (KEEP, task #3696 exception inventory): one post is bounded by `timeout_s`
+    so an unreachable gateway cannot park the calling thread past a bounded
+    attempt (the call site runs off the root event loop), and `attempts` stays
+    at the design's one-retry ceiling — "retry once, then drop". The
+    observation round fixes the retry cadence, so neither number is an operator
+    tuning surface; a firing the channel never accepted is instead repaired by
+    the router's pending-delivery re-post on later observations.
     """
 
     def __init__(self, *, timeout_s: float = 10.0, attempts: int = 2) -> None:
