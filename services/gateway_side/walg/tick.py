@@ -48,6 +48,10 @@ from services.gateway_side.walg.backups import Backup, BackupChainError, list_ba
 from services.gateway_side.walg.retention import RetentionAbortedError, apply_retention
 from services.gateway_side.walg.runner import WalgCommandError, run_walg
 from services.gateway_side.walg.state import (
+    STEP_BACKUP,
+    STEP_PREFLIGHT,
+    STEP_RETENTION,
+    STEP_VERIFY,
     BackupRecord,
     RetentionRecord,
     RunRecord,
@@ -78,11 +82,6 @@ _EXPECTED_FAILURES = (
     VerifyOutputError,
     RetentionAbortedError,
 )
-
-STEP_PREFLIGHT = "preflight"
-STEP_BACKUP = "backup"
-STEP_VERIFY = "verify"
-STEP_RETENTION = "retention"
 
 
 @dataclass(frozen=True)
