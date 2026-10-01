@@ -10,9 +10,9 @@ moment and any number of times:
    alert. A skip leaves the outcome of the last real run untouched.
 2. **Preflight.** The pinned binary, the configuration and key pin, and one
    `backup-list`, which proves the credentials and the prefix.
-3. *(The weekly recovery drill belongs here, before the backup, so that it restores
-   yesterday's backup: the one a lost host would need. A failed drill never stops
-   the backup.)*
+3. **Recovery drill**, once a week (`drill.py`), before the backup, so that it restores
+   yesterday's backup: the one a lost host would need. A failed drill is recorded in
+   `drill` and never stops the backup.
 4. **Backup.** `backup-push` with `WALG_DELTA_MAX_STEPS=6`: WAL-G itself starts a new
    full backup once the increment chain is six deep (a daily run therefore makes a
    full backup every seventh time), and retries a failed full backup the next day
@@ -31,9 +31,7 @@ from __future__ import annotations
 
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 
 import psycopg
 
@@ -43,8 +41,9 @@ from base.host.private_storage import ensure_private_dir
 from base.log import logger
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from services.gateway_side.walg import config as walg_config
-from services.gateway_side.walg import state
+from services.gateway_side.walg import drill, state
 from services.gateway_side.walg.backups import Backup, BackupChainError, list_backups
+from services.gateway_side.walg.pg_target import PgTarget, pg_target
 from services.gateway_side.walg.retention import RetentionAbortedError, apply_retention
 from services.gateway_side.walg.runner import WalgCommandError, run_walg
 from services.gateway_side.walg.state import (
@@ -82,19 +81,6 @@ _EXPECTED_FAILURES = (
     VerifyOutputError,
     RetentionAbortedError,
 )
-
-
-@dataclass(frozen=True)
-class PgTarget:
-    """Where this home's Postgres is: its owner-only admin socket and its data directory."""
-
-    admin_url: str
-    data_dir: Path
-
-
-def pg_target() -> PgTarget:
-    authority = pg_admin.local_owner_authority()
-    return PgTarget(admin_url=authority.admin_url, data_dir=authority.data_dir)
 
 
 def postgres_accepts_connections(target: PgTarget) -> bool:
@@ -170,6 +156,28 @@ def _backup(
     return after
 
 
+def _drill(
+    target: PgTarget, backups: list[Backup], report: Report, now: Callable[[], datetime]
+) -> bool:
+    """Drill the newest backup now; records the outcome. Returns whether it succeeded."""
+    previous = state.read_state().drill
+    record = drill.run_drill(target, backups[-1], previous, report, now)
+    state.update_state(drill=record)
+    if record.ok:
+        report(f"drill: ok in {record.seconds:.0f}s ({record.detail})")
+    else:
+        report(f"drill: FAILED after {record.seconds:.0f}s: {record.detail}")
+    return record.ok
+
+
+def _weekly_drill(
+    target: PgTarget, backups: list[Backup], report: Report, now: Callable[[], datetime]
+) -> None:
+    """The drill when one is due. Its failure is recorded and reported, never raised."""
+    if drill.drill_due(state.read_state().drill, backups, now()):
+        _drill(target, backups, report, now)
+
+
 def _verify(report: Report, now: Callable[[], datetime]) -> str:
     verdict = verify_chain()
     state.update_state(
@@ -196,7 +204,7 @@ def _run_steps(target: PgTarget, report: Report, now: Callable[[], datetime]) ->
     try:
         before = _preflight()
         report(f"preflight: ok, {len(before)} backups listed")
-        # The weekly recovery drill is run here (see the module docstring).
+        _weekly_drill(target, before, report, now)
         current = STEP_BACKUP
         after = _backup(target, before, report, now)
         current = STEP_VERIFY
@@ -283,3 +291,37 @@ def run_tick(report: Report, *, now: Callable[[], datetime] = _now) -> int:
     except LockTimeoutError:
         report("another WAL-G tick is still running; nothing to do")
         return 0
+
+
+def _locked_drill(report: Report, now: Callable[[], datetime]) -> int:
+    try:
+        state.read_state()
+        target = pg_target()
+        if not postgres_accepts_connections(target):
+            report("failed: postgres is not accepting connections")
+            return 1
+        backups = _preflight()
+    except (state.StateError, RuntimeError, StepFailedError, *_EXPECTED_FAILURES) as exc:
+        report(f"failed: {exc}")
+        return 1
+    if not backups:
+        report("failed: no backup exists yet; run `ava backup walg run` first")
+        return 1
+    return 0 if _drill(target, backups, report, now) else 1
+
+
+def run_drill_now(report: Report, *, now: Callable[[], datetime] = _now) -> int:
+    """Run the recovery drill on the newest backup now (the weekly one runs inside the tick).
+
+    Takes the same lock as the tick, so the two never overlap. Exit 0 only when the drill passed.
+    """
+    if not walg_config.enabled():
+        report("WAL-G is off (AVA_WALG_CONFIG_FILE is not set); nothing to drill")
+        return 1
+    ensure_private_dir(state.walg_dir())
+    try:
+        with file_lock(state.lock_path(), timeout_s=0):
+            return _locked_drill(report, now)
+    except LockTimeoutError:
+        report("failed: a WAL-G tick or drill is still running")
+        return 1

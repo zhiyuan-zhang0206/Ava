@@ -33,6 +33,8 @@ class Backup:
     start_time: datetime
     uncompressed_bytes: int
     compressed_bytes: int
+    start_lsn: int  # where the backup's WAL begins (an integer position, `0/2000028` is 33554472)
+    finish_lsn: int  # the position `pg_backup_stop` returned: replay must reach it
 
     @property
     def is_full(self) -> bool:
@@ -70,6 +72,8 @@ def parse_backups(text: str) -> list[Backup]:
                     start_time=datetime.fromisoformat(str(entry["start_time"])),
                     uncompressed_bytes=int(entry["uncompressed_size"]),
                     compressed_bytes=int(entry["compressed_size"]),
+                    start_lsn=int(entry["start_lsn"]),
+                    finish_lsn=int(entry["finish_lsn"]),
                 )
             )
         except (KeyError, TypeError, ValueError):

@@ -35,6 +35,15 @@ def cmd_walg_run() -> int:
     return tick.run_tick(_stamped)
 
 
+def cmd_walg_drill() -> int:
+    """Run the recovery drill on the newest backup now; non-zero unless it passed.
+
+    The tick runs the same drill once a week before its backup; a success here counts
+    as that week's drill.
+    """
+    return tick.run_drill_now(_stamped)
+
+
 def cmd_walg_restore(*, directory: str, backup: str, time: str | None, lsn: str | None) -> int:
     """Restore a backup into an empty directory and recover it to the target.
 
@@ -136,11 +145,20 @@ def _tick_lines() -> list[str]:
             f"last retention: {recorded.retention.deleted} objects deleted "
             f"({recorded.retention.at.isoformat()})"
         )
+    if recorded.drill is not None:
+        drill = recorded.drill
+        target = drill.target_lsn or "the end of the archive"
+        lines.append(
+            f"last drill: {'ok' if drill.ok else 'FAILED'} ({drill.finished_at.isoformat()}): "
+            f"{drill.backup} to {target} in {drill.seconds:.0f}s; {drill.detail}"
+        )
+        last_ok = drill.last_ok_at.isoformat() if drill.last_ok_at is not None else "never"
+        lines.append(f"last successful drill: {last_ok}")
     return lines
 
 
 def cmd_walg_status() -> int:
-    """Print configuration, binary, key fingerprint, archiver and daily-tick facts; exits 0."""
+    """Print configuration, binary, key fingerprint, archiver, daily-tick and drill facts; exits 0."""
     path = walg_config.configured_path()
     if path is None:
         print("WAL-G archiving is off (AVA_WALG_CONFIG_FILE is not set)")

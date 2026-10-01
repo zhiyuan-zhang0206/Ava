@@ -29,6 +29,12 @@ def _h_backup_walg_run(_args: argparse.Namespace) -> int:
     return cmd_walg_run()
 
 
+def _h_backup_walg_drill(_args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.walg import cmd_walg_drill
+
+    return cmd_walg_drill()
+
+
 def _h_backup_walg_restore(args: argparse.Namespace) -> int:
     from cli.commands.data_plane.walg import cmd_walg_restore
 
@@ -67,7 +73,7 @@ def _add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     retire.set_defaults(func=_h_backup_operations_retire)
 
     walg = backup_sub.add_parser(
-        "walg", help="WAL-G physical backup: pre-flight check, daily run, restore, status"
+        "walg", help="WAL-G physical backup: pre-flight check, daily run, drill, restore, status"
     )
     walg_sub = walg.add_subparsers(dest="walg_cmd", required=True)
     walg_check = walg_sub.add_parser(
@@ -82,6 +88,12 @@ def _add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         "(the scheduled job runs this; safe to repeat, concurrent runs stand down)",
     )
     walg_run.set_defaults(func=_h_backup_walg_run)
+    walg_drill = walg_sub.add_parser(
+        "drill",
+        help="restore the newest backup into a scratch Postgres, recover it to the newest "
+        "archived WAL and read a real conversation back (the daily run does this weekly)",
+    )
+    walg_drill.set_defaults(func=_h_backup_walg_drill)
     walg_restore = walg_sub.add_parser(
         "restore",
         help="restore a backup into an empty directory and recover it to a target time or "

@@ -46,6 +46,9 @@ def test_the_parser_reaches_every_verb() -> None:
     run = parser.parse_args(["backup", "walg", "run"])
     status = parser.parse_args(["backup", "walg", "status"])
     restore = parser.parse_args(["backup", "walg", "restore", "--dir", "/srv/restored"])
+    drill = parser.parse_args(["backup", "walg", "drill"])
+
+    assert drill.func.__name__ == "_h_backup_walg_drill"
 
     assert restore.func.__name__ == "_h_backup_walg_restore"
     assert (restore.dir, restore.backup, restore.time, restore.lsn) == (
@@ -330,3 +333,48 @@ def test_restore_while_wal_g_is_off_says_so(
 
     assert walg_cmd.cmd_walg_restore(directory="/x", backup="LATEST", time=None, lsn=None) == 1
     assert "WAL-G is off" in capsys.readouterr().out
+
+
+def test_drill_hands_the_tick_module_a_timestamping_reporter_and_returns_its_exit_code(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fake_drill(report: Any) -> int:
+        report("drill: FAILED after 3s: recovery failed")
+        return 1
+
+    monkeypatch.setattr(walg_cmd.tick, "run_drill_now", fake_drill)
+
+    assert walg_cmd.cmd_walg_drill() == 1
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z drill: FAILED after 3s: recovery failed\n",
+        capsys.readouterr().out,
+    )
+
+
+def test_status_shows_the_last_drill_and_the_last_success(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stamp = datetime(2026, 10, 2, 6, 25, tzinfo=UTC)
+    state.write_state(
+        state.State(
+            tick=state.TickRecord(started_at=stamp),
+            drill=state.DrillRecord(
+                finished_at=stamp,
+                ok=False,
+                backup="base_000000010000000000000087",
+                target_lsn="0/A3000000",
+                seconds=612.4,
+                detail="recovery failed: no segment",
+                last_ok_at=None,
+            ),
+        )
+    )
+
+    assert walg_cmd.cmd_walg_status() == 0
+
+    out = capsys.readouterr().out
+    assert (
+        "last drill: FAILED (2026-10-02T06:25:00+00:00): base_000000010000000000000087 to 0/A3000000 in 612s; recovery failed: no segment"
+        in out
+    )
+    assert "last successful drill: never" in out
