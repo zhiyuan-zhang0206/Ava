@@ -20,6 +20,7 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
+from base.config import settings
 from tests.skills import load_skill_script
 
 
@@ -386,10 +387,10 @@ def test_fetch_dedups_inclusive_slice_boundaries(
 
 
 def test_fetch_passes_agent_filter_and_bearer_auth(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / ".env").write_text("AVA_CLUSTER_SECRET=test-secret\n")
-    monkeypatch.setattr(collect_mod, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
+    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
     client = _FakeClient([])
     _patch_client(collect_mod, monkeypatch, client)
 

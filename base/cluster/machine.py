@@ -35,8 +35,9 @@ import enum
 from collections.abc import Iterable
 from typing import Literal
 
-from base.cluster.auth import bearer_header, client_bearer
+from base.cluster.auth import bearer_header, delivered_token
 from base.config import settings
+from base.host.env.dotenv_boot import launcher_context
 
 # A machine carries a SET of capabilities, not a single role. `gateway` owns
 # Postgres/Redis + the HTTP gateway; `agent-runner` runs agent processes;
@@ -71,6 +72,10 @@ class MachineRoleInvalid(ValueError):  # noqa: N818
 
 class GatewayApiBaseMissing(RuntimeError):  # noqa: N818 — state description, same style as MachineNameMissing
     """gateway_url unset — cannot resolve where to reach the gateway."""
+
+
+class GatewayApiTokenMissing(RuntimeError):  # noqa: N818 — state description, same style as GatewayApiBaseMissing
+    """An agent- or runner-profile process has no machine API token although the cluster API is authenticated."""
 
 
 class _Unset(enum.Enum):
@@ -353,18 +358,70 @@ def gateway_api_base() -> str:
     return url
 
 
+# Launcher profiles whose processes present the machine API token and never the
+# human secret: the launcher delivers one to every agent host and runner service
+# (`cli.commands.data_plane.bringup.api_delivery`), exec children inherit it.
+_TOKEN_ONLY_PROFILES = frozenset({"agent", "runner"})
+
+
+def gateway_bearer() -> str:
+    """The bearer this process presents to the gateway API; empty in the open posture.
+
+    The machine API token of the active write generation first: delivered by
+    the launcher, or by the boot pass to an admitted operator process. Without
+    one, the human cluster secret (an operator on the gateway home; a
+    gateway-profile service) — except in an agent- or runner-profile process,
+    which holds its token whenever the cluster API is authenticated, so a
+    missing token there is a launch defect and raises instead of silently
+    presenting the human secret. A remote-managed data plane keeps no write
+    generations and delivers no token (`api_delivery`): its gateway-local
+    services present the human secret, so that plane is exempt.
+
+    Raises:
+        GatewayApiTokenMissing: an agent- or runner-profile process has no
+            `AVA_API_TOKEN` while `AVA_CLUSTER_SECRET` is set.
+    """
+    token = delivered_token()
+    if token:
+        return token
+    secret = settings.data_plane.cluster_secret
+    profile = launcher_context()
+    if secret and profile in _TOKEN_ONLY_PROFILES and not _plane_delivers_no_tokens():
+        raise GatewayApiTokenMissing(
+            f"this {profile}-profile process carries no machine API token (AVA_API_TOKEN) "
+            "while the cluster API is authenticated (AVA_CLUSTER_SECRET is set). The root "
+            "launcher delivers the active write generation's token to every agent host and "
+            "runner service it starts, and such a process never presents the human secret "
+            "instead: restart the cluster's services (`ava stop`, then `ava start`) so the "
+            "launcher delivers it."
+        )
+    return secret
+
+
+def _plane_delivers_no_tokens() -> bool:
+    """Whether this unit is a gateway home on a remote-managed data plane.
+
+    The one case where `api_delivery` hands out no token although the API is
+    authenticated: the plane keeps no write generations to issue one from.
+    """
+    from base.host.env.bootstrap import config_source_is_local
+
+    return config_source_is_local() and settings.data_plane.is_remote
+
+
 def gateway_auth_headers() -> dict[str, str]:
     """Auth headers a client presents to the cluster's authenticated surfaces.
 
     The Bearer paired with `gateway_api_base` for every client-side call to an
     authenticated gateway route (`/api/cluster/*`, `/api/agents/*`,
-    `/api/config`, `/api/memory/*`, ...) and with the gateway's `/ops` dials: this
-    process's machine API token of the active write generation (delivered by the
-    launcher, or by the boot pass to an admitted operator process), else the
-    human cluster secret (an operator on the gateway home). Empty in the open
-    posture, where the middleware is a no-op, so the same call site works either way.
+    `/api/config`, `/api/memory/*`, ...) and with the gateway's `/ops` dials:
+    `gateway_bearer()`. Empty in the open posture, where the middleware is a
+    no-op, so the same call site works either way.
+
+    Raises:
+        GatewayApiTokenMissing: see `gateway_bearer`.
     """
-    bearer = client_bearer(settings.data_plane.cluster_secret)
+    bearer = gateway_bearer()
     return bearer_header(bearer) if bearer else {}
 
 

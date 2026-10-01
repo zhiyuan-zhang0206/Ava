@@ -20,8 +20,7 @@ from contextlib import suppress
 from typing import Any
 from urllib.parse import urlsplit
 
-from base.cluster.auth import client_bearer
-from base.cluster.machine import gateway_api_base
+from base.cluster.machine import GatewayApiTokenMissing, gateway_api_base, gateway_bearer
 from base.config import settings
 from base.log import logger
 from services.browser.mcp_upstream import _await_stop_or_timeout
@@ -46,14 +45,21 @@ def _gateway_session_params() -> tuple[str, str] | None:
     browser just cannot open auth-gated gateway URLs without the cookie.
 
     The credential is this daemon's delivered runner API token (the login
-    accepts the active generation's runner token); the human secret only on a
-    gateway home that runs the daemon without a delivery."""
+    accepts the active generation's runner token). The human secret never
+    stands in for a missing token: a daemon launched without one is logged as
+    a launch defect and left without the cookie (best effort, like every
+    other path here), except on a remote-managed data plane, which delivers no
+    token and whose gateway home presents the human secret."""
     try:
         gateway_url = gateway_api_base()
     except Exception as e:  # gateway URL unset on this unit
         logger.warning(f"[browser-mcp] gateway session injection disabled: {e}")
         return None
-    credential = client_bearer(settings.data_plane.cluster_secret)
+    try:
+        credential = gateway_bearer()
+    except GatewayApiTokenMissing as e:
+        logger.error(f"[browser-mcp] gateway session injection disabled: {e}")
+        return None
     if not credential:
         logger.warning("[browser-mcp] gateway session injection disabled: the cluster API is open")
         return None

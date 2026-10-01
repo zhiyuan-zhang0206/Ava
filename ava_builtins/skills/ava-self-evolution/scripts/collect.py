@@ -49,6 +49,7 @@ from record import LeakPaths, build_record
 from record import _plugins_activated as _plugins_activated
 from record import _transcript as _transcript
 
+from base.cluster.machine import gateway_auth_headers
 from base.config import settings
 from base.db import connect
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
@@ -69,25 +70,6 @@ _SUBPROCESS_CALL_RE = re.compile(r"subprocess\.(run|Popen|check_output|check_cal
 
 
 # ─────── Loki-backed event fetches (paged via the gateway /api/events) ───────
-
-
-def _gateway_headers() -> dict[str, str]:
-    """Bearer auth: the process's machine API token (an agent inherits its
-    agent-host's), else the gateway home's secret from $AVA_HOME/.env."""
-    from base.cluster.auth import delivered_token
-
-    token = delivered_token()
-    if token:
-        return {"Authorization": f"Bearer {token}"}
-    env_file = Path(ava_home()) / ".env"
-    if not env_file.exists():
-        return {}
-    for line in env_file.read_text().splitlines():
-        if line.startswith("AVA_CLUSTER_SECRET="):
-            secret = line.split("=", 1)[1].strip().strip("\"'")
-            if secret:
-                return {"Authorization": f"Bearer {secret}"}
-    return {}
 
 
 def _gateway_url() -> str:
@@ -125,7 +107,7 @@ def _events_page(
         resp = client.get(
             _gateway_url() + _EVENTS_PATH,
             params=params,
-            headers=_gateway_headers(),
+            headers=gateway_auth_headers(),
             timeout=_HTTP_TIMEOUT_S,
         )
         refusal = observability_refusal_detail(resp)

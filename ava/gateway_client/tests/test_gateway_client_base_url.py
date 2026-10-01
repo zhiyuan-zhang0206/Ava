@@ -51,3 +51,37 @@ def test_gateway_client_no_bearer_when_secret_unset(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
     client = cast(Any, gc._client_singleton())  # pyright: ignore[reportUnknownMemberType]
     assert "Authorization" not in client.headers
+
+
+def test_gateway_client_in_an_agent_presents_the_delivered_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An agent inherits its host's machine API token; the human secret never
+    rides along when the token is there."""
+    from base.config import settings
+
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cr3t-token")
+    monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+    monkeypatch.setenv("AVA_API_TOKEN", "delivered-token")
+
+    import ava.gateway_client.transport as gc
+
+    monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
+    client = cast(Any, gc._client_singleton())  # pyright: ignore[reportUnknownMemberType]
+    assert client.headers.get("Authorization") == "Bearer delivered-token"
+
+
+def test_gateway_client_in_an_agent_without_a_token_fails_instead_of_using_the_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.config import settings
+
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cr3t-token")
+    monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
+
+    import ava.gateway_client.transport as gc
+
+    monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
+    with pytest.raises(RuntimeError, match="AVA_API_TOKEN"):
+        gc._client_singleton()  # pyright: ignore[reportUnknownMemberType]

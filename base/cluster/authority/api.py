@@ -21,7 +21,8 @@ secret (decisions/2026-09-27-write-generation-rollout-choices.md, item 3):
 Settings-free: the launcher, the boot pass and the gateway read the same
 private store. Comparisons are constant-time over SHA-256 digests, so the
 accepting side never needs a token in clear. A client reads its own token
-with `base.cluster.auth.client_bearer` (stdlib-only, safe during boot).
+with `base.cluster.auth.delivered_token` (stdlib-only, safe during boot) and presents
+it through `base.cluster.machine.gateway_bearer`.
 """
 
 from __future__ import annotations

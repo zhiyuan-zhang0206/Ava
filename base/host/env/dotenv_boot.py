@@ -44,7 +44,7 @@ PLACEHOLDER_DB_URL = "postgresql://no-cluster@127.0.0.1:1/run-ava-start-first"
 # deliberately settings-full — no profile — but a boot pass reached through it
 # must still see which launcher context this process tree descends from; the
 # launcher-projection exemptions in `_enforce_cluster_env_authority` read it
-# live-or-recorded (`_launcher_context`). Never cleared: a nested CLI only
+# live-or-recorded (`launcher_context`). Never cleared: a nested CLI only
 # overwrites it when it carries a fresh live marker of its own (#4334).
 LAUNCHER_PROFILE_ENV_KEY = "AVA_LAUNCHER_PROFILE"
 
@@ -238,7 +238,7 @@ def _identity_env_only() -> frozenset[str]:
     return frozenset({"AVA_GATEWAY_URL"})
 
 
-def _launcher_context() -> str | None:
+def launcher_context() -> str | None:
     """The launcher's process profile for this process tree, live or recorded.
 
     A launcher-spawned daemon or agent carries the live `AVA_PROCESS_PROFILE`
@@ -266,7 +266,7 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
     The scope is deliberately narrow, so the sibling-leak protection keeps its
     full force: agent-launched trees only — the live `AVA_PROCESS_PROFILE=agent`
     marker or the value a CLI entry point recorded before popping it
-    (`_launcher_context`; with only the live marker consulted, cli.main's pop
+    (`launcher_context`; with only the live marker consulted, cli.main's pop
     made this gate unreachable — #4334) — a plain shell's inherited value still
     drops; runner-role URLs only (an inherited owner URL still drops).
 
@@ -281,7 +281,7 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
     """
     if not value:
         return False
-    if _launcher_context() != "agent":
+    if launcher_context() != "agent":
         return False
     try:
         username = urlsplit(value).username
@@ -311,7 +311,7 @@ def _is_launcher_redis_url(value: str | None) -> bool:
     """
     if not value:
         return False
-    if _launcher_context() != "agent":
+    if launcher_context() != "agent":
         return False
     try:
         return bool(urlsplit(value).hostname)
@@ -399,7 +399,7 @@ def _enforce_cluster_env_authority(home: Path) -> None:
     (`ava_runner`-shaped URL) and the Redis URL (`urlsplit`-parseable with a host). The
     context is the live `AVA_PROCESS_PROFILE=agent` marker or the value
     a CLI entry point recorded before popping it (cli/main.py `_normalize_process_profile` →
-    `_launcher_context`); with only the live marker consulted, the CLI pop made the exemption
+    `launcher_context`); with only the live marker consulted, the CLI pop made the exemption
     unreachable and a probe run from an agent child on a pure agent-runner fell back to the
     placeholder URL (#4334). The force loop above already refuses to let the unit's `.env` owner URL
     replace the DB projection; the drop loop must not revoke either projection — on a unit
@@ -560,7 +560,7 @@ def operator_db_delivery(endpoint: str | None, *, api: bool) -> dict[str, str] |
     from base.cluster.authority import AuthorityRefusedError, operator_environment
 
     try:
-        return operator_environment(home, endpoint, launcher=_launcher_context(), api=api)
+        return operator_environment(home, endpoint, launcher=launcher_context(), api=api)
     except AuthorityRefusedError as exc:
         return str(exc)
 
@@ -613,7 +613,7 @@ def deliver_unit_authority() -> None:
     if is_delivered_unit_login():
         return
     home = resolve_ava_home().expanduser().resolve()
-    context = _launcher_context()
+    context = launcher_context()
     if context is not None:
         _db_authority_refusal = (
             f"this {context}-profile agent-runner process was launched without its unit's "
