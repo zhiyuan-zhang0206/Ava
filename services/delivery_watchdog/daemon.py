@@ -59,8 +59,8 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up.
    the internal `recover-crash-marked-v2` path (one request per owner, 60s
    cooldown, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618).
 
-Runs on the gateway, one per cluster. Kept alive via
-`services/healthchecks/delivery_watchdog.py` (the gateway watchdog).
+Runs on the gateway, one per cluster. Kept alive by the root supervisor's health
+monitor through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).
 
 Usage:
     .venv/bin/python -m services.delivery_watchdog.daemon

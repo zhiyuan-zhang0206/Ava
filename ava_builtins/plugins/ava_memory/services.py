@@ -23,9 +23,7 @@ from __future__ import annotations
 import os
 
 from base.cluster.machine import MachineRole
-from base.config import settings
-from base.daemon.health import health_port
-from ops.roster import daemon_identity
+from ops.roster import healthz_daemon
 from ops.roster.service_spec import ServiceSpec
 
 # The indexer runs on the gateway capability: it indexes the gateway's
@@ -65,9 +63,9 @@ def services() -> tuple[ServiceSpec, ...]:
     services onto the tail of the roster, well after the gateway group.
     """
     return (
-        ServiceSpec(
-            session="memory-indexer",
-            cmd=".venv/bin/python -m services.memory_indexer.daemon",
+        healthz_daemon(
+            "memory-indexer",
+            module="services.memory_indexer.daemon",
             capabilities=_GATEWAY,
             # The pool is a markdown checkout on disk and the default index backends
             # (numpy / Milvus) never open the main DB (which is also why it is the one
@@ -77,13 +75,6 @@ def services() -> tuple[ServiceSpec, ...]:
             # delivers the gateway login.
             requires_db=False,
             db_access="gateway",
-            curl_url=f"http://localhost:{health_port('memory_indexer')}/healthz",
-            # Same identity contract as every core /healthz daemon: a 2xx is only
-            # believed once name/home/pid say the answering process is this unit's.
-            identity_probe=daemon_identity(
-                "memory_indexer", settings.services.memory_indexer_pidfile
-            ),
-            healthcheck_module="services.healthchecks.memory_indexer",
             gate=_memory_indexer_gate,
         ),
     )

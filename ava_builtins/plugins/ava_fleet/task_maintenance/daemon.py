@@ -32,10 +32,9 @@ speaks — posting a notice or a message; it never changes task state.
 Usage:
     .venv/bin/python -m ava_builtins.plugins.ava_fleet.task_maintenance.daemon
 
-Kept alive by the gateway watchdog's 60s healthcheck
-(`ava_builtins/plugins/ava_fleet/task_maintenance/healthcheck.py`), wired via
-the plugin's `services()` ServiceSpec.healthcheck_module — so the schema-drift
-exit in `_dispatch_loop` is revived on the next round instead of staying dead.
+Kept alive by the root supervisor's health monitor through the `/healthz`
+identity probe of the plugin's `services()` entry — so the schema-drift exit in
+`_dispatch_loop` is revived on the next round instead of staying dead.
 """
 
 import asyncio

@@ -31,7 +31,7 @@ Gateway-owned background daemon (`services/events_maintenance/daemon.py`). Since
 - `services/events_maintenance/rollup.py:compute_rollup` — aggregation core (steady-state; the migration backfill was one-shot SQL)
 - `services/events_maintenance/jsonl_replay.py` — automatic pre-retention gap replay plus `--dry-run` / `--days YYYYMMDD ...` operator CLI
 - `services/events_maintenance/resolution.py:run_resolution_slice` — immutable Loki class resolution, marker transitions, and the unresolved/dismissed gauges
-- Watchdog keeps alive via `services/healthchecks/events_maintenance.py`
+- Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`ops/roster/healthz.py`)
 
 ## Notes
 - Sidebar `total_events` is a historical parity constant (see `gateway/cluster/status.py` `ARCHIVE_TOTAL_ROWS`) — the PG archive it once counted was dropped with the task #1281/#1823 cleanup

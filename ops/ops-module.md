@@ -6,7 +6,7 @@ coordination. Its design rationale is recorded in
 
 | Responsibility | Current implementation |
 |---|---|
-| Service specification | `ops/spec.py` (capability selection and gates); `ops/roster/` (canonical roster, its `service_spec` contract) |
+| Service specification | `ops/spec.py` (capability selection and gates); `ops/roster/` (canonical roster, its `service_spec` contract; `healthz.py` builds the entry of a standard `/healthz` daemon from its session, module, capabilities and `requires_db`) |
 | Observation and status | `ops/roster/observe.py`; `ops/cluster_status/` (host snapshot, `schema_mismatch` diagnosis) |
 | Native agent drain | `ops/agent_pause/` (drain, `probe` of the running host) |
 | Agent lifecycle | `ops/agents/` (birth and wake); `ops/lifecycle/` (lifecycle RPC ops) |

@@ -17,6 +17,7 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineRole
+from base.daemon.health import health_port
 from cli.commands import _repo
 from ops import roster, spec
 from ops.roster import service_spec
@@ -166,7 +167,7 @@ def test_application_roster_has_one_supervision_authority() -> None:
     services = {service.session: service for service in roster.build_services()}
     assert "gateway-watchdog" not in services
     assert "agent-runner-watchdog" not in services
-    assert services["delivery-watchdog"].healthcheck_module is not None
+    assert services["delivery-watchdog"].identity_probe is not None
     assert all("services.watchdog.daemon" not in service.cmd for service in services.values())
 
 
@@ -424,7 +425,7 @@ def test_daemon_identity_binds_the_probe_to_one_daemons_facts(
     assert roster.daemon_identity("ops", pidfile)().alive is True
     assert seen["name"] == "ops"
     assert seen["pidfile"] == pidfile
-    assert str(roster.health_port("ops")) in str(seen["url"])
+    assert str(health_port("ops")) in str(seen["url"])
 
 
 def test_im_bridge_gated_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -475,7 +476,8 @@ def test_milvus_gated_out_unless_milvus_backend(monkeypatch: pytest.MonkeyPatch)
         # Both capabilities (a service that runs on either host) gets no marker:
         # the gateway pop must not run against a service that is not gateway-only.
         (frozenset({"gateway", "agent-runner"}), None),
-        (frozenset[MachineRole](), None),
+        # No capabilities is no longer a spec that can exist: construction refuses it
+        # (`ops/roster/tests/test_healthz_daemon.py`).
     ],
 )
 def test_profile_marker_derives_from_capabilities(

@@ -36,8 +36,8 @@ treated as an empty day, leaving that day's existing ledger rows intact.
 Usage:
     .venv/bin/python -m services.events_maintenance.daemon
 
-Kept alive by the gateway watchdog's 60s healthcheck
-(`services.healthchecks.events_maintenance`), so the schema-drift exit in
+Kept alive by the root supervisor's health monitor through the roster's
+`/healthz` identity probe, so the schema-drift exit in
 `_dispatch_loop` is revived on the next round instead of staying dead.
 
 Health reports progress independently for the rollup and resolution loops.
