@@ -24,7 +24,11 @@ A test that leaves an environment key, a stored module attribute, the cwd, a sig
 | `identity` | the slots in `WATCHED_ATTRS` / `WATCHED_CONTEXTVARS` (agent identity) | `ava.agent_identity._agent_id = ...` assigned bare, by convention, in hundreds of tests; delete the table when a fixture restores it |
 | `sys.path` | a note, never a leak: entries added or removed | tests insert on purpose |
 
-First-party means a file under the rootdir outside any `tests/` directory. A module's dict is scanned by total length (one `sum(map(len, ...))` per test), so the guard costs tens of microseconds a test.
+First-party means a module's `__file__` is below the rootdir, outside top-level dot-directories (`.venv`, `.git`) and any `tests`, `site-packages` or `node_modules` directory. Dicts are scanned by total length (`sum(map(len, ...))`); only when it moved are the dicts that moved located.
+
+## Cost
+
+Two snapshots a test per xdist worker, under CI's coverage tracer, where the price is the Python frames a test enters (each a trace event), not C work. So the guard works in bulk passes (`map`, `compress`, one `==` per container; only a difference runs the Python that names it), about eight frames a snapshot; `tests/ci/test_leak_guard_cost.py` counts them (`sys.setprofile`; timing flakes). Per test what remains is the module scan twice (about 12 us in cache, several times that after a test; the floor) and `os.getcwd()` twice (0.25 us on Linux, 10-25 us on macOS; only it sees a deleted cwd). Per worker, locating the first-party modules among ~8,000 in `sys.modules` is a one-time cost, as reading a module is what costs: new names come from the key list's tail, and the submodules of a top-level module whose own file is not first-party (an installed package) are skipped unread; a test checks that none of ours hides there. The shard line splits `us/test` into scans, locating (one-time) and the rest; steady cost is `us/test - ms*1000/tests`.
 
 ## Modes
 
@@ -54,4 +58,4 @@ Recipes per kind are in the fail-mode message and in [flaky-tests §9](../../con
 
 ## Switching `warn` to `fail`
 
-One default changes, and the `AVA_HOME` hook in `tests/fixtures/guards.py` (covered by the `env` check) goes. It waits for: warn running through a full nightly duration refresh with complete 17/17 reports; three consecutive main pushes with no leak; a drain run (a draft PR forcing `AVA_LEAK_GUARD=fail` on all shards, which restores after each leaker and so shows the ones warn masks) with zero guard errors; the identity slots restored by a fixture or the table emptied; the measured cost on CI at most 0.2 ms a test; and no exemption list.
+One default changes, and the `AVA_HOME` hook in `tests/fixtures/guards.py` (covered by the `env` check) goes. It waits for: warn running through a full nightly duration refresh with complete 17/17 reports; three consecutive main pushes with no leak; a drain run (a draft PR forcing `AVA_LEAK_GUARD=fail` on all shards, which restores after each leaker and so shows the ones warn masks) with zero guard errors; the identity slots restored by a fixture or the table emptied; the measured cost on CI at most 0.2 ms a test (`us/test` of the shard line, with the steady figure beside it); and no exemption list.
