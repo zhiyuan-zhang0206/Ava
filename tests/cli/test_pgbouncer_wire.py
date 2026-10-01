@@ -496,7 +496,7 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
     skip there."""
     import sys
 
-    from cli.commands.data_plane.pgbouncer import _admin_reachable
+    from base.cluster.dataplane.pooler import admin_reachable
 
     if sys.platform == "darwin":
         pytest.skip("127.0.0.2 needs an lo0 alias on macOS")
@@ -505,8 +505,8 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
         _pgbouncer_in_front(pg_url, listen_addr="127.0.0.2") as pooled,
     ):
         listen_port = int(str(conninfo_to_dict(pooled)["port"]))
-        assert _admin_reachable(listen_port, _SECRET, host="127.0.0.2") is True
-        assert _admin_reachable(listen_port, _SECRET, host="127.0.0.1") is False
+        assert admin_reachable(listen_port, _SECRET, host="127.0.0.2") is True
+        assert admin_reachable(listen_port, _SECRET, host="127.0.0.1") is False
 
 
 # ── Pooled session-GUC pollution (2026-09-02 P0) ────────────────────────────

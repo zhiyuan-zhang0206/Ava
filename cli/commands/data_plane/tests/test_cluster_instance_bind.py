@@ -13,6 +13,7 @@ from typing import cast
 
 import pytest
 
+from base.cluster import ownership, port_preflight
 from base.config import settings
 from cli.commands.data_plane import cluster_instance as _ci
 
@@ -80,7 +81,7 @@ def test_addr_assigned_unassigned_ip_is_false() -> None:
 
 def test_wait_returns_immediately_for_loopback_only_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """A single box reachable only at localhost never waits — loopback is always up."""
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "localhost")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "localhost")
     monkeypatch.setattr(
         _ci,
         "_addr_assigned",
@@ -92,7 +93,7 @@ def test_wait_returns_immediately_for_loopback_only_host(monkeypatch: pytest.Mon
 def test_wait_returns_true_once_address_appears(monkeypatch: pytest.MonkeyPatch) -> None:
     """The reachable address is absent on the first probe, present on the next — the
     private-network-coming-up-late case — so the wait resolves True after retrying."""
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(_ci.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
     seen: list[int] = []
 
@@ -107,7 +108,7 @@ def test_wait_returns_true_once_address_appears(monkeypatch: pytest.MonkeyPatch)
 
 def test_wait_returns_false_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """The address never appears within the bound → fail fast (caller aborts start)."""
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(_ci, "_BIND_WAIT_TIMEOUT_S", 0.0)
     monkeypatch.setattr(_ci.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_addr_assigned", lambda _a: False)  # pyright: ignore[reportUnknownArgumentType]
@@ -120,15 +121,15 @@ def test_wait_returns_false_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_bind_addrs_loopback_only_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """A no-secret cluster binds loopback alone, whatever the reachable address —
     an unauthenticated data plane must never be LAN-reachable."""
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
-    assert _ci._bind_addrs("") == ["127.0.0.1"]
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
+    assert port_preflight.bind_addrs("") == ["127.0.0.1"]
 
 
 def test_bind_addrs_includes_reachable_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """With a secret, the reachable address joins loopback as today (auth makes
     the non-loopback bind safe)."""
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
-    assert _ci._bind_addrs("s3cret") == ["127.0.0.1", "10.0.0.5"]
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
+    assert port_preflight.bind_addrs("s3cret") == ["127.0.0.1", "10.0.0.5"]
 
 
 def test_pg_hba_body_authenticates_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,7 +137,7 @@ def test_pg_hba_body_authenticates_without_secret(monkeypatch: pytest.MonkeyPatc
     on the owner-only socket, every other role SCRAM; no trust line anywhere and
     no reachable/cidr lines (the bind stays loopback-only)."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("")
     assert "trust" not in body
@@ -156,7 +157,7 @@ def test_pg_hba_body_scram_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     No replication rows without a PITR replication URL (pinned explicitly —
     ambient prod env must not leak in)."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("s3cret")
     assert body.splitlines() == [
@@ -172,7 +173,7 @@ def test_pg_hba_body_emits_replication_rows_for_pitr_role(monkeypatch: pytest.Mo
     parsed role: pg_basebackup's physical replication connection matches only
     the literal `replication` keyword, never `all` (2026-08-30 activation)."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "")
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "127.0.0.1")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "127.0.0.1")
     monkeypatch.setattr(
         settings.physical_backup,
         "pitr_replication_db_url",
@@ -188,7 +189,7 @@ def test_pg_hba_body_no_replication_rows_without_pitr_url(
 ) -> None:
     """No PITR replication URL -> no replication rows."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "")
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "127.0.0.1")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "127.0.0.1")
     monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("s3cret")
     assert "replication" not in body
@@ -221,8 +222,8 @@ def test_bind_addrs_follows_passed_secret_not_ambient_settings(
     widen a no-secret cluster's bind to the LAN."""
     # Ambient settings carry a foreign secret — the leak Task #1113 reproduces.
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "foreign-sibling-secret")
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
-    assert _ci._bind_addrs("") == ["127.0.0.1"]
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
+    assert port_preflight.bind_addrs("") == ["127.0.0.1"]
 
 
 def test_pg_hba_body_follows_passed_secret_not_ambient_settings(
@@ -233,7 +234,7 @@ def test_pg_hba_body_follows_passed_secret_not_ambient_settings(
     gains LAN-reachable host lines keyed to a FOREIGN cluster's posture."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "foreign-sibling-secret")
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("")
     assert "10.0.0" not in body
@@ -252,7 +253,7 @@ def _wire_redis_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[l
         lambda: pytest.fail("redis must never wait for the reachable bind"),
     )
     monkeypatch.setattr(_ci, "_redis_server_bin", lambda: "redis-server")
-    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
     redis_answers = iter([False, True])  # not running before start, up after
     monkeypatch.setattr(
         _ci,
@@ -282,7 +283,7 @@ def test_start_redis_binds_loopback_only_without_secret(
 ) -> None:
     """A no-secret Redis start uses exactly the loopback bind, and still
     authenticates: the bearer decides reach, never whether Redis has a password."""
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     started = _wire_redis_start(monkeypatch, tmp_path)
 
     assert _ci.start_redis(6380, "redis-admin", "redis-runtime", "", "ava") == 0
@@ -356,7 +357,7 @@ def test_macos_start_redis_binds_loopback_only_with_secret(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The macOS workaround retains its external relay even with auth."""
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     started = _wire_redis_start(monkeypatch, tmp_path)
 
     assert _ci.start_redis(6380, "redis-admin", "redis-runtime", "s3cr3t", "ava") == 0
@@ -368,8 +369,8 @@ def test_macos_start_redis_does_not_use_shared_pg_bind_addrs(
 ) -> None:
     """The shared helper may remain dual-bind for pg without widening Redis."""
     monkeypatch.setattr(
-        _ci,
-        "_bind_addrs",
+        port_preflight,
+        "bind_addrs",
         lambda _secret: pytest.fail("redis must not use the shared pg bind helper"),  # pyright: ignore[reportUnknownArgumentType]
     )
     started = _wire_redis_start(monkeypatch, tmp_path)
@@ -384,7 +385,7 @@ def test_linux_redis_bind_uses_caller_secret_not_inherited_config(
 ) -> None:
     started = _wire_redis_start(monkeypatch, tmp_path)
     monkeypatch.setattr(_ci, "is_macos", lambda: False)
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "" if secret else "polluted")
     waits: list[bool] = []
 
@@ -414,7 +415,7 @@ def test_running_redis_persists_the_authenticated_password_to_its_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A journal retry repairs config after an old-password false-down probe."""
-    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
     (tmp_path / "redis.conf").write_text('requirepass "stale-old-password"\n')
@@ -450,7 +451,7 @@ def test_redis_conf_always_renders_rdb_save_schedule(
     """A no-secret cluster still persists and authenticates: the RDB save
     schedule and requirepass survive every conf render, or a restart silently
     loses persistence (task #2027) or comes back without a password."""
-    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -512,7 +513,7 @@ def test_start_probes_receive_the_url_hosts(
     monkeypatch.setattr(_ci, "_redis_running", _redis_running)
     monkeypatch.setattr(_ci, "_ensure_redis_acl", _ensure_redis_acl)
     monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
-    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
     calls: list[list[str]] = []
 
@@ -602,7 +603,7 @@ def test_start_pg_loopback_only_bind_never_waits(
 ) -> None:
     """A no-secret cluster binds loopback only — the wait is never consulted and
     the start proceeds (a stray AVA_MACHINE_HOST must not hold a warm start)."""
-    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(port_preflight, "bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _ci,
         "_wait_for_reachable_bind",
@@ -631,9 +632,9 @@ def test_start_pg_waits_and_fails_fast_on_timeout(
 ) -> None:
     """Secret-set cluster, reachable address never assigned: postgres must not be
     launched into a guaranteed bind failure — fail fast with an explicit error."""
-    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1", "10.0.0.5"])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(port_preflight, "bind_addrs", lambda _secret: ["127.0.0.1", "10.0.0.5"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_wait_for_reachable_bind", lambda: False)
-    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
     rc = _ci._start_pg(5433, "s3cr3t")
@@ -651,7 +652,7 @@ def test_start_pg_waits_for_reachable_bind_before_starting(
     """Secret-set cluster, address appears late: the wait resolves and the start
     proceeds — the boot-race case the wait exists for."""
     waited: list[bool] = []
-    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1", "10.0.0.5"])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(port_preflight, "bind_addrs", lambda _secret: ["127.0.0.1", "10.0.0.5"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _ci,
         "_wait_for_reachable_bind",
@@ -681,7 +682,7 @@ def test_the_postmaster_inherits_no_ava_authority(
     }
     for key, value in {**delivered, "PATH": "/usr/bin:/bin", "TZ": "Asia/Shanghai"}.items():
         monkeypatch.setenv(key, value)
-    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(port_preflight, "bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_pg_running", lambda _port, _host: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
@@ -707,7 +708,7 @@ def test_start_pg_hands_the_built_start_env_to_owned_launch(
     """Task #3754: direct postgres gets pg_start_env() — the postmaster env is
     built explicitly (the macOS locale fallback for launchd / non-interactive
     ssh starts) instead of inheriting whatever process brought the cluster up."""
-    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(port_preflight, "bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_pg_running", lambda _port, _host: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)

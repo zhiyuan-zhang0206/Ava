@@ -16,6 +16,7 @@ from redis.asyncio import Redis as AsyncRedis
 
 from base.cluster import ownership
 from base.cluster import postgres as pg
+from base.cluster.dataplane import pooler as base_pooler
 from base.native_process.ownership import OwnedProcess
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
@@ -31,7 +32,7 @@ def test_foreign_redis_keeps_acl_and_config(
     native ownership refuses before any ACL or config effect."""
     config = tmp_path / "redis.conf"
     config.write_text("original config\n")
-    monkeypatch.setattr(instance, "redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(instance, "_redis_dial_host", lambda: "127.0.0.1")
     monkeypatch.setattr(instance, "_redis_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     with redis_server() as url:
@@ -59,7 +60,7 @@ def test_foreign_postgres_listener_refuses_before_hba_or_initdb(
 def test_foreign_pooler_listener_refuses_before_config_or_signal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(pooler, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(pooler, "pgbouncer_bin", lambda: __file__)
     monkeypatch.setattr(ownership, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(pooler, "_write_config", lambda **_kw: pytest.fail("must not write"))  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
@@ -77,7 +78,7 @@ def test_foreign_pooler_listener_refuses_before_config_or_signal(
 def test_pooler_birth_change_prevents_reload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(pooler, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(pooler, "pgbouncer_bin", lambda: __file__)
     monkeypatch.setattr(
         ownership,
@@ -86,7 +87,7 @@ def test_pooler_birth_change_prevents_reload(
     )
     monkeypatch.setattr(ownership, "require_listener", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(pooler, "_write_config", lambda **_kw: False)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    monkeypatch.setattr(pooler, "pgbouncer_public_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(
         pooler,
         "psutil",
@@ -153,7 +154,7 @@ def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
         monkeypatch.setattr(settings.data_plane, "redis_url", url)
         with redis.Redis.from_url(url, decode_responses=True) as client:  # pyright: ignore[reportUnknownMemberType] — redis stubs
             directory = Path(str(client.config_get("dir")["dir"]))  # pyright: ignore[reportUnknownMemberType] — redis stubs
-            monkeypatch.setattr(plane.instance, "redis_data_dir", lambda: directory)
+            monkeypatch.setattr(ownership, "redis_data_dir", lambda: directory)
             with pytest.raises(RuntimeError, match="connection changed"):
                 plane.stop(3)
             assert client.ping(), "the server must survive lost connection custody"  # pyright: ignore[reportUnknownMemberType] — redis stubs

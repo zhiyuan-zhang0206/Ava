@@ -50,20 +50,17 @@ from typing import Literal
 
 import psutil
 
-import base.cluster.port_preflight
-from base.cluster import ownership
+from base.cluster import machine, ownership, port_preflight
 from base.cluster.authority import POOLER_ADMIN
+from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_tools import brew_prefix, is_macos
-from base.cluster.machine import reachable_host
 from base.host.proc import process_alive
 from base.native_process.child_env import daemon_process_env
 from base.native_process.os_platform import LockTimeoutError
-from base.paths import ava_home
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.cluster_instance import (
     _BIND_WAIT_TIMEOUT_S,
-    _bind_addrs,
     _pg_socket_dir,
     _wait_for_reachable_bind,
 )
@@ -79,26 +76,12 @@ _DEFAULT_POOL_SIZE = 25
 _IGNORE_STARTUP_PARAMETERS = "extra_float_digits,options"
 
 
-def _pgbouncer_dir() -> Path:
-    d = ava_home() / "pgbouncer"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def ini_path() -> Path:
-    return _pgbouncer_dir() / "pgbouncer.ini"
-
-
 def _userlist_path() -> Path:
-    return _pgbouncer_dir() / "userlist.txt"
-
-
-def pidfile_path() -> Path:
-    return _pgbouncer_dir() / "pgbouncer.pid"
+    return pooler.pooler_dir() / "userlist.txt"
 
 
 def _logfile_path() -> Path:
-    return _pgbouncer_dir() / "pgbouncer.log"
+    return pooler.pooler_dir() / "pgbouncer.log"
 
 
 def pgbouncer_bin() -> str:
@@ -151,7 +134,7 @@ def _render_ini(*, pg_port: int, listen_port: int, db_name: str, cluster_secret:
     (borrowers measured statement_timeout=0). Between-transaction pollution is
     defended client-side (base/db/__init__.py baseline restore per dial/borrow +
     read-write write posture; 2026-09-02 P0)."""
-    listen_addr = ", ".join(_bind_addrs(cluster_secret))
+    listen_addr = ", ".join(port_preflight.bind_addrs(cluster_secret))
     socket_dir = _pg_socket_dir()
     from base.db import PG_STATEMENT_TIMEOUT_SET_SQL
 
@@ -187,7 +170,7 @@ def _render_ini(*, pg_port: int, listen_port: int, db_name: str, cluster_secret:
             "log_connections = 0",
             "log_disconnections = 0",
             f"logfile = {_logfile_path()}",
-            f"pidfile = {pidfile_path()}",
+            f"pidfile = {pooler.pidfile_path()}",
             "",
         ]
     )
@@ -204,7 +187,7 @@ def _write_config(
         pg_port=pg_port, listen_port=listen_port, db_name=db_name, cluster_secret=cluster_secret
     ).encode()
     changed = False
-    for path, body in ((ini_path(), ini), (_userlist_path(), userlist)):
+    for path, body in ((pooler.ini_path(), ini), (_userlist_path(), userlist)):
         try:
             current = path.read_bytes()
         except FileNotFoundError:
@@ -260,7 +243,7 @@ def _pid_is_our_pooler(pid: int) -> bool:
         ini = Path(argv[argv.index("-d") + 1])
         if not ini.is_absolute():
             ini = Path(proc.cwd()) / ini
-        return ini.resolve() == ini_path().resolve()
+        return ini.resolve() == pooler.ini_path().resolve()
     except (psutil.Error, OSError, IndexError):
         return False
 
@@ -276,7 +259,7 @@ def _running_pid() -> int | None:
     line is the one that makes a cross-home pidfile visible before it costs an
     outage."""
 
-    pidfile = pidfile_path()
+    pidfile = pooler.pidfile_path()
     if not pidfile.exists():
         return None
     try:
@@ -295,80 +278,29 @@ def _running_pid() -> int | None:
     return None
 
 
-def _admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0.1") -> bool:
-    """Authenticate to the pooler's admin console without opening a backend.
-
-    Backend readiness is proven separately by the caller, as each delivered
-    login. Public bind verification reads the socket table, never a self-dial.
-    """
-    from base.db.connections import connect_url
-    from base.host.net.url_secret import url_with_userinfo
-
-    url = url_with_userinfo(
-        f"postgresql://@{host}:{listen_port}/pgbouncer", POOLER_ADMIN, admin_password
-    )
-    try:
-        # The console runs no Postgres statements: no ceiling in its startup packet.
-        with connect_url(url, autocommit=True, connect_timeout=3, unbounded=True):
-            return True
-    except Exception:
-        return False
-
-
-def pgbouncer_public_listener_reachable(listen_port: int, role: str, cluster_secret: str) -> bool:
-    """True when the pooler listens on the address remote consumers actually dial.
-
-    The loopback probe (`pgbouncer_listener_reachable`) proves "the pooler process
-    is there"; this one proves "the PUBLIC front door is open". A pooler whose
-    `listen_addr` includes the reachable address but failed to bind it
-    keeps running on loopback alone — pgbouncer treats a failed bind as a WARNING,
-    not an error — and a loopback-only probe cannot tell the difference, so
-    `AVA_DB_URL`'s public path stays silently dead for every enrolled agent-runner
-    (task #1288: 2026-08-16 a boot-time address race left the pooler loopback-only
-    for two days).
-
-    A local socket-table read is the authoritative fact for this question. A
-    network self-dial through the reachable address is a hairpin route that VPN
-    filtering can intermittently block even while the listener remains bound;
-    treating that routing failure as a missing bind causes destructive false
-    restarts. The exact reachable address and IPv4/IPv6 wildcard binds all cover
-    the public front door. An empty table proves nothing and remains degraded.
-
-    A no-secret cluster's pooler binds loopback only by design (`_bind_addrs`), so
-    there is no public listener to check — returns True without inspecting the
-    host or socket table. `role` remains in the stable probe signature shared by
-    the healthcheck and bring-up callers; socket inspection needs no credential."""
-    del role
-    if _bind_addrs(cluster_secret) == ["127.0.0.1"]:
-        return True
-    reachable = reachable_host()
-    addrs = base.cluster.port_preflight.listener_addrs(listen_port)
-    return bool(addrs & {reachable, "0.0.0.0", "::", "*"})  # noqa: S104 — matching OS wildcard binds, not opening one
-
-
 def _wait_for_reachable_bind_gated(cluster_secret: str) -> bool:
     """Bounded wait for the configured reachable bind address — only when needed.
 
     A secret-set cluster's pooler binds loopback + the reachable address
-    (`_bind_addrs`), so a boot that races the private network must wait for the
+    (`port_preflight.bind_addrs`), so a boot that races the private network must wait for the
     address before starting. A no-secret cluster binds loopback ONLY, whatever
     `AVA_MACHINE_HOST` says — waiting on it would let a stray ambient
     `AVA_MACHINE_HOST` hold a warm `ava start` hostage for a bind that never
-    happens (the same ambient-leak class `_bind_addrs` documents, task #1113).
+    happens (the same ambient-leak class `port_preflight.bind_addrs` documents, task #1113).
 
     Returns True immediately when no wait is needed (loopback-only bind, or the
     address already assigned); False on timeout so the caller fails fast."""
-    if _bind_addrs(cluster_secret) == ["127.0.0.1"]:
+    if port_preflight.bind_addrs(cluster_secret) == ["127.0.0.1"]:
         return True
     return _wait_for_reachable_bind()
 
 
 def _accepting_pooler(listen_port: int) -> OwnedPooler | None:
-    owner = ownership.pooler(ini_path(), pidfile_path())
+    owner = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
     if owner is None:
         ownership.require_listener(None, listen_port, required=False)
         return None
-    custodian = OwnedPooler(owner, listen_port, ini_path())
+    custodian = OwnedPooler(owner, listen_port, pooler.ini_path())
     custodian.require_accepting()
     return custodian
 
@@ -434,7 +366,9 @@ def ensure_pgbouncer(
     if custodian is not None:
         owner = custodian.identity
         pid = owner.pid
-        public = pgbouncer_public_listener_reachable(listen_port, POOLER_ADMIN, cluster_secret)
+        public = pooler.pgbouncer_public_listener_reachable(
+            listen_port, POOLER_ADMIN, cluster_secret
+        )
         # A running pooler whose files are unchanged and whose public listener
         # verifies is reloaded, never waited on: a transient blip on the private
         # network must not hold `ava start` hostage behind a serving pooler (P1).
@@ -443,7 +377,7 @@ def ensure_pgbouncer(
             if not owner.live():
                 raise RuntimeError("PgBouncer identity changed before reload")
             process.send_signal(signal.SIGHUP)
-            if not _admin_reachable(listen_port, admin_password):
+            if not pooler.admin_reachable(listen_port, admin_password):
                 print(
                     f"  ✗ pgbouncer (127.0.0.1:{listen_port}) refused its admin credential",
                     file=sys.stderr,
@@ -453,7 +387,7 @@ def ensure_pgbouncer(
             return 0
         if not public and not _wait_for_reachable_bind_gated(cluster_secret):
             print(
-                f"  ✗ reachable bind address {reachable_host()!r} is not assigned to any "
+                f"  ✗ reachable bind address {machine.reachable_host()!r} is not assigned to any "
                 f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — the degraded "
                 "pgbouncer cannot be restarted into a healthy double bind. On reboot "
                 "this means the private network has not come up yet; retry `ava start` "
@@ -468,7 +402,7 @@ def ensure_pgbouncer(
         else:
             print(
                 f"  ✗ pgbouncer is NOT listening on the reachable address "
-                f"{reachable_host()!r} — it degraded to loopback-only (task #1288) and "
+                f"{machine.reachable_host()!r} — it degraded to loopback-only (task #1288) and "
                 "remote agent-runners cannot reach the pooled AVA_DB_URL. Reload cannot "
                 "re-bind it; restarting the pooler",
                 file=sys.stderr,
@@ -490,7 +424,7 @@ def _launch_pooler(listen_port: int, cluster_secret: str, admin_password: str) -
         # outage shape). The boot retry keeps re-running `ava start`, so this only
         # needs to be true once the private network is actually up.
         print(
-            f"  ✗ reachable bind address {reachable_host()!r} is not assigned to any "
+            f"  ✗ reachable bind address {machine.reachable_host()!r} is not assigned to any "
             f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — pgbouncer would "
             "silently degrade to loopback-only and every remote agent-runner would "
             "lose the pooled AVA_DB_URL. On reboot this means the private network has "
@@ -499,7 +433,7 @@ def _launch_pooler(listen_port: int, cluster_secret: str, admin_password: str) -
         )
         return 1
     result = subprocess.run(
-        [pgbouncer_bin(), "-d", str(ini_path())],
+        [pgbouncer_bin(), "-d", str(pooler.ini_path())],
         check=False,
         capture_output=True,
         text=True,
@@ -515,7 +449,7 @@ def _launch_pooler(listen_port: int, cluster_secret: str, admin_password: str) -
     # -d daemonizes and returns immediately; wait for the admin console to
     # authenticate. The caller proves each delivered login's pooled backend.
     for _ in range(60):
-        if _admin_reachable(listen_port, admin_password):
+        if pooler.admin_reachable(listen_port, admin_password):
             break
         time.sleep(0.1)
     else:
@@ -524,33 +458,25 @@ def _launch_pooler(listen_port: int, cluster_secret: str, admin_password: str) -
             file=sys.stderr,
         )
         return 1
-    if not pgbouncer_public_listener_reachable(listen_port, POOLER_ADMIN, cluster_secret):
+    if not pooler.pgbouncer_public_listener_reachable(listen_port, POOLER_ADMIN, cluster_secret):
         # The pooler is up on loopback but NOT on the address consumers dial — the
         # silent degradation this whole function exists to never ship. Loud failure:
         # the boot retry / watchdog keeps re-running, and once the private network
         # is up the next pass restarts the pooler into a healthy double bind.
         print(
             f"  ✗ pgbouncer started but is NOT listening on the reachable address "
-            f"{reachable_host()!r} — it degraded to loopback-only (see "
+            f"{machine.reachable_host()!r} — it degraded to loopback-only (see "
             f"{_logfile_path()}). Every remote agent-runner's pooled AVA_DB_URL is "
             "dead. Retry `ava start` once the private network is up; the watchdog "
             "healthcheck will keep re-attempting.",
             file=sys.stderr,
         )
         return 1
-    ownership.require_listener(ownership.pooler(ini_path(), pidfile_path()), listen_port)
+    ownership.require_listener(
+        ownership.pooler(pooler.ini_path(), pooler.pidfile_path()), listen_port
+    )
     print(f"  ✓ pgbouncer started (127.0.0.1:{listen_port}, transaction pooling)")
     return 0
-
-
-def pgbouncer_listener_reachable(listen_port: int, admin_password: str) -> bool:
-    """Is the POOLER itself up — the admin-console probe, with no server hop.
-
-    The watchdog healthcheck's question: an end-to-end `SELECT 1` also fails when
-    Postgres is down, and restarting the pooler is the wrong answer to that. This
-    separates "the pooler process is gone" (repairable by `ensure_pgbouncer`) from
-    "the pooler is fine and the backend behind it is not"."""
-    return _admin_reachable(listen_port, admin_password)
 
 
 PoolerStop = Literal["not-running", "stopped", "forced"]
@@ -567,10 +493,10 @@ def stop_pgbouncer(*, force: bool = False) -> PoolerStop:
     pid = _running_pid()
     if pid is None:
         return "not-running"
-    owner = ownership.pooler(ini_path(), pidfile_path())
+    owner = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
     if owner is None:
         return "not-running"
-    custodian = OwnedPooler.from_config(owner, ini_path())
+    custodian = OwnedPooler.from_config(owner, pooler.ini_path())
     deadline = time.monotonic() + 5.0
     try:
         if custodian.stop(deadline=deadline):

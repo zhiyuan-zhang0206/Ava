@@ -52,9 +52,10 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from base.cluster import ensure_cluster_redis_acl, ownership
+from base.cluster import ensure_cluster_redis_acl, machine, ownership, port_preflight
 from base.cluster import postgres as owned_postgres
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
+from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_tools import (
     PG_BIN_LINUX,
     brew_prefix,
@@ -64,7 +65,6 @@ from base.cluster.dataplane.pg_tools import (
     pg_tool,
     pg_tz_args,
 )
-from base.cluster.machine import reachable_host
 from base.config import settings
 from base.config.physical_backup import pitr_replication_hba_lines
 from base.db.pg_admin import pg_admin_url as _base_pg_admin_url
@@ -74,8 +74,6 @@ from base.host.private_storage import write_private_bytes
 from base.host.system.backend import get_backend
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.paths import ava_home
-
-_LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
 
 
 def _pg_dial_host() -> str:
@@ -113,10 +111,6 @@ def _pg_data_dir() -> Path:
     return ava_home() / "pg"
 
 
-def redis_data_dir() -> Path:
-    return ava_home() / "redis"
-
-
 def _pg_template_dir() -> Path:
     """Cached `initdb` output, copied so a new instance is a directory copy rather
     than a multi-second init. Kept in the home, beside the data directory it seeds."""
@@ -148,32 +142,6 @@ def _pg_bin(name: str) -> str:
     return str(pg_tool(name)) if is_macos() else str(PG_BIN_LINUX / name)
 
 
-def _bind_addrs(cluster_secret: str) -> list[str]:
-    """Loopback plus this host's reachable address, de-duplicated (loopback alone
-    when reachable resolves to localhost — the single-box default).
-
-    A no-secret cluster binds LOOPBACK ONLY, whatever the reachable address says:
-    an empty secret is the single-box posture (its API and `/ops` serve
-    unauthenticated and no other machine dials its data plane), so Postgres and
-    its pooler, though they always authenticate (SCRAM), have no reason to face
-    the LAN. The bearer decides the network posture — an operator who wants a
-    LAN-reachable Postgres data plane sets the cluster secret.
-
-    `cluster_secret` is the CALLER-PASSED cluster secret (the same value the hba
-    is written from and the pooler is configured with), never read from
-    `settings` — a process that inherited a sibling cluster's
-    AVA_CLUSTER_SECRET (a shell carrying a different home's environment) must not widen
-    a no-secret cluster's bind posture to the LAN. The caller resolves the
-    cluster's own secret from its authority-passed `.env` value."""
-    if not cluster_secret:
-        return ["127.0.0.1"]
-    host = reachable_host()
-    out = ["127.0.0.1"]
-    if host not in _LOOPBACK_ALIASES:
-        out.append(host)
-    return out
-
-
 def _addr_assigned(addr: str) -> bool:
     """True if `addr` is currently assigned to a local interface (bindable). A
     Postgres or PgBouncer listener can only bind an address the kernel has on an
@@ -193,8 +161,8 @@ def _wait_for_reachable_bind() -> bool:
     local interface. Returns True immediately on a loopback-only (single-box) host —
     loopback is always present. Returns False on timeout so the caller fails fast
     with a clear message instead of pg_ctl dying on an un-bindable address."""
-    host = reachable_host()
-    if host in _LOOPBACK_ALIASES:
+    host = machine.reachable_host()
+    if host in port_preflight.LOOPBACK_ALIASES:
         return True
     deadline = time.monotonic() + _BIND_WAIT_TIMEOUT_S
     while True:
@@ -219,7 +187,7 @@ def _pg_hba_body(cluster_secret: str) -> str:
 
     The bearer decides only reach: a secret cluster adds its reachable address
     and `trusted_cidrs` as SCRAM host lines, matching its bind posture
-    (`_bind_addrs`); a no-secret cluster has loopback lines only.
+    (`port_preflight.bind_addrs`); a no-secret cluster has loopback lines only.
 
     PITR adds loopback `replication` rows for its role (see
     `pitr_replication_hba_lines`): pg_basebackup's PHYSICAL replication
@@ -238,8 +206,8 @@ def _pg_hba_body(cluster_secret: str) -> str:
         "host all all ::1/128 scram-sha-256",
     ]
     if cluster_secret:
-        host = reachable_host()
-        if host not in _LOOPBACK_ALIASES:
+        host = machine.reachable_host()
+        if host not in port_preflight.LOOPBACK_ALIASES:
             lines.append(f"host all all {host}/32 scram-sha-256")
         for cidr in (c.strip() for c in settings.data_plane.trusted_cidrs.split(",") if c.strip()):
             lines.append(f"host all all {cidr} scram-sha-256")
@@ -372,23 +340,23 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
     (data / "pg_hba.conf").write_text(_pg_hba_body(cluster_secret))
     dial_host = _pg_dial_host()
     # Same gate as the pgbouncer path (task #1303, PR #47 P2): a no-secret
-    # cluster binds loopback alone (`_bind_addrs`), so a stray ambient
+    # cluster binds loopback alone (`port_preflight.bind_addrs`), so a stray ambient
     # AVA_MACHINE_HOST must not hold a warm start hostage for a bind that never
     # happens. Wait only when this cluster actually binds the reachable address.
     if (
         owner is None
-        and _bind_addrs(cluster_secret) != ["127.0.0.1"]
+        and port_preflight.bind_addrs(cluster_secret) != ["127.0.0.1"]
         and not _wait_for_reachable_bind()
     ):
         print(
-            f"  ✗ reachable bind address {reachable_host()!r} is not assigned to any "
+            f"  ✗ reachable bind address {machine.reachable_host()!r} is not assigned to any "
             f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — postgres cannot bind "
             f"it. On reboot this means the private network has not come "
             f"up yet; retry `ava start` once it is.",
             file=sys.stderr,
         )
         return 1
-    listen = ",".join(_bind_addrs(cluster_secret))
+    listen = ",".join(port_preflight.bind_addrs(cluster_secret))
     owned_postgres.start(
         data,
         pg_port,
@@ -495,14 +463,14 @@ def start_redis(
             redis_port, redis_admin_password, runtime_password, identity, dial_host
         )
         if result == 0:
-            _write_redis_conf(redis_data_dir(), redis_admin_password)
+            _write_redis_conf(ownership.redis_data_dir(), redis_admin_password)
             print(f"  ✓ redis already running ({dial_host}:{redis_port})")
         return result
     ownership.require_listener(None, redis_port, required=False)
-    bind_addrs = ["127.0.0.1"] if is_macos() else _bind_addrs(cluster_secret)
+    bind_addrs = ["127.0.0.1"] if is_macos() else port_preflight.bind_addrs(cluster_secret)
     if not is_macos() and cluster_secret and not _wait_for_reachable_bind():
         return 1
-    data = redis_data_dir()
+    data = ownership.redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
     args = [
         _redis_server_bin(),
@@ -567,7 +535,7 @@ def _ensure_redis_acl(
             redis_admin_url=admin,
             runtime_password=runtime_password,
             channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
-            expected_data_dir=redis_data_dir(),
+            expected_data_dir=ownership.redis_data_dir(),
         )
     except Exception as exc:
         print(f"  ✗ ensuring cluster redis user failed: {exc}", file=sys.stderr)
@@ -710,7 +678,6 @@ def _print_pooler_status() -> None:
     registry record means the port is unknowable — say so instead of a false `:0`."""
     from base.cluster import get_record
     from base.cluster.authority import AuthorityRefusedError, read_pooler_admin
-    from cli.commands.data_plane.pgbouncer import pgbouncer_listener_reachable
 
     rec = get_record(ava_home())
     if rec is None:
@@ -718,19 +685,11 @@ def _print_pooler_status() -> None:
         return
     port = rec.ports["pgbouncer"]
     try:
-        ok = pgbouncer_listener_reachable(port, read_pooler_admin(ava_home()).password)
+        ok = pooler.pgbouncer_listener_reachable(port, read_pooler_admin(ava_home()).password)
     except AuthorityRefusedError as exc:
         print(f"  ✗ pgbouncer (127.0.0.1:{port}): {exc}")
         return
     print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
-
-
-def configured_redis_port() -> int | None:
-    """This cluster's redis port from settings.data_plane.redis_url, or None if not
-    resolvable (no instance to stop). Deliberately no credential: the URL carries
-    the restricted runtime ACL password, which is never admin authority — admin
-    effects use `settings.data_plane.redis_admin_password`."""
-    return urlsplit(settings.data_plane.redis_url).port or None
 
 
 def stop_cluster_instance() -> int:
@@ -749,7 +708,7 @@ def stop_cluster_instance() -> int:
         warn_orphaned_local_instance()
         return 0
     data = _pg_data_dir()
-    port = configured_redis_port()
+    port = ownership.configured_redis_port()
     # Resolve the admin credential before any stop effect: the runtime URL's
     # ACL user can neither AUTH as `default` nor SHUTDOWN (`-@dangerous`).
     redis_env = None if port is None else _redis_cli_env(settings.data_plane.redis_admin_password)

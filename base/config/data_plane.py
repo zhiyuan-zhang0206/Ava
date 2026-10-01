@@ -446,7 +446,7 @@ class DataPlaneSettings(EnvSettings):
         extension (a userspace VPN overlay can transiently black-hole a
         self-connect to its own IP: the TCP handshake completes but the forwarding
         leg is dead). The data plane always binds `127.0.0.1` first
-        (`_bind_addrs`), so the loopback dial is always valid on the host that
+        (`port_preflight.bind_addrs`), so the loopback dial is always valid on the host that
         carries it. A URL naming another machine passes through untouched, so the
         bootstrap-served URL keeps working on remote runners.
 

@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import psutil
 import psycopg
@@ -177,3 +178,22 @@ def require_postgres_connection(conn: psycopg.Connection[Any], data: Path) -> No
         or not owner.live()
     ):
         raise RuntimeError("connected PostgreSQL backend is not owned by this home")
+
+
+def redis_data_dir() -> Path:
+    """This home's native Redis data directory (`$AVA_HOME/redis`)."""
+    # Lazy: `import base.cluster` stays free of Settings and the home (the restricted
+    # restore worker imports it before either exists).
+    from base.paths import ava_home
+
+    return ava_home() / "redis"
+
+
+def configured_redis_port() -> int | None:
+    """This cluster's redis port from settings.data_plane.redis_url, or None if not
+    resolvable (no instance to stop). Deliberately no credential: the URL carries
+    the restricted runtime ACL password, which is never admin authority — admin
+    effects use `settings.data_plane.redis_admin_password`."""
+    from base.config import settings
+
+    return urlsplit(settings.data_plane.redis_url).port or None

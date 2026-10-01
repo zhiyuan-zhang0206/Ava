@@ -19,7 +19,7 @@ import pytest
 import base.cluster as cl
 import cli.commands.data_plane.bringup as dp
 import cli.commands.data_plane.cluster_instance as ci
-import cli.commands.data_plane.pgbouncer as pgb
+from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
 
 _ADMIN = "pooler-admin-fixture"
@@ -58,7 +58,7 @@ def test_pgbouncer_line_uses_registry_port(
         probed.update(port=port, password=password)
         return True
 
-    monkeypatch.setattr(pgb, "pgbouncer_listener_reachable", _reachable)
+    monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", _reachable)
 
     ci.print_data_plane_status()
     out = capsys.readouterr().out
@@ -107,7 +107,7 @@ def test_pgbouncer_line_without_registry_record_says_so(
     monkeypatch.setattr(ci, "_redis_reachable", lambda _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
     monkeypatch.setattr(cl, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(pgb, "pgbouncer_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
 
     ci.print_data_plane_status()
     out = capsys.readouterr().out
@@ -154,7 +154,7 @@ def test_postgres_probe_dials_pooled_front_door(
     # pgbouncer on: the probe still dials the pooled URL, never direct.
     calls.clear()
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
-    monkeypatch.setattr(pgb, "pgbouncer_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         "base.cluster.authority.read_pooler_admin",
         lambda _home: SimpleNamespace(password=_ADMIN),  # pyright: ignore[reportUnknownArgumentType]
