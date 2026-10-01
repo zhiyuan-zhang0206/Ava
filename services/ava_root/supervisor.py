@@ -9,14 +9,10 @@ requires reconciliation rather than permission to launch a duplicate.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
-import signal
-from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
-from time import monotonic
+from time import monotonic, time
 from typing import Protocol
 
 import psutil
@@ -28,8 +24,7 @@ from base.host.env.registry import (
     manifest_certification_secret_env,
 )
 from base.native_process.child_env import inherited_process_env
-from base.native_process.group_closure import group_empty
-from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
+from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import (
     ErrorCode,
     RequestPayload,
@@ -38,23 +33,25 @@ from base.native_process.root_control.ipc import (
     error_response,
     ok_response,
 )
+from services.ava_root import intent_store
 from services.ava_root.custody import ServiceCustody, require_clear
-from services.ava_root.group_scope import (
-    capture_group,
-    group_closed,
-    group_over,
-    ownership_retained,
-    record_survivors,
-    recorded_living,
-    unproven_group,
+from services.ava_root.group_scope import group_closed, record_survivors
+from services.ava_root.intent_store import (
+    IntentRecord,
+    IntentSource,
+    RestartFailure,
+    RestartStage,
+    UnitIntent,
+    merge_record_for_boot,
 )
 from services.ava_root.manifest import (
-    DesiredState,
     RestartPolicy,
-    UnitManifest,
     UnitRegistry,
+    UnitState,
     UnknownUnitError,
 )
+from services.ava_root.stopping import StoppingMixin, SupervisorConfig
+from services.ava_root.unit_records import _Generation, _UnitRuntime
 
 _log = logging.getLogger(__name__)
 
@@ -70,64 +67,6 @@ def _unit_env(unit_id: str) -> dict[str, str]:
         env.pop(MANIFEST_CERTIFICATION_SECRET_ENV, None)
         env.pop(MANIFEST_CERTIFICATION_FINALIZER_ENV, None)
     return env
-
-
-@dataclass(frozen=True, slots=True)
-class SupervisorConfig:
-    """Timing policy for the supervise loop (test-tunable)."""
-
-    stop_timeout_s: float = 10.0
-    """Default TERM window per unit; only explicit force permits a later kill.
-
-    A unit whose manifest declares `stop_timeout_s` gets that window instead. The
-    window must exceed the longest the unit's own SIGTERM cleanup may run: root
-    reads a unit still inside its own bound as unstopped, and refuses."""
-
-
-class UnitState(StrEnum):
-    """What a unit's process is doing right now."""
-
-    RUNNING = "running"
-    STOPPED = "stopped"
-
-
-@dataclass(slots=True)
-class _Generation:
-    """One process instance of a unit.
-
-    `exited` is set as the *last* action of the wait task, so any coroutine
-    that observes the event also observes the exit fully processed.
-    """
-
-    proc: asyncio.subprocess.Process
-    started_at: float
-    identity: OwnedProcess | None = None
-    """The leader's native birth; None when the leader exited before root read it.
-
-    Root, its only reaper, reaped it or will; its group is still `proc.pid`."""
-    custody: ServiceCustody | None = None
-    tracked: set[OwnedProcess] = field(default_factory=set[OwnedProcess])
-    closing: bool = False
-    scope_closed_at_exit: bool = False
-    """The leader's group was empty when the watch read it after the reap.
-
-    Nothing of the unit remained. Otherwise the watch retained the group's
-    members in `tracked` at that read."""
-    exited: asyncio.Event = field(default_factory=asyncio.Event)
-
-
-@dataclass(slots=True)
-class _UnitRuntime:
-    """Mutable per-unit state owned by the supervisor."""
-
-    manifest: UnitManifest
-    desired: DesiredState = DesiredState.STOPPED
-    state: UnitState = UnitState.STOPPED
-    generation: _Generation | None = None
-    restart_count: int = 0
-    last_exit: str | None = None
-    last_error: str | None = None
-    watch_task: asyncio.Task[None] | None = None
 
 
 class HealthSource(Protocol):
@@ -146,7 +85,7 @@ class MetricsSource(Protocol):
         ...
 
 
-class Supervisor:
+class Supervisor(StoppingMixin):
     """Owns the lifecycle of every unit in one registry.
 
     All mutating verbs serialize on one lock, so overlapping commands are
@@ -179,15 +118,27 @@ class Supervisor:
     # ── lifecycle ────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start one clean root generation; unfinished custody requires recovery."""
+        """Start one clean root generation; unfinished custody requires recovery.
+
+        Each unit's stored record is merged first (conservative, see
+        `intent_store.merge_record_for_boot`): a recorded operator stop holds
+        its unit down; a stop the root gave itself is superseded; a recorded
+        replacement failure is carried until a fresh generation proves it gone.
+        """
         require_clear(self._run_dir)
         self._log_dir.mkdir(parents=True, exist_ok=True)
         async with self._lock:
             self._running = True
             self._started_at = monotonic()
             for runtime in self._units.values():
-                runtime.desired = DesiredState.RUNNING
-            await asyncio.gather(*(self._start_unit(runtime) for runtime in self._units.values()))
+                self._boot_intent(runtime)
+            await asyncio.gather(
+                *(
+                    self._start_unit(runtime)
+                    for runtime in self._units.values()
+                    if runtime.intent is UnitIntent.RUNNING
+                )
+            )
 
     async def shutdown(self) -> None:
         """Stop the whole tree (children before parents) and drain the tasks.
@@ -201,7 +152,7 @@ class Supervisor:
             self._running = False
             for unit_id in self._registry.all_stop_order():
                 runtime = self._units[unit_id]
-                runtime.desired = DesiredState.STOPPED
+                self._set_intent(runtime, UnitIntent.STOPPED, IntentSource.SELF)
                 try:
                     await self._stop_unit(runtime)
                 except Exception as exc:
@@ -233,7 +184,7 @@ class Supervisor:
         results: list[dict[str, object]] = []
         for member in self._registry.subtree(unit_id):
             runtime = self._units[member]
-            runtime.desired = DesiredState.RUNNING
+            self._set_intent(runtime, UnitIntent.RUNNING, IntentSource.OPERATOR)
             if self._is_active(runtime):
                 action = "already-running"
             else:
@@ -251,7 +202,7 @@ class Supervisor:
         results: list[dict[str, object]] = []
         for member in self._registry.stop_order(unit_id):
             runtime = self._units[member]
-            runtime.desired = DesiredState.STOPPED
+            self._set_intent(runtime, UnitIntent.STOPPED, IntentSource.OPERATOR)
             was_active = self._is_active(runtime)
             await self._stop_unit(runtime, force=force)
             action = "stopped" if was_active else "already-stopped"
@@ -261,15 +212,59 @@ class Supervisor:
     async def restart(self, unit_id: str) -> dict[str, object]:
         """Stop then replace a subtree under one mutation lock.
 
-        Planned downtime avoids overlapping writers. Spawn acceptance is not
-        readiness; callers must observe the new generation.
+        A restart means "keep it running, replace it": it never turns a failed
+        self-rescue into a stop, and it never rewrites an explicit stop into a
+        run unless this verb is that operator word. Each member ends either with
+        a fresh active generation or with an explicit `restart_failed` state
+        (intent stays running) that the health monitor counts and retries under
+        its backoff. A member whose stop was refused keeps its old generation
+        while the rest of the subtree is still processed; refusals are raised
+        together afterwards. Spawn acceptance is not readiness; callers must
+        observe the new generation.
         """
         async with self._lock:
-            await self._down_locked(unit_id)
-            result = await self._up_locked(unit_id)
-            for member in self._registry.subtree(unit_id):
-                self._units[member].restart_count += 1
-            return result | {"verb": Verb.RESTART.value}
+            members = self._registry.subtree(unit_id)
+            for member in members:
+                runtime = self._units[member]
+                if runtime.intent is not UnitIntent.RUNNING:
+                    self._set_intent(runtime, UnitIntent.RUNNING, IntentSource.OPERATOR)
+            refusals: list[Exception] = []
+            refused: set[str] = set()
+            for member in self._registry.stop_order(unit_id):
+                runtime = self._units[member]
+                try:
+                    await self._stop_unit(runtime)
+                except Exception as exc:
+                    refused.add(member)
+                    refusals.append(exc)
+                    self._record_restart_failure(runtime, RestartStage.DOWN, str(exc))
+            results: list[dict[str, object]] = []
+            for member in members:
+                runtime = self._units[member]
+                if member in refused:
+                    results.append(self._unit_result(runtime, "refused"))
+                    continue
+                try:
+                    await self._start_unit(runtime)
+                except Exception as exc:
+                    runtime.last_error = f"restart failed: {exc}"
+                    self._record_restart_failure(runtime, RestartStage.UP, str(exc))
+                    results.append(self._unit_result(runtime, "failed"))
+                    continue
+                if self._is_active(runtime):
+                    runtime.restart_count += 1
+                    results.append(self._unit_result(runtime, "restarted"))
+                else:
+                    detail = runtime.last_error or "replacement did not start"
+                    self._record_restart_failure(runtime, RestartStage.UP, detail)
+                    results.append(self._unit_result(runtime, "failed"))
+            if len(refusals) == 1:
+                raise refusals[0]
+            if refusals:
+                raise ExceptionGroup(
+                    f"root restart refused to stop {len(refusals)} unit(s)", refusals
+                )
+            return {"verb": Verb.RESTART.value, "units": results}
 
     async def status(self) -> dict[str, object]:
         """The tree snapshot: structure, health, and restart counters."""
@@ -283,7 +278,15 @@ class Supervisor:
                 "exec": list(runtime.manifest.exec),
                 "manifest_digest": runtime.manifest.digest(),
                 "restart": runtime.manifest.restart.value,
-                "desired": runtime.desired.value,
+                "intent": runtime.intent.value,
+                "intent_source": runtime.intent_source.value,
+                "restart_failed": None
+                if runtime.restart_failed is None
+                else {
+                    "stage": runtime.restart_failed.stage.value,
+                    "since": runtime.restart_failed.since,
+                    "detail": runtime.restart_failed.detail,
+                },
                 "state": runtime.state.value,
                 "pid": self._pid(runtime),
                 "create_time": runtime.generation.identity.birth
@@ -368,11 +371,19 @@ class Supervisor:
         return generation.identity, generation.started_at
 
     def revival_deferral(self, unit_id: str) -> str | None:
-        """Preserve explicit stop, retained custody, and never-restart policy."""
+        """Preserve explicit stop, retained custody, and never-restart policy.
+
+        Classification reads the unit's intent — the policy fact — never a
+        mechanical transition residue: only an explicit stop is the expected,
+        silent state. A recorded replacement failure is deliberately not a
+        deferral: suppressing the action here would recreate exactly the
+        silence class the record exists to surface (task #4872) — its retry
+        cadence belongs to the health monitor's backoff.
+        """
         runtime = self._units.get(unit_id)
         if runtime is None:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
-        if runtime.desired is not DesiredState.RUNNING:
+        if runtime.intent is not UnitIntent.RUNNING:
             return "held down"
         if runtime.generation is not None and not self._is_active(runtime):
             return "native custody requires reconciliation"
@@ -405,8 +416,95 @@ class Supervisor:
 
     # ── internals ────────────────────────────────────────────────────────────
 
+    def _set_intent(self, runtime: _UnitRuntime, intent: UnitIntent, source: IntentSource) -> None:
+        """Record a unit's policy fact and persist it for the next root."""
+        runtime.intent = intent
+        runtime.intent_source = source
+        self._write_record(runtime)
+
+    def _write_record(self, runtime: _UnitRuntime) -> None:
+        intent_store.write(
+            self._run_dir,
+            runtime.manifest.id,
+            IntentRecord(runtime.intent, runtime.intent_source, runtime.restart_failed),
+        )
+
+    def _boot_intent(self, runtime: _UnitRuntime) -> None:
+        """Merge this unit's stored record into a fresh root generation."""
+        record = intent_store.read(self._run_dir, runtime.manifest.id)
+        merged = merge_record_for_boot(record)
+        if merged.note is not None:
+            _log.info("unit %s: %s", runtime.manifest.id, merged.note)
+        runtime.intent = merged.intent
+        runtime.intent_source = merged.source
+        runtime.restart_failed = merged.restart_failed
+        if record is None or (
+            record.intent,
+            record.source,
+            record.restart_failed,
+        ) != (merged.intent, merged.source, merged.restart_failed):
+            self._write_record(runtime)
+
+    def _record_restart_failure(
+        self, runtime: _UnitRuntime, stage: RestartStage, detail: str
+    ) -> None:
+        """Record one member's failed replacement half; store first, then signal."""
+        previous = runtime.restart_failed
+        since = previous.since if previous is not None else time()
+        failure = RestartFailure(stage=stage, since=since, detail=detail)
+        runtime.restart_failed = failure
+        self._write_record(runtime)
+        if previous is None or previous.stage is not stage:
+            self._emit_restart_failed(runtime, failure)
+
+    def _clear_restart_failure(self, runtime: _UnitRuntime) -> None:
+        """Clear a recorded failure once a fresh generation proved it gone."""
+        previous = runtime.restart_failed
+        if previous is None:
+            return
+        runtime.restart_failed = None
+        self._write_record(runtime)
+        self._emit_restart_cleared(runtime, previous)
+
+    @staticmethod
+    def _emit_restart_failed(runtime: _UnitRuntime, failure: RestartFailure) -> None:
+        try:
+            from base.log import logger
+
+            logger.warning(
+                "unit {unit} replacement failed at its {stage} half — explicit failure state "
+                "recorded; intent stays running and the health monitor retries under its backoff",
+                event="root_restart_failed",
+                unit=runtime.manifest.id,
+                stage=failure.stage.value,
+                detail=failure.detail,
+            )
+        except Exception:
+            # Fan-out may lag or fail; the record is already stored, so never
+            # let a signal failure corrupt the transition that produced it.
+            _log.exception("unit %s: restart-failure event fan-out failed", runtime.manifest.id)
+
+    @staticmethod
+    def _emit_restart_cleared(runtime: _UnitRuntime, failure: RestartFailure) -> None:
+        try:
+            from base.log import logger
+
+            logger.info(
+                "unit {unit} replacement succeeded — failure state cleared after "
+                "{failed_for_s:.0f}s",
+                event="root_restart_cleared",
+                unit=runtime.manifest.id,
+                failed_for_s=max(0.0, time() - failure.since),
+            )
+        except Exception:
+            _log.exception("unit %s: restart-cleared event fan-out failed", runtime.manifest.id)
+
     async def _start_unit(self, runtime: _UnitRuntime) -> None:
-        """Spawn a stopped unit; a spawn failure is recorded, never raised."""
+        """Spawn a stopped unit; a spawn failure is recorded, never raised.
+
+        A fresh active generation is the only proof that a recorded replacement
+        failure is gone, so success clears it on every activation path.
+        """
         if self._is_active(runtime):
             return
         try:
@@ -415,6 +513,8 @@ class Supervisor:
             runtime.state = UnitState.STOPPED
             runtime.last_error = f"spawn failed: {exc}"
             _log.error("unit %s failed to start: %s", runtime.manifest.id, exc)
+            return
+        self._clear_restart_failure(runtime)
 
     async def _spawn(self, runtime: _UnitRuntime) -> None:
         """Fork+exec one fresh generation of `runtime`.
@@ -498,191 +598,6 @@ class Supervisor:
         # unexpected exit); until then it blocks revival and a duplicate root.
         generation.exited.set()
 
-    async def _stop_unit(self, runtime: _UnitRuntime, *, force: bool = False) -> None:
-        """Stop one owned generation; force escalation must be explicit."""
-        generation = runtime.generation
-        if generation is None:
-            runtime.state = UnitState.STOPPED
-            return
-        await self._stop_generation(runtime, generation, force=force)
-
-    async def _stop_generation(
-        self, runtime: _UnitRuntime, generation: _Generation, *, force: bool = False
-    ) -> None:
-        """Stop captured births; unknown scope keeps custody and refuses success."""
-        # Routed by what this stop finds, not by `closing`: a retry after a
-        # refused stop whose leader has since exited must not signal by the
-        # group number.
-        exited = _exited_leader(runtime, generation)
-        if exited is not None:
-            await self._stop_exited_generation(runtime, generation, *exited, force=force)
-            return
-        identity, custody = self._capture_posix_stop(runtime, generation)
-        await self._stop_posix_generation(runtime, generation, identity, custody, force=force)
-
-    async def _stop_exited_generation(
-        self,
-        runtime: _UnitRuntime,
-        generation: _Generation,
-        pgid: int,
-        custody: ServiceCustody,
-        *,
-        force: bool,
-    ) -> None:
-        """Close what root recorded of a unit whose leader it reaped before this stop.
-
-        Root reaps its own leader, so after that reap the leader is positively
-        dead, whether or not root read its birth first, and the watch retained
-        the members of group `pgid` it read just after that reap. After that the
-        number proves nothing: once those members exit, another program's group
-        can carry it. So this stop never signals by the group number: nothing it
-        signals, captures or adopts comes from a group listing, which only reads
-        the group's session or names it in a refusal. It signals only recorded
-        births and their birth-verified descendants (`capture_tree`), each
-        through its own birth check; only explicit force escalates. Once none of
-        them lives, custody is released when the unit's group is proven over
-        (`group_over`): empty when read after the reap or now, its number now
-        held as a PID, or the group carrying it now in another session; no such
-        group is ever signalled. A group still occupied in root's own session,
-        or in one root cannot read, may hold unrecorded processes of the unit:
-        custody stays and the stop refuses, naming it. Moving the record aside
-        is the operator's word that no process of the unit remains; with no
-        recorded birth alive, the generation is dropped without a signal
-        (`_drop_moved_aside`).
-        """
-        await self._await_reap(runtime, generation, pgid, custody)
-        window = self._stop_window(runtime)
-        deadline = monotonic() + window
-        while True:
-            # Judged as each poll begins, so a refusal rests on reads taken after the deadline.
-            expired = monotonic() >= deadline
-            living = recorded_living(generation.tracked)
-            if not os.path.lexists(custody.path):
-                _drop_moved_aside(runtime, custody, living)
-                return
-            if living:
-                custody.retain(generation.tracked)
-                if expired and not force:
-                    raise ownership_retained(runtime.manifest.id, living, pgid, window)
-                self._signal_all(living, force=expired and force)
-                if expired:
-                    force = False
-                    deadline = monotonic() + window
-            elif group_over(pgid, empty_at_exit=generation.scope_closed_at_exit):
-                custody.clear()
-                runtime.generation = None
-                runtime.state = UnitState.STOPPED
-                runtime.last_error = None
-                _log.info(
-                    "unit %s: recorded births of group %s are gone; custody released",
-                    runtime.manifest.id,
-                    pgid,
-                )
-                return
-            elif expired:
-                raise unproven_group(runtime.manifest.id, pgid, custody)
-            await asyncio.sleep(0.05)
-
-    async def _await_reap(
-        self,
-        runtime: _UnitRuntime,
-        generation: _Generation,
-        pgid: int,
-        custody: ServiceCustody,
-    ) -> None:
-        """Wait (bounded) for the watch task to reap the exited leader.
-
-        Without that reap root has no group reading taken before the leader's
-        number could be reused, so it cannot judge the unit's scope; only a
-        record the operator moved aside lets the stop go on without it.
-        """
-        watch = runtime.watch_task
-        if not generation.exited.is_set() and watch is not None and not watch.done():
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(generation.exited.wait(), self._stop_window(runtime))
-        if not generation.exited.is_set() and os.path.lexists(custody.path):
-            raise RuntimeError(
-                f"unit {runtime.manifest.id}: leader (pid {pgid}) exited but "
-                f"root never observed its reap; custody retained at {custody.path}. Once no "
-                "process of this unit remains, move that record aside and retry the stop"
-            )
-
-    @staticmethod
-    def _capture_posix_stop(
-        runtime: _UnitRuntime,
-        generation: _Generation,
-    ) -> tuple[OwnedProcess, ServiceCustody]:
-        identity, custody = generation.identity, generation.custody
-        if identity is None or custody is None:
-            raise RuntimeError(f"unit {runtime.manifest.id} has unacknowledged native birth")
-        retain_processes(generation.tracked, capture_tree(identity))
-        custody.retain(generation.tracked)
-        generation.closing = True
-        return identity, custody
-
-    async def _stop_posix_generation(
-        self,
-        runtime: _UnitRuntime,
-        generation: _Generation,
-        identity: OwnedProcess,
-        custody: ServiceCustody,
-        *,
-        force: bool,
-    ) -> None:
-        """Bounded TERM, then certified closure of the unit's process group.
-
-        Only a stop that found the leader live runs this: the unreaped leader
-        reserved the group number until its reap inside this bounded stop,
-        which reads the group within that same stop, never after an unbounded
-        gap (a stop that finds the leader already reaped is
-        `_stop_exited_generation`, which never signals by the group number).
-        After the reap, only the kernel reporting that group empty certifies
-        the stop: a child forked while the leader handled TERM is still a
-        member, so it is captured, signalled like any tracked descendant and
-        must exit too. Only explicit force escalates, and only to those
-        captured members. A member that calls setsid() leaves the group by
-        construction and is not covered.
-        """
-        self._signal_owned(identity, force=False)
-        window = self._stop_window(runtime)
-        deadline = monotonic() + window
-        while True:
-            living = {item for item in generation.tracked if item.live()}
-            if not living:
-                await generation.exited.wait()
-                if group_empty(identity.pid):
-                    custody.clear()
-                    runtime.generation = None
-                    runtime.state = UnitState.STOPPED
-                    return
-                living = capture_group(generation.tracked, identity.pid)
-            for item in living:
-                retain_processes(generation.tracked, capture_tree(item))
-            custody.retain(generation.tracked)
-            expired = monotonic() >= deadline
-            if expired and not force:
-                raise ownership_retained(runtime.manifest.id, living, identity.pid, window)
-            if not identity.live() or expired:
-                self._signal_all(living, force=expired and force)
-            if expired:
-                force = False
-                deadline = monotonic() + window
-            await asyncio.sleep(0.05)
-
-    def _stop_window(self, runtime: _UnitRuntime) -> float:
-        """The TERM window for one unit: what its manifest declares, else the default."""
-        declared = runtime.manifest.stop_timeout_s
-        return self._config.stop_timeout_s if declared is None else declared
-
-    @staticmethod
-    def _signal_owned(identity: OwnedProcess, *, force: bool) -> None:
-        identity.send_signal(signal.SIGKILL if force else signal.SIGTERM)
-
-    @classmethod
-    def _signal_all(cls, living: set[OwnedProcess], *, force: bool) -> None:
-        for item in living:
-            cls._signal_owned(item, force=force)
-
     @staticmethod
     def _is_active(runtime: _UnitRuntime) -> bool:
         """True when the unit has a live generation process."""
@@ -709,63 +624,6 @@ class Supervisor:
         if runtime.last_error is not None:
             result["error"] = runtime.last_error
         return result
-
-
-def _exited_leader(
-    runtime: _UnitRuntime, generation: _Generation
-) -> tuple[int, ServiceCustody] | None:
-    """The leader's group number and custody once the leader is positively not
-    live (gone, a zombie, or its PID now another birth); None while it runs.
-
-    A leader whose birth root never read had exited before that read: `_spawn`
-    records none only on NoSuchProcess, which a running child of root cannot
-    raise, and root, its only reaper, reaped it or will. Its group number is
-    `proc.pid`, which it was born leading (`process_group=0`), so it is judged
-    like any exited leader: by what the watch recorded at its reap, never by
-    signalling that number. An identity that cannot be verified keeps custody
-    and names the next step.
-    """
-    identity, custody = generation.identity, generation.custody
-    if custody is None:
-        raise RuntimeError(f"unit {runtime.manifest.id} has no durable custody")
-    if identity is None:
-        return generation.proc.pid, custody
-    try:
-        return None if identity.live() else (identity.pid, custody)
-    except RuntimeError as exc:
-        raise RuntimeError(
-            f"unit {runtime.manifest.id}: cannot confirm whether its recorded birth "
-            f"(pid {identity.pid}) still runs: {exc}; custody retained at {custody.path}. "
-            f"Inspect pid {identity.pid}: stop it if it is still this unit's process, and retry "
-            "the stop once that pid has exited or its identity can be read. Moving the record "
-            "aside does not settle a birth root cannot verify"
-        ) from exc
-
-
-def _drop_moved_aside(
-    runtime: _UnitRuntime, custody: ServiceCustody, living: set[OwnedProcess]
-) -> None:
-    """Drop an exited unit's generation whose custody record the operator moved aside.
-
-    Moving it aside declares that no process of the unit remains. Root takes
-    that only while no recorded birth lives, and signals nothing; a live
-    recorded birth keeps the refusal, since custody is recorded before signals.
-    """
-    if living:
-        raise RuntimeError(
-            f"unit {runtime.manifest.id}: custody record {custody.path} was moved aside, but "
-            f"recorded births still run (pids {sorted(item.pid for item in living)}). Restore "
-            "the record and retry the stop, or stop those processes and retry"
-        )
-    runtime.generation = None
-    runtime.state = UnitState.STOPPED
-    runtime.last_error = None
-    _log.warning(
-        "unit %s: the operator moved the custody record aside (%s); generation dropped "
-        "without a signal",
-        runtime.manifest.id,
-        custody.path,
-    )
 
 
 def _describe_exit(returncode: int) -> str:

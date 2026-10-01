@@ -230,7 +230,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # lowers the total by one, to 221. The inbound reconcile's settled-history
     # fallback (task #4788) raises it to 222. Retiring the update straggler
     # reap (decisions/2026-09-30-remove-straggler-reap.md: the reaped/settled
-    # pair and the two quiet-close events) lowers it by four, to 218.
+    # pair and the two quiet-close events) lowers it by four, to 218. The unit
+    # intent store's recorded-failure pair (task #4872: root_restart_failed —
+    # an interrupted replacement's explicit failure state — and
+    # root_restart_cleared) raises the current total to 220.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
     assert "agent_reopened" not in _TELEMETRY_KINDS
     for retired in (
@@ -242,13 +245,20 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
         assert retired not in _TELEMETRY_KINDS
     # The suffix diagnostic adds one; retiring tool-call concatenation removes one.
     assert "multiple_tool_calls_merged" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 218
+    assert len(_TELEMETRY_KINDS) == 220
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",
         "action",
         "worker_agent_id",
     )
+
+
+def test_root_restart_payloads_name_the_evidence() -> None:
+    from base.events.contract import payload_keys
+
+    assert payload_keys("root_restart_failed") == ("unit", "stage", "detail")
+    assert payload_keys("root_restart_cleared") == ("unit", "failed_for_s")
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
