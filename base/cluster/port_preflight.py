@@ -198,3 +198,34 @@ def listener_addrs(port: int) -> set[str]:
         if host:
             addrs.add(host)
     return addrs
+
+
+LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
+
+
+def bind_addrs(cluster_secret: str) -> list[str]:
+    """Loopback plus this host's reachable address, de-duplicated (loopback alone
+    when reachable resolves to localhost — the single-box default).
+
+    A no-secret cluster binds LOOPBACK ONLY, whatever the reachable address says:
+    an empty secret is the single-box posture (its API and `/ops` serve
+    unauthenticated and no other machine dials its data plane), so Postgres and
+    its pooler, though they always authenticate (SCRAM), have no reason to face
+    the LAN. The bearer decides the network posture — an operator who wants a
+    LAN-reachable Postgres data plane sets the cluster secret.
+
+    `cluster_secret` is the CALLER-PASSED cluster secret (the same value the hba
+    is written from and the pooler is configured with), never read from
+    `settings` — a process that inherited a sibling cluster's
+    AVA_CLUSTER_SECRET (a shell carrying a different home's environment) must not widen
+    a no-secret cluster's bind posture to the LAN. The caller resolves the
+    cluster's own secret from its authority-passed `.env` value."""
+    if not cluster_secret:
+        return ["127.0.0.1"]
+    from base.cluster import machine
+
+    host = machine.reachable_host()
+    out = ["127.0.0.1"]
+    if host not in LOOPBACK_ALIASES:
+        out.append(host)
+    return out

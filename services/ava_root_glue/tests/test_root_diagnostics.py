@@ -10,6 +10,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.cluster.dataplane import pooler as base_pooler
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from services.ava_root.health import HealthMonitor, ProbeRunner
@@ -272,7 +273,6 @@ def test_browser_canary_runs_only_inside_owned_endpoint_probe(
 
 def test_pooler_requires_native_custody_before_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.cluster import ownership
-    from cli.commands.data_plane import pgbouncer
 
     def registered(_home: object) -> object:
         return object()
@@ -280,7 +280,7 @@ def test_pooler_requires_native_custody_before_protocol(monkeypatch: pytest.Monk
     listener = Mock(side_effect=AssertionError("unknown pooler must not be accepted"))
     monkeypatch.setattr("base.cluster.get_record", registered)
     monkeypatch.setattr(ownership, "pooler", Mock(return_value=None))
-    monkeypatch.setattr(pgbouncer, "pgbouncer_listener_reachable", listener)
+    monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", listener)
     assert probes.pgbouncer().verdict.value == "down"
     listener.assert_not_called()
 

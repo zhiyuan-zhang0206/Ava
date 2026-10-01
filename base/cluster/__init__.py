@@ -22,14 +22,16 @@ cluster gets the fixed identifier `DATA_PLANE_IDENTITY` (`ava`): its instance
 is single-tenant, so the identifier needs no per-cluster distinction.
 The public namespace exports the home record, the fixed port table, URL
 derivation, Postgres provisioning and Redis ACL helpers. `ownership` provides the shared
-native storage observer used before startup and maintenance effects.
+native storage observer used before startup and maintenance effects, and the home's Redis
+data directory and configured port it observes.
 
 Membership and access live in member modules the door does not re-export:
 `machine` (this host's machine name and capability set), `machines` and
 `machine_exclusions` (the multi-machine roster and its operator exclusions),
 `auth` (cluster bearer auth), `rate_limit` (gateway login throttling),
 `transport_encryption` (the precondition for secret-bearing off-box listeners)
-and `port_preflight` (the listener scan the ownership checks and health checks share).
+and `port_preflight` (the listener scan the ownership checks and health checks share, and
+the bind posture, `bind_addrs`, the data plane's listeners are expected to hold).
 """
 
 from __future__ import annotations

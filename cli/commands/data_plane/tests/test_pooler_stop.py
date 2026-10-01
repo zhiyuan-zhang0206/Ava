@@ -22,6 +22,7 @@ import psycopg
 import pytest
 
 from base.cluster import ownership
+from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.config import settings
 from base.native_process.ownership import OwnedProcess
@@ -128,7 +129,7 @@ def native_pooler(
     if not (Path(binary).exists() or shutil.which(binary)):
         pytest.skip("native PgBouncer is not installed")
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.setattr(pooler, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@127.0.0.1:12345/test")
     monkeypatch.setattr(settings.data_plane, "redis_url", _ABSENT_REDIS)
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")

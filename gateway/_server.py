@@ -113,7 +113,7 @@ def main() -> None:
     #   clients (healthchecks, SDK) outright — verified on macOS.
     #   A no-secret gateway binds 127.0.0.1 instead: its API is unauthenticated,
     #   and the no-secret posture is single-box (the data plane is loopback-only
-    #   too — `_bind_addrs`), so an all-interfaces bind would expose the
+    #   too — `port_preflight.bind_addrs`), so an all-interfaces bind would expose the
     #   unauthenticated API to the LAN.
     # - **agent-runner**: 127.0.0.1. The gateway does not reach an
     #   agent-runner's gateway directly — gateway→agent-runner RPC goes

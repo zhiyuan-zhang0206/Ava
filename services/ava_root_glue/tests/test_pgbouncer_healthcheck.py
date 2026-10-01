@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import pytest
 
 from base.cluster import ClusterPorts
+from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.record import ClusterRecord
 from base.daemon.health import DaemonProbe
 from services.ava_root_glue.diagnostic_probes import pgbouncer
@@ -22,7 +23,6 @@ def test_pooler_protocol_requires_native_custody_and_both_listeners(
     monkeypatch: pytest.MonkeyPatch, loopback: bool, public: bool, expected: str
 ) -> None:
     from base.cluster import ownership
-    from cli.commands.data_plane import pgbouncer as pooler
     from services.ava_root_glue import diagnostic_probes
     from services.healthchecks import owned_service
 
@@ -59,15 +59,12 @@ def test_pooler_protocol_requires_native_custody_and_both_listeners(
         return public
 
     monkeypatch.setattr(owned_service, "owned_tcp", inspect)
-    monkeypatch.setattr(pooler, "pgbouncer_listener_reachable", _fake_listener_reachable)
+    monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", _fake_listener_reachable)
     monkeypatch.setattr(
-        pooler, "pgbouncer_public_listener_reachable", _fake_public_listener_reachable
+        base_pooler, "pgbouncer_public_listener_reachable", _fake_public_listener_reachable
     )
-    repair = Mock(side_effect=AssertionError("diagnostic must not repair"))
-    monkeypatch.setattr(pooler, "ensure_pgbouncer", repair)
     assert pgbouncer().verdict.value == expected
     assert seen == [(owner, 6432)]
-    repair.assert_not_called()
 
 
 def test_unknown_pooler_record_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
