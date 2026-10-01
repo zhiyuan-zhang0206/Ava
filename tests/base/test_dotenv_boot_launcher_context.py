@@ -52,7 +52,11 @@ def test_cli_entry_records_launcher_profile_and_keeps_undeclared_projections(
     from cli.main import _normalize_process_profile
 
     monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.delitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, raising=False)
+    # The entry helper records the launcher profile next. Register the absent key (setitem)
+    # before removing it: `delitem(raising=False)` on an absent key records nothing, so the
+    # recorded value would outlive the test.
+    monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "")
+    monkeypatch.delitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY)
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
     _point_env_at_without_data_plane_urls(monkeypatch, tmp_path)
     monkeypatch.setitem(

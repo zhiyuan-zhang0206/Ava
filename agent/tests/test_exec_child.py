@@ -689,7 +689,14 @@ def test_child_overlay_phases_framework_then_plugin(
     monkeypatch.setenv("AVA_EXEC_REQUEST_FILE", str(tmp_path / "req.json"))
     monkeypatch.setenv("AVA_EXEC_RESULT_FILE", str(tmp_path / "res.json"))
 
-    exec_child.main()
+    # main() installs the child's SIGINT/SIGTERM handlers (they raise): put the originals back.
+    old_sigint = signal.getsignal(signal.SIGINT)
+    old_sigterm = signal.getsignal(signal.SIGTERM)
+    try:
+        exec_child.main()
+    finally:
+        signal.signal(signal.SIGINT, old_sigint)
+        signal.signal(signal.SIGTERM, old_sigterm)
 
     assert events == [
         "apply:framework",
