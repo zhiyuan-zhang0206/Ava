@@ -482,13 +482,13 @@ def test_the_total_raises_one_annotation_with_a_line_per_file_kind_and_thing(
 ) -> None:
     counts = tmp_path / "counts"
     env = ("leak_guard", "env: AVA_X was added")
-    identity = ("leak_guard", "identity: ava.agent_identity._agent_id: 1 -> 7")
+    signal = ("leak_guard", "signal: SIGINT handler SIG_DFL -> handler")
     _leaks_in(
         counts,
         "1",
         _guarded("tests/a/test_x.py", "test_1", env),
         _guarded("tests/a/test_x.py", "test_2", env),  # the same key again: one line, x2
-        _guarded("tests/a/test_a.py", "test_3", identity),
+        _guarded("tests/a/test_a.py", "test_3", signal),
         _guarded("tests/z/test_z.py", "test_4", ("leak_guard", "cwd: /a -> /b")),
     )
     _leaks_in(counts, "2", _guarded("tests/a/test_x.py", "test_5", env))
@@ -500,13 +500,11 @@ def test_the_total_raises_one_annotation_with_a_line_per_file_kind_and_thing(
     lines = _annotation(capsys.readouterr().out)
     assert lines[0].startswith("leak guard (warn): 5 leak finding(s) in 5 test(s)")
     assert "from 3/4 count files (INCOMPLETE: no file for 4)" in lines[0]
-    assert lines[1] == "  by kind: cwd=1, env=3, identity=1"
-    assert lines[
-        2:
-    ] == [  # identity last: hundreds of tests assign it bare and must not push the rest out
+    assert lines[1] == "  by kind: cwd=1, env=3, signal=1"
+    assert lines[2:] == [  # sorted by file, then kind, then thing
+        "  tests/a/test_a.py  [signal] SIGINT  x1 test(s), e.g. test_3",
         "  tests/a/test_x.py  [env] AVA_X  x3 test(s), e.g. test_1",
         "  tests/z/test_z.py  [cwd] /a  x1 test(s), e.g. test_4",
-        "  tests/a/test_a.py  [identity] ava.agent_identity._agent_id  x1 test(s), e.g. test_3",
     ]
     assert "### Leak guard" in summary.read_text()
     written = json.loads(report.read_text())
