@@ -345,6 +345,12 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return files
 
 
+def _ancestors_within(path: Path, scope: Path) -> set[Path]:
+    """Every directory from `path`'s own up to `scope`: a new subpackage adds an entry to each
+    ancestor's budget, not just to its parent's."""
+    return {a for a in path.parents if a == scope or scope in a.parents}
+
+
 def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
     """Collect files and independently checked directories without following links."""
     files: set[Path] = set()
@@ -379,7 +385,7 @@ def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
             if selected.is_dir():
                 visit(selected)
             elif selected.is_file():
-                directories.add(selected.parent)
+                directories.update(_ancestors_within(selected, scope))
                 if selected.suffix == ".py":
                     files.add(selected)
     return files, directories
@@ -741,15 +747,28 @@ def _check_ast_and_quality(
     return errors
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+def _changed_targets(only: list[str] | None) -> list[str]:
+    """The `--only` changed files as explicit targets; none (the full scan) when the tooling changed."""
+    scope = lint_common.changed_scope(only, _REPO_ROOT)
+    return [] if scope is None else [str(_REPO_ROOT / rel) for rel in sorted(scope)]
+
+
+def _parse_args(argv: list[str]) -> tuple[list[str], bool, bool]:
+    """(explicit targets, unfold complexity warnings, nothing to judge) from the command line."""
     full = "--complexity-warnings-full" in argv
-    argv = [arg for arg in argv if arg != "--complexity-warnings-full"]
-    if argv:
-        missing = [arg for arg in argv if not Path(arg).exists()]
-        if missing:
-            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
-            return 1
+    argv, only = lint_common.split_only([a for a in argv if a != "--complexity-warnings-full"])
+    targets = [*argv, *_changed_targets(only)]
+    return targets, full, only == [] and not targets
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv, full, nothing_changed = _parse_args(argv if argv is not None else sys.argv[1:])
+    if nothing_changed:
+        return 0
+    missing = [arg for arg in argv if not Path(arg).exists()]
+    if missing:
+        print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+        return 1
     # Keep symlinks visible to the budget collector so it can exclude them.
     targets = (
         [Path(os.path.abspath(a)) for a in argv]  # noqa: PTH100 — normalize without following symlinks

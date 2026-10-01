@@ -36,7 +36,10 @@ OTHER_CI = {
     "lint-clock-lattice",
     "lint-core-content-manifests",
 }
-PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint", "frontend-vitest"}
+# Hooks CI's structure gate skips because another job runs the same tool directly. The
+# changed-files `frontend-eslint` is a commit-stage hook; its whole-project twin is pre-push.
+CI_OWNED = {"pyright", "frontend-tsc", "frontend-eslint", "frontend-vitest"}
+PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint-full", "frontend-vitest"}
 # Pre-push-stage-only hooks with no direct 1:1 CI job duplicate: local
 # safety nets that re-run the pre-commit stage over the real branch diff, an
 # unconditional rerun of the generated-artifact family, and the full scan of the
@@ -267,7 +270,7 @@ def test_codegen_invokes_exactly_the_four_configured_hooks() -> None:
 
 def test_four_hooks_exactly_partition_the_existing_structure_gate() -> None:
     skipped = set(LINT["env"]["SKIP"].split(","))
-    assert skipped == OTHER_CI | PREPUSH | LOCAL_ONLY | CODEGEN
+    assert skipped == OTHER_CI | CI_OWNED | LOCAL_ONLY | CODEGEN
     commit_hooks = {
         hook_id
         for hook_id, hook in HOOKS.items()
@@ -275,7 +278,7 @@ def test_four_hooks_exactly_partition_the_existing_structure_gate() -> None:
     }
     lint_hooks = commit_hooks - skipped
     assert not lint_hooks & CODEGEN
-    assert lint_hooks | CODEGEN == commit_hooks - OTHER_CI - LOCAL_ONLY
+    assert lint_hooks | CODEGEN == commit_hooks - OTHER_CI - LOCAL_ONLY - CI_OWNED
 
 
 def test_selector_ids_and_regexes_follow_hook_config() -> None:

@@ -383,13 +383,16 @@ def _default_files() -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    argv, only = lint_common.split_only(argv)
     if argv:
         files, missing = lint_common.resolve_targets(argv, _REPO_ROOT)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     else:
-        files = _default_files()
+        # The default scope, or only the `--only` changed files (the commit hook) inside it.
+        scope = lint_common.changed_scope(only, _REPO_ROOT)
+        files = _default_files() if scope is None else [f for f in _default_files() if f in scope]
 
     total = 0
     for rel in files:
