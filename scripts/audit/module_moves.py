@@ -7,6 +7,7 @@ Run: `.venv/bin/python scripts/audit/module_moves.py OLD=NEW [OLD=NEW ...]`
 Moving modules into packages reduces directory entries only if the old files
 disappear. Unlike a module split with re-exports, a move must leave no callers
 at the old path, and every name referenced at the new path must still exist.
+Before the move, `where_used.py` lists everything it will touch.
 
 ## What it checks
 
@@ -43,9 +44,14 @@ def _mask_history_reads(text: str) -> str:
     return _HISTORY_READ_RE.sub(lambda match: " " * len(match.group(0)), text)
 
 
+def is_frozen(name: str) -> bool:
+    """Whether a tracked path is in a frozen history axis: never rewritten."""
+    return name.startswith(_FROZEN)
+
+
 def _is_excluded(name: str) -> bool:
     """Whether a tracked path is outside the audit's live-content universe."""
-    return not name or name.startswith(_FROZEN)
+    return not name or is_frozen(name)
 
 
 def _tracked_text() -> list[tuple[str, str]]:
