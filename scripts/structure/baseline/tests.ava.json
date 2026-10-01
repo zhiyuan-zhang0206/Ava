@@ -17,19 +17,12 @@
     "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._write_atomically": 1,
     "tests/ava/test_agents_sdk.py::ava.gateway_client.transport._client": 1,
     "tests/ava/test_agents_sdk.py::gateway.agents.router._forward_spawn_to_remote": 1,
-    "tests/ava/test_external_integration.py::ava.gateway_client.transport._client": 2,
-    "tests/ava/test_presets_sdk.py::ava.gateway_client.transport._client": 1,
-    "tests/ava/test_ui.py::ava.gateway_client.transport._client": 1,
-    "tests/ava/test_ui.py::ava.ui._SERVE_READY_TIMEOUT_S": 2,
-    "tests/ava/test_ui.py::ava.ui._reject_foreign_port_occupant": 1,
-    "tests/ava/test_ui.py::ava.ui._wait_until_serving": 1
+    "tests/ava/test_external_integration.py::ava.gateway_client.transport._client": 2
   },
   "tests_location": {
     "tests/ava/sdk_surface/test_metering.py::top-level": 1,
     "tests/ava/sdk_surface/test_validation.py::top-level": 1,
     "tests/ava/test_agents_sdk.py::top-level": 1,
-    "tests/ava/test_external_integration.py::top-level": 1,
-    "tests/ava/test_presets_sdk.py::top-level": 1,
-    "tests/ava/test_ui.py::top-level": 1
+    "tests/ava/test_external_integration.py::top-level": 1
   }
 }
