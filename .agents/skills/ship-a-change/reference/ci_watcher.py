@@ -48,6 +48,8 @@ Usage:
    was already persisted before the watcher tried to deliver.
 """
 
+# operates-on-cluster: agent-records, home-files -- runs as an agent watcher: wakes its agent, writes a verdict file
+
 import atexit
 import os
 import sys

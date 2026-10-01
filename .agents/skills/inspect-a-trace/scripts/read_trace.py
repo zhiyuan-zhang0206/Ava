@@ -40,6 +40,8 @@ LLM span detection: span name ends with `.chat`, or attribute
 `traceloop.association.properties.ls_model_name`.
 """
 
+# operates-on-cluster: secrets, telemetry -- resolves the cluster's home for its trace files and secret
+
 from __future__ import annotations
 
 import argparse
