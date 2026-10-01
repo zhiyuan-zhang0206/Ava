@@ -10,8 +10,8 @@ Posts through the gateway's /api/alerts ingest — the single funnel that stores
 the row AND fans the IM notification out (same shape the health probe posts,
 W16) — with the agent's machine API token as the bearer. Never raises and
 never blocks the agent's event loop: the POST runs on a daemon thread, and a
-per-process rate limit turns an outage that fails every exec into one alert
-per window instead of one per attempt. When the gateway itself is unreachable
+per-agent rate limit turns an outage that fails every exec into one alert per
+agent per window instead of one per attempt. When the gateway itself is unreachable
 the POST just fails silently — the machine-level health alert already covers
 that outage.
 """
@@ -24,9 +24,12 @@ from typing import Any
 
 from base.log import logger
 
-# One bootstrap-failure alert per process per window: an outage fails every
-# exec, and the point is one visible signal (plus a slow reminder), not a row
-# per execute_code attempt.
+# One bootstrap-failure alert per agent per window: an outage fails every
+# exec, and the point is one visible signal per agent (plus a slow reminder),
+# not a row per execute_code attempt. Keyed by agent because the agent host
+# serves many agents in one process and each alert reports that agent's own
+# failure: a shared stamp would let agent A's alert hide agent B's for the whole
+# window.
 _ALERT_RATE_LIMIT_S = 600.0
 
 _ALERT_NAME = "exec child boot failed"
@@ -34,7 +37,10 @@ _SEVERITY = "warning"
 _SOURCE = "agent-exec"
 _POST_TIMEOUT_S = 10.0
 
-_last_posted_at: float | None = None
+# agent id -> monotonic time of its last posted alert. A stamp older than the
+# window suppresses nothing and is dropped on the next call, so the map holds
+# only agents that alerted within the last window.
+_last_posted_at: dict[int, float] = {}
 _rate_lock = threading.Lock()
 
 
@@ -96,18 +102,19 @@ def _post(agent_id: int, exc_type: str, exc_msg: str) -> None:
 
 
 def maybe_alert_exec_boot_failure(agent_id: int, exc: BaseException) -> None:
-    """Rate-limited, non-blocking alert for a boot-phase exec child crash.
+    """Per-agent rate-limited, non-blocking alert for a boot-phase exec child crash.
 
     Called from the exec dispatcher when the child's envelope reports
     code_reached=False. Returns immediately; the actual HTTP POST happens on a
     daemon thread so a slow or dead gateway cannot stall the agent's turn.
     """
-    global _last_posted_at  # noqa: PLW0603
     now = time.monotonic()
     with _rate_lock:
-        if _last_posted_at is not None and now - _last_posted_at < _ALERT_RATE_LIMIT_S:
+        for expired in [a for a, at in _last_posted_at.items() if now - at >= _ALERT_RATE_LIMIT_S]:
+            del _last_posted_at[expired]
+        if agent_id in _last_posted_at:
             return
-        _last_posted_at = now
+        _last_posted_at[agent_id] = now
     exc_type = getattr(exc, "exc_type", None) or type(exc).__name__
     exc_msg = getattr(exc, "exc_msg", None) or str(exc)
     threading.Thread(

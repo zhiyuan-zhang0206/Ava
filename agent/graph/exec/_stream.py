@@ -3,9 +3,9 @@ stdout/stderr and publish it incrementally for live frontend display.
 
 `StreamingTextIO` is the sink `contextlib.redirect_stdout/stderr` writes into —
 bounded by `exec_output_accumulation_max_chars`, so a runaway print loop is
-truncated head+tail as it streams instead of growing the agent process until it
-is OOM-killed; `ExecOutputChunkPublisher` ships the accumulated increments to
-the per-process event publisher (a non-blocking enqueue). Both are polled by the exec node's
+truncated head+tail as it streams instead of growing the agent host process until
+it is OOM-killed; `ExecOutputChunkPublisher` ships the accumulated increments to
+the turn's event publisher (a non-blocking enqueue). Both are polled by the exec node's
 main task on a fixed interval — they hold no exec control-flow state, so they
 live apart from the node's thread/cancel/dispatch logic. Emitting (rather than
 awaiting Redis) is what keeps the poll loop free to watch cancel/deadline even
@@ -184,7 +184,7 @@ class ExecOutputChunkPublisher:
     """Emits ExecOutputChunk SSE events as the stream accumulates, so the
     frontend can stream display — the exec node's main task polls every 50ms and
     calls `publish(chunk_text)` to push the newly accumulated text from the last
-    round through the per-process event publisher (a non-blocking enqueue).
+    round through the turn's event publisher (a non-blocking enqueue).
 
     `item_id` is shared with the final ExecOutput (`f"{exec_msg_idx}.0"`); the
     frontend appends deltas to the same code_output item by id; on completion,

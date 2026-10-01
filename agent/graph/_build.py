@@ -108,17 +108,28 @@ _retry_budget_state = threading.local()
 
 
 def _retry_thread_id() -> str:
-    """The per-thread stall-pair streak key (bound turn identity, else `?`).
+    """The per-thread stall-pair streak key: the bound turn identity.
 
     `agent.graph.llm_errors` keys its streaks by the llm node's
     ``str(agent_id_from_config(config))``; the retry machinery runs in the same
-    turn, so the bound identity resolves to the same string. `?` keeps tests
-    and non-agent entry points from crashing on an unbound identity.
+    turn, so the bound identity resolves to the same string. The one host
+    process serves many agents, so an unbound identity must not fall into a
+    shared bucket that every agent's streak would then count against: the only
+    caller is the stall-pair retry inside a hosted turn (the host binds the
+    identity around the whole turn), and anything else is a bug that raises.
+
+    Raises:
+        RuntimeError: no turn identity is bound.
     """
     from base.native_process.turn_identity import effective_agent_id
 
     ident = effective_agent_id()
-    return str(ident) if ident is not None else "?"
+    if ident is None:
+        raise RuntimeError(
+            "the stall-pair retry needs the turn identity bound (the agent host binds it "
+            "around every turn); with none, every agent would share one streak bucket"
+        )
+    return str(ident)
 
 
 def _delayed_stall_sleep(streak: int) -> float:

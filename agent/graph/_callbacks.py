@@ -37,7 +37,7 @@ internal callback timing.
 Per-call instance: `llm_node` creates a new one on each entry (binds the
 current agent_id + independent buf state).
 
-Fan-out hands each event to the per-process `AgentEventPublisher` (`emit`, a
+Fan-out hands each event to the turn's `AgentEventPublisher` (`emit`, a
 non-blocking enqueue), not an awaited Redis publish: these are best-effort
 live-view events that must never stall the llm stream loop on a slow central
 Redis. `process_chunk` / `finish` are therefore synchronous.
