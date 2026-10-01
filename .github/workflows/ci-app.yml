@@ -65,6 +65,11 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ui/app/src-tauri
+          # Only main saves. A cache written on a PR merge ref (Trunk's draft
+          # PRs included) is unreadable by any other PR or queue run, and the
+          # ~1.9 GB set per ref crowds the repository's 10 GB cache cap. PR runs
+          # still restore main's entry, or its prefix match when the key is new.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Rust format
         working-directory: ui/app/src-tauri
@@ -113,6 +118,11 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ui/app/src-tauri
+          # Only main saves. A cache written on a PR merge ref (Trunk's draft
+          # PRs included) is unreadable by any other PR or queue run, and the
+          # ~1.9 GB set per ref crowds the repository's 10 GB cache cap. PR runs
+          # still restore main's entry, or its prefix match when the key is new.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the Tauri CLI
         run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
