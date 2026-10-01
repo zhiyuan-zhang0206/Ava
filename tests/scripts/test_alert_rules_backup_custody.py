@@ -1,4 +1,4 @@
-"""Alert rules for backup/PITR operation custody (quarantined and blocked kinds)."""
+"""Alert rules for backup operation custody (quarantined and blocked kinds)."""
 
 from __future__ import annotations
 
@@ -28,3 +28,17 @@ def test_backup_operation_custody_rules_fire_per_operation_kind(
     assert _threshold_params(rule) == [[0]]
     assert rule["labels"]["severity"] == severity
     assert "attributes_operation" in rule["annotations"]["summary"]
+
+
+@pytest.mark.parametrize(
+    ("uid", "verb"),
+    [
+        ("ava-ops-backup-operation-blocked", "ava backup operations retire"),
+        ("ava-ops-backup-operation-quarantined", "ava backup operations status"),
+    ],
+)
+def test_backup_operation_custody_rules_name_the_live_operator_verb(uid: str, verb: str) -> None:
+    rule = {r["uid"]: r for r in _load_rules()}[uid]
+
+    assert verb in rule["annotations"]["description"]
+    assert "ava pitr operations" not in rule["annotations"]["description"]

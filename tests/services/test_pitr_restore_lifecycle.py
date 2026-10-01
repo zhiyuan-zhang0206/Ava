@@ -17,13 +17,13 @@ from pytest import MonkeyPatch
 from base.cluster.dataplane import pg_tools
 from base.native_process import native_boot_id
 from base.native_process.ownership import OwnedProcess
+from services.backup_scheduler.operation.custody import NativeProcess
 from services.pitr.base_backup.manifest import (
     SCHEMA_VERSION,
     BaseObject,
     CandidateManifest,
     WalRange,
 )
-from services.pitr.operation.custody import NativeProcess
 from services.pitr.restore import manifest, postgres, proof
 from services.pitr.restore.manifest import RestoreObject
 from services.pitr.restore.postgres import (

@@ -89,7 +89,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "schedule_stalled",  # gateway/schedules/manager.py:_report_stalled_schedules telemetry.emit
         "memory_search_stats",  # services/memory_search/app.py:emit_memory_search_stats (positional emit)
         "pitr_remote_inventory",  # services/pitr/retention/scheduler.py:refresh (positional emit)
-        "backup_operation_custody",  # services/pitr/operation/custody.py:report (positional emit)
+        "backup_operation_custody",  # services/backup_scheduler/operation/custody.py:report (positional emit)
         "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore + services/pitr/base_scheduler_daemon.py:run (positional emit)
         "plugin_load_failed",  # base/packages/plugins/load_report.py:report_plugin_load_failure telemetry.emit("telemetry", ...)
         "converge_file_preserved",  # base/host/converge/preserve_report.py:report_converge_preserve telemetry.emit("telemetry", ...)

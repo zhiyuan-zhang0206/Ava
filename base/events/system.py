@@ -269,12 +269,12 @@ class PitrRemoteInventory(TypedDict):
 
 
 class BackupOperationCustody(TypedDict):
-    """`backup_operation_custody` payload — backup/PITR operation custody.
+    """`backup_operation_custody` payload — scheduled backup operation custody.
 
     ``operation`` names the operation kind (``logical-dump``, ``base-candidate``,
     ...). ``custody`` is ``quarantined`` (closure proven; the next operation
     proceeds), ``blocked`` (closure unproven; the kind refuses new work until
-    ``ava pitr operations retire``) or ``retired`` (an operator retirement).
+    ``ava backup operations retire``) or ``retired`` (an operator retirement).
     ``detail`` is the bounded diagnostic; it is never an alert grouping key.
     """
 

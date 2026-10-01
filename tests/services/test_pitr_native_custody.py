@@ -18,9 +18,9 @@ import pytest
 
 from base.native_process import native_boot_id, ownership
 from base.native_process.ownership import OwnedProcess
+from services.backup_scheduler.operation import custody
+from services.backup_scheduler.operation.custody import NativeProcess
 from services.pitr.base_backup import candidate
-from services.pitr.operation import custody
-from services.pitr.operation.custody import NativeProcess
 from services.pitr.restore import postgres, proof
 from services.pitr.restore.postgres import SandboxPostgresIdentity
 from services.pitr.restore.proof import LivePostgresIdentity, RestoreProofError
@@ -348,7 +348,7 @@ def test_logical_kinds_have_separate_control_roots(
 
 def test_worker_bootstrap_refuses_code_outside_its_root(tmp_path: Path) -> None:
     """Workers run the controller's checkout, never another editable install."""
-    from services.pitr.operation import worker_process
+    from services.backup_scheduler.operation import worker_process
 
     _BOOT = [sys.executable, "-I", "-B", "-c", worker_process._BOOTSTRAP]  # noqa: N806
     foreign = subprocess.run(  # noqa: S603
@@ -373,7 +373,7 @@ async def test_launch_failure_quarantines_and_the_next_run_proceeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from base.native_process.exec_domain import ExecProcessDomain
-    from services.pitr.operation import worker_process
+    from services.backup_scheduler.operation import worker_process
 
     def exhausted(*_args: object, **_kwargs: object) -> None:
         raise OSError(24, "Too many open files")
@@ -391,13 +391,13 @@ async def test_worker_secrets_and_progress_never_touch_retained_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The live URL arrives on stdin; stderr progress reaches the operator live."""
-    from services.pitr.operation import worker_process
+    from services.backup_scheduler.operation import worker_process
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(
         tmp_path,
         monkeypatch,
-        "import hashlib\nfrom services.pitr.operation.worker_process import worker_secrets\n"
+        "import hashlib\nfrom services.backup_scheduler.operation.worker_process import worker_secrets\n"
         "seen=hashlib.sha256(worker_secrets()['live_db_url'].encode()).hexdigest()\n"
         "sys.stderr.write('downloading base\\nbase extracted\\n');sys.stderr.flush()\n"
         "Path(sys.argv[2]).write_text(json.dumps({'seen':seen}))\n",
@@ -424,7 +424,7 @@ async def test_custody_steps_run_off_the_event_loop(
 ) -> None:
     """A slow group close never stalls the scheduler's health loop."""
     from base.native_process.exec_domain import ExecProcessDomain
-    from services.pitr.operation import worker_process
+    from services.backup_scheduler.operation import worker_process
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{}')\n")
@@ -490,7 +490,7 @@ async def test_cancelled_drill_gets_time_to_write_its_evidence(
     _worker(
         tmp_path,
         monkeypatch,
-        "from services.pitr.operation.worker_process import worker_request\n"
+        "from services.backup_scheduler.operation.worker_process import worker_request\n"
         "request, output = worker_request(sys.argv)\n"
         "scratch=Path(request['drill']['scratch']);scratch.mkdir()\n"
         "try:\n"
@@ -624,7 +624,7 @@ async def test_commit_holds_the_kind_lock_against_another_controller(
     """A committing operation holds `closure.json` without `committed.json`;
     another controller's admission must never quarantine it as a stopped one."""
     from base.native_process.os_platform import LockTimeoutError
-    from services.pitr.operation import worker_process
+    from services.backup_scheduler.operation import worker_process
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{}')\n")
@@ -674,7 +674,7 @@ async def test_a_stop_during_the_grace_keeps_the_original_failure_on_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The stop propagates, yet the quarantine records why the operation failed."""
-    from services.pitr.operation import worker_process
+    from services.backup_scheduler.operation import worker_process
     from tests.services.test_pitr_operation_owner import _until, _worker
 
     started = tmp_path / "started"
@@ -701,7 +701,7 @@ async def test_a_broken_progress_sink_never_loses_a_passing_operation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An operator's closed stderr pipe must not fail or cancel a healthy drill."""
-    from services.pitr.operation import worker_process
+    from services.backup_scheduler.operation import worker_process
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(
@@ -731,8 +731,8 @@ async def test_a_busy_kind_defers_a_scheduled_run_instead_of_failing_it(
     from datetime import UTC, datetime
 
     from base.native_process.os_platform import LockTimeoutError, file_lock
+    from services.backup_scheduler.operation import worker_process
     from services.pitr import base_scheduler_daemon as scheduler
-    from services.pitr.operation import worker_process
 
     kind = _kind(tmp_path)
     kind.control_root.mkdir(parents=True)

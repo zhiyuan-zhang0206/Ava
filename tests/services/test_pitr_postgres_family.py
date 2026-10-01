@@ -25,8 +25,8 @@ import pytest
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.native_process import native_boot_id
 from base.native_process.ownership import OwnedProcess
-from services.pitr.operation import custody
-from services.pitr.operation import worker_process as workers
+from services.backup_scheduler.operation import custody
+from services.backup_scheduler.operation import worker_process as workers
 from tests.services.test_pitr_native_custody import _control_dir, _exited_worker, _kind
 from tests.services.test_pitr_operation_owner import _release_held, _until, _worker
 
@@ -36,7 +36,7 @@ __all__ = ["_release_held"]  # the per-test release of unresolved leaders
 _BUSY = "SELECT count(*) FROM generate_series(1, 20000000000)"
 _POSTGRES_WORKER = """\
 import psycopg
-from services.pitr.operation.worker_process import worker_request
+from services.backup_scheduler.operation.worker_process import worker_request
 from base.native_process.ownership import OwnedProcess
 from base.cluster.dataplane.pg_foreground import start_foreground_postgres, wait_foreground_postgres
 import psutil
@@ -192,7 +192,7 @@ def test_retirement_applies_the_postgres_family_proof(tmp_path: Path) -> None:
 
 
 _FAKE_POSTMASTER = """\
-from services.pitr.operation.worker_process import worker_request
+from services.backup_scheduler.operation.worker_process import worker_request
 from base.cluster.dataplane.pg_foreground import start_foreground_postgres
 request, output = worker_request(sys.argv)
 start_foreground_postgres(

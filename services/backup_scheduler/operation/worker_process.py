@@ -1,4 +1,4 @@
-"""One directly owned worker process group per backup or PITR operation.
+"""One directly owned worker process group per scheduled backup operation.
 
 The controller launches a fixed worker module in a new session, retains the
 unreaped direct child, and alone signals that group. Trusted tools inherit it;
@@ -8,7 +8,7 @@ A bootstrap puts the controller's own code root first on the worker's path and
 refuses any other import origin. Secrets reach the worker on stdin, never in a
 retained control file.
 
-Every outcome settles custody (`services.pitr.operation.custody`):
+Every outcome settles custody (`services.backup_scheduler.operation.custody`):
 
 - **accepted**: confirmed closure, a zero exit, a valid result and the
   caller's commit under the kind lock; the controls retire.
@@ -18,7 +18,7 @@ Every outcome settles custody (`services.pitr.operation.custody`):
   proved, stop and drain cancellation included; an alert is raised and the
   next operation of the kind proceeds.
 - **blocked**: closure is unproven; the kind refuses new work and alerts until
-  `ava pitr operations retire` re-proves closure.
+  `ava backup operations retire` re-proves closure.
 
 Custody steps (launch, closure, commit, quarantine) run to completion off the
 event loop. A stop that arrives meanwhile waits for the step's real outcome,
@@ -52,7 +52,7 @@ from base.native_process import native_boot_id
 from base.native_process.exec_domain import ExecDomainBirthError, ExecProcessDomain
 from base.native_process.group_closure import confirm_closure
 from base.native_process.os_platform import LockTimeoutError, file_lock
-from services.pitr.operation.custody import (
+from services.backup_scheduler.operation.custody import (
     NativeProcess,
     OperationBusyError,
     OperationDeferred,
@@ -78,7 +78,7 @@ _BOOTSTRAP = """\
 import importlib.util, pathlib, runpy, sys
 root, module = pathlib.Path(sys.argv[1]), sys.argv[2]
 sys.path.insert(0, str(root))
-for name in ("base", "services.pitr", module):
+for name in ("base", "services.backup_scheduler.operation", module):
     spec = importlib.util.find_spec(name)
     origin = None if spec is None else spec.origin
     if origin is None or not pathlib.Path(origin).resolve().is_relative_to(root):
@@ -243,7 +243,7 @@ async def run_operation(
     Proven closure quarantines a failed operation; unproven closure blocks the
     kind. `progress` receives the worker's stderr lines as they are written.
     Persisted files cannot adopt this group after controller death: that
-    needs `ava pitr operations retire` to re-prove closure first.
+    needs `ava backup operations retire` to re-prove closure first.
     """
     if os.name != "posix":
         raise RuntimeError("backup operation workers require POSIX")

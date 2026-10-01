@@ -25,7 +25,7 @@ postmaster inherit its group, and the postmaster is receipted because its
 children setsid() out of it. The controller refuses operator input mistakes
 before launch and confirms closure of the group and of that family before
 accepting the retained drill evidence. A controller crash leaves the drill kind
-blocked until `ava pitr operations retire` re-proves closure.
+blocked until its controls are retired after closure is re-proven.
 """
 
 from __future__ import annotations

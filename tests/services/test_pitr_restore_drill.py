@@ -14,8 +14,8 @@ import pytest
 
 from base.native_process import native_boot_id
 from base.native_process.ownership import OwnedProcess
+from services.backup_scheduler.operation.custody import NativeProcess
 from services.pitr.base_backup.manifest import BaseObject, CandidateManifest, WalRange
-from services.pitr.operation.custody import NativeProcess
 from services.pitr.restore import drill
 from services.pitr.restore.drill import (
     DRILL_TABLES,

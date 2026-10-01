@@ -1,4 +1,4 @@
-"""Custody records, quarantine and retirement for backup and PITR operations.
+"""Custody records, quarantine and retirement for scheduled backup operations.
 
 Each operation kind owns a private control root: a lock plus at most the
 controls of operations whose custody is not settled. A control directory's
@@ -11,7 +11,7 @@ records decide what happens next:
   blocked, and admission and retirement retry it.
 - `committed.json`: the business commit happened; the controls just retire.
 - `unresolved.json`, or no closure proof at all: custody is unproven. The kind
-  is blocked until `ava pitr operations retire` re-proves closure.
+  is blocked until `ava backup operations retire` re-proves closure.
 
 Quarantine runs only after proven closure. The kind's sanitizer removes
 plaintext database material and moves the worker's business receipts into the
@@ -84,19 +84,19 @@ class NativeProcess:
     def capture(cls, process: psutil.Process) -> NativeProcess:
         boot = native_boot_id()
         if boot is None:
-            raise RuntimeError("PITR process custody requires a native POSIX boot identity")
+            raise RuntimeError("process custody requires a native POSIX boot identity")
         return cls(boot, OwnedProcess.capture(process))
 
     @classmethod
     def from_value(cls, value: object) -> NativeProcess:
         if not isinstance(value, dict):
-            raise TypeError("invalid PITR native process receipt")
+            raise TypeError("invalid native process receipt")
         record = cast("dict[str, object]", value)
         if set(record) != {"boot_id", "process"}:
-            raise RuntimeError("invalid PITR native process receipt")
+            raise RuntimeError("invalid native process receipt")
         boot, raw_process = record["boot_id"], record["process"]
         if not isinstance(boot, str) or not boot or not isinstance(raw_process, dict):
-            raise RuntimeError("invalid PITR native process receipt")
+            raise RuntimeError("invalid native process receipt")
         process = cast("dict[str, object]", raw_process)
         return cls(boot, _parse_birth(process))
 
@@ -109,7 +109,7 @@ class NativeProcess:
     def present(self) -> psutil.Process | None:
         """Include an unreaped zombie: it still pins the native PID/group number."""
         if self.boot_id != native_boot_id():
-            raise RuntimeError("PITR process receipt belongs to another boot")
+            raise RuntimeError("process receipt belongs to another boot")
         try:
             current = psutil.Process(self.process.pid)
             if not self.process.same_birth(OwnedProcess.capture(current)):
@@ -134,19 +134,19 @@ class NativeProcess:
 
 def _parse_birth(process: dict[str, object]) -> OwnedProcess:
     if set(process) != {"pid", "birth", "starttime"}:
-        raise RuntimeError("incomplete PITR native process birth")
+        raise RuntimeError("incomplete native process birth")
     pid, birth, ticks = process["pid"], process["birth"], process["starttime"]
     if type(pid) is not int or pid <= 0:
-        raise RuntimeError("invalid PITR native PID")
+        raise RuntimeError("invalid native PID")
     if (
         isinstance(birth, bool)
         or not isinstance(birth, (int, float))
         or not math.isfinite(birth)
         or birth <= 0
     ):
-        raise RuntimeError("invalid PITR native process birth")
+        raise RuntimeError("invalid native process birth")
     if ticks is not None and (type(ticks) is not int or ticks < 0):
-        raise RuntimeError("invalid PITR native start ticks")
+        raise RuntimeError("invalid native start ticks")
     identity = OwnedProcess(pid, float(birth), ticks)
     identity.birth_key()
     return identity
@@ -250,7 +250,7 @@ class OperationBlockedError(RuntimeError):
     def __init__(self, kind: OperationKind, blocked: list[tuple[Path, str]]) -> None:
         listing = "; ".join(f"{path.name}: {reason}" for path, reason in blocked)
         super().__init__(
-            f"{kind.name} operations are blocked until `ava pitr operations retire` "
+            f"{kind.name} operations are blocked until `ava backup operations retire` "
             f"proves closure ({kind.control_root}): {listing}"
         )
         self.blocked = blocked

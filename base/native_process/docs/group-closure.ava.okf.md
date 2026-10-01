@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Process-group closure core
-description: The one standard-library primitive that proves a launched process group closed (SIGKILL rounds, a non-reaping leader-exit wait, a kernel group listing), shared by exec domains, PITR custody and ava-root unit stop.
+description: The one standard-library primitive that proves a launched process group closed (SIGKILL rounds, a non-reaping leader-exit wait, a kernel group listing), shared by exec domains, backup operation custody and ava-root unit stop.
 tags:
 - base
 - process
@@ -46,8 +46,8 @@ This is trusted-tool cleanup, not a fence: a member that calls `setsid()` or
 | Caller | Uses |
 |---|---|
 | `ExecProcessDomain.close_confirmed` | `confirm_closure` with its own round signal: under the domain lock and `Popen`'s wait lock, only while the root's native birth and parentage hold; EPERM passes only when no member is live |
-| PITR unadmitted launch (`ExecDomainBirthError`, held retries) | `confirm_closure` with the default signal |
+| Backup operation unadmitted launch (`ExecDomainBirthError`, held retries) | `confirm_closure` with the default signal |
 | ava-root unit stop | `group_empty` and `group_members`, after the unit leader is reaped |
 
 Consumers: [[agents/incarnation/incarnation-resources.ava.okf.md|exec incarnation resources]],
-[[services/pitr/docs/operation-custody.ava.okf.md|PITR operation custody]].
+[[services/backup_scheduler/docs/operation-custody.ava.okf.md|backup operation custody]].

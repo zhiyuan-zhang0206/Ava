@@ -42,6 +42,11 @@ tags:
 - `ava logs retention`: local, non-recursive managed-log cleanup; legacy global
   14-day fallback or explicit family tiers across service and native archives;
   open handles are excluded.
+- `ava backup operations status/retire`: custody of the scheduled logical dump
+  and restore-drill operations. `status` lists blocked kinds and quarantine
+  (exit 1 while any kind is blocked); `retire` re-proves group closure of each
+  blocked operation, and `--confirm` quarantines the proven ones
+  ([[services/backup_scheduler/docs/operation-custody.ava.okf.md|Operation custody]]).
 - `ava pitr retention inspect`: read-only latest local dry-run plan; no delete
   surface.
 - `ava pitr drill`: operator-driven isolated physical restore drill to an

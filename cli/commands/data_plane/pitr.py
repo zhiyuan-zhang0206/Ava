@@ -13,7 +13,6 @@ from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
 from base.paths import ava_home
 from services.pitr.base_backup.manifest import CandidateManifest
-from services.pitr.operation.custody import OperationKind
 from services.pitr.restore.rollback_snapshot_archive import (
     RollbackSnapshotArchive,
     archive_rollback_snapshot,
@@ -383,114 +382,6 @@ def _drill_summary(evidence: dict[str, object], path: Path) -> dict[str, object]
         "counts_live": counts.get("counts_live"),
         "timings": evidence["timings"],
     }
-
-
-def _operation_kinds() -> list[OperationKind]:
-    from services.backup_scheduler.worker import dump_kind, restore_drill_kind
-    from services.pitr.base_worker import candidate_kind
-    from services.pitr.restore.operation_runtime import drill_kind, restore_kind
-
-    root = ava_home() / "physical-backup"
-    return [
-        dump_kind(),
-        restore_drill_kind(),
-        candidate_kind(root),
-        restore_kind(root),
-        drill_kind(root),
-    ]
-
-
-def cmd_pitr_operations_status() -> int:
-    """Show which operation kinds are blocked and what quarantine holds."""
-    from services.pitr.operation.custody import blocked_operations, quarantine_entries
-
-    kinds = _operation_kinds()
-    blocked_any = False
-    for kind in kinds:
-        blocked = blocked_operations(kind)
-        blocked_any = blocked_any or bool(blocked)
-        print(f"{kind.name}: {'BLOCKED' if blocked else 'ready'} ({kind.control_root})")
-        for work, reason in blocked:
-            print(f"  {work.name}: {reason}")
-    for kind in kinds:
-        entries = quarantine_entries(kind.quarantine_root)
-        print(f"quarantine {kind.quarantine_root}: {len(entries)} entries")
-        for entry in entries[-5:]:
-            print(f"  {entry.name}")
-    if blocked_any:
-        print("run `ava pitr operations retire` to re-prove closure and release a blocked kind")
-    return 1 if blocked_any else 0
-
-
-def cmd_pitr_operations_retire(*, confirm: bool) -> int:
-    """Re-prove closure of blocked operations; `--confirm` quarantines the proven ones."""
-    from base.native_process.os_platform import LockTimeoutError
-    from services.pitr.operation.custody import retire_blocked
-
-    refused = found = False
-    for kind in _operation_kinds():
-        try:
-            reports = retire_blocked(kind, confirm=confirm)
-        except LockTimeoutError:
-            print(f"{kind.name}: an operation is running; retry once it settles", file=sys.stderr)
-            refused = True
-            continue
-        for report in reports:
-            found = True
-            if report.refusal is not None:
-                refused = True
-                verdict = "retirement NOT finished" if report.proven else "closure NOT proven"
-                print(
-                    f"{kind.name} {report.work.name}: {verdict} [{report.refusal}]: {report.reason}",
-                    file=sys.stderr,
-                )
-            elif report.entry is not None:
-                print(f"{kind.name} {report.work.name}: retired into {report.entry}")
-            else:
-                print(f"{kind.name} {report.work.name}: closure proven ({report.reason})")
-    if not found and not refused:
-        print("no blocked operations")
-    elif found and not confirm:
-        print("preview only: re-run with --confirm to quarantine every proven operation")
-    return 1 if refused else 0
-
-
-def cmd_pitr_operations_discard_candidate(*, chain: str, confirm: bool) -> int:
-    """Discard one unfinished base capture an operator judged stale.
-
-    A leftover weekly `.ready` refuses activation's forced candidate and is
-    never resumed while activation holds the schedule. `--confirm` removes it;
-    it refuses while a base-candidate operation runs or its kind is blocked.
-    """
-    from base.native_process.os_platform import LockTimeoutError, file_lock
-    from services.pitr.base_backup.candidate import BaseCandidateError, discard_resumable_candidate
-    from services.pitr.base_worker import candidate_kind
-    from services.pitr.operation.custody import blocked_operations
-
-    root = ava_home() / "physical-backup"
-    kind = candidate_kind(root)
-    try:
-        with file_lock(kind.control_root / ".lock", timeout_s=0):
-            blocked = blocked_operations(kind)
-            if blocked:
-                print(
-                    f"{kind.name} is blocked ({blocked[0][0].name}: {blocked[0][1]}); "
-                    "run `ava pitr operations retire` first",
-                    file=sys.stderr,
-                )
-                return 1
-            ready = discard_resumable_candidate(root, chain, confirm=confirm)
-    except LockTimeoutError:
-        print(f"{kind.name}: an operation is running; retry once it settles", file=sys.stderr)
-        return 1
-    except BaseCandidateError as exc:
-        print(f"pitr operations discard-candidate refused: {exc}", file=sys.stderr)
-        return 1
-    if not confirm:
-        print(f"would discard {ready}; re-run with --confirm to remove it")
-    else:
-        print(f"discarded {ready}")
-    return 0
 
 
 def _resolve_drill_candidate(chain: str | None, candidate: str | None) -> CandidateManifest:

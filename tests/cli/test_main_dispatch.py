@@ -23,6 +23,7 @@ import pytest
 from base.native_process import code_version
 from cli import main as _main
 from cli.parsers import agents as _agents
+from cli.parsers import backup as _backup
 from cli.parsers import build_parser
 from cli.parsers import cluster as _cluster
 from cli.parsers import host as _host
@@ -311,6 +312,24 @@ def test_pitr_retention_inspect_parser_binds_read_only_handler() -> None:
     assert args.func is _pitr._h_pitr_retention_inspect
 
 
+def test_backup_operations_parser_binds_status_and_retire() -> None:
+    parser = _main._build_parser()
+    status = parser.parse_args(["backup", "operations", "status"])
+    retire = parser.parse_args(["backup", "operations", "retire"])
+    confirmed = parser.parse_args(["backup", "operations", "retire", "--confirm"])
+    assert status.func is _backup._h_backup_operations_status
+    assert retire.func is _backup._h_backup_operations_retire
+    assert (retire.confirm, confirmed.confirm) == (False, True)
+
+
+def test_pitr_operations_moved_to_backup_operations() -> None:
+    """Operation custody is the backup domain's: `ava pitr operations` no longer parses."""
+    with pytest.raises(SystemExit) as exited:
+        _main._build_parser().parse_args(["pitr", "operations", "status"])
+
+    assert exited.value.code == 2
+
+
 def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatch) -> None:
     """`ava start --only-service gateway ...` reaches _h_start with the parsed
     argparse Namespace: the service selection is all `start` takes."""
@@ -472,7 +491,7 @@ def test_foreign_checkout_is_refused_before_dispatch(
         ["agents", "ls"],
         ["config", "get"],
         ["schedules", "ls"],
-        ["pitr", "operations", "status"],
+        ["backup", "operations", "status"],
     ],
 )
 def test_foreign_checkout_still_runs_the_read_only_verbs(

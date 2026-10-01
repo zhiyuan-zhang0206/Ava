@@ -21,8 +21,8 @@ mandatory.
 
 The package root holds only process entry points: their module paths are written into service
 manifests, custody records, pidfile identity checks and `postgresql.auto.conf`, so they never move.
-Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`, `wal/`,
-`operation/` and `stores/` (role protocols, GCS adapters, and the `baidu/`, `cos/`, `oss/` backends).
+Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`, `wal/`
+and `stores/` (role protocols, GCS adapters, and the `baidu/`, `cos/`, `oss/` backends).
 
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
 - `services/pitr/activation/state.py` — strict schema-v5 atomic activation record; CAS transitions persist config digests, the exact home operation/action/generation binding, WAL ACK/viewer evidence, and candidate/protected digests while preserving `started_at`; older transport schemas refuse rather than acquiring new authority
@@ -76,12 +76,13 @@ Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`
 
 ## Operation custody
 
-Base candidates, restore proofs and operator drills (and the logical backup
-jobs) each run as one directly owned worker process group; results commit only
-after confirmed closure, a zero exit and validation. A failed or cancelled
-operation with proven closure is quarantined without plaintext and the next
-one proceeds; unproven closure blocks its kind until `ava pitr operations
-retire`: [[services/pitr/docs/operation-custody.ava.okf.md|Operation custody]].
+Base candidates, restore proofs and operator drills each run on the backup
+domain's operation core ([[services/backup_scheduler/docs/operation-custody.ava.okf.md|Operation custody]]):
+one directly owned worker process group; results commit only after confirmed
+closure, a zero exit and validation. A failed or cancelled operation with
+proven closure is quarantined without plaintext and the next one proceeds;
+unproven closure blocks its kind. `ava backup operations retire` covers the
+two logical backup kinds only.
 
 ## Remote retention
 

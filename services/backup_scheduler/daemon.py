@@ -26,6 +26,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
 from services.backup import _cluster_tz, is_due
+from services.backup_scheduler.operation.custody import OperationBusyError
 from services.backup_scheduler.recovery_drill import (
     load_local_dump_restore_success,
     local_dump_restore_due,
@@ -33,7 +34,6 @@ from services.backup_scheduler.recovery_drill import (
 )
 from services.backup_scheduler.worker import run_job
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.pitr.operation.custody import OperationBusyError
 
 _log = logging.getLogger("services.backup_scheduler.daemon")
 
