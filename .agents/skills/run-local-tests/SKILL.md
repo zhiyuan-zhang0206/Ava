@@ -60,9 +60,8 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   re-points the shared venv's editable `.pth` here — breaking every other
   checkout that uses that venv
   ([rationale](../../../conventions/dev-setup.md#development-in-a-worktree)).
-  No venv yet? Build the worktree's own (`env -u VIRTUAL_ENV python
-  scripts/host_ops/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`),
-  or for a test-only run reuse another worktree's real venv:
+  No venv yet? Run `bash scripts/setup-worktree.sh` inside the worktree (it
+  builds the worktree's own), or for a test-only run reuse another worktree's real venv:
   `PYTHONPATH=<this-worktree> <other-worktree>/.venv/bin/python -m pytest ...`
   (PYTHONPATH outranks that venv's `.pth`, so the tests run against this
   worktree's code). This shortcut is only valid when every tested subprocess

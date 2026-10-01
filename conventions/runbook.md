@@ -183,7 +183,7 @@ prod runtime and dev workspace are split at the filesystem level:
 | Path | Role | Notes |
 |---|---|---|
 | `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through `python -m cli.fleet_update` ([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode); `ava.self.update()` was removed 2026-08) |
-| `~/Ava/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool) | freely checkout any branch, decoupled from prod |
+| `~/Ava/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (made by `scripts/setup-worktree.sh <task>`) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool; complete it with `scripts/setup-worktree.sh` inside it) | freely checkout any branch, decoupled from prod |
 
 ### Worktree uv iron rule (Tasks #1572, #5638)
 
@@ -2148,7 +2148,7 @@ Never install from an ephemeral worktree: all worktrees of a clone share
 `git rev-parse --git-common-dir`'s `hooks/` directory, and pre-commit writes the
 installing interpreter's absolute path into `INSTALL_PYTHON`. Deleting that
 worktree leaves a dead pointer. `scripts/setup-worktree.sh` checks the shared
-installation without rewriting hooks or `core.hooksPath`. Converge re-asserts
+installation (`check_git_hooks.py --strict`: a problem stops the bootstrap) without rewriting hooks or `core.hooksPath`. Converge re-asserts
 the same health on every source `ava start`
 (`ensure_local_git_hooks` runs `check_git_hooks.py --scan-machine` over the
 conventional local checkouts); drift warns, it never blocks. Before deleting a
