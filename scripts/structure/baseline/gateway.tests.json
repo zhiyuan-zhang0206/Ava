@@ -11,6 +11,7 @@
   },
   "files": {
     "gateway/tests/test_agent_inspect.py": 823,
+    "gateway/tests/test_agents_sdk.py": 1162,
     "gateway/tests/test_auth.py": 1161,
     "gateway/tests/test_idempotency.py": 859,
     "gateway/tests/test_notices_endpoint.py": 1402,
@@ -20,6 +21,8 @@
   },
   "patch_targets": {
     "gateway/tests/test_agent_inspect.py::gateway.inspect._live": 1,
+    "gateway/tests/test_agents_sdk.py::ava.gateway_client.transport._client": 1,
+    "gateway/tests/test_agents_sdk.py::gateway.agents.router._forward_spawn_to_remote": 1,
     "gateway/tests/test_cache.py::gateway.cluster._stats_dashboard": 2,
     "gateway/tests/test_cache.py::gateway.cluster.status._compute_stats_dashboard": 8,
     "gateway/tests/test_cache.py::gateway.lgtm._loki_transport": 1,
