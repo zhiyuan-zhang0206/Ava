@@ -177,13 +177,13 @@ def test_clear_stale_resolves_only_terminated(monkeypatch: pytest.MonkeyPatch) -
         if url == "http://gw/api/agents/7":
             return _Resp(200, {"agent_id": 7, "status": "terminated"})
         if url == "http://gw/api/agents/9":
-            return _Resp(200, {"agent_id": 9, "status": "restarting"})
+            return _Resp(200, {"agent_id": 9, "status": "idling"})
         assert url == "http://gw/api/notices/open"
         return _Resp(
             200,
             [
                 _notice(1, 7, title="dead agent", require_response=True),
-                _notice(2, 9, title="restarting agent"),
+                _notice(2, 9, title="idle agent"),
             ],
         )
 

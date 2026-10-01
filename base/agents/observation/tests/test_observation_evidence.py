@@ -80,7 +80,7 @@ def test_host_down_precedes_recent_admission_refusal() -> None:
     assert (
         _reason(
             host_online=False,
-            admission_outcome="publication_deferred",
+            admission_outcome="maintenance_hold",
             admission_age=timedelta(seconds=10),
         )
         == AvailabilityReason.HOST_UNAVAILABLE
@@ -120,7 +120,7 @@ def test_stale_admission_outcome_is_unknown_even_with_live_host() -> None:
     assert (
         _reason(
             host_online=True,
-            admission_outcome="publication_deferred",
+            admission_outcome="maintenance_hold",
             admission_age=timedelta(minutes=6),
         )
         == AvailabilityReason.UNKNOWN

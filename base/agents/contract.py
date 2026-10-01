@@ -31,7 +31,6 @@ from typing import ClassVar
 class AgentStatus(StrEnum):
     RUNNING = "running"
     IDLING = "idling"
-    RESTARTING = "restarting"
     TERMINATED = "terminated"
 
 
@@ -70,11 +69,11 @@ class TerminationSource(StrEnum):
     # once the cause clears, so both are resurrect-eligible (backoff-spaced).
     LAUNCH_CONFIRM = "launch-confirm"
     # A framework-detected inconsistency in the row's OWN state killed it — not a
-    # death anyone requested and not a launch that can be retried
-    # (`ops/agents/__init__.py:respawn_agent` finding status='restarting' with no 'restart'
-    # inbound). Deliberately NOT resurrectable: the row's history is corrupt, so an
-    # automatic retry would convert a loud one-time fault into a recurring
-    # background warning. Ops inspects, then resurrects by hand.
+    # death anyone requested and not a launch that can be retried. No code writes
+    # it now; historical rows keep it. Deliberately NOT resurrectable: the row's
+    # history is corrupt, so an automatic retry would convert a loud one-time
+    # fault into a recurring background warning. Ops inspects, then resurrects by
+    # hand.
     INTEGRITY = "integrity"
 
     @classmethod

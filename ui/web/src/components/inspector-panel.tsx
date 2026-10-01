@@ -774,7 +774,6 @@ const STATUS_LABEL_KEY: Record<string, string> = {
   running: "statusRunning",
   idling: "statusIdling",
   impersonated: "statusImpersonated",
-  restarting: "statusRestarting",
   terminated: "statusTerminated",
 };
 
@@ -824,12 +823,10 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
 }
 
 // The "next heartbeat" cell — mirrors the backend's mutually-exclusive states:
-// an active pause renders a clock time; an idle-family agent (idling /
-// restarting — the statuses the fleet view projects to Idle)
+// an active pause renders a clock time; an idling agent
 // with a check-in already queued (the daemon won't send another while an
 // inbound is pending) renders "pending"; one with nothing queued renders its
-// projected next check-in, or "due" when the projection has passed (a
-// restarting agent's idle clock runs on while the daemon skips it — a past
+// projected next check-in, or "due" when the projection has passed (a past
 // "next" time must never render as "Xm ago"); a running or terminated agent
 // an em dash (never checked in on).
 function nextHeartbeatCell(

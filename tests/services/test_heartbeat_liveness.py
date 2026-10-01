@@ -255,7 +255,7 @@ class TestLivenessPass:
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=_OFFLINE_AFTER_FAILURES)
         aid = _make_agent(db_conn, status="idling", lease_s_ahead=600)
-        aid2 = _make_agent(db_conn, status="restarting", lease_s_ahead=None)
+        aid2 = _make_agent(db_conn, status="running", lease_s_ahead=None)
         # Probe success would reset the failure count — this test exercises
         # the merge judgement directly on a pre-set probe state.
         _merge_liveness(pool)
@@ -314,7 +314,7 @@ class TestLivenessPass:
     ) -> None:
         """A mounted frontend receives online/offline truth without a poll storm."""
         _register_machine(db_conn)
-        aid = _make_agent(db_conn, status="restarting", lease_s_ahead=None)
+        aid = _make_agent(db_conn, status="idling")
         announced: list[int] = []
 
         def capture_announcement(agent_id: int) -> None:

@@ -13,7 +13,7 @@ tags:
 
 > Design lead #2861 · design concept v3.3 (2026-08-07) · **design-phase node — the current system is NOT this; see the as-is nodes linked at the bottom.**
 
-> **As landed:** the cluster deploy lease and the per-host updater lease described below were retired with the in-place updater ([decision](../../../decisions/2026-09-30-remove-deployment-lease.md)). `host_deploy_state` carries only the `idle`/`paused` posture, and `deployment_state`'s live consumer is the code-version gate's `min_code_version`. The `stable` / `updating` / `settling` phases, the settle note and `recover` do not exist; agent leases (`agents_meta.lease_expires_at`) landed as designed.
+> **As landed:** the cluster deploy lease and the per-host updater lease described below were retired with the in-place updater ([decision](../../../decisions/2026-09-30-remove-deployment-lease.md)). `host_deploy_state` is `machine`, the `idle`/`paused` posture and `updated_at`, and `deployment_state` is `id` plus the code-version gate's `min_code_version` ([decision](../../../decisions/2026-10-01-contract-the-retired-deploy-storage.md)). The `stable` / `updating` / `settling` phases, the settle note and `recover` do not exist; agent leases (`agents_meta.lease_expires_at`) landed as designed, and the agent state machine has three states (`restarting` was retired).
 
 ## Problem in one sentence
 
@@ -44,7 +44,7 @@ The registry×lease frame for every managed object and the single `alive` predic
 
 ### Agent state machine: one matrix
 
-Four states (`running`/`idling`/`restarting`/`terminated`, matching [[base/docs/agents-contract.ava.okf.md]]) with one transition matrix: each transition is one row (from-set → to → allowed writer → side effects); all writers go through the single entry `agent_state.transition()`. Batch-adjudication edge conditions move from comments into the state graph + tests.
+Four states (`running`/`idling`/`restarting`/`terminated` as designed; `restarting` was retired, so three today, matching [[base/docs/agents-contract.ava.okf.md]]) with one transition matrix: each transition is one row (from-set → to → allowed writer → side effects); all writers go through the single entry `agent_state.transition()`. Batch-adjudication edge conditions move from comments into the state graph + tests.
 
 ### Migration application authority
 
