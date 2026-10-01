@@ -163,13 +163,12 @@ REDIS_PASSWORD_ENV = "AVA_REDIS_PASSWORD"  # noqa: S105 — env key, not a crede
 # inherits, so a process tree that set it keeps every child on the same home.
 AVA_HOME_ENV = "AVA_HOME"
 
-# Bootstrap/identity guide keys an agent that self-fetches its config still
-# needs forwarded before Settings: the gateway URL to reach /api/bootstrap; the
-# data-plane URL as a boot-time fallback; the TLS bundle for the fetch on
-# corp-MITM hosts. Plus the two JSON carriers above. The Settings aliases are
-# declared by field name so an alias rename follows automatically; the rest are
-# passthrough rows.
-_GUIDE_FIELDS = frozenset({"cluster_secret", "gateway_url", "gateway_port"})
+# Non-Settings guide keys an agent that self-fetches its config still needs
+# forwarded before Settings: the TLS bundle for the fetch on corp-MITM hosts,
+# plus the two JSON carriers above, all passthrough rows. The gateway URL and
+# port it dials are host-scope fields, so the session view already forwards
+# them. The cluster secret is in no forwarded view: an agent child presents its
+# API token, never the human bearer.
 _GUIDE_PASSTHROUGH_KEYS = frozenset(
     {"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", AGENT_CONFIG_OVERLAY_ENV, AGENT_BIRTH_CONFIG_ENV}
 )
@@ -408,17 +407,13 @@ def manifest_certification_secret_env() -> dict[str, str]:
     )
 
 
-def _agent_guide_keys() -> frozenset[str]:
-    return frozenset(FIELD_ALIASES[n] for n in _GUIDE_FIELDS) | _GUIDE_PASSTHROUGH_KEYS
-
-
 @lru_cache(maxsize=1)
 def agent_forward_keys() -> frozenset[str]:
     """The detached-agent child allowlist: the session set plus the agent-scope
     aliases (per-agent knobs: AVA_LLM_OVERRIDE etc.) plus the boot-time guide
-    keys (cluster secret, TLS bundle, the
-    overlay/birth JSON carriers — never argv, issue #974)."""
-    return session_forward_keys() | _scope_aliases("agent") | _agent_guide_keys()
+    keys (TLS bundle, the overlay/birth JSON carriers — never argv, issue
+    #974)."""
+    return session_forward_keys() | _scope_aliases("agent") | _GUIDE_PASSTHROUGH_KEYS
 
 
 # ── Projections ──
@@ -464,8 +459,8 @@ def child_env(role: ProcessRole) -> dict[str, str]:
     channel a build child needs; issue #2095) are carried non-empty only — an
     empty $DISPLAY means "no display".
 
-    The allow/drop decision is the DATA in this registry; the callers
-    (base.sessions.env_forwarding / ops.agent_launch) are the mechanism that applies it.
+    The allow/drop decision is the DATA in this registry; the caller
+    (base.sessions.env_forwarding) is the mechanism that applies it.
     """
     _require_role(role)
     _ensure_validated()
