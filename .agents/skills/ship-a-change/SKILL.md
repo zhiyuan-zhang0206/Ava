@@ -103,9 +103,11 @@ Still on you:
 
 1. `git worktree add -b ava-<id>-<task> .worktrees/ava-<id>-<task> main`
 2. Develop and commit in the new worktree (run `bash scripts/setup-worktree.sh`
-   on first use; a fresh worktree needs its own real `.venv` first — worktree uv
-   iron rule in [runbook](../../../conventions/runbook.md): discard an inherited
-   `VIRTUAL_ENV`, then `python scripts/host_ops/guard_editable_venv.py .` and
+   on first use: it creates the worktree's own real `.venv` when absent, runs the
+   locked install and `npm ci` for `ui/web` — the UI hooks need `node_modules`.
+   Worktree uv iron rule in [runbook](../../../conventions/runbook.md) for a
+   manual setup: discard an inherited `VIRTUAL_ENV`, then
+   `python scripts/host_ops/guard_editable_venv.py .` and
    `env -u VIRTUAL_ENV uv sync`). A worktree
    `.venv` must be a real directory under this checkout, **never a symlink**
    to a shared venv (`ln -s ~/Ava/.venv .venv`): a later `uv sync` then writes
