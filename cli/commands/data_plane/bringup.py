@@ -47,7 +47,7 @@ def ensure_gateway_data_plane() -> int:
     if rec is None:
         print(
             f"  ✗ no registry record for home {ava_home()} — cannot bring up its "
-            "data plane. Run this home's `ava start` with its first-start identity.",
+            "data plane. Run `ava init` for this home first.",
             file=sys.stderr,
         )
         return 1

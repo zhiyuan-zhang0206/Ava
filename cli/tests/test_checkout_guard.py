@@ -1,8 +1,8 @@
 """A home that carries its own `<home>/source` checkout is changed only by that checkout.
 
 The rule (`base.host.env.dotenv_boot.home_checkout_error`) is shared by the CLI's
-pre-Settings gate (`cli.preflight.require_own_checkout`), first start's identity
-boundary (`cli.start_intent`) and the service-launch guard
+pre-Settings gate (`cli.preflight.require_own_checkout`), the identity
+boundaries of `ava init` and `ava start` (`cli.init_intent`, `cli.start_intent`) and the service-launch guard
 (`base.paths.prod_service_checkout_error`). A home with no `source` of its own (a
 test or scratch home) accepts any checkout. HOME points at a temporary directory
 wherever the default home is involved, so none of this can touch the operator's
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from base.host.env.dotenv_boot import home_checkout_error
-from cli import fleet_update, preflight, start_intent
+from cli import fleet_update, init_intent, preflight, start_intent
 
 
 def _home_with_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -132,19 +132,19 @@ def test_gate_passes_everything_for_the_homes_own_checkout(
     assert preflight.require_own_checkout(["stop"], home / "source") is None
 
 
-# ── first start ──
+# ── init and start ──
 
 
-def test_first_start_refuses_a_foreign_checkout_before_writing_anything(
+def test_start_refuses_a_foreign_checkout_before_reading_the_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     home = _home_with_source(tmp_path, monkeypatch)
     monkeypatch.setattr(start_intent, "_checkout", lambda: tmp_path / "dev")
 
     def _never_reached(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("a refused start must not reach the start body")
+        raise AssertionError("a refused start must not reach the home's admission")
 
-    monkeypatch.setattr(start_intent, "_prepare_start_locked", _never_reached)
+    monkeypatch.setattr(start_intent, "require_initialized", _never_reached)
     args = argparse.Namespace()
 
     assert start_intent.run_start(args) == 1
@@ -153,7 +153,24 @@ def test_first_start_refuses_a_foreign_checkout_before_writing_anything(
     assert sorted(path.name for path in home.iterdir()) == ["source"], "nothing may be written"
 
 
-def test_first_start_takes_a_test_home_from_any_checkout(
+def test_init_refuses_a_foreign_checkout_before_writing_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _home_with_source(tmp_path, monkeypatch)
+    monkeypatch.setattr(start_intent, "_checkout", lambda: tmp_path / "dev")
+
+    def _never_reached(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a refused init must not reach the identity phase")
+
+    monkeypatch.setattr(init_intent, "initialize_home", _never_reached)
+
+    assert init_intent.run_init(argparse.Namespace()) == 1
+
+    assert "source checkout" in capsys.readouterr().err
+    assert sorted(path.name for path in home.iterdir()) == ["source"], "nothing may be written"
+
+
+def test_a_test_home_is_taken_from_any_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))

@@ -29,7 +29,7 @@ Precedence for both: env var > `$AVA_HOME/<field>` file > fail loud
 `AVA_MACHINE_SERVE_AGENT_RUNNER` / `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` —
 so a single box is not a third role, just the relevant flags true.
 
-There is **no TTY prompt**: `ava start` writes the files from its flags, and a
+There is **no TTY prompt**: `ava init` records these from its flags, and a
 missing value prints an actionable error and exits 1. An agent calling `ava`
 (e.g. `ava cluster status`) has no TTY and would hang on a prompt.
 

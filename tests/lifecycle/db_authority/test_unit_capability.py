@@ -35,11 +35,11 @@ from base.config.service_read import served_db_endpoint
 from base.db.connections import NoDatabaseAuthorityError, _guard_db_url
 from base.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S
 from base.host.env import bootstrap, dotenv_boot
-from cli import start_intent
+from cli import start_intent, unit_join
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.lifecycle.start_generation import _write_generation
-from tests.lifecycle._start_identity import prepare_start_identity
+from tests.lifecycle._init_identity import prepare_init_identity
 from tests.lifecycle.db_authority import test_single_box as _single_box
 from tests.lifecycle.db_authority.test_single_box import Born, _refused
 
@@ -367,7 +367,7 @@ def _runner_args(bundle: Path) -> Any:
 
     return build_parser().parse_args(
         [
-            "start",
+            "init",
             "--serve-agent-runner",
             "--no-serve-gateway",
             "--machine-name",
@@ -380,27 +380,46 @@ def _runner_args(bundle: Path) -> Any:
     )
 
 
-def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
-    born: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def _issue_bundle(out: Path, runner: Path, capsys: pytest.CaptureFixture[str]) -> tuple[str, str]:
+    """Issue `out` for the unit at `runner`: (what `issue-unit` printed, its transport key)."""
     from cli.commands.cluster.control import cmd_db_authority_issue_unit
 
-    _serve_on_loopback(monkeypatch, born)
-    # The gateway's API is authenticated: the bundle carries the unit's API admission.
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
-    runner = (tmp_path / "runner").resolve()
-    bundle = tmp_path / "mini.bundle"
     assert (
-        cmd_db_authority_issue_unit(
-            machine=_MACHINE, home=str(runner), out=str(bundle), ttl_hours=1
-        )
+        cmd_db_authority_issue_unit(machine=_MACHINE, home=str(runner), out=str(out), ttl_hours=1)
         == 0
     )
     printed = capsys.readouterr().out
     match = re.search(r"transport key \(shown once, carry it separately\): (\S+)", printed)
     assert match is not None, printed
+    return printed, match.group(1)
+
+
+def _install_on_initialized_unit(bundle: Path, key: str) -> None:
+    """The initialized unit takes the next bundle through `install-unit`: the same
+    join, the key from the environment, the bundle consumed."""
+    from cli.commands.cluster.control import cmd_db_authority_install_unit
+
+    os.environ[unit.CAPABILITY_KEY_ENV] = key
+    assert cmd_db_authority_install_unit(bundle=str(bundle)) == 0
+    assert not bundle.exists() and unit.CAPABILITY_KEY_ENV not in os.environ
+
+
+def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
+    born: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _serve_on_loopback(monkeypatch, born)
+    # The gateway's API is authenticated: the bundle carries the unit's API admission.
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
+    runner = (tmp_path / "runner").resolve()
+    bundle = tmp_path / "mini.bundle"
+    printed, key = _issue_bundle(bundle, runner, capsys)
+    # A second bundle for the same unit and generation: what `install-unit` installs
+    # on the already initialized unit below.
+    renewal = tmp_path / "mini-renewal.bundle"
+    _, renewal_key = _issue_bundle(renewal, runner, capsys)
     # The unit's first start precedes its `ava` link: the hint names the checkout's CLI.
-    assert "`.venv/bin/ava start --db-capability <bundle>`" in printed, printed
+    assert "`.venv/bin/ava init --db-capability <bundle>`" in printed, printed
+    assert "`ava cluster db-authority install-unit <bundle>`" in printed, printed
     assert bundle.stat().st_mode & 0o777 == 0o600
     served = config.bootstrap_config_values()
     assert urlsplit(served["AVA_DB_URL"]).password is None
@@ -421,17 +440,19 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
         # The unit joins without the human secret: its bundle authenticates it.
         os.environ.pop("AVA_CLUSTER_SECRET", None)
         os.environ["AVA_HOME"] = str(runner)
-        os.environ[unit.CAPABILITY_KEY_ENV] = match.group(1)
-        prepare_start_identity(_runner_args(bundle))
+        os.environ[unit.CAPABILITY_KEY_ENV] = key
+        prepare_init_identity(_runner_args(bundle))
         assert unit.CAPABILITY_KEY_ENV not in os.environ
+        _install_on_initialized_unit(renewal, renewal_key)
     assert not bundle.exists()
     env = dotenv_values(runner / ".env")
     assert "AVA_DB_URL" not in env and unit.CAPABILITY_KEY_ENV not in env
     assert "AVA_CLUSTER_SECRET" not in env
 
     capability = unit.require_unit_capability(runner)
-    # The join's bootstrap fetch presented the bundle's runner API token.
-    assert capability.api is not None and bearers == [capability.api.token]
+    # Each join's bootstrap fetch (init, then install-unit) presented the generation's
+    # runner API token.
+    assert capability.api is not None and bearers == [capability.api.token] * 2
     with psycopg.connect(capability.dsn, prepare_threshold=None, connect_timeout=5) as conn:
         assert conn.execute("SELECT current_user").fetchone() == ("ava_g0_runner",)
         assert conn.execute("SELECT count(*) FROM agents_meta").fetchone() is not None
@@ -446,14 +467,14 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
         }
 
 
-def test_a_remote_unit_home_holding_the_human_secret_refuses_to_start(tmp_path: Path) -> None:
+def test_a_remote_unit_home_holding_the_human_secret_refuses_to_join(tmp_path: Path) -> None:
     """A remote unit never holds the human secret; a home that still records
     it refuses before any fetch or identity effect."""
     home = (tmp_path / "legacy-runner").resolve()
     home.mkdir(mode=0o700)
     values = {"AVA_GATEWAY_URL": "http://10.0.0.7:8000", "AVA_CLUSTER_SECRET": _HUMAN}
     with pytest.raises(ValueError, match="records the human cluster secret"):
-        start_intent._join(values, home, None)
+        unit_join.join_gateway(values, home, None)
 
 
 def test_a_bearer_only_runner_receives_no_database_login(
