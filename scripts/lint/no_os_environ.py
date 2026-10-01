@@ -6,8 +6,8 @@ silent no-op). Also run automatically via pre-commit hook before commit.
 
 ## Why
 
-`base/config.py:Settings` is the single source of truth for runtime
-config. Scattered `os.environ.get("AVA_X")` causes:
+`base.config.settings` (the `Settings` aggregate in `base/config/`) is the single
+source of truth for runtime config. Scattered `os.environ.get("AVA_X")` causes:
 - defaults drift from Settings
 - types (bool/int/float) are unvalidated; ValueError surfaces only at use, not at startup
 - the frontend Control page does not see newly-added vars
@@ -33,9 +33,12 @@ Settings fields. No inline exemption mechanism — avoids scattered hard-to-audi
 
 Scan all `monkeypatch.setenv("X", ...)` / `monkeypatch.delenv("X")` /
 `os.environ["X"] = ...` calls in `tests/`, `test_*.py`, `*_test.py`; if
-X is in Settings's **model_fields alias set**, error — `Settings` is a
-BaseSettings module-load singleton, env is read once at import time, so
-later setenv/delenv cannot reach `settings.x`, and the test silently no-ops.
+X is in Settings's **model_fields alias set**, error — the `Settings`
+singleton is built once and its fields hold the environment as it stood then
+(the pytest conftest builds it eagerly at import, `AVA_CONFIG_BOOT=eager`; a
+production process builds it at the first config read beyond the boot-lite
+surface, see `base/config/__init__.py`), so later setenv/delenv cannot reach
+`settings.x`, and the test silently no-ops.
 Must switch to `monkeypatch.setattr(settings, "<field_name>", value)` —
 except provider API-key env vars declared in `_PROVIDER_KEY_ENV_VARS` and the
 live-read knobs in `_LIVE_READ_ENV_VARS` (see below): those are read from the
@@ -102,8 +105,9 @@ _PROVIDER_KEY_ENV_VARS = frozenset(
 )
 
 # Vars read from the live environment BY DESIGN (not via the Settings singleton,
-# which is constructed once at module load). The exec-child OTLP deferral knobs
-# are read on the child arm path in base/telemetry/otlp/telemetry_otlp_defer.py, where
+# which holds the environment as it stood when it was built). The exec-child
+# OTLP deferral knobs are read on the child arm path in
+# base/telemetry/otlp/telemetry_otlp_defer.py, where
 # constructing Settings would import the config chain the deferral exists to
 # avoid (task #3816 M4b) — so in tests, monkeypatch.setenv on them is a REAL
 # seam, the same class as the provider keys above. Every entry must have its
@@ -210,8 +214,8 @@ def _settings_managed_aliases() -> frozenset[str]:
     """Read every alias from the config field registry — auto-syncs when Settings adds a field.
 
     Returns env var names (alias) that are owned by Settings, so any
-    monkeypatch.setenv on them is a NOOP at runtime (Settings is module-load
-    singleton; env reads happen at __init__ time, not on attribute access).
+    monkeypatch.setenv on them is a NOOP at runtime (the Settings singleton is
+    built once; env reads happen when it is constructed, not on attribute access).
     """
     from base.config import FIELD_INFOS
 
@@ -326,8 +330,8 @@ def main(argv: list[str] | None = None) -> int:
             if kind.startswith("setenv-managed:"):
                 env = kind.split(":", 1)[1]
                 print(
-                    f"{rel}:{lineno}: monkeypatch.setenv/delenv on `{env}` — Settings is a module-load "
-                    f"singleton; env changes do not reach the settings instance field. Use "
+                    f"{rel}:{lineno}: monkeypatch.setenv/delenv on `{env}` — Settings is a singleton "
+                    f"built once; env changes do not reach the settings instance field. Use "
                     f'`monkeypatch.setattr(settings, "<field_name>", value)` instead.'
                 )
             else:
