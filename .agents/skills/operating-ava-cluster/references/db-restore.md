@@ -113,15 +113,23 @@ checkpoint conversation must be proved.
 ## Off-site encrypted copy
 
 After local encryption succeeds and before local pruning, the gateway publishes
-the `.dump.enc` artifact through the shared backup store contract — the same
-backend switch as the physical PITR plane (`AVA_PITR_STORE_BACKEND`), under
-the `ava-logical/` namespace. The publish is if-absent and store-verified
-(ACK: pin_token, size, checksum). It is optional: a missing or unconfigured
-store, or a failed publish, emits a warning but never discards the local
-artifact — the local copy remains the primary. Because only encrypted
-artifacts reach the store, its access model does not expose database contents.
-Remote objects are append-only (the store contract has no delete verb); remote
-retention is a shared planner concern and a follow-up.
+the `.dump.enc` artifact to Aliyun OSS under the `ava-logical/` namespace
+(`services/gateway_side/backup/offsite.py`). It needs
+`AVA_PITR_STORE_BACKEND=oss`, `AVA_PITR_OSS_ENDPOINT`, `AVA_PITR_OSS_BUCKET` and
+`AVA_PITR_OSS_CREDENTIALS_FILE`; a home without them skips the leg with one
+INFO log line. The publish is if-absent (server-enforced `x-oss-forbid-overwrite`
+on completion; the bucket must stay versioning-off) and verified (per-part
+`Content-MD5` plus the multipart ETag chain). It is optional: a failed publish
+or an unusable credentials file logs the cause but never discards the local
+artifact — the local copy remains the primary. Success is judged by the
+destination, not by silence: the log line `[backup] off-site published
+ava-logical/<name> (size=..., pin=..., checksum=md5:...)` and the object itself,
+its size equal to the local `.dump.enc`. To publish one existing artifact by
+hand: `python -m services.backup --publish-offsite /abs/path/<name>.dump.enc`
+(`--offsite-root PREFIX` publishes under another prefix, for a scratch
+check). Only encrypted artifacts reach the bucket, so its access model does
+not expose database contents. Nothing here deletes a remote object; remote expiry
+belongs to the bucket's lifecycle policy.
 
 ## Migration rollback-snapshot archive
 

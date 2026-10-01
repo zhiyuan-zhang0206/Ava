@@ -41,7 +41,7 @@ from cli.commands.tests.test_single_box import Born
 from cli.commands.tests.test_single_box import born as born
 from cli.commands.tests.test_single_box import configured as configured
 from services import backup
-from services.pitr.stores import factory
+from services.gateway_side.backup import offsite
 
 pytestmark = pytest.mark.skipif(
     not (Path(pooler.pgbouncer_bin()).exists() or shutil.which(pooler.pgbouncer_bin())),
@@ -51,8 +51,8 @@ pytestmark = pytest.mark.skipif(
 _REPO = Path(__file__).resolve().parents[3]
 
 
-def _no_store() -> Any:
-    raise RuntimeError("no backup store configured")
+def _no_publish(*_args: object, **_kwargs: object) -> None:
+    """The off-site leg is not under test here."""
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def maintenance(born: Born, monkeypatch: pytest.MonkeyPatch) -> Born:
     monkeypatch.delitem(os.environ, authority.GENERATION_ENV, raising=False)
     monkeypatch.delenv("AVA_DB_ADMIN_PASSWORD", raising=False)
     assert "AVA_DB_ADMIN_PASSWORD" not in (born.home / ".env").read_text()
-    monkeypatch.setattr(factory, "get_store_group", _no_store)
+    monkeypatch.setattr(offsite, "publish", _no_publish)
     return born
 
 
