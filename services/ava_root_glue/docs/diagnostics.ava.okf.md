@@ -40,7 +40,8 @@ until that connection closes. A refused endpoint is DOWN; inspection or
 ownership failures are UNAVAILABLE. PgBouncer diagnostics use the shared native
 PID/config reader directly. Neither diagnostic inherits a maintenance stop verb.
 Both read the home's layout and listener probes from `base.cluster`
-(`ownership.redis_data_dir`, `dataplane.pooler`) and import no `cli` module: a cli
+(`ownership.redis_data_dir`, `dataplane.pooler`) and import no `cli` module (the
+`services must not import cli` import-linter contract keeps it so): a cli
 reorganization cannot silently turn them UNAVAILABLE.
 
 Status includes expected diagnostics before any sample, with null sample time and
