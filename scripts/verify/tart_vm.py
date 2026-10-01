@@ -8,8 +8,9 @@ guest through `export_commit`. This module is where the macOS boundary's rules l
   enforces; whether Linux guests count is not established, so every running Tart VM
   counts), checked before a VM is booted;
 - the only host path a guest sees is a freshly built bare repository holding that one
-  commit's history, mounted read-only and never the host's object store (virtio-fs
-  denies packs that are hard-linked elsewhere on the host: git sees them as missing);
+  commit's history, mounted read-only and never the host's object store (a share holding
+  objects hard-linked to the host's was read with "Permission denied" in the guest, while a
+  fresh-fetch export read cleanly);
 - no clipboard, audio or USB passthrough between host and guest;
 - the host's cluster, credentials, keychain and VM store never enter a guest
   (`boundary.refuse_host_state`), and the host's own state is never an argument.

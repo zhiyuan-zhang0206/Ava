@@ -8,11 +8,10 @@ The shipped model is described in [`AGENTS.md`](../../AGENTS.md) and
 [`runbook.md`](../../conventions/runbook.md); this doc stays as the record of the
 order and of what each slice deleted.
 
-Slice 6 has its Linux container recipe (`scripts/verify/`) and the Tart
-clone-inheritance experiment. Still to do: the Tart recipe is a design with no
-script (the golden image build and the per-run clone driver do not exist), and
-`ava start` end to end inside a macOS guest has not been run; the open items are
-in [verification boundaries](verification-boundaries.md#not-yet-known).
+Slice 6 has its Linux container recipe and its Tart recipe (`scripts/verify/`: the
+golden image build and the per-run clone driver) and the Tart clone-inheritance
+experiment; `ava start` end to end inside a cloned macOS guest has run once. The
+open items are in [verification boundaries](verification-boundaries.md#not-yet-known).
 
 ## Boundary
 
@@ -55,7 +54,7 @@ and tests relocation (the locality work), and the data plane itself.
 | 3 | done (#3774) | Port-block allocation and cross-cluster preflight; `--health-port-base`, `health_port_env` and the WSL default base; the retired `restarter` and `coordinator` slots. New homes record the fixed port table (25 slots, `base/host/env/port_table.py`); a home keeps reading its recorded ports; tests keep ports of their own (the session's kernel-assigned table for homes born in tests) | `base/cluster/{ports,port_preflight,derive}.py`, `base/host/env/{port_table,registry}.py`, `cli/commands/converge/{port_preflight,health_preflight}.py`, `cli/preflight.py`, `cli/start_identity.py`, `cli/start_intent.py`, `cli/parsers/host.py`, and the 10 consumers of `record_*_port`, now `rec.ports[...]` (`base/db/{connections,pg_admin}.py`, `cli/commands/data_plane/{bringup,cluster_instance,pgbouncer}.py`, `cli/commands/converge/redis_bridge.py`, `cli/commands/observability/otel_collector.py`, `services/ava_root_glue/diagnostic_probes.py`, `services/pitr/activation/runtime.py`, `scripts/data_plane_ops/rotate_data_plane_secrets.py`) | Bring-up reads recorded ports unchanged. A record that still carries the two retired slots is refused at start, so they are deleted from `start-intent.json` by hand between the stop and the start |
 | 4 | done (#3787) | The bare-`ava` launcher routing, the per-home CLI link, `AVA_HOST_STATE_DIR` (host state is the home), per-home OS job slugs; `ava` on PATH becomes a direct link to the production source CLI. `cluster down` is deleted and `cluster destroy` loses `--path`: it acts on this home, the default one included, and needs an interactive confirmation (type the home path, no bypass flag). Fixed OS job labels need a gate in the same slice: only the default home registers or removes OS jobs. The permissions helper keeps its per-home launchd label for now (a fixed label changes its launchd identity on every Mac, to be taken on its own) | `scripts/ava-launcher.sh`, `cli/commands/converge/{_steps,host}.py`, `cli/commands/cluster/home.py`, `base/config/general.py`, `base/paths`, `base/host/system/*`, `tests/base/test_bare_ava.py` | Host wiring. Converge rewrites the PATH link and the crontab lines on the next start; the old launchd jobs and the old Linux boot unit are removed by hand between the stop and the start |
 | 5 | done (#3795) | The one-step birth inside `ava start`: `ava init` takes the first-start flags (11 of `start`'s 15; `--worktree` and `--health-port-base`, the other two of the original 17, went with slices 2 and 3), writes the home's identity and starts nothing; `start` keeps service selection and fails fast on an uninitialized home. The data plane is still born by the first `start` (the birth branches follow the intent's phase). `--db-capability` also serves a runner's later bundle, so it moves to `ava cluster db-authority install-unit` beside `issue-unit` | `cli/parsers/host.py`, `cli/init_intent.py` (new), `cli/unit_join.py` (new), `cli/start_intent.py`, `cli/start_identity.py`, `cli/commands/lifecycle/start.py`, `cli/commands/_setup.py`, `cli/commands/cluster/control.py`, `scripts/verify/container.py` | Small: the identity half of `start` was already a settings-free phase. No intent change, so no hand step on a running home |
-| 6 | partly done: container recipe (#3779), Tart experiment (#3782) | Nothing is deleted: the container and Tart recipes that replace the native preview (a Linux image running the normal stack, a Tart base image with its one-time grants) | new: [verification boundaries](verification-boundaries.md); the container recipe is `scripts/verify/`; the Tart clone-inheritance experiment passed (Experiment B there: a clone of a granted image keeps the helper identity and both grants); the Tart recipe is not scripted and `ava start` end to end in a guest has not been run | Separate design; slices 1 to 5 do not wait for it |
+| 6 | done: container recipe (#3779), Tart experiment (#3782), Tart recipe scripts | Nothing is deleted: the container and Tart recipes that replace the native preview (a Linux image running the normal stack, a Tart base image with its one-time grants) | new: [verification boundaries](verification-boundaries.md); the container recipe is `scripts/verify/`; the Tart clone-inheritance experiment passed (Experiment B there: a clone of a granted image keeps the helper identity and both grants); the Tart recipe is `scripts/verify/tart_run.py` (per run) and `tart_golden.py` (golden image), and one run of it carried `ava start` end to end in a guest | Separate design; slices 1 to 5 do not wait for it |
 
 Dependency order: slice 1 first, a pure deletion that removes the largest
 consumer of everything after it. Slice 3 is implemented against whatever of
@@ -97,10 +96,11 @@ their packages' own `tests/` directories under the locality work.
 
 ## Not yet known
 
-- Whether `ava start` runs end to end inside a Tart macOS guest. The signed
-  helper chain and the grants of a cloned image are answered (Experiment B in
-  [verification boundaries](verification-boundaries.md#experiment-b-clone-inheritance-outside-the-repository-run-2026-10-01)):
-  a clone keeps the helper identity and both grants, with no approval at clone time.
+- Whether a golden image built by `tart_golden.py` (rather than by hand) holds up
+  across days and commits; the open Tart items are in
+  [verification boundaries](verification-boundaries.md#not-yet-known). Answered: a clone
+  keeps the helper identity and both grants with no approval at clone time (Experiment B
+  there), and `ava start` runs end to end inside a cloned guest (its Recipe C run).
 - Whether any agent workflow still depends on a worktree cluster; the
   self-development skill does not require one.
 - Whether the impersonation preview can run in a container with the CLI logins
