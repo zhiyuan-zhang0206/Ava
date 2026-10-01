@@ -4,7 +4,7 @@ cache-friendliness).
 A fork must keep the source agent's effective config (so the inherited context
 stays cache-valid); the only sanctioned change is ADDING skills to the two
 skill lists. These tests drive POST /api/agents through TestClient with the
-in-process spawn fixture (tests/gateway/conftest.py) and read the stored row +
+in-process spawn fixture (tests/path_scoped/gateway_tests.py) and read the stored row +
 the fork inbound payload through db_conn.
 """
 

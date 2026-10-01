@@ -4,7 +4,7 @@ PTY session whose command line tees output to a log file and session capture,
 then ends with the CLI completion notice (`ava agents send ... --source
 watcher:N`); cron/at build a script then spawn.
 
-The `_pty_sessions_env` fixture (session-scoped, tests/ava/conftest.py) runs the
+The `_pty_sessions_env` fixture (session-scoped, tests/path_scoped/ava_tests.py) runs the
 real supervisor daemon under the tmp test home; the session tests are
 POSIX-only (skip on Windows — the PTY supervisor is POSIX-only)."""
 

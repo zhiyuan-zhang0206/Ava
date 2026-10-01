@@ -1,7 +1,7 @@
 """ava.shell unit tests — one-shot `run(cmd)` + persistent PTY session wrapper.
 
 Runs against real detached per-session PTY hosts + real bash. The
-`_pty_sessions_env` fixture (session-scoped, tests/ava/conftest.py) pins a tmp
+`_pty_sessions_env` fixture (session-scoped, tests/path_scoped/ava_tests.py) pins a tmp
 test home and sweeps its sessions; POSIX-only, skips entirely on Windows.
 
 Sessions are distinguished by name prefix. Parallel xdist workers each use a
@@ -35,7 +35,7 @@ pytestmark = [
 
 # The shared PTY/agent isolation fixtures (`_pty_sessions_env`, `_isolated_agent`,
 # `_agent_row`) and the `_ensure_agents_meta_row` helper live in
-# `tests/ava/conftest.py` so both this module and `test_watcher.py` inherit
+# `tests/path_scoped/ava_tests.py` so both this module and `test_watcher.py` inherit
 # them.
 
 
