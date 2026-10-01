@@ -86,6 +86,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "tests the root leak guard plugin, tests/fixtures/leak_guard.py",
     ),
+    "tests/ci/test_leak_guard_cost.py": (
+        "contract",
+        "tests the cost of the root leak guard plugin, tests/fixtures/leak_guard.py",
+    ),
     "tests/ci/test_path_scopes.py": (
         "contract",
         "tests the PATH_SCOPES plugin, tests/fixtures/path_scopes.py",
@@ -97,6 +101,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/ci/test_prepush_hooks.py": (
         "contract",
         "runs .pre-commit-config.yaml and the scripts/prepush-*.sh hooks as processes",
+    ),
+    "tests/ci/test_prepush_selection.py": (
+        "contract",
+        "runs the scripts/prepush-*.sh and precommit-eslint.sh hooks against .pre-commit-config.yaml in throwaway repositories",
     ),
     "tests/ci/test_pyright_test_environments.py": (
         "contract",

@@ -96,15 +96,19 @@ def _run(
     return status, out.out, out.err
 
 
+def _make_repo(root: pathlib.Path) -> pathlib.Path:
+    """A tracked repository at `root` with one frozen top-level test and nothing else registered."""
+    for rel, text in _SOURCES.items():
+        _write(root, rel, text)
+    _freeze(root, [_KEY])
+    _git(root, "init", "--quiet")
+    _git(root, "add", "-A")
+    return root
+
+
 @pytest.fixture
 def repo(tmp_path: pathlib.Path) -> pathlib.Path:
-    """A tracked repository with one frozen top-level test and nothing else registered."""
-    for rel, text in _SOURCES.items():
-        _write(tmp_path, rel, text)
-    _freeze(tmp_path, [_KEY])
-    _git(tmp_path, "init", "--quiet")
-    _git(tmp_path, "add", "-A")
-    return tmp_path
+    return _make_repo(tmp_path)
 
 
 def _track(root: pathlib.Path, rel: str, text: str = "def test_it():\n    pass\n") -> None:
@@ -247,23 +251,45 @@ def test_a_baseline_value_other_than_one_is_an_error(
     assert "with the value 1" in err
 
 
-# ------------------------------------------------------------------ explicit paths (the commit hook)
+# ------------------------------------------------------------------ explicit paths and --only
 
 
-def test_explicit_paths_check_those_tests_only(
+def test_explicit_paths_judge_exactly_those_tests(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _track(repo, "tests/base/test_a.py")
     _track(repo, "tests/base/test_b.py")
     status, out, _ = _run(repo, capsys, ["tests/base/test_a.py"])
     assert status == 1
-    assert [line.split(":")[0] for line in out.splitlines() if ":1:" in line] == [
-        "tests/base/test_a.py"
-    ]
+    assert _flagged(out) == ["tests/base/test_a.py"]
     assert _run(repo, capsys, ["tests/base/test_x.py"]) == (0, "", "")  # frozen: fine
-    assert (
-        _run(repo, capsys, [str(repo / "tests/base/test_a.py")])[0] == 1
-    )  # absolute, as hooks pass
+    assert _run(repo, capsys, [str(repo / "tests/base/test_a.py")])[0] == 1  # absolute path
+
+
+def _flagged(out: str) -> list[str]:
+    return [line.split(":")[0] for line in out.splitlines() if ":1: a top-level test" in line]
+
+
+def test_only_judges_the_changed_top_level_tests_and_nothing_else(
+    repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _track(repo, "tests/base/test_a.py")
+    _track(repo, "tests/base/test_b.py")
+    _track(repo, "base/net/tests/test_p.py")
+    status, out, _ = _run(
+        repo, capsys, ["--only", "tests/base/test_a.py", "base/net/tests/test_p.py"]
+    )
+    assert status == 1
+    assert _flagged(out) == ["tests/base/test_a.py"]  # test_b did not change
+    assert _run(repo, capsys, ["--only", "tests/base/test_x.py"]) == (0, "", "")  # frozen
+    assert _run(repo, capsys, ["--only", str(repo / "tests/base/test_a.py")])[0] == 1
+
+
+def test_only_with_nothing_changed_has_nothing_to_judge(
+    repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _track(repo, "tests/base/test_a.py")
+    assert _run(repo, capsys, ["--only"]) == (0, "", "")
 
 
 @pytest.mark.parametrize(
@@ -272,17 +298,30 @@ def test_explicit_paths_check_those_tests_only(
         _SHARD,
         "scripts/structure/tests_location.py",
         "scripts/structure/tests_location_allowed.py",
+        "scripts/structure/tests_location_suggest.py",
     ],
 )
-def test_a_changed_rule_input_checks_every_test(
+def test_a_changed_rule_input_widens_only_to_every_test(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str], rule_input: str
 ) -> None:
     _track(repo, "tests/base/test_a.py")
-    _track(repo, "scripts/structure/tests_location.py", "# the lint\n")
-    _track(repo, "scripts/structure/tests_location_allowed.py", "# the registry\n")
-    status, out, _ = _run(repo, capsys, [rule_input])
+    if rule_input != _SHARD:  # the shard is the repository's own, already tracked
+        _track(repo, rule_input, "# a rule input\n")
+    status, out, _ = _run(repo, capsys, ["--only", rule_input])
     assert status == 1
-    assert "tests/base/test_a.py:1:" in out
+    assert _flagged(out) == ["tests/base/test_a.py"]
+
+
+def test_a_changed_test_of_the_lint_itself_does_not_widen(
+    repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _track(repo, "tests/base/test_a.py")
+    _track(repo, "scripts/structure/tests/test_tests_location.py")
+    assert _run(repo, capsys, ["--only", "scripts/structure/tests/test_tests_location.py"]) == (
+        0,
+        "",
+        "",
+    )
 
 
 def test_a_registry_entry_gone_stale_is_found_whichever_file_the_commit_names(
@@ -290,9 +329,11 @@ def test_a_registry_entry_gone_stale_is_found_whichever_file_the_commit_names(
 ) -> None:
     _track(repo, "tests/base/test_other.py")
     _git(repo, "rm", "-q", "-f", "tests/base/test_x.py")
-    status, out, _ = _run(repo, capsys, ["tests/base/test_other.py"])
-    assert status == 1
-    assert "stale entry `tests/base/test_x.py`" in out
+    _track(repo, "base/net/tests/test_p.py")
+    for argv in (["tests/base/test_other.py"], ["--only", "base/net/tests/test_p.py"]):
+        status, out, _ = _run(repo, capsys, argv)
+        assert status == 1
+        assert "stale entry `tests/base/test_x.py`" in out
 
 
 def test_a_missing_explicit_path_is_an_error(
@@ -301,6 +342,40 @@ def test_a_missing_explicit_path_is_an_error(
     status, out, err = _run(repo, capsys, ["tests/base/test_nope.py"])
     assert (status, out) == (1, "")
     assert "target path(s) not found: tests/base/test_nope.py" in err
+
+
+def test_a_missing_only_path_is_an_error(repo: pathlib.Path) -> None:
+    with pytest.raises(SystemExit, match=r"target path\(s\) not found: tests/base/test_nope.py"):
+        tl.main(["--only", "tests/base/test_nope.py"], repo_root=repo, allowed={})
+
+
+# ------------------------------------------------------------------ where the checkout sits
+
+
+def test_the_verdicts_do_not_depend_on_where_the_checkout_sits(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every judgment is on the path below the repository root: a checkout under directories
+    named `tests`, `e2e`, `tmp`, `build`, `ui` or `fixtures` is judged like one anywhere else."""
+    verdicts: list[tuple[int, list[str]]] = []
+    for root in (
+        tmp_path / "plain",
+        tmp_path / "tests" / "e2e" / "tmp" / "build" / "ui" / "fixtures" / "repo",
+    ):
+        _make_repo(root)
+        _track(root, "tests/base/test_new.py")
+        _track(root, "tests/e2e/test_flow.py")
+        _track(root, "tests/ui/test_app.py")
+        _track(root, "base/net/tests/test_p.py")
+        for argv in ([], ["--only", "tests/base/test_new.py", "tests/e2e/test_flow.py"]):
+            status, out, _ = _run(root, capsys, argv)
+            verdicts.append((status, _flagged(out)))
+        status, out, _ = _run(
+            root, capsys, ["--only", "tests/e2e/test_flow.py", "tests/ui/test_app.py"]
+        )
+        verdicts.append((status, _flagged(out)))
+    assert verdicts[:3] == verdicts[3:]
+    assert verdicts[:3] == [(1, ["tests/base/test_new.py"])] * 2 + [(0, [])]
 
 
 # ------------------------------------------------------------------ the checks never read the code

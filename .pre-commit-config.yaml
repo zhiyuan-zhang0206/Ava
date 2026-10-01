@@ -170,20 +170,19 @@ repos:
       # registered in scripts/structure/tests_location_allowed.py (`contract` or `integration`,
       # with a reason) or be frozen in the `tests_location` baseline section (the tests still to
       # move): new tests belong in their package's own tests/ directory. The verdict is a path
-      # lookup (no placement rule, no import graph), so this hook is a process start plus the
-      # baseline shards (~0.06 s); pre-commit passes the changed test files and a changed lint,
-      # registry or baseline shard checks every test. `--suggest FILE` names the package a test
-      # belongs in. See scripts/structure/tests_location.py header.
+      # lookup (no placement rule, no import graph): `--only` judges the changed test files at a
+      # cost of a process start plus the baseline shards (~0.06 s), and a changed lint tool,
+      # registry or baseline shard (scripts/structure/) widens it to every test. `--suggest FILE`
+      # names the package a test belongs in. See scripts/structure/tests_location.py header.
       - id: lint-tests-location
         name: lint tests location (a new test belongs in its package, not the top-level tests/)
-        entry: .venv/bin/python scripts/structure/tests_location.py
+        entry: .venv/bin/python scripts/structure/tests_location.py --only
         language: system
-        require_serial: true
         files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/structure/(tests_location|tests_location_allowed|tests_location_suggest)\.py|scripts/structure/baseline/.*\.json)$
 
-      # The full check of the hook above at every push (every tracked top-level test, ~0.08 s):
-      # a deleted or renamed test is never passed to a commit hook, so its stale registry entry
-      # is found here.
+      # The full check of the hook above at every push (every tracked top-level test, ~0.08 s, so
+      # unwrapped): a per-file hook never judges a deletion, so a deleted or renamed test's stale
+      # registry entry is found here (and in CI's `--all-files` run).
       - id: lint-tests-location-full
         name: lint tests location, full (every tracked top-level test; catches a stale entry)
         entry: .venv/bin/python scripts/structure/tests_location.py
@@ -191,7 +190,6 @@ repos:
         stages: [pre-push]
         always_run: true
         pass_filenames: false
-        require_serial: true
 
       # Ban building a psycopg pool without TCP keepalives where the structure
       # gate's `postgres-dial` rule cannot see it: scripts/ and the modules that

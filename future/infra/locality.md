@@ -78,7 +78,7 @@ lifecycle; those items wait for it to land and are then designed on its code.
    candidate — most of its readers sit in files #3479 rewrites.
    `base/config` as a registration hub needs a design pass first.
 5. **Tests in the top-level `tests/`** (`scripts/structure/tests_location.py`, the
-   `tests_location` section: 216 frozen tests; `tests_location_allowed.py`: 61 registered, 56
+   `tests_location` section: 209 frozen tests; `tests_location_allowed.py`: 63 registered, 58
    `contract` and 5 `integration`). The lint refuses a new top-level test that is not e2e, UI or
    registered, by path alone; the frozen tests are the work list for moving tests into their
    packages (`--suggest <file>` names each one's lowest legal package, the move tool's job).

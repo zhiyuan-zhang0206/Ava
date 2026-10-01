@@ -52,14 +52,12 @@
   "tests_location": {
     "tests/agent/test_checkpoint_serde.py::top-level": 1,
     "tests/agent/test_claim.py::top-level": 1,
-    "tests/agent/test_claim_attach_drain.py::top-level": 1,
     "tests/agent/test_compact.py::top-level": 1,
     "tests/agent/test_corpse_reap.py::top-level": 1,
     "tests/agent/test_exec_domain_confirmation.py::top-level": 1,
     "tests/agent/test_exec_owner_entry.py::top-level": 1,
     "tests/agent/test_exec_turn_config.py::top-level": 1,
     "tests/agent/test_fork_notes.py::top-level": 1,
-    "tests/agent/test_graph_stream.py::top-level": 1,
     "tests/agent/test_hosted_db_flush_recovery.py::top-level": 1,
     "tests/agent/test_hosted_force_quiescence.py::top-level": 1,
     "tests/agent/test_hosted_force_terminate_close.py::top-level": 1,
@@ -77,12 +75,10 @@
     "tests/agent/test_maintenance_lifecycle_wait.py::top-level": 1,
     "tests/agent/test_maintenance_receipt_grading.py::top-level": 1,
     "tests/agent/test_multiple_tool_calls.py::top-level": 1,
-    "tests/agent/test_node_log.py::top-level": 1,
     "tests/agent/test_plugin_config.py::top-level": 1,
     "tests/agent/test_preloaded_skills.py::top-level": 1,
     "tests/agent/test_process_boot.py::top-level": 1,
     "tests/agent/test_resource_admission.py::top-level": 1,
-    "tests/agent/test_startup_restore_pages.py::top-level": 1,
-    "tests/agent/test_syntax_fix_billing.py::top-level": 1
+    "tests/agent/test_startup_restore_pages.py::top-level": 1
   }
 }

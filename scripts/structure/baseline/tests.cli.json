@@ -54,7 +54,6 @@
   "tests_location": {
     "tests/cli/test_agent_host_identity_probe.py::top-level": 1,
     "tests/cli/test_commands_cluster_status.py::top-level": 1,
-    "tests/cli/test_converge_github_pr.py::top-level": 1,
     "tests/cli/test_converge_lgtm.py::top-level": 1,
     "tests/cli/test_converge_redis_bridge.py::top-level": 1,
     "tests/cli/test_grafana_render_cmd.py::top-level": 1,
