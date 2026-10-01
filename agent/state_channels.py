@@ -11,7 +11,7 @@ every name from here, and **new checkpoints** validate because
 `agent.state_channels` is in the allowlist too. Both halves are load-bearing —
 drop the re-export and old checkpoints stop deserializing; drop the new
 allowlist entry and freshly-written checkpoints warn (and will block when
-langgraph makes the allowlist strict). `tests/agent/test_checkpoint_serde.py`
+langgraph makes the allowlist strict). `agent/tests/test_checkpoint_serde.py`
 locks both directions.
 """
 
