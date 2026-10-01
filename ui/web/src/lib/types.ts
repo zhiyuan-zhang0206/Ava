@@ -93,7 +93,7 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
     status === row.status &&
     "awaiting_response_count" in row
   ) {
-    return row as AgentRow;
+    return row;
   }
   // Hand-rebuilt allowlist: an omitted optional field vanishes silently (availability, task #4723).
   return {
