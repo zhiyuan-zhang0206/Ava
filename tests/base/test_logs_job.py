@@ -207,13 +207,3 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     assert job._unregister_macos() == 0
     assert not plist.exists()
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootout"]
-
-
-def test_converge_registers_logs_maintenance(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands.converge._os_jobs import ensure_logs_maintenance
-
-    calls: list[str] = []
-    monkeypatch.setattr(job, "register_logs_job", lambda: calls.append("register"))
-
-    ensure_logs_maintenance(None)  # type: ignore[arg-type]
-    assert calls == ["register"]

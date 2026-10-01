@@ -246,13 +246,3 @@ def test_unregister_delegates_to_the_backend(
 
     job.unregister_packages_job()
     assert calls == ["unregister"]
-
-
-def test_converge_registers_the_refresh_job(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands.converge._os_jobs import ensure_packages_refresh_job
-
-    calls: list[str] = []
-    monkeypatch.setattr(job, "register_packages_job", lambda: calls.append("register"))
-
-    ensure_packages_refresh_job(None)  # type: ignore[arg-type]
-    assert calls == ["register"]

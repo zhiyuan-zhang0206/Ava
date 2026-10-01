@@ -21,7 +21,6 @@
     "tests/base/test_telemetry_otlp_exit_delivery.py::_sent_pairs": 6
   },
   "patch_targets": {
-    "tests/base/test_boot_unit.py::base.host.system.boot_unit._systemctl": 3,
     "tests/base/test_connect_helpers.py::base.db.code_version_gate._has_log_sink": 1,
     "tests/base/test_connect_helpers.py::base.db.code_version_gate._last_read_at": 2,
     "tests/base/test_connect_helpers.py::base.native_process.code_version._db_gate_exempt": 1,
