@@ -11,6 +11,7 @@
   },
   "files": {
     "gateway/tests/test_agent_inspect.py": 823,
+    "gateway/tests/test_auth.py": 1161,
     "gateway/tests/test_idempotency.py": 859,
     "gateway/tests/test_notices_endpoint.py": 1402,
     "gateway/tests/test_routes.py": 1221,
