@@ -153,7 +153,7 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     rest stay green while quietly testing a different world.
 
     The opt-in for the installed meaning is `_installed_machine_identity` in
-    `tests/cli/conftest.py` — a module takes it with one line:
+    `tests/path_scoped/cli_tests.py` — a module takes it with one line:
     `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
     """
     from base.cluster.machine import reset_identity
@@ -210,7 +210,7 @@ def workspace(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     Pins the agent id explicitly via monkeypatch instead of relying on the
     session-global `ava.agent_identity._agent_id = 1` staying unmutated across test
     ordering (a leak through that global is exactly what the `_isolated_agent`
-    monkeypatch fix in tests/ava/conftest.py guards against). The dir is NOT
+    monkeypatch fix in tests/path_scoped/ava_tests.py guards against). The dir is NOT
     pre-created — `workspace_dir` mkdirs on first resolution, and several
     tests assert exactly that; pre-create with `.mkdir(parents=True)` when a
     test seeds files into it.

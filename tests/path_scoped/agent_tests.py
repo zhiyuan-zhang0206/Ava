@@ -1,4 +1,4 @@
-"""Shared fixtures for tests/agent/.
+"""Shared fixtures for the agent tests (registered by `tests/fixtures/path_scopes.py`).
 
 `fake_cancel_event` replaces llm._cancel / exec.node's `subscribe_interrupt` — lets tests
 trigger the cancel race directly via `event.set()`, avoiding a real DB inbound
@@ -6,10 +6,9 @@ watcher (slow + flaky). The production path always goes through RAII subscribe
 (inbound Redis pub/sub); this fixture only affects name bindings in the import
 path, with zero impact on production.
 
-Placed in conftest rather than in individual test files: tests/agent/test_cancel.py
-verifies the race trigger; tests/agent/test_graph_stream.py runs llm/exec nodes
-without wanting a real Redis SUBSCRIBE (fake_redis is an AsyncMock, no pubsub
-behavior).
+Shared here rather than in individual test files: test_cancel.py verifies the
+race trigger; test_graph_stream.py runs llm/exec nodes without wanting a real
+Redis SUBSCRIBE (fake_redis is an AsyncMock, no pubsub behavior).
 """
 
 from __future__ import annotations

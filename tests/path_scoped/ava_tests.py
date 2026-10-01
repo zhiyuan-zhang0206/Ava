@@ -1,4 +1,4 @@
-"""Shared fixtures for PTY-backed SDK tests (`ava.shell`, `ava.watcher`).
+"""Shared fixtures for the ava SDK tests (registered by `tests/fixtures/path_scopes.py`), PTY-backed ones among them (`ava.shell`, `ava.watcher`).
 
 Sessions are pty sessions, each carried by its own detached host process
 (`base.sessions.pty`) under the tmp test home; the `_pty_sessions_env`
@@ -18,11 +18,13 @@ import time
 from collections.abc import Iterator
 
 import pytest
-from pydantic import SecretStr
 
 import ava
 from ava import shell
-from base.config import settings as _settings
+
+# One definition shared with the gateway and integration modules; imported here so it
+# registers for this module's paths.
+from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
 
 # Parallel xdist worker isolation: pty session records/sockets live under each
 # worker's own tmp test home, so workers cannot collide; still, each worker uses
@@ -33,23 +35,6 @@ from base.config import settings as _settings
 # captured self id. Spaced by 10 to leave room for the "other agent" in filter tests.
 _WORKER_NUM = int(re.sub(r"\D", "", os.environ.get("PYTEST_XDIST_WORKER", "")) or "0")
 _TEST_AGENT_BASE = 900_000 + _WORKER_NUM * 10
-
-
-@pytest.fixture(autouse=True)
-def _mock_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set all API keys to dummy values so spawn validation passes in tests
-    that exercise the gateway (e.g. test_agents_sdk)."""
-    for attr in (
-        "anthropic_api_key",
-        "deepseek_api_key",
-        "gemini_api_key",
-        "openai_api_key",
-        "xiaomi_api_key",
-        "moonshot_api_key",
-        "zhipu_api_key",
-        "dashscope_api_key",
-    ):
-        monkeypatch.setattr(_settings.lm, attr, SecretStr("sk-test"))
 
 
 def _ensure_agents_meta_row(agent_id: int | None = None) -> None:

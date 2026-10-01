@@ -1,0 +1,6 @@
+{
+  "patch_targets": {
+    "tests/path_scoped/agent_tests.py::agent.graph.llm._cancel": 1,
+    "tests/path_scoped/gateway_tests.py::gateway.agents.router._forward_spawn_to_remote": 1
+  }
+}
