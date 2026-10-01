@@ -69,15 +69,23 @@ A worktree is a checkout, not a deployment: it owns no cluster. Use its own real
 `.venv/bin/ava` directly; the host's bare `ava` runs the cluster `$AVA_HOME` names.
 Package acquisition and Git hooks are separate from starting a cluster.
 
-Before a manual worktree dependency operation, clear inherited `VIRTUAL_ENV`
-and run `scripts/host_ops/guard_editable_venv.py`. `scripts/setup-worktree.sh` runs this
-guard and prepares development dependencies without creating a cluster.
+`scripts/setup-worktree.sh <task>` is the one command that makes a worktree. It
+fetches `origin/main`, adds `.worktrees/<task>` on branch `ava-<task>` (`--branch`
+and `--base` override), builds the worktree's own real `.venv`, runs the locked
+install and `npm ci`, and verifies the shared git hooks and the editable-install
+guard (an inherited `VIRTUAL_ENV` is cleared) — without creating a cluster.
+Re-running it only re-bootstraps; after a failure, run it again with no argument
+inside the worktree. A worktree made by another tool (Claude Code's
+`.claude/worktrees/<name>/`) is completed the same way; the main clone is refused.
 
 ```bash
-cd ~/Ava/.worktrees/<name>
-scripts/setup-worktree.sh
+bash scripts/setup-worktree.sh <task>   # last line: worktree ready: <path> (branch <branch>)
+cd ~/Ava/.worktrees/<task>              # a script cannot change your directory
 .venv/bin/pytest <selected test files>
 ```
+
+For a manual dependency operation in an existing worktree, clear inherited
+`VIRTUAL_ENV` and run `scripts/host_ops/guard_editable_venv.py` first.
 
 **Which home a worktree reads.** With `AVA_HOME` unset the home is `~/.ava`; on a
 development machine that also runs production, that is the production cluster. A
