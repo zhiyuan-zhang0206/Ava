@@ -20,7 +20,7 @@ tags:
 
 | Layer | Location | Description |
 |---|---|---|
-| **Unit tests** | `<pkg>/**/tests/test_{file}.py`, else `tests/{module}/test_{file}.py` | one test file per source file, in the `tests/` directory of the package it tests (the top-level `tests/{module}/` for code whose package has none) |
+| **Unit tests** | `<pkg>/**/tests/test_{file}.py` | one test file per source file, in the `tests/` directory of the package it tests (the top-level `tests/{module}/` holds those still to move; `scripts/structure/tests_location.py` refuses new ones) |
 | **Integration tests** | `tests/integration/` | cross-module tests; `TestClient` mounts `gateway.app` in-process + custom `_TestClientTransport` forwarding httpx, **no separate Gateway process** |
 | **E2E tests** | `tests/e2e/` | full-stack end-to-end tests |
 | **Data factories** | `tests/factories/` | test data construction tools |
