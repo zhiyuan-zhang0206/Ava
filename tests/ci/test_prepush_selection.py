@@ -126,20 +126,29 @@ def test_eslint_runs_over_changed_files_at_commit_and_over_the_project_at_push()
 @pytest.fixture
 def eslint_repo(tmp_path: Path) -> tuple[Path, Path]:
     """A repo with fake `npx` / `node` / `npm` that log how they were called, so the script's own
-    decisions (which files, whole project or not) can be read back. Returns (repo, call log)."""
+    decisions (which files, whole project or not) can be read back. Returns (repo, call log dir).
+
+    Each tool logs to its own file: the script pipes `npx ... | node ...`, so the two run
+    concurrently and one shared log would record them in whichever order they got scheduled."""
     repo = tmp_path / "repo"
     (repo / "ui/web/node_modules/.bin").mkdir(parents=True)
     (repo / "ui/web/node_modules/.bin/eslint").write_text("")
     (repo / "ui/web/node_modules/.bin/eslint").chmod(0o755)
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    calls = tmp_path / "calls.log"
+    calls = tmp_path / "calls"
+    calls.mkdir()
     shims = tmp_path / "shims"
     shims.mkdir()
     for tool in ("npx", "node", "npm"):
         shim = shims / tool
-        shim.write_text(f'#!/bin/sh\necho "{tool} $*" >> {calls}\ncat > /dev/null\n')
+        shim.write_text(f'#!/bin/sh\necho "{tool} $*" >> {calls / tool}\ncat > /dev/null\n')
         shim.chmod(0o755)
     return repo, calls
+
+
+def _tool_calls(calls: Path, tool: str) -> list[str]:
+    log = calls / tool
+    return log.read_text().splitlines() if log.exists() else []
 
 
 def _run_eslint_script(repo: Path, calls: Path, *paths: str) -> subprocess.CompletedProcess[str]:
@@ -159,12 +168,11 @@ def test_eslint_lints_just_the_changed_files(eslint_repo: tuple[Path, Path]) -> 
     repo, calls = eslint_repo
     result = _run_eslint_script(repo, calls, "ui/web/src/a.tsx", "ui/web/src/lib/b.ts")
     assert result.returncode == 0, result.stderr
-    logged = calls.read_text().splitlines()
-    assert logged[0] == (
+    assert _tool_calls(calls, "npx") == [
         "npx --no-install eslint --no-warn-ignored --format json src/a.tsx src/lib/b.ts"
-    )
-    assert logged[1] == "node scripts/check-eslint-warnings.mjs"
-    assert not any(line.startswith("npm ") for line in logged)
+    ]
+    assert _tool_calls(calls, "node") == ["node scripts/check-eslint-warnings.mjs"]
+    assert _tool_calls(calls, "npm") == []
 
 
 @pytest.mark.parametrize(
@@ -187,7 +195,8 @@ def test_eslint_setup_change_lints_the_whole_project(
     repo, calls = eslint_repo
     result = _run_eslint_script(repo, calls, "ui/web/src/a.tsx", setup_path)
     assert result.returncode == 0, result.stderr
-    assert calls.read_text().splitlines() == ["npm run lint"]
+    assert _tool_calls(calls, "npm") == ["npm run lint"]
+    assert _tool_calls(calls, "npx") == _tool_calls(calls, "node") == []
 
 
 def test_eslint_hook_triggers_on_every_setup_file() -> None:
