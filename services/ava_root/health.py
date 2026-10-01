@@ -21,6 +21,7 @@ from typing import Protocol
 
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
+from services.ava_root.alerts import AlertRouter, UnitAlertFacts, UnitAlertView
 from services.ava_root.manifest import UnknownUnitError
 from services.ava_root.probes import Probe, ProbeError, ProbeRegistry
 
@@ -45,6 +46,10 @@ class RevivalHost(Protocol):
 
     def revival_deferral(self, unit_id: str) -> str | None:
         """Why a would-be reviver must not act on `unit_id` now, or None."""
+        ...
+
+    def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
+        """The alert-relevant facts of one unit; unknown units raise UnknownUnitError."""
         ...
 
 
@@ -214,6 +219,7 @@ class HealthMonitor:
         config: HealthConfig | None = None,
         gate: HealthGate | None = None,
         startup_graces: Mapping[str, float] | None = None,
+        alerts: AlertRouter | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._registry = registry
@@ -225,9 +231,10 @@ class HealthMonitor:
         self._units: dict[str, UnitHealth] = {}
         self._runners: dict[str, ProbeRunner] = {}
         self._task: asyncio.Task[None] | None = None
+        self._alerts = alerts
 
     async def run_round(self) -> None:
-        """Probe every registered unit once, in registration order."""
+        """Probe every registered unit once, in registration order, then alert."""
         for unit_id in self._registry.unit_ids():
             try:
                 await self._check_unit(unit_id)
@@ -236,6 +243,34 @@ class HealthMonitor:
                 state.last_verdict = "unavailable"
                 state.last_detail = f"health round raised {type(exc).__name__}: {exc}"
                 _log.exception("[health] unit %s: round failed; continuing", unit_id)
+        await self._observe_alerts()
+
+    async def _observe_alerts(self) -> None:
+        """Feed this round's unit facts to the alert router, off the event loop.
+
+        The router's user-channel post is blocking HTTP, and the root loop must
+        keep serving control requests while delivery is attempted. Units
+        outside the supervisor's tree (the static probe path) carry no alert
+        facts and are skipped; the router contains per-unit failures itself.
+        """
+        if self._alerts is None:
+            return
+        views: list[UnitAlertView] = []
+        for unit_id in self._registry.unit_ids():
+            try:
+                facts = self._supervisor.unit_alert_facts(unit_id)
+            except UnknownUnitError:
+                continue
+            state = self._units.get(unit_id)
+            views.append(
+                UnitAlertView(
+                    unit=unit_id,
+                    facts=facts,
+                    breaker_open=state is not None and state.breaker_since is not None,
+                    detail=state.last_detail if state is not None else "",
+                )
+            )
+        await asyncio.to_thread(self._alerts.observe, views)
 
     async def start(self) -> None:
         """Run rounds until `stop()` — sleep first, then one round per interval."""

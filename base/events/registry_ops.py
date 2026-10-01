@@ -49,6 +49,8 @@ from base.events.system import (
     RootHealthTick,
     RootRestartCleared,
     RootRestartFailed,
+    RootUnitAlertFired,
+    RootUnitAlertResolved,
     ScheduleStalled,
     SseLifecycle,
     StatsDashboardStale,
@@ -216,6 +218,21 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "root_restart_cleared",
         "root unit replacement succeeded — the recorded failure state was cleared (task #4872)",
         payload=RootRestartCleared,
+        tier="noise",
+    ),
+    "root_unit_alert_fired": _telemetry(
+        "root_unit_alert_fired",
+        "root unit entered an alertable failure state (intent running, and restart_failed, "
+        "breaker open, or retained custody) — one firing per episode; delivery records the "
+        "user-channel post (task #4872)",
+        payload=RootUnitAlertFired,
+        tier="anomaly",
+    ),
+    "root_unit_alert_resolved": _telemetry(
+        "root_unit_alert_resolved",
+        "root unit alert episode closed — the failure state cleared and the episode resolved "
+        "(task #4872)",
+        payload=RootUnitAlertResolved,
         tier="noise",
     ),
     # Parent-helper diagnosis never grants root authority to replace its ancestor.
