@@ -17,19 +17,24 @@ Order is load-bearing:
    every function-scoped fixture (`monkeypatch` included) has restored what it
    recorded. It imports only the standard library and pytest, so it may sit
    before the plugins that import project modules.
-3. `plugin_registrations` before `provisioning` and `guards`: pytest sets
+3. `identity_restore` third, right after the guard and ahead of every other
+   autouse fixture: it sets up after the guard, so it tears down before the
+   guard compares (the guard then finds the identity slots back), and its window
+   covers whatever the autouse fixtures after it do to those slots.
+4. `plugin_registrations` before `provisioning` and `guards`: pytest sets
    same-scope autouse fixtures up in registration order, and this one has
    always run first of them.
-4. `provisioning` before `guards`: within `guards`, autouse fixtures are set up
+5. `provisioning` before `guards`: within `guards`, autouse fixtures are set up
    alphabetically, and `_clean_state` (in `provisioning`) sorts ahead of the
    `_guard_*` fixtures. The hooks in `provisioning` also stay registered
    before `collection_guard` and the stall probe, as they were.
-5. The opt-in fixture modules and the two hook-only plugins follow.
+6. The opt-in fixture modules and the two hook-only plugins follow.
 """
 
 pytest_plugins = [
     "tests.fixtures.env_bootstrap",
     "tests.fixtures.leak_guard",
+    "tests.fixtures.identity_restore",
     "tests.fixtures.plugin_registrations",
     "tests.fixtures.provisioning",
     "tests.fixtures.guards",

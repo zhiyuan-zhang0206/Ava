@@ -20,6 +20,7 @@ import re
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,10 +28,11 @@ import pytest
 
 from scripts.ci import shard_counts
 from tests.ci import leak_guard_suite
-from tests.fixtures import leak_guard
+from tests.fixtures import identity_restore, leak_guard
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GUARD = "tests.fixtures.leak_guard"
+_RESTORE = "tests.fixtures.identity_restore"
 _TESTS = "leakdemo/tests"
 _CLEAN_FILE = f"{_TESTS}/test_clean_patterns.py"
 _LEAKS_FILE = f"{_TESTS}/test_known_leaks.py"
@@ -44,10 +46,12 @@ LEAKERS = {
     "test_leaker_signal_handler": "signal",
 }
 NOTES = {"test_note_syspath_leak": "sys.path"}
+IDENTITY_VICTIM = "test_victim_stale_identity"
 VICTIMS = {
     "test_victim_identity_read",
     "test_victim_expects_unset_port",
     "test_victim_plain_namespace_name",
+    IDENTITY_VICTIM,
 }
 
 
@@ -83,11 +87,19 @@ class Suite:
         self._runs: dict[tuple[object, ...], Run] = {}
 
     def run(
-        self, *, mode: str | None = None, xdist: bool = False, fault: str = "", select: str = _TESTS
+        self,
+        *,
+        mode: str | None = None,
+        xdist: bool = False,
+        fault: str = "",
+        select: str = _TESTS,
+        plugins: tuple[str, ...] = (_GUARD,),
     ) -> Run:
-        key = (mode, xdist, fault, select)
+        key = (mode, xdist, fault, select, plugins)
         if key not in self._runs:
-            self._runs[key] = _pytest(self.root, select, mode, xdist, fault, len(self._runs))
+            self._runs[key] = _pytest(
+                self.root, select, mode, xdist, fault, len(self._runs), plugins=plugins
+            )
         return self._runs[key]
 
 
@@ -137,11 +149,12 @@ def _pytest(
     fault: str,
     n: int,
     *,
-    preload: bool = True,
+    plugins: Sequence[str] = (_GUARD,),
 ) -> Run:
     junit = root / f"junit-{n}.xml"
     command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
-    command += ["-p", _GUARD] if preload else []  # preloaded = registered before everything else
+    for plugin in plugins:  # preloaded = registered before everything else, in this order
+        command += ["-p", plugin]
     command += ["-p", "pytest_asyncio.plugin", "-c", "pytest.ini"]
     command += [f"--junitxml={junit}", "-o", "junit_family=xunit1"]
     command += ["-p", "xdist.plugin", "-n", "2"] if xdist else []
@@ -171,7 +184,7 @@ def _kinds(run: Run, name: str) -> list[str]:
 # -- the root stack ------------------------------------------------------------------------------
 
 
-def test_the_guard_is_the_second_root_plugin_right_after_env_bootstrap() -> None:
+def test_the_guard_is_the_second_root_plugin_and_the_identity_restore_the_third() -> None:
     tree = ast.parse((_REPO_ROOT / "conftest.py").read_text(encoding="utf-8"))
     assignment = next(
         node
@@ -179,7 +192,11 @@ def test_the_guard_is_the_second_root_plugin_right_after_env_bootstrap() -> None
         if isinstance(node, ast.Assign)
         and any(getattr(t, "id", "") == "pytest_plugins" for t in node.targets)
     )
-    assert ast.literal_eval(assignment.value)[:2] == ["tests.fixtures.env_bootstrap", _GUARD]
+    assert ast.literal_eval(assignment.value)[:3] == [
+        "tests.fixtures.env_bootstrap",
+        _GUARD,
+        _RESTORE,
+    ]
 
 
 def test_the_guard_sets_up_before_every_other_function_scoped_autouse_fixture(
@@ -194,6 +211,16 @@ def test_the_guard_sets_up_before_every_other_function_scoped_autouse_fixture(
     assert all(names.index("_leak_guard") < names.index(other) for other in others)
 
 
+def test_the_identity_restore_sets_up_right_after_the_guard(request: pytest.FixtureRequest) -> None:
+    """Set up after the guard it tears down before it (the guard compares last); set up before every
+    other autouse fixture it also undoes what those leave."""
+    names = request.fixturenames
+    root_autouse = ("_clean_state", "_restore_plugin_registrations")
+    others = [n for n in names if n in root_autouse or n.startswith("_guard_")]
+    assert names.index("_leak_guard") < names.index("_restore_agent_identity")
+    assert all(names.index("_restore_agent_identity") < names.index(other) for other in others)
+
+
 @pytest.mark.parametrize(("module", "attrs"), leak_guard.WATCHED_ATTRS)
 def test_every_watched_identity_slot_still_exists(module: str, attrs: tuple[str, ...]) -> None:
     """A rename shows up here, not as a guard fault in every test of a later fail-mode run."""
@@ -201,11 +228,34 @@ def test_every_watched_identity_slot_still_exists(module: str, attrs: tuple[str,
     assert [a for a in attrs if a not in vars(loaded)] == []
 
 
+@pytest.mark.parametrize(("module", "attrs"), identity_restore.IDENTITY_SLOTS)
+def test_every_restored_identity_slot_still_exists(module: str, attrs: tuple[str, ...]) -> None:
+    """A rename shows up here, not as an error in the setup of every test."""
+    loaded = importlib.import_module(module)
+    assert [a for a in attrs if a not in vars(loaded)] == []
+
+
+def test_every_state_slot_of_agent_identity_is_restored() -> None:
+    """A slot added to the module without joining the table would leak again, unnamed.
+
+    The module annotates each of its process-global slots (`_agent_id: int | None = None`).
+    """
+    restored = dict(identity_restore.IDENTITY_SLOTS)["ava.agent_identity"]
+    assert set(importlib.import_module("ava.agent_identity").__annotations__) == set(restored)
+
+
 @pytest.mark.parametrize(("module", "name"), leak_guard.WATCHED_CONTEXTVARS)
 def test_every_watched_context_variable_still_exists(module: str, name: str) -> None:
     loaded = importlib.import_module(module)
     assert name in vars(loaded)
     getattr(loaded, name).get()  # the guard reads it exactly like this
+
+
+@pytest.mark.parametrize(("module", "name"), identity_restore.IDENTITY_CONTEXTVARS)
+def test_every_restored_context_variable_still_exists(module: str, name: str) -> None:
+    loaded = importlib.import_module(module)
+    assert name in vars(loaded)
+    getattr(loaded, name).get()  # the restore reads it exactly like this
 
 
 # -- what it names -------------------------------------------------------------------------------
@@ -277,6 +327,31 @@ def test_an_unknown_mode_stops_the_run(suite: Suite) -> None:
     assert "AVA_LEAK_GUARD='loud': expected one of off, warn, fail" in run.out
 
 
+# -- the identity restore ------------------------------------------------------------------------
+
+
+def test_the_identity_restore_puts_the_slot_back_for_the_next_test(suite: Suite) -> None:
+    """Red without it (`test_without_the_guard_the_victims_are_the_red_tests`), green with it."""
+    run = suite.run(mode="off", plugins=(_RESTORE,))
+    assert run.bad() == VICTIMS - {IDENTITY_VICTIM}
+
+
+def test_registered_after_the_guard_the_restore_leaves_the_guard_nothing_to_name(
+    suite: Suite,
+) -> None:
+    """The restore tears down first, so the guard compares a slot that is already back."""
+    run = suite.run(plugins=(_GUARD, _RESTORE))
+    assert run.named == {k: v for k, v in {**LEAKERS, **NOTES}.items() if v != "identity"}
+    assert run.bad() == VICTIMS - {IDENTITY_VICTIM}
+
+
+def test_registered_before_the_guard_the_restore_is_too_late(suite: Suite) -> None:
+    """The restore tears down last, after the guard compared: the guard still names the leaker."""
+    run = suite.run(plugins=(_RESTORE, _GUARD))
+    assert run.named["test_leaker_bare_identity_assignment"] == "identity"
+    assert IDENTITY_VICTIM not in run.bad()  # the next test is protected either way
+
+
 # -- fail mode: the later switch -----------------------------------------------------------------
 
 
@@ -303,7 +378,7 @@ def test_fail_mode_is_loud_about_a_guard_that_cannot_work(suite: Suite) -> None:
 
 def test_registered_first_the_guard_blames_the_leaker_and_only_the_leaker(tmp_path: Path) -> None:
     leak_guard_suite.write_order_suite(tmp_path, [_GUARD, "order_other"])
-    run = _pytest(tmp_path, _TESTS, None, False, "", 0, preload=False)
+    run = _pytest(tmp_path, _TESTS, None, False, "", 0, plugins=())
     assert run.named == {"test_leaker_setattr_getattr_served_name": "module-attr"}
     assert (
         "leakdemo.selfmod.AGENT_ID (NoneType) was added" in run.out
@@ -315,7 +390,7 @@ def test_registered_after_an_autouse_monkeypatch_plugin_the_guard_compares_too_e
 ) -> None:
     """Registered last, it compares before the other plugin's undo: a clean test is blamed."""
     leak_guard_suite.write_order_suite(tmp_path, ["order_other", _GUARD])
-    run = _pytest(tmp_path, _TESTS, None, False, "", 0, preload=False)
+    run = _pytest(tmp_path, _TESTS, None, False, "", 0, plugins=())
     assert run.named["test_clean_monkeypatch_setenv_in_the_body"] == "env"  # the loud symptom
     assert "leakdemo.selfmod.AGENT_ID (int) was added" in run.out  # still patched, not yet undone
 

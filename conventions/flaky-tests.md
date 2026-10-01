@@ -282,11 +282,13 @@ candidate generation, and the PNG-only mutation rule.
 ## 9. Leave process-global state as you found it
 
 **Rule.** A test returns the process to the state it started in: environment,
-module attributes, cwd, signal handlers and the agent identity. Undo a change
-through the tool that records it (`monkeypatch`, `patch.dict`, a `finally`).
+module attributes, cwd and signal handlers. Undo a change through the tool that
+records it (`monkeypatch`, `patch.dict`, a `finally`). The agent identity is the
+exception: a root fixture (`identity_restore`) puts it back after every test, so
+`ava.agent_identity._agent_id = ...` needs no undo.
 
 **Signature.** A test fails only in some shard compositions and always in the
-worker of an earlier test; it reads a key, attribute or identity it never set;
+worker of an earlier test; it reads a key or attribute it never set;
 moving test files makes the failure appear or vanish.
 
 **Evidence.** `monkeypatch.setattr(ava.self, "AGENT_ID", ...)` on a name the
@@ -298,8 +300,7 @@ five environment keys the code under test set outlived three test files (PR
 
 **Correct form.** `setenv(name, "")` before `delenv`; `setitem(vars(module),
 name, value)` or `mock.patch.object` for a name served by `__getattr__`;
-`monkeypatch.chdir`; restore a handler in a `finally`; set the agent identity
-through `monkeypatch.setattr`. The root
+`monkeypatch.chdir`; restore a handler in a `finally`. The root
 [leak guard](../tests/docs/test-leak-guard.ava.okf.md) compares these after
 every test and names the leaker in the CI annotation of the counts job; its
 fail mode, once enabled, restores after each leaker and fails it at its own
