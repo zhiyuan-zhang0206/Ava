@@ -67,7 +67,6 @@ from cli.commands.converge.redis_bridge import ensure_redis_bridge
 # test reaches for `cli.commands.converge.host.ConvergeCtx` / `ALL_ROLES`.
 from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx, ConvergeStep
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
-from cli.commands.data_plane.pitr_foundation import converge_pitr_foundation
 from cli.commands.extensions.external_skills import converge_external_agent_skill
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step
 from cli.commands.observability.otel_collector import ensure_otel_collector_step
@@ -328,11 +327,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "PostgreSQL 17 + pgvector runtime",
         _ensure_pg_binaries_step,
-        roles=frozenset({"gateway"}),
-    ),
-    ConvergeStep(
-        "physical backup foundation",
-        converge_pitr_foundation,
         roles=frozenset({"gateway"}),
     ),
     # Reconcile the one DB URL (AVA_DB_URL) with the pooler toggle + preflight the

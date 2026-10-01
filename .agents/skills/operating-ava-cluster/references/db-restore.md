@@ -115,14 +115,15 @@ checkpoint conversation must be proved.
 After local encryption succeeds and before local pruning, the gateway publishes
 the `.dump.enc` artifact to Aliyun OSS under the `ava-logical/` namespace
 (`services/gateway_side/backup/offsite.py`). It needs
-`AVA_PITR_STORE_BACKEND=oss`, `AVA_PITR_OSS_ENDPOINT`, `AVA_PITR_OSS_BUCKET` and
-`AVA_PITR_OSS_CREDENTIALS_FILE`; a home without them skips the leg with one
-INFO log line. The publish is if-absent (server-enforced `x-oss-forbid-overwrite`
-on completion; the bucket must stay versioning-off) and verified (per-part
-`Content-MD5` plus the multipart ETag chain). It is optional: a failed publish
-or an unusable credentials file logs the cause but never discards the local
-artifact — the local copy remains the primary. Success is judged by the
-destination, not by silence: the log line `[backup] off-site published
+`AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and
+`AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` (set through `ava config set`); a home
+without all three skips the leg with one INFO log line. The publish is
+if-absent (server-enforced `x-oss-forbid-overwrite` on completion; the bucket
+must stay versioning-off) and verified (per-part `Content-MD5` plus the
+multipart ETag chain). It is optional: a failed publish or an unusable
+credentials file logs the cause but never discards the local artifact — the
+local copy remains the primary. Success is judged by the destination, not by
+silence: the log line `[backup] off-site published
 ava-logical/<name> (size=..., pin=..., checksum=md5:...)` and the object itself,
 its size equal to the local `.dump.enc`. To publish one existing artifact by
 hand: `python -m services.backup --publish-offsite /abs/path/<name>.dump.enc`
@@ -131,39 +132,16 @@ check). Only encrypted artifacts reach the bucket, so its access model does
 not expose database contents. Nothing here deletes a remote object; remote expiry
 belongs to the bucket's lifecycle policy.
 
-## Migration rollback-snapshot archive
+## Migration rollback snapshots
 
 Tables named `*_backfill_*` are finite migration recovery snapshots, not
 durable application state. The migration lint requires a later forward
 migration with `DROP TABLE IF EXISTS` for every such table. Before that forward
-retirement may run against a populated table, preserve its recovery data with
-the official three-step workflow from the gateway checkout:
-
-```bash
-.venv/bin/ava pitr snapshot archive <table>
-.venv/bin/ava pitr snapshot verify <table>
-.venv/bin/ava pitr snapshot retire <table>
-```
-
-`archive` creates a custom-format dump of the one table, encrypts it with the
-configured PITR AES-GCM key, and publishes it under a content-addressed
-rollback-snapshot object name through the configured offsite store. The local
-owner-only evidence record at `$AVA_HOME/rollback-snapshot-archives/<table>.json`
-contains the backend acknowledgement: object name, generation pin, checksum,
-and metadata.
-
-`verify` downloads exactly that recorded generation through the viewer path,
-authenticates and decrypts it, restores it into a throwaway PostgreSQL cluster,
-and reads the restored table. It then records successful verification in the
-same local evidence record. `retire` refuses until that verification exists;
-once it does, it performs the idempotent `DROP TABLE IF EXISTS` on the live
-snapshot table. Do not delete or edit the evidence record between these steps:
-the record is the guard that binds retirement to the archived, drilled object.
-Verification requires the record key ID to match the currently configured PITR key.
-Before reusing a rollback-snapshot table name, delete its old evidence record.
-
-## Sibling procedure
-
-This document covers the logical `.dump.enc` artifact. To prove the physical
-PITR chain restores to a chosen point in time, use the isolated physical
-restore drill: [`physical-restore-drill.md`](physical-restore-drill.md).
+retirement may run against a populated table, keep its recovery data by hand:
+dump the one table with `pg_dump --format=custom --table=public.<table>` through
+the owner dial the scheduled dump uses (`services.backup.dump_source()`) into
+`$AVA_HOME/backups/<table>.dump` (mode 0600), confirm it with
+`pg_restore --list` (the listing must name `TABLE DATA public <table>`), and
+keep the file until the migration is verified in production. The dump is not
+encrypted and is not published off-site; delete it once the snapshot has no
+further use.

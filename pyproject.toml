@@ -38,10 +38,6 @@ dependencies = [
     "tiktoken>=0.14",
     "croniter>=6.2.2",
     "google-genai>=2.0",
-    # Official GCS client: credential-safe conditional creates, CRC32C, and
-    # generation-aware retries. A gcloud subprocess leaks operational coupling;
-    # handwritten REST would duplicate auth, resumable upload, and retry logic.
-    "google-cloud-storage>=3.4.0",
     "watchdog>=6.0.0",
     "numpy>=2.4.4",
     "pymilvus[milvus-lite]>=3.0.0",
@@ -89,7 +85,6 @@ dependencies = [
     "python-dateutil>=2.9.0",  # date parsing
     "tabulate>=0.9.0",  # table formatting
     "cryptography>=42.0.0",  # crypto primitives
-    "zstandard>=0.25.0",  # deterministic streaming compression for PITR base candidates
     "lark-oapi>=1.7.1",
     "websockets>=15.0.1",
     "oss2>=2.19.1",
@@ -1086,6 +1081,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/ava_root_glue/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/backup_scheduler/operation/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

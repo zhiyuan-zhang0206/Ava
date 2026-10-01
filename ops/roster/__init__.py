@@ -302,30 +302,6 @@ def build_services() -> tuple[ServiceSpec, ...]:
             identity_probe=daemon_identity("pg_backup", settings.services.pg_backup_pidfile),
             healthcheck_module="services.healthchecks.pg_backup",
         ),
-        ServiceSpec(
-            session="pitr-uploader",
-            cmd=".venv/bin/python -m services.pitr.uploader_daemon",
-            capabilities=_GATEWAY,
-            requires_db=False,
-            pidfile=settings.services.pitr_uploader_pidfile,
-            curl_url=_hz("pitr_uploader"),
-            identity_probe=daemon_identity(
-                "pitr_uploader", settings.services.pitr_uploader_pidfile
-            ),
-            healthcheck_module="services.healthchecks.pitr_uploader",
-        ),
-        ServiceSpec(
-            session="pitr-base-candidate",
-            cmd=".venv/bin/python -m services.pitr.base_scheduler_daemon",
-            capabilities=_GATEWAY,
-            requires_db=True,
-            pidfile=settings.services.pitr_base_backup_pidfile,
-            curl_url=_hz("pitr_base_backup"),
-            identity_probe=daemon_identity(
-                "pitr_base_backup", settings.services.pitr_base_backup_pidfile
-            ),
-            healthcheck_module="services.healthchecks.pitr_base_backup",
-        ),
     )
 
     # ── agent-runner-only services ──────────────────────────────────────────

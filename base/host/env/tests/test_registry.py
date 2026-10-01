@@ -294,8 +294,6 @@ class TestConsumptionMatrixDeclarations:
             "im_bridge",
             "page_server",
             "agent_host",
-            "pitr_uploader",
-            "pitr_base_backup",
             "gateway_watchdog",
             "agent_runner_watchdog",
         }

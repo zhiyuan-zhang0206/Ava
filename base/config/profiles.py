@@ -52,9 +52,6 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             # Display window defaults (task #3696) — served by gateway endpoints
             # (messages / timeline / notices / shell) for unparameterized reads.
             "display",
-            # The PITR uploader daemon reads the physical-backup plane under
-            # the gateway profile (bucket/key/credentials).
-            "physical_backup",
             # The skills router (#3267) reads install_registry.resolved_policy(),
             # which resolves per-package update defaults from settings.packages.
             "packages",
@@ -81,10 +78,6 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             # The agent-host manifest health monitor writes pending-age,
             # slow-seal, capture-failure, and retention-loss alerts.
             "alerts",
-            # ops/spec.py's pitr-uploader roster gate is reachable from the
-            # agent closure (via the fleet plugin); only gateway/runner
-            # processes read the domain at runtime.
-            "physical_backup",
             # ava/skills.py imports base.packages.extensions.install_registry, whose
             # resolved_policy() resolves per-package update defaults from
             # settings.packages (#3267).
@@ -112,8 +105,6 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             # closure) resolves an omitted capture window from
             # display.shell_capture_default_lines (task #3696).
             "display",
-            # ops/spec.py gates the pitr-uploader roster entry on AVA_PITR_ENABLED.
-            "physical_backup",
             # base.packages.extensions.install_registry.resolved_policy() is reachable from the
             # runner closure and resolves per-package update defaults from
             # settings.packages (#3267).

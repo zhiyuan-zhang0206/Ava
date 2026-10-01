@@ -49,8 +49,6 @@ FIXED_PORTS: dict[str, int] = {
     "page_server": 8112,
     "agent_host": 8114,
     "pg_backup": 8116,
-    "pitr_uploader": 8117,
-    "pitr_base_backup": 8118,
     "gateway_watchdog": 8119,
     "agent_runner_watchdog": 8120,
     # The memory search service's TCP port (like milvus's 19530, not a health

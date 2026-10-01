@@ -12,7 +12,7 @@ half-stopped until the watchdog respawned it. Task #4222's sweep-A migrated
 this daemon family — watchdog, memory_indexer, heartbeat, page_server,
 events_maintenance, memory_search — to the sibling daemons' established shape
 (``asyncio.Runner`` + an explicit cancellation drain + a hard exit that skips
-teardown; see ``services/agent_ops/daemon.py``, ``services/pitr/uploader_daemon.py``),
+teardown; see ``services/agent_ops/daemon.py``, ``services/backup_scheduler/daemon.py``),
 and these regressions lock the property in per daemon.
 
 Each child runs the production ``main()`` — signal wiring included — with

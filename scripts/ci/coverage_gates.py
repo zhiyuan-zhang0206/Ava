@@ -37,7 +37,7 @@ CORE_THRESHOLD_DEFAULT = 85.0
 
 # Per-risk-domain minimum line floors (percent). Each key is a domain
 # prefix: top-level packages ("ops") or second-level subdomains
-# ("services/pitr"). A prefix matches every reported file whose path is the
+# ("services/backup_scheduler"). A prefix matches every reported file whose path is the
 # prefix itself or starts with "prefix/".
 #
 # Calibrated 2026-08-29 from the first measuring CI run (PR #965):
@@ -49,7 +49,7 @@ CORE_THRESHOLD_DEFAULT = 85.0
 # ops is the deploy/rollout/cluster-lifecycle surface (highest incident
 # exposure — a broken upgrade takes the fleet down), so it keeps the
 # tightest buffer; services carries the data-durability daemons
-# (backup/pitr/watchdog) and ava_builtins the plugins.
+# (backup/watchdog) and ava_builtins the plugins.
 FLOORS: dict[str, float] = {
     "ops": 90.0,
     "services": 70.0,
@@ -75,7 +75,7 @@ def _aggregate(files: dict[str, dict]) -> tuple[dict[str, list[int]], dict[str, 
 
     Returns (per_domain, per_subdomain): per_domain keys are top-level
     packages ("ops"); per_subdomain keys are the first two path segments
-    ("services/pitr") — both maps hold [covered, valid] pairs.
+    ("services/backup_scheduler") — both maps hold [covered, valid] pairs.
     """
     per_domain: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     per_subdomain: dict[str, list[int]] = defaultdict(lambda: [0, 0])

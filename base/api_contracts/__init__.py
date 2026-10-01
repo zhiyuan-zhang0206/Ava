@@ -11,9 +11,8 @@ directly instead of hand-unpacking dicts.
 
 Only the subset the CLI actually decodes lives here — gateway-only response
 models (ClusterPanel, SystemStatus, ServiceItem, ...) stay in `gateway.schemas`.
-`strict_decode.py` supplies stdlib-only field checks for durable JSON documents.
 
-Import `config`, `contracts`, `op_envelope`, `status`, and `strict_decode` directly.
+Import `config`, `contracts`, `op_envelope`, and `status` directly.
 Nothing is re-exported here: every submodule import executes this initializer.
 Settings-free consumers must not inherit unrelated chains such as
 `config.py -> base.host.env.config_registry` or `status.py -> DB`.

@@ -41,8 +41,6 @@ registration are distinct; the root manifest determines which services run.
 | `page_server.py` | Service protocol probe | Page-server loop health |
 | `permissions_helper.py` | Read-only diagnostic helper | Parent helper ping and launchd failure classification |
 | `pg_backup.py` | Service protocol probe | Backup progress and last-success age |
-| `pitr_base_backup.py` | Service protocol probe | Base backup progress |
-| `pitr_uploader.py` | Service protocol probe | Upload progress and disk footprint |
 | `prod_venv.py` | Read-only diagnostic helper | Bounded dependency check and isolated import smoke |
 | `redis_acl.py` | Read-only diagnostic helper | Runtime-credential Redis PING |
 

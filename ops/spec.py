@@ -224,16 +224,6 @@ _FLAG_GATES: tuple[tuple[str, Callable[[], bool], str], ...] = (
         "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)",
     ),
     (
-        "pitr-uploader",
-        lambda: settings.physical_backup.pitr_enabled,
-        "disabled (AVA_PITR_ENABLED off)",
-    ),
-    (
-        "pitr-base-candidate",
-        lambda: settings.physical_backup.pitr_base_backup_enabled,
-        "disabled (AVA_PITR_BASE_BACKUP_ENABLED off)",
-    ),
-    (
         "im-bridge",
         lambda: settings.services.im_bridge_enabled,
         "disabled (AVA_IM_BRIDGE_ENABLED off)",

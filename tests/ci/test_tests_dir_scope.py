@@ -154,7 +154,7 @@ def test_fixture_scope_lint_package_scope_needs_an_init_in_a_package_tests_direc
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     _write(
         tmp_path,
-        "services/pitr/tests/conftest.py",
+        "services/example/tests/conftest.py",
         """
         import pytest
 

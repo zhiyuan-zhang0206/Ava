@@ -16,4 +16,4 @@ in [the lifecycle plan](../../../../future/infra/unified-cluster-lifecycle.md).
 
 Ordinary maintenance still owns its captured pause generation and failed receipts.
 Release continuation belongs to the retained finite operation executor. Removing
-the old recovery actors does not provide the planned PITR operation authority.
+the old recovery actors adds no new operation authority.

@@ -871,31 +871,3 @@ def test_health_port_warns_once_on_windows_8106(
     assert len(warnings) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert "8106" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
     assert "iphlpsvc" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_read_health_payload_requires_this_unit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The display read accepts only a payload whose `home` is this unit's."""
-    monkeypatch.setattr(health, "ava_home", lambda: tmp_path)
-
-    def own_unit_body(_url: str, _timeout_s: float) -> dict[str, object]:
-        return {"name": "pitr_base_backup", "home": str(tmp_path)}
-
-    monkeypatch.setattr(health, "_health_payload", own_unit_body)
-    assert health.read_health_payload("pitr_base_backup") == {
-        "name": "pitr_base_backup",
-        "home": str(tmp_path),
-    }
-
-    def other_unit_body(_url: str, _timeout_s: float) -> dict[str, object]:
-        return {"home": str(tmp_path / "other")}
-
-    monkeypatch.setattr(health, "_health_payload", other_unit_body)
-    assert health.read_health_payload("pitr_base_backup") is None
-
-    def no_answer(_url: str, _timeout_s: float) -> health.DaemonProbe:
-        return health.DaemonProbe.down("no answer")
-
-    monkeypatch.setattr(health, "_health_payload", no_answer)
-    assert health.read_health_payload("pitr_base_backup") is None

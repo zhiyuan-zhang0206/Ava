@@ -770,7 +770,7 @@ def test_put_remote_rejects_writable_non_remote_host_field(
 def test_put_remote_rejects_oss_credential_fields(
     monkeypatch: pytest.MonkeyPatch, _clean_overrides: Path
 ) -> None:
-    """OSS credential paths are host-local editable only: a machine-addressed PUT
+    """The OSS credential path is host-local editable only: a machine-addressed PUT
     400s at the gate (remote_writable=False), so a remote admin can never point a
     machine at arbitrary credential files. Locks the security boundary the
     writable flip must not loosen."""
@@ -778,13 +778,16 @@ def test_put_remote_rejects_oss_credential_fields(
     dispatched = AsyncMock()
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatched)
     with TestClient(app) as client:
-        for field in ("pitr_oss_credentials_file", "pitr_oss_viewer_credentials_file"):
-            resp = client.put(
-                f"/api/config?machine={REMOTE}",
-                json={field: str(_clean_overrides / "attacker-credentials.json")},
-            )
-            assert resp.status_code == 400, resp.text
-            assert "unknown or read-only" in resp.json()["detail"]
+        resp = client.put(
+            f"/api/config?machine={REMOTE}",
+            json={
+                "backup_offsite_credentials_file": str(
+                    _clean_overrides / "attacker-credentials.json"
+                )
+            },
+        )
+        assert resp.status_code == 400, resp.text
+        assert "unknown or read-only" in resp.json()["detail"]
     dispatched.assert_not_awaited()
 
 

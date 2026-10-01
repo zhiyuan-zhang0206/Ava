@@ -318,9 +318,6 @@ def test_cmd_converge_unconfigured_returns_zero(
     repo = tmp_path / "repo"
     (repo / ".venv" / "bin").mkdir(parents=True)
     (repo / ".venv" / "bin" / "ava").write_text("#!/bin/sh\n")
-    archive_shim = repo / "services" / "pitr" / "archive_shim.py"
-    archive_shim.parent.mkdir(parents=True)
-    archive_shim.write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
     monkeypatch.setenv("AVA_HOME", str(home / "avahome"))  # pyright: ignore[reportUnknownArgumentType]
     # A unit test must not reach Maven Central: seed the vendored Postgres tree so
     # the vendored-binaries step takes ensure_pg_binaries()'s idempotent early

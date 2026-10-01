@@ -120,8 +120,6 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "computer-mcp",
         "page-server",
         "pg-backup",
-        "pitr-uploader",
-        "pitr-base-candidate",
         "otel-collector",
         "agent-host",
         # The native LGTM backends are root units of an observability station.

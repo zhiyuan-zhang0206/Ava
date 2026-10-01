@@ -49,8 +49,7 @@ async def _assert_tree_gone(pids: list[int], timeout_s: float = 5.0) -> None:
     A SIGKILLed descendant can remain a zombie until its new parent reaps it,
     and psutil.pid_exists() still reports those entries — a snapshot check
     races the OS reaper (same discipline as
-    agent/tests/test_exec_subprocess.py::_assert_tree_gone and
-    tests/services/test_pitr_base_scheduler.py::_assert_tree_gone). A zombie
+    agent/tests/test_exec_subprocess.py::_assert_tree_gone). A zombie
     or already-reaped pid counts as gone.
     """
     deadline = time.monotonic() + timeout_s

@@ -32,8 +32,7 @@ subpackages hold the domains, each an independent package door:
   shipping, logs; owns its converge steps (`lgtm_native.py`, `otel_collector.py`)
 - `data_plane/` — per-cluster Postgres/Redis/PgBouncer bring-up, their verified
   maintenance stop (`maintenance_stop.py`), backup-operation custody
-  (`backup_operations.py`), PITR; owns its converge steps
-  (`pgbouncer.py`, `pitr_foundation.py`)
+  (`backup_operations.py`); owns its converge step (`pgbouncer.py`)
 - `cluster/` — whole-cluster verbs, the health probe, cron, the registry
 - `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
   the warning-only start preflights (health, ports, ownership), the
@@ -115,8 +114,6 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
   (`ava mcp serve`) rather than a `commands/` module: it is a long-running
   stdio server, not a command that renders and exits, and it pulls in the mcp
   SDK that no other verb needs. See [[cli/commands/extensions/docs/packages.ava.okf.md]].
-- [[cli/commands/data_plane/docs/pitr.ava.okf.md]] defines the PITR inspection surface and the archive →
-  verify → retire guard for finite migration rollback snapshots.
 - [[cli/commands/converge/docs/ownership_preflight.ava.okf.md]] names the
   warning-only ownership repair guard that runs before converge writes later
   host state.

@@ -94,9 +94,9 @@ def split_reducer_patch(
 
     Shared by the cluster-side PUT reducer and the host-side config_write_op —
     the host side gains the sentinel guard here too (the frontend never
-    sends a sentinel for a host field today, but the two PITR OSS credential
-    paths are host-scoped and sensitive, so the guard now covers them as
-    well).
+    sends a sentinel for a host field today, but host-scoped sensitive fields
+    such as the off-site backup credentials path exist, so the guard covers
+    them as well).
     """
     writes = {
         k: v

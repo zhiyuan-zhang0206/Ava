@@ -979,7 +979,7 @@ def test_start_readiness_alert_lifecycle_on_real_db(
         )
     db_conn.commit()
 
-    specs = (_spec("pitr-uploader"),)
+    specs = (_spec("labeler"),)
     _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
     _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
 
