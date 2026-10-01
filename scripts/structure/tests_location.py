@@ -65,6 +65,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
@@ -158,7 +159,7 @@ def _entry_errors(where: str, rel: str, repo_root: Path) -> list[str]:
 
 
 def registry_errors(
-    allowed: dict[str, tuple[str, str]], baseline: dict[str, int], repo_root: Path
+    allowed: Mapping[str, tuple[str, str]], baseline: dict[str, int], repo_root: Path
 ) -> list[str]:
     """Stale, needless, duplicate and malformed entries of `ALLOWED` and the frozen baseline."""
     errors: list[str] = []
@@ -180,7 +181,7 @@ def registry_errors(
 
 
 def unregistered_errors(
-    files: list[str], allowed: dict[str, tuple[str, str]], baseline: dict[str, int]
+    files: list[str], allowed: Mapping[str, tuple[str, str]], baseline: dict[str, int]
 ) -> list[str]:
     """One message per top-level test that is neither by design, allowed nor frozen."""
     return [
@@ -250,7 +251,7 @@ def main(
     argv: list[str] | None = None,
     *,
     repo_root: Path = _REPO_ROOT,
-    allowed: dict[str, tuple[str, str]] | None = None,
+    allowed: Mapping[str, tuple[str, str]] | None = None,
 ) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     repo_root = repo_root.resolve()
