@@ -20,10 +20,10 @@ from psycopg_pool import ConnectionPool
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
 from ops import pty_close_notices as notices
+from ops.tests.test_pty_close_notices import _agent, _inbounds, _record
+from ops.tests.test_pty_close_notices import journal as journal
+from ops.tests.test_pty_close_notices import pool as pool
 from services.agent_ops import close_notices
-from tests.ops.test_pty_close_notices import _agent, _inbounds, _record
-from tests.ops.test_pty_close_notices import journal as journal
-from tests.ops.test_pty_close_notices import pool as pool
 
 _HOLDER = "release:close-notices"
 _AT = datetime(2026, 9, 28, 12, 0, tzinfo=UTC)

@@ -1,0 +1,6 @@
+{
+  "patch_targets": {
+    "ops/tests/test_agent_skill_view.py::ava.composer_commands._command_dirs": 1,
+    "ops/tests/test_recover_crash_marked.py::ops.lifecycle._recovery_halt_reason": 5
+  }
+}

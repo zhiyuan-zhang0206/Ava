@@ -1,0 +1,5 @@
+{
+  "patch_targets": {
+    "ops/cluster_status/tests/test_capture_shell_trim.py::base.sessions.backend._shell_backend": 1
+  }
+}

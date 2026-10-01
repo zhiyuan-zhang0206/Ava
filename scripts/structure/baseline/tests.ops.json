@@ -1,11 +1,5 @@
 {
-  "directories": {
-    "tests/ops": 24
-  },
   "patch_targets": {
-    "tests/ops/test_agent_skill_view.py::ava.composer_commands._command_dirs": 1,
-    "tests/ops/test_capture_shell_trim.py::base.sessions.backend._shell_backend": 1,
-    "tests/ops/test_recover_crash_marked.py::ops.lifecycle._recovery_halt_reason": 5,
     "tests/ops/test_schema_mismatch.py::gateway.cluster.roster_probe._probe_failures": 1,
     "tests/ops/test_spec_roster.py::base.daemon.health._probe_daemon": 2,
     "tests/ops/test_spec_roster.py::ops.roster._browser_probe": 1

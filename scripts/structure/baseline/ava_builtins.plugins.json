@@ -12,5 +12,14 @@
     "ava_builtins/plugins/ava_sdk_reminder/agent_runtime.py::_SdkReminderAfterExecHook.__call__": 23,
     "ava_builtins/plugins/lm_google/gemini_cache.py::get_or_create_cache": 16,
     "ava_builtins/plugins/lm_google/provider.py::build": 18
+  },
+  "files": {
+    "ava_builtins/plugins/ava_fleet/tests/test_task_maintenance_daemon.py": 804,
+    "ava_builtins/plugins/tests/test_ava_memory_write.py": 1181
+  },
+  "patch_targets": {
+    "ava_builtins/plugins/ava_fleet/tests/test_task_maintenance_daemon.py::ava_builtins.plugins.ava_fleet.task_maintenance.daemon._advance_reminder_counters": 2,
+    "ava_builtins/plugins/ava_fleet/tests/test_task_maintenance_daemon.py::ava_builtins.plugins.ava_fleet.task_maintenance.daemon._deliver_message": 2,
+    "ava_builtins/plugins/ava_fleet/tests/test_task_maintenance_daemon.py::ava_builtins.plugins.ava_fleet.task_maintenance.daemon._pending_counter_writes": 2
   }
 }
