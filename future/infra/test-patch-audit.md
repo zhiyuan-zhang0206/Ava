@@ -36,7 +36,8 @@ the census moves when they do.
 - **E, global environment.** The explicit list `E_MODULES` in
   `scripts/structure/patch_targets.py` (settings, paths, machine and cluster identity, env
   resolution, ambient services) and `AVA_*` environment variables. Tests replace these through
-  the same few seams everywhere; a test-support design for them is a separate line of work.
+  the same few seams everywhere; a test-support design for them is a separate line of work,
+  planned in [dependency injection](dependency-injection.md).
 - **U, unresolved.** The patched object is not statically known (a parameter, a call result).
 
 ## Totals
