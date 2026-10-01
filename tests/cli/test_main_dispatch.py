@@ -431,12 +431,12 @@ def test_settings_load_failure_prints_env_template(
     assert "AVA_DB_URL" in captured.err
 
 
-# -- checkout gate on the state-changing verbs --------------------------------
+# -- checkout gate: every command from a foreign checkout -----------------------
 
 
 def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A home that carries its own `source` checkout, named by AVA_HOME. This
-    checkout is not it, so the gate must refuse every verb that changes it."""
+    checkout is not it, so the gate must refuse every command."""
     home = tmp_path / ".ava"
     (home / "source").mkdir(parents=True)
     monkeypatch.setenv("AVA_HOME", str(home))
@@ -457,6 +457,12 @@ def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ["logs", "retention"],
         ["agents", "send", "1", "hello"],
         ["boot"],
+        ["status"],
+        ["agents", "ls"],
+        ["config", "get"],
+        ["stop", "--help"],
+        ["config", "unset", "--", "--help"],
+        ["boot", "--help"],
     ],
 )
 def test_foreign_checkout_is_refused_before_dispatch(
@@ -465,9 +471,9 @@ def test_foreign_checkout_is_refused_before_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A checkout that is not the home's own must not change that home: every
-    verb outside the read-only list is refused before anything dispatches (and
-    before `ava boot` could retry a start)."""
+    """A checkout that is not the home's own does not operate that home: every
+    command is refused before anything dispatches (and before `ava boot` could
+    retry a start), and nothing is written to the home."""
     home = _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
     monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording(argv[0], dispatched))
@@ -480,30 +486,7 @@ def test_foreign_checkout_is_refused_before_dispatch(
     assert str(home) in err, "the message must name the home it acts on"
     assert str(home / "source") in err, "and the checkout that may act on it"
     assert "AVA_HOME" in err
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["status"],
-        ["cluster", "status"],
-        ["maintenance", "status"],
-        ["agents", "ls"],
-        ["config", "get"],
-        ["schedules", "ls"],
-        ["backup", "operations", "status"],
-    ],
-)
-def test_foreign_checkout_still_runs_the_read_only_verbs(
-    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Reading a home changes nothing, so any checkout may do it."""
-    _owned_home(tmp_path, monkeypatch)
-    dispatched: list[str] = []
-    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording(argv[0], dispatched))
-
-    assert _main.main(argv) == 0
-    assert dispatched == [argv[0]]
+    assert sorted(path.name for path in home.iterdir()) == ["source"], "nothing may be written"
 
 
 def test_the_homes_own_checkout_runs_the_state_changing_verbs(
@@ -535,19 +518,37 @@ def test_a_home_with_no_source_accepts_any_checkout(
     assert dispatched == ["stop"]
 
 
-def test_help_is_never_gated(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("flag", ["--help", "-h"])
+def test_foreign_checkout_may_still_ask_for_a_lone_help_flag(
+    flag: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`ava stop --help` is a parse-only invocation: it must reach argparse (which
-    prints help and exits 0) rather than be refused by the gate."""
+    """A lone `-h`/`--help` reaches argparse (which prints and exits 0) rather
+    than the gate: no verb runs."""
     _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
-    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording("stop", dispatched))
+    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording("ava", dispatched))
 
     with pytest.raises(SystemExit) as exc:
-        _main.main(["stop", "--help"])
+        _main.main([flag])
 
     assert exc.value.code == 0
+    assert "source checkout" not in capsys.readouterr().err
+
+
+def test_foreign_checkout_may_still_run_bare_ava(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With no argv the gate has no verb to refuse; argparse owns the usage error."""
+    _owned_home(tmp_path, monkeypatch)
+    dispatched: list[str] = []
+    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording("ava", dispatched))
+
+    assert _main.main([]) == 0
+
+    assert dispatched == ["ava"]
     assert "source checkout" not in capsys.readouterr().err
 
 

@@ -1,14 +1,14 @@
-"""Setup-field resolution (env > $AVA_HOME/<name> file).
+"""Setup-field resolution (the home's `.env`, read through Settings).
 
-Called by `cmd_start`. Resolution never writes `$AVA_HOME/<name>`; the home's
-durable identity is persisted by `ava init` (`cli/init_intent.py`,
-`cli/start_identity.py`), so starts take no identity input.
+Called by `cmd_start`. Resolution never writes; the home's durable identity is
+persisted by `ava init` (`cli/init_intent.py`, `cli/start_identity.py`), so starts take
+no identity input.
 
 Capabilities (serve_gateway / serve_agent_runner / serve_observability_station)
-are independent booleans, each resolved env (settings bool) >
-`$AVA_HOME/machine_serve_<cap>` file; the string setup fields
-(machine_name / description / memory_remote / gateway_url) are resolved by
-`_SetupField` below, gated by which capabilities this host carries.
+are independent booleans, each the settings bool of its `AVA_MACHINE_SERVE_*` key
+(unset = off); the string setup fields (machine_name / description / memory_remote /
+gateway_url) are resolved by `_SetupField` below, gated by which capabilities this
+host carries.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class _SetupField:
     """Metadata for a single setup field — used by the collector and error message.
 
     Attributes:
-        name: `$AVA_HOME/<name>` filename + `settings.<name>` Python attribute
+        name: `settings.<name>` Python attribute
         env_var: equivalent env var (e.g. `AVA_MACHINE_NAME`)
         hint: value hint shown in error messages (e.g. "<name>, e.g. host-a")
         roles: tuple of capability values this field is required by (("gateway",), ("agent-runner",), or both)
@@ -61,18 +61,16 @@ class _SetupField:
 @dataclass(frozen=True)
 class _Capability:
     """Metadata for one serve-capability flag — a boolean (serve or not), not a
-    string field. Resolved env (settings bool) > `$AVA_HOME/<file>`.
+    string field. Resolved from the settings bool (unset = off).
 
     Attributes:
         capability: the capability token this flag declares ("gateway" /
             "agent-runner" / "observability-station")
-        file: `$AVA_HOME/<file>` filename + the basename for the env var below
-        env_var: equivalent env var (e.g. `AVA_MACHINE_SERVE_GATEWAY`)
+        env_var: the `.env` key (e.g. `AVA_MACHINE_SERVE_GATEWAY`)
         settings_attr: `settings.<attr>` (bool | None — None = env unset)
     """
 
     capability: str
-    file: str
     env_var: str
     settings_attr: str
 
@@ -80,19 +78,16 @@ class _Capability:
 _CAPABILITIES: tuple[_Capability, ...] = (
     _Capability(
         capability="gateway",
-        file="machine_serve_gateway",
         env_var="AVA_MACHINE_SERVE_GATEWAY",
         settings_attr="machine_serve_gateway",
     ),
     _Capability(
         capability="agent-runner",
-        file="machine_serve_agent_runner",
         env_var="AVA_MACHINE_SERVE_AGENT_RUNNER",
         settings_attr="machine_serve_agent_runner",
     ),
     _Capability(
         capability="observability-station",
-        file="machine_serve_observability_station",
         env_var="AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
         settings_attr="machine_serve_observability_station",
     ),
@@ -131,46 +126,22 @@ _SETUP_FIELDS: tuple[_SetupField, ...] = (
 
 
 def _resolve_capability(cap: _Capability) -> bool:
-    """env (settings bool) > `$AVA_HOME/<file>` > False.
-
-    A non-None env / file is honored as-is; only when both are unset does the
-    capability default to off.
-    """
-    from base.cluster.machine import parse_serve_value
-    from base.paths import ava_home
-
+    """The capability's settings bool; unset means the capability is off."""
     env_val: bool | None = get_field(cap.settings_attr)
-    if env_val is not None:
-        return env_val
-    p = ava_home() / cap.file
-    if p.exists():
-        text = p.read_text()
-        if text.strip():
-            return parse_serve_value(text, str(p))
-    return False
+    return bool(env_val)
 
 
 def _resolve_setup_field(field: _SetupField) -> str | None:
-    """env > file > None.
+    """The field's settings value, or None when it is empty.
 
-    The field's validator gates whichever source wins; an invalid value raises
-    immediately.
+    The field's validator gates the value; an invalid one raises immediately.
     """
-    from base.paths import ava_home
-
-    env_val = get_field(field.name).strip()
-    if env_val:
-        if field.validator:
-            field.validator(env_val)
-        return env_val
-    p = ava_home() / field.name
-    if p.exists():
-        file_val = p.read_text().strip()
-        if file_val:
-            if field.validator:
-                field.validator(file_val)
-            return file_val
-    return None
+    value = get_field(field.name).strip()
+    if not value:
+        return None
+    if field.validator:
+        field.validator(value)
+    return value
 
 
 def _collect_setup_values() -> tuple[SetupValues, list[_SetupField | _Capability]]:

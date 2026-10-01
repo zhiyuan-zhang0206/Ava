@@ -17,7 +17,7 @@ separate — no cross-contamination. On a split deployment, each unit has
 exactly one path matching its role.
 
 This module handles:
-- read `$AVA_HOME/memory_remote` for the remote URL
+- read `AVA_MEMORY_REMOTE` (the home's `.env`) for the remote URL
 - check local repo state (is it a git repo / is the branch correct)
 - first-time init for each checkout (`init()` for agent-runner,
   `init_gateway()` for gateway)
@@ -50,7 +50,7 @@ from base.cluster.machine import is_agent_runner, is_gateway, machine_name
 from base.config import cluster_tz, settings
 from base.host.proc import run_bounded
 from base.native_process.os_platform import CREATE_NO_WINDOW
-from base.paths import ava_home, gateway_memory_dir, memory_dir
+from base.paths import gateway_memory_dir, memory_dir
 
 # Memory pool physical path is `$AVA_HOME/memory` via `memory_dir()` (same
 # location `ava/memory.py:PATH` exposes to the agent). We resolve it through
@@ -69,7 +69,7 @@ _DEFAULT_GITIGNORE = """\
 
 
 class MemoryRemoteMissing(RuntimeError):  # noqa: N818 — "state description" naming, same as MachineNameMissing
-    """Neither env `AVA_MEMORY_REMOTE` nor `$AVA_HOME/memory_remote` is set — multi-machine memory setup is incomplete."""
+    """`AVA_MEMORY_REMOTE` is not set — multi-machine memory setup is incomplete."""
 
 
 class MemoryPoolBootstrapFailed(RuntimeError):  # noqa: N818
@@ -85,31 +85,22 @@ class MemoryBranchMismatch(RuntimeError):  # noqa: N818
 
 
 def memory_remote() -> str:
-    """Get the central git remote URL. settings (env-backed) > file > raise.
+    """Get the central git remote URL: `settings.general.memory_remote` (env
+    `AVA_MEMORY_REMOTE`: the home's `.env`, headless deployment or CI injection).
 
-    Precedence:
-    1. `settings.general.memory_remote` (env `AVA_MEMORY_REMOTE` / headless
-       deployment / CI injection)
-    2. `$AVA_HOME/memory_remote` file (regular operator configuration)
-    3. neither -> MemoryRemoteMissing. `ava memory init` chooses its
-       role-specific local or gateway-bootstrap path; a caller that needs a
-       remote directs the operator to configure one.
+    Empty -> MemoryRemoteMissing. `ava memory init` chooses its role-specific
+    local or gateway-bootstrap path; a caller that needs a remote directs the
+    operator to configure one.
 
     Raises:
-        MemoryRemoteMissing: settings.general.memory_remote empty + file
-            missing or empty.
+        MemoryRemoteMissing: settings.general.memory_remote is empty.
     """
     env = settings.general.memory_remote.strip()
     if env:
         return env
-    p = ava_home() / "memory_remote"
-    if p.exists():
-        url = p.read_text().strip()
-        if url:
-            return url
     raise MemoryRemoteMissing(
         "memory remote not set. Configure one before a remote-backed memory "
-        f"operation: `echo <git-url> > {p}` or `export AVA_MEMORY_REMOTE=<git-url>`."
+        "operation: set AVA_MEMORY_REMOTE=<git-url> in the home's `.env`."
     )
 
 
@@ -408,11 +399,11 @@ def init() -> None:
       - gateway-capable unit (single-box fresh install, bench, offline
         personal dev): `git init -b <branch>` local empty repo + empty
         commit; do not connect remote. A later remote-backed operation raises
-        MemoryRemoteMissing; configure `AVA_MEMORY_REMOTE` or
-        `$AVA_HOME/memory_remote` before using that operation.
+        MemoryRemoteMissing; configure `AVA_MEMORY_REMOTE` before using that
+        operation.
 
     Raises:
-        MachineNameMissing: `$AVA_HOME/machine_name` not set.
+        MachineNameMissing: `AVA_MACHINE_NAME` not set.
         MemoryBranchMismatch: already init'd on a runner but branch incorrect.
         subprocess.CalledProcessError: git command failure (network /
             auth / remote does not exist, etc.).
@@ -462,9 +453,9 @@ def init() -> None:
             except MemoryPoolBootstrapFailed as e:
                 raise MemoryRemoteMissing(
                     "memory remote not configured and the gateway pool snapshot "
-                    f"fetch failed ({e}). Set AVA_MEMORY_REMOTE (or "
-                    "$AVA_HOME/memory_remote) for the GitHub sync path, fix the "
-                    "gateway URL / cluster secret, or set AVA_MEMORY_KEEP_LOCAL=true "
+                    f"fetch failed ({e}). Set AVA_MEMORY_REMOTE for the GitHub sync "
+                    "path, fix the gateway URL / cluster secret, or set "
+                    "AVA_MEMORY_KEEP_LOCAL=true "
                     "to run an explicitly local-only pool."
                 ) from e
             return

@@ -294,26 +294,30 @@ def test_config_source_is_remote_for_pure_runner(monkeypatch: pytest.MonkeyPatch
     assert bootstrap.config_source_is_local() is False  # absent = pure runner
 
 
-def test_config_source_reads_the_serve_file(
+def test_config_source_reads_the_homes_env_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # env unset -> $AVA_HOME/machine_serve_gateway file decides.
+    # env unset -> the home's `.env` decides; a legacy `machine_serve_gateway` file is not read.
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.delitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", raising=False)
     (home / "machine_serve_gateway").write_text("true")
+    assert bootstrap.config_source_is_local() is False
+    (home / ".env").write_text("AVA_MACHINE_SERVE_GATEWAY=true\n")
     assert bootstrap.config_source_is_local() is True
-    (home / "machine_serve_gateway").write_text("false")
+    (home / ".env").write_text("AVA_MACHINE_SERVE_GATEWAY=false\n")
     assert bootstrap.config_source_is_local() is False
 
 
-def test_config_source_env_wins_over_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_config_source_env_wins_over_the_env_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "false")
-    (home / "machine_serve_gateway").write_text("true")
+    (home / ".env").write_text("AVA_MACHINE_SERVE_GATEWAY=true\n")
     assert bootstrap.config_source_is_local() is False
 
 
@@ -334,8 +338,8 @@ def test_should_fetch_only_for_enrolled_runner(
     `not config_source_is_local() and should_fetch_from_gateway()`; a gateway
     unit short-circuits at the first half. Bare checkouts and unenrolled runners
     resolve locally."""
-    # Point AVA_HOME at a fresh dir: the suite's tmpfs home carries a
-    # machine_serve_agent_runner file (conftest), which the settings-free
+    # Point AVA_HOME at a fresh dir: the suite's tmpfs home `.env` declares
+    # AVA_MACHINE_SERVE_AGENT_RUNNER (conftest), which the settings-free
     # flag resolution would otherwise read.
     home = tmp_path / "home"
     home.mkdir()
@@ -359,9 +363,10 @@ def test_should_fetch_only_for_enrolled_runner(
     assert bootstrap.should_fetch_from_gateway() is False
 
 
-def test_should_fetch_reads_the_serve_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The serve_agent_runner flag resolves env > $AVA_HOME/machine_serve_agent_runner
-    file, settings-free."""
+def test_should_fetch_reads_the_homes_env_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The serve_agent_runner flag resolves env > the home's `.env`, settings-free."""
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
@@ -369,6 +374,8 @@ def test_should_fetch_reads_the_serve_file(monkeypatch: pytest.MonkeyPatch, tmp_
     monkeypatch.delitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", raising=False)
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gw:8000")
     (home / "machine_serve_agent_runner").write_text("true")
+    assert bootstrap.should_fetch_from_gateway() is False  # the legacy file is not read
+    (home / ".env").write_text("AVA_MACHINE_SERVE_AGENT_RUNNER=true\n")
     assert bootstrap.should_fetch_from_gateway() is True
 
 

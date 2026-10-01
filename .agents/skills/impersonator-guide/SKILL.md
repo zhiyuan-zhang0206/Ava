@@ -61,7 +61,7 @@ Three values anchor every command in this skill:
   on the home `AVA_HOME` names, else `~/.ava`: launched by an Ava agent, you
   inherited that agent's `AVA_HOME`; in a terminal of your own on the hosting
   machine, leave it unset. An `ava` from a checkout that is not the home's own
-  refuses a command that changes state rather than guess.
+  refuses every command rather than guess.
 
 Check state any time:
 

@@ -14,25 +14,17 @@ from urllib.parse import urlsplit
 from pydantic import Field, field_validator, model_validator
 
 from base.config.base import EnvSettings, _unit_home
-from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL, resolve_ava_home
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.predicates import is_ipv4_literal, is_loopback_host
 from base.host.net.url_secret import url_host, url_with_host, url_with_query_param
 
 
 def _self_machine_host() -> str:
     """This host's reachable address, mirroring `base.cluster.machine.reachable_host`
-    (env `AVA_MACHINE_HOST` > `$AVA_HOME/machine_host` file > `localhost`).
+    (env `AVA_MACHINE_HOST` > `localhost`).
     Duplicated at this leaf because base.cluster.machine imports settings — a config
     sub-model cannot import it back."""
-    env = os.environ.get("AVA_MACHINE_HOST", "").strip()
-    if env:
-        return env
-    path = resolve_ava_home() / "machine_host"
-    if path.exists():
-        host = path.read_text().strip()
-        if host:
-            return host
-    return "localhost"
+    return os.environ.get("AVA_MACHINE_HOST", "").strip() or "localhost"
 
 
 # A runner-class login: a local plane's write-generation runner login

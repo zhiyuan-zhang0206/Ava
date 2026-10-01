@@ -261,10 +261,12 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
 
     home = tmp_path / "home"
     (home / "run").mkdir(parents=True)
-    (home / "machine_name").write_text("probe-host")  # the gateway init names its host
     gateway = "http://gateway.invalid:8000"
-    # A configured pure runner: its `.env` carries the role and the gateway URL.
-    (home / ".env").write_text(f"AVA_MACHINE_SERVE_AGENT_RUNNER=true\nAVA_GATEWAY_URL={gateway}\n")
+    # A configured pure runner: its `.env` carries the role, the gateway URL and the
+    # name the gateway init gives its host.
+    (home / ".env").write_text(
+        f"AVA_MACHINE_NAME=probe-host\nAVA_MACHINE_SERVE_AGENT_RUNNER=true\nAVA_GATEWAY_URL={gateway}\n"
+    )
     (home / ".env").chmod(0o600)
     (home / "run" / "bootstrap-snapshot.json").write_text(
         json.dumps(

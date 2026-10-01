@@ -42,8 +42,6 @@ does (the variable, else `~/.ava`); runs inside the repo venv (`.venv/bin/python
 installed.
 """
 
-# operates-on-cluster: secrets, telemetry -- reads the local trace mirror, queries Tempo with the cluster secret
-
 from __future__ import annotations
 
 import argparse
