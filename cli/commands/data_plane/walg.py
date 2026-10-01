@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from base.cluster.dataplane import walg_binary
@@ -67,3 +68,28 @@ def cmd_walg_status() -> int:
     failure = probe.failure()
     print(f"health: {failure or 'ok'}")
     return 0
+
+
+def warn_archive_inactive() -> None:
+    """Say so when WAL archiving is configured but this Postgres is not carrying it.
+
+    A retained postmaster is only reloaded, so it keeps the launch arguments of its
+    previous start: `archive_mode` and the archive command take effect at the next
+    new launch. A warning, not a failure: the health probe is the alert.
+    """
+    expected = expected_archive()
+    if expected is None:
+        return
+    try:
+        with probe.admin_connection() as conn:
+            state = probe.read_archiver_state(conn)
+    except Exception as exc:
+        print(f"  ! WAL archiving state not read ({type(exc).__name__}: {exc})", file=sys.stderr)
+        return
+    if probe.settings_differ(state, expected):
+        print(
+            "  ! WAL archiving is configured but this Postgres is not running with the "
+            "configured archive settings (it kept its previous launch arguments): run "
+            "`ava stop` and `ava start` to activate it",
+            file=sys.stderr,
+        )

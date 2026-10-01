@@ -66,6 +66,7 @@ from cli.commands.converge.redis_bridge import ensure_redis_bridge
 # modules without an import cycle; re-exported here because every caller and
 # test reaches for `cli.commands.converge.host.ConvergeCtx` / `ALL_ROLES`.
 from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx, ConvergeStep
+from cli.commands.converge.walg import converge_walg
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
 from cli.commands.extensions.external_skills import converge_external_agent_skill
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step
@@ -327,6 +328,14 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "PostgreSQL 17 + pgvector runtime",
         _ensure_pg_binaries_step,
+        roles=frozenset({"gateway"}),
+    ),
+    # WAL archiving, when AVA_WALG_CONFIG_FILE switches it on: the pinned binary, a
+    # validated configuration and the pinned key fingerprint, all before Postgres
+    # starts. A no-op while the key is unset.
+    ConvergeStep(
+        "WAL-G archiving",
+        converge_walg,
         roles=frozenset({"gateway"}),
     ),
     # Reconcile the one DB URL (AVA_DB_URL) with the pooler toggle + preflight the
