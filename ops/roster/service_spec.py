@@ -91,12 +91,21 @@ class ServiceSpec:
             service is a standard Ava ``/healthz`` daemon whose port is the
             ``base.daemon.health.DEFAULT_PORTS[health_name]`` slot (the same name
             the daemon passes to ``start_health_server``). None = any other shape.
+        home_healthz: this service's readiness endpoint is an Ava ``/healthz``
+            whose body names the unit's home, so ``ava start`` can recognise
+            another unit's occupant on the port before it launches
+            (``cli.commands._probe._occupied_health_ports``). Always true of a
+            ``health_name`` daemon, which need not set it; declared here by the
+            one other service that answers such a payload, the gate on its entry
+            port. False = the endpoint carries no home identity, so an occupant
+            cannot be told apart before the launch.
 
     Construction validates what the declaration alone can decide, so a malformed
     spec fails where it is written instead of at ``ava start`` or root wiring:
     non-empty known capabilities, a derivable database login class, one readiness
     endpoint (``curl_url`` xor ``tcp_port``), a positive finite ``stop_ceiling_s``,
-    and, for a ``health_name``, an existing port slot and a ``/healthz`` URL.
+    and, for a ``health_name`` or ``home_healthz``, a ``/healthz`` URL (and for a
+    ``health_name`` an existing port slot).
     """
 
     session: str
@@ -115,41 +124,60 @@ class ServiceSpec:
     db_access: DbAccess | None = None
     stop_ceiling_s: float | None = None
     health_name: str | None = None
+    home_healthz: bool = False
 
     def __post_init__(self) -> None:
-        if not self.capabilities:
-            raise ValueError(f"service {self.session!r} declares no capabilities")
-        unknown = self.capabilities - set(get_args(MachineRole))
-        if unknown:
-            raise ValueError(
-                f"service {self.session!r} declares unknown capabilities {sorted(unknown)}; "
-                f"known: {sorted(get_args(MachineRole))}"
-            )
-        if self.curl_url is not None and self.tcp_port is not None:
-            raise ValueError(
-                f"service {self.session!r} declares both curl_url and tcp_port; "
-                "its readiness endpoint is exactly one"
-            )
-        if self.tcp_port is not None and not 0 < self.tcp_port < 65536:
-            raise ValueError(f"service {self.session!r} has invalid tcp_port {self.tcp_port}")
+        _validate_capabilities(self)
+        _validate_endpoint(self)
+        _validate_healthz(self)
         ceiling = self.stop_ceiling_s
         if ceiling is not None and (not math.isfinite(ceiling) or ceiling <= 0):
             raise ValueError(
                 f"service {self.session!r} stop_ceiling_s must be a positive finite number, "
                 f"got {ceiling!r}"
             )
-        if self.health_name is not None:
-            if self.health_name not in DEFAULT_PORTS:
-                raise ValueError(
-                    f"service {self.session!r} names health slot {self.health_name!r}, "
-                    f"which has no port (known: {sorted(DEFAULT_PORTS)})"
-                )
-            if self.curl_url is None or not self.curl_url.endswith("/healthz"):
-                raise ValueError(
-                    f"service {self.session!r} serves /healthz (health_name "
-                    f"{self.health_name!r}) but its curl_url is {self.curl_url!r}"
-                )
         db_access(self)  # raises for a database service whose login class cannot be decided
+
+
+def _validate_capabilities(spec: ServiceSpec) -> None:
+    if not spec.capabilities:
+        raise ValueError(f"service {spec.session!r} declares no capabilities")
+    unknown = spec.capabilities - set(get_args(MachineRole))
+    if unknown:
+        raise ValueError(
+            f"service {spec.session!r} declares unknown capabilities {sorted(unknown)}; "
+            f"known: {sorted(get_args(MachineRole))}"
+        )
+
+
+def _validate_endpoint(spec: ServiceSpec) -> None:
+    if spec.curl_url is not None and spec.tcp_port is not None:
+        raise ValueError(
+            f"service {spec.session!r} declares both curl_url and tcp_port; "
+            "its readiness endpoint is exactly one"
+        )
+    if spec.tcp_port is not None and not 0 < spec.tcp_port < 65536:
+        raise ValueError(f"service {spec.session!r} has invalid tcp_port {spec.tcp_port}")
+
+
+def _validate_healthz(spec: ServiceSpec) -> None:
+    serves_healthz = spec.curl_url is not None and spec.curl_url.endswith("/healthz")
+    if spec.health_name is not None:
+        if spec.health_name not in DEFAULT_PORTS:
+            raise ValueError(
+                f"service {spec.session!r} names health slot {spec.health_name!r}, "
+                f"which has no port (known: {sorted(DEFAULT_PORTS)})"
+            )
+        if not serves_healthz:
+            raise ValueError(
+                f"service {spec.session!r} serves /healthz (health_name "
+                f"{spec.health_name!r}) but its curl_url is {spec.curl_url!r}"
+            )
+    if spec.home_healthz and not serves_healthz:
+        raise ValueError(
+            f"service {spec.session!r} declares home_healthz but its curl_url is "
+            f"{spec.curl_url!r}, not a /healthz endpoint"
+        )
 
 
 def profile_marker(spec: ServiceSpec) -> str | None:
