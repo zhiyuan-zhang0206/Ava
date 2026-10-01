@@ -58,6 +58,25 @@ an immutable running release or seal ignored dependency directories.
   an adoption hint, never replacement custody. Failed start cannot become ready.
   No resident boot wrapper or root runtime deadline exists; interactive start
   writes no PIDFile. `KillMode=process` preserves independent data-plane siblings.
+## Unit intent and recorded failures
+
+Each unit carries one policy fact: its `intent` (`running` | `stopped`) and the
+source that last set it (`operator` | `self` | `selection`), persisted per unit
+under the run directory (`intent/<unit>.json`, atomic writes). Classification of
+an expected stop reads only this intent — a mechanical transition residue never
+reads back as an operator action (task #4872). An interrupted replacement is
+recorded explicitly as `restart_failed` (the half it failed in, `down` or `up`,
+and since when) and clears only once a fresh active generation proves it gone;
+the health monitor counts it and retries under its backoff. A root restart
+merges each stored record conservatively: an explicit operator or selection stop
+holds its unit down, a stop root recorded for itself during shutdown is
+superseded by the admitted start, and a recorded failure is carried until a
+generation proves it gone. A unit with no stored record — one adopted from a
+generation that predates this store — or with an unreadable one (the store logs
+it) takes the same default at its admitted start: `running`, source `selection`.
+Residue from an older scheme is discarded, never consulted; a fleet update's
+full stop/start leaves no mixed state.
+
 ## Control contract
 
 This package owns the application service tree. The wire protocol and client sit below every consumer:

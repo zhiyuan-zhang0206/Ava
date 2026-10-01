@@ -22,6 +22,7 @@ from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from services.ava_root import health as health_mod
 from services.ava_root.health import HealthConfig, HealthMonitor
+from services.ava_root.inputs import InputSeal
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry, UnknownUnitError
 from services.ava_root.probes import ProbeRegistry
 from services.ava_root.supervisor import Supervisor
@@ -32,6 +33,9 @@ class _Recorder:
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+
+    def info(self, message: str, **extra: object) -> None:
+        self.calls.append({"message": message, **extra})
 
     def warning(self, message: str, **extra: object) -> None:
         self.calls.append({"message": message, **extra})
@@ -525,6 +529,89 @@ async def test_integration_unconfirmed_restart_backs_off(
     assert supervisor._units["svc"].restart_count == 1
     assert supervisor._units["svc"].generation is second
     assert "backing off" in caplog.text
+
+
+async def _running_unit_with_unactivatable_replacement(
+    started: StartFactory, short_tmp: Path, caplog: pytest.LogCaptureFixture
+) -> tuple[Supervisor, Path, HealthMonitor]:
+    """One running sealed unit whose replacement cannot activate (matrix #1 setup)."""
+    caplog.set_level(logging.DEBUG, logger="services.ava_root.health")
+    sealed = short_tmp / "sealed-input"
+    sealed.write_text("v1")
+    seal = InputSeal.capture(sealed.resolve())
+    unit = UnitManifest(
+        "svc",
+        (sys.executable, "-u", "-c", "import time; time.sleep(60)"),
+        RestartPolicy.ALWAYS,
+        "root",
+        inputs=(seal,),
+    )
+    supervisor = await started([unit])
+    probe = CellProbe(DaemonProbe.up("serving"))
+    monitor = HealthMonitor(
+        supervisor,
+        _registry("svc", probe),
+        config=_config(breaker_rounds=5, verify_deadline_s=0.5),
+    )
+    await monitor.run_round()  # the running generation is observed ready (grace over)
+    assert monitor.snapshot()["svc"].generation_ready
+    probe.verdict = DaemonProbe.down("not serving")
+    sealed.write_text("v2")  # the next birth of this generation is refused
+    return supervisor, sealed, monitor
+
+
+async def test_failed_replacement_records_explicit_state_and_still_counts(
+    started: StartFactory,
+    recorder: _Recorder,
+    caplog: pytest.LogCaptureFixture,
+    short_tmp: Path,
+) -> None:
+    """A replacement that cannot activate lands in an explicit recorded failure.
+
+    The failed up half must be visible in status and as a registered event while
+    the round counts it — never read as an expected operator stop (matrix #1).
+    """
+    supervisor, _sealed, monitor = await _running_unit_with_unactivatable_replacement(
+        started, short_tmp, caplog
+    )
+    await monitor.run_round()  # the restart attempt cannot activate
+    state = monitor.snapshot()["svc"]
+    assert state.consecutive_failures == 1
+    assert state.next_respawn_at is not None
+    assert "restart FAILED" in caplog.text
+    assert "expected (operator stop)" not in caplog.text
+    entry = cast("list[dict[str, Any]]", (await supervisor.status())["units"])[0]
+    assert entry["intent"] == "running" and entry["state"] == "stopped"
+    assert entry["restart_failed"]["stage"] == "up"
+    assert supervisor._units["svc"].restart_count == 0
+    assert len(recorder.events("root_restart_failed")) == 1
+
+
+async def test_failed_replacement_backs_off_then_retry_clears_the_record(
+    started: StartFactory,
+    recorder: _Recorder,
+    caplog: pytest.LogCaptureFixture,
+    short_tmp: Path,
+    clock: FakeClock,
+) -> None:
+    """The recorded failure counts under the backoff, and a successful retry clears it."""
+    supervisor, sealed, monitor = await _running_unit_with_unactivatable_replacement(
+        started, short_tmp, caplog
+    )
+    await monitor.run_round()  # 1: the failure is recorded
+    await monitor.run_round()  # 2: inside the backoff window — counting, no attempt
+    assert supervisor._units["svc"].restart_count == 0
+    assert "backing off" in caplog.text
+    assert "expected (operator stop)" not in caplog.text
+    sealed.write_text("v1")  # the retry can activate again
+    clock.now += 31.0
+    await monitor.run_round()  # 3: the retry replaces the generation and clears the record
+    assert supervisor._units["svc"].restart_count == 1
+    entry = cast("list[dict[str, Any]]", (await supervisor.status())["units"])[0]
+    assert entry["restart_failed"] is None
+    assert entry["state"] == "running"
+    assert len(recorder.events("root_restart_failed")) == 1
+    assert len(recorder.events("root_restart_cleared")) == 1
 
 
 async def test_a_probe_outlasting_the_verification_window_leaves_the_restart_unconfirmed() -> None:
