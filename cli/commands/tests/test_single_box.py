@@ -151,7 +151,11 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
     # The start process adopts its delivered login into os.environ; the raw-env
     # seam restores the suite's own values at teardown.
     monkeypatch.setitem(os.environ, "AVA_DB_URL", values["AVA_DB_URL"])
-    monkeypatch.delitem(os.environ, authority.GENERATION_ENV, raising=False)
+    # The birth adopts the delivered generation next. `delitem(raising=False)` on an absent
+    # key records nothing, so register the key (setitem) before removing it: teardown then
+    # deletes whatever the birth assigned.
+    monkeypatch.setitem(os.environ, authority.GENERATION_ENV, "")
+    monkeypatch.delitem(os.environ, authority.GENERATION_ENV)
 
     def _record(_home: Path) -> cluster.ClusterRecord:
         return record

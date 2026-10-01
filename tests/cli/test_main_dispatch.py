@@ -20,6 +20,7 @@ from typing import cast
 
 import pytest
 
+from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from base.native_process import code_version
 from cli import main as _main
 from cli.parsers import agents as _agents
@@ -158,6 +159,10 @@ def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPat
     """The CLI always constructs the full settings domain set."""
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
     assert "AVA_PROCESS_PROFILE" in os.environ
+    # main() records the discarded profile as AVA_LAUNCHER_PROFILE. Register the absent key
+    # (setenv) before removing it so teardown deletes what main() assigned.
+    monkeypatch.setenv(LAUNCHER_PROFILE_ENV_KEY, "")
+    monkeypatch.delenv(LAUNCHER_PROFILE_ENV_KEY)
 
     def _fake(_args: argparse.Namespace) -> int:
         return 0
