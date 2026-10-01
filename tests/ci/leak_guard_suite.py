@@ -83,11 +83,14 @@ from collections.abc import Iterator
 
 import pytest
 
-from tests.fixtures import leak_guard
+import leakdemo.identity  # the stand-in slot must be loaded before the first test, whatever file runs
+from tests.fixtures import identity_restore, leak_guard
 
-# The suite's own singleton stands in for the agent identity registry.
+# The suite's own singleton stands in for the agent identity slots, for the guard and the restore alike.
 leak_guard.WATCHED_ATTRS = (("leakdemo.identity", ("_id",)),)
 leak_guard.WATCHED_CONTEXTVARS = ()
+identity_restore.IDENTITY_SLOTS = (("leakdemo.identity", ("_id",)),)
+identity_restore.IDENTITY_CONTEXTVARS = ()
 
 
 class _Boom(list):
@@ -197,6 +200,10 @@ def test_clean_preregistered_module_attr(monkeypatch: pytest.MonkeyPatch) -> Non
 # ---- class 4: the identity slot assigned bare, the pattern 300+ test sites use
 def test_leaker_bare_identity_assignment() -> None:
     identity._id = 7
+
+
+def test_victim_stale_identity() -> None:
+    assert identity._id is None  # the session's identity, not the 7 the test before it left
 
 
 def test_clean_identity_via_monkeypatch(monkeypatch: pytest.MonkeyPatch) -> None:
