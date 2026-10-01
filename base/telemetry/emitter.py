@@ -577,10 +577,11 @@ def init_telemetry(*, process: str = "unknown", agent_id: int | None = None) -> 
     """Bind process identity and bring up the event pipeline. Idempotent.
 
     Called from the loguru `init_*` entry points (the single boot seam every
-    process shares): `init_agent_process` → process="agent-kernel",
-    `init_gateway_process(name)` → process=name, etc. The first call opens the
-    drain thread; later calls only refresh the identity binding. The DB is no
-    longer part of the pipeline (task #1197), so startup never depends on it."""
+    process shares): `init_gateway_process(name)` → process=name; the exec
+    child's `add_postgres_sink` → process="agent-exec" plus its agent id. The
+    first call opens the drain thread; later calls only refresh the identity
+    binding. The DB is no longer part of the pipeline (task #1197), so startup
+    never depends on it."""
     _state["process"] = process
     _state["agent_id"] = agent_id
     if _state["machine"] is None:

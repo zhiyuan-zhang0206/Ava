@@ -25,10 +25,10 @@ loguru single logger instance + `extra` dict for contextual fields.
 `base.log.sinks` owns stdlib interception and local file-sink mechanics;
 this module re-exports those helpers while retaining process initialization.
 Each entry-point process calls init_* once at startup, binding
-process-level fields (agent process binds agent_id — deferred, so a
-process hosting several agents' turns attributes each record to the
-turn that wrote it; gateway does not; SDK subprocess binds the same
-group as its parent agent). All
+process-level fields (`agent_id` is deferred — `TurnScopedAgentId` — so
+the agent host, one process serving many agents' turns, attributes each
+record to the turn that wrote it; the exec subprocess binds its own
+agent id outright). All
 subsequent `from base.log import logger` calls get a logger that
 auto-carries those fields — callers do not repeat them per line.
 
@@ -37,8 +37,8 @@ auto-carries those fields — callers do not repeat them per line.
 Every log line carries at least:
 - `level`  (loguru built-in)
 - `time`   (loguru built-in)
-- `agent_id`  the turn's agent if one is bound, else this process's
-  (`TurnScopedAgentId`); if neither, `-`
+- `agent_id`  the turn's agent if one is bound (`TurnScopedAgentId`),
+  else `-`
 
 More granular fields (`turn_id` / `node` / `tool_name`) are added
 as-needed later; not strictly required on every line.
@@ -102,7 +102,6 @@ from base.native_process import loaded_commit
 from base.native_process.turn_identity import (
     TURN_SCOPED_AGENT_ID,
     TurnScopedAgentId,
-    set_process_agent_id,
 )
 
 # `base.cluster.machine` / `base.paths` are imported inside the init functions that
@@ -114,7 +113,6 @@ from base.native_process.turn_identity import (
 
 __all__ = [
     "add_postgres_sink",
-    "init_agent_process",
     "init_cli_process",
     "init_gateway_process",
     "init_subprocess_logger",
@@ -130,10 +128,10 @@ def _machine_name_lazy() -> str:
     return machine_name()
 
 
-# Log files for all processes live under $AVA_HOME/logs (logs_dir()). kernel /
-# subprocess / gateway each write their own file (kernel and subprocess share a
-# single agent-{N}.log; multi-process append relies on O_APPEND atomicity;
-# single-line JSONL < PIPE_BUF 4KB does not interleave).
+# Log files for all processes live under $AVA_HOME/logs (logs_dir()). The
+# gateway and every daemon write their own `<name>.log`; each exec subprocess
+# appends to its agent's `agent-{N}.log` (multi-process append relies on
+# O_APPEND atomicity; single-line JSONL < PIPE_BUF 4KB does not interleave).
 
 # Remove the default stderr handler that loguru adds automatically —
 # the init functions below add their own per process type, avoiding
@@ -143,11 +141,10 @@ logger.remove()
 # extra defaults. format string references {extra[...]}; missing keys
 # raise KeyError, so pre-fill.
 #
-# The deferred binding rather than a bare "-": a process that never calls
-# `init_agent_process` still resolves to "-" (no turn bound, no process agent),
-# so gateway / daemon / CLI attribution is unchanged — but a process that binds
-# a TURN gets that turn's agent. That is the hosted agent-runner
-# (`future/infra/agent-runner-as-server.md`), which inits through
+# The deferred binding rather than a bare "-": a process that binds no turn
+# still resolves to "-", so gateway / daemon / CLI attribution is unchanged —
+# but a process that binds a TURN gets that turn's agent. That is the hosted
+# agent-runner (`future/infra/agent-runner-as-server.md`), which inits through
 # `init_gateway_process` and would otherwise stamp every hosted agent's records
 # with the `-` sentinel, throwing away the attribution the turn contextvar knows.
 logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
@@ -177,8 +174,8 @@ def _message_to_params(
     bind this key via `logger.configure(extra={...})` (default `"-"`
     sentinel = no agent, stored NULL). Logger calls pass
     `agent_id=N` to override the default. Missing key fast-raises
-    KeyError (means init_* did not run, framework bug). The agent
-    init binds a `TurnScopedAgentId` rather than a fixed id, so a
+    KeyError (means init_* did not run, framework bug). The default
+    binding is a `TurnScopedAgentId` rather than a fixed id, so a
     process hosting several agents' turns attributes each record to
     the turn that wrote it.
 
@@ -195,7 +192,7 @@ def _message_to_params(
     extra = dict(record["extra"])
     agent_id_raw = extra.pop("agent_id")  # required — init_* bound it; KeyError fast
     if isinstance(agent_id_raw, TurnScopedAgentId):
-        # Deferred binding: the turn's agent, else this process's (see the class).
+        # Deferred binding: the turn's agent, else the `-` sentinel (see the class).
         agent_id_raw = agent_id_raw.resolve()
     event_explicit = extra.pop("event", None)
     if event_explicit == "":
@@ -330,7 +327,7 @@ def add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None) 
     The pipeline lives in `base.telemetry` (bounded queue + drain thread —
     the same batching/backpressure shape the former `_ThreadedPostgresSink`
     had, now the single write path for every sink). `process` names this process in
-    every event row (agent-kernel / gateway / watchdog / ...); `agent_id`
+    every event row (gateway / watchdog / agent-exec / ...); `agent_id`
     binds the default agent dimension.
 
     At runtime, sink failures are contained on the drain thread; loguru's
@@ -360,7 +357,7 @@ def add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None) 
 _postgres_sink_id: int | None = None
 
 
-# Process-level idempotency guard. The three init_* functions add
+# Process-level idempotency guard. The init_* functions add
 # sinks, but `logger.add` is not idempotent — repeated calls
 # accumulate sinks until fd exhaustion (errno 24 Too many open
 # files). Bug symptom: the watchdog daemon calls 6 healthcheck.main()
@@ -373,42 +370,14 @@ _postgres_sink_id: int | None = None
 _init_done = False
 
 
-def init_agent_process(*, agent_id: int) -> None:
-    """Called once at Agent kernel process startup. Binds agent_id,
-    adds stderr (human) + file (`agent-{N}.log`) + the unified event
-    pipeline sinks.
-
-    Attribution is turn-scoped: the bound `TurnScopedAgentId` resolves to the
-    turn's agent when one is bound, else to `agent_id` — identical to a fixed
-    binding in a one-agent process, correct in a hosted one.
-
-    Idempotent — repeat in the same process silent-skips (see
-    ``_init_done`` at module top).
-    """
-    global _init_done  # noqa: PLW0603 — process-level singleton
-    if _init_done:
-        return
-    _configure_windows_event_loop_policy()
-    set_process_agent_id(agent_id)
-    logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
-    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
-    from base.paths import logs_dir
-
-    _add_file_sink(logs_dir() / f"agent-{agent_id}.log")
-    add_postgres_sink(process="agent-kernel", agent_id=agent_id)
-    _install_stdlib_intercept()
-    _init_done = True
-
-
 def init_subprocess_logger(*, agent_id: int) -> None:
     """Called once at exec subprocess startup. **Only** adds the file
     sink, no stderr — the subprocess's stderr is captured by parent
     and injected into exec_output fed to the LLM; framework logs to
     stderr would pollute the agent context.
 
-    Writes to the same file as the parent agent (`agent-{N}.log`);
-    record `extra` fields distinguish kernel vs subprocess origin
-    (caller binds `process_role`).
+    Writes `agent-{N}.log`, which every exec subprocess of that agent appends
+    to; `process_role="subprocess"` marks these records.
 
     Idempotent — repeat in the same process silent-skips (see
     ``_init_done`` at module top).
@@ -434,8 +403,8 @@ def _configure_windows_event_loop_policy() -> None:
     its acquire timeout — the hosted agent-host on Windows shows a
     db_pool_acquire_timeout storm (task #2338 follow-up). The Selector policy
     is the psycopg-documented Windows posture. Every process-boot seam here
-    (init_gateway_process / init_agent_process / init_subprocess_logger /
-    init_cli_process) calls this before any `asyncio.run`, so every asyncio +
+    (init_gateway_process / init_subprocess_logger / init_cli_process)
+    calls this before any `asyncio.run`, so every asyncio +
     psycopg entry point on Windows is covered in one place. No-op elsewhere.
     """
     if sys.platform != "win32":

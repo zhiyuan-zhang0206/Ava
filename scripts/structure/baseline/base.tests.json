@@ -20,7 +20,6 @@
     "base/tests/test_redis_listener.py::base.events.live.redis_listener.RedisInboundListener._consume_one": 3,
     "base/tests/test_redis_listener.py::base.events.live.redis_listener.RedisInboundListener._ensure_subscribed": 3,
     "base/tests/test_redis_listener.py::base.events.live.redis_listener.RedisInboundListener._redis": 1,
-    "base/tests/test_telemetry_otlp_child_defer.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 1,
-    "base/tests/test_turn_scoped_log_attribution.py::base.native_process.turn_identity._process_agent_id": 5
+    "base/tests/test_telemetry_otlp_child_defer.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 1
   }
 }
