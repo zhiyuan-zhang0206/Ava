@@ -45,7 +45,7 @@ def _machine_identity(*, role: str, name: str | None = None) -> Generator[None]:
     Injects via base.cluster.machine.set_identity so every `from base.cluster.machine import
     machine_role` / `machine_name` call site sees the new value without
     per-module patching. `name=None` leaves machine_name as-is — no injection; it
-    resolves lazily from `$AVA_HOME/machine_name` if not yet cached, otherwise
+    resolves lazily from settings if not yet cached, otherwise
     returns the already-cached value. The finally block resets the holder, so the
     session default is restored — no per-field save/restore is needed because the
     holder re-resolves lazily after reset.
