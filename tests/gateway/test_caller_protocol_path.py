@@ -107,7 +107,7 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
         item = claimed[0]
         assert item.source == _SOURCE
         assert item.payload == {"caller_identity": _CALLER}
-        message = build_chat_inbound(item)
+        message, _ = build_chat_inbound(item)
     content = message.model_dump()["content"]
     assert isinstance(content, str)
     assert "External agent" in content and "codex" in content

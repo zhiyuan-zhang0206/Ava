@@ -27,10 +27,10 @@ from agent.hooks.compact import (
     generate_summary,
 )
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
-from agent.messages import NoteTag, system_note_message
+from agent.messages import NoteTag, security_note_message, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
-from ava.security import scan_inbound_content
+from ava.security import SecurityFindingEntry, scan_inbound_content
 from base.agents.context import AvaContext
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
@@ -64,6 +64,26 @@ class _BatchState:
     active_task_id: int | None = None
     task_ids: set[int] = field(default_factory=set)
     committed_chat_ids: list[int] = field(default_factory=list)
+
+    def append_scanned(self, message: BaseMessage, finding: SecurityFindingEntry | None) -> None:
+        """Append an inbound `message`; when its injection scan flagged it
+        (`finding`), the SECURITY note rides right behind it.
+
+        The finding is delivered here, in this claim's own delta — never parked
+        in process state for a later node — so it reaches exactly the agent
+        whose inbound it is, whatever other agent turns the host interleaves.
+        Claim runs between turns, with no tool_use awaiting its result, so a
+        note behind the message cannot split a tool_use -> tool_result pair.
+        """
+        self.new_msgs.append(message)
+        if finding is not None:
+            self.new_msgs.append(
+                security_note_message(
+                    source=finding.source,
+                    triggers=finding.triggers,
+                    created_at=datetime.now(UTC),
+                )
+            )
 
 
 def _by_who(source: str) -> str:
@@ -140,7 +160,7 @@ async def _handle_chat(
     st: _BatchState,
 ) -> None:
     """CHAT inbound: wrap as HumanMessage, append to state, mark committed."""
-    st.new_msgs.append(build_chat_inbound(item))
+    st.append_scanned(*build_chat_inbound(item))
     st.active_task_id = None
     st.committed_chat_ids.append(item.id)
 
@@ -185,20 +205,19 @@ async def _handle_system_note(
     summary written by another agent), so it passes through the same
     injection scan as inbound chat before entering the conversation.
     """
-    content = item.content
-    if settings.agent.security_scan_enabled:
-        content = scan_inbound_content(content, source=f"inbound.system_note:{item.source}")
+    finding = scan_inbound_content(item.content, source=f"inbound.system_note:{item.source}")
     task_id = _task_id_from_system_note(item.payload, _system_note_tag(item.payload))
     st.active_task_id = task_id
     if task_id is not None:
         st.task_ids.add(task_id)
-    st.new_msgs.append(
+    st.append_scanned(
         system_note_message(
-            content=f"{_ts_prefix()}{content}",
+            content=f"{_ts_prefix()}{item.content}",
             tag=_system_note_tag(item.payload),
             task_id=task_id,
             created_at=item.created_at,
-        )
+        ),
+        finding,
     )
 
 
