@@ -148,14 +148,16 @@ repos:
         require_serial: true
         files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/lint/patch_targets\.py|scripts/structure/(placement|import_cache|patch_points|patch_targets|patch_report|locality|baseline_shards)\.py|scripts/structure/baseline/.*\.json)$
 
-      # The unconditional full scan of the hook above, at every push whatever
-      # the diff (pre-commit's own file selection would never pass it the
-      # untouched tests whose home a production import change moves).
+      # The full scan of the hook above, at every push that touches Python, whatever the
+      # diff (pre-commit's own file selection would never pass it the untouched tests whose
+      # home a production import change moves, and never a deleted path). A push with no
+      # Python on the branch cannot move a test's home, so it skips the scan.
       - id: lint-patch-targets-full
         name: lint patch targets, full scan (a production import change moves other tests' homes)
-        entry: .venv/bin/python scripts/lint/patch_targets.py
+        entry: bash scripts/prepush-if-changed.sh '\.py$' -- .venv/bin/python scripts/lint/patch_targets.py
         language: system
         stages: [pre-push]
+        verbose: true  # A skip must stay visible.
         always_run: true
         pass_filenames: false
         require_serial: true
@@ -519,9 +521,21 @@ repos:
         files: ^ui/web/.*\.(ts|tsx)$
         pass_filenames: false
 
-      # ESLint — aligned with frontend CI; errors and unbaselined warnings fail.
+      # ESLint over the files this commit changed, through the same warning gate as CI (errors
+      # and unbaselined warnings fail). An edit to the lint setup (config, local rules, warning
+      # baseline, tsconfig, dependencies) lints the whole project instead. The commit stage cannot
+      # see a type-aware rule react to a type that changed in another file; the whole-project
+      # run below does, at push. The id stays `frontend-eslint`: CI's SKIP lists name it, and
+      # CI's frontend job lints the whole project.
       - id: frontend-eslint
-        name: frontend eslint
+        name: frontend eslint (changed files)
+        entry: bash scripts/precommit-eslint.sh
+        language: system
+        files: ^ui/web/(.*\.(ts|tsx|js|mjs)|package(-lock)?\.json|tsconfig\.json|scripts/eslint-warning-baseline\.json)$
+
+      # The whole-project ESLint run, aligned with frontend CI.
+      - id: frontend-eslint-full
+        name: frontend eslint (whole project)
         entry: bash scripts/prepush-guard.sh eslint -- bash -c 'cd ui/web && npm run lint'
         stages: [pre-push]
         verbose: true
@@ -638,14 +652,14 @@ repos:
       # Added/Copied/Modified/Renamed paths -- never a Deleted one -- so a
       # change that only deletes the last file referencing an event or config
       # field can leave its generated artifact stale with no pre-commit-stage
-      # hook ever firing, on any range. This always-run duplicate ignores
-      # every files: filter and re-checks the whole repository at every
-      # push; the underlying hooks keep their normal filtered,
-      # pre-commit-stage-only behavior, so `git commit` stays fast. See
-      # scripts/prepush-artifact-freshness.sh.
+      # hook ever firing, on any range. The branch-diff run above executes every hook the
+      # branch added to or changed; this one executes, over the whole repository, the
+      # artifact hooks whose inputs the branch ONLY deleted (every one when the range is
+      # unknown). The underlying hooks keep their normal filtered, pre-commit-stage-only
+      # behavior, so `git commit` stays light. See scripts/provision/prepush_freshness.py.
       - id: lint-prepush-artifact-freshness
-        name: "lint prepush artifact freshness (unconditional generated-artifact check)"
-        entry: bash scripts/prepush-artifact-freshness.sh
+        name: "lint prepush artifact freshness (hooks whose inputs the branch only deleted)"
+        entry: .venv/bin/python scripts/provision/prepush_freshness.py
         stages: [pre-push]
         verbose: true  # Successful skips must stay visible.
         language: system

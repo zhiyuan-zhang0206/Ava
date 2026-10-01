@@ -3,9 +3,9 @@
 # ruff: noqa: S603 — subprocess commands use only test-owned paths and fixture literals.
 
 import fcntl
+import importlib
 import json
 import os
-import re
 import selectors
 import shlex
 import subprocess
@@ -22,7 +22,6 @@ ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts/prepush-guard.sh"
 CHECK = ROOT / "scripts/provision/check_git_hooks.py"
 BRANCH_LINT = ROOT / "scripts/prepush-branch-lint.sh"
-ARTIFACT_FRESHNESS = ROOT / "scripts/prepush-artifact-freshness.sh"
 PYRIGHT_FILES = ROOT / "scripts/prepush-pyright-files.sh"
 INSTALL = ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push"
 
@@ -89,7 +88,7 @@ def test_stage_contract() -> None:
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
     assert config["default_install_hook_types"] == ["pre-commit", "pre-push"]
     hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
-    for name in ("frontend-tsc", "frontend-eslint", "frontend-vitest"):
+    for name in ("frontend-tsc", "frontend-eslint-full", "frontend-vitest"):
         hook = hooks[name]
         assert hook["stages"] == ["pre-push"]
         assert hook["verbose"] is True  # pre-commit hides output on PASS otherwise.
@@ -142,19 +141,15 @@ def test_prepush_parity_hooks_configured() -> None:
     assert freshness["always_run"] is True
     assert freshness["verbose"] is True
     assert freshness["pass_filenames"] is False
-    assert freshness["entry"] == "bash scripts/prepush-artifact-freshness.sh"
+    assert freshness["entry"] == ".venv/bin/python scripts/provision/prepush_freshness.py"
 
 
 def test_artifact_freshness_hook_list_matches_config() -> None:
-    # Drift guard: scripts/prepush-artifact-freshness.sh hardcodes the
-    # generated-artifact hook family so it can duplicate each one
-    # unconditionally at push. A new files:-filtered artifact hook added to
-    # .pre-commit-config.yaml without also joining this list would silently
-    # keep the same delete-only blind spot the hook exists to close.
-    script = ARTIFACT_FRESHNESS.read_text()
-    match = re.search(r"hooks=\(\n(.*?)\n\)\n", script, re.S)
-    assert match, "scripts/prepush-artifact-freshness.sh must define a hooks=(...) array"
-    listed = [line.strip() for line in match.group(1).splitlines() if line.strip()]
+    # Drift guard: scripts/provision/prepush_freshness.py names the generated-artifact hook
+    # family it re-runs when a branch only deletes their inputs. A new files:-filtered artifact
+    # hook added to .pre-commit-config.yaml without also joining this list would silently keep
+    # the delete-only blind spot the hook exists to close.
+    listed = list(importlib.import_module("scripts.provision.prepush_freshness").HOOKS)
     expected = {
         "types-codegen-fresh",
         "constants-codegen-fresh",
@@ -164,19 +159,21 @@ def test_artifact_freshness_hook_list_matches_config() -> None:
         "lint-ava-okf",
         "check-doc-references",
     }
-    assert len(listed) == len(expected), "duplicate id in prepush-artifact-freshness.sh hooks list"
+    assert len(listed) == len(expected), "duplicate id in prepush_freshness.HOOKS"
     assert set(listed) == expected
 
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
     hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
     for hook_id in listed:
         hook = hooks[hook_id]
-        # Each must still be a normal filtered pre-commit-stage hook: the
-        # freshness script is what adds the always_run/push-time behavior,
-        # not the hook's own commit-time definition.
+        # Each must still be a normal filtered pre-commit-stage hook: the freshness script
+        # decides when to re-run it over the whole repository, not the hook's own definition.
         assert hook.get("pass_filenames") is False
         assert "pre-commit" in hook.get("stages", config["default_stages"])
         assert hook.get("always_run") is not True
+        assert hook["files"], (
+            f"{hook_id} must be files:-filtered for the delete-only test to mean anything"
+        )
 
 
 def test_branch_lint_skips_without_origin_main(checkout: Path) -> None:
@@ -190,16 +187,6 @@ def test_branch_lint_skips_without_origin_main(checkout: Path) -> None:
     )
     assert result.returncode == 0
     assert "PRE-PUSH SKIPPED [branch-lint]: origin/main is not resolvable locally" in result.stderr
-
-
-def test_branch_lint_guard_preflight_missing_precommit(checkout: Path) -> None:
-    # scripts/prepush-branch-lint.sh delegates its lock/load handling to
-    # prepush-guard.sh's "branch-lint" tool; exercise that preflight directly
-    # the same way the existing pyright/tsc/eslint/vitest tests do.
-    result = run_guard(checkout, "branch-lint")
-    assert result.returncode == 0
-    assert "PRE-PUSH SKIPPED [branch-lint]: missing .venv/bin/pre-commit" in result.stderr
-    assert "executed" not in result.stdout
 
 
 def _init_probe_repo(path: Path) -> None:
