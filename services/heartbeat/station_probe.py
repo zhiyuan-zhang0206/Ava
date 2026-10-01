@@ -42,7 +42,7 @@ from base.config import settings
 from base.deploy.transition import transition_severity
 from base.log import init_gateway_process, logger
 from base.telemetry.station_endpoint import StationTarget as _StationTarget
-from base.telemetry.station_endpoint import resolve_station_target
+from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
 
 _log = logging.getLogger("services.heartbeat.station_probe")
 
@@ -70,11 +70,9 @@ def _configured_observability_base() -> str:
     """The validated AVA_OBSERVABILITY_URL base, or "" when unset/malformed.
 
     The same validation the collector fan-out uses
-    (cli/commands/observability/observatory_urls.py) — the two consumer paths can never
+    (base.telemetry.station_endpoint) — the two consumer paths can never
     disagree about where the station is.
     """
-    from cli.commands.observability.observatory_urls import validated_observability_base
-
     return validated_observability_base(settings.observability.observability_url)
 
 
