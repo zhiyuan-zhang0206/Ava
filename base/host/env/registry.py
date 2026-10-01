@@ -206,8 +206,6 @@ _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     "events_maintenance",
     # The supervised pg-backup scheduler has its own per-unit health endpoint.
     "pg_backup",
-    "pitr_uploader",
-    "pitr_base_backup",
     "memory_indexer",
     "ops",
     "delivery_watchdog",

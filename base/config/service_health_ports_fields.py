@@ -158,30 +158,6 @@ class ServiceHealthPortFields:
             "remote_writable": False,
         },
     )
-    pitr_uploader_health_port: int | None = Field(
-        default=None,
-        alias="AVA_PITR_UPLOADER_HEALTH_PORT",
-        description="PITR uploader /healthz port override (per unit). Unset = default 8117.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-    pitr_base_backup_health_port: int | None = Field(
-        default=None,
-        alias="AVA_PITR_BASE_BACKUP_HEALTH_PORT",
-        description="PITR base candidate scheduler /healthz port override.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
 
     memory_indexer_health_port: int | None = Field(
         default=None,

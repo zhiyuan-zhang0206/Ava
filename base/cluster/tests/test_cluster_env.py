@@ -29,8 +29,6 @@ def _rec(tmp_path: Path):
             "im_bridge": 18017,
             "agent_host": 18019,
             "pg_backup": 18021,
-            "pitr_uploader": 18022,
-            "pitr_base_backup": 18023,
             "memory_search": 18024,
             "gateway_watchdog": 18025,
             "agent_runner_watchdog": 18026,
