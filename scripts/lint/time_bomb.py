@@ -84,6 +84,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import lint_common  # noqa: E402 - standalone script
+from scripts.structure.lazy_modules import ModuleMap  # noqa: E402 - standalone script
 
 _SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
 
@@ -126,78 +127,122 @@ def _is_dt_ctor(node: ast.AST) -> bool:
     return False
 
 
+# A module can only hold a fixed-instant constant (`NAME = datetime(...)` / `date(...)`) if its
+# text spells that constructor call, so only those modules are parsed to look for one. The loose
+# pattern (it also matches `update(`) is the fast literal scan; the exact one settles its hits.
+_FIXED_CTOR_LOOSE = re.compile(r"date(?:time)?\s*\(")
+_FIXED_CTOR_HINT = re.compile(r"\b(?:datetime|date)\s*\(")
+
+_Functions = dict[str, tuple[ast.FunctionDef | ast.AsyncFunctionDef, frozenset[str]]]
+
+
+class _FixedMap(ModuleMap[frozenset[str]]):
+    """module -> its fixed-instant names; a module without any is not a member."""
+
+    def __contains__(self, name: object) -> bool:
+        return isinstance(name, str) and self.get(name) is not None
+
+
+def _top_level_functions(tree: ast.Module) -> _Functions:
+    functions: _Functions = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
+            functions[node.name] = (node, frozenset(a.arg for a in args))
+    return functions
+
+
+def _module_assignments(tree: ast.Module) -> list[tuple[str, ast.AST]]:
+    """(name, value) of every module-level `NAME = value` / `NAME: T = value`."""
+    found: list[tuple[str, ast.AST]] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            found.extend((t.id, node.value) for t in node.targets if isinstance(t, ast.Name))
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is not None
+        ):
+            found.append((node.target.id, node.value))
+    return found
+
+
+def _fixed_instant_names(tree: ast.Module) -> frozenset[str]:
+    """Module-level names bound to a fixed instant, directly or through other such names."""
+    assigns = _module_assignments(tree)
+    names = {name for name, value in assigns if _is_dt_ctor(value)}
+    while derived := {
+        name
+        for name, value in assigns
+        if name not in names
+        and any(isinstance(n, ast.Name) and n.id in names for n in ast.walk(value))
+    }:
+        names |= derived
+    return frozenset(names)
+
+
 class _Index:
-    """One parsed view of the repo: modules, fixed-instant constants, and
-    lazily-computed per-function summaries."""
+    """A view of the repo: modules, fixed-instant constants, and per-function summaries.
+
+    Everything is built on demand: a module is read and parsed the first time a call, an
+    import or a judged file resolves into it, so a run that judges a few files touches a few
+    modules instead of the repository. A module is anything under the scanned dirs (and
+    `tests/`) at the path its dotted name spells.
+    """
 
     def __init__(self, root: Path, dirs: tuple[str, ...]) -> None:
         self.root = root
-        self.trees: dict[str, ast.Module] = {}  # dotted module -> tree
-        self.fns: dict[
-            str,
-            dict[str, tuple[ast.FunctionDef | ast.AsyncFunctionDef, frozenset[str]]],
-        ] = {}
-        self.fixed: dict[str, frozenset[str]] = {}  # module -> fixed-instant names
+        self._scanned = frozenset((*dirs, "tests"))
+        self._exists: dict[str, bool] = {}
+        self._trees: dict[str, ast.Module | None] = {}
+        self.trees = ModuleMap(self._is_module, self._tree)
+        self.fns = ModuleMap(self._is_module, self._functions)
+        self.fixed = _FixedMap(self._is_module, self._fixed_names)  # module -> fixed-instant names
         self._summary: dict[tuple[str, str], tuple[bool, bool, bool]] = {}
-        self._scan(dirs)
 
-    def _scan(self, dirs: tuple[str, ...]) -> None:
-        for d in (*dirs, "tests"):
-            for path in self.root.joinpath(d).rglob("*.py"):
-                rel = path.relative_to(self.root).as_posix()
-                if "__pycache__" in rel or "/mirrors/" in rel:
-                    continue
-                try:
-                    tree = ast.parse(path.read_text(encoding="utf-8"))
-                except (OSError, UnicodeDecodeError, SyntaxError):
-                    continue
-                mod = rel[:-3].replace("/", ".")
-                self.trees[mod] = tree
-                for node in tree.body:
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        params = {
-                            a.arg
-                            for a in (
-                                *node.args.posonlyargs,
-                                *node.args.args,
-                                *node.args.kwonlyargs,
-                            )
-                        }
-                        self.fns.setdefault(mod, {})[node.name] = (node, frozenset(params))
-        # fixed-instant module-level constants + transitive aliases
-        for mod, tree in self.trees.items():
-            assigns: list[tuple[str | None, ast.AST | None]] = []
-            for node in tree.body:
-                if isinstance(node, ast.Assign):
-                    for target in node.targets:
-                        if isinstance(target, ast.Name):
-                            assigns.append((target.id, node.value))
-                elif (
-                    isinstance(node, ast.AnnAssign)
-                    and isinstance(node.target, ast.Name)
-                    and node.value is not None
-                ):
-                    assigns.append((node.target.id, node.value))
-            names: set[str] = set()
-            for name, value in assigns:
-                if name is not None and value is not None and _is_dt_ctor(value):
-                    names.add(name)
-            changed = True
-            while changed:
-                changed = False
-                for name, value in assigns:
-                    if name is None or name in names or value is None:
-                        continue
-                    if any(isinstance(n, ast.Name) and n.id in names for n in ast.walk(value)):
-                        names.add(name)
-                        changed = True
-            if names:
-                self.fixed[mod] = frozenset(names)
+    def functions(self, mod: str) -> _Functions:
+        """The module's top-level functions; none for an unknown or unparseable module."""
+        return self.fns.get(mod) or {}
 
-    def family_modules(self) -> frozenset[str]:
-        """Modules that define a fixed-instant constant — the boundary family
-        whose window result is a function of a fixed instant."""
-        return frozenset(self.fixed)
+    def fixed_names(self, mod: str) -> frozenset[str]:
+        """The module's fixed-instant names; none when it defines no such constant."""
+        return self.fixed.get(mod) or frozenset()
+
+    def _path(self, mod: str) -> Path:
+        return self.root / (mod.replace(".", "/") + ".py")
+
+    def _is_module(self, mod: str) -> bool:
+        if mod not in self._exists:
+            relative = mod.replace(".", "/")
+            self._exists[mod] = (
+                mod.split(".", 1)[0] in self._scanned
+                and "/mirrors/" not in relative
+                and "__pycache__" not in relative
+                and self._path(mod).is_file()
+            )
+        return self._exists[mod]
+
+    def _tree(self, mod: str) -> ast.Module | None:
+        if mod not in self._trees:
+            try:
+                self._trees[mod] = ast.parse(self._path(mod).read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, SyntaxError):
+                self._trees[mod] = None
+        return self._trees[mod]
+
+    def _functions(self, mod: str) -> _Functions | None:
+        tree = self._tree(mod)
+        return None if tree is None else _top_level_functions(tree)
+
+    def _fixed_names(self, mod: str) -> frozenset[str] | None:
+        try:
+            text = self._path(mod).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+        if _FIXED_CTOR_LOOSE.search(text) is None or _FIXED_CTOR_HINT.search(text) is None:
+            return None
+        tree = self._tree(mod)
+        return (_fixed_instant_names(tree) or None) if tree is not None else None
 
     def _imports(self, mod: str, name: str) -> tuple[str, str] | None:
         tree = self.trees.get(mod)
@@ -226,16 +271,16 @@ class _Index:
     def _resolve(self, mod: str, call: ast.Call) -> tuple[str, str] | None:
         f = call.func
         if isinstance(f, ast.Name):
-            if f.id in self.fns.get(mod, {}):
+            if f.id in self.functions(mod):
                 return mod, f.id
             return self._imports(mod, f.id)
         if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
             direct = self._imports(mod, f.value.id)
             if direct is not None:
-                if f.attr in self.fns.get(direct[0], {}):
+                if f.attr in self.functions(direct[0]):
                     return direct[0], f.attr
                 sub = f"{direct[0]}.{direct[1]}"
-                if sub in self.fns and f.attr in self.fns[sub]:
+                if f.attr in self.functions(sub):
                     return sub, f.attr
         return None
 
@@ -280,7 +325,7 @@ class _Index:
         self, call: ast.Call, callee: tuple[str, str], caller_clock: frozenset[str]
     ) -> bool:
         mod, name = callee
-        info = self.fns.get(mod, {}).get(name)
+        info = self.functions(mod).get(name)
         if info is None:
             return False
         node, params = info
@@ -333,7 +378,7 @@ class _Index:
         cached = self._summary.get(key)
         if cached is not None:
             return cached
-        info = self.fns.get(mod, {}).get(name)
+        info = self.functions(mod).get(name)
         if info is None:
             return (False, True, False)
         node, params = info
@@ -344,7 +389,7 @@ class _Index:
         visited = visited | {key}
         uses = False
         covered = True
-        family = mod in self.family_modules()
+        family = mod in self.fixed
         for sub in ast.walk(node):
             if (
                 isinstance(sub, ast.Call)
@@ -388,19 +433,18 @@ def _is_test_path(rel: str) -> bool:
 
 def _rel_or_abs(path: Path) -> str:
     """Repo-relative posix path, or the absolute path for a target outside the repo."""
-    try:
-        return path.relative_to(_REPO_ROOT).as_posix()
-    except ValueError:
-        return path.as_posix()
+    return path.as_posix().removeprefix(_REPO_ROOT.as_posix() + "/")
 
 
-def _lint_source(index: _Index, paths: list[Path]) -> list[str]:
+def _lint_source(
+    index: _Index, paths: list[Path], scope: frozenset[str] | None = None
+) -> list[str]:
     errors: list[str] = []
     for path in paths:
         if path.is_dir():
             for p in sorted(path.rglob("*.py")):
                 rel = _rel_or_abs(p)
-                if _is_test_path(rel):
+                if _is_test_path(rel) or (scope is not None and rel not in scope):
                     continue
                 errors.extend(_lint_source_file(index, p, rel))
         elif path.suffix == ".py":
@@ -413,7 +457,7 @@ def _lint_source(index: _Index, paths: list[Path]) -> list[str]:
 def _lint_source_file(index: _Index, path: Path, rel: str) -> list[str]:
     mod = rel[:-3].replace("/", ".")
     errors: list[str] = []
-    fns = index.fns.get(mod, {})
+    fns = index.functions(mod)
     for name, (fn_node, params) in fns.items():
         clock = params & _CLOCK_PARAMS
         if not clock:
@@ -452,13 +496,13 @@ def _lint_source_file(index: _Index, path: Path, rel: str) -> list[str]:
 # ── rule 2: exact equality on a fixed instant with an unpinned derivation ────
 
 
-def _lint_tests(index: _Index, paths: list[Path]) -> list[str]:
+def _lint_tests(index: _Index, paths: list[Path], scope: frozenset[str] | None = None) -> list[str]:
     errors: list[str] = []
     for path in paths:
         if path.is_dir():
             for p in sorted(path.rglob("*.py")):
                 rel = _rel_or_abs(p)
-                if _is_test_path(rel):
+                if _is_test_path(rel) and (scope is None or rel in scope):
                     errors.extend(_lint_test_file(index, p, rel))
         elif path.suffix == ".py":
             rel = _rel_or_abs(path)
@@ -501,7 +545,7 @@ def _local_derives(
                 isinstance(n, ast.Attribute)
                 and isinstance(n.value, ast.Name)
                 and n.value.id in aliases
-                and n.attr in index.fixed.get(aliases[n.value.id], ())
+                and n.attr in index.fixed_names(aliases[n.value.id])
             ):
                 return True
         return False
@@ -547,7 +591,7 @@ def _expr_refs_fixed(
             isinstance(n, ast.Attribute)
             and isinstance(n.value, ast.Name)
             and n.value.id in aliases
-            and n.attr in index.fixed.get(aliases[n.value.id], ())
+            and n.attr in index.fixed_names(aliases[n.value.id])
         ):
             return True
     return False
@@ -703,6 +747,8 @@ def _lint_test_file(index: _Index, path: Path, rel: str) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    argv, only = lint_common.split_only(argv)
+    scope = lint_common.changed_scope(only, _REPO_ROOT)
     root = _REPO_ROOT
     if argv:
         paths = [p if p.is_absolute() else root / p for p in (Path(a) for a in argv)]
@@ -720,8 +766,11 @@ def main(argv: list[str] | None = None) -> int:
         index = _Index(root, dirs)
         # Rules 2 and 3 read test files wherever they live: the top-level tests/ and
         # each package's own tests/ (`_lint_tests` keeps only test paths).
-        errors = _lint_source(index, lint_common.scan_roots(root, dirs)) + _lint_tests(
-            index, [root / "tests", *lint_common.scan_roots(root, dirs)]
+        # With `--only` (the commit hook) just the changed files are judged, against the same
+        # whole-repo index; what a changed helper does to files that did not change is
+        # CI's full run to catch.
+        errors = _lint_source(index, lint_common.scan_roots(root, dirs), scope) + _lint_tests(
+            index, [root / "tests", *lint_common.scan_roots(root, dirs)], scope
         )
     for err in errors:
         print(err, file=sys.stderr)
