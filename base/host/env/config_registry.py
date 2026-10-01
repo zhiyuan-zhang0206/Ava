@@ -90,6 +90,7 @@ DOMAIN_MODELS: tuple[tuple[str, str, str | type[Any], str], ...] = (
     ("packages", "Packages", "PackagesSettings", "agent-runner"),
     ("feishu", "Feishu", "FeishuSettings", "gateway"),
     ("telegram", "Telegram", "TelegramSettings", "gateway"),
+    ("walg", "WAL-G backup", "WalgSettings", "gateway"),
     ("general", "General", "GeneralSettings", "common"),
 )
 
@@ -117,6 +118,7 @@ MODEL_CLASSES = {
     "PackagesSettings": "base.config.packages",
     "FeishuSettings": "base.config.feishu",
     "TelegramSettings": "base.config.telegram",
+    "WalgSettings": "base.config.walg",
     "GeneralSettings": "base.config.general",
 }
 
