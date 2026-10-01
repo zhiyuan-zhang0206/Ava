@@ -82,7 +82,7 @@ home born before this model (no ledger) is refused; no conversion exists.
 | Path | Role |
 |---|---|
 | `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions; always the default home's cluster (its own pg 5433 / redis 6380 + prod service ports) |
-| `~/Ava/` (this checkout) | **dev clone** — worktree dev under `.worktrees/<task>/` (branch from `main`, PR into `main`) (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool); a worktree owns no cluster: it verifies with selected tests and CI, and a process tree that imports application code sets its own temporary `AVA_HOME` |
+| `~/Ava/` (this checkout) | **dev clone** — worktree dev under `.worktrees/<task>/` (branch from `main`, PR into `main`) (made by `scripts/setup-worktree.sh`) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool); a worktree owns no cluster: it verifies with selected tests and CI, and a process tree that imports application code sets its own temporary `AVA_HOME` |
 
 `ava init` initializes a home once and starts nothing: Settings-free, it persists
 `start-intent.json` (home, capabilities, admitted checkout, ports; credentials until
@@ -217,7 +217,7 @@ rule 4's ask-first loop is [workflow align](ava_builtins/skills/ava-workflow/ali
 
 ## Workflow (mandatory)
 
-- **Worktree + PR** — every change in `git worktree add -b ava-<id>-<task> .worktrees/<task> main`, then `bash scripts/setup-worktree.sh` inside it (its own real `.venv` — never a symlink — plus the locked install, `npm ci` for `ui/web`, and the hook / editable-venv guards; without `ui/web/node_modules` the UI hooks and checks cannot run), merged via PR through the Trunk merge queue; direct push forbidden. Merge is not deployment; runtime rollout requires separate operator authorization and verification. [Workflow →](.agents/skills/ship-a-change/SKILL.md)
+- **Worktree + PR** — every change in a worktree made by `bash scripts/setup-worktree.sh <task>` (run from the main clone or any worktree: branch `ava-<task>` off fresh `origin/main`, its own real `.venv`, locked install, `npm ci` for `ui/web`, hook / editable-venv checks), then `cd` to the path on its last line `worktree ready: <path> (branch <branch>)`. Never `git worktree add` by hand or symlink a `.venv`; a worktree from Claude Code's own tool gets the same script with no argument, run inside it. Merged via PR through the Trunk merge queue; direct push forbidden. Merge is not deployment; runtime rollout requires separate operator authorization and verification. [Workflow →](.agents/skills/ship-a-change/SKILL.md)
 - **PR description** — must have file-tree diff with ★ critical paths + prose data flow. [Spec →](.agents/skills/write-a-pr-description/SKILL.md)
 - **Tech-debt sweeps** — follow `.agents/skills/ava-sweeper/` (debt classes + tracker; boundary vs. lint in [`conventions/lint-vs-sweeper.md`](conventions/lint-vs-sweeper.md)).
 - **Complexity analysis** — McCabe cyclomatic complexity + maintainability index via radon, ranked for refactoring. [Skill →](.agents/skills/measure-complexity/SKILL.md)
