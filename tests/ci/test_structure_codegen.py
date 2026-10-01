@@ -42,9 +42,10 @@ CI_OWNED = {"pyright", "frontend-tsc", "frontend-eslint", "frontend-vitest"}
 PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint-full", "frontend-vitest"}
 # Pre-push-stage-only hooks with no direct 1:1 CI job duplicate: local
 # safety nets that re-run the pre-commit stage over the real branch diff, an
-# unconditional rerun of the generated-artifact family, and the full scan of the
+# unconditional rerun of the generated-artifact family, the full scan of the
 # per-file patch-target lint (a production import change moves the home of tests
-# it never passes). Unlike PREPUSH, CI does not run these by name -- it already
+# it never passes) and the full tests-location check (a deleted test is never passed
+# to a commit hook). Unlike PREPUSH, CI does not run these by name -- it already
 # covers the same ground unconditionally via backend-structure's /
 # merged-tree-structure's own `--all-files` runs of the underlying (filtered)
 # hooks, so no CI job needs a matching direct invocation the way `uv run
@@ -53,6 +54,7 @@ PREPUSH_LOCAL_ONLY = {
     "lint-prepush-branch-diff",
     "lint-prepush-artifact-freshness",
     "lint-patch-targets-full",
+    "lint-tests-location-full",
 }
 LOCAL_ONLY = {"check-git-hooks-install"}
 # These identities come from fastapi._compat.v2 / fastapi.openapi.utils, not
