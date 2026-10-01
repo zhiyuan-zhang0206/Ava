@@ -67,9 +67,9 @@ _CLI_LOG_NAMES: dict[tuple[str, ...], str] = {
 def _init_cli_logging(args_in: list[str]) -> None:
     """Open this verb's sinks, once its Settings may be built.
 
-    Building them builds Settings, so `ava start` calls this only after first
-    start published the home's identity, and every other verb after the home
-    gates, right before dispatch. A Settings failure raised here is the one
+    Building them builds Settings, so `ava start` calls this only after the home
+    is admitted, `ava init` opens none (it is Settings-free), and every other verb
+    opens them after the home gates, right before dispatch. A Settings failure raised here is the one
     the command would raise, and reaches the same handlers.
     """
     name = _CLI_LOG_NAMES.get(tuple(args_in[:1])) or _CLI_LOG_NAMES.get(tuple(args_in[:2]))
@@ -139,8 +139,8 @@ def _print_settings_load_failure(e: ValidationError) -> int:
             print(f"  {var}=<value>", file=sys.stderr)
     print(
         "\nAdd the lines above to ~/.ava/.env, then re-run your command. For the full\n"
-        "agent-runner bring-up flow, use `ava start --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> "
-        "--machine-host <this-host-addr> --db-capability <bundle>`.",
+        "agent-runner bring-up flow, use `ava init --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> "
+        "--machine-host <this-host-addr> --db-capability <bundle>`, then `ava start`.",
         file=sys.stderr,
     )
     return 1
@@ -227,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
-        if args_in[:1] != ["start"]:
+        if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
             _init_cli_logging(args_in)
         return args.func(args)
     except LockTimeoutError as exc:

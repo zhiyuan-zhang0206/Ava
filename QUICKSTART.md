@@ -16,8 +16,8 @@ the entire cluster.
 | Model API Key | Anthropic (`ANTHROPIC_API_KEY`), DeepSeek (`DEEPSEEK_API_KEY`), or OpenAI (`OPENAI_API_KEY`) |
 | Git | For cloning the repo |
 | A terminal | All commands in this guide run in a terminal |
-| Homebrew (macOS) | `ava start` provisions Postgres/Redis via Homebrew — install it first: `https://brew.sh` |
-| Non-root user (Linux) | `ava start` births a per-cluster Postgres via `initdb`, which **refuses to run as root**. Fresh VPS images land you as root — create a user with passwordless sudo first, then run the install as that user: `adduser ava && echo 'ava ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/ava && su - ava` |
+| Homebrew (macOS) | The first `ava start` provisions Postgres/Redis via Homebrew — install it first: `https://brew.sh` |
+| Non-root user (Linux) | The first `ava start` births a per-cluster Postgres via `initdb`, which **refuses to run as root**. Fresh VPS images land you as root — create a user with passwordless sudo first, then run the install as that user: `adduser ava && echo 'ava ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/ava && su - ava` |
 
 
 > **Windows users**: Windows runs the `agent-runner` capability natively — no
@@ -27,7 +27,7 @@ the entire cluster.
 
 ---
 
-## Step 1: Clone and install
+## Step 1: Clone, install and initialize
 
 ```bash
 # Clone to the canonical path
@@ -37,34 +37,21 @@ git clone https://github.com/zhiyuan-zhang0206/Ava.git source && cd source
 # Install dependencies + the `ava` CLI; no cluster is created yet
 uv sync
 
-# First start births the cluster AND brings up services (single-machine, no auth on loopback)
-.venv/bin/ava start --serve-gateway --serve-agent-runner --machine-name my-machine
-
-# To opt into auth at birth, run this secure form INSTEAD of the command above:
-printf 'Cluster secret: ' >&2
-IFS= read -rs AVA_CLUSTER_SECRET
-printf '\n' >&2
-export AVA_CLUSTER_SECRET
-.venv/bin/ava start --serve-gateway --serve-agent-runner --machine-name my-machine
-unset AVA_CLUSTER_SECRET
+# Record this machine's identity once (single machine, no auth on loopback). Starts nothing.
+.venv/bin/ava init --serve-gateway --serve-agent-runner --machine-name my-machine
 ```
 
 `uv sync` installs the dependencies: uv, Python 3.12, Postgres 17, Redis, and
 Node.js (Node is recommended on macOS; the web UI and browser tools need it).
-The first `ava start` above births the cluster (its own Postgres/Redis, ports,
-`~/.ava/.env`) and brings up services in the same call; its converge phase also
-links `~/.local/bin/ava` to this checkout's CLI. You'll see `ready` when it succeeds.
-
-> **After first start**, reopen your terminal, or run `source ~/.bashrc` (Linux) /
-> `source ~/.zshrc` (macOS), to put `~/.local/bin` on PATH. If `ava` is still not
-> found (e.g. uv already existed), add it manually:
-> `export PATH="$HOME/.local/bin:$PATH"`.
+`ava init` records the cluster's identity: its ports, its generated credentials and
+`~/.ava/.env`. It starts no process and creates no database; an initialized home
+refuses a second `ava init`.
 
 ---
 
-## Step 2: Minimal config
+## Step 2: Minimal config, then start
 
-First start already populated `~/.ava/.env` with database/Redis connection
+`ava init` already populated `~/.ava/.env` with database/Redis connection
 strings, the gateway URL, and role toggles. **Edit it directly**
 (do not use `cp .env.example` to overwrite it wholesale — that would clobber these
 derived values). At minimum, add model configuration:
@@ -75,16 +62,27 @@ AVA_MODEL=deepseek-flash
 DEEPSEEK_API_KEY=sk-your-key-here
 ```
 
-Then reconcile the running cluster against the edited file:
+Then start the cluster:
 
 ```bash
-ava start
+.venv/bin/ava start
 ```
 
-> On a single box the cluster runs unauthenticated on loopback, so
-> `AVA_CLUSTER_SECRET` is left empty by default. The authenticated first-start
-> form in Step 1 keeps the secret out of shell history and process argv. Gateway-only
-> split deployments mint a secret automatically.
+The first `ava start` creates the cluster's own Postgres/Redis, applies the schema and
+brings up services; its converge phase also links `~/.local/bin/ava` to this checkout's
+CLI. You'll see `ready` when it succeeds. Later starts reconcile the running cluster
+against the edited file.
+
+> **After the first start**, reopen your terminal, or run `source ~/.bashrc` (Linux) /
+> `source ~/.zshrc` (macOS), to put `~/.local/bin` on PATH. If `ava` is still not
+> found (e.g. uv already existed), add it manually:
+> `export PATH="$HOME/.local/bin:$PATH"`.
+
+> On a single box the cluster runs unauthenticated and binds loopback only, so
+> `AVA_CLUSTER_SECRET` is left empty. A gateway that serves other machines
+> (`--serve-gateway --no-serve-agent-runner`) mints a secret at `ava init`. To set or replace the
+> secret of a running cluster use
+> [`scripts/data_plane_ops/rotate_cluster_secret.py`](scripts/data_plane_ops/rotate_cluster_secret.py).
 >
 > For the full config reference, see [`.env.example`](.env.example) and the
 > [secrets reference](.agents/skills/deploy-ava-cluster/references/secrets.md).

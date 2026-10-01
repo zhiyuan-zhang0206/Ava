@@ -33,8 +33,8 @@ def test_friendly_template_lists_missing_vars(capsys):
     # Python attr names get uppercased + AVA_ prefixed to match the field aliases.
     assert "AVA_DB_URL=<value>" in err
     assert "AVA_REDIS_URL=<value>" in err
-    # The runner's first start is the recommended fix, not a raw traceback.
-    assert "ava start --serve-agent-runner" in err
+    # The runner's init is the recommended fix, not a raw traceback.
+    assert "ava init --serve-agent-runner" in err
     assert "Traceback" not in err
 
 

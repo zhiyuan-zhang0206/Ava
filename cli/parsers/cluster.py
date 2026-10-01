@@ -77,6 +77,12 @@ def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
     )
 
 
+def _h_cluster_db_authority_install_unit(args: argparse.Namespace) -> int:
+    from cli.commands.cluster.control import cmd_db_authority_install_unit
+
+    return cmd_db_authority_install_unit(bundle=args.bundle)
+
+
 def _add_db_authority_parser(
     cluster_sub: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -105,6 +111,15 @@ def _add_db_authority_parser(
         f"at most {UNIT_BUNDLE_MAX_TTL_S / 3600:g})",
     )
     issue_unit_p.set_defaults(func=_h_cluster_db_authority_issue_unit)
+    install_unit_p = db_authority_sub.add_parser(
+        "install-unit",
+        help="on an initialized agent-runner unit: install a capability bundle `issue-unit` "
+        "sealed for it (a newer write generation after a rotation); the transport key comes "
+        "from AVA_DB_CAPABILITY_KEY and the bundle file is deleted once installed. Stop the "
+        "unit first and `ava start` it after",
+    )
+    install_unit_p.add_argument("bundle", metavar="BUNDLE", help="path of the sealed bundle file")
+    install_unit_p.set_defaults(func=_h_cluster_db_authority_install_unit)
 
 
 def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

@@ -1,10 +1,11 @@
-"""Durable unit identity for the single start lifecycle; no runtime settings or effects.
+"""Durable unit identity for `ava init` and `ava start`; no runtime settings or effects.
 
 The private intent precedes `.env` publication and is the home's record of itself:
 a gateway unit's ports (the fixed table) and data-plane host live in its `record`
-(`base.cluster.record`), and no other file on the host lists this cluster. A
-home without an intent that already holds a data plane cannot be born again
-over it; explicit reattachment is required.
+(`base.cluster.record`), and no other file on the host lists this cluster. `ava init`
+writes it once (`prepare_identity`, `resume_claim`); `ava start` only admits a home
+that carries it (`require_initialized`). A home without an intent that already
+holds a data plane cannot be born again over it; explicit reattachment is required.
 """
 
 from __future__ import annotations
@@ -22,11 +23,26 @@ from base import cluster
 from base.host.atomic_io import write_text_atomic
 from base.host.env.dotenv_file import upsert_env
 from base.host.private_storage import ensure_private_dir, ensure_private_file
-from cli.start_runtime import StartRuntime
+from base.native_process.os_platform import IS_WINDOWS
 
 INTENT_NAME = cluster.INTENT_NAME
 _CAPS = ("gateway", "agent-runner", "observability-station")
 _PHASES = ("claiming", "configured", "provisioned", "ready")
+_DESTROY_INTENT = "destroy-intent.json"
+# The capability flag each capability is declared with, and the identity fields a
+# home records beside it: `ava init`'s inputs, and what a home declares for itself.
+CAP_ARGS = {
+    "gateway": "serve_gateway",
+    "agent-runner": "serve_agent_runner",
+    "observability-station": "serve_observability_station",
+}
+IDENTITY_FIELDS = (
+    "machine_name",
+    "machine_host",
+    "machine_description",
+    "memory_remote",
+    "gateway_url",
+)
 
 
 @dataclass(frozen=True)
@@ -36,7 +52,6 @@ class IdentityInput:
     roles: frozenset[str]
     values: dict[str, str]
     config_digest: str | None = None
-    runtime: StartRuntime | None = None
 
 
 def _write(path: Path, data: dict[str, Any]) -> None:
@@ -177,74 +192,91 @@ def _gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[s
     return derived
 
 
-def _validate_existing(
-    inputs: IdentityInput, env: dict[str, str | None], rec: cluster.ClusterRecord | None
-) -> None:
-    for key, value in inputs.values.items():
-        if key in env and env[key] != value:
-            raise RuntimeError(
-                f"start cannot change persisted identity/configuration {key}; configure it explicitly"
-            )
-    if "gateway" in inputs.roles:
-        if rec is None or not env.get("AVA_DB_URL") or not env.get("AVA_REDIS_URL"):
-            raise RuntimeError(
-                "existing home has no recorded identity (start-intent.json) or is incomplete; "
-                "explicit reattachment is required"
-            )
-    elif not env.get("AVA_GATEWAY_URL"):
-        raise RuntimeError("existing remote unit has no gateway identity")
-
-
-def _publish_claim(inputs: IdentityInput, data: dict[str, Any]) -> None:
+def _publish_claim(home: Path, data: dict[str, Any]) -> None:
     if data["phase"] == "claiming":
         if data["record"] is not None:
             # A gateway's logical backups are encrypted under a passphrase minted
             # here, independent of its cluster secret (an empty one included).
             from services.gateway_side.backup import passphrase
 
-            passphrase.ensure_minted(inputs.home)
-        upsert_env(inputs.home / ".env", data["env"])
+            passphrase.ensure_minted(home)
+        upsert_env(home / ".env", data["env"])
         data["phase"] = "configured"
         # `.env` now holds the payload, credentials included; the intent keeps
         # no copy that a later rotation would leave stale.
         data["env"] = {}
-        _write(inputs.home / INTENT_NAME, data)
+        _write(home / INTENT_NAME, data)
 
 
-def _validate_repeat(inputs: IdentityInput, data: dict[str, Any]) -> None:
-    if data["roles"] != sorted(inputs.roles):
-        raise RuntimeError("start capability set differs from the persisted identity")
+def _refuse_detached(home: Path) -> None:
+    if (home / _DESTROY_INTENT).exists():
+        raise RuntimeError("home is being destroyed or detached; explicit reattachment required")
+
+
+def pending_claim(home: Path) -> dict[str, Any] | None:
+    """The home's interrupted claim; None for a home with no intent.
+
+    Refuses a detached home and a home `ava init` already finished: initialization
+    runs once, and changing an identity means destroying the cluster first.
+    """
+    _refuse_detached(home)
+    data = read_intent(home)
+    if data is None:
+        _require_unclaimed_state(home)
+    elif data["phase"] != "claiming":
+        raise RuntimeError(
+            f"home {home} is already initialized (phase {data['phase']}); `ava init` runs "
+            "once per home. Use `ava start`; to change this home's identity, run "
+            "`ava cluster destroy` first"
+        )
+    return data
+
+
+def _require_unclaimed_state(home: Path) -> None:
+    """A home without an intent may carry nothing that says whose it is."""
+    env = dotenv_values(home / ".env")
+    if env.get("AVA_DB_URL") or env.get("AVA_GATEWAY_URL"):
+        raise RuntimeError(
+            "existing home has no recorded identity (start-intent.json) or is incomplete; "
+            "explicit reattachment is required"
+        )
+    if _holds_resources(home):
+        raise RuntimeError(
+            "existing resource state has no initialization authority; refusing fresh start"
+        )
+
+
+def resume_claim(home: Path) -> None:
+    """Finish an interrupted claim from the payload its intent recorded.
+
+    The caller holds the home's `start-intent.lock`. The recorded ports and
+    credentials are published as they were minted; the input flags of the
+    interrupted run are not asked for again.
+    """
+    data = pending_claim(home)
+    if data is None:
+        raise RuntimeError("no interrupted claim to resume")
+    _publish_claim(home, data)
 
 
 def prepare_identity(inputs: IdentityInput) -> None:
     """Persist one complete identity before any process or database effect.
 
-    The caller holds the home's `start-intent.lock`.
+    The caller holds the home's `start-intent.lock`. A home that already has an
+    intent is never claimed again here: an interrupted claim resumes through
+    `resume_claim`, an initialized home is refused.
     """
     ensure_private_dir(inputs.home)
-    if (inputs.home / "destroy-intent.json").exists():
-        raise RuntimeError("home is being destroyed or detached; explicit reattachment required")
-    data = read_intent(inputs.home)
-    if data is not None:
-        _validate_repeat(inputs, data)
-    _prepare_reserved_identity(inputs, data)
-
-
-def _prepare_reserved_identity(inputs: IdentityInput, data: dict[str, Any] | None) -> None:
-    if data is not None:
-        _publish_claim(inputs, data)
-        _validate_existing(
-            inputs,
-            dotenv_values(inputs.home / ".env"),
-            cluster.ClusterRecord(**data["record"]) if data["record"] else None,
+    if pending_claim(inputs.home) is not None:
+        raise RuntimeError(
+            "an interrupted claim exists; re-run `ava init` without flags to finish it"
         )
-        return
-    env = dotenv_values(inputs.home / ".env")
-    if env.get("AVA_DB_URL") or env.get("AVA_GATEWAY_URL"):
-        _validate_existing(inputs, env, None)
-        return
-    if any(
-        (inputs.home / name).exists()
+    _create_claim(inputs)
+
+
+def _holds_resources(home: Path) -> bool:
+    return any(
+        (home / name).exists()
         for name in (
             "pg",
             "redis",
@@ -252,11 +284,7 @@ def _prepare_reserved_identity(inputs: IdentityInput, data: dict[str, Any] | Non
             "deploy-state.json",
             "run/deploy-pause-owner.json",
         )
-    ):
-        raise RuntimeError(
-            "existing resource state has no initialization authority; refusing fresh start"
-        )
-    _create_claim(inputs)
+    )
 
 
 def _create_claim(inputs: IdentityInput) -> None:
@@ -281,4 +309,126 @@ def _create_claim(inputs: IdentityInput) -> None:
         "env": values,
     }
     _write(inputs.home / INTENT_NAME, data)
-    _publish_claim(inputs, data)
+    _publish_claim(inputs.home, data)
+
+
+# --- what a home declares for itself, and the admission `ava start` gives it -------------
+
+
+def stored_values(home: Path) -> dict[str, str]:
+    """What the home already declares: its `.env`, then the `machine_*` files older
+    homes keep their identity fields and capability flags in."""
+    values = {k: v for k, v in dotenv_values(home / ".env").items() if v is not None}
+    for field in (*IDENTITY_FIELDS, *("machine_" + v for v in CAP_ARGS.values())):
+        path = home / field
+        key = "AVA_" + field.upper()
+        if key not in values and path.exists():
+            values[key] = path.read_text().strip()
+    return values
+
+
+def capability_value(cap: str, stored: dict[str, str], *, explicit: bool | None) -> bool | None:
+    key = "AVA_MACHINE_" + CAP_ARGS[cap].upper()
+    raw = stored.get(key)
+    if raw is not None and raw.lower() not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
+        raise ValueError(f"invalid capability value {key}")
+    prior = raw.lower() in {"true", "1", "yes", "on"} if raw is not None else None
+    if explicit is not None and prior is not None and explicit != prior:
+        raise ValueError(f"init cannot change persisted capability {cap}")
+    return prior if prior is not None else explicit
+
+
+def capability_roles(stored: dict[str, str], explicit: dict[str, bool | None]) -> frozenset[str]:
+    """The capability set the stored declarations and the explicit flags give.
+
+    `explicit` maps a capability name to the flag `ava init` was given for it; a
+    capability it omits was not given one.
+    """
+    roles = {cap for cap in CAP_ARGS if capability_value(cap, stored, explicit=explicit.get(cap))}
+    if not roles:
+        raise ValueError(
+            "no capability declared: `ava init` takes --serve-gateway, --serve-agent-runner "
+            "and/or --serve-observability-station"
+        )
+    if IS_WINDOWS:
+        raise ValueError("native Windows is unsupported; use WSL2 or a POSIX host")
+    return frozenset(roles)
+
+
+@dataclass(frozen=True)
+class InitializedHome:
+    """What `ava start` admitted: the capability set, and the intent (None for a
+    runner home that predates the intent journal)."""
+
+    roles: frozenset[str]
+    intent: dict[str, Any] | None
+
+
+def require_initialized(home: Path) -> InitializedHome:
+    """Admit `home` for `ava start`, or raise why it cannot start. No side effects.
+
+    Settings-free. The checks are those a start has always made of an existing
+    home; the first-start inputs are no longer among them (`ava init` takes them).
+    """
+    _refuse_detached(home)
+    intent = read_intent(home)
+    env = dotenv_values(home / ".env")
+    if intent is None:
+        return _admit_without_intent(home, env)
+    if intent["phase"] == "claiming":
+        raise RuntimeError(
+            f"home {home} was only partly initialized: an earlier `ava init` was interrupted "
+            "before it published this home's configuration. Re-run `ava init` (no flags) to finish it"
+        )
+    roles = frozenset(intent["roles"])
+    if "gateway" in roles:
+        if not env.get("AVA_DB_URL") or not env.get("AVA_REDIS_URL"):
+            raise RuntimeError(
+                "existing home has no recorded identity or is incomplete; "
+                "explicit reattachment is required"
+            )
+    elif not env.get("AVA_GATEWAY_URL"):
+        raise RuntimeError("existing remote unit has no gateway identity")
+    _require_host_declarations(home, roles, env)
+    return InitializedHome(roles, intent)
+
+
+def _admit_without_intent(home: Path, env: dict[str, str | None]) -> InitializedHome:
+    if env.get("AVA_DB_URL") or env.get("AVA_GATEWAY_URL"):
+        # A runner home born before the intent journal starts as it always has, on
+        # what its `.env` and `machine_*` files declare; a gateway never does.
+        roles = capability_roles(stored_values(home), {})
+        if "gateway" in roles:
+            raise RuntimeError(
+                "existing home has no recorded identity (start-intent.json) or is "
+                "incomplete; explicit reattachment is required"
+            )
+        if not env.get("AVA_GATEWAY_URL"):
+            raise RuntimeError("existing remote unit has no gateway identity")
+        _require_host_declarations(home, roles, env)
+        return InitializedHome(roles, None)
+    if _holds_resources(home):
+        raise RuntimeError(
+            "existing resource state has no initialization authority; refusing start"
+        )
+    raise RuntimeError(
+        f"home {home} is not initialized: run `ava init` first (it takes the machine name, "
+        "the capabilities and, for a runner, the gateway; see `ava init --help`)"
+    )
+
+
+def _require_host_declarations(
+    home: Path, roles: frozenset[str], env: dict[str, str | None]
+) -> None:
+    from base.sessions.env_forwarding import admit_service_path
+
+    if "gateway" not in roles and env.get("AVA_CLUSTER_SECRET") is not None:
+        raise RuntimeError(
+            f"this remote unit's home ({home}) records the human cluster secret; a remote "
+            "unit authenticates with its capability's machine API token and never holds "
+            "it. Remove AVA_CLUSTER_SECRET from its .env"
+        )
+    declared = env.get("AVA_SERVICE_PATH")
+    if declared is None:
+        raise RuntimeError("existing home requires an explicit AVA_SERVICE_PATH declaration")
+    admit_service_path(declared)

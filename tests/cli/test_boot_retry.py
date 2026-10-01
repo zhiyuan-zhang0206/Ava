@@ -92,8 +92,8 @@ def test_the_child_is_this_interpreter_running_ava_start(
 
 def test_start_flags_are_forwarded(monkeypatch: pytest.MonkeyPatch, runs: list[list[str]]) -> None:
     _stub_returncodes(monkeypatch, runs, [0])
-    boot_retry.run_boot(["--machine-name", "laptop-host"])
-    assert runs[0][-3:] == ["start", "--machine-name", "laptop-host"]
+    boot_retry.run_boot(["--only-service", "gateway"])
+    assert runs[0][-3:] == ["start", "--only-service", "gateway"]
 
 
 def test_unready_start_is_retried_until_ready(
@@ -169,5 +169,5 @@ def test_cli_main_dispatches_boot_before_the_settings_gated_import(
 
     forwarded: list[list[str]] = []
     monkeypatch.setattr("cli.boot_retry.run_boot", lambda argv: forwarded.append(argv) or 0)  # pyright: ignore[reportUnknownArgumentType]
-    assert cli_main.main(["boot", "--machine-name", "x"]) == 0
-    assert forwarded == [["--machine-name", "x"]]
+    assert cli_main.main(["boot", "--only-service", "gateway"]) == 0
+    assert forwarded == [["--only-service", "gateway"]]

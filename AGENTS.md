@@ -84,24 +84,27 @@ home born before this model (no ledger) is refused; no conversion exists.
 | `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions; always the default home's cluster (its own pg 5433 / redis 6380 + prod service ports) |
 | `~/Ava/` (this checkout) | **dev clone** — worktree dev under `.worktrees/<task>/` (branch from `main`, PR into `main`) (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool); a worktree owns no cluster: it verifies with selected tests and CI, and a process tree that imports application code sets its own temporary `AVA_HOME` |
 
-`ava start` is the single idempotent initialization and startup entry. Before
-runtime Settings or native effects, it persists `start-intent.json` (home,
-capabilities, admitted checkout, ports; credentials until `.env` holds them); repeats retain that identity and
-service selection, and an interrupted one resumes. The home is `AVA_HOME`
+`ava init` initializes a home once and starts nothing: Settings-free, it persists
+`start-intent.json` (home, capabilities, admitted checkout, ports; credentials until
+`.env` holds them) and publishes `.env`. An interrupted init resumes (`ava init`, no
+flags); an initialized home refuses a second one. `ava start` admits only an
+initialized home, creates its data plane on the first start, and retains the service
+selection on repeats. The home is `AVA_HOME`
 when set, else `~/.ava`, read whenever it is needed — production does not depend
 on the variable; a test session, a hook or a tool that imports application code
 sets it once at its top and every descendant inherits it. A home that carries its
 own `<home>/source` checkout is changed only by that checkout's CLI: any other
 checkout's verbs that change state are refused (read-only verbs are not).
 
-First start takes the machine name, capability flags and reachable host. A
-remote agent-runner joins through the same entry with `--gateway-url` and its
+`ava init` takes the machine name, capability flags and reachable host. A
+remote agent-runner joins through it with `--gateway-url` and its
 capability bundle (`--db-capability`, the transport key in `AVA_DB_CAPABILITY_KEY`),
-which also authenticates it; it creates no gateway or local data plane.
+which also authenticates it; it creates no gateway or local data plane. A later bundle
+(after a write-generation rotation) goes to `ava cluster db-authority install-unit`.
 A home describes only itself: its ports live in its own start intent, and no host
 file lists clusters; the state a host shares (vendored runtime, initdb template,
-PTY freeze, coding-session owners) lives in the home too. First
-configuration may come from `--config-file`; credentials and identity survive retries.
+PTY freeze, coding-session owners) lives in the home too. Initial
+configuration may come from `--config-file`; credentials and identity survive an interrupted init.
 
 Application processes have one supervisor: `ava-root`. On macOS the ancestry
 is `launchd -> signed permissions helper -> ava-root -> services / agent-host`.
@@ -112,7 +115,7 @@ database for migrations. Readiness requires a real protocol response from the
 captured process generation; missing evidence cannot become success.
 
 A checkout's own `.venv/bin/ava` runs **the checkout it belongs to** (where its `cli`
-source lives), not the current directory, against the home above; first start runs it. The host's bare `ava`
+source lives), not the current directory, against the home above; the first `ava init` runs it. The host's bare `ava`
 (`~/.local/bin/ava`, linked by production start converge) is a plain link to the production
 checkout's `.venv/bin/ava`; which home it acts on is `AVA_HOME`, else `~/.ava`, like every CLI.
 OS jobs (launchd, crontab, the Linux boot unit) are named for the job, not the home, and only
@@ -127,7 +130,9 @@ starting again, scripted as `python -m cli.fleet_update down` and `up`
 
 ```bash
 uv sync       # prepare the checkout dependencies and CLI; no cluster is created
-ava start     # reconcile the established home and desired service roster
+ava init --serve-gateway --serve-agent-runner --machine-name NAME
+              # record this home's identity once; starts nothing (an initialized home is refused)
+ava start     # first start creates the data plane; later ones reconcile the desired service roster
               # --only-service NAME is an allowlist; --disable-service NAME is an exclusion
               # --all-services explicitly resets selection; omitted flags retain it
 ava pause     # normal agent drain; preserves infrastructure, browser and persistent PTYs.
@@ -137,9 +142,11 @@ ava stop      # normal agent drain, then full local stop including PTYs/browser/
 ava status    # check status (includes the pg/redis view)
 ava cluster db-authority issue-unit --machine NAME --home UNIT_HOME --out BUNDLE
               # gateway: seal one unit's capability; prints its transport key once
-ava start --no-serve-gateway --serve-agent-runner --gateway-url URL --machine-name NAME --machine-host HOST --db-capability BUNDLE
-              # first start of a remote runner; supply AVA_DB_CAPABILITY_KEY in the
+ava init --no-serve-gateway --serve-agent-runner --gateway-url URL --machine-name NAME --machine-host HOST --db-capability BUNDLE
+              # join a remote runner; supply AVA_DB_CAPABILITY_KEY in the
               # environment; the bundle is consumed
+ava cluster db-authority install-unit BUNDLE
+              # an initialized runner: install a newer bundle (stop, install-unit, start)
 ava cluster status                 # full multi-machine roster of this cluster
 ava cluster destroy [--drop-db]    # decommission this host's cluster: stop, deregister its OS jobs and
                                    # helper, mark the home detached; you type the home path at a

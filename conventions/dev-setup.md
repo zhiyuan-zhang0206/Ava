@@ -34,7 +34,7 @@ After that the distro gets its own identity and IP on the private network.
 Choose the gateway URL and this host's reachable address before first start.
 Repeated start does not change the recorded identity; conflicting inputs refuse.
 
-## First start of a runner
+## Joining a runner
 
 Acquire the checkout's dependencies using the
 [deployment procedure](../.agents/skills/deploy-ava-cluster/SKILL.md). A split
@@ -43,21 +43,24 @@ join the private network, then run (the runner never needs the gateway's
 bearer: its capability bundle authenticates it):
 
 ```bash
-.venv/bin/ava start --serve-agent-runner --no-serve-gateway \
+.venv/bin/ava init --serve-agent-runner --no-serve-gateway \
   --gateway-url http://<gateway-host>:8000 \
   --machine-name <new-name> --machine-host <this-host-addr> \
   --db-capability <bundle>
+.venv/bin/ava start
 ```
 
 The bundle comes from `ava cluster db-authority issue-unit --machine <new-name>
 --home <this unit's $AVA_HOME> --out <bundle>` on the gateway; export its
 printed transport key as `AVA_DB_CAPABILITY_KEY` without echoing it, and unset
 it afterward. `--ssl-cert-file PATH` supplies a trusted CA
-bundle when required. First start installs the capability (and deletes the
-bundle), durably records local identity, registers this host, and starts its
-selected root services.
+bundle when required. `ava init` installs the capability (and deletes the
+bundle) and durably records local identity; the first `ava start` registers this
+host and starts its selected root services.
 Every runner process fetches current connection facts at Settings construction.
-Use bare start thereafter; conflicting identity flags refuse.
+Use bare start thereafter; `ava init` refuses an initialized home. A later bundle
+(after a write-generation rotation) goes to `ava cluster db-authority install-unit
+<bundle>` with the unit stopped.
 
 ## Development in a worktree
 

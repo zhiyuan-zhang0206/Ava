@@ -28,9 +28,9 @@ Precedence:
   `machine_serve_agent_runner` / `machine_serve_observability_station` file >
   False. A host with no capability raises MachineRoleMissing.
 
-When first passing `ava start --machine-name X --serve-gateway`, the CLI writes
-the files; if no capability is set, it fails loud and prints an actionable
-hint. **No** TTY prompt — agent-first design, agent has no TTY and would hang.
+`ava init --machine-name X --serve-gateway` records these in the home's `.env`;
+if no capability is set, a start fails loud and prints an actionable hint.
+**No** TTY prompt — agent-first design, agent has no TTY and would hang.
 """
 
 import enum
@@ -237,7 +237,7 @@ def reachable_host() -> str:
 
     Precedence:
     1. `settings.general.machine_host` (env `AVA_MACHINE_HOST`), when non-empty
-    2. `$AVA_HOME/machine_host` file (written by `ava start --machine-host`)
+    2. `$AVA_HOME/machine_host` file (older homes; `ava init --machine-host` records `.env`)
     3. `localhost` — a single box is reachable only at loopback (zero-config).
 
     The operator declares this address; it is not auto-detected, so the codebase
@@ -285,8 +285,8 @@ def _resolve_name() -> str:
         if name:
             return name
     raise MachineNameMissing(
-        f"machine name not set — run `ava start --machine-name <name>` once "
-        f"(writes {p}); or `export AVA_MACHINE_NAME=<name>` (e.g. host-a / host-b)."
+        "machine name not set — `ava init --machine-name <name>` records it for a new "
+        "home; for an initialized one set AVA_MACHINE_NAME in its `.env` (e.g. host-a / host-b)."
     )
 
 
@@ -346,9 +346,9 @@ def _resolve_role() -> MachineRoles:
         raise MachineRoleMissing(
             "this host serves neither gateway, agent-runner, nor observability-station — set "
             "AVA_MACHINE_SERVE_GATEWAY and/or AVA_MACHINE_SERVE_AGENT_RUNNER and/or "
-            "AVA_MACHINE_SERVE_OBSERVABILITY_STATION (or run `ava start --serve-gateway` / "
-            "`--serve-agent-runner` / `--serve-observability-station`; a single box serves both "
-            "gateway and agent-runner)."
+            "AVA_MACHINE_SERVE_OBSERVABILITY_STATION (or run `ava init --serve-gateway` / "
+            "`--serve-agent-runner` / `--serve-observability-station` on a new home; a single "
+            "box serves both gateway and agent-runner)."
         )
     return frozenset(caps)
 
@@ -375,7 +375,7 @@ def _resolve_host() -> str:
         if host:
             return host
     # Zero-config single box: reachable only at loopback. This fallback is last
-    # so the `machine_host` file (written by `ava start --machine-host`) wins —
+    # so the `machine_host` file (older homes) wins —
     # the config field's default is empty for the same reason (a non-empty
     # default would shadow the file). A remote runner that wrongly lands here is
     # rejected at registration time by the loopback guard in

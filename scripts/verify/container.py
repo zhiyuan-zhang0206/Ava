@@ -7,8 +7,8 @@ The container is one Ava machine: production layout (`~/.ava`, source at
 `~/.ava/source`), native Postgres, Redis and PgBouncer, no systemd, no mounts of the
 host's cluster, no published ports. The run resolves the ref to one commit, builds
 the image if the provisioning inputs changed, starts a container, clones the commit
-into it, builds both dependency trees from that commit's lockfiles, takes the first
-`ava start` (gateway and agent-runner on one box), runs the observer, copies the
+into it, builds both dependency trees from that commit's lockfiles, runs `ava init`
+and then the first `ava start` (gateway and agent-runner on one box), runs the observer, copies the
 evidence out, and removes the container with its volumes. The model is scripted;
 no provider key is injected, so nothing secret can reach the container. The design
 is future/infra/verification-boundaries.md.
@@ -77,9 +77,10 @@ rm .git/objects/info/alternates
 git rev-parse HEAD
 """
 
-START_ARGV = [
+# `ava init` records the machine's identity; `ava start` takes only the service selection.
+INIT_ARGV = [
     ".venv/bin/ava",
-    "start",
+    "init",
     "--serve-gateway",
     "--serve-agent-runner",
     "--machine-name",
@@ -88,6 +89,10 @@ START_ARGV = [
     "127.0.0.1",
     "--config-file",
     f"{WORK}/profile.env",
+]
+START_ARGV = [
+    ".venv/bin/ava",
+    "start",
     *(arg for name in SERVICES for arg in ("--only-service", name)),
 ]
 
@@ -100,6 +105,7 @@ TIMEOUTS = {
     "frontend": 900,
     "profile-upload": 60,
     "observer-upload": 60,
+    "init": 120,
     "start": 2400,
     "observe": 600,
 }
@@ -287,9 +293,8 @@ def run_steps(evidence: Evidence, container: str, commit: str) -> None:
         ("observer-upload", f"cat > {WORK}/observe.py", observer),
     ):
         evidence.step(name, _exec(container, ["bash", "-c", script], stdin=True), stdin=content)
-    evidence.step(
-        "start", _exec(container, ["bash", "-c", f"cd {source} && {' '.join(START_ARGV)}"])
-    )
+    for name, argv in (("init", INIT_ARGV), ("start", START_ARGV)):
+        evidence.step(name, _exec(container, ["bash", "-c", f"cd {source} && {' '.join(argv)}"]))
     evidence.step("observe", _exec(container, ["bash", "-c", observe]))
 
 

@@ -95,8 +95,8 @@ class LoopbackDialUrlRefused(RuntimeError):  # noqa: N818 — state description;
     under the wrong identity (the 2026-07-18 runner incident; the station variant
     is WP4). This is the central-DB integrity guard that stops such a row from ever
     being written, whichever host runs `register_self`; the operator sets
-    `AVA_MACHINE_HOST` (or `ava start --machine-host`) to this host's reachable
-    address.
+    `AVA_MACHINE_HOST` (or `ava init --machine-host` on a new home) to this host's
+    reachable address.
     """
 
 
@@ -104,11 +104,10 @@ def gateway_url() -> str:
     """Get this host's gateway URL. env > file > raise.
 
     Precedence:
-    1. `AVA_GATEWAY_URL` env var (headless deployment / CI / docker)
-    2. `$AVA_HOME/gateway_url` file (regular setup; `ava start`
-       first run writes it)
-    3. neither -> GatewayUrlMissing (`ava start` precheck catches and
-       TTY-prompts the default `http://<reachable-host>:8000`)
+    1. `AVA_GATEWAY_URL` env var (the home's `.env`, which `ava init` records, or the
+       process environment)
+    2. `$AVA_HOME/gateway_url` file (older homes)
+    3. neither -> GatewayUrlMissing
 
     Raises:
         GatewayUrlMissing: env var empty + file missing or empty.
@@ -119,8 +118,9 @@ def gateway_url() -> str:
     url = _resolve_gateway_url()
     if url is None:
         raise GatewayUrlMissing(
-            f"gateway URL not set — `ava start` will prompt during setup. "
-            f"Manual: `echo <url> > {ava_home() / 'gateway_url'}` or `export AVA_GATEWAY_URL=<url>`."
+            f"gateway URL not set — `ava init --gateway-url <url>` records it for a new home; "
+            f"for an initialized one set AVA_GATEWAY_URL in its `.env` (or `echo <url> > "
+            f"{ava_home() / 'gateway_url'}`)."
         )
     return url
 

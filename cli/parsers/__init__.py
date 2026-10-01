@@ -11,7 +11,7 @@ module docstring.
 
 One module per domain:
 
-- ``host`` — start/stop/restart/status/converge/firewall/trace
+- ``host`` — init/start/stop/restart/status/converge/firewall/trace
 - ``cluster`` — the whole-cluster verbs
 - ``agents`` — agents + notices
 - ``plugins`` — plugins + skill
@@ -29,6 +29,7 @@ from cli.parsers.computer import _add_computer_parser
 from cli.parsers.host import (
     _add_converge_parser,
     _add_firewall_parser,
+    _add_init_parser,
     _add_lgtm_parser,
     _add_pause_parser,
     _add_restart_parser,
@@ -64,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    _add_init_parser(sub)
     _add_start_parser(sub)
     _add_stop_parser(sub)
     _add_pause_parser(sub)
