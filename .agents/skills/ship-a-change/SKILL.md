@@ -120,8 +120,9 @@ Still on you:
    reuse another worktree's real venv instead — see
    [run-local-tests](../run-local-tests/SKILL.md).
 3. Rebase onto latest main: `git fetch origin main && git rebase origin/main`
-4. Run targeted local tests before pushing; full test suites run only in CI
-   (including for `base/` changes; user ruling 2026-09-22) — see [`.agents/skills/run-local-tests/SKILL.md`](../run-local-tests/SKILL.md).
+4. Run local checks on only what you changed before pushing (pytest on the
+   affected test files, `-n 2`; pyright on the changed files only); full suites and whole-repo pyright run only in CI (including for
+   `base/` changes; user ruling 2026-09-22, pyright included 2026-10-01) — see [`.agents/skills/run-local-tests/SKILL.md`](../run-local-tests/SKILL.md).
    An explicit user CI-only constraint overrides local execution; record the
    skipped local gates and confirm that the corresponding CI checks actually run.
 5. Push branch → `gh pr create --base main`
