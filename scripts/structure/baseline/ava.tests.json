@@ -1,0 +1,8 @@
+{
+  "patch_targets": {
+    "ava/tests/test_log_batching.py::base.telemetry.emitter._BATCH_SIZE": 1,
+    "ava/tests/test_log_batching.py::base.telemetry.emitter._FLUSH_INTERVAL_S": 1,
+    "ava/tests/test_log_batching.py::base.telemetry.emitter._QUEUE_MAXSIZE": 1,
+    "ava/tests/test_log_batching.py::base.telemetry.emitter._jsonl_failures": 1
+  }
+}

@@ -10,7 +10,7 @@ on:
     paths:
       - 'ui/app/**'
       - 'tests/ui/**'
-      - 'tests/scripts/test_build_app_update_manifest.py'
+      - 'scripts/codegen/tests/test_build_app_update_manifest.py'
       - 'scripts/codegen/build_app_update_manifest.py'
       - '.github/workflows/ci-app.yml'
       - '.github/workflows/release-app.yml'
@@ -18,7 +18,7 @@ on:
     paths:
       - 'ui/app/**'
       - 'tests/ui/**'
-      - 'tests/scripts/test_build_app_update_manifest.py'
+      - 'scripts/codegen/tests/test_build_app_update_manifest.py'
       - 'scripts/codegen/build_app_update_manifest.py'
       - '.github/workflows/ci-app.yml'
       - '.github/workflows/release-app.yml'
@@ -158,4 +158,4 @@ jobs:
           python3 -m pytest --noconftest tests/ui/test_android_overlay.py \
             tests/ui/test_android_update_check.py \
             tests/ui/test_app_release_workflow.py \
-            tests/scripts/test_build_app_update_manifest.py -q
+            scripts/codegen/tests/test_build_app_update_manifest.py -q

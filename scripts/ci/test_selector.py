@@ -75,13 +75,13 @@ _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
 _TREE_SCAN_FILE_PATTERN = re.compile(r"test_lint_.*\.py$")
 _TREE_SCAN_TESTS = frozenset(
     {
-        "tests/test_ci_job_rerun.py",
+        "scripts/ci/tests/test_ci_job_rerun.py",
         "tests/test_ci_rerun_workflow.py",
         "tests/test_ci_utils.py",
         "tests/test_db_check_enum_sync.py",
         "tests/test_pool_keepalives.py",
         "tests/test_qa_approved_gate_workflow.py",
-        "tests/test_qa_gate.py",
+        "scripts/ci/tests/test_qa_gate.py",
         "tests/test_env_guard_canary.py",
     }
 )

@@ -56,7 +56,7 @@ def skills_unit(unit_home: Path, set_machine_identity: Callable[..., None]) -> N
 @pytest.fixture(autouse=True)
 def memory_plugin() -> Any:
     """Load ava_memory through the real plugin-registration path (mirrors
-    tests/plugins/test_ava_memory_notes.py) so the memory-note registrations
+    ava_builtins/plugins/ava_memory/tests/test_ava_memory_notes.py) so the memory-note registrations
     exist regardless of what earlier modules cleared."""
     from agent.state import clear_plugin_registrations
     from base.packages.plugins.config_registration import bind_from_disk
