@@ -134,6 +134,12 @@ to the new path by hand. Changing how a section's sites are measured raises
 its version in `scripts/structure/baseline/rules.json` and re-freezes it; for
 that one change the guard holds the section's total instead of its keys.
 
+The `tests_location` section is the same kind of frozen map for a different rule: a test in the
+top-level `tests/` must stay by design, be listed in `scripts/structure/tests_location_allowed.py`
+with a reason, or be frozen there as `path::top-level -> 1` (the tests still to move into their
+package). It is shrink-only against the base revision, and a moved test's key fails as stale
+until it is deleted (`scripts/structure/tests_location.py`).
+
 What this means for common edits:
 
 - **Splitting a file, or moving code to another file**, cannot carry a frozen
