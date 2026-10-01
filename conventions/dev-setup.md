@@ -89,9 +89,10 @@ For a manual dependency operation in an existing worktree, clear inherited
 
 **Which home a worktree reads.** With `AVA_HOME` unset the home is `~/.ava`; on a
 development machine that also runs production, that is the production cluster. A
-worktree's CLI may read it (`status`, `ls`, `get`), but a home that carries its own
-`<home>/source` checkout is started, stopped and reconfigured only by that
-checkout's CLI: every other verb refuses and names the CLI to run.
+home that carries its own `<home>/source` checkout is operated only by that
+checkout's CLI: a worktree's CLI refuses every command against it, `status`
+included (bare `ava` and a lone `-h`/`--help` excepted), and names the CLI to run;
+read production with the host's bare `ava`.
 
 **The convention: a development tool that imports application code runs in a home of
 its own.** Any script, test run or subagent that imports application code, run in a

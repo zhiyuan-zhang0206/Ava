@@ -278,21 +278,22 @@ every descendant inherits it:
   skips the gateway config fetch, dials nothing and writes nothing; run it straight from
   a checkout.
 
-**Which checkout may change a home.** A home that carries its own `<home>/source`
-checkout (the production home `~/.ava`; every unit started from source) is started,
-stopped and reconfigured only by that checkout's code
-(`dotenv_boot.home_checkout_error`). The CLI gate (`cli.preflight.require_own_checkout`,
-the first thing `cli.main` does, settings-free) refuses every verb outside a
-read-only list (`status`, `ls`, `get` and the like) when the running CLI belongs to
-any other checkout, and first start and the service launchers apply the same rule. A
-home with no `source` — a test or scratch home — accepts any checkout. The way out of
-the refusal is in its message: run `<home>/source/.venv/bin/ava`, or name a home of
-your own with `AVA_HOME`. `python -m cli.fleet_update` already drives every host
+**Which checkout may operate a home.** A home that carries its own `<home>/source`
+checkout (the production home `~/.ava`; every unit started from source) is operated
+only by that checkout's code (`dotenv_boot.home_checkout_error`). The CLI gate
+(`cli.preflight.require_own_checkout`, the first thing `cli.main` does,
+settings-free) refuses every command when the running CLI belongs to any other
+checkout, `status`, `ls` and `get` included; the only passes are bare `ava` and a
+lone `-h`/`--help`, which parse and run no verb. First start and the service
+launchers apply the same rule. A home with no `source` — a test or scratch home —
+accepts any checkout. The way out of the refusal is in its message: run
+`<home>/source/.venv/bin/ava` (the bare `ava` of a production host), or name a home
+of your own with `AVA_HOME`. `python -m cli.fleet_update` already drives every host
 through `$HOME/.ava/source/.venv/bin/ava`, so it is never refused.
 
-Without the variable a development checkout reads the host's own cluster: on a
-development machine that also runs production, that is production. It may read; it
-may not start, stop or reconfigure it.
+Without the variable a development checkout resolves to the host's own cluster: on a
+development machine that also runs production, that is production. Its CLI does not
+touch it, not even to read; read production with the host's bare `ava`.
 
 `.env` lives at `$AVA_HOME/.env`; each co-located unit carries its own. A dev
 worktree with `AVA_HOME` unset resolves to `~/.ava` like any other process: tests
