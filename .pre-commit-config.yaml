@@ -73,6 +73,10 @@ repos:
         always_run: true
         pass_filenames: false
 
+      # `--only FILE...` on the lints below: the commit judges the changed files under the lint's own
+      # scope, and a change to the lint tooling or to an input its rule reads widens it to the full
+      # scan (scripts/lint/docs/changed-files-mode.ava.okf.md). CI's `--all-files` is the full scan.
+      #
       # No sync blocking calls in async bodies (gateway + ops event-loop surfaces).
       # One sync psycopg / subprocess call in an async handler freezes the
       # whole gateway (2026-08-03 incident); a justified bounded read opts out with
@@ -202,7 +206,8 @@ repos:
       # base/telemetry/alerts_copy.py — the IM alert-copy locale module). Skill bodies,
       # code comments, docs, tests, fixtures, demos all fail on raw CJK;
       # functional CJK data is written as \uXXXX escapes (runtime-identical).
-      # Whole-repo scan via git ls-files; see scripts/content_lint/lint_no_cjk.py header.
+      # Scope: every tracked file; a commit judges the changed ones (--only), `--all-files` all of
+      # them. See scripts/content_lint/lint_no_cjk.py header.
       - id: lint-no-cjk
         name: lint no CJK (repo-wide, English-only source)
         entry: .venv/bin/python scripts/content_lint/lint_no_cjk.py --only
@@ -651,14 +656,13 @@ repos:
       # pre-commit's own diff selection passes a files:-filtered hook only
       # Added/Copied/Modified/Renamed paths -- never a Deleted one -- so a
       # change that only deletes the last file referencing an event or config
-      # field can leave its generated artifact stale with no pre-commit-stage
       # hook ever firing, on any range. The branch-diff run above executes every hook the
       # branch added to or changed; this one executes, over the whole repository, the
-      # artifact hooks whose inputs the branch ONLY deleted (every one when the range is
-      # unknown). The underlying hooks keep their normal filtered, pre-commit-stage-only
+      # artifact hooks whose inputs the branch deleted and that run cannot cover (every
+      # one when the range is unknown). The underlying hooks keep their normal filtered, pre-commit-stage-only
       # behavior, so `git commit` stays light. See scripts/provision/prepush_freshness.py.
       - id: lint-prepush-artifact-freshness
-        name: "lint prepush artifact freshness (hooks whose inputs the branch only deleted)"
+        name: "lint prepush artifact freshness (hooks whose inputs the branch deleted)"
         entry: .venv/bin/python scripts/provision/prepush_freshness.py
         stages: [pre-push]
         verbose: true  # Successful skips must stay visible.
