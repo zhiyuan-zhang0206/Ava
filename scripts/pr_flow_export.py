@@ -67,8 +67,6 @@ Timeline failures degrade to cached or partial records and are counted in
 ``stats``; Trunk failures drop only the fields that depend on them.
 """
 
-# operates-on-cluster: home-files, telemetry -- snapshots under $AVA_HOME/state/pr-flow, emits via the cluster's telemetry
-
 from __future__ import annotations
 
 import argparse

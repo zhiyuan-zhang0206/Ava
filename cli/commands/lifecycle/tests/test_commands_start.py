@@ -127,11 +127,12 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     assert "AVA_GATEWAY_URL" in err
 
 
-def test_setup_field_resolves_env_then_home_file_and_writes_nothing(
+def test_setup_field_resolves_from_settings_only_and_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """env > `$AVA_HOME/<name>` file; a validator gates every source, and
-    resolution never writes the home (`ava init` owns its identity)."""
+    """The settings value (the home's `.env`); a validator gates it, a legacy
+    `machine_name` file is not read, and resolution never writes the home (`ava init`
+    owns its identity)."""
     from base import paths
 
     home = tmp_path / "home"
@@ -146,15 +147,13 @@ def test_setup_field_resolves_env_then_home_file_and_writes_nothing(
     )
 
     monkeypatch.setattr(settings.general, "machine_name", "")
+    (home / "machine_name").write_text("from-file\n")
     assert _setup_commands._resolve_setup_field(field) is None
-    assert not (home / "machine_name").exists()
-
-    (home / "machine_name").write_text(" from-file \n")
-    assert _setup_commands._resolve_setup_field(field) == "from-file"
+    assert sorted(p.name for p in home.iterdir()) == ["machine_name"]  # nothing written
 
     monkeypatch.setattr(settings.general, "machine_name", " from-env ")
     assert _setup_commands._resolve_setup_field(field) == "from-env"
-    assert checked == ["from-file", "from-env"]
+    assert checked == ["from-env"]
 
 
 def test_start_refuses_capabilities_that_differ_from_the_ones_init_recorded(

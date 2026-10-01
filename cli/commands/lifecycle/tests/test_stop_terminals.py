@@ -365,7 +365,6 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     monkeypatch.setattr(strict, "_TERMINAL_STOP_GRACE_S", 1.0)
-    (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2045-stubborn"
     shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
     jobs = _started_jobs(shell, pty_reaper)
@@ -390,7 +389,6 @@ def test_stop_kills_a_double_forked_orphan_of_the_session(
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     monkeypatch.setattr(strict, "_TERMINAL_STOP_GRACE_S", 1.0)
-    (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2046-orphan"
     pidfile = home / "orphan.pid"
     job = _double_forked_job(pidfile, ignore=("SIGTERM", "SIGHUP"))
@@ -434,7 +432,6 @@ def test_stop_kills_a_helper_its_job_forks_on_term_and_orphans(
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     monkeypatch.setattr(strict, "_TERMINAL_STOP_GRACE_S", 1.0)
-    (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2047-helper"
     pidfile = home / "helper.pid"
     script = home / f"{name}.job.py"
@@ -483,7 +480,6 @@ def test_stop_kills_the_last_hop_of_a_fork_chain_started_on_term(
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     monkeypatch.setattr(strict, "_TERMINAL_STOP_GRACE_S", grace_s)
-    (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2048-chain"
     pidfile = home / "last.pid"
     script = home / f"{name}.job.py"
@@ -526,7 +522,6 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     monkeypatch.setattr(strict, "_TERMINAL_STOP_GRACE_S", 0.5)
-    (home / "machine_name").write_text("test-host")
     closed = "ava-agent-987-shell-2051-closed"
     stuck = "ava-agent-987-shell-2052-stuck"
     closed_shell = _start_busy_session(terminal, home, closed, _STUBBORN_JOB, pty_reaper)
@@ -639,7 +634,6 @@ def test_stop_records_notice_for_verified_closed_busy_session(
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
-    (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2044-busy"
     shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB, pty_reaper)
     assert _started_jobs(shell, pty_reaper), "the job never started"
@@ -675,7 +669,6 @@ def test_stop_records_nothing_for_idle_shell(
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
-    (home / "machine_name").write_text("test-host")
     (home / ".bash_profile").write_text(f"PS1='{_IDLE_PROMPT} '\n")
     name = "ava-agent-987-shell-2044-idle"
     env = {"AVA_HOME": str(home), "HOME": str(home)}
@@ -708,7 +701,6 @@ def test_stop_keeps_hold_when_a_process_outlives_the_kill(
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     monkeypatch.setattr(strict, "_TERMINAL_STOP_GRACE_S", 0.5)
-    (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2044-stubborn"
     shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
     jobs = _started_jobs(shell, pty_reaper)

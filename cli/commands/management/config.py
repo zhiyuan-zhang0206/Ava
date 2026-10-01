@@ -37,18 +37,11 @@ _GATEWAY_URL_KEYS = ("AVA_GATEWAY_URL",)
 
 
 def _home_gateway_base() -> str | None:
-    """This process's home gateway identity: its persisted ``gateway_url``
-    file first (machine identity, written at the home's first `ava start`), then the
-    home `.env` aliases. None when the home carries no identity yet (fresh
-    install before first start)."""
+    """This process's home gateway identity: the home `.env` aliases
+    (`AVA_GATEWAY_URL`, recorded by `ava init`). None when the home carries no
+    identity yet (before `ava init`)."""
     from base.host.env import runtime_config
-    from base.host.env.dotenv_boot import resolve_ava_home
 
-    gateway_url_path = resolve_ava_home() / "gateway_url"
-    if gateway_url_path.exists():
-        gateway_url = gateway_url_path.read_text().strip()
-        if gateway_url:
-            return gateway_url.rstrip("/")
     aliases = runtime_config.read_env_aliases()
     for key in _GATEWAY_URL_KEYS:
         gateway_url = aliases.get(key, "").strip()
@@ -72,7 +65,7 @@ def _gateway_base() -> str:
         return home_base
     raise _ConfigError(
         "gateway_url unset — this home carries no gateway identity yet: "
-        "run `ava start` for it, or "
+        "run `ava init` for it, or "
         "`export AVA_GATEWAY_URL=<gateway url>` to target one explicitly."
     )
 

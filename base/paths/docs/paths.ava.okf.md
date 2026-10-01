@@ -48,7 +48,6 @@ $AVA_HOME/
 ├── skills/<name>/SKILL.md      # the single skill load dir (gated by the registry)
 ├── mcps/<name>/                # installed MCP packages, each with its own .venv
 ├── plugins/<name>/plugin.py    # externally installed plugins
-├── machine_name, machine_host, machine_serve_*   # setup fields written by `ava start` flags
 ├── disabled_services           # durable `--disable-service` set the watchdog honors
 └── deploy-state.*.lock         # home lifecycle mutexes (+ .holder.json diagnostics)
 ```
@@ -67,7 +66,7 @@ only itself.
 - The home is `AVA_HOME` when set, else `~/.ava`
   (`base/host/env/dotenv_boot.py:resolve_ava_home`), never from cwd and never from a
   flag: no pointer file, no checkout claim, no in-process override. A home that
-  carries its own `<home>/source` checkout is changed only by that checkout's code
+  carries its own `<home>/source` checkout is operated only by that checkout's code
   (`dotenv_boot.home_checkout_error`; `prod_service_checkout_error` applies it to
   service launches). Cluster identity **is** this path — there is no cluster name;
   see [[base.ava.okf.md|the base overview]].

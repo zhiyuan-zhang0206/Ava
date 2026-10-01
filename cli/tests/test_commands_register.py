@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
 from typing import cast
 
 import pytest
@@ -111,9 +110,7 @@ def test_service_without_identity_probe_cannot_claim_readiness(
     assert result.label == "unavailable"
 
 
-def test_register_gateway_advertises_without_gateway_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_register_gateway_advertises_without_gateway_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """gateway registration no longer requires AVA_GATEWAY_URL.
 
     WP4 (conventions/reachability-and-credentials.md): the advertised URL is
@@ -138,7 +135,6 @@ def test_register_gateway_advertises_without_gateway_url(
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr("base.cluster.machine.ava_home", lambda: tmp_path)
 
     rc = _real_register_machine_or_die(
         cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
@@ -147,9 +143,7 @@ def test_register_gateway_advertises_without_gateway_url(
     assert calls == ["http://10.0.0.2:8000"]
 
 
-def test_register_gateway_only_advertises_reachable_host(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_register_gateway_only_advertises_reachable_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """A gateway-only unit advertises `reachable_host` + the gateway URL's port —
     NOT the bare gateway URL (WP4: the hostname is what the page proxy's SSRF
     allowlist consumes; a loopback advertisement breaks page serves)."""
@@ -161,10 +155,8 @@ def test_register_gateway_only_advertises_reachable_host(
         calls.append(url)
 
     monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
+    monkeypatch.setattr(settings.gateway, "gateway_url", "https://ava.example:8000")
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr("base.cluster.machine.ava_home", lambda: tmp_path)
-    (tmp_path / "gateway_url").write_text("https://ava.example:8000")
 
     rc = _real_register_machine_or_die(
         cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})

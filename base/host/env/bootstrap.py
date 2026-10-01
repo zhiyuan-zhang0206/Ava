@@ -104,9 +104,9 @@ _TRUTHY = frozenset({"1", "true", "yes", "on"})
 _FALSY = frozenset({"0", "false", "no", "off"})
 
 
-def _serve_flag(env_key: str, file_name: str) -> bool:
+def _serve_flag(env_key: str) -> bool:
     """Settings-free mirror of one capability flag's resolution: env
-    `AVA_MACHINE_SERVE_*` > `$AVA_HOME/.env` > `$AVA_HOME/<file>` > False.
+    `AVA_MACHINE_SERVE_*` > `$AVA_HOME/.env` > False.
 
     Normal config boot has already loaded the `.env` before this function runs,
     so its value is in the environment. Settings-lite maintenance commands do
@@ -117,8 +117,8 @@ def _serve_flag(env_key: str, file_name: str) -> bool:
     later, so the config-source decision can never silently disagree with the
     machine role.
 
-    `$AVA_HOME` here is `dotenv_boot.resolve_ava_home()`: at this point in boot
-    the env var may not be pinned yet (see above).
+    The `.env` read resolves `$AVA_HOME` through `dotenv_boot.resolve_ava_home()`: at
+    this point in boot the env var may not be pinned yet (see above).
     """
     raw = os.environ.get(env_key)
     if raw is not None and raw.strip():
@@ -128,11 +128,6 @@ def _serve_flag(env_key: str, file_name: str) -> bool:
     raw = runtime_config.read_env_aliases().get(env_key)
     if raw is not None and raw.strip():
         return raw.strip().lower() in _TRUTHY
-    from base.host.env.dotenv_boot import resolve_ava_home
-
-    path = resolve_ava_home() / file_name
-    if path.exists():
-        return path.read_text().strip().lower() in _TRUTHY
     return False
 
 
@@ -147,22 +142,22 @@ def config_source_is_local() -> bool:
     role flags — CI, lint scripts, dev tools — is not a unit yet and resolves
     locally with no fetch.
 
-    The serve-gateway flag is read settings-free (env > `$AVA_HOME/.env` >
-    `$AVA_HOME/machine_serve_gateway` file > False) because this runs DURING
-    the Settings import, before base.cluster.machine can resolve the role. `cli.main`
-    opts the maintenance verbs out of the fetch with AVA_CONFIG_FETCH=skip (see
-    CONFIG_FETCH_ENV); that is orthogonal to this derivation.
+    The serve-gateway flag is read settings-free (env > `$AVA_HOME/.env` > False)
+    because this runs DURING the Settings import, before base.cluster.machine can
+    resolve the role. `cli.main` opts the maintenance verbs out of the fetch with
+    AVA_CONFIG_FETCH=skip (see CONFIG_FETCH_ENV); that is orthogonal to this
+    derivation.
     """
-    return _serve_flag("AVA_MACHINE_SERVE_GATEWAY", "machine_serve_gateway")
+    return _serve_flag("AVA_MACHINE_SERVE_GATEWAY")
 
 
 def should_fetch_from_gateway() -> bool:
     """Whether this process's Settings build fetches cluster config from the gateway.
 
     True only for a CONFIGURED pure agent-runner: the serve_agent_runner flag is
-    on (env `AVA_MACHINE_SERVE_AGENT_RUNNER` > `$AVA_HOME/machine_serve_agent_runner`
-    file > False) AND a gateway URL is present (`ava start` validates the remote
-    projection before persisting runner identity). Everything else resolves locally:
+    on (env `AVA_MACHINE_SERVE_AGENT_RUNNER` > `$AVA_HOME/.env` > False) AND a gateway
+    URL is present (`ava start` validates the remote projection before persisting
+    runner identity). Everything else resolves locally:
 
     - a gateway-capable unit (config_source_is_local) never fetches;
     - a bare checkout with no role flags (CI, lint scripts, dev tools) and a
@@ -176,9 +171,7 @@ def should_fetch_from_gateway() -> bool:
     so the flag and the URL are both present in the environment when they
     exist on disk.
     """
-    return _serve_flag("AVA_MACHINE_SERVE_AGENT_RUNNER", "machine_serve_agent_runner") and bool(
-        os.environ.get("AVA_GATEWAY_URL")
-    )
+    return _serve_flag("AVA_MACHINE_SERVE_AGENT_RUNNER") and bool(os.environ.get("AVA_GATEWAY_URL"))
 
 
 class BootstrapFetchError(RuntimeError):

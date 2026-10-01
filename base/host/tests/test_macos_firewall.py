@@ -136,7 +136,7 @@ def test_loopback_only_host_is_a_no_op(
 
     Checked before the firewall state so a zero-config box is never nagged about a
     rule that would change nothing for it — case and surrounding space included,
-    since these arrive from `.env` and a `machine_host` file.
+    since these arrive from `.env`.
     """
     _darwin(monkeypatch)
     _stub_query(monkeypatch, state="State = 1", apps="Total number of apps = 0\n")

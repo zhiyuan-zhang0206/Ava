@@ -137,7 +137,7 @@ def test_init_refuses_configuration_without_an_intent(
     home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A home that has an identity in its `.env` but no intent has no initialization
-    authority: init does not adopt it (`ava start` still admits a runner's, as before)."""
+    authority: init does not adopt it, and `ava start` refuses it the same way."""
     home.mkdir(mode=0o700)
     (home / ".env").write_text("AVA_GATEWAY_URL=http://10.0.0.7:8000\n")
 

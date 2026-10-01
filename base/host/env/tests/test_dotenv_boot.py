@@ -132,7 +132,7 @@ def test_enforce_drops_undeclared_identity_key(
     login shell into an isolated child flipped `config_source_is_local()` to
     True, skipped the settings-lite placeholders, and the DERIVED drop then
     failed Settings with Field required. Dropped, the resolver falls through to
-    the unit's own `$AVA_HOME/machine_*` files / False."""
+    False."""
     monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "true")
     monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_AGENT_RUNNER", "true")
     monkeypatch.setitem(os.environ, "AVA_MACHINE_NAME", "leaked-prod-host")

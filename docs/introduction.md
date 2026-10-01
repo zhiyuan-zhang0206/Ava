@@ -220,8 +220,9 @@ already calls.
 ## CLI
 
 One entry point — `ava`. Every verb acts on the home `$AVA_HOME` names (`~/.ava`
-for prod when it is unset); a home with its own `source` checkout is changed only by
-that checkout's `ava`. Run `ava --help` for the full surface.
+for prod when it is unset); a home with its own `source` checkout is operated only by
+that checkout's `ava`; any other checkout's `ava` refuses every command. Run `ava --help`
+for the full surface.
 
 | Verb | Does |
 |---|---|

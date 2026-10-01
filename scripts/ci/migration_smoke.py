@@ -14,11 +14,6 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from base.host.env.dotenv_boot import enter_scratch_home
-
-if __name__ == "__main__":
-    enter_scratch_home()
-
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
