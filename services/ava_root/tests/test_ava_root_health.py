@@ -21,6 +21,7 @@ import pytest
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from services.ava_root import health as health_mod
+from services.ava_root.alerts import UnitAlertFacts
 from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.inputs import InputSeal
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry, UnknownUnitError
@@ -71,6 +72,9 @@ class StubSupervisor:
         self.unknown_units: set[str] = set(unknown_units or ())
         self.on_restart: Callable[[], None] | None = None
         self.generation = (OwnedProcess(42, 100.0, None), 0.0)
+        self.alert_facts = UnitAlertFacts(
+            intent_running=True, restart_failed=None, custody_held=False
+        )
 
     async def restart(self, unit_id: str) -> dict[str, object]:
         self.restart_calls.append(unit_id)
@@ -87,6 +91,11 @@ class StubSupervisor:
         if unit_id in self.unknown_units:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
         return self.deferrals.get(unit_id)
+
+    def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
+        if unit_id in self.unknown_units:
+            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        return self.alert_facts
 
 
 class CellProbe:

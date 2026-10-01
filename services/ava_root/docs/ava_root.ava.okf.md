@@ -77,6 +77,33 @@ it) takes the same default at its admitted start: `running`, source `selection`.
 Residue from an older scheme is discarded, never consulted; a fleet update's
 full stop/start leaves no mixed state.
 
+## Episode alerts
+
+The health monitor derives one condition per unit each round: the unit's intent
+is running and it sits in an explicit failure state — a recorded replacement
+failure, an open restart breaker, or retained native custody.
+`services/ava_root/alerts.py` turns that condition into a durable episode under
+`<run_dir>/alerts/<unit>.json` (atomic, best-effort writes): the record is
+written before any fan-out, so one episode fires exactly once — later rounds,
+backoff retries, and a change of failure kind on an open episode stay silent —
+and it survives a root restart: a condition still present afterwards never
+re-fires, and one that disappeared meanwhile still resolves. Each edge emits
+`root_unit_alert_fired` / `root_unit_alert_resolved` carrying the episode
+identity (unit, kind, since) and the user-channel delivery outcome; the resolve
+replays that identity to close the matching alert row.
+
+The user channel is the gateway's `/api/alerts` ingest, posted by the
+deployment-side notifier with the health probe's client posture
+(`gateway_api_base` + `gateway_auth_headers`, plus `X-Alerts-Token` when this
+home carries the cluster webhook token). A failed post is retried once and then
+given up for that edge — the store stays authoritative, and the outcome
+lands on the event stream. While the episode stays open and the firing was
+never accepted, each later observation re-posts it (idempotent under the
+(fingerprint, startsAt) key), repairing a crash between acceptance and the
+record stamp or a gateway unreachable at fire time; a firing still never
+accepted at resolve time reports `delivery="skipped"` and posts nothing —
+no fabricated row.
+
 ## Control contract
 
 This package owns the application service tree. The wire protocol and client sit below every consumer:

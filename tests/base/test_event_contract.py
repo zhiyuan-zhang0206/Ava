@@ -235,7 +235,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # an interrupted replacement's explicit failure state — and
     # root_restart_cleared) raises it to 220. Retiring the PITR stack
     # (decisions/2026-10-02-delete-the-self-written-pitr-stack.md: no remote
-    # inventory snapshot) lowers the current total by one, to 219.
+    # inventory snapshot) lowers the current total by one, to 219. The root unit
+    # alert pair (task #4872 B route: root_unit_alert_fired — a unit entered an
+    # alertable failure state — and root_unit_alert_resolved) raises the
+    # current total to 221.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
     assert "agent_reopened" not in _TELEMETRY_KINDS
     for retired in (
@@ -247,7 +250,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
         assert retired not in _TELEMETRY_KINDS
     # The suffix diagnostic adds one; retiring tool-call concatenation removes one.
     assert "multiple_tool_calls_merged" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 219
+    assert len(_TELEMETRY_KINDS) == 221
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",
@@ -261,6 +264,25 @@ def test_root_restart_payloads_name_the_evidence() -> None:
 
     assert payload_keys("root_restart_failed") == ("unit", "stage", "detail")
     assert payload_keys("root_restart_cleared") == ("unit", "failed_for_s")
+
+
+def test_root_unit_alert_payloads_name_the_evidence() -> None:
+    from base.events.contract import payload_keys
+
+    assert payload_keys("root_unit_alert_fired") == (
+        "unit",
+        "kind",
+        "since_timestamp_seconds",
+        "detail",
+        "delivery",
+    )
+    assert payload_keys("root_unit_alert_resolved") == (
+        "unit",
+        "kind",
+        "since_timestamp_seconds",
+        "failed_for_s",
+        "delivery",
+    )
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
