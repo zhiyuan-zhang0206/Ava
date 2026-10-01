@@ -49,7 +49,7 @@ No Cordis-style "everything is a plugin" runtime unification — see the
 borrow/not-borrow section.
 
 - A Claude Code plugin package is already a mixed release unit (skills +
-  commands + `.mcp.json`); `ava_builtins/plugins/ava_code` ships skills in the
+  commands + `.mcp.json`); `ava_builtins/plugins/ava_fleet` ships skills in the
   same repo. One manifest declares all contribution surfaces; the host
   dispatches each to its existing executor (the VS Code model).
 - Unifying runtimes is a misfit: skills are pure text with no runtime, MCP is a

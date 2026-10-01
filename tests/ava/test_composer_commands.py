@@ -79,42 +79,37 @@ def test_discover_sorted_by_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_builtin_commands_discoverable():
-    # End-to-end (no monkeypatch): repo-level commands/ (recap, plan) stay bare;
-    # the ava_code plugin's commands/ are namespaced under the plugin folder.
-    # The namespace renders in canonical display spelling — the plugin dir is a
-    # Python package (`ava_code`), so the picker must show `ava-code.pr`, not
-    # the raw directory name.
+    # End-to-end (no monkeypatch): repo-level commands/ (recap, plan) stay bare.
     names = {c["name"] for c in composer_commands.discover_commands()}
     assert {"recap", "plan"} <= names
-    assert {"ava-code:pr", "ava-code:review", "ava-code:worktree"} <= names
 
 
 def test_scan_dir_renders_canonical_namespace_spelling(tmp_path: Path):
     # An underscore plugin / skill folder must present the dash form outward,
     # `:`-joined like a skill identifier.
     _write(tmp_path, "deploy.md", "ship it")
-    out = composer_commands._scan_dir(tmp_path, ("ava_code",))
-    assert "ava-code:deploy" in out
-    assert out["ava-code:deploy"]["name"] == "ava-code:deploy"
+    out = composer_commands._scan_dir(tmp_path, ("ava_fleet",))
+    assert "ava-fleet:deploy" in out
+    assert out["ava-fleet:deploy"]["name"] == "ava-fleet:deploy"
 
 
 def test_underscore_command_spelling_still_expands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # The picker shows the canonical `:`-joined dash name; inbound matching
-    # folds dash/underscore + colon/dot, so a legacy `/ava_code.pr` still
-    # expands the same command as `/ava-code:pr`.
-    _write(tmp_path, "pr.md", "write the PR body")
+    # folds dash/underscore + colon/dot, so a legacy `/ava_fleet.ship` still
+    # expands the same command as `/ava-fleet:ship`.
+    _write(tmp_path, "ship.md", "write the release note")
     monkeypatch.setattr(
         composer_commands,
         "_command_dirs",
-        lambda: [(tmp_path, ("ava_code",))],
+        lambda: [(tmp_path, ("ava_fleet",))],
     )
     monkeypatch.setattr(composer_commands, "_skill_commands", dict)
-    dash = composer_commands.expand_command("/ava-code:pr fix the tests")
-    legacy = composer_commands.expand_command("/ava_code.pr fix the tests")
+    dash = composer_commands.expand_command("/ava-fleet:ship fix the tests")
+    legacy = composer_commands.expand_command("/ava_fleet.ship fix the tests")
     # Both spellings resolve to the same command (same body); the expansion
     # echoes the spelling the user typed, so only the echoed name differs.
-    assert "write the PR body" in dash
-    assert "write the PR body" in legacy
+    assert "write the release note" in dash
+    assert "write the release note" in legacy
     assert "fix the tests" in dash and "fix the tests" in legacy
 
 

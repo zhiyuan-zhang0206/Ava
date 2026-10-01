@@ -18,4 +18,3 @@ Go through seven dimensions, judge each as pass / partial-concern, each finding 
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava_builtins/plugins/ava_fleet/docs/notify.ava.okf.md|Notify]] — 🔴 items escalate via `ava.ui.notify`
-- [[ava_builtins/plugins/ava_code/docs/ava_code.ava.okf.md|AvaCode]] — same code workflow as PR / conventions / testing skills
