@@ -48,6 +48,8 @@ from base.events.system import (
     ResolvedMarker,
     RootHealthExpected,
     RootHealthTick,
+    RootRestartCleared,
+    RootRestartFailed,
     ScheduleStalled,
     SseLifecycle,
     StatsDashboardStale,
@@ -203,6 +205,19 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "root_restart_breaker_open",
         "root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round",
         tier="anomaly",
+    ),
+    "root_restart_failed": _telemetry(
+        "root_restart_failed",
+        "root unit replacement failed at its down|up half — explicit failure state recorded; "
+        "intent stays running and the health monitor retries under its backoff (task #4872)",
+        payload=RootRestartFailed,
+        tier="anomaly",
+    ),
+    "root_restart_cleared": _telemetry(
+        "root_restart_cleared",
+        "root unit replacement succeeded — the recorded failure state was cleared (task #4872)",
+        payload=RootRestartCleared,
+        tier="noise",
     ),
     # Parent-helper diagnosis never grants root authority to replace its ancestor.
     "permissions_helper_unhealthy": _telemetry(
