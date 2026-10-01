@@ -30,13 +30,23 @@ import tempfile
 import time
 import uuid
 from contextlib import suppress
-from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Any
 
 RECIPE = Path(__file__).resolve().parent
 REPO = RECIPE.parents[1]
+sys.path.insert(0, str(REPO))
+
+from scripts.verify.boundary import (  # noqa: E402 — standalone script
+    START_ARGV,
+    Evidence,
+    git,
+    init_argv,
+    profile_text,
+    refuse_host_state,
+    resolve_commit,
+)
+
 IMAGE = "ava-verify"
 CACHE_VOLUME = "ava-verify-cache"
 CONTAINER_HOME = "/home/verify"
@@ -46,24 +56,6 @@ WORK = f"{CONTAINER_HOME}/verify"
 # What the Dockerfile copies into the build; the image tag hashes exactly these.
 CONTEXT_FILES = ("scripts/verify/Dockerfile", "scripts/verify/Dockerfile.dockerignore")
 CONTEXT_TREES = ("scripts/provision", "scripts/install-cli-tools.sh")
-
-# The start profile (the deleted native preview's, plus a declared time zone): no cron,
-# boot or logs jobs, no browser, no remote memory or transfer, no GitHub gate, no
-# telemetry export, and the scripted model scenario in place of a provider. No key of
-# any kind: nothing secret enters the container.
-PROFILE = {
-    "AVA_OS_JOBS_ENABLED": "0",
-    "AVA_PROVISION_BUILTIN_SCHEDULES": "0",
-    "AVA_BROWSER_ENABLED": "0",
-    "AVA_MEMORY_KEEP_LOCAL": "1",
-    "AVA_CROSS_MACHINE_TRANSFER_BACKEND": "none",
-    "AVA_REQUIRE_GITHUB_PR": "0",
-    "AVA_LLM_OVERRIDE": "tests.e2e.fakes.scenarios.message_flow:build",
-    "AVA_TELEMETRY_OTLP_ENABLED": "0",
-    "AVA_TIMEZONE": "UTC",
-}
-SERVICES = ("gateway", "frontend", "ops", "agent-host")
-MACHINE_NAME = "verify"
 
 PREPARE_SOURCE = """
 set -euo pipefail
@@ -77,24 +69,7 @@ rm .git/objects/info/alternates
 git rev-parse HEAD
 """
 
-# `ava init` records the machine's identity; `ava start` takes only the service selection.
-INIT_ARGV = [
-    ".venv/bin/ava",
-    "init",
-    "--serve-gateway",
-    "--serve-agent-runner",
-    "--machine-name",
-    MACHINE_NAME,
-    "--machine-host",
-    "127.0.0.1",
-    "--config-file",
-    f"{WORK}/profile.env",
-]
-START_ARGV = [
-    ".venv/bin/ava",
-    "start",
-    *(arg for name in SERVICES for arg in ("--only-service", name)),
-]
+INIT_ARGV = init_argv(f"{WORK}/profile.env")
 
 # Wall-clock bound of each step, seconds. A timed-out step fails the run.
 TIMEOUTS = {
@@ -111,35 +86,12 @@ TIMEOUTS = {
 }
 
 
-class RunFailedError(RuntimeError):
-    """A recipe step failed; the evidence of the steps before it is kept."""
-
-
 # --------------------------------------------------------------------- the boundary
-
-
-def refuse_host_state(source: Path) -> None:
-    """Nothing of the host's cluster, credentials or container runtime may enter.
-
-    Refuses the home directory, anything that contains it (a parent such as `/Users`
-    would expose it), the host cluster and credential directories inside it, and any
-    socket (the container runtime's is one, and its path varies by runtime).
-    """
-    home = Path.home().resolve()
-    resolved = source.resolve()
-    sealed = [home / name for name in (".ava", ".ssh", ".gnupg", ".aws", ".docker")]
-    if (
-        home.is_relative_to(resolved)
-        or any(resolved.is_relative_to(path) for path in sealed)
-        or resolved.name == "docker.sock"
-        or resolved.is_socket()
-    ):
-        raise ValueError(f"refusing to mount host state into the container: {resolved}")
 
 
 def git_objects_dir(repo: Path) -> Path:
     """The repository's object store: the only host path the container sees."""
-    common = _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
     objects = Path(common) / "objects"
     if not objects.is_dir():
         raise ValueError(f"{repo} has no object store at {objects}")
@@ -177,16 +129,6 @@ def docker_run_argv(name: str, image: str, objects: Path, memory: str, shm: str)
 # ------------------------------------------------------------------------- helpers
 
 
-def _git(repo: Path, *args: str) -> str:
-    return subprocess.run(  # noqa: S603 — argv list, never a shell
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
-    ).stdout.strip()
-
-
-def resolve_commit(repo: Path, ref: str) -> str:
-    return _git(repo, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
-
-
 def context_digest(repo: Path) -> str:
     """Hash of every byte the image build can see (working-tree files, relative names)."""
     files = [repo / name for name in CONTEXT_FILES]
@@ -203,42 +145,6 @@ def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 — argv list, never a shell
         ["docker", *args], capture_output=True, text=True, check=check
     )
-
-
-@dataclass
-class Evidence:
-    """One run's directory: a log per step, the observer's JSON, and result.json."""
-
-    root: Path
-    result: dict[str, Any]
-
-    def step(self, name: str, argv: list[str], *, stdin: str | None = None) -> None:
-        log = self.root / f"{len(self.result['steps']):02d}-{name}.log"
-        row: dict[str, Any] = {"name": name, "argv": argv, "log": log.name}
-        self.result["steps"].append(row)
-        started = time.monotonic()
-        try:
-            with log.open("w") as out:
-                done = subprocess.run(  # noqa: S603 — argv list, never a shell
-                    argv,
-                    stdout=out,
-                    stderr=subprocess.STDOUT,
-                    input=stdin,
-                    stdin=None if stdin is not None else subprocess.DEVNULL,
-                    text=True,
-                    timeout=TIMEOUTS[name],
-                    check=False,
-                )
-            row["returncode"] = done.returncode
-        except subprocess.TimeoutExpired:
-            row["returncode"] = "timeout"
-        row["seconds"] = round(time.monotonic() - started, 1)
-        self.save()
-        if row["returncode"] != 0:
-            raise RunFailedError(f"step {name} failed ({row['returncode']}): see {log}")
-
-    def save(self) -> None:
-        (self.root / "result.json").write_text(json.dumps(self.result, indent=2) + "\n")
 
 
 def _exec(container: str, argv: list[str], *, stdin: bool = False) -> list[str]:
@@ -281,7 +187,7 @@ def build_image(evidence: Evidence) -> str:
 
 def run_steps(evidence: Evidence, container: str, commit: str) -> None:
     source = f"{CONTAINER_HOME}/.ava/source"
-    profile = "".join(f"{key}={value}\n" for key, value in PROFILE.items())
+    profile = profile_text()
     observer = (RECIPE / "observe.py").read_text()
     observe = f"cd {source} && PYTHONPATH={source} .venv/bin/python {WORK}/observe.py {WORK}/observer.json"
     prepare = PREPARE_SOURCE.format(objects=OBJECTS_MOUNT)
@@ -320,6 +226,7 @@ def run(ref: str, evidence_root: Path, memory: str, shm: str) -> int:
     evidence = Evidence(
         evidence_root / f"{stamp}-{commit[:8]}",
         {"ref": ref, "commit": commit, "recipe_repo": str(REPO), "steps": [], "result": "running"},
+        TIMEOUTS,
     )
     evidence.root.mkdir(parents=True, mode=0o700)
     container = f"ava-verify-{commit[:8]}-{uuid.uuid4().hex[:6]}"
