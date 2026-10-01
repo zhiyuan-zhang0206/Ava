@@ -102,6 +102,7 @@ _IGNORED_ENV = os.environ.encodekey("PYTEST_CURRENT_TEST")  # pytest rewrites it
 _EXCLUDED_DIRS = r"(?:tests|site-packages|node_modules)"
 _module_dict = operator.attrgetter("__dict__")
 _module_file = operator.methodcaller("get", "__file__")
+_module_spec = operator.methodcaller("get", "__spec__")
 _HINTS = {
     "env": (
         "monkeypatch.delenv(name, raising=False) records nothing for an absent key, so whatever "
@@ -164,6 +165,7 @@ class _ModuleWatch:
         self._seen = 0  # len(sys.modules) at the last discovery
         self._order: list[str] = []  # the keys of sys.modules the last discovery saw, in order
         self._judged: set[str] = set()
+        self._importing: list[str] = []  # first-party modules some thread is still importing
         self._names: list[str] = []
         self._dicts: list[dict[str, Any]] = []
         self._lens: list[int] = []
@@ -231,16 +233,33 @@ class _ModuleWatch:
         ours = list(map(self._match, compress(files, has_file)))
         return list(compress(names, ours)), list(compress(dicts, ours))
 
+    def _settled(
+        self, found: list[str], dicts: list[dict[str, Any]]
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        """`found` without the modules some thread is still importing, which are looked at again.
+
+        A lazy import in a background thread registers the module before its body has run, and the
+        names the body then defines would be named as a leak of whichever test is running. A module
+        is watched from the pass after its import finished (`__spec__._initializing` is False).
+        """
+        specs = map(_module_spec, dicts)
+        importing = list(map(getattr, specs, repeat("_initializing"), repeat(False)))
+        self._importing = list(compress(found, importing))
+        if not self._importing:
+            return found, dicts
+        settled = list(map(operator.not_, importing))
+        return list(compress(found, settled)), list(compress(dicts, settled))
+
     def _discover(self) -> None:
-        if len(sys.modules) == self._seen:
+        if len(sys.modules) == self._seen and not self._importing:
             return
         self._seen = len(sys.modules)
         started = _now()
-        names = self._unjudged()
+        names = self._importing + self._unjudged()
         self._judged.update(names)
         self.judged += len(names)
         self.passes += bool(names)
-        found, dicts = self._locate(self._inside(names))
+        found, dicts = self._settled(*self._locate(self._inside(names)))
         lens = list(map(len, dicts))
         self._names.extend(found)
         self._dicts.extend(dicts)
