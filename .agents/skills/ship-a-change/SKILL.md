@@ -200,8 +200,9 @@ file-tree diff with ★ critical paths + prose data flow.
 
 The commit-stage `types-codegen-fresh` hook needs `ui/web/node_modules`.
 A fresh worktree without these dependencies can fail this hook even on clean
-`main`. The frontend tsc, eslint and vitest hooks run at pre-push; their shared
-guard reports a visible skip when tooling is unavailable.
+`main`. The frontend tsc, whole-project eslint and vitest hooks run at pre-push, and
+the changed-files eslint hook at commit; each reports a visible skip when tooling
+is unavailable.
 
 If dependencies cannot be installed, skip **only that hook by name**, so every
 other commit hook still runs:
