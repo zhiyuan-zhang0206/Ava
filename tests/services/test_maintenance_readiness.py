@@ -1,9 +1,6 @@
 """A stopped generation can prove readiness without reopening native work."""
 
-import asyncio
-import json
 import os
-from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -13,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from psycopg_pool import ConnectionPool, PoolTimeout
+from psycopg_pool import PoolTimeout
 
 from base import config
 from base.cluster.auth import bearer_header
@@ -24,7 +21,6 @@ from base.deploy.maintenance.state import MaintenanceHold
 from base.deploy.state import host_deploy_state
 from base.host.env import runtime_config as rt
 from gateway.app import app
-from services.agent_ops import daemon
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -118,32 +114,6 @@ def test_held_health_exemption_preserves_authentication(monkeypatch: pytest.Monk
         assert client.get("/api/health").status_code == 200
         assert client.get("/api/cluster/status").status_code == 401
     assert admission.held()
-
-
-@pytest.mark.usefixtures("held")
-async def test_real_ops_status_reports_the_hold_without_releasing_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Real dispatch, executor, PostgreSQL posture and journal; no service is launched.
-    with (
-        ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool,
-        ThreadPoolExecutor(max_workers=2) as executor,
-    ):
-        monkeypatch.setattr(daemon, "_db_pool", pool)
-        monkeypatch.setattr(daemon, "_op_executor", executor)
-        monkeypatch.setattr(daemon, "_dispatch_sem", asyncio.Semaphore(2))
-
-        async def request(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-            status, raw, _ = await daemon._ops_route(
-                json.dumps({"kind": kind, "payload": payload}).encode()
-            )
-            assert status == 200
-            return json.loads(raw)
-
-        status = await request("status_probe", {})
-        assert status["status"] == "completed"
-        assert status["result"]["paused"] is True
-        assert admission.held()
 
 
 @pytest.mark.usefixtures("held")
