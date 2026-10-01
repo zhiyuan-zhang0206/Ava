@@ -10,10 +10,9 @@ Netdisk, Tencent COS, Aliyun OSS) behind eight roles each. With its CLI, its 33
 configuration keys and their cc-80 validator, its tests and its documents it was
 about 35,000 lines.
 
-It never gave this cluster a recovery point. Its activation was operator-owned
-and was not completed: the physical chain stopped being written on 2026-09-19,
-`archive_mode` is off, and the only recovery media is the daily encrypted logical
-dump. Its restore path is code this repository has to keep working, because no
+Its activation was operator-owned and multi-step, and a chain only existed after
+every step was done by hand; the daily encrypted logical dump is the recovery
+path that does not depend on it. Its restore path is code this repository has to keep working, because no
 other tool can read its objects. Meanwhile a scratch drill of WAL-G against the
 same object store restored a full-plus-incremental chain to a chosen time,
 replayed the whole WAL history from the oldest full backup, and survived a
