@@ -74,8 +74,9 @@ def _drain_background_trace_threads() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _reset_init_flag():
-    """Reset trace-init and retry-loop state between tests."""
+def _reset_init_flag(monkeypatch: pytest.MonkeyPatch):
+    """Reset trace-init and retry-loop state (and the key arming writes) between tests."""
+    monkeypatch.setenv("TRACELOOP_TRACE_CONTENT", "")  # arming sets it; teardown deletes it
     _assert_no_background_trace_threads()
     gate = telemetry_otlp.observability_export_allowed
     gate.cache_clear()
@@ -1598,7 +1599,6 @@ def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tm
     monkeypatch.setattr("base.config.settings.observability.trace_strip_content", True)
     monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
-    monkeypatch.delenv("TRACELOOP_TRACE_CONTENT", raising=False)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 

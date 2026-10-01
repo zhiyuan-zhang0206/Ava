@@ -284,9 +284,10 @@ def test_fork_shell_child_resets_term_and_hup_dispositions(
     monkeypatch.setattr(host_mod.os, "execvp", fake_execvp)
     # Mimic host.main(): the host ignores these three signals so a stray
     # signal aimed at the session tree cannot take the host down.
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+    watched = (signal.SIGHUP, signal.SIGTERM, signal.SIGPIPE)
+    previous = {sig: signal.getsignal(sig) for sig in watched}
+    for sig in watched:
+        signal.signal(sig, signal.SIG_IGN)
     master: int | None = None
     try:
         pid, master = _fork_shell(str(tmp_path), {}, 80, 24)
@@ -307,8 +308,8 @@ def test_fork_shell_child_resets_term_and_hup_dispositions(
         assert "HUP=SIG_DFL" in probe, f"HUP must be default in the child: {probe}"
         assert "PIPE=SIG_DFL" in probe, f"PIPE must be default in the child: {probe}"
     finally:
-        for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGPIPE):
-            signal.signal(sig, signal.SIG_DFL)
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
         if master is not None:
             os.close(master)
 
