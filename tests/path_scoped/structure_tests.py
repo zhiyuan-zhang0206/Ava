@@ -1,4 +1,4 @@
-"""Shared isolation for the structure-gate tests."""
+"""Shared isolation for the structure-gate tests (registered by `tests/fixtures/path_scopes.py`)."""
 
 from __future__ import annotations
 
