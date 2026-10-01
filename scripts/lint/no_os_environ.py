@@ -330,10 +330,10 @@ def main(argv: list[str] | None = None) -> int:
     py_files = _files_to_scan(argv, scope)
     # Only Rule 2 (tests) reads the config registry, and importing it is the slow part of a
     # run that judges a few non-test files.
-    managed_envs = (
+    managed_envs: frozenset[str] = (
         _settings_managed_aliases()
         if any(_is_test_file(_rel_label(path)) for path in py_files)
-        else frozenset()
+        else frozenset[str]()
     )
 
     total_violations = 0

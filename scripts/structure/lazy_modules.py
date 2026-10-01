@@ -18,14 +18,13 @@ class ModuleMap[T]:
         self._build = build
         self._built: dict[str, T | None] = {}
 
-    def get(self, name: str, default: T | None = None) -> T | None:
-        """The built value, or `default` for an unknown module or one `build` returned None for."""
+    def get(self, name: str) -> T | None:
+        """The built value; None for an unknown module or one `build` returned None for."""
         if not self._exists(name):
-            return default
+            return None
         if name not in self._built:
             self._built[name] = self._build(name)
-        built = self._built[name]
-        return default if built is None else built
+        return self._built[name]
 
     def __contains__(self, name: object) -> bool:
         return isinstance(name, str) and self._exists(name)
