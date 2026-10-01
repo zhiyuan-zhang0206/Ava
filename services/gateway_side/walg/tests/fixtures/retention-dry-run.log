@@ -1,0 +1,26 @@
+INFO: 2026/10/01 23:33:00.679273 Backup to delete will be searched in storages: [default]
+INFO: 2026/10/01 23:33:00.679342 retrieving permanent objects
+INFO: 2026/10/01 23:33:01.788272 Start delete
+INFO: 2026/10/01 23:33:03.228371 Evaluating objects for deletion...
+INFO: 2026/10/01 23:33:03.228403 Object marked for deletion: basebackups_005/base_000000010000000000000087_backup_stop_sentinel.json storage=default
+INFO: 2026/10/01 23:33:03.228410 Object marked for deletion: basebackups_005/base_0000000100000000000000A6_D_000000010000000000000087_backup_stop_sentinel.json storage=default
+INFO: 2026/10/01 23:33:03.228421 Object marked for deletion: wal_005/000000010000000000000001.lz4 storage=default
+INFO: 2026/10/01 23:33:03.228425 Object marked for deletion: wal_005/000000010000000000000002.lz4 storage=default
+INFO: 2026/10/01 23:33:03.228431 Object marked for deletion: wal_005/000000010000000000000003.lz4 storage=default
+INFO: 2026/10/01 23:33:03.228966 Object marked for deletion: wal_005/000000010000000000000087.00000028.backup.lz4 storage=default
+INFO: 2026/10/01 23:33:03.229094 Object marked for deletion: wal_005/0000000100000000000000A6.00007C08.backup.lz4 storage=default
+INFO: 2026/10/01 23:33:03.230669 Object marked for deletion: wal_005/00000001000000020000001E.lz4 storage=default
+INFO: 2026/10/01 23:33:03.230673 Object marked for deletion: wal_005/00000001000000020000001F.lz4 storage=default
+INFO: 2026/10/01 23:33:03.232059 Object marked for deletion: basebackups_005/base_000000010000000000000087/files_metadata.json storage=default
+INFO: 2026/10/01 23:33:03.232064 Object marked for deletion: basebackups_005/base_000000010000000000000087/metadata.json storage=default
+INFO: 2026/10/01 23:33:03.232067 Object marked for deletion: basebackups_005/base_0000000100000000000000A6_D_000000010000000000000087/files_metadata.json storage=default
+INFO: 2026/10/01 23:33:03.232071 Object marked for deletion: basebackups_005/base_0000000100000000000000A6_D_000000010000000000000087/metadata.json storage=default
+INFO: 2026/10/01 23:33:03.232079 Object marked for deletion: basebackups_005/base_000000010000000000000087/tar_partitions/backup_label.tar.lz4 storage=default
+INFO: 2026/10/01 23:33:03.232082 Object marked for deletion: basebackups_005/base_000000010000000000000087/tar_partitions/part_001.tar.lz4 storage=default
+INFO: 2026/10/01 23:33:03.232085 Object marked for deletion: basebackups_005/base_000000010000000000000087/tar_partitions/part_002.tar.lz4 storage=default
+INFO: 2026/10/01 23:33:03.232089 Object marked for deletion: basebackups_005/base_000000010000000000000087/tar_partitions/part_003.tar.lz4 storage=default
+INFO: 2026/10/01 23:33:03.232092 Object marked for deletion: basebackups_005/base_000000010000000000000087/tar_partitions/pg_control.tar.lz4 storage=default
+INFO: 2026/10/01 23:33:03.232095 Object marked for deletion: basebackups_005/base_0000000100000000000000A6_D_000000010000000000000087/tar_partitions/backup_label.tar.lz4 storage=default
+INFO: 2026/10/01 23:33:03.232099 Object marked for deletion: basebackups_005/base_0000000100000000000000A6_D_000000010000000000000087/tar_partitions/part_001.tar.lz4 storage=default
+INFO: 2026/10/01 23:33:03.232102 Object marked for deletion: basebackups_005/base_0000000100000000000000A6_D_000000010000000000000087/tar_partitions/pg_control.tar.lz4 storage=default
+INFO: 2026/10/01 23:33:03.232115 Dry run: objects would be deleted count=21, Run with --confirm to execute
