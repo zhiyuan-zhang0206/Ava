@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+import textwrap
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -217,6 +219,43 @@ def test_the_rollout_step_makes_an_old_intent_readable_idempotently(
         assert not path.with_name(path.name + ".tmp").exists()
         data = identity.read_intent(inputs.home)
         assert data == {k: v for k, v in born_before.items() if k != "worktree"}
+
+
+def _runbook_port_slot_step() -> str:
+    """The python snippet the runbook gives for dropping the retired PITR port slots."""
+    runbook = (Path(__file__).resolve().parents[2] / "conventions" / "runbook.md").read_text()
+    blocks = re.findall(r"```bash\n(.*?)\n\s*```", runbook, flags=re.DOTALL)
+    (step,) = [b for b in blocks if "start-intent.json" in b and "pitr_uploader" in b]
+    return textwrap.dedent(step)
+
+
+def test_the_runbook_step_drops_the_retired_port_slots_idempotently(
+    inputs: identity.IdentityInput,
+) -> None:
+    """A home born with the PITR slots is refused by new code until the runbook's
+    rollout step has run; the step, run verbatim from the runbook, makes the intent
+    readable again, leaves it private and does nothing the second time."""
+    identity.prepare_identity(inputs)
+    path = inputs.home / identity.INTENT_NAME
+    data = json.loads(path.read_text())
+    data["record"]["ports"] |= {"pitr_uploader": 8117, "pitr_base_backup": 8118}
+    path.write_text(json.dumps(data, sort_keys=True) + "\n")
+    path.chmod(0o600)
+    with pytest.raises(RuntimeError, match=r"unexpected \['pitr_base_backup', 'pitr_uploader'\]"):
+        identity.read_intent(inputs.home)
+
+    for _ in range(2):  # the second run changes nothing
+        subprocess.run(  # noqa: S603 — the runbook's own snippet
+            ["bash", "-c", _runbook_port_slot_step()],
+            env={"PATH": os.environ["PATH"], "AVA_HOME": str(inputs.home)},
+            check=True,
+            capture_output=True,
+        )
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert not list(inputs.home.glob("start-intent.json.*"))
+        read = identity.read_intent(inputs.home)
+        assert read is not None and read["record"]["ports"] == cluster.get_record(inputs.home).ports  # pyright: ignore[reportOptionalMemberAccess]
+        assert "pitr_uploader" not in read["record"]["ports"]
 
 
 def test_configured_home_missing_its_intent_is_not_reborn(inputs: identity.IdentityInput) -> None:

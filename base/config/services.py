@@ -229,31 +229,6 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
         },
     )
 
-    pitr_uploader_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "pitr_uploader.pid",
-        alias="AVA_PITR_UPLOADER_PIDFILE",
-        description="PITR uploader daemon pidfile path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-    pitr_base_backup_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "pitr_base_backup.pid",
-        alias="AVA_PITR_BASE_BACKUP_PIDFILE",
-        description="PITR base candidate scheduler daemon pidfile path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     gateway_pidfile: Path = Field(
         default_factory=lambda: _unit_home() / "run" / "gateway.pid",
         alias="AVA_GATEWAY_PIDFILE",
