@@ -301,7 +301,7 @@ def agent_runner_cluster_aliases() -> frozenset[str]:
     are deliberately NOT here: the gateway machine may also run agent daemons
     (single box), and host-scope keys have no bootstrap fetch source. Derived:
     capability=agent-runner AND cluster scope (validated against the gateway
-    consumption matrix by tests/base/test_gateway_consumer_guard.py)."""
+    consumption matrix by cli/commands/lifecycle/tests/test_gateway_consumer_guard.py)."""
     return frozenset(
         FIELD_ALIASES[name]
         for name, scope in FIELD_SCOPES.items()

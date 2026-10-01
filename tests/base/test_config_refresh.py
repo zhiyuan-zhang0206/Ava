@@ -68,7 +68,7 @@ def _restore_env_after_refresh(monkeypatch: pytest.MonkeyPatch) -> Iterator[None
     `refresh_data_plane_settings` re-runs the boot env load, which writes the
     fake unit's keys (the rotated Redis URL etc.) into os.environ for the rest
     of the process. A later test that builds a fresh DataPlaneSettings from env
-    (tests/base/test_url_secret.py) would otherwise inherit them (observed
+    (base/tests/test_url_secret.py) would otherwise inherit them (observed
     when the two files share a pytest worker)."""
     saved = dict(os.environ)
     yield

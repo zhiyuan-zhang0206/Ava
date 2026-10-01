@@ -12,7 +12,7 @@ The table is closed. A home's recorded `ports` must carry exactly these keys
 a slot means rewriting every existing record by hand before its next start.
 
 Tests never use these numbers: every port a test binds or dials comes from the
-kernel or from a private range above 21000, and `tests/base/test_fixed_ports.py`
+kernel or from a private range above 21000, and `base/cluster/tests/test_fixed_ports.py`
 keeps the whole table below it.
 """
 

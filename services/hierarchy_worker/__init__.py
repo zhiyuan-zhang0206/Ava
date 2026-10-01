@@ -38,5 +38,5 @@ on the gateway host). It is imported by
 runner, a profile-less process that constructs every config domain) and by
 the job child — never by the gateway process itself, whose import closure
 must stay clear of the generation stack (see
-`tests/base/test_gateway_consumer_guard.py`).
+`cli/commands/lifecycle/tests/test_gateway_consumer_guard.py`).
 """

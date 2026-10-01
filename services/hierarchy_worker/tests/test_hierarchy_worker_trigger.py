@@ -27,6 +27,9 @@ from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import runner
 from services.hierarchy_worker.scan import ScanOutcome, _has_clean_baseline, first_build, scan
 
+# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
+# pyright: reportUnknownArgumentType = warning
+
 
 def cid(nth: int) -> str:
     """Lexicographically ordered UUIDv6-shaped checkpoint ids, one per `nth`."""
