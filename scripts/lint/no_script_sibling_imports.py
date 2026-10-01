@@ -252,16 +252,22 @@ def _fix_hint(rel: str) -> str:
     )
 
 
+def _excluded(parts: tuple[str, ...]) -> bool:
+    """Whether a path BELOW the scanned root runs through a vendored/generated directory.
+
+    Only the part of the path under the root counts: a checkout that itself lives in a
+    directory named `tmp` or `build` (a CI scratch dir, a pytest temp dir) must still be scanned.
+    """
+    return any(part in _EXCLUDED_DIRS for part in parts)
+
+
 def _iter_py_files(roots: list[Path]) -> list[Path]:
     files: list[Path] = []
     for root in roots:
         if root.is_file() and root.suffix == ".py":
             files.append(root)
         elif root.is_dir():
-            for p in root.rglob("*.py"):
-                if any(part in _EXCLUDED_DIRS for part in p.parts):
-                    continue
-                files.append(p)
+            files.extend(p for p in root.rglob("*.py") if not _excluded(p.relative_to(root).parts))
     return files
 
 
@@ -274,9 +280,7 @@ def _files_to_scan(targets: list[Path], scope: frozenset[str] | None) -> list[Pa
     if scope is None:
         return _iter_py_files(targets)
     return [
-        path
-        for path in (_REPO_ROOT / rel for rel in scope)
-        if path.suffix == ".py" and not any(part in _EXCLUDED_DIRS for part in path.parts)
+        _REPO_ROOT / rel for rel in scope if rel.endswith(".py") and not _excluded(Path(rel).parts)
     ]
 
 

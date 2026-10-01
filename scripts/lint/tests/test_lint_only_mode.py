@@ -121,7 +121,10 @@ CASES = [
     Case(
         "scripts.lint.turn_scoped_config",
         "agent/x.py",
-        "from base.config import settings\nx = settings.agent.checkpoint_interval\n",
+        "from base.config import settings\nx = settings.agent.fixture_field\n",
+        # The lint asks the real config registry which fields are per-agent; a field of its
+        # own keeps the case independent of whatever the registry holds today.
+        patches={"base.config.per_agent_field_names": lambda: {"fixture_field"}},
     ),
     Case(
         "scripts.lint.clock_lattice",
@@ -165,9 +168,14 @@ CASES = [
 
 @pytest.fixture
 def fake_repo(tmp_path: Path) -> Path:
+    """A scratch repository, deliberately placed under directories named like the ones lints
+    skip (`tmp`, `build`): pytest's own temp dir is `/tmp/...` on CI and `/var/folders/...` on a
+    Mac, and a lint that judged the PATH of the checkout instead of the path below it passed on
+    one and silently scanned nothing on the other."""
+    root = tmp_path / "tmp" / "build" / "repo"
     for rel in (*lint_common.FRAMEWORK_DIRS, "scripts", "tests", "base/lm", "ava_builtins/plugins"):
-        (tmp_path / rel).mkdir(parents=True, exist_ok=True)
-    return tmp_path
+        (root / rel).mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _write(root: Path, rel: str, text: str) -> None:
@@ -184,7 +192,10 @@ def test_only_judges_exactly_the_changed_files(
         if hasattr(lint, root_name):
             monkeypatch.setattr(lint, root_name, fake_repo)
     for name, value in case.patches.items():
-        monkeypatch.setattr(lint, name, value)
+        if "." in name:  # another module's attribute, which the lint imports at call time
+            monkeypatch.setattr(name, value)
+        else:
+            monkeypatch.setattr(lint, name, value)
     if hasattr(lint, "_tracked_files"):  # a scratch tree is not a git repository
         monkeypatch.setattr(
             lint,
