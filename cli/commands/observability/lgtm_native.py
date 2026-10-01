@@ -494,8 +494,9 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
     """Converge the native backends on the observability station.
 
     Provider identity is the legacy `lgtm-host` marker OR the declarative
-    `observability-station` capability; both render the full native set
-    (configs + native service definitions + storage dirs) and install pinned binaries.
+    `observability-station` capability; both install the pinned binaries and
+    render the configs and storage dirs of the selected backends. Starting them
+    belongs to `ava-root`.
     """
     selected = ctx.services.intersection(BACKENDS)
     if not is_station_ctx(ctx) or not selected:

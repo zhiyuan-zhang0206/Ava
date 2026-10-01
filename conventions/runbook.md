@@ -1761,8 +1761,8 @@ unmarked gateway skips the collector and the default producer export, keeping
 the JSONL event mirror only; an explicitly configured OTLP endpoint opts the
 producer into that external collector. Delivery is role-specific: the marked
 gateway collector writes traces to the Tempo selected by the host-scope
-`AVA_TELEMETRY_TEMPO_ENDPOINT` setting (prod's override selects the remote WSL
-Tempo) and logs/metrics to gateway-loopback Loki/Prometheus; a pure runner
+`AVA_TELEMETRY_TEMPO_ENDPOINT` setting and logs/metrics to gateway-loopback
+Loki/Prometheus; a pure runner
 collector keeps the same three exporter component IDs and relays each
 signal to `AVA_GATEWAY_OTLP_ENDPOINT`, a read-only bootstrap projection of
 the gateway's reachable host and OTLP port, with `Authorization: Bearer
@@ -1896,8 +1896,8 @@ bypasses that gate without creating a local collector.
 **LGTM backend lifecycle** — Loki, Prometheus (GOMEMLIMIT 2GiB / 1GiB), and
 Grafana run as native processes on Darwin arm64 and Linux amd64, owned by
 `ava-root` (below). Explicit host listen ports permit isolated homes; defaults
-remain 3100/9090/3003 plus Loki gRPC 9095. See [native lifecycle](../cli/commands/observability/docs/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
-override targets the remote WSL Tempo. No
+remain 3100/9090/3003 plus Loki gRPC 9095. See [native lifecycle](../cli/commands/observability/docs/lgtm.ava.okf.md). Tempo is remote, selected by the host-scope
+`AVA_TELEMETRY_TEMPO_ENDPOINT` setting. No
 service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
 ops alerting via Grafana's embedded Alertmanager → the gateway webhook, the

@@ -66,8 +66,8 @@ notifications (P0 -> `send_message` to #3242 and #405, P2 -> `notify` queue).
   unwind gets a 30s grace before the hard-exit path SIGKILLs the gate's
   process tree: the former docker rm --force equivalent, so a wedged
   playwright driver cannot leave orphan Chromium on the host.
-- Engine: the repo-pinned Playwright Chromium (`playwright==1.59.0` in
-  `uv.lock`), headless on the host. No Docker. The engine is deliberately
+- Engine: the repo-pinned Playwright Chromium (the `playwright` version
+  locked in `uv.lock`), headless on the host. No Docker. The engine is deliberately
   pinned so goldens stay comparable across runs; upgrading Playwright
   requires a golden re-accept afterwards. Prerequisite: the bundled browser
   must be present on the host (`uv run playwright install chromium`, cached

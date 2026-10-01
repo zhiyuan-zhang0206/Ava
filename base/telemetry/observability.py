@@ -89,7 +89,7 @@ def home_is_observability_station(home: Path) -> bool:
     marker-only so every pre-existing call site keeps historical behavior.
 
     The single decision behind the converge bring-up/rendering steps, the
-    gateway watchdog's lgtm keepalive, the producer OTLP export gate, the
+    backend roster gate, the producer OTLP export gate, the
     collector-lifecycle gates, and the Loki read gate — they cannot drift apart
     again (issue #622).
     """
