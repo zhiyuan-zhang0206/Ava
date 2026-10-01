@@ -124,7 +124,7 @@ a later bundle, with `install-unit`):
 # on the gateway (its checkout's CLI), for one unit:
 ava cluster db-authority issue-unit --machine <name> --home <unit $AVA_HOME> --out <bundle>
 # carry the 0600 bundle to the unit and the printed transport key separately; then, on the
-# unit (its checkout's `.venv/bin/ava` — the home's own CLI link does not exist until its first start):
+# unit (its checkout's `.venv/bin/ava` — the host's bare `ava` is linked by its first start):
 read -rs AVA_DB_CAPABILITY_KEY && export AVA_DB_CAPABILITY_KEY
 .venv/bin/ava init --db-capability <bundle>         # first join, plus the identity flags
 ava cluster db-authority install-unit <bundle>      # a later bundle: stop the unit first, start it after
@@ -263,38 +263,37 @@ every descendant inherits it:
 
 - the test session (`tests/fixtures/env_bootstrap.py`) sets a temporary home before
   anything imports application code;
-- every entry script under `scripts/`, `.agents/skills/` and `ava_builtins/skills/`
-  that imports application code takes one of two positions
-  (`scripts/tests/test_tools_scratch_home.py` enforces it). A development or CI tool
-  (the lints, codegen dumps, docs checks, smokes) calls
-  `dotenv_boot.enter_scratch_home()` before its first application import, behind
+- every script a git hook launches that reaches application code calls
+  `dotenv_boot.enter_scratch_home()` before its first import that does, behind
   `if __name__ == "__main__":` (tests import these modules, and a pytest process
-  refuses the call): a fresh temporary `AVA_HOME` and `AVA_CONFIG_FETCH=skip`,
-  whatever the caller's environment carries. A tool that operates on the local
-  cluster says so and says what it touches: a line
-  `# operates-on-cluster: <states> -- <reason>` in the file (states such as `database`,
-  `secrets`, `pty-sessions`, `telemetry`), or a row for a whole directory in that
-  test (`ava_builtins/skills`, `scripts/data_plane_ops`, `scripts/data_repair`,
-  `scripts/host_ops`). `scripts/check_worktree_remove.py` is one of them: it reads this
-  machine's live session records (`$AVA_HOME/run/pty`), so it keeps the real home,
-  only skips the gateway config fetch, dials nothing and writes nothing; run it
-  straight from a checkout.
+  refuses the call): a fresh temporary `AVA_HOME` and `AVA_CONFIG_FETCH=skip`, whatever
+  the caller's environment carries. Hooks run on every commit and push by nobody's
+  choice, which is why this one is code
+  (`scripts/tests/test_hooks_scratch_home.py` derives the scripts from
+  `.pre-commit-config.yaml`);
+- every other script that imports application code is run on purpose, and follows the
+  convention in `conventions/dev-setup.md`: a temporary `AVA_HOME` in a development
+  checkout. `scripts/check_worktree_remove.py` is the one tool that must read the real
+  home: it reads this machine's live session records (`$AVA_HOME/run/pty`), so it only
+  skips the gateway config fetch, dials nothing and writes nothing; run it straight from
+  a checkout.
 
-**Which checkout may change a home.** A home that carries its own `<home>/source`
-checkout (the production home `~/.ava`; every unit started from source) is started,
-stopped and reconfigured only by that checkout's code
-(`dotenv_boot.home_checkout_error`). The CLI gate (`cli.preflight.require_own_checkout`,
-the first thing `cli.main` does, settings-free) refuses every verb outside a
-read-only list (`status`, `ls`, `get` and the like) when the running CLI belongs to
-any other checkout, and first start and the service launchers apply the same rule. A
-home with no `source` — a test or scratch home — accepts any checkout. The way out of
-the refusal is in its message: run `<home>/source/.venv/bin/ava`, or name a home of
-your own with `AVA_HOME`. `python -m cli.fleet_update` already drives every host
+**Which checkout may operate a home.** A home that carries its own `<home>/source`
+checkout (the production home `~/.ava`; every unit started from source) is operated
+only by that checkout's code (`dotenv_boot.home_checkout_error`). The CLI gate
+(`cli.preflight.require_own_checkout`, the first thing `cli.main` does,
+settings-free) refuses every command when the running CLI belongs to any other
+checkout, `status`, `ls` and `get` included; the only passes are bare `ava` and a
+lone `-h`/`--help`, which parse and run no verb. First start and the service
+launchers apply the same rule. A home with no `source` — a test or scratch home —
+accepts any checkout. The way out of the refusal is in its message: run
+`<home>/source/.venv/bin/ava` (the bare `ava` of a production host), or name a home
+of your own with `AVA_HOME`. `python -m cli.fleet_update` already drives every host
 through `$HOME/.ava/source/.venv/bin/ava`, so it is never refused.
 
-Without the variable a development checkout reads the host's own cluster: on a
-development machine that also runs production, that is production. It may read; it
-may not start, stop or reconfigure it.
+Without the variable a development checkout resolves to the host's own cluster: on a
+development machine that also runs production, that is production. Its CLI does not
+touch it, not even to read; read production with the host's bare `ava`.
 
 `.env` lives at `$AVA_HOME/.env`; each co-located unit carries its own. A dev
 worktree with `AVA_HOME` unset resolves to `~/.ava` like any other process: tests
@@ -1912,8 +1911,8 @@ observability station. Provider identity is either the operator-created
 `$AVA_HOME/lgtm-host` marker file (in practice prod `~/.ava`;
 `touch ~/.ava/lgtm-host` once, or `ava lgtm on`) or the declarative
 `observability-station` unit capability (`ava init
---serve-observability-station` / `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` /
-`$AVA_HOME/machine_serve_observability_station`). On the station home, converge
+--serve-observability-station`, recorded as `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` in the
+home's `.env`). On the station home, converge
 prepares pins from `deploy/lgtm/native/versions.yml` and rendered configuration.
 Loki, Prometheus and Grafana belong to the normal root service roster, on both
 macOS and Linux. They have no separate OS jobs. `AVA_LGTM_STORAGE_DIR` selects

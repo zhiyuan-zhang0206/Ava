@@ -416,7 +416,7 @@ FIREWALL_LEGACY_FAMILY: tuple[str, ...] = ("~/Library/Android/sdk/platform-tools
 def _machine_name() -> str:
     """This host's stable machine identifier; never raises.
 
-    ``base.cluster.machine.machine_name`` (env > ``$AVA_HOME/machine_name``) is the
+    ``base.cluster.machine.machine_name`` (``AVA_MACHINE_NAME``) is the
     authoritative source. When it is unset the host is not yet a configured Ava
     unit, so fall back to the normalized ComputerName, then the bare hostname —
     a fresh machine can still be matched by an operator who names entries after

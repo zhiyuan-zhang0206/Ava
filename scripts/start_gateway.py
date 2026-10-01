@@ -9,8 +9,6 @@ stateless HTTP adapter providing HTTP wrapping of lifecycle + UI ops for
 HTTP-only clients (browser / CLI / admin). **Not a gateway / supervisor.**
 """
 
-# operates-on-cluster: config, database -- starts this cluster's gateway server (the same as python -m gateway)
-
 from __future__ import annotations
 
 import sys

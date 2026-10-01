@@ -62,8 +62,6 @@ items remain (details in the report and at the workdir); 2 = setup failure
 build without the spawn wire method, probe timeout).
 """
 
-# operates-on-cluster: host-services -- drives this machine's permissions helper to request the TCC grants
-
 from __future__ import annotations
 
 import argparse

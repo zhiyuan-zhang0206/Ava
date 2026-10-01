@@ -1,8 +1,9 @@
-"""`base/cluster/machine.py` unit tests — machine_name and machine_role env/file precedence + validation.
+"""`base/cluster/machine.py` unit tests — machine identity resolution from settings + validation.
 
 machine_role is derived from independent capability booleans
-(serve_gateway / serve_agent_runner / serve_observability_station);
-each boolean: env (settings bool|None) > `$AVA_HOME/machine_serve_*` file > False.
+(serve_gateway / serve_agent_runner / serve_observability_station), each the settings
+bool of its `AVA_MACHINE_SERVE_*` key (None = off). The home's `.env` is the only source:
+identity files in the home are not read (`test_identity_files_in_the_home_are_not_read`).
 `_parse_roles` / `_coerce_roles` are kept, only used in the set_identity injection path (see bottom).
 """
 
@@ -27,8 +28,8 @@ from base.config import settings
 @pytest.fixture(autouse=True)
 def _machine_setup(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Reset identity holder + clear both serve-capability env settings so a
-    leaked host value never bleeds into a precedence test. Each test sets only
-    what it needs; unset (None) means "fall through to the file"."""
+    leaked host value never bleeds into a resolution test. Each test sets only
+    what it needs; unset (None) means off."""
     from base.cluster.machine import reset_identity
 
     monkeypatch.setattr(settings.general, "machine_serve_gateway", None)
@@ -39,88 +40,91 @@ def _machine_setup(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, Non
     reset_identity()
 
 
-def test_machine_role_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # env (settings bool) beats the on-disk file for each capability.
+def test_machine_role_follows_each_settings_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.general, "machine_serve_gateway", True)
     monkeypatch.setattr(settings.general, "machine_serve_agent_runner", False)
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_serve_gateway").write_text("false")  # overridden by env
-    (tmp_path / "machine_serve_agent_runner").write_text("true")  # overridden by env
     assert machine_role() == frozenset({"gateway"})
 
 
-def test_machine_role_file_when_env_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # env unset (None) -> each capability reads its file.
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_serve_agent_runner").write_text("true\n")  # trailing \n trimmed
-    assert machine_role() == frozenset({"agent-runner"})
-
-
-def test_machine_role_both_files_single_box(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Both capability files true -> single-box gateway,agent-runner set."""
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_serve_gateway").write_text("true")
-    (tmp_path / "machine_serve_agent_runner").write_text("true")
+def test_machine_role_single_box(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Both capability flags true -> single-box gateway,agent-runner set."""
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", True)
+    monkeypatch.setattr(settings.general, "machine_serve_agent_runner", True)
     assert machine_role() == frozenset({"gateway", "agent-runner"})
 
 
-def test_machine_role_observability_station_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The observability-station capability resolves from its own flag file —
+def test_machine_role_observability_station(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The observability-station capability resolves from its own flag —
     a second machine can declare the station without gateway or agent-runner."""
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_serve_observability_station").write_text("true\n")
+    monkeypatch.setattr(settings.general, "machine_serve_observability_station", True)
     assert machine_role() == frozenset({"observability-station"})
 
 
-def test_is_observability_station_helper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_is_observability_station_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     """is_observability_station() mirrors is_gateway()/is_agent_runner()."""
     from base.cluster.machine import reset_identity
 
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_serve_observability_station").write_text("true")
+    monkeypatch.setattr(settings.general, "machine_serve_observability_station", True)
     assert _machine.is_observability_station() is True
     assert _machine.is_gateway() is False
     # machine_role() is process-cached — the identity holder must be reset for
-    # the re-resolve after the capability files change.
+    # the re-resolve after the capability flags change.
     reset_identity()
-    (tmp_path / "machine_serve_observability_station").unlink()
-    (tmp_path / "machine_serve_gateway").write_text("true")
+    monkeypatch.setattr(settings.general, "machine_serve_observability_station", None)
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", True)
     assert _machine.is_observability_station() is False
     assert _machine.is_gateway() is True
 
 
-def test_machine_role_raises_when_neither(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # env unset + no files -> both capabilities resolve False -> Missing.
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
+def test_machine_role_raises_when_neither() -> None:
+    # every flag unset -> no capability -> Missing.
     with pytest.raises(MachineRoleMissing):
         machine_role()
 
 
-def test_machine_role_raises_when_both_files_false(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Explicit false in both files -> no capability -> Missing (not a silent
+def test_machine_role_raises_when_both_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit false in both flags -> no capability -> Missing (not a silent
     empty set)."""
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_serve_gateway").write_text("false")
-    (tmp_path / "machine_serve_agent_runner").write_text("false")
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", False)
+    monkeypatch.setattr(settings.general, "machine_serve_agent_runner", False)
     with pytest.raises(MachineRoleMissing):
         machine_role()
 
 
-def test_machine_serve_file_typo_raises_not_silent_false(
+def test_identity_files_in_the_home_are_not_read(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A typo in a machine_serve_* file (e.g. 'ture') must raise, not silently
-    resolve to False — else a host meant to serve gateway quietly serves nothing."""
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_serve_gateway").write_text("ture")  # typo for 'true'
-    with pytest.raises(MachineRoleInvalid):
+    """The home's `.env` is the only identity source: the `machine_*`, `gateway_url`
+    and `memory_remote` files older homes kept are not read by any resolver."""
+    from base.cluster.machine import (
+        GatewayApiBaseMissing,
+        MachineNameMissing,
+        machine_description,
+        machine_name,
+        reachable_host,
+    )
+
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setattr(settings.general, "machine_name", "")
+    monkeypatch.setattr(settings.general, "machine_host", "")
+    monkeypatch.setattr(settings.general, "machine_description", "")
+    monkeypatch.setattr(settings.gateway, "gateway_url", "")
+    (tmp_path / "machine_name").write_text("from-file")
+    (tmp_path / "machine_host").write_text("10.0.0.2")
+    (tmp_path / "machine_description").write_text("from-file")
+    (tmp_path / "machine_serve_gateway").write_text("true")
+    (tmp_path / "machine_serve_agent_runner").write_text("true")
+    (tmp_path / "machine_serve_observability_station").write_text("true")
+    (tmp_path / "gateway_url").write_text("http://from-file:8000")
+
+    with pytest.raises(MachineNameMissing):
+        machine_name()
+    with pytest.raises(MachineRoleMissing):
         machine_role()
+    with pytest.raises(GatewayApiBaseMissing):
+        _machine.gateway_api_base()
+    assert machine_description() is None
+    assert reachable_host() == "localhost"
 
 
 def test_set_identity_coerces_string_and_iterable() -> None:
@@ -175,32 +179,19 @@ def test_parse_roles_accepts_observability_station() -> None:
     assert _machine._parse_roles("observability-station") == frozenset({"observability-station"})
 
 
-def test_machine_description_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_machine_description_comes_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.cluster import machine
     from base.config import settings
 
-    monkeypatch.setattr(settings.general, "machine_description", "from-env")
-    monkeypatch.setattr(machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_description").write_text("from-file")
-    assert machine.machine_description() == "from-env"
-
-
-def test_machine_description_file_when_env_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from base.cluster import machine
-    from base.config import settings
-
-    monkeypatch.setattr(settings.general, "machine_description", "")
-    monkeypatch.setattr(machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_description").write_text("voice IO + browser\n")
+    monkeypatch.setattr(settings.general, "machine_description", " voice IO + browser \n")
     assert machine.machine_description() == "voice IO + browser"
 
 
-def test_machine_description_none_when_neither(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_machine_description_none_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.cluster import machine
     from base.config import settings
 
     monkeypatch.setattr(settings.general, "machine_description", "")
-    monkeypatch.setattr(machine, "ava_home", lambda: tmp_path)
     assert machine.machine_description() is None
 
 
@@ -222,24 +213,12 @@ def test_gateway_api_base_agent_runner_uses_gateway_url(
     assert _machine.gateway_api_base() == "https://ava.example.com"
 
 
-def test_gateway_api_base_reads_file_when_env_unset(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # env unset -> falls back to $AVA_HOME/gateway_url (unified with
-    # machines.gateway_url(), so a host with only the file set still resolves).
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "gateway_url").write_text("http://from-file:8000\n")
-    assert _machine.gateway_api_base() == "http://from-file:8000"
-
-
 def test_gateway_api_base_unset_raises_regardless_of_role(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # unset (env empty + no file) raises GatewayApiBaseMissing for every capability
-    # set — gateway_api_base() is role-blind, so the serve flags do not change it.
+    # unset raises GatewayApiBaseMissing for every capability set —
+    # gateway_api_base() is role-blind, so the serve flags do not change it.
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
     for serve_gateway, serve_agent_runner in ((True, False), (False, True), (True, True)):
         monkeypatch.setattr(settings.general, "machine_serve_gateway", serve_gateway)
         monkeypatch.setattr(settings.general, "machine_serve_agent_runner", serve_agent_runner)
@@ -271,7 +250,6 @@ def test_set_identity_is_per_field_independent(monkeypatch: pytest.MonkeyPatch) 
     from base.cluster.machine import machine_role, reset_identity, set_identity
 
     monkeypatch.setattr(settings.general, "machine_name", "")
-    monkeypatch.setattr(_machine, "ava_home", lambda: Path("/nonexistent-ava-home"))
     set_identity(role="agent-runner")
     try:
         assert machine_role() == frozenset({"agent-runner"})  # name never resolved -> no raise
@@ -301,30 +279,15 @@ def test_set_identity_description_none_is_explicit(tmp_path: Path) -> None:
         reset_identity()
 
 
-def test_reachable_host_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(settings.general, "machine_host", "10.0.0.1")
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_host").write_text("100.0.0.9")  # overridden by env
+def test_reachable_host_comes_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.general, "machine_host", " 10.0.0.1 ")
     assert _machine.reachable_host() == "10.0.0.1"
 
 
-def test_reachable_host_file_when_env_empty(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(settings.general, "machine_host", "")
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
-    (tmp_path / "machine_host").write_text("10.0.0.2\n")  # trailing \n trimmed
-    assert _machine.reachable_host() == "10.0.0.2"
-
-
-def test_reachable_host_defaults_to_localhost(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """env empty + no machine_host file → `localhost` (single-box zero-config). The
-    fallback is last so the enrolled runner's file wins; a remote runner that lands
+def test_reachable_host_defaults_to_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Empty -> `localhost` (single-box zero-config). A remote runner that lands
     here is rejected at registration time, not by this resolver."""
     monkeypatch.setattr(settings.general, "machine_host", "")
-    monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
     assert _machine.reachable_host() == "localhost"
 
 

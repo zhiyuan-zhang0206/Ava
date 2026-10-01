@@ -700,16 +700,20 @@ def test_child_overlay_phases_framework_then_plugin(
     ]
 
 
+def _declare_machine_name(tmp_path: Path) -> None:
+    """help(ava.self) renders MACHINE_SPEC, which needs a machine identity: the child's
+    bare $AVA_HOME must declare its own in `.env` (an inherited env identity is dropped
+    when the home's `.env` does not declare it)."""
+    (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / ".env").write_text("AVA_MACHINE_NAME=test-host\n", encoding="utf-8")
+
+
 def test_child_help_hides_attach_for_text_only_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Interactive help in a text-only child omits the attach contract — the
     SDK docs gate matches the system prompt (user ruling 2026-08-28)."""
-    # help(ava.self) renders MACHINE_SPEC, which needs a machine identity —
-    # the child's bare $AVA_HOME must carry its own machine_name file (env
-    # identity is dropped when the home's .env does not declare it).
-    (tmp_path / "home").mkdir(exist_ok=True)
-    (tmp_path / "home" / "machine_name").write_text("test-host", encoding="utf-8")
+    _declare_machine_name(tmp_path)
     proc, _request, _result = _spawn(
         tmp_path,
         "import ava, io, contextlib\n"
@@ -729,11 +733,7 @@ def test_child_help_keeps_attach_for_media_capable_model(
 ) -> None:
     """A media-capable child's interactive help keeps the attach contract
     (user ruling 2026-08-28)."""
-    # help(ava.self) renders MACHINE_SPEC, which needs a machine identity —
-    # the child's bare $AVA_HOME must carry its own machine_name file (env
-    # identity is dropped when the home's .env does not declare it).
-    (tmp_path / "home").mkdir(exist_ok=True)
-    (tmp_path / "home" / "machine_name").write_text("test-host", encoding="utf-8")
+    _declare_machine_name(tmp_path)
     proc, _request, _result = _spawn(
         tmp_path,
         "import ava, io, contextlib\n"
@@ -752,11 +752,7 @@ def test_child_help_hides_attach_for_withdrawn_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A withdrawn vision model's child gates media on its text-only fallback."""
-    # help(ava.self) renders MACHINE_SPEC, which needs a machine identity —
-    # the child's bare $AVA_HOME must carry its own machine_name file (env
-    # identity is dropped when the home's .env does not declare it).
-    (tmp_path / "home").mkdir(exist_ok=True)
-    (tmp_path / "home" / "machine_name").write_text("test-host", encoding="utf-8")
+    _declare_machine_name(tmp_path)
     proc, _request, _result = _spawn(
         tmp_path,
         "import ava, io, contextlib\n"

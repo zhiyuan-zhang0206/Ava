@@ -18,11 +18,6 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from base.host.env.dotenv_boot import enter_scratch_home
-
-if __name__ == "__main__":
-    enter_scratch_home()
-
 
 # Re-exported: scripts/content_lint/lint_ava_okf.py does `from build_okf_data import resolve_wikilink`.
 from base.packages.docs.okf_graph import build_graph_data

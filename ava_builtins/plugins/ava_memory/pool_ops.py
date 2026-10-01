@@ -7,7 +7,8 @@ venv (`ava_builtins` importable) — `consolidation/SKILL.md` invokes them with
 a bare `python`, which an agent's shell resolves to that venv (the venv's
 `bin/` leads the PATH every agent process inherits). Stdlib + subprocess plus
 the leaf that resolves the home (`base.host.env.dotenv_boot.resolve_ava_home`:
-`$AVA_HOME`, else `~/.ava`), which builds no Settings.
+`$AVA_HOME`, else `~/.ava`), which builds no Settings, and `dotenv_values` to
+read the home's `.env`.
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+
+from dotenv import dotenv_values
 
 from base.host.env.dotenv_boot import resolve_ava_home
 
@@ -24,13 +27,22 @@ def pool_dir() -> Path:
 
 
 def machine_name() -> str:
-    env = os.environ.get("AVA_MACHINE_NAME")
+    """This host's machine name: `AVA_MACHINE_NAME` in the process environment, else
+    in the home's `.env`. Builds no Settings.
+
+    A host that declares neither is not a configured unit; the steward would push
+    under a made-up branch, so this refuses instead.
+    """
+    env = os.environ.get("AVA_MACHINE_NAME", "").strip()
     if env:
         return env
-    mf = resolve_ava_home() / "machine_name"
-    if mf.exists():
-        return mf.read_text().strip()
-    return "unknown"
+    declared = (dotenv_values(resolve_ava_home() / ".env").get("AVA_MACHINE_NAME") or "").strip()
+    if declared:
+        return declared
+    raise SystemExit(
+        "✗ AVA_MACHINE_NAME is set neither in the environment nor in "
+        f"{resolve_ava_home() / '.env'}; the memory branch is machine-<name>"
+    )
 
 
 def branch_name() -> str:

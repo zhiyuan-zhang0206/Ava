@@ -16,8 +16,6 @@ to send a message to the printed agent_id.
 centralized at the gateway.
 """
 
-# operates-on-cluster: agent-records, secrets -- spawns a root agent through the running gateway with the cluster secret
-
 from __future__ import annotations
 
 import sys
