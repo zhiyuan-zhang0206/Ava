@@ -2,8 +2,7 @@
 
 The suite runs thousands of tests in one worker process. A test that leaves that process
 different from how it found it (an environment key, a module attribute that is now stored,
-the cwd, a signal handler, the agent identity) changes what every LATER test in the worker
-sees. The red test is then an innocent victim far from its cause, and only in the runs where
+the cwd, a signal handler) changes what every LATER test in the worker sees. The red test is then an innocent victim far from its cause, and only in the runs where
 the leaker and the victim share a worker; moving test files changes the order and the shard
 composition, so a leak the old order hid starts to hit others. Three shapes seen here:
 
@@ -36,18 +35,16 @@ Checks (kind: what is compared). Values are never printed.
   module-attr   a first-party module's `__dict__` gained a non-dunder, non-module name
   cwd           `os.getcwd()`
   signal        `signal.getsignal` of the common signals
-  identity      the agent-identity singletons in WATCHED_ATTRS / WATCHED_CONTEXTVARS: a key scan
-                cannot see an existing name take a new value, and 300+ test sites assign
-                `ava.agent_identity._agent_id` bare. Delete the table when a fixture restores them.
   sys.path      a NOTE, never a leak: entries added or removed (73 test sites insert on purpose)
 
 Cost: two snapshots a test, so the guard stays in bulk C-level passes (`map` / `compress` / one `==`
 per container) and enters a handful of Python frames; under CI's coverage tracer the frame count,
 not the C work, sets the price. `tests/ci/test_leak_guard_cost.py` counts them.
 
-It does not see an existing module attribute re-assigned (a static lint's job), a container
-mutated in place, a module object swapped through `sys.modules`, or the disk, sockets and
-processes. POSIX is the supported platform (`os.environ._data`).
+It does not see an existing module attribute re-assigned (a static lint's job: the agent identity
+is one, and `identity_restore` puts it back instead), a container mutated in place, a module object
+swapped through `sys.modules`, or the disk, sockets and processes. POSIX is the supported platform
+(`os.environ._data`).
 
 Reporting: each finding is a JUnit property on the leaker's testcase (`leak_guard`, or
 `leak_guard_note` for a note; `leak_guard_fault` for a fault of the guard) that
@@ -75,20 +72,8 @@ import pytest
 _Finding = tuple[str, str]  # (kind, detail)
 MODES = ("off", "warn", "fail")
 LEAK, NOTE, FAULT = "leak_guard", "leak_guard_note", "leak_guard_fault"  # JUnit property names
-STRICT_KINDS = ("env", "module-attr", "cwd", "signal", "identity")
+STRICT_KINDS = ("env", "module-attr", "cwd", "signal")
 NOTE_KINDS = ("sys.path",)
-# (module, attrs): module-level singletons whose changed VALUE is a leak. Add one only with a failure story.
-WATCHED_ATTRS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    (
-        "ava.agent_identity",
-        ("_agent_id", "_owns_loop", "_actor", "_external_agent_id", "_external_identity"),
-    ),
-    ("base.native_process.turn_identity", ("_process_agent_id",)),
-)
-# (module, name): ContextVars, read through `.get()` in the main thread's context.
-WATCHED_CONTEXTVARS: tuple[tuple[str, str], ...] = (
-    ("base.native_process.turn_identity", "_TURN_AGENT_ID"),
-)
 
 _SIGNALS = tuple(
     getattr(signal, name)
@@ -128,11 +113,6 @@ _HINTS = {
         "monkeypatch.setattr(module, name, value, raising=False)."
     ),
     "cwd": "use monkeypatch.chdir(path); a bare os.chdir needs a finally that changes back.",
-    "identity": (
-        "a test assigned the agent identity (`ava.agent_identity._agent_id = ...`, establish(), "
-        "set_process_agent_id()) and did not put the previous value back. Use "
-        "monkeypatch.setattr(module, name, value) so teardown restores it."
-    ),
     "signal": "restore the handler in a finally / finalizer: signal.signal(sig, previous).",
 }
 
@@ -304,21 +284,6 @@ class _ModuleWatch:
         return len(self._dicts)
 
 
-def _read_named() -> dict[tuple[str, str], object]:
-    """Current value of every WATCHED_ATTRS / WATCHED_CONTEXTVARS entry whose module is loaded."""
-    values: dict[tuple[str, str], object] = {}
-    for module_name, attrs in WATCHED_ATTRS:
-        module = sys.modules.get(module_name)
-        if module is not None:
-            for attr in attrs:
-                values[(module_name, attr)] = getattr(module, attr)
-    for module_name, name in WATCHED_CONTEXTVARS:
-        module = sys.modules.get(module_name)
-        if module is not None:
-            values[(module_name, name)] = getattr(module, name).get()
-    return values
-
-
 def _cwd() -> str | None:
     try:
         return os.getcwd()  # noqa: PTH109 - the cheapest read; twice per test
@@ -332,14 +297,13 @@ def _handlers() -> tuple[Any, ...]:
 
 
 class _Snapshot:
-    __slots__ = ("cwd", "env", "named", "path", "signals")
+    __slots__ = ("cwd", "env", "path", "signals")
 
     def __init__(self) -> None:
         self.env = _environ_data().copy()
         self.cwd = _cwd()
         self.path = sys.path[:]
         self.signals = _handlers()
-        self.named = _read_named()
 
 
 def _ignore_env_noise(before: dict[Any, Any], env_now: dict[Any, Any]) -> None:
@@ -375,16 +339,6 @@ def _signal_findings(before: tuple[Any, ...], now: tuple[Any, ...]) -> list[_Fin
     ]
 
 
-def _identity_findings(
-    before: dict[tuple[str, str], object], now: dict[tuple[str, str], object]
-) -> list[_Finding]:
-    return [
-        ("identity", f"{key[0]}.{key[1]}: {_show(old)} -> {_show(now[key])}")
-        for key, old in before.items()
-        if key in now and now[key] != old
-    ]
-
-
 def _path_findings(before: list[str]) -> list[_Finding]:
     added = [p for p in sys.path if p not in before]
     removed = [p for p in before if p not in sys.path]
@@ -406,15 +360,6 @@ def _restore_signals(before: tuple[Any, ...]) -> None:
     for sig, old_handler in zip(_SIGNALS, before, strict=True):
         if old_handler is not None and _getsignal(sig) != old_handler:
             signal.signal(sig, old_handler)
-
-
-def _restore_identity(before: dict[tuple[str, str], object]) -> None:
-    for (module_name, attr), old_value in before.items():
-        module = sys.modules[module_name]
-        if (module_name, attr) in WATCHED_CONTEXTVARS:
-            getattr(module, attr).set(old_value)
-        else:
-            setattr(module, attr, old_value)
 
 
 class _Run:
@@ -482,9 +427,6 @@ class _Run:
         handlers_now = _handlers()
         if handlers_now != before.signals:
             found += _signal_findings(before.signals, handlers_now)
-        named_now = _read_named()
-        if named_now != before.named:
-            found += _identity_findings(before.named, named_now)
         scanned = _now()
         found += self.watch.check()
         self.scan_ns += _now() - scanned
@@ -501,8 +443,6 @@ class _Run:
             os.chdir(before.cwd)
         if "signal" in kinds:
             _restore_signals(before.signals)
-        if "identity" in kinds:
-            _restore_identity(before.named)
         if "module-attr" in kinds:
             for module_dict, attr in self.watch.reported:
                 module_dict.pop(attr, None)
