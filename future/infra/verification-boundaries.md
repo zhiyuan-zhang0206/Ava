@@ -1,8 +1,10 @@
 # Verification boundaries: containers and Tart VMs in place of a local preview
 
-**Status: the Linux container recipe is built and has run; the Tart clone-inheritance
-experiment (Experiment B, below) has run and its result is in; `ava start` end to end
-inside a macOS guest has not been run.** This is slice 6 of
+**Status: both recipes are built. The Linux container recipe has run; the Tart recipe
+(`scripts/verify/tart_run.py`, `tart_golden.py`) has run once against a golden image
+built by hand (see "Run results" under Recipe C), and the Tart clone-inheritance
+experiment (Experiment B, below) has run. The golden-image build script has run only as
+`--dry-run` and under test.** This is slice 6 of
 [one cluster per host](one-cluster-per-host.md); the ruling and its reasons are in
 [one cluster per host](../../decisions/2026-09-30-one-cluster-per-host.md). The native
 local preview is deleted. This doc says what replaces it: which isolation boundaries
@@ -22,8 +24,8 @@ User rulings on this slice (2026-10-01):
    (a fresh `ava start` from source).
 2. **The Tart experiment runs in parallel** with it. Its result is in (Experiment B): a
    clone of a granted image keeps the helper's signing identity and both grants, so the
-   Tart recipe is clone-per-run. What the experiment did not exercise, a full `ava start`
-   in a guest, stays design.
+   Tart recipe is clone-per-run. The recipe is scripted (`scripts/verify/tart_run.py`) and
+   one run of it carried a full `ava start` in a guest (Recipe C, "Run results").
 3. **Tart uses the `base` image** (SIP disabled), not `vanilla`.
 4. **The model is scripted.** No verification boundary carries a provider key: the
    scripted scenario executes real code through the real gateway and agent host, and
@@ -41,7 +43,7 @@ source checkout `~/.ava/source`, the fixed port table. Two kinds are in this sli
 | Boundary | Status | Carries |
 |---|---|---|
 | Linux container (Recipe A) | built, `scripts/verify/` | source start, real agent execution with a scripted model, frontend and CORS over loopback |
-| Tart macOS VM (Recipe C) | clone inheritance measured; `ava start` in a guest not run | signed helper chain, launchd custody, desktop and headed-browser capabilities |
+| Tart macOS VM (Recipe C) | built, `scripts/verify/`; one real run recorded below | signed helper chain, launchd custody, desktop and headed-browser capabilities |
 
 A Linux VM with systemd is a third form, used only when boot custody is the subject;
 it exists in CI (see "Other Linux forms").
@@ -255,8 +257,54 @@ to the hosted runners.
 
 ## Recipe C: Tart macOS VM
 
-**Design, with one measured result: Experiment B (below) measured whether a clone keeps the
-helper's identity and grants. A full `ava start` in a guest has not been run.**
+Run it from a development checkout on an Apple-silicon Mac that has Tart and a golden image
+(built once, below):
+
+```
+python3 scripts/verify/tart_run.py --ref origin/main
+```
+
+The script is stdlib-only and host-side (`tart_run.py` over `tart_vm.py` and the shared
+`boundary.py`, which the container recipe also uses for its start profile, argv, host-state
+refusal and evidence steps). It resolves `--ref` to one commit and records, step by step in
+`<evidence-root>/<time>-<sha8>/result.json` (one log file per step):
+
+1. `export`: a fresh bare repository holding only that commit's history, in a temporary
+   directory. It is built by a fetch, so no file in it is hard-linked into the host's object
+   store (a share holding a `git clone --local` of the host repository failed in the guest:
+   `unable to open loose object ... Permission denied`, while the fetched export passed
+   `git fsck`) and the host repository's config and other branches stay out.
+2. `clone`: `tart clone <golden> ava-verify-<sha8>-<random>`, from a golden image that exists
+   locally and is stopped.
+3. `boot`: `tart run --no-graphics --no-audio --no-clipboard --no-usb-accessories` with the
+   export as the one read-only share; ready when `tart exec <vm> true` answers.
+4. In the guest, through the guest agent: `keychain` (the login keychain is readable),
+   `prepare-source` (the commit into `~/.ava/source`, a standalone clone with no remote),
+   `toolchain` (the repository's own `scripts/provision/database.sh` and `toolchain.sh`:
+   Homebrew `postgresql@17`, `redis@8.2`, `pgbouncer`, `pgvector`, and the pinned uv; a no-op
+   for what the golden image already holds), `python` (`uv sync --locked`), the profile and
+   observer uploads, `init` and `start` (the same argv as the container recipe; the first
+   start builds the frontend), `observe`, `snapshot` (process table, disk, memory).
+5. Evidence out and teardown, whatever happened: the observer's JSON and the cluster's logs
+   are copied out, the VM is halted and deleted, the temporary export is removed.
+
+Exit status is zero only when every step and every observer check passed and the VM is gone.
+Rules the driver enforces before it asks Tart for anything: at most two Tart VMs run at once
+(counting every running one), a clone is taken only from a stopped image, the share is
+refused if it is, or contains, the home directory or the host's cluster, credential,
+keychain or Tart directories, and only a VM whose name carries the run prefix is ever deleted,
+so the golden image and earlier experiment VMs are out of its reach. The model is scripted
+and nothing secret is passed in, as in the container.
+
+`tart_golden.py` is the golden-image build, done once with a person present: clone the base
+image by digest, set 4 CPUs and 8 GB, fetch a commit and provision the toolchain, create the
+identity, set the key's partition list, build and load the helper, then boot with graphics,
+print what to toggle and wait. After the person confirms it restarts the helper and judges the
+grant from `ping`, the system TCC rows, the identity's designated requirement and a capture
+that is not a uniform image (the record is written to the evidence directory); it then removes
+`~/.ava/source` and shuts the guest down. It never overwrites a VM, never boots a third, and
+`--dry-run` prints every step and touches nothing. The steps are those of "Golden image" and
+"First grant" below.
 
 ### Prior art
 
@@ -332,8 +380,8 @@ virtualization layer directly would repeat Tart.
 ### Golden image (one-time, user present)
 
 From `macos-tahoe-base` pinned by digest, 4 CPUs and 8 GB (`tart set <name> --cpu 4 --memory 8192`).
-Steps 1 to 4 prepare a signed, loaded helper; the experiment ran them (known), except the
-toolchain for a full start, which is design.
+Steps 1 to 4 prepare a signed, loaded helper; the experiment ran them by hand (known), and
+`tart_golden.py` scripts them, with the toolchain for a full start added (step 1).
 
 1. **Toolchain.** `swiftc` is already in the image. Add `uv` at the release CI pins,
    installed from the release archive with its sha256 checked, and a checkout of the commit
@@ -411,8 +459,10 @@ The login keychain needs no unlock in the boots tried (auto-login opens it); kee
 the shared directory into `~/.ava/source` (local disk, not the virtio-fs share), sync
 dependencies, start, observe, copy evidence out, stop and delete the clone. Observation
 runs in the guest; a host browser pointed at a forwarded guest port has the same
-port-number problem as in Recipe A. The container's observer is reusable in the guest: it
-reads only the home and the checkout.
+port-number problem as in Recipe A. The container's observer is the guest's: one file
+(`observe.py`) that reads only the home and the checkout, with the Homebrew kegs for the
+toolchain and one macOS-only check, `helper_chain`. `tart_run.py` is this section as a
+script.
 
 **A helper rebuild inside a used home needs the job retired first.** When the commit under
 test changes the helper's inputs, the start rebuilds it, and replacing an installed, loaded
@@ -425,14 +475,26 @@ that changes nothing is skipped, so most runs never reach this.
 
 ### Observing a guest
 
-- **`ping`** through the real client: `preflight_screen` and `ax_trusted`. Readable
-  headless.
+`observe.py` runs the container's six checks and, on macOS, `helper_chain` (on Linux it is
+listed under `not_applicable`, neither passed nor failed). `helper_chain` reads and changes
+nothing:
+
+- **`ping`** through the real client: `preflight_screen` and `ax_trusted`, plus the two
+  lifecycle protocol flags the start admits the helper by. Readable headless.
+- **The tree**: the helper's root keeper reports a running root for this home, the root's
+  own status agrees on its pid, and every unit's chain of parents ends
+  `unit -> ava-root -> helper -> launchd`, with the units exactly the verification profile's
+  services.
 - **TCC rows**, read-only: `sqlite3 -readonly` on the system database
-  (`/Library/Application Support/com.apple.TCC/TCC.db`). The Screen Recording and
-  Accessibility rows for `com.ava.permissions-helper` live there, not in the user database.
-  `auth_value` 2 is allowed, 0 is denied; the helper writes the denied rows itself at its
-  first start, and its csreq embeds the identity's SHA-1. Never write these rows to make a
-  check pass.
+  (`/Library/Application Support/com.apple.TCC/TCC.db`), compared with the two allowed
+  values; the helper's designated requirement and CDHash are recorded beside them. The
+  Screen Recording and Accessibility rows for `com.ava.permissions-helper` live there, not
+  in the user database. `auth_value` 2 is allowed, 0 is denied; the helper writes the denied
+  rows itself at its first start, and its csreq embeds the identity's SHA-1. Never write
+  these rows to make a check pass.
+
+Beyond the observer, for a person or a boot with graphics:
+
 - **A real capture through the helper** (graphics only), judged by pixel statistics (distinct
   colors and the share of the commonest one) and by looking at the image, copied out as
   base64 over `tart exec` output.
@@ -457,6 +519,94 @@ reproduced the same CDHash and kept both grants; it did not change the code, so 
 rebuild that changes the CDHash resets Accessibility is untested (unknown 2). A rebuild is
 skipped when the source and the requirement hash are unchanged.
 
+### Run results
+
+One run of `tart_run.py` against the golden image of Experiment B: the helper built, signed
+and loaded, both grants given, uv present, and no PostgreSQL, Redis or PgBouncer. Known, from that run (macOS 26.6.2 guest on `arm64`, 4 CPUs and 8 GB, headless;
+the project commits no run, so this is what the run established, not a log):
+
+- **The run passed, and the VM was deleted.** All seven observer checks passed: the six
+  of the container (`toolchain`, `source`, `services`, `frontend`, `cors`, `scripted_agent`;
+  the scripted agent's recorded output body was `3`) and the macOS-only `helper_chain`. In
+  that check the helper answered `ping` with both grants true, the system TCC rows for both
+  services were `auth_value` 2, its designated requirement and CDHash were those the golden
+  image's own verification records (same identity SHA-1, same CDHash), and every process chain ended `unit -> ava-root -> AvaPermissionsHelper -> launchd`
+  for the gateway, frontend, agent-host and ops. The helper in those chains had been running
+  since 14 seconds after the guest's boot (its process age against `launchd`'s in the
+  snapshot): `ava start` ran its converge step (build, sign, load) and left it in place.
+- **No manual step.** Nothing in the run waited for a click, an unlock or an answer. The
+  guest was headless, so a consent dialog could not have been seen, but none blocked a step.
+  This is the claim "a clone of a granted image carries `ava start` on macOS" holding end
+  to end, beyond the helper's `ping` that Experiment B measured.
+- **Time**, 21 minutes in all:
+
+  | Step | Seconds |
+  |---|---|
+  | export, clone (APFS copy-on-write), boot to guest agent | 2, 0, 25 |
+  | keychain guard, `prepare-source` | 1, 15 |
+  | `toolchain` | 743 |
+  | `uv sync --locked` | 4 |
+  | uploads, `ava init` | 2 |
+  | `ava start` (first start: data plane, frontend dependencies and build) | 472 |
+  | `observe`, `snapshot`, evidence copy and teardown | 5, 1, a few |
+
+- **The `toolchain` step is what makes a run slow, and it is a golden-image matter.** The
+  4 seconds of `uv sync` say the image's uv cache was warm (inferred from the time). The
+  image held none of the four Homebrew formulae, so each run installed `postgresql@17`
+  (17.11), `redis@8.2` (8.2.9), `pgbouncer` (1.25.2) and `pgvector`, dominated by the
+  PostgreSQL bottle download from ghcr.io at roughly 40 to 90 KB/s on the network the run
+  used. `tart_golden.py` runs the same step when it builds an image, so a golden image built
+  by it carries them and the step is a no-op per run; this run did not use such an image.
+- **Versions the guest ran** (recorded by the observer): PostgreSQL 17.11, Redis 8.2.9,
+  PgBouncer 1.25.2, uv 0.10.2, Python 3.12.12, Node v24.20.0 and Next.js 16.3.4. Node comes
+  from the base image; `scripts/provision/node.sh` is not run on macOS, and the frontend
+  built and answered on 24. The Linux image installs Node 22. Homebrew's PgBouncer is
+  1.25.2, not the 1.26.0 the Linux image pins: on macOS `base/host/brew_pin.py` names the
+  formulae and `brew install` takes the version Homebrew serves.
+- **Memory.** The guest has 8 GB, and a macOS guest has no cgroup, so no peak is recorded;
+  after the start the guest reported 81% free and no swap in use.
+- **Benign output.** The start warns that the standalone checkout has no installed Git
+  hooks (as in the container) and npm warns that three packages have install scripts not
+  covered by `allowScripts`.
+- **A killed run leaves an invisible half-made VM.** A run that is killed hard during
+  `tart clone` (no `finally`) left a directory under the Tart VM store holding `config.json`,
+  `control.sock` and `nvram.bin` and no disk image. `tart list` does not show it, and `tart
+  delete <name>` removes it.
+
+The host side ran under the Command Line Tools' Python 3.9, which the stdlib-only scripts
+accept. Not exercised by the run: a commit that changes the helper's inputs (the start would
+then need the retired-helper order above), a capture, a boot with graphics, and a golden image
+that drifted over days.
+
+#### The golden build, as exercised
+
+Two parts of `tart_golden.py` ran for real; the part between them did not.
+
+- **From the base image, as the script runs it.** `tart clone` of the pinned digest (APFS
+  copy-on-write, instant), `tart set`, the headless boot with the commit export,
+  `prepare-source` (4 to 8 seconds) and `toolchain` (407 seconds on a fresh image, uv included)
+  ran. Of three attempts the first two failed within 40 seconds at the Homebrew bottle
+  downloads (`SSL_ERROR_SYSCALL` to ghcr.io; `toolchain` is bounded and a failed step stops
+  the build with the VM left as it is). The third passed `toolchain`, and then `python`
+  (`uv sync --locked` on a cold cache) failed after 656 seconds on a request timeout to
+  files.pythonhosted.org. A retry of the sync against a PyPI mirror from the same guest timed
+  out as well. So on a fresh image the script has not reached the identity, the key partition
+  list, the first helper build or the wait for the person; the network the attempts used
+  reaches ghcr.io and PyPI only intermittently and slowly, and a cold-cache `uv sync` is the
+  step that needs it most.
+- **Against the granted image.** `prepare-source`, `python` (8 seconds, warm cache),
+  `IDENTITY`, `KEY_ACCESS`, `HELPER`, `RESTART_HELPER`, `VERIFY` and `FINALIZE` ran in a
+  clone of the granted image booted with graphics, and every one exited zero. Creating the
+  identity, setting the partition list and converging the helper were no-ops there (the image
+  already had them). `judge_grant` returned no problem on the real record: both booleans
+  true, both system TCC rows `auth_value` 2 carrying the identity's requirement, and a capture
+  through the helper of 275,424 distinct colors with the commonest at 6% of the pixels. This
+  checks the verdict's input formats (`security find-identity`, `codesign -d`, the `sqlite3`
+  rows) against real output, which the unit tests only mimic.
+- **Not run by the script anywhere:** the interactive wait (`await_grant`), and creating the
+  identity and the grants from nothing. They stay design plus unit tests until a golden image
+  is built from the base image with a person present.
+
 ## Surfaces only macOS can verify, and what CI keeps
 
 | Surface | Why macOS | Hosted macOS CI today | Tart VM |
@@ -476,7 +626,8 @@ in the helper, so they stay on the VM.
 ## Not yet known
 
 Tart. Items 1 to 3 are answered by Experiment B and stay here so the numbers used above
-keep their meaning:
+keep their meaning; the Recipe C run answers the question Experiment B left (`ava start` in a
+guest) and adds items 6 to 9:
 
 1. **Answered: a clone of a granted image keeps the signing identity and both grants.** The
    SHA-1, the designated requirement, the CDHash and the TCC rows were identical in the
@@ -499,17 +650,28 @@ keep their meaning:
    26 behavior not checked).
 5. Whether Linux guests count toward the two-VM kernel quota, and whether the Linux
    container runtime's VM does. (Two macOS guests at once is known to work.)
+6. **Answered: `ava start` runs end to end in a cloned, headless guest** and the observer's
+   seven checks pass, with no manual step (Recipe C, "Run results").
+7. A golden image built from the base image by `tart_golden.py`, to its end and with a person
+   present: the build has run to the dependency sync and, against a granted image, from the
+   helper steps on; the join between them and the grant wait have not run. A run on such an
+   image would show whether the per-run `toolchain` step (743 seconds here) becomes a no-op.
+8. A commit that changes the helper's inputs: the run only met an unchanged helper, and
+   `tart_run.py` does not automate the retired-helper order above, so by the code read there
+   the start would refuse such a commit (not triggered). Whether a CDHash-changing rebuild resets Accessibility is item 2.
+9. How the golden image ages: Homebrew formulae, the uv cache and the base image's own
+   updates move under a long-lived image (compare item 4).
 
 Container:
 
-6. Whether the impersonation preview can run in either boundary: it needs external host CLI
-   logins, which would have to arrive as dedicated revocable credentials, and the scripted-
-   model ruling means no secret enters a boundary today.
-7. Whether the same recipe passes on `linux/amd64` (the architecture CI and most Linux hosts
-   use): nothing in it is arm64-specific except the package install, but it has only been
-   run on arm64.
-8. A browser UI check (Chromium in the image) and real provider behavior are not carried;
-   each needs its own decision.
+10. Whether the impersonation preview can run in either boundary: it needs external host CLI
+    logins, which would have to arrive as dedicated revocable credentials, and the scripted-
+    model ruling means no secret enters a boundary today.
+11. Whether the same recipe passes on `linux/amd64` (the architecture CI and most Linux hosts
+    use): nothing in it is arm64-specific except the package install, but it has only been
+    run on arm64.
+12. A browser UI check (Chromium in the image) and real provider behavior are not carried;
+    each needs its own decision.
 
 ## Experiment B: clone inheritance, outside the repository (run 2026-10-01)
 
@@ -578,6 +740,7 @@ What the run showed:
   booleans true about a minute after boot; `converge()` 39 seconds for the first build in
   the golden image (identity already present) and 5.5 seconds for R2's rebuild.
 
-Not exercised: a rebuild that changes the CDHash; `ava start` (services, data plane, root)
-inside a guest; a capture from a headless guest with the grants held (no display); `--vnc`;
-the golden image drifting over days (unknown 4); Linux guests against the two-VM quota.
+Not exercised by the experiment: a rebuild that changes the CDHash; `ava start` (services,
+data plane, root) inside a guest (the Recipe C run covers it); a capture from a headless guest
+with the grants held (no display); `--vnc`; the golden image drifting over days (unknown 4);
+Linux guests against the two-VM quota.
