@@ -53,6 +53,7 @@ _GATEWAY_SOURCE_ROOTS = (
     "services/delivery_watchdog/",
     "services/frontend/",
     "services/gateway_side/backup/",
+    "services/gateway_side/walg/",
 )
 
 
@@ -402,6 +403,7 @@ _KIND_ROOTS: dict[str, tuple[str, ...]] = {
         "services/milvus/",
         "services/delivery_watchdog/",
         "services/gateway_side/backup/",
+        "services/gateway_side/walg/",
     ),
     "agent": (
         "agent/",
