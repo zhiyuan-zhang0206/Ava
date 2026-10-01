@@ -88,25 +88,38 @@ Rulings that fix the boundary of the rule:
    injected `Platform` value instead of module constants. A pure function whose
    memoized result cannot change an answer (regex compiles, static tables) stays,
    from a closed list that names the reason for each entry.
-4. **Background work is owned and durable.** Every background task belongs to a
-   component: it starts with the component and is stopped and drained with it. No
-   free-floating `asyncio.create_task` and no free-floating thread. The target
-   holder is a component-owned `TaskGroup`, or an equivalent holder of bounded
-   concurrency. The work lands in durable state (a database row, the outbox) or
-   can be rediscovered from durable state by a reconcile loop, so a task killed
-   midway leaves something that can be resumed. Single-flight and cool-down state
-   lives in durable storage, not in a process-local dict. The same lint locks it,
-   with a shrink-only baseline. The facts behind it: non-test code has about 70
-   `asyncio.create_task` sites and about 26 `threading.Thread(` sites, and no
-   `TaskGroup`. A best-effort live-UI publish dispatched after a database commit in
-   the gateway is not awaited or cancelled at shutdown, and its safety rests on a
-   comment. The delivery watchdog keeps its single-flight and cool-down in
-   process-local dicts that restart from zero. This rule is about lifecycle, not
-   about splitting work into services: a service here is an independent process
-   supervised by `ava-root`, and work leaves the host process only when that is
-   needed. A read-only audit of all background work (what is persisted, what a
-   mid-run kill leaves, whether stop drains it) decides which pieces, if any, need
-   more; this record states no conclusion from it.
+4. **Background duties are services with sequential loops, and request paths
+   start no tasks.**
+   - Every periodic or event-driven background duty is its own service: an
+     independent process supervised by `ava-root`, with its own health check,
+     readiness proof and lifecycle. It does not stay inside the service that
+     happens to need it.
+   - A duty's body is a sequential loop: scan, act, sleep. A round that has not
+     finished prevents the next from starting, so single-flight holds by
+     construction and no process-local dedupe dict is needed. Cool-down and retry
+     state lives in durable storage (a database column), so a restart does not
+     reset it.
+   - A round that must act on many agents concurrently uses an
+     `async with asyncio.TaskGroup()` scoped to that round: bounded concurrency,
+     every child awaited before the next round, and cancelling the loop at stop
+     cancels the children. This is allowed and the lint does not report it. A
+     free-floating `asyncio.create_task` and a free-floating thread remain
+     violations.
+   - A side effect on a request path (for example the notification the gateway
+     sends after a database commit) does not start a free-floating task. It is
+     awaited in the request, or written as a durable record (an outbox row) that a
+     service's loop consumes.
+   - The same lint locks the rule, with a shrink-only baseline. The facts behind
+     it: non-test code has about 70 `asyncio.create_task` sites and about 26
+     `threading.Thread(` sites, and no `TaskGroup`. The gateway's best-effort
+     live-UI publish after a database commit is not awaited or cancelled at
+     shutdown, and its safety rests on a comment. The delivery watchdog keeps its
+     single-flight and cool-down in process-local dicts that restart from zero.
+   - A read-only audit of all background work (what is persisted, what a mid-run
+     kill leaves, whether stop drains it) is in progress and decides how each
+     existing duty maps onto this rule; this record states no conclusion from it.
+     The cost of splitting is tracked as open questions in the
+     [plan](../future/infra/dependency-injection.md).
 5. **Agent-scoped state must not be held process-wide.** A keyed dict is still
    ambient state and stays a violation; an unkeyed buffer shared between agents is
    a cross-agent bug. The survey's roughly 25 entries are audited for actual
@@ -155,6 +168,13 @@ Rulings that fix the boundary of the rule:
 - **Exempt registries once they are sealed after boot.** It leaves import-order
   dependence in place and needs a seal state that every registry must remember to
   set.
+- **Hold background tasks long-term in a component-owned `TaskGroup` inside the
+  service that owns the component.** It keeps the process count down, but every
+  such task then needs its own start, drain-on-stop, durability and health proof
+  inside a host not built around it, and single-flight needs process-local state
+  again. An independent service with a sequential loop answers those once, through
+  the supervisor, and makes single-flight a property of the loop. The price is one
+  process per duty, recorded in the plan's open questions.
 - **Add a `warn_once` facade for the throttle entries.** It would turn a
   write-only concern into a stateful shared object this wave and entrench the
   home-made alerting configuration before anyone has judged it.
@@ -177,7 +197,9 @@ Rulings that fix the boundary of the rule:
   ContextVars, the import-time registries and the direct task and thread starts
   are frozen in it unless they are fixed first. It is the standing form of the
   survey, and reducing it is the migration's progress measure.
-- Background-task ownership and durability fixes follow the audit, component by
-  component; the 12 sets that hold tasks alive and the direct task and thread
-  starts are baselined until then.
+- Existing background duties move into services, or into outbox rows consumed by a
+  service's loop, as the audit identifies them; the 12 sets that hold tasks alive
+  and the direct task and thread starts are baselined until then. Each new
+  service costs a supervised process and onboarding work; both are open in the
+  plan.
 - The throttle and dedupe entries (14) stay frozen as deliberate residue.

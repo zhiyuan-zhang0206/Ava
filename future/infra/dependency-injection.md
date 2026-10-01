@@ -124,25 +124,33 @@ Constructors and factory functions, no container library. Process-level
 dependencies reach graph nodes by closure or `functools.partial` when the graph is
 built; agent- and turn-level values reach them through the runtime context.
 
-### 8. Background work has an owner and a durable footing
+### 8. Background duties are services; request paths start no tasks
 
-Every background task belongs to a component, starts with it, and is stopped and
-drained with it; the target holder is a component-owned `TaskGroup` or an
-equivalent holder of bounded concurrency, not a free-floating `create_task` or
-thread (a set of strong references is the symptom: asyncio keeps only weak
-references to tasks). The work lands in durable state or can be rediscovered from
-it by a reconcile loop, so a task killed midway leaves something resumable.
-Single-flight and cool-down state is durable, not a process-local dict.
+- A periodic or event-driven background duty is its own service: an independent
+  process supervised by `ava-root`, with its own health check, readiness proof and
+  lifecycle. It does not stay inside the service that happens to need it.
+- Its body is a sequential loop: scan, act, sleep. A round that has not finished
+  prevents the next from starting, so single-flight holds by construction and no
+  process-local dedupe dict is needed. Cool-down and retry state lives in durable
+  storage, a database column, so a restart does not reset it.
+- A round that must act on many agents at once opens an
+  `async with asyncio.TaskGroup()` scoped to that round: bounded concurrency, every
+  child awaited before the next round, and cancelling the loop at stop cancels the
+  children. The lint does not report this. A free-floating `create_task` or thread
+  remains a violation.
+- A side effect on a request path, such as the notification the gateway sends after
+  a database commit, does not start a free-floating task. It is awaited in the
+  request, or recorded durably (an outbox row) for a service's loop to consume.
 
 Non-test code has about 70 `asyncio.create_task` sites and about 26
-`threading.Thread(` sites, and no `TaskGroup`. Two examples: a best-effort live-UI
-publish dispatched after a database commit in the gateway is not awaited or
-cancelled at shutdown and is safe by a comment; the delivery watchdog's
+`threading.Thread(` sites, and no `TaskGroup`. The sets that hold tasks alive today
+exist because asyncio keeps only weak references to tasks. Two examples: a
+best-effort live-UI publish dispatched after a database commit in the gateway is not
+awaited or cancelled at shutdown and is safe by a comment; the delivery watchdog's
 single-flight and cool-down live in dicts that restart empty.
 
-This is about lifecycle, not about making every background job a service. A service
-here is an independent process supervised by `ava-root`, and work leaves the host
-process only where the audit below shows it must.
+The costs of this split are open questions below, and so is how each existing duty
+maps onto the rule: an audit of all background work is pending.
 
 ## Enforcement
 
@@ -155,7 +163,8 @@ over the framework packages including `schedules/`, excluding tests, skill scrip
 - import-time calls that read ambient state (environment, clock, working
   directory, random, ids, host facts);
 - ContextVars and import-time registration;
-- creation of a task or thread outside its owning component's holder.
+- creation of a task or thread other than through a `TaskGroup` scoped to one
+  round of a service loop.
 
 A closed list of write-only facades (logger, meter, tracer) sits in one guard file
 and changes only with a decision record. The baseline freezes every violation that
@@ -190,9 +199,12 @@ process-global `settings`, with a per-module shrink-only baseline.
 5. **Turn context.** Move the config pins, plugin config and turn identity from
    ContextVars into `AvaContext` once the agent-level slices exist; delete the
    views and the lint that polices them.
-6. **Background-work ownership.** Driven by the audit result: per component, a
-   holder started, stopped and drained by its root, and durable single-flight and
-   cool-down state; independent services only where the audit says so.
+6. **Background duties become services.** Driven by the audit result: each duty
+   moves into a service with a sequential loop and durable cool-down and retry
+   state, and a request-path side effect becomes an awaited call or an outbox row
+   that a service consumes. Round-scoped `TaskGroup`s replace the direct task starts
+   as each duty moves. How many services this adds depends on the cost questions
+   below.
 7. **Clear the baseline.** `Settings` is then the catalog. The allowlist of
    environment readers shrinks to the roots, and the boot-lite layer is removed if
    the hypothesis below holds. Completed items are deleted from this page.
@@ -222,8 +234,20 @@ process-global `settings`, with a per-module shrink-only baseline.
   do not wait for the migration.
 - **Background-work audit.** A read-only audit covers all background work: what is
   persisted, what a mid-run kill leaves, and whether stop drains it. Its result
-  fixes the order of step 6 and which pieces, if any, become independent services.
-  Pending.
+  fixes the order of step 6 and how each existing duty maps onto the rule. Pending.
+  Work that is neither a periodic duty nor a request-path side effect (for example a
+  drain worker owned by a per-turn object) is classified by the same audit.
+- **Cost of splitting into services: memory.** Each Python service process holds
+  about 70 MiB of private memory today, by an import-baseline measurement: redis-py
+  about 34-38 MiB, psycopg about 20 MiB, pydantic about 10 MiB, and the
+  repository's own code about 7.5 MiB. A finer split therefore presupposes lowering
+  per-process memory. A read-only service-memory audit is in progress; this page
+  makes no reduction plan and no commitment beyond these figures until it reports.
+- **Cost of splitting into services: onboarding.** Adding a service today means
+  editing `ops/roster/__init__.py`, `base/host/env/port_table.py` and
+  `base/cluster/ports.py`, plus a health-check module under `services/healthchecks/`
+  with its documentation and tests. A declarative roster could remove most of that
+  boilerplate; it is not designed.
 - **Plugins outside the repository.** A plugin installed outside the repository that
   reads `settings` directly cannot be found from here. What a plugin may read of the
   framework configuration, besides its own plugin-scope config, is undecided. No
