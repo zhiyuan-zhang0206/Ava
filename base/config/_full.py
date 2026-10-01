@@ -36,7 +36,6 @@ from base.config.general import GeneralSettings
 from base.config.lm import LmSettings
 from base.config.observability import ObservabilitySettings
 from base.config.packages import PackagesSettings
-from base.config.physical_backup import PhysicalBackupSettings
 from base.config.profiles import (
     PROCESS_PROFILES,
     PROFILE_UNSET,
@@ -80,7 +79,6 @@ class Settings(BaseModel):
     # BaseSettings fills from env at construction; pyright sees the zero-arg factory
     # as under-supplied.
     data_plane: DataPlaneSettings = Field(default_factory=DataPlaneSettings)  # pyright: ignore[reportArgumentType, reportUnknownVariableType]
-    physical_backup: PhysicalBackupSettings = Field(default_factory=PhysicalBackupSettings)
     services: ServiceSettings = Field(default_factory=ServiceSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
@@ -205,7 +203,6 @@ def _facade_exports() -> dict[str, Any]:
         "LmSettings": LmSettings,
         "ObservabilitySettings": ObservabilitySettings,
         "PackagesSettings": PackagesSettings,
-        "PhysicalBackupSettings": PhysicalBackupSettings,
         "SandboxSettings": SandboxSettings,
         "ServiceSettings": ServiceSettings,
         "TelegramSettings": TelegramSettings,

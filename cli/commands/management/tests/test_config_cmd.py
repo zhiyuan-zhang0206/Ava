@@ -8,7 +8,6 @@ is an explicit null), the read-only / unknown-key guards, and the restart hint.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -366,84 +365,31 @@ def test_unset_machine_host_field_uses_remote_writable(captured_put: dict[str, A
     assert captured_put["machine"] == "company-mini"
 
 
-def _write_incident_env(home: Path) -> tuple[Path, Path]:
-    """Create the OSS restore-proof shape that prevents ``Settings()`` from booting."""
-    backup_key = home / "backup.key"
-    backup_key.write_bytes(b"k" * 32)
-    backup_key.chmod(0o600)
-    oss_credentials = home / "oss-uploader.json"
-    oss_credentials.write_text(
-        json.dumps({"access_key_id": "uploader", "access_key_secret": "fake-secret"})
-    )
-    oss_credentials.chmod(0o600)
+def _write_incident_env(home: Path) -> None:
+    """Create the shape that prevents ``Settings()`` from booting: inverted sandbox timeouts."""
     (home / ".env").write_text(
         "\n".join(
             (
                 "AVA_DB_URL=postgresql://ava@127.0.0.1:5432/ava",
                 "AVA_REDIS_URL=redis://127.0.0.1:6380/0",
                 "AVA_MACHINE_SERVE_GATEWAY=true",
-                "AVA_PITR_ENABLED=true",
-                "AVA_PITR_BASE_BACKUP_ENABLED=true",
-                "AVA_PITR_RESTORE_PROOF_ENABLED=true",
-                "AVA_PITR_STORE_BACKEND=oss",
-                "AVA_PITR_OSS_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com",
-                "AVA_PITR_OSS_BUCKET=test-bucket",
-                f"AVA_PITR_BACKUP_KEY_FILE={backup_key}",
-                "AVA_PITR_BACKUP_KEY_ID=test-key",
-                "AVA_PITR_REPLICATION_DB_URL=postgresql://replicator@127.0.0.1:5432/postgres",
-                f"AVA_PITR_OSS_CREDENTIALS_FILE={oss_credentials}",
+                "AVA_EXEC_TIMEOUT_SECONDS=1200",
+                "AVA_EXEC_NODE_TIMEOUT_SECONDS=300",
+                "AVA_OPS_CONCURRENCY=7",
             )
         )
         + "\n"
     )
-    return backup_key, oss_credentials
 
 
-def _write_valid_gcs_env_with_incomplete_oss_transition(home: Path) -> None:
-    """Seed a valid GCS configuration whose writable OSS switch would be invalid."""
-    backup_key, oss_credentials = _write_incident_env(home)
-    gcs_uploader = home / "gcs-uploader.json"
-    gcs_uploader.write_text(
-        json.dumps(
-            {
-                "type": "service_account",
-                "client_email": "uploader@example.com",
-                "project_id": "test-project",
-                "private_key_id": "uploader-key",
-            }
-        )
-    )
-    gcs_uploader.chmod(0o600)
-    gcs_viewer = home / "gcs-viewer.json"
-    gcs_viewer.write_text(
-        json.dumps(
-            {
-                "type": "service_account",
-                "client_email": "viewer@example.com",
-                "project_id": "test-project",
-                "private_key_id": "viewer-key",
-            }
-        )
-    )
-    gcs_viewer.chmod(0o600)
+def _write_valid_sandbox_env(home: Path) -> None:
+    """A gateway `.env` whose sandbox timeout pair is valid."""
     (home / ".env").write_text(
         "\n".join(
             (
                 "AVA_MACHINE_SERVE_GATEWAY=true",
-                "AVA_PITR_ENABLED=true",
-                "AVA_PITR_BASE_BACKUP_ENABLED=true",
-                "AVA_PITR_RESTORE_PROOF_ENABLED=true",
-                "AVA_PITR_STORE_BACKEND=gcs",
-                "AVA_PITR_GCS_PROJECT=test-project",
-                "AVA_PITR_GCS_BUCKET=test-bucket",
-                f"AVA_PITR_BACKUP_KEY_FILE={backup_key}",
-                "AVA_PITR_BACKUP_KEY_ID=test-key",
-                "AVA_PITR_REPLICATION_DB_URL=postgresql://replicator@127.0.0.1:5432/postgres",
-                f"AVA_PITR_GCS_CREDENTIALS_FILE={gcs_uploader}",
-                f"AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE={gcs_viewer}",
-                "AVA_PITR_OSS_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com",
-                "AVA_PITR_OSS_BUCKET=test-bucket",
-                f"AVA_PITR_OSS_CREDENTIALS_FILE={oss_credentials}",
+                "AVA_EXEC_TIMEOUT_SECONDS=300",
+                "AVA_EXEC_NODE_TIMEOUT_SECONDS=1200",
             )
         )
         + "\n"
@@ -475,7 +421,7 @@ def test_cli_module_imports_without_settings(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "AVA_PITR_OSS_CREDENTIALS_FILE" in result.stdout
+    assert "AVA_EXEC_NODE_TIMEOUT_SECONDS" in result.stdout
 
 
 @pytest.fixture
@@ -547,13 +493,13 @@ def test_local_get_masks_sensitive(
     local_env_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     credential_path = "/private/fake-oss-credentials.json"
-    (local_env_home / ".env").write_text(f"AVA_PITR_OSS_CREDENTIALS_FILE={credential_path}\n")
+    (local_env_home / ".env").write_text(f"AVA_BACKUP_OFFSITE_CREDENTIALS_FILE={credential_path}\n")
 
     rc = cfg.cmd_config_get(None, machine=None, local=True)
 
     assert rc == 0
     out = capsys.readouterr().out
-    assert "AVA_PITR_OSS_CREDENTIALS_FILE" in out
+    assert "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE" in out
     assert "••••••••" in out
     assert credential_path not in out
 
@@ -563,24 +509,23 @@ def test_local_set_validates_candidate_and_rejects_incident_shape(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The agent runtime exports AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE; inherited
-    # here it completes the OSS credential shape and turns this test's expected
-    # rejection into a valid patch (task #2552). The candidate validation builds
-    # the physical-backup model FRESH from os.environ (base/config/candidate.py
-    # `source_model()`), so the env itself is the seam — not the Settings
-    # singleton (which is why setenv/delenv would be a no-op elsewhere, and why
-    # the wholesale environ swap is the honest patch here).
+    # The candidate validation builds the sandbox model FRESH from os.environ
+    # (base/config/candidate.py `source_model()`), so the env itself is the seam,
+    # not the Settings singleton (which is why setenv/delenv would be a no-op
+    # elsewhere, and why the wholesale environ swap is the honest patch here):
+    # an inherited exec timeout would otherwise decide the verdict.
     import os
 
-    clean_env = {k: v for k, v in os.environ.items() if k != "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE"}
+    keys = ("AVA_EXEC_TIMEOUT_SECONDS", "AVA_EXEC_NODE_TIMEOUT_SECONDS")
+    clean_env = {k: v for k, v in os.environ.items() if k not in keys}
     monkeypatch.setattr(os, "environ", clean_env)
-    _write_valid_gcs_env_with_incomplete_oss_transition(local_env_home)
+    _write_valid_sandbox_env(local_env_home)
     before = (local_env_home / ".env").read_bytes()
 
-    rc = cfg.cmd_config_set(["AVA_PITR_STORE_BACKEND=oss"], machine=None, local=True)
+    rc = cfg.cmd_config_set(["AVA_EXEC_NODE_TIMEOUT_SECONDS=200"], machine=None, local=True)
 
     assert rc == 1
-    assert "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE" in capsys.readouterr().err
+    assert "exec_node_timeout_seconds" in capsys.readouterr().err
     assert (local_env_home / ".env").read_bytes() == before
 
 
@@ -666,7 +611,7 @@ def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
             (
                 "from cli.commands.management.config import cmd_config_set; "
                 "raise SystemExit(cmd_config_set("
-                "['AVA_PITR_RESTORE_PROOF_ENABLED=false'], None, local=True))"
+                "['AVA_EXEC_NODE_TIMEOUT_SECONDS=2000'], None, local=True))"
             ),
         ],
         cwd=repo_root,
@@ -683,9 +628,9 @@ def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
     assert result.returncode == 0, result.stderr
     # The patch lands (values are stored quoted; compare through the alias
     # view like the sibling valid-env test).
-    assert runtime_config.read_env_aliases()["AVA_PITR_RESTORE_PROOF_ENABLED"] == "false"
+    assert runtime_config.read_env_aliases()["AVA_EXEC_NODE_TIMEOUT_SECONDS"] == "2000.0"
     # Unrelated incident lines survive the repair write.
-    assert "AVA_PITR_OSS_ENDPOINT" in runtime_config.read_env_aliases()
+    assert runtime_config.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "7"
     assert (local_env_home / ".env").read_bytes() != before
 
 

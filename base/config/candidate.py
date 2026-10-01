@@ -1,8 +1,8 @@
 """Validate full config candidates before a write can make startup impossible.
 
 The 2026-09-01 OSS incident persisted a partial store-backend transition that
-violated ``PhysicalBackupSettings``' restore-proof invariant. New processes
-then failed while constructing Settings, before they could report a result.
+violated a cross-field settings invariant. New processes then failed while
+constructing Settings, before they could report a result.
 Write boundaries use this module to reconstruct the complete affected domain
 from the fresh `.env` state plus their patch, so the same Pydantic coercion and
 cross-field validators that run at startup reject an invalid candidate before
