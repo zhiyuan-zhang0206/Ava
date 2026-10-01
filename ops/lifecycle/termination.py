@@ -8,7 +8,10 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents import AgentNotFound, AgentStatus
-from base.agents.incarnation.lifecycle_acceptance import KILL_ALL_SHELL_SESSIONS
+from base.agents.incarnation.lifecycle_acceptance import (
+    HOSTED_TURN_RECOVERY_MARKER,
+    KILL_ALL_SHELL_SESSIONS,
+)
 from base.agents.messages.envelope import validate_writable_source
 from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
@@ -79,6 +82,31 @@ def _insert_pending_termination_message(
         if row is None:
             raise RuntimeError("termination message retry INSERT returned no id")
         return int(row[0])
+
+
+def _insert_recovery_wake(conn: psycopg.Connection, agent_id: int, content: str) -> None:
+    """Queue the system chat that resurrects a force-terminated agent.
+
+    Called inside the force transaction, after the fence is installed, so a
+    committed force can never exist without its wake (the corpse reaper's
+    `_queue_recovery_wake` does the same for a crash death). Two predicates of
+    the resurrection trigger decide the shape of this row:
+
+    - its id is above `last_force_terminate_inbound_id`, so it is inserted
+      after the terminate command (any chat queued before the command is
+      fenced out of resurrecting the agent);
+    - its `created_at` is strictly after `status_changed_at`, which the status
+      UPDATE just stamped with this transaction's `now()` — so the wake
+      carries `clock_timestamp()`, never the transaction-start default.
+
+    The `hosted_turn_recovery` marker is what lets a system-source chat
+    resurrect (`HOSTED_TURN_RECOVERY_MARKER`).
+    """
+    conn.execute(
+        "INSERT INTO inbound_messages (agent_id,content,kind,source,payload,created_at) "
+        "VALUES (%s,%s,'chat','system',%s,clock_timestamp())",
+        (agent_id, content, Jsonb({HOSTED_TURN_RECOVERY_MARKER: True})),
+    )
 
 
 def _insert_termination_inbounds(
@@ -213,8 +241,15 @@ def _force_terminate_transaction(
     source: str,
     message: str | None = None,
     kill_all_shell_sessions: bool = False,
+    recovery_wake: str | None = None,
 ) -> tuple[AgentStatus, int | None, list[str], int]:
     """Lock the agent, insert termination intent and install its host resource fence. A newer inbound cannot bypass this accepted force command.
+
+    `recovery_wake` (the delivery watchdog's wedged-turn recovery) is the
+    content of a marked system chat committed in this same transaction, after
+    the fence (`_insert_recovery_wake`): the terminated agent then always has
+    the pending trigger its resurrection retry works from, and a failed insert
+    rolls the whole force back, leaving the agent as it was.
 
     `kill_all_shell_sessions` is recorded on the force command and in its audit
     event; the caller kills the sessions once this fence commits, and the host
@@ -262,6 +297,8 @@ def _force_terminate_transaction(
         from base.agents.incarnation.hosted_force import install_hosted_force
 
         install_hosted_force(conn, agent_id, terminate_inbound_id)
+        if recovery_wake is not None:
+            _insert_recovery_wake(conn, agent_id, recovery_wake)
         prepared_event = _stage_termination_event(
             conn,
             agent_id=agent_id,
