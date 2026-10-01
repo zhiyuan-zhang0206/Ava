@@ -337,6 +337,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/events_maintenance/tests",
             "services/gate/tests",
             "services/gateway_side/backup/tests",
+            "services/gateway_side/walg/tests",
             "services/healthchecks/tests",
             "services/heartbeat/tests/test_heartbeat_daemon.py",
             "services/heartbeat/tests/test_heartbeat_liveness.py",

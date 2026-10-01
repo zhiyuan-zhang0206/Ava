@@ -1125,6 +1125,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/gateway_side/walg/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/healthchecks/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
