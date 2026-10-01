@@ -1403,6 +1403,13 @@ itself (its own public key in its own `authorized_keys`):
   rerun the whole half, which is idempotent. `--dry-run` runs only the
   read-only checks and prints the effects. Output is redacted and tee'd to
   `DIR`.
+- **A manual step that rewrites a state file comes before any command of the new
+  code.** When a release's manual steps change a file the code reads (a key dropped
+  from `start-intent.json`, a renamed file), finish them on every host already switched
+  to NEW before that host runs any NEW command, `ava stop` included. A rerun of `down`
+  is such a command: it runs `ava stop` again on a host already on NEW, and NEW refuses
+  the state file that is not yet converted. Rerun `down` only after the step is done on
+  the hosts it has switched.
 - A unit `down` could not reach (a laptop offline) keeps running its old
   processes. The gateway's start in `up` raises the cluster's minimum code
   version, and those processes exit when they next touch the database
