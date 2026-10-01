@@ -77,3 +77,19 @@ lifecycle; those items wait for it to land and are then designed on its code.
    natural owner `base/native_process/ownership.py`'s `OwnedProcess`) is the next
    candidate — most of its readers sit in files #3479 rewrites.
    `base/config` as a registration hub needs a design pass first.
+5. **Tests in the top-level `tests/`** (`scripts/structure/tests_location.py`, the
+   `tests_location` section: 216 frozen tests; `tests_location_allowed.py`: 61 registered, 56
+   `contract` and 5 `integration`). The lint refuses a new top-level test that is not e2e, UI or
+   registered, by path alone; the frozen tests are the work list for moving tests into their
+   packages (`--suggest <file>` names each one's lowest legal package, the move tool's job).
+   Still open: (a) **legality of tests inside packages** (a test whose package may not import what it
+   uses, or that holds none of the code it tests): it needs `place()` and the import-linter
+   contracts, so it is a separate check, not a hook; today three package tests would fail it
+   (`scripts/tests/test_tools_scratch_home.py`, and two under
+   `services/gateway_side/backup/tests/` that use both the loose `services/backup.py` and
+   `services.gateway_side`); (b) `tests/fixtures/path_scopes.py` still gives autouse isolation
+   fixtures by directory prefix, so a test moved into a directory the table does not list loses
+   them (the lint's message says so; `tests/ci/test_path_scopes.py` catches a listed test that
+   lost them, not a new test placed in an unlisted directory); (c) whether a frozen or registered
+   entry still needs its place (a frozen test that has since lost its package home) needs the
+   placement rule, so it belongs in a slow CI check, not a hook.
