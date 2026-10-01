@@ -1018,7 +1018,7 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
     captured: dict[str, object] = {}
 
     def _fake_force_blocking(
-        aid: int, _body: object, _pool: object
+        aid: int, _body: object, _pool: object, _recovery_wake: str | None
     ) -> tuple[AgentStatus, int | None, list[str], int]:
         captured["agent_id"] = aid
         return AgentStatus.RUNNING, None, [], 91
