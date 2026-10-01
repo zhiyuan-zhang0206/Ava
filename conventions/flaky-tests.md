@@ -300,9 +300,8 @@ five environment keys the code under test set outlived three test files (PR
 name, value)` or `mock.patch.object` for a name served by `__getattr__`;
 `monkeypatch.chdir`; restore a handler in a `finally`. The root
 [leak guard](../tests/docs/test-leak-guard.ava.okf.md) compares these after
-every test and names the leaker in the CI annotation of the counts job; its
-fail mode, once enabled, restores after each leaker and fails it at its own
-teardown.
+every test; its default `fail` mode restores after each leaker and fails it at
+its own teardown, and the CI annotation of the counts job lists what it found.
 
 **Lintability — not lintable (operational).** Whether a test restores what it
 changed is a runtime property; a static lint only sees an assignment that

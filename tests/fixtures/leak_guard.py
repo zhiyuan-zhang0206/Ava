@@ -24,11 +24,14 @@ set up is already in the "before" snapshot, so a module's first and last test ar
 `tests/ci/test_leak_guard.py` locks that position and the behavior.
 
 `AVA_LEAK_GUARD` selects the mode (any other value stops the run):
-  warn  (default) observe only: never changes a test outcome, never puts any state back, and a
-        fault of the guard itself is one report line, never a test result;
-  fail  put back what the strict checks name, then fail the leaker at its own teardown, so
-        victims stay green and only the leaker is red;
+  fail  (default) put back what the strict checks name, then fail the leaker at its own
+        teardown, so victims stay green and only the leaker is red;
+  warn  observe only: never changes a test outcome, never puts any state back (a leak is a
+        JUnit property and a report line);
   off   the fixture is a no-op.
+A fault of the guard itself is one report line and one JUnit property, never a test result, in
+every mode, with one exception: in fail mode a fault of the snapshot or the comparison is loud,
+because without either there is no verdict and the gate would pass silently.
 
 Checks (kind: what is compared). Values are never printed.
   env           `os.environ` keys added, removed or changed
@@ -73,6 +76,7 @@ _Finding = tuple[str, str]  # (kind, detail)
 MODES = ("off", "warn", "fail")
 LEAK, NOTE, FAULT = "leak_guard", "leak_guard_note", "leak_guard_fault"  # JUnit property names
 STRICT_KINDS = ("env", "module-attr", "cwd", "signal")
+_VERDICT_STAGES = ("snapshot", "compare")  # a fault of either leaves no verdict: loud in fail mode
 NOTE_KINDS = ("sys.path",)
 
 _SIGNALS = tuple(
@@ -379,7 +383,7 @@ class _Run:
         self.worker_stats: list[dict[str, Any]] = []
 
     def configure(self, rootpath: str) -> None:
-        mode = os.environ.get("AVA_LEAK_GUARD", "warn")
+        mode = os.environ.get("AVA_LEAK_GUARD", "fail")
         if mode not in MODES:
             raise pytest.UsageError(f"AVA_LEAK_GUARD={mode!r}: expected one of {', '.join(MODES)}")
         self.mode = mode
@@ -470,14 +474,17 @@ _RUN = _Run()
 def _contained[T](
     stage: str, item: pytest.Item | None, call: Callable[..., T], *args: Any
 ) -> T | None:
-    """Warn mode: a fault of the guard itself is one report line (and one JUnit property), never a test result.
+    """A fault of the guard itself is one report line (and one JUnit property), never a test result.
 
-    In fail mode a guard that cannot do its job must be loud, so the fault propagates.
+    Exception: in fail mode the snapshot and the comparison are what the verdict is made of, so a
+    guard that cannot take either must be loud there (the fault propagates). Everything else it
+    does (writing the property, handing findings to the controller, the summary) cannot hide a
+    leak from the gate, so a fault there never fails a test or crashes the session.
     """
     try:
         return call(*args)
     except Exception as exc:
-        if _RUN.mode == "fail":
+        if _RUN.mode == "fail" and stage in _VERDICT_STAGES:
             raise
         if _RUN.fault(stage, exc) and item is not None:
             # The property write may be the very thing that broke: then there is nothing to write it with.
@@ -561,8 +568,6 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
     try:
         _write_summary(terminalreporter)
     except Exception as exc:  # the one place a fault cannot be reported through the summary itself
-        if _RUN.mode == "fail":
-            raise
         terminalreporter.write_line(
             f"leak guard ({_RUN.mode}): the summary failed: {type(exc).__name__}: {exc}"
         )

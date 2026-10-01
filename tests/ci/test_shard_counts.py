@@ -395,8 +395,8 @@ def _leaks_in(directory: Path, group: str, *cases: str) -> None:
 
 
 def _annotation(log: str) -> list[str]:
-    """The lines of the one `leak guard (warn)` annotation in `log`, decoded."""
-    commands = [x for x in log.splitlines() if x.startswith("::warning title=leak guard (warn)::")]
+    """The lines of the one `leak guard` annotation in `log`, decoded."""
+    commands = [x for x in log.splitlines() if x.startswith("::warning title=leak guard::")]
     assert len(commands) == 1, "one annotation, on one line"
     return commands[0].split("::", 2)[2].replace("%0A", "\n").replace("%25", "%").split("\n")
 
@@ -465,7 +465,7 @@ def test_a_clean_total_says_so_and_raises_no_annotation(
     argv = ["total", "--dir", str(counts), "--expected", "1", "--leak-report", str(report)]
     assert shard_counts.main([*argv, "--sha", "c" * 40, "--run-id", "9"]) == 0
     log = capsys.readouterr().out
-    assert "leak guard (warn): 0 leak finding(s) in 0 test(s), 0 sys.path note(s)" in log
+    assert "leak guard: 0 leak finding(s) in 0 test(s), 0 sys.path note(s)" in log
     assert "from 1/1 count files" in log
     assert "::warning" not in log
     written = json.loads(report.read_text())
@@ -498,7 +498,7 @@ def test_the_total_raises_one_annotation_with_a_line_per_file_kind_and_thing(
     argv = ["total", "--dir", str(counts), "--expected", "1 2 3 4"]
     assert shard_counts.main([*argv, "--summary", str(summary), "--leak-report", str(report)]) == 0
     lines = _annotation(capsys.readouterr().out)
-    assert lines[0].startswith("leak guard (warn): 5 leak finding(s) in 5 test(s)")
+    assert lines[0].startswith("leak guard: 5 leak finding(s) in 5 test(s)")
     assert "from 3/4 count files (INCOMPLETE: no file for 4)" in lines[0]
     assert lines[1] == "  by kind: cwd=1, env=3, signal=1"
     assert lines[2:] == [  # sorted by file, then kind, then thing

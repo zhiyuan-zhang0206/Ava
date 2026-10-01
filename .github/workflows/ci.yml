@@ -1489,7 +1489,7 @@ jobs:
 
       - name: Upload the leak report
         # What the root leak guard (tests/fixtures/leak_guard.py) found across every shard: the
-        # full list behind the one `leak guard (warn)` annotation of the step above, so a leak is
+        # full list behind the one `leak guard` annotation of the step above, so a leak is
         # read from this job and its artifact, never from the shards' logs.
         if: ${{ !cancelled() }}
         continue-on-error: true
