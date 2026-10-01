@@ -5,7 +5,7 @@ line budget.
 
 cli.main's entry pops AVA_PROCESS_PROFILE (settings-full by design) and
 records the popped value as AVA_LAUNCHER_PROFILE; the authority pass reads
-the live-or-recorded context (`_launcher_context`). With only the live
+the live-or-recorded context (`launcher_context`). With only the live
 marker consulted, both launcher-projection exemptions were unreachable on
 every CLI path: `ava cluster health-probe` run from an agent child on a pure
 agent-runner dropped the launcher's runner URLs and fell back to the

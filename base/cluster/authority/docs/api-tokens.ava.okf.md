@@ -28,9 +28,12 @@ login: the root launcher gives each service its class token (`api_access`,
 (a set human secret on the gateway, an API-bearing capability on a remote
 unit), so a delivered token always means "present a bearer"; the boot pass
 gives an admitted operator process the same token; exec children and watchers
-inherit it. Clients present `AVA_API_TOKEN` first, else the human secret
-(`base.cluster.auth.client_bearer`). An empty-secret single box delivers no
-token and keeps its open API.
+inherit it. Clients present `AVA_API_TOKEN` first (`base.cluster.machine.gateway_bearer`);
+only an operator or gateway-profile process without one presents the human secret,
+while a process launched with the agent or runner profile and lacking one raises
+`GatewayApiTokenMissing` (a remote-managed plane delivers no token, so its gateway
+home presents the human secret). An empty-secret single box delivers no token and
+keeps its open API.
 
 The OTLP relay ingress is telemetry, not a write path, and does not rotate per
 generation: its bearer is `telemetry_token(secret)` (HMAC-SHA256 under the

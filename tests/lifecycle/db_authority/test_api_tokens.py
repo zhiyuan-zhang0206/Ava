@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from base.cluster import authority
-from base.cluster.auth import bearer_header, client_bearer, cookie_name
+from base.cluster.auth import bearer_header, cookie_name
 from base.cluster.authority import api, ledger, unit
 from base.cluster.machine import MachineRole, gateway_auth_headers
 from base.config import settings
@@ -600,7 +600,6 @@ def test_api_class_follows_the_login_class_else_the_single_capability() -> None:
 def test_clients_present_the_delivered_token_first(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
     monkeypatch.delitem(os.environ, api.API_TOKEN_ENV, raising=False)
-    assert client_bearer(_HUMAN) == _HUMAN
     assert gateway_auth_headers() == bearer_header(_HUMAN)
     monkeypatch.setitem(os.environ, api.API_TOKEN_ENV, "delivered-" + "t" * 32)
     assert gateway_auth_headers() == bearer_header("delivered-" + "t" * 32)
