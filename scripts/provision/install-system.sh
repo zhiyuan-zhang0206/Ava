@@ -4,7 +4,7 @@
 # scripts/provision/* so the package logic lives in one place.
 #
 # Use it to bring a bare Debian/Ubuntu box up to "can run Ava" in one call;
-# `ava start` then initializes the cluster. Not required on a host that already
+# `ava init` and `ava start` then initialize the cluster. Not required on a host that already
 # has the toolchain.
 #
 # Server binaries only, NO initdb: the test suite spins throwaway native clusters

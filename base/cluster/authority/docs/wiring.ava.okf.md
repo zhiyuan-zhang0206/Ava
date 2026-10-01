@@ -49,7 +49,8 @@ carries a login to another home:
   a home without an active generation.
   Nothing in the bundle is the unit's own; the login and tokens are shared
   ([what a bundle exposes](unit-bundle.ava.okf.md)).
-- **Install** (unit, `ava start --db-capability FILE`, key in
+- **Install** (unit, `ava init --db-capability FILE` for the first join and
+  `ava cluster db-authority install-unit FILE` for a later bundle, key in
   `AVA_DB_CAPABILITY_KEY`, popped at once): `open_bundle` refuses anything that
   fails authentication or has expired; the join's bootstrap fetch presents the
   bundle's API token (never the human secret); `install_bundle` requires this machine

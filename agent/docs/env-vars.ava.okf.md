@@ -21,13 +21,13 @@ Ava's **key environment variables** and their propagation chain. These variables
 ### Cluster & Data Plane
 | Variable | Set at | Purpose |
 |------|--------|------|
-| `AVA_CLUSTER_SECRET` | gateway `ava start` (first start) | The gateway's human bearer (API, frontend login); never served by bootstrap, never held by a remote unit, never a Postgres or Redis password |
+| `AVA_CLUSTER_SECRET` | gateway `ava init` | The gateway's human bearer (API, frontend login); never served by bootstrap, never held by a remote unit, never a Postgres or Redis password |
 | `AVA_API_TOKEN` | launch environment | The write generation's machine API token of the process's class (runner class for agents; exec children inherit it); the bearer SDK and service clients present first; delivered only while the API is authenticated. Also persisted at 0600 in `$AVA_HOME/run/ava-root/manifests.json` (root's own record of what it launched) until the next start rewrites it; inert once a release fence revokes the generation |
 | `AVA_DB_URL` | launch environment / bootstrap | The write generation's class login delivered by the launcher (runner class for agents; a remote agent-runner's installed unit capability); `.env` and bootstrap carry only the credential-free endpoint. Same `manifests.json` persistence as `AVA_API_TOKEN` above |
 | `AVA_REDIS_URL` | gateway `.env` / bootstrap | Redis runtime ACL URL; its password remains embedded and is never separately forwarded to agents |
 | `AVA_HOME` | `ava start` / converge | Data plane root directory, also **is** the cluster identity itself |
 
-Cluster identity is **path-only** (`base/cluster/`, #629/#633): there is no `AVA_CLUSTER` environment variable—the single-machine self-referencing identity is `$AVA_HOME` itself; the human-readable label (`home_label()`) is computed from the basename of the home directory for display only, not persisted anywhere; the identity given to a remote agent-runner is the gateway URL + its issued capability bundle, passed to `ava start --serve-agent-runner --gateway-url ... --machine-name ... --machine-host ...` on its first run. The old `AVA_CLUSTER` field is retired: nothing in the current start/identity code reads it, so a legacy gateway payload that still sends it has no effect.
+Cluster identity is **path-only** (`base/cluster/`, #629/#633): there is no `AVA_CLUSTER` environment variable—the single-machine self-referencing identity is `$AVA_HOME` itself; the human-readable label (`home_label()`) is computed from the basename of the home directory for display only, not persisted anywhere; the identity given to a remote agent-runner is the gateway URL + its issued capability bundle, passed to `ava init --serve-agent-runner --gateway-url ... --machine-name ... --machine-host ...` on its first run. The old `AVA_CLUSTER` field is retired: nothing in the current start/identity code reads it, so a legacy gateway payload that still sends it has no effect.
 
 ### Network & Host
 | Variable | Set at | Purpose |

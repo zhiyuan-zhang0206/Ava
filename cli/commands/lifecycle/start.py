@@ -16,7 +16,7 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 from base.paths import prod_service_checkout_error
 from cli.commands._repo import _repo_root
-from cli.commands._setup import _print_missing_setup_error
+from cli.commands._setup import _missing_setup_message
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
 from cli.commands.lifecycle._start_bookmarks import record_running_sha as _record_running_sha
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
@@ -158,13 +158,6 @@ def _prepare_cold_start(
 
 @resume_after_start
 def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (converge -> infra -> services -> status); splitting hurts readability
-    machine_name: str | None = None,
-    serve_gateway: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
-    serve_agent_runner: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
-    serve_observability_station: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
-    machine_description: str | None = None,
-    memory_remote: str | None = None,
-    gateway_url: str | None = None,
     disabled_services: tuple[str, ...] = (),
     only_services: tuple[str, ...] = (),
     *,
@@ -202,25 +195,16 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         print(f"\u2717 {err}", file=sys.stderr)
         return 1
 
-    # 0b) collect & validate setup fields (capability-aware filter)
-    args: dict[str, str | bool | None] = {
-        "machine_name": machine_name,
-        "machine_serve_gateway": serve_gateway,
-        "machine_serve_agent_runner": serve_agent_runner,
-        "machine_serve_observability_station": serve_observability_station,
-        "machine_description": machine_description,
-        "memory_remote": memory_remote,
-        "gateway_url": gateway_url,
-    }
+    # 0b) collect & validate the home's recorded setup fields (capability-aware filter)
     try:
-        resolved, missing = _setup_commands._collect_setup_values(args)
+        resolved, missing = _setup_commands._collect_setup_values()
     except ValueError as e:
         # validator failure (e.g. MachineRoleInvalid) — do not persist invalid
         # value, print error + exit.
         print(f"\n✗ {e}", file=sys.stderr)
         return 1
     if missing:
-        _print_missing_setup_error(missing, resolved.get("machine_role"))
+        print(_missing_setup_message(missing), file=sys.stderr)
         return 1
 
     # reset identity holder so downstream base.cluster.machine.machine_name() /
@@ -230,6 +214,17 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     reset_identity()
 
     roles = machine_role()
+    from cli.start_identity import read_intent
+
+    recorded = read_intent(ava_home())
+    if recorded is not None and sorted(roles) != recorded["roles"]:
+        print(
+            f"\n✗ this home's capabilities ({','.join(sorted(roles))}) differ from the ones "
+            f"`ava init` recorded ({','.join(recorded['roles'])}); capabilities are fixed when "
+            "a home is initialized",
+            file=sys.stderr,
+        )
+        return 1
     print(f"\n→ roles = {','.join(sorted(roles))}, machine = {resolved['machine_name']}")
     from base.native_process.os_platform import raise_fd_limit
 
@@ -363,8 +358,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
             reachable = f"http://{host}:{port}"
             print(f"\n→ gateway reachable at {reachable}")
             print(
-                f"  join an agent-runner: ava start --serve-agent-runner --no-serve-gateway --gateway-url {reachable} "
-                "--machine-name <name> --machine-host <runner-host> --db-capability <bundle> "
+                f"  join an agent-runner: ava init --serve-agent-runner --no-serve-gateway --gateway-url {reachable} "
+                "--machine-name <name> --machine-host <runner-host> --db-capability <bundle>, then ava start "
                 "(bundle from `ava cluster db-authority issue-unit` here; AVA_DB_CAPABILITY_KEY "
                 "set from a non-echoing prompt)"
             )
@@ -407,13 +402,6 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
 
 def cmd_start(
-    machine_name: str | None = None,
-    serve_gateway: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
-    serve_agent_runner: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
-    serve_observability_station: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
-    machine_description: str | None = None,
-    memory_remote: str | None = None,
-    gateway_url: str | None = None,
     disabled_services: tuple[str, ...] = (),
     only_services: tuple[str, ...] = (),
     *,
@@ -423,17 +411,11 @@ def cmd_start(
 ) -> int:
     """Converge one configured unit through storage, schema, root and readiness.
 
-    The public CLI persists first-start identity before reaching this entry.
-    Internal restart callers reuse that identity and its durable service selection.
+    `ava init` persisted the unit's identity before the public CLI reaches this
+    entry. Internal restart callers reuse that identity and its durable service
+    selection.
     """
     return _cmd_start_body(
-        machine_name=machine_name,
-        serve_gateway=serve_gateway,
-        serve_agent_runner=serve_agent_runner,
-        serve_observability_station=serve_observability_station,
-        machine_description=machine_description,
-        memory_remote=memory_remote,
-        gateway_url=gateway_url,
         disabled_services=disabled_services,
         only_services=only_services,
         all_services=all_services,

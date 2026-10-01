@@ -1,6 +1,6 @@
 """`ava` host-level lifecycle verbs — argparse builders + their `_h_*` handlers.
 
-`start` / `pause` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` /
+`init` / `start` / `pause` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` /
 `lgtm` act
 on THIS host (or the unit this checkout owns), as opposed to the cluster-wide
 verbs in ``cli.parsers.cluster``. Handlers stay thin: each lazy-imports its
@@ -10,6 +10,12 @@ Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
+
+
+def _h_init(args: argparse.Namespace) -> int:
+    from cli.init_intent import run_init
+
+    return run_init(args)
 
 
 def _h_start(args: argparse.Namespace) -> int:
@@ -78,62 +84,88 @@ def _h_trace_ship(args: argparse.Namespace) -> int:
     return cmd_trace_ship(since=args.since, until=args.until, dry_run=args.dry_run)
 
 
-def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava start` — multi-machine setup args; pass once on first run, CLI persists
-    # to file and subsequent calls do not need them. NO TTY prompt — agent-first
-    # design, agent has no TTY, missing values fail loud.
-    start_p = sub.add_parser(
-        "start",
-        help="[host] bring up this unit's full stack (idempotent). The home is "
-        "$AVA_HOME, else ~/.ava — never a flag. Machine identity is first-run only: "
-        "pass --machine-name / --serve-gateway / --serve-agent-runner / "
-        "--gateway-url on the FIRST start (or set the env vars / $AVA_HOME files); "
-        "the values are persisted and later runs need none of them.",
+def _add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    # `ava init` — the home's identity, recorded once. NO TTY prompt — agent-first
+    # design, agent has no TTY, missing values fail loud. Settings-free: it starts
+    # nothing; the first `ava start` provisions the data plane and launches.
+    init_p = sub.add_parser(
+        "init",
+        help="[host] record this home's identity once (machine name, capabilities, "
+        "credentials, ports) before its first `ava start`; starts nothing. The home is "
+        "$AVA_HOME, else ~/.ava — never a flag. A home that is already initialized is "
+        "refused; `ava start` brings it up.",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--machine-name",
         default=None,
-        help="usually first-run only: stable identifier for this host (e.g. host-a / host-b). "
-        "Persisted to $AVA_HOME/machine_name; env AVA_MACHINE_NAME wins over the file",
+        help="stable identifier for this host (e.g. host-a / host-b); required",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--serve-gateway",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="usually first-run only: serve the gateway capability (central pg/redis + all daemons). Single box "
-        "passes both --serve-gateway --serve-agent-runner; unset falls back to the "
-        "$AVA_HOME/machine_serve_gateway file. env: AVA_MACHINE_SERVE_GATEWAY",
+        help="serve the gateway capability (central pg/redis + all daemons). A single box "
+        "passes both --serve-gateway --serve-agent-runner",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--serve-agent-runner",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="usually first-run only: serve the agent-runner capability (agent-host/ops/watchdog); unset falls back to the $AVA_HOME/machine_serve_agent_runner file. "
-        "env: AVA_MACHINE_SERVE_AGENT_RUNNER",
+        help="serve the agent-runner capability (agent-host/ops/watchdog)",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--serve-observability-station",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="usually first-run only: serve the observability-station capability (own the native LGTM "
-        "observability backends — the declarative form of the $AVA_HOME/lgtm-host marker); unset falls "
-        "back to the $AVA_HOME/machine_serve_observability_station file. env: "
-        "AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
+        help="serve the observability-station capability (own the native LGTM "
+        "observability backends — the declarative form of the $AVA_HOME/lgtm-host marker)",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--machine-description",
         default=None,
-        help='Free-text note of what this host is for (e.g. "voice IO + browser"); persisted to $AVA_HOME/machine_description and the machines table.',
+        help='free-text note of what this host is for (e.g. "voice IO + browser")',
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--memory-remote",
         default=None,
-        help="usually first-run only: central git remote URL for memory pool (e.g. git@github.com:you/AvaMemory.git). env: AVA_MEMORY_REMOTE",
+        help="central git remote URL for memory pool (e.g. git@github.com:you/AvaMemory.git)",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--gateway-url",
         default=None,
-        help="usually first-run only: public URL of the gateway. On the gateway this host's own URL; on an agent-runner, the gateway it reaches. env: AVA_GATEWAY_URL",
+        help="public URL of the gateway. On the gateway this host's own URL; on an "
+        "agent-runner, the gateway it reaches (required there)",
+    )
+    init_p.add_argument(
+        "--config-file",
+        type=str,
+        default=None,
+        help="explicit dotenv configuration, outside the home",
+    )
+    init_p.add_argument(
+        "--machine-host", default=None, help="this host's reachable private-network address"
+    )
+    init_p.add_argument("--ssl-cert-file", default=None, help="CA bundle for gateway verification")
+    init_p.add_argument(
+        "--db-capability",
+        default=None,
+        metavar="BUNDLE",
+        help="agent-runner only: install the database capability bundle the gateway operator "
+        "issued (`ava cluster db-authority issue-unit`); its transport key comes from "
+        "AVA_DB_CAPABILITY_KEY. The bundle file is deleted once installed. A later bundle "
+        "goes to `ava cluster db-authority install-unit`.",
+    )
+    init_p.set_defaults(func=_h_init)
+
+
+def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    # `ava start` — brings up a home `ava init` initialized; the service selection
+    # is its only input.
+    start_p = sub.add_parser(
+        "start",
+        help="[host] bring up this unit's full stack (idempotent). The home is "
+        "$AVA_HOME, else ~/.ava — never a flag. It must be initialized first: "
+        "`ava init` takes the machine identity (name, capabilities, gateway).",
     )
     selection = start_p.add_mutually_exclusive_group()
     selection.add_argument(
@@ -163,21 +195,6 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         default=[],
         metavar="SERVICE",
         help="run only these services (repeatable; persisted for restart)",
-    )
-    start_p.add_argument(
-        "--config-file", type=str, default=None, help="explicit first-start dotenv configuration"
-    )
-    start_p.add_argument(
-        "--machine-host", default=None, help="this host's reachable private-network address"
-    )
-    start_p.add_argument("--ssl-cert-file", default=None, help="CA bundle for gateway verification")
-    start_p.add_argument(
-        "--db-capability",
-        default=None,
-        metavar="BUNDLE",
-        help="agent-runner only: install the database capability bundle the gateway operator "
-        "issued (`ava cluster db-authority issue-unit`); its transport key comes from "
-        "AVA_DB_CAPABILITY_KEY. The bundle file is deleted once installed.",
     )
     start_p.set_defaults(func=_h_start)
 

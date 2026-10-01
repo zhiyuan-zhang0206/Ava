@@ -213,7 +213,7 @@ delivers each service its class login bound into the launch digest, and an
 admitted operator CLI consumes the gateway login. Bootstrap serves no database
 credential; a remote agent-runner installs a sealed, unit-bound capability the
 gateway operator issues (`ava cluster db-authority issue-unit`,
-`ava start --db-capability`), carrying the active generation's runner login,
+`ava init --db-capability`, and `install-unit` for a later bundle), carrying the active generation's runner login,
 and its API admission
 ([unit capability](../../base/cluster/authority/docs/wiring.ava.okf.md#remote-agent-runner-units)).
 API admission is a generation boundary too: every generation carries one
