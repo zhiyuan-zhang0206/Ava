@@ -144,6 +144,7 @@ def test_a_well_formed_spec_constructs() -> None:
     assert _spec(curl_url="http://localhost:1/", stop_ceiling_s=0.5).stop_ceiling_s == 0.5
     assert _spec(capabilities=_BOTH, requires_db=True, db_access="gateway").db_access == "gateway"
     assert _spec(tcp_port=65535).tcp_port == 65535
+    assert _spec(curl_url="http://localhost:1/__ava/healthz", home_healthz=True).home_healthz
 
 
 _MALFORMED: list[tuple[dict[str, object], str]] = [
@@ -162,6 +163,8 @@ _MALFORMED: list[tuple[dict[str, object], str]] = [
         "serves /healthz",
     ),
     ({"health_name": "heartbeat"}, "serves /healthz"),
+    ({"home_healthz": True}, "declares home_healthz"),
+    ({"home_healthz": True, "curl_url": "http://localhost:1/api/health"}, "declares home_healthz"),
     ({"capabilities": _BOTH, "requires_db": True}, "declares no db_access"),
 ]
 
@@ -214,6 +217,18 @@ def test_names_are_unique_across_the_whole_roster() -> None:
         "module": [_module(s) for s in healthz],
     }.items():
         assert len(set(values)) == len(values), f"duplicate {key}: {sorted(map(str, values))}"
+
+
+def test_a_healthz_endpoint_is_declared_not_left_to_its_url() -> None:
+    """Every roster entry whose readiness endpoint is a `/healthz` says what kind: a
+    standard daemon (`health_name`) or an endpoint that names its home (`home_healthz`).
+    `ava start` decides which ports it can check for a foreign occupant from that
+    declaration, so a new `/healthz` entry cannot be silently in or out of the check."""
+    for spec in roster.build_services():
+        serves_healthz = spec.curl_url is not None and spec.curl_url.endswith("/healthz")
+        declared = spec.health_name is not None or spec.home_healthz
+        assert serves_healthz == declared, spec.session
+    assert {s.session for s in roster.build_services() if s.home_healthz} == {"gate"}
 
 
 def test_a_standard_daemons_session_derives_its_health_name() -> None:
