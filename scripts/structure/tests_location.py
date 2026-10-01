@@ -222,6 +222,17 @@ def _explicit_files(argv: list[str], repo_root: Path) -> tuple[list[str], bool] 
     return [rel for rel in names if is_top_level_test(rel)], full
 
 
+def _files_to_check(argv: list[str], repo_root: Path) -> list[str] | None:
+    """The tests to judge: every tracked one, or the top-level tests the arguments name."""
+    if not argv:
+        return _tracked_tests(repo_root)
+    explicit = _explicit_files(argv, repo_root)
+    if explicit is None:
+        return None
+    files, full = explicit
+    return _tracked_tests(repo_root) if full else files
+
+
 def _suggest(argv: list[str], repo_root: Path) -> int:
     # Heavy (placement, the import graph): imported only when a suggestion is asked for.
     from scripts.structure import tests_location_suggest
@@ -246,12 +257,9 @@ def main(
     if argv[:1] == [_SUGGEST]:
         return _suggest(argv[1:], repo_root)
     allowed = tests_location_allowed.ALLOWED if allowed is None else allowed
-    files = _tracked_tests(repo_root)
-    if argv:
-        explicit = _explicit_files(argv, repo_root)
-        if explicit is None:
-            return 1
-        files = files if explicit[1] else explicit[0]
+    files = _files_to_check(argv, repo_root)
+    if files is None:
+        return 1
     try:
         baseline = read_baseline(repo_root)
     except (OSError, ValueError) as exc:
