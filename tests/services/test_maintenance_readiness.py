@@ -191,15 +191,15 @@ def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
 
 
 @pytest.mark.usefixtures("held")
-def test_a_runners_first_start_joins_a_held_gateway(
+def test_a_runners_first_join_reaches_a_held_gateway(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, served_gateway_home: Any
 ) -> None:
-    """A runner's first start joins (`_join`) with the bundle the gateway issued
+    """A runner's init joins (`join_gateway`) with the bundle the gateway issued
     while the gateway's own hold still stands, over the gateway's real
     middleware stack."""
     from base.cluster.authority import unit
     from base.host.env import bootstrap
-    from cli import start_intent
+    from cli import unit_join
 
     secret = _authenticated(monkeypatch)
     runner = (tmp_path / "runner").resolve()
@@ -225,7 +225,7 @@ def test_a_runners_first_start_joins_a_held_gateway(
 
         monkeypatch.setattr(bootstrap, "dial_get", dial)
         os.environ[unit.CAPABILITY_KEY_ENV] = issued.transport_key
-        start_intent._join(
+        unit_join.join_gateway(
             {"AVA_GATEWAY_URL": gateway, "AVA_MACHINE_NAME": "mini"}, runner, str(bundle)
         )
     installed = unit.require_unit_capability(runner)

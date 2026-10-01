@@ -12,7 +12,7 @@ branch:
 
 - **single box** — `gateway,agent-runner` both local (`~/.ava`).
 - **split** — gateway on one host, an `agent-runner` satellite enrolled to it
-  (`ava start --serve-agent-runner --no-serve-gateway`). The user's own multi-machine op (a cloud/server gateway + a
+  (`ava init --serve-agent-runner --no-serve-gateway`). The user's own multi-machine op (a cloud/server gateway + a
   Mac satellite that carries the desktop-bound skills) is this mode.
 
 The user always interacts through the browser UI the gateway serves; "where the

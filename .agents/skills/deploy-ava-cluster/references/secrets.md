@@ -43,16 +43,16 @@ only in the bootstrap URL; Redis `default`/`requirepass` uses
 keeps its provider URLs and `AVA_RUNNER_DB_PASSWORD` for its gateway-local
 agents; it has no write generation to issue to remote runners.
 
-The first-start capabilities determine the initial control-plane secret:
+The capabilities given to `ava init` determine the initial control-plane secret:
 
-| First-start shape | Secret |
+| `ava init` shape | Secret |
 |---|---|
 | `--serve-gateway --serve-agent-runner` | Empty bearer by default; unauthenticated loopback API. Postgres/PgBouncer still admit only write-generation logins (generation 0 minted at first start) and Redis gets its generated admin and runtime passwords. |
 | `--serve-gateway --no-serve-agent-runner` | Minted automatically. It stays on the gateway; runners receive capability bundles instead. |
-| `--serve-agent-runner --no-serve-gateway` | No bearer: supply the capability bundle's transport key as `AVA_DB_CAPABILITY_KEY` for the first start. A runner home recording `AVA_CLUSTER_SECRET` refuses. |
+| `--serve-agent-runner --no-serve-gateway` | No bearer: supply the capability bundle's transport key as `AVA_DB_CAPABILITY_KEY` for `ava init` (and again for a later `install-unit`). A runner home recording `AVA_CLUSTER_SECRET` refuses. |
 
 The initialization journal binds credentials before their first effects.
-Repeated or interrupted start preserves them. Do not edit the journal or copy a
+Repeated start or an interrupted init preserves them. Do not edit the journal or copy a
 new environment template over the generated file. Credential rotation is a
 separate authorized operation; it is not performed by a start retry.
 

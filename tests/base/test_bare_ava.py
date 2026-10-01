@@ -11,8 +11,6 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands._setup as _setup_commands
-from base.paths import repo_root
 from cli.commands.converge import _steps
 from cli.commands.converge import host as converge_host
 
@@ -117,17 +115,3 @@ def test_non_prod_first_start_creates_no_bare_link_when_none_existed(
 
     assert not bare_link.exists()
     assert not bare_link.is_symlink()
-
-
-def test_missing_setup_error_names_the_checkout_cli(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`_print_missing_setup_error`'s first-time-setup example must name this
-    checkout's own `.venv/bin/ava`, since the host's `ava` is linked only by a
-    first start."""
-    missing: list[_setup_commands._SetupField | _setup_commands._Capability] = [
-        c for c in _setup_commands._CAPABILITIES if c.capability != "observability-station"
-    ]
-    _setup_commands._print_missing_setup_error(missing, None)
-    err = capsys.readouterr().err
-    assert f"{repo_root()}/.venv/bin/ava start --machine-name <name>" in err
