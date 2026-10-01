@@ -47,6 +47,11 @@ tags:
   (exit 1 while any kind is blocked); `retire` re-proves group closure of each
   blocked operation, and `--confirm` quarantines the proven ones
   ([[services/backup_scheduler/docs/operation-custody.ava.okf.md|Operation custody]]).
+- `ava backup walg check|status`: the WAL-G archiving pre-flight and state. `check`
+  proves the pinned binary, the configuration and key, and a put/list/get/delete round
+  trip under the bucket prefix (exit 1 on the first failing step); `status` prints the
+  configuration, key fingerprint and archiver facts and never fails
+  ([[services/gateway_side/walg/docs/walg.ava.okf.md|WAL-G]]).
 - `ava mcp ...`: isolated environments at `$AVA_HOME/mcps/`. `ava mcp serve`
   runs the other direction and exposes the cluster control plane as an MCP
   server ([[ava/mcps/docs/mcps.ava.okf.md|MCP]]).

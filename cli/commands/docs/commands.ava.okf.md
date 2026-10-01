@@ -32,12 +32,13 @@ subpackages hold the domains, each an independent package door:
   shipping, logs; owns its converge steps (`lgtm_native.py`, `otel_collector.py`)
 - `data_plane/` — per-cluster Postgres/Redis/PgBouncer bring-up, their verified
   maintenance stop (`maintenance_stop.py`), backup-operation custody
-  (`backup_operations.py`); owns its converge step (`pgbouncer.py`)
+  (`backup_operations.py`), `ava backup walg` and the start-time WAL-archiving
+  warning (`walg.py`); owns its converge step (`pgbouncer.py`)
 - `cluster/` — whole-cluster verbs, the health probe, cron, the registry
 - `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
   the warning-only start preflights (health, ports, ownership), the
   rendered-file guard, and host-wiring steps owned by no other domain
-  (firewall, Redis bridge, OS jobs).
+  (firewall, Redis bridge, OS jobs, the WAL-G install/validate step `walg.py`).
 - `lifecycle/` — `ava start` / `pause` / `stop` / `restart` / `maintenance` /
   `status`, the pending-migration step, and the single application root they
   drive: [[cli/commands/lifecycle/docs/lifecycle.ava.okf.md|Host lifecycle]].
