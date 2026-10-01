@@ -60,11 +60,6 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from base.host.env.dotenv_boot import enter_scratch_home
-
-if __name__ == "__main__":
-    enter_scratch_home()
-
 # Dated three-segment tag: v<major>.<minor>.<patch>-<YYYYMMDD>[-HHMM]
 from base.deploy.release.tags import _TAG, pick_latest_tag
 

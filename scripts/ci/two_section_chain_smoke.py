@@ -1052,7 +1052,4 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
 
 
 if __name__ == "__main__":
-    from base.host.env.dotenv_boot import enter_scratch_home
-
-    enter_scratch_home()
     raise SystemExit(main())

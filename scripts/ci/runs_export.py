@@ -20,8 +20,6 @@ instant skip taking precedence over superseded over abandoned. v1 does not
 aggregate failure signatures or job timing: those remain phase-two follow-ups.
 """
 
-# operates-on-cluster: home-files, telemetry -- caches under $AVA_HOME/state/ci-runs, emits via the cluster's telemetry
-
 from __future__ import annotations
 
 import argparse

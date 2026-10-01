@@ -12,6 +12,11 @@ the production checkout, virtualenv, or active plugin image. Do not create a
 development worktree from production. Do not edit, reset, switch branches,
 reinstall packages, or reload modules in a running production tree.
 
+Run any script, test or subagent that imports application code with a temporary
+`AVA_HOME` (`export AVA_HOME="$(mktemp -d)" AVA_CONFIG_FETCH=skip`), or inside the
+Docker/Tart verification boundary. Unset, the home is `~/.ava`, which on a host
+that also runs production is production (`conventions/dev-setup.md`).
+
 The running interpreter keeps imported modules. A merged commit, an on-disk
 SHA, or a successful CLI exit does not prove running services adopted it.
 Read `conventions/defensive-patterns.md`: a rollout cannot deliver its own
