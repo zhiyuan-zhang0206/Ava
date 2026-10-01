@@ -29,8 +29,7 @@ def bootstrap_message(
     """Name both identities explicitly and inline the briefing in the launch message."""
     if provider not in _EXECUTOR_LABELS or not name.strip():
         raise ValueError("A takeover needs a session name and a codex/claude/dsh provider")
-    # A bare `ava`: the executor inherits AVA_HOME, and the host launcher runs
-    # that cluster's own CLI (scripts/ava-launcher.sh).
+    # A bare `ava`: the host's `~/.local/bin/ava`, linked to the production CLI.
     command = shlex.join(
         [
             "ava",

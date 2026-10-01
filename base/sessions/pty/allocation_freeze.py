@@ -1,10 +1,9 @@
-"""Host-wide, generation-owned admission freeze for new PTY sessions.
+"""Generation-owned admission freeze for new PTY sessions.
 
-Every co-located Ava cluster consumes the same host PTY pool, so the marker and
-its lock live in the host state dir (``AVA_HOST_STATE_DIR``) rather than under
-one ``$AVA_HOME``. The allocation gate affects only absent session -> new detached
-PTY host; desired-state reconcilers reap existing exact sessions that belong to
-an earlier generation.
+The host runs one cluster, so the marker and its lock live in its ``$AVA_HOME``
+(``pty-allocation-freeze.json`` and ``pty-allocation.lock``). The allocation gate
+affects only absent session -> new detached PTY host; desired-state reconcilers
+reap existing exact sessions that belong to an earlier generation.
 
 The marker is an operator capability: only its exact random generation may
 resume allocation. Resuming leaves that UUID as the current session generation,
@@ -60,20 +59,16 @@ def _invalid(message: str) -> Never:
     raise ValueError(message)
 
 
-def _host_state_dir() -> Path:
-    """Directory shared by every cluster home on this host (``AVA_HOST_STATE_DIR``);
-    a test or custom installation isolates it by setting that variable."""
-    from base.paths import host_state_dir
-
-    return host_state_dir()
-
-
 def state_path() -> Path:
-    return _host_state_dir() / _STATE_FILENAME
+    from base.paths import ava_home
+
+    return ava_home() / _STATE_FILENAME
 
 
 def lock_path() -> Path:
-    return _host_state_dir() / _LOCK_FILENAME
+    from base.paths import ava_home
+
+    return ava_home() / _LOCK_FILENAME
 
 
 def _timestamp(value: object) -> dt.datetime:

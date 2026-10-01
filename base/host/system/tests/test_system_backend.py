@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 import base.host.system.backend as backend_module
@@ -77,27 +75,25 @@ def test_venv_python_path() -> None:
     assert path.endswith("python3")
 
 
-def test_linux_autostart_has_one_native_manager_and_explicit_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_linux_autostart_has_one_native_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.host.system import boot_unit
 
-    calls: list[Path | str] = []
+    calls: list[str] = []
 
     def install() -> list[str]:
         calls.append("install")
         return []
 
-    def uninstall(home: Path) -> list[str]:
-        calls.append(home)
+    def uninstall() -> list[str]:
+        calls.append("uninstall")
         return []
 
     monkeypatch.setattr(boot_unit, "install", install)
     monkeypatch.setattr(boot_unit, "uninstall", uninstall)
     backend = LinuxPlatformBackend()
     backend.register_autostart()
-    backend.unregister_autostart(tmp_path)
-    assert calls == ["install", tmp_path]
+    backend.unregister_autostart()
+    assert calls == ["install", "uninstall"]
 
 
 def test_linux_autostart_propagates_unavailable_systemd(monkeypatch: pytest.MonkeyPatch) -> None:

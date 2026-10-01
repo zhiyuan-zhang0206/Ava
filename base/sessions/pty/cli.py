@@ -465,7 +465,7 @@ def _op_new(name: str, rest: list[str]) -> int:
                     f"({freeze.error}); repair it before allocating new sessions\n"
                 )
                 return 1
-            # Keep the host-wide lock until ready. Once a concurrent freeze
+            # Keep the allocation lock until ready. Once a concurrent freeze
             # returns, every allocation before it has a visible live record and
             # every allocation after it observes the marker above.
             return _spawn_host(name, cwd, envfile, generation, cmd_b64)

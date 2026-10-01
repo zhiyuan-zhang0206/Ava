@@ -11,9 +11,8 @@ crashing (blast radius: exactly one session). This is what makes the SDK's
 
 Four modules:
 
-- ``allocation_freeze.py`` — the host-wide, generation-owned marker and
-  allocation lock shared by every co-located cluster; operator freeze/resume
-  never interrupts an existing session;
+- ``allocation_freeze.py`` — the home's generation-owned marker and allocation
+  lock; operator freeze/resume never interrupts an existing session;
 
 - ``host.py`` — the per-session host: owns the ``pty.fork()`` shell, feeds
   its raw bytes into a pyte screen model + ring buffer + byte log, and

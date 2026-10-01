@@ -364,7 +364,6 @@ def _private_pg_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     home.mkdir()
     port = _free_port()
     monkeypatch.setenv("AVA_HOME", str(home))
-    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     monkeypatch.setattr(settings.data_plane, "db_url", f"postgresql://test@127.0.0.1:{port}/test")
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")

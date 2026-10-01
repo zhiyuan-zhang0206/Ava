@@ -15,7 +15,6 @@ from base.host.system import packages_job as job
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "_home_slug", lambda: "ava-deadbeef")
     monkeypatch.setattr(cron, "ava_binary_path", lambda: "/work tree/.venv/bin/ava")
     monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".ava"))
     monkeypatch.setattr(cron, "launchd_path_env", lambda: "/work tree/.venv/bin:/usr/bin")
@@ -33,7 +32,7 @@ def test_launchd_plist_runs_the_refresh_pass_on_the_tick(tmp_path: Path) -> None
     values = [element.text for element in root.findall("./dict/array/string")]
     command = values[2]
 
-    assert "com.ava.ava-deadbeef.packages-refresh" in content
+    assert "<string>com.ava.packages-refresh</string>" in content
     assert values[0:2] == ["/bin/sh", "-c"]
     assert command is not None
     assert "'/work tree/.venv/bin/ava' packages refresh --from-job" in command
@@ -55,7 +54,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
     monkeypatch.setattr(cron.subprocess, "run", run)
 
     assert job._register_macos() == 0
-    plist = job._launchd_plist_path("ava-deadbeef")
+    plist = job._launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
     assert job._register_macos() == 0
 
@@ -63,11 +62,11 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootstrap"]
 
 
-def test_linux_registration_replaces_only_this_clusters_line(
+def test_linux_registration_replaces_only_its_own_lines(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    other = "*/15 * * * * /other/ava packages refresh --from-job  # ava-packages-refresh.ava-other-cafefeed"
-    old = "*/15 * * * * /old/ava packages refresh --from-job  # ava-packages-refresh.ava-deadbeef"
+    other = "40 4 * * * /x/ava logs rotate  # ava-logs-maintenance"
+    old = "*/15 * * * * /old/ava packages refresh --from-job  # ava-packages-refresh"
     written: dict[str, str] = {}
 
     def which(_name: str) -> str:
@@ -89,7 +88,7 @@ def test_linux_registration_replaces_only_this_clusters_line(
     assert other in written["body"]
     assert f"{other}\n\n" in written["body"]
     assert old not in written["body"]
-    assert written["body"].count("# ava-packages-refresh.ava-deadbeef") == 1
+    assert written["body"].count("# ava-packages-refresh") == 1
     assert "*/15 * * * *" in written["body"]
     assert "packages refresh --from-job" in written["body"]
     assert str(tmp_path / ".ava" / "logs" / "packages-refresh.log") in written["body"]
@@ -138,15 +137,15 @@ def test_linux_crontab_failures_and_empty_table(
     assert (
         len(writes),
         writes[0].startswith("*/15 * * * * "),
-        writes[0].endswith("# ava-packages-refresh.ava-deadbeef\n"),
+        writes[0].endswith("  # ava-packages-refresh\n"),
         writes[0].count("\n"),
     ) == (1, True, True, 1)
 
     read.returncode = 0
     assert (
-        job._unregister_linux("ava-deadbeef"),
+        job._unregister_linux(),
         writes[-1],
-        job._unregister_linux("ava-deadbeef"),
+        job._unregister_linux(),
         len(writes),
     ) == (0, "\n", 0, 2)
 
@@ -154,7 +153,7 @@ def test_linux_crontab_failures_and_empty_table(
     write_failure = True
     assert job._register_linux() == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
-    assert job._unregister_linux("ava-deadbeef") == 1
+    assert job._unregister_linux() == 1
     assert len(writes) == 2
 
 
@@ -176,13 +175,13 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     assert job._register_macos() == 1
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
     assert errors == [
-        ("launchctl bootstrap failed for {}: {}", job._label("ava-deadbeef"), "denied")
+        ("launchctl bootstrap failed for {}: {}", "com.ava.packages-refresh", "denied")
     ]
 
-    plist = job._launchd_plist_path("ava-deadbeef")
+    plist = job._launchd_plist_path()
     assert plist.exists()
-    assert job._unregister_macos("ava-deadbeef") == 0
-    assert job._unregister_macos("ava-deadbeef") == 0
+    assert job._unregister_macos() == 0
+    assert job._unregister_macos() == 0
     assert not plist.exists()
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootout"]
 
@@ -200,7 +199,9 @@ def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
     assert skipped == ["packages refresh"]
 
 
-def test_register_is_skipped_when_refresh_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_is_skipped_when_refresh_disabled(
+    default_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from base.config import settings
 
     monkeypatch.setattr(cron, "os_jobs_enabled", lambda: True)
@@ -213,7 +214,9 @@ def test_register_is_skipped_when_refresh_disabled(monkeypatch: pytest.MonkeyPat
     job.register_packages_job()
 
 
-def test_register_dispatches_to_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_dispatches_to_the_backend(
+    default_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from base.config import settings
 
     calls: list[str] = []
@@ -230,22 +233,19 @@ def test_register_dispatches_to_the_backend(monkeypatch: pytest.MonkeyPatch) -> 
     assert calls == ["register"]
 
 
-def test_unregister_delegates_with_the_home_slug(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_unregister_delegates_to_the_backend(
+    default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from base.cluster import slug_for_home
-
     calls: list[str] = []
 
     class Backend:
-        def unregister_packages_job(self, slug: str) -> None:
-            calls.append(slug)
+        def unregister_packages_job(self) -> None:
+            calls.append("unregister")
 
     monkeypatch.setattr("base.host.system.backend.get_backend", Backend)
 
-    home = tmp_path / ".ava-target"
-    job.unregister_packages_job(home)
-    assert calls == [slug_for_home(home)]
+    job.unregister_packages_job()
+    assert calls == ["unregister"]
 
 
 def test_converge_registers_the_refresh_job(monkeypatch: pytest.MonkeyPatch) -> None:

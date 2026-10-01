@@ -35,8 +35,7 @@ Each cluster owns its **own** Postgres + Redis instance under its `$AVA_HOME`
 shared brew/systemd services, and not one instance partitioned by database name.
 `ava start` ensures this cluster's pair is up (skip-if-running); `ava stop` tears
 it down. Because `ava stop` (gateway role) takes this cluster's data plane down,
-stop a dev worktree cluster with `ava cluster down --path <home>`, not a bare
-`ava stop`.
+it stops the whole host's cluster; a worktree owns no cluster of its own.
 
 Redis auth has two users, and confusing them is what turns an auth error into a
 self-inflicted outage:
@@ -83,9 +82,9 @@ gateway is up has nowhere to land.
 
 ```bash
 ava cluster status                    # full multi-machine roster
-ava cluster down --path <home>        # stop the cluster at a home path, keep its data
-ava cluster destroy --path <home>     # stop + deregister its OS-scheduled jobs + mark the
-                                      # home detached (refused for ~/.ava, the prod home)
+ava cluster destroy                   # decommission this host's cluster: stop + deregister its
+                                      # OS-scheduled jobs + mark the home detached. Needs a
+                                      # terminal; you type the home path (no flag skips it)
                                       # add --drop-db to also remove its pg/redis data dirs
 ```
 

@@ -302,8 +302,8 @@ def _print_missing_setup_error(missing: list[_SetupField | _Capability], role: s
         )
     print(
         "\nAfter the first successful run, the CLI writes values to $AVA_HOME/<field> "
-        "files; subsequent `ava start` calls do not need the args (a bare `ava` acts on "
-        "the cluster $AVA_HOME names once that run has linked its $AVA_HOME/ava).",
+        "files; subsequent `ava start` calls do not need the args (a bare `ava` is linked to "
+        "this checkout's CLI by that first run).",
         file=sys.stderr,
     )
 
@@ -311,9 +311,9 @@ def _print_missing_setup_error(missing: list[_SetupField | _Capability], role: s
 def _checkout_cli() -> str:
     """The CLI a first start runs: this checkout's own `.venv/bin/ava`.
 
-    The host's bare `ava` runs `$AVA_HOME/ava`, which the first start's converge
-    links, so it cannot reach a home before that start. Windows has no launcher
-    (`supports_ava_symlink()` is False); its `ava` on PATH is the venv's own.
+    The host's bare `ava` is linked by the first start's converge, so it does not
+    exist before that start. Windows has no such link (`supports_ava_symlink()` is
+    False); its `ava` on PATH is the venv's own.
     """
     if not get_backend().supports_ava_symlink():
         return "ava"

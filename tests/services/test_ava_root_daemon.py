@@ -516,7 +516,6 @@ def _systemd_starter(
         "from base.native_process.ownership import OwnedProcess\n"
         "from dataclasses import asdict\n"
         f"receipt = Path({str(receipt)!r})\n"
-        f"assert os.environ['AVA_HOST_STATE_DIR'] == {str(home.parent / 'host-state')!r}\n"
         f"data = subprocess.Popen({_SLEEPER!r}, start_new_session=True)\n"
         f"hint = root_pid_path(Path({str(home)!r}))\n"
         "hint.parent.mkdir(parents=True, exist_ok=True)\n"
@@ -585,7 +584,6 @@ def _systemd_test_context(home: Path) -> BootUnitContext:
         entry.pw_name,
         grp.getgrgid(entry.pw_gid).gr_name,
         Path(entry.pw_dir),
-        home.parent / "host-state",
     )
 
 
@@ -595,7 +593,7 @@ def _assert_failed_adoption(ctx: BootUnitContext, receipt: Path, failure: str) -
     assert receipt.with_suffix(".failure").read_text() == failure
     births = json.loads(receipt.read_text())
     assert set(births) == {"data", "root", "app"}
-    assert boot_unit.manager_properties(ctx.home)["MainPID"] == "0"
+    assert boot_unit.manager_properties()["MainPID"] == "0"
     # Before publication the deliberately stale hint names data; afterwards it
     # names root. Neither becomes MainPID when the ordinary starter fails.
     expected = births["data" if failure == "before" else "root"]["pid"]
@@ -612,6 +610,18 @@ def _require_native_systemd() -> None:
     allowed = subprocess.run(["sudo", "-n", "true"], check=False, timeout=10)
     if allowed.returncode:
         pytest.skip("native systemd test requires passwordless sudo")
+    # The host has one boot unit and the test must be that unit to be adopted, so it
+    # runs only where none exists: otherwise it would start, stop and reset the
+    # host's own.
+    known = subprocess.run(  # noqa: S603 — fixed systemctl verb, the module's own unit name
+        ["systemctl", "show", "--property=LoadState", "--value", boot_unit.UNIT_NAME],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if known.stdout.strip() != "not-found":
+        pytest.skip("this host has its own ava-boot unit; the test would act on it")
 
 
 @pytest.mark.parametrize("failure", ["", "before", "after"])
@@ -631,7 +641,7 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
     manifest = _write_manifests(tmp_path, [{"id": "app", "exec": _SLEEPER, "restart": "always"}])
     receipt = tmp_path / "births.json"
     starter = _systemd_starter(ctx.home, receipt, run_dir, manifest, failure)
-    unit = boot_unit.unit_name(ctx.home)
+    unit = boot_unit.UNIT_NAME
     target = Path("/run/systemd/system") / unit
     holder = tmp_path / unit
     content = boot_unit.render_unit(ctx)
@@ -665,7 +675,7 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
 
         owners = {key: OwnedProcess(**value) for key, value in raw.items()}
         root, app, data = owners["root"], owners["app"], owners["data"]
-        manager = boot_unit.manager_properties(ctx.home)
+        manager = boot_unit.manager_properties()
         assert manager["MainPID"] == str(root.pid)
         assert manager["ActiveState"] == "active"
         assert psutil.Process(root.pid).ppid() == 1, "manager did not adopt root as its child"

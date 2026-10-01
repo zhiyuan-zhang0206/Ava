@@ -159,8 +159,7 @@ def remind_expiring_impersonations(
                 is not None
             ):
                 continue
-            # A bare `ava`: the executor inherits AVA_HOME, and the host launcher
-            # runs that cluster's own CLI (scripts/ava-launcher.sh).
+            # A bare `ava`: the host's `~/.local/bin/ava`, linked to the production CLI.
             prefix = ["ava", "impersonate"]
             # Suggest the window the executor last chose, not a fixed hour: the
             # guide asks for short leases extended in steps.

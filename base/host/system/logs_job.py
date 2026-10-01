@@ -1,6 +1,6 @@
 """Daily OS job for copytruncate rotation followed by tiered retention.
 
-Each cluster registers one local maintenance schedule. POSIX runs both commands
+The host registers one local maintenance schedule. POSIX runs both commands
 in one shell so retention starts only after rotation succeeds.
 """
 
@@ -21,12 +21,11 @@ _HOUR = 4
 _MINUTE = 40
 
 
-def _label(slug: str) -> str:
-    return f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.{slug}.logs-maintenance"
+_LABEL = f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.logs-maintenance"
 
 
-def _launchd_plist_path(slug: str) -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{_label(slug)}.plist"
+def _launchd_plist_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
 def _shell_command() -> str:
@@ -35,7 +34,6 @@ def _shell_command() -> str:
 
 
 def _launchd_plist_content() -> str:
-    slug = base.host.system.cron._home_slug()
     log_file = Path(base.host.system.cron.job_home()) / "logs" / "logs-maintenance.out.log"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -43,7 +41,7 @@ def _launchd_plist_content() -> str:
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>{_label(slug)}</string>
+    <string>{_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
@@ -70,10 +68,9 @@ def _launchd_plist_content() -> str:
 
 
 def _register_macos() -> int:
-    """Rewrite and reload this cluster's daily LaunchAgent."""
-    slug = base.host.system.cron._home_slug()
-    label = _label(slug)
-    plist_path = _launchd_plist_path(slug)
+    """Rewrite and reload the daily LaunchAgent."""
+    label = _LABEL
+    plist_path = _launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     plist_path.write_text(_launchd_plist_content(), encoding="utf-8")
 
@@ -83,17 +80,17 @@ def _register_macos() -> int:
     return 0
 
 
-def _unregister_macos(slug: str) -> int:
-    base.host.system.cron.remove_launchd_job(_label(slug), _launchd_plist_path(slug))
+def _unregister_macos() -> int:
+    base.host.system.cron.remove_launchd_job(_LABEL, _launchd_plist_path())
     return 0
 
 
-def _cron_marker(slug: str) -> str:
-    return f"{_CRON_MARKER}.{slug}"
-
-
 def _register_linux() -> int:
-    """Replace this cluster's 04:40 maintenance line in the user crontab."""
+    """Replace the 04:40 maintenance line in the user crontab.
+
+    Lines are matched by the marker as a substring, so a line an older version
+    wrote with a per-home suffix after the marker is replaced in place.
+    """
     missing_rc = base.host.system.cron.require_crontab(
         "  * logs maintenance: crontab not installed; daily rotation and "
         "retention cannot be registered",
@@ -103,8 +100,7 @@ def _register_linux() -> int:
     if missing_rc is not None:
         return missing_rc
 
-    slug = base.host.system.cron._home_slug()
-    marker = _cron_marker(slug)
+    marker = _CRON_MARKER
     entry = (
         f"{_MINUTE} {_HOUR} * * * {base.host.system.cron.cron_env_prefix()}"
         f"/bin/sh -c {shlex.quote(_shell_command())}  {marker}"
@@ -120,25 +116,28 @@ def _register_linux() -> int:
     return 0
 
 
-def _unregister_linux(slug: str) -> int:
+def _unregister_linux() -> int:
     return base.host.system.cron.remove_crontab_entry(
-        _cron_marker(slug), write_failure_rc=1, on_removed=None
+        _CRON_MARKER, write_failure_rc=1, on_removed=None
     )
 
 
 def register_logs_job() -> None:
-    """Register this cluster's daily logs-maintenance job."""
+    """Register the daily logs-maintenance job."""
     if not base.host.system.cron.os_jobs_enabled():
         base.host.system.cron.skip_os_job("logs-maintenance")
+        return
+    if not base.host.system.cron.owns_os_jobs("logs-maintenance"):
         return
     from base.host.system.backend import get_backend
 
     get_backend().register_logs_job()
 
 
-def unregister_logs_job(home: Path | None = None) -> None:
-    """Remove a cluster's daily logs-maintenance job."""
-    from base.cluster import slug_for_home
+def unregister_logs_job() -> None:
+    """Remove the daily logs-maintenance job (a no-op outside the default home)."""
+    if not base.host.system.cron.owns_os_jobs("logs-maintenance"):
+        return
     from base.host.system.backend import get_backend
 
-    get_backend().unregister_logs_job(slug_for_home(home))
+    get_backend().unregister_logs_job()

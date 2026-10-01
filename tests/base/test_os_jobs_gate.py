@@ -1,19 +1,21 @@
-"""The `AVA_OS_JOBS_ENABLED` gate, and what a generated job spec is anchored to.
+"""The OS-job gates, and what a generated job spec is anchored to.
 
-Together these are the fix for the e2e OS-job leak: the gate stops the suite from
-arming a job at all, and the anchoring makes any job that IS armed name the
-binary and `$AVA_HOME` of the checkout that wrote it — so no stale job can
-resolve onto the prod install.
+`AVA_OS_JOBS_ENABLED` stops the suite from arming a job at all; the default-home
+gate (`owns_os_jobs`) stops any other home from registering or removing one,
+because labels and crontab markers name a job, not a home; and the anchoring makes
+any job that IS armed name the binary and `$AVA_HOME` of the checkout that wrote
+it — so no stale job can resolve onto the prod install.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from base.config import settings
-from base.host.system import autostart, cron, logs_job, packages_job
+from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job
 
 
 class _ExplodingBackend:
@@ -30,6 +32,24 @@ class _ExplodingBackend:
 
     def register_packages_job(self) -> None:
         raise AssertionError("register_packages_job reached the OS with the gate off")
+
+    def register_pr_flow_job(self) -> None:
+        raise AssertionError("register_pr_flow_job reached the OS with the gate off")
+
+    def unregister_cron(self) -> None:
+        raise AssertionError("unregister_cron reached the OS outside the default home")
+
+    def unregister_autostart(self) -> None:
+        raise AssertionError("unregister_autostart reached the OS outside the default home")
+
+    def unregister_logs_job(self) -> None:
+        raise AssertionError("unregister_logs_job reached the OS outside the default home")
+
+    def unregister_packages_job(self) -> None:
+        raise AssertionError("unregister_packages_job reached the OS outside the default home")
+
+    def unregister_pr_flow_job(self) -> None:
+        raise AssertionError("unregister_pr_flow_job reached the OS outside the default home")
 
 
 class _RecordingBackend:
@@ -48,17 +68,23 @@ class _RecordingBackend:
     def register_packages_job(self) -> None:
         self.calls.append("packages-refresh")
 
-    def unregister_cron(self, slug: str) -> None:
-        self.calls.append(f"unregister-cron:{slug}")
+    def register_pr_flow_job(self) -> None:
+        self.calls.append("pr-flow")
 
-    def unregister_autostart(self, home: Path) -> None:
-        self.calls.append(f"unregister-autostart:{home}")
+    def unregister_cron(self) -> None:
+        self.calls.append("unregister-cron")
 
-    def unregister_logs_job(self, slug: str) -> None:
-        self.calls.append(f"unregister-logs-maintenance:{slug}")
+    def unregister_autostart(self) -> None:
+        self.calls.append("unregister-autostart")
 
-    def unregister_packages_job(self, slug: str) -> None:
-        self.calls.append(f"unregister-packages-refresh:{slug}")
+    def unregister_logs_job(self) -> None:
+        self.calls.append("unregister-logs-maintenance")
+
+    def unregister_packages_job(self) -> None:
+        self.calls.append("unregister-packages-refresh")
+
+    def unregister_pr_flow_job(self) -> None:
+        self.calls.append("unregister-pr-flow")
 
 
 @pytest.fixture()
@@ -87,50 +113,103 @@ def test_suite_default_is_off() -> None:
     assert cron.os_jobs_enabled() is False
 
 
-@pytest.mark.parametrize(
-    "call",
-    [
-        pytest.param(cron.register_os_cron, id="health-probe"),
-        pytest.param(autostart.register_autostart, id="autostart"),
-        pytest.param(logs_job.register_logs_job, id="logs-maintenance"),
-        pytest.param(packages_job.register_packages_job, id="packages-refresh"),
-    ],
-)
+_REGISTERS = [
+    pytest.param(cron.register_os_cron, id="health-probe"),
+    pytest.param(autostart.register_autostart, id="autostart"),
+    pytest.param(logs_job.register_logs_job, id="logs-maintenance"),
+    pytest.param(packages_job.register_packages_job, id="packages-refresh"),
+    pytest.param(pr_flow_job.register_pr_flow_job, id="pr-flow"),
+]
+_UNREGISTER_CALLS: dict[str, Callable[[], None]] = {
+    "health-probe": cron.unregister_os_cron,
+    "autostart": autostart.unregister_autostart,
+    "logs-maintenance": logs_job.unregister_logs_job,
+    "packages-refresh": packages_job.unregister_packages_job,
+    "pr-flow": pr_flow_job.unregister_pr_flow_job,
+}
+_UNREGISTERS = [pytest.param(call, id=name) for name, call in _UNREGISTER_CALLS.items()]
+
+
+@pytest.mark.parametrize("call", _REGISTERS)
 def test_registration_never_reaches_the_backend_when_gated(
-    call: object, monkeypatch: pytest.MonkeyPatch
+    call: object, default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("base.host.system.backend.get_backend", _ExplodingBackend)
     assert callable(call)
     call()  # no AssertionError == the gate held
 
 
-def test_registration_dispatches_when_enabled(gate_on: None, backend: _RecordingBackend) -> None:
+def test_registration_dispatches_when_enabled(
+    gate_on: None, default_home: Path, backend: _RecordingBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pr_flow_job, "credential_blocker", lambda: None)
     cron.register_os_cron()
     autostart.register_autostart()
     logs_job.register_logs_job()
     packages_job.register_packages_job()
+    pr_flow_job.register_pr_flow_job()
     assert backend.calls == [
         "cron",
         "autostart",
         "logs-maintenance",
         "packages-refresh",
+        "pr-flow",
     ]
 
 
-def test_deregistration_is_never_gated(backend: _RecordingBackend, tmp_path: Path) -> None:
-    """Cleanup has to work wherever registration is forbidden — otherwise a run
-    that leaks under an older build can never be swept by a newer one."""
-    home = tmp_path / ".ava-target"
-    cron.unregister_os_cron(home)
-    autostart.unregister_autostart(home)
-    logs_job.unregister_logs_job(home)
-    packages_job.unregister_packages_job(home)
-    assert [c.split(":")[0] for c in backend.calls] == [
+def test_deregistration_is_not_gated_by_the_os_jobs_switch(
+    default_home: Path, backend: _RecordingBackend
+) -> None:
+    """Cleanup has to work wherever registration is switched off (the suite runs
+    with it off) — otherwise a leak under an older build can never be swept."""
+    for call in _UNREGISTER_CALLS.values():
+        call()
+    assert backend.calls == [
         "unregister-cron",
         "unregister-autostart",
         "unregister-logs-maintenance",
         "unregister-packages-refresh",
+        "unregister-pr-flow",
     ]
+
+
+# ---------------------------------------------------------------------------
+# The default-home gate
+# ---------------------------------------------------------------------------
+# Labels and crontab markers name a job, not a home, so the scheduler's one
+# namespace per OS user is shared by every process on the host. A scratch home
+# (a test, a tool, a disposable cluster) must neither replace nor remove the
+# host's real job — on a development machine that also runs production, a
+# `launchctl bootout` from a test would take a production job down.
+
+
+@pytest.mark.parametrize("call", _REGISTERS)
+def test_a_scratch_home_registers_nothing(
+    call: object, gate_on: None, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("base.host.system.backend.get_backend", _ExplodingBackend)
+    monkeypatch.setattr(pr_flow_job, "credential_blocker", lambda: None)
+    assert callable(call)
+    call()  # no AssertionError == nothing reached the scheduler
+
+
+@pytest.mark.parametrize("call", _UNREGISTERS)
+def test_a_scratch_home_removes_nothing(
+    call: object, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("base.host.system.backend.get_backend", _ExplodingBackend)
+    assert callable(call)
+    call()
+
+
+def test_the_default_home_owns_the_jobs_however_it_is_spelled(
+    default_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert cron.owns_os_jobs("autostart")
+    monkeypatch.setenv("AVA_HOME", str(default_home / "elsewhere" / ".." / ".ava"))
+    assert cron.owns_os_jobs("autostart")
+    monkeypatch.setenv("AVA_HOME", str(default_home / ".ava-preview"))
+    assert not cron.owns_os_jobs("autostart")
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +244,6 @@ def test_health_probe_plist_pins_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_p
     """An OS probe observes its owning home and carries no release policy."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
     monkeypatch.setattr(cron, "ava_binary_path", lambda: "/x/ava")
-    monkeypatch.setattr(cron, "_home_slug", lambda: "ava-x")
     body = cron._launchd_plist_content(300)
     import plistlib
 
@@ -191,7 +269,6 @@ def test_every_launchagent_pins_ava_home(
     monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
     monkeypatch.setattr(cron, "ava_binary_path", lambda: "/x/ava")
     monkeypatch.setattr(autostart, "ava_binary_path", lambda: "/x/ava")
-    monkeypatch.setattr(autostart, "_home_slug", lambda: "ava-x")
     assert callable(render)
     body = render()
     assert isinstance(body, str)

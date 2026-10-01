@@ -141,8 +141,8 @@ def gui_session_domain() -> str | None:
     reach the login Keychain. A daemon respawned from an agent/SSH/Background
     chain answers e.g. ``Background``, and the domain is inherited from the
     spawning chain — no in-place relaunch can move it, only launchd can cross
-    domains (``base.host.system.autostart.relaunch_via_gui_domain``). None off macOS,
-    and None when the answer is unavailable — never evidence either way."""
+    domains. None off macOS, and None when the answer is unavailable — never
+    evidence either way."""
     if sys.platform != "darwin":
         return None
     return _bounded_stdout(["/bin/launchctl", "managername"])

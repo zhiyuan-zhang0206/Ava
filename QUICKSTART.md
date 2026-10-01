@@ -53,14 +53,12 @@ unset AVA_CLUSTER_SECRET
 Node.js (Node is recommended on macOS; the web UI and browser tools need it).
 The first `ava start` above births the cluster (its own Postgres/Redis, ports,
 `~/.ava/.env`) and brings up services in the same call; its converge phase also
-links `~/.local/bin/ava` to the ava launcher, which runs the CLI of the cluster
-`$AVA_HOME` names. You'll see `ready` when it succeeds.
+links `~/.local/bin/ava` to this checkout's CLI. You'll see `ready` when it succeeds.
 
 > **After first start**, reopen your terminal, or run `source ~/.bashrc` (Linux) /
-> `source ~/.zshrc` (macOS), to put `~/.local/bin` on PATH, then name your cluster
-> with `export AVA_HOME="$HOME/.ava"` (add it to the same file to keep it): the bare
-> `ava` refuses without `AVA_HOME`. If `ava` is still not found (e.g. uv already
-> existed), add it manually: `export PATH="$HOME/.local/bin:$PATH"`.
+> `source ~/.zshrc` (macOS), to put `~/.local/bin` on PATH. If `ava` is still not
+> found (e.g. uv already existed), add it manually:
+> `export PATH="$HOME/.local/bin:$PATH"`.
 
 ---
 
@@ -151,14 +149,12 @@ A complete Ava cluster is now running on your machine:
 
 ### `ava: command not found`
 
-The production home's first `ava start` links `~/.local/bin/ava` to the ava launcher
-(its converge phase), which runs the CLI of the cluster `$AVA_HOME` names. Put that path
-on PATH and name your cluster:
+The production home's first `ava start` links `~/.local/bin/ava` to the checkout's CLI
+(its converge phase). Put that path on PATH:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-export AVA_HOME="$HOME/.ava"
-# To make them permanent, add both lines to ~/.bashrc or ~/.zshrc
+# To make it permanent, add the line to ~/.bashrc or ~/.zshrc
 ```
 
 ### `ava start` says "AVA_CLUSTER_SECRET is required"

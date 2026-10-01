@@ -178,9 +178,8 @@ def _load_dotenv_layer(path: Path) -> None:
 def load_ava_env() -> None:
     """Load this process's `$AVA_HOME/.env` (then `mirror.env`) into os.environ.
 
-    Pins AVA_HOME to the resolved home, so a descendant that needs the variable
-    in its own environment (a bare `ava` invocation from an agent shell) finds
-    it; resolution itself never depends on the pin. The authority pass then
+    Pins AVA_HOME to the resolved home, so every descendant inherits it;
+    resolution itself never depends on the pin. The authority pass then
     forces the unit's own `.env` declarations over a polluted parent
     environment and drops the cluster values the `.env` does not declare —
     EXCEPT the never-drop identity exemptions (`_force_also`:

@@ -70,11 +70,11 @@ def _platform_key() -> str:
 
 
 def runtime_root() -> Path:
-    """Host-level binaries root in the host state dir (independent of any one
-    `$AVA_HOME`), so a single download serves every cluster + checkout on the box."""
-    from base.paths import host_state_dir
+    """Vendored binaries root, `$AVA_HOME/runtime`: the host runs one cluster, so
+    the home is the place a download is kept."""
+    from base.paths import ava_home
 
-    return host_state_dir() / "runtime"
+    return ava_home() / "runtime"
 
 
 def vendored_pg_dir() -> Path:

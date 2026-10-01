@@ -399,7 +399,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     printed = capsys.readouterr().out
     match = re.search(r"transport key \(shown once, carry it separately\): (\S+)", printed)
     assert match is not None, printed
-    # The unit's first start precedes its $AVA_HOME/ava link: the hint names the checkout's CLI.
+    # The unit's first start precedes its `ava` link: the hint names the checkout's CLI.
     assert "`.venv/bin/ava start --db-capability <bundle>`" in printed, printed
     assert bundle.stat().st_mode & 0o777 == 0o600
     served = config.bootstrap_config_values()
@@ -421,7 +421,6 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
         # The unit joins without the human secret: its bundle authenticates it.
         os.environ.pop("AVA_CLUSTER_SECRET", None)
         os.environ["AVA_HOME"] = str(runner)
-        os.environ["AVA_HOST_STATE_DIR"] = str(tmp_path / "runner-host-state")
         os.environ[unit.CAPABILITY_KEY_ENV] = match.group(1)
         prepare_start_identity(_runner_args(bundle))
         assert unit.CAPABILITY_KEY_ENV not in os.environ

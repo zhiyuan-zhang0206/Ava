@@ -88,34 +88,19 @@ def test_branch_drift_feature_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert prod_source_branch_drift() == "ava-7/fix"
 
 
-def test_prod_source_dir_resolves_from_the_home_cli_link(
+def test_prod_source_dir_is_the_homes_own_source(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Without `$AVA_HOME/source`, the home's own CLI link (`$AVA_HOME/ava` →
-    `<source>/.venv/bin/ava`) names the checkout — the gateway-only layout keeps
-    its source at /opt/ava/source while $AVA_HOME is ~/.ava_gateway."""
-    source = tmp_path / "opt" / "ava" / "source"
-    ava_bin = source / ".venv" / "bin" / "ava"
-    ava_bin.parent.mkdir(parents=True)
-    ava_bin.write_text("#!/bin/sh\n")
+    """The home names its checkout: `$AVA_HOME/source`. A link at `$AVA_HOME/ava`
+    or the host's bare `ava` names no other."""
     home = tmp_path / "avahome"
     home.mkdir()
-    (home / "ava").symlink_to(ava_bin)
+    elsewhere = tmp_path / "opt" / "ava" / "source" / ".venv" / "bin" / "ava"
+    elsewhere.parent.mkdir(parents=True)
+    elsewhere.write_text("#!/bin/sh\n")
+    (home / "ava").symlink_to(elsewhere)
     monkeypatch.setattr("base.paths.ava_home", lambda: home)
-    assert _prod_source_dir() == source
-
-
-def test_prod_source_dir_ignores_the_host_launcher_link(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The host's bare `ava` belongs to no cluster: with neither `$AVA_HOME/source`
-    nor `$AVA_HOME/ava`, the answer is the home's own (absent) source."""
-    link = tmp_path / "home" / ".local" / "bin" / "ava"
-    link.parent.mkdir(parents=True)
-    link.symlink_to(tmp_path / "prod" / "source" / "scripts" / "ava-launcher.sh")
-    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda _cls: tmp_path / "home"))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "avahome")
-    assert _prod_source_dir() == tmp_path / "avahome" / "source"
+    assert _prod_source_dir() == home / "source"
 
 
 def test_checkout_head_sha_reads_an_explicit_checkout(tmp_path: Path) -> None:

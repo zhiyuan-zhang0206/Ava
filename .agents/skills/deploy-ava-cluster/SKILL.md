@@ -94,9 +94,9 @@ A changed running root generation requires a normal stop before replacement.
 
 A failed first start keeps its journal and resource custody. Repeating start
 resumes the same initialization. Do not erase the journal, overwrite the home,
-or free its reservation manually. For a disposable non-default home, normal
-`ava cluster destroy --path PATH` performs verified cleanup before freeing the
-reservation; a destroyed home is not silently reused.
+or free its reservation manually. To decommission a host's cluster, `ava cluster
+destroy` (at a terminal; you type the home path) performs verified cleanup and marks
+the home detached; a destroyed home is not silently reused.
 
 ## Join a runner
 

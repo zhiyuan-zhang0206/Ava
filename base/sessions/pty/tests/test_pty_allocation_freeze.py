@@ -1,4 +1,4 @@
-"""Contract tests for host-wide, generation-owned PTY allocation freeze."""
+"""Contract tests for the home's generation-owned PTY allocation freeze."""
 
 from __future__ import annotations
 
@@ -6,31 +6,23 @@ from pathlib import Path
 
 import pytest
 
-from base.config import settings
 from base.sessions.pty import allocation_freeze
 from base.sessions.pty import cli as pty_cli
 
 
 @pytest.fixture(autouse=True)
-def _isolated_host_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    host_dir = tmp_path / "host"
-    monkeypatch.setattr(settings.general, "host_state_dir", host_dir)
-    return host_dir
+def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "home"
+    monkeypatch.setenv("AVA_HOME", str(home))
+    return home
 
 
-def test_freeze_is_host_wide_and_records_operator_generation(
-    _isolated_host_registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    first_home = tmp_path / "cluster-a"
-    second_home = tmp_path / "cluster-b"
-    monkeypatch.setenv("AVA_HOME", str(first_home))
-    first_state_path = allocation_freeze.state_path()
-    monkeypatch.setenv("AVA_HOME", str(second_home))
+def test_freeze_lives_in_the_home_and_records_operator_generation(_isolated_home: Path) -> None:
+    assert allocation_freeze.state_path() == _isolated_home / "pty-allocation-freeze.json"
+    assert allocation_freeze.lock_path() == _isolated_home / "pty-allocation.lock"
 
     frozen = allocation_freeze.freeze(holder="operator-1818", reason="bounded cleanup")
 
-    assert allocation_freeze.state_path() == first_state_path
-    assert first_state_path.parent == _isolated_host_registry
     assert frozen.status == "frozen"
     assert frozen.generation
     assert frozen.holder == "operator-1818"
@@ -61,7 +53,7 @@ def test_corrupt_marker_fails_closed_and_refusal_removes_envfile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = allocation_freeze.state_path()
-    path.parent.mkdir(parents=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{broken-json")
     spawned: list[str] = []
 

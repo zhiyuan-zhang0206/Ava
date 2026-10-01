@@ -23,25 +23,17 @@ def _ctx(repo: Path, ava_home: Path, roles=None):
     return converge_host.ConvergeCtx(repo=repo, ava_home=ava_home, roles=roles)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_ensure_ava_launcher_links_bare_ava_to_the_launcher(home: Path, tmp_path: Path) -> None:
+def test_ensure_ava_on_path_links_bare_ava_to_this_checkouts_cli(
+    home: Path, tmp_path: Path
+) -> None:
     link = home / ".local" / "bin" / "ava"
     link.parent.mkdir(parents=True)
-    link.symlink_to(tmp_path / "old" / ".venv" / "bin" / "ava")  # a checkout CLI link
     repo = tmp_path / "repo"
-    converge_host._ensure_ava_launcher(_ctx(repo, home))
-    assert link.readlink() == repo / "scripts" / "ava-launcher.sh"
-    converge_host._ensure_ava_launcher(_ctx(repo, home))  # idempotent
-    assert link.readlink() == repo / "scripts" / "ava-launcher.sh"
-
-
-def test_ensure_home_cli_link_names_this_checkouts_cli(home: Path, tmp_path: Path) -> None:
-    ava_home = tmp_path / "cluster-home"
-    (ava_home / "ava").parent.mkdir(parents=True)
-    (ava_home / "ava").symlink_to(tmp_path / "stale" / ".venv" / "bin" / "ava")
-    repo = tmp_path / "repo"
-    converge_host._ensure_home_cli_link(_ctx(repo, ava_home))
-    assert (ava_home / "ava").readlink() == repo / ".venv" / "bin" / "ava"
-    assert not (home / ".local").exists()  # the home records only itself
+    link.symlink_to(repo / "scripts" / "ava-launcher.sh")  # the retired launcher link
+    converge_host._ensure_ava_on_path(_ctx(repo, home))
+    assert link.readlink() == repo / ".venv" / "bin" / "ava"
+    converge_host._ensure_ava_on_path(_ctx(repo, home))  # idempotent
+    assert link.readlink() == repo / ".venv" / "bin" / "ava"
 
 
 def test_ensure_local_bin_on_path_block_is_idempotent(home, tmp_path: Path):
@@ -322,7 +314,6 @@ def test_cmd_converge_unconfigured_returns_zero(
 ):
     import cli.commands._repo as _repo_commands
     from base.cluster.dataplane import runtime_binaries as rb
-    from base.config import settings
 
     repo = tmp_path / "repo"
     (repo / ".venv" / "bin").mkdir(parents=True)
@@ -330,13 +321,10 @@ def test_cmd_converge_unconfigured_returns_zero(
     archive_shim = repo / "services" / "pitr" / "archive_shim.py"
     archive_shim.parent.mkdir(parents=True)
     archive_shim.write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
-    # settings is an import-time singleton, so patch the attribute directly
-    # (setenv("AVA_HOME") would not be re-read).
     monkeypatch.setenv("AVA_HOME", str(home / "avahome"))  # pyright: ignore[reportUnknownArgumentType]
     # A unit test must not reach Maven Central: seed the vendored Postgres tree so
     # the vendored-binaries step takes ensure_pg_binaries()'s idempotent early
     # return (the real download is covered by tests/integration/test_vendored_binaries.py).
-    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     seeded_bin = rb.vendored_pg_dir() / "bin"
     seeded_bin.mkdir(parents=True)
     (seeded_bin / "initdb").write_text("#!/bin/sh\n")

@@ -1,8 +1,7 @@
-"""Home-addressed cluster management; initialization belongs only to start."""
+"""Decommission of the host's cluster; initialization belongs only to start."""
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -14,93 +13,94 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _subprocess_env(*, gateway_home: Path) -> dict[str, str]:
-    """Environment for a cluster subprocess (the `ava stop` child of
-    `cmd_cluster_down`).
+def _drop_dirs(home: Path) -> list[Path]:
+    """What `--drop-db` deletes: the cluster's own data directories and the short
+    Postgres socket directory under /tmp. One list for the prompt and the removal,
+    so the prompt names exactly what goes."""
+    from base.db.pg_admin import pg_socket_path
 
-    Two categories of inherited env are stripped so the child's own
-    $AVA_HOME/.env wins, not the parent's already-loaded config:
-    - `derived_env_keys()` (AVA_DB_URL / AVA_REDIS_URL / ports / channels) —
-      else this cluster's db/redis URLs leak in and `load_dotenv` (override=False)
-      would not replace them, silently pointing the child at the wrong database.
-    - `env_identity_keys()` (serve flags / name / gateway-url /
-      memory-remote) — else the child inherits this host's identity.
+    return [home / "pg", home / "redis", pg_socket_path(home)]
+
+
+def _interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _confirm_destroy(home: Path, *, roles: list[str], drop_db: bool) -> bool:
+    """Ask a person at a terminal to type the home path; True only when they did.
+
+    Destroy is irreversible, so the confirmation is the point: it needs stdin and
+    stdout to be terminals and offers no flag that skips it. Anything else (no
+    terminal, end of input, a different string) does nothing.
     """
-    from base.host.env.registry import derived_env_keys, env_identity_keys
-
-    stripped = derived_env_keys() | env_identity_keys()
-    env = {k: v for k, v in os.environ.items() if k not in stripped}
-    env["AVA_HOME"] = str(gateway_home)
-    # No config-source pin needed: AVA_CONFIG_SOURCE is gone (2026-08-01) and the
-    # child (`ava stop`) is a settings-lite verb — cli.main opts it out of the
-    # gateway fetch, and it reads only this target home's host-scope .env, which
-    # is exactly what a teardown needs with the gateway down.
-    return env
-
-
-def cmd_cluster_down(*, path: str) -> int:
-    """Stop a cluster's services + its own pg/redis (does not drop data).
-
-    Both a CLI verb (`ava cluster down --path`) and the first step of
-    `cmd_cluster_destroy`. It addresses a cluster you are NOT in, by home path —
-    to stop the one you are in, use `ava stop`."""
-    from base import cluster as cl
-
-    home = Path(path).expanduser()
-    rec = cl.get_record(home)
-    if rec is None:
-        print(f"✗ ava cluster down: no cluster record at '{home}'", file=sys.stderr)
-        return 1
-
-    # The child stop runs with AVA_HOME = the target home, so its data-plane
-    # teardown reaches only THAT home's own pg/redis instance — which is exactly
-    # what "stop the cluster at this path" means, so no --keep-infra (destroy's
-    # --drop-db then removes data dirs of a genuinely stopped instance, never a
-    # live one). -y so the non-interactive subprocess does not hang/abort on the
-    # stdin confirm. --stop-browser: a cluster-down tears this cluster fully
-    # down, so its headed browser session goes too. (The keep-browser default is
-    # for in-place stop / update of the cluster you are living in, not for
-    # stopping a different one.)
-    cmd = [sys.executable, "-m", "cli.main", "stop", "-y", "--stop-browser"]
-    # No derived env: the child reads the cluster's connection vars from its own
-    # $AVA_HOME/.env (the inherited values are stripped by _subprocess_env).
-    env = _subprocess_env(gateway_home=home)
-    result = subprocess.run(cmd, cwd=_repo_root(), env=env, check=False)
-    return result.returncode
-
-
-def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
-    """Detach a cluster: stop it, retire its OS jobs, mark the home detached,
-    optionally remove its data dirs.
-
-    Refuses to destroy the default home (`~/.ava`) — it is prod. Returns 0 on
-    success, 1 if the path holds no cluster record or is the default home.
-
-    Nothing on the host lists clusters, so there is no slot to free: once its
-    services stop, the home's port block is simply unbound. Without `--drop-db`
-    the home's own files stay (`.env` included): a detached home's `.env` is the
-    only copy of that cluster's secret, of any key hand-added beyond
-    `SEED_ENV_KEYS`, and of the URLs its data-plane identity is read from. The
-    `detached` destroy intent is what stops the leftover home from starting
-    again (`cli.start_identity.prepare_identity` refuses it), and the start port
-    preflight refuses a home whose block another cluster has since taken.
-    """
-    from base import cluster as cl
-
-    home = Path(path).expanduser().resolve()
-    if cl.is_default_home(home):
+    if not _interactive():
         print(
-            f"✗ ava cluster destroy: refusing to destroy the default home ({cl.default_home()}) "
-            "— it is the production cluster; use 'ava stop' to stop it",
+            "✗ ava cluster destroy: refusing without an interactive terminal "
+            "(over ssh, use `ssh -t`); there is no flag that skips the confirmation",
             file=sys.stderr,
         )
+        return False
+    role_text = ", ".join(roles) if roles else "no roles recorded"
+    print(f"ava cluster destroy will decommission the cluster at {home} ({role_text}):")
+    print("  - stop its services and its own Postgres and Redis")
+    print("  - retire this host's OS jobs (launchd, crontab, boot unit) and the permissions helper")
+    print("  - mark the home detached: `ava start` refuses it until destroy-intent.json is deleted")
+    if "gateway" in roles:
+        print("  - this host serves the gateway: every agent-runner loses its control plane")
+    if drop_db:
+        print("  - DELETE the cluster's database and cache, which cannot be undone:")
+        for directory in _drop_dirs(home):
+            print(f"      {directory}")
+    try:
+        answer = input("Type the home path to confirm: ")
+    except EOFError:
+        answer = ""
+    if answer.strip() != str(home):
+        print("aborted: nothing was changed", file=sys.stderr)
+        return False
+    return True
+
+
+def _stop_cluster() -> int:
+    """Stop this cluster's services and its own pg/redis (does not drop data).
+
+    The child is `ava stop`, run from this checkout with the same home. No
+    `--keep-infra`: `--drop-db` then removes the data directories of a genuinely
+    stopped instance, never a live one. `-y` because the child has no terminal to
+    confirm on (destroy confirmed already); `--stop-browser` because a teardown
+    takes the headed browser down too."""
+    cmd = [sys.executable, "-m", "cli.main", "stop", "-y", "--stop-browser"]
+    return subprocess.run(cmd, cwd=_repo_root(), check=False).returncode
+
+
+def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
+    """Detach the host's cluster: stop it, retire its OS jobs and helper, mark the
+    home detached, optionally remove its data dirs.
+
+    Acts on this process's home (`AVA_HOME`, else `~/.ava`), the default
+    production home included, after `_confirm_destroy`. Returns 0 on success, 1
+    when the home holds no start intent, the confirmation is not given, or a step
+    fails.
+
+    Without `--drop-db` the home's own files stay (`.env` included): a detached
+    home's `.env` is the only copy of that cluster's secret, of any key hand-added
+    beyond `SEED_ENV_KEYS`, and of the URLs its data-plane identity is read from.
+    The `detached` destroy intent is what stops the leftover home from starting
+    again (`cli.start_identity.prepare_identity` refuses it); deleting that file by
+    hand is the only way back.
+    """
+    from base.paths import ava_home
+    from cli.start_identity import read_intent
+
+    home = ava_home().resolve()
+    intent = read_intent(home)
+    if intent is None:
+        print(f"✗ ava cluster destroy: no start intent at '{home}'", file=sys.stderr)
+        return 1
+    if not _confirm_destroy(home, roles=list(intent["roles"]), drop_db=drop_db):
         return 1
 
-    rec = cl.get_record(home)
-    if rec is None:
-        print(f"✗ ava cluster destroy: no cluster record at '{home}'", file=sys.stderr)
-        return 1
-
+    from base.config import settings
     from base.host.private_storage import write_private_bytes
     from base.native_process.os_platform import file_lock
     from services.permissions_helper.launchd_job import unregister_helper
@@ -109,13 +109,13 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
     # refuse it from the first moment of the teardown.
     with file_lock(home / "start-intent.lock", timeout_s=30):
         write_private_bytes(home / "destroy-intent.json", b'{"version":1,"state":"destroying"}\n')
-        rc = cmd_cluster_down(path=str(home))
+        rc = _stop_cluster()
         if rc != 0:
             print("cluster stop incomplete; destroy intent retained", file=sys.stderr)
             return rc
         try:
-            _unregister_scheduled_jobs(home)
-            unregister_helper(home, helper_port=rec.ports["permissions_helper"])
+            _unregister_scheduled_jobs()
+            unregister_helper(home, helper_port=settings.services.permissions_helper_port)
         except (OSError, RuntimeError, ValueError, TypeError) as exc:
             print(f"cluster cleanup incomplete: {exc}", file=sys.stderr)
             return 1
@@ -125,27 +125,22 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
     if drop_db:
         # The whole Postgres+Redis instance is this cluster's own, so removing its
         # data dirs IS the drop — there is no shared server to DROP DATABASE inside.
-        # `cmd_cluster_down` already stopped it (above); delete the dirs under the
-        # cluster's home, plus the short pg socket dir under /tmp.
+        # `_stop_cluster` already stopped it (above).
         import shutil
 
-        for d in (home / "pg", home / "redis", Path("/tmp") / f"ava-pg-{cl.home_slug(home)}"):  # noqa: S108
-            shutil.rmtree(d, ignore_errors=True)
+        for directory in _drop_dirs(home):
+            shutil.rmtree(directory, ignore_errors=True)
         print(f"✓ removed '{home}' per-cluster data plane (pg + redis data dirs)")
 
     return 0
 
 
-def _unregister_scheduled_jobs(home: Path) -> None:
-    """Remove every OS-scheduled job the cluster at `home` registered (health
-    probe, boot autostart, logs maintenance and packages refresh).
+def _unregister_scheduled_jobs() -> None:
+    """Remove every OS-scheduled job the host registered (health probe, boot
+    autostart, logs maintenance, packages refresh and PR flow).
 
-    `home` is passed to each helper as an argument. It cannot be signalled by
-    setting `AVA_HOME`: `settings` is constructed once at import, so a mid-process
-    mutation of the environment changes nothing, and the helpers would deregister
-    THIS process's cluster — running `ava cluster destroy --path <worktree>` from
-    the prod checkout (the documented way to address a cluster) would tear down
-    prod's own health probe and autostart.
+    Labels name jobs, not homes, and each `unregister_*` is a no-op outside the
+    default home, so a scratch home's destroy never touches the host's jobs.
 
     Every job must be retired before the home is marked detached. An
     unavailable scheduler is ambiguous custody, so failures are raised.
@@ -154,12 +149,14 @@ def _unregister_scheduled_jobs(home: Path) -> None:
     from base.host.system.cron import unregister_os_cron
     from base.host.system.logs_job import unregister_logs_job
     from base.host.system.packages_job import unregister_packages_job
+    from base.host.system.pr_flow_job import unregister_pr_flow_job
 
     jobs: list[tuple[str, Callable[[], None]]] = [
-        ("health probe", lambda: unregister_os_cron(home)),
-        ("autostart", lambda: unregister_autostart(home)),
-        ("logs maintenance", lambda: unregister_logs_job(home)),
-        ("packages refresh", lambda: unregister_packages_job(home)),
+        ("health probe", unregister_os_cron),
+        ("autostart", unregister_autostart),
+        ("logs maintenance", unregister_logs_job),
+        ("packages refresh", unregister_packages_job),
+        ("PR flow", unregister_pr_flow_job),
     ]
     failed: list[str] = []
     for name, unregister in jobs:

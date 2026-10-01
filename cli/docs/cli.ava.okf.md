@@ -28,10 +28,9 @@ The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` builds
 
 ### `ava cluster` Subcommands
 
-Verbs that act on a cluster rather than on this host's services, addressed by
-**home path** (`--path`), not name: `status` / `down` /
-`destroy` / `health-probe` / `cron-*` /
-other registered commands. Enumerated in [[cli/docs/cluster.ava.okf.md]].
+Verbs that act on the cluster rather than on this host's services, on the home
+`AVA_HOME` names (else `~/.ava`): `status` / `destroy` / `health-probe` /
+`cron-*` / other registered commands. Enumerated in [[cli/docs/cluster.ava.okf.md]].
 
 ### Agent & Ops
 
@@ -81,7 +80,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 
 - `cli/main.py:main()` — argparse entrypoint; `cli/parsers/` — the settings-free command tree.
 - `cli/start_intent.py:run_start()` — first-start inputs and full home lifecycle lock; `cli/start_identity.py` — durable initialization journal.
-- `cli/commands/cluster/home.py` — `down/destroy` (`--path` addressed), exact cleanup before marking the home detached; `start.py` / `status.py` / `data_plane/cluster_instance.py` — runtime operations.
+- `cli/commands/cluster/home.py` — `destroy` (confirmed at a terminal), exact cleanup before marking the home detached; `start.py` / `status.py` / `data_plane/cluster_instance.py` — runtime operations.
 
 ## Notes
 

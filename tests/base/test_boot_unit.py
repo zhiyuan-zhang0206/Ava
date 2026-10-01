@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster import home_slug
 from base.host.system import boot_unit
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 from base.host.system.boot_unit import (
@@ -19,7 +18,6 @@ from base.host.system.boot_unit import (
     systemd_running,
     uninstall,
     unit_enabled,
-    unit_name,
 )
 
 
@@ -38,7 +36,6 @@ def _context(tmp_path: Path) -> BootUnitContext:
         user="ava-user",
         group="ava-group",
         home_dir=tmp_path / "user-home",
-        host_state_dir=tmp_path / "private-host-state",
     )
 
 
@@ -64,7 +61,7 @@ def test_render_unit_states_the_boot_policy(ctx: BootUnitContext) -> None:
     assert f"PIDFile={boot_unit.root_pid_path(ctx.home)}" in unit
 
 
-def test_render_unit_binds_home_checkout_and_host_state_dir(ctx: BootUnitContext) -> None:
+def test_render_unit_binds_home_and_checkout(ctx: BootUnitContext) -> None:
     unit = render_unit(ctx)
     # Boot ordering + identity: the unit runs as the cluster's user, in the
     # checkout, with the checkout venv on PATH.
@@ -76,7 +73,7 @@ def test_render_unit_binds_home_checkout_and_host_state_dir(ctx: BootUnitContext
     # while the literal rest-of-line form keeps spaces working.
     assert f'WorkingDirectory="{ctx.repo}"' not in unit
     assert f'Environment="AVA_HOME={ctx.home}"' in unit
-    assert f'Environment="AVA_HOST_STATE_DIR={ctx.host_state_dir}"' in unit
+    assert "AVA_HOST_STATE_DIR" not in unit
     assert f'Environment="HOME={ctx.home_dir}"' in unit
     assert f'Environment="PATH={ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"' in unit
     # `:` disables $-expansion in the Exec line; the script path is quoted.
@@ -84,9 +81,7 @@ def test_render_unit_binds_home_checkout_and_host_state_dir(ctx: BootUnitContext
 
 
 def test_render_unit_quotes_without_shell_expansion(ctx: BootUnitContext) -> None:
-    odd = BootUnitContext(
-        ctx.home, Path('/repo "odd" % $x'), ctx.user, ctx.group, ctx.home_dir, ctx.host_state_dir
-    )
+    odd = BootUnitContext(ctx.home, Path('/repo "odd" % $x'), ctx.user, ctx.group, ctx.home_dir)
     unit = render_unit(odd)
     assert 'ExecStart=:"/repo \\"odd\\" %% $x/.venv/bin/python" "-m" "cli.main" "start"' in unit
     assert "AVA_BOOT_PROXY_WAIT" not in unit
@@ -94,12 +89,7 @@ def test_render_unit_quotes_without_shell_expansion(ctx: BootUnitContext) -> Non
 
 def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
     bad = BootUnitContext(
-        ctx.home,
-        Path("/repo\nExecStart=/bad"),
-        ctx.user,
-        ctx.group,
-        ctx.home_dir,
-        ctx.host_state_dir,
+        ctx.home, Path("/repo\nExecStart=/bad"), ctx.user, ctx.group, ctx.home_dir
     )
     with pytest.raises(ValueError, match="control characters"):
         render_unit(bad)
@@ -138,18 +128,18 @@ def test_unit_enabled_reads_the_one_systemctl_seam(
 
     monkeypatch.setattr(boot_unit, "systemd_running", lambda: True)
     monkeypatch.setattr(boot_unit, "_systemctl", fake_systemctl)
-    assert unit_enabled(ctx.home) is True
-    assert calls == [("is-enabled", unit_name(ctx.home))]
+    assert unit_enabled() is True
+    assert calls == [("is-enabled", "ava-boot.service")]
 
     # Anything but the literal word "enabled" is not ownership.
     def disabled(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 0, "disabled\n", "")
 
     monkeypatch.setattr(boot_unit, "_systemctl", disabled)
-    assert unit_enabled(ctx.home) is False
+    assert unit_enabled() is False
     # A host without systemd can never have an enabled unit.
     monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
-    assert unit_enabled(ctx.home) is False
+    assert unit_enabled() is False
 
 
 # --- install / uninstall / status --------------------------------------------
@@ -162,7 +152,7 @@ def _install_seams(
     monkeypatch.setattr(boot_unit, "systemd_running", lambda: True)
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", tmp_path / "etc-systemd")
 
-    def unit_enabled(_home: Path | None = None) -> bool:
+    def unit_enabled() -> bool:
         return enabled
 
     monkeypatch.setattr(boot_unit, "unit_enabled", unit_enabled)
@@ -191,7 +181,7 @@ def test_install_refuses_without_systemd(
         install(context=ctx)
 
 
-def test_uninstall_removes_only_this_homes_paths(
+def test_uninstall_removes_only_the_boot_units_paths(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     units = tmp_path / "etc-systemd"
@@ -208,29 +198,32 @@ def test_uninstall_removes_only_this_homes_paths(
 
     monkeypatch.setattr(boot_unit, "privileged", fake_privileged)
 
-    unit = units / unit_name(ctx.home)
+    unit = units / "ava-boot.service"
     unit.write_text(render_unit(ctx))
     foreign = units / "unrelated.service"
     foreign.write_text("y")
-    steps = uninstall(ctx.home)
+    # The egress template unit of the gateway host is not ours, and is named in no command.
+    template = units / "ava-gateway-egress@.service"
+    template.write_text("z")
+    steps = uninstall()
 
-    assert ["systemctl", "disable", "--now", unit_name(ctx.home)] in recorded
+    assert ["systemctl", "disable", "--now", "ava-boot.service"] in recorded
     assert ["rm", "-f", str(unit)] in recorded
     assert ["systemctl", "daemon-reload"] in recorded
-    # Only this home's exact paths; a sibling unit is in no command.
-    assert str(foreign) not in str(recorded)
-    assert foreign.exists()
+    # Only the exact path; a sibling unit is in no command.
+    assert str(foreign) not in str(recorded) and "ava-gateway-egress" not in str(recorded)
+    assert foreign.exists() and template.exists()
     assert steps == [f"removed {unit}"]
 
     # Nothing left to remove -> a no-op (the mocked `rm -f` never ran for real).
     unit.unlink()
     before = list(recorded)
-    assert uninstall(ctx.home) == []
+    assert uninstall() == []
     assert recorded == before
     # A non-Linux host never touches /etc, whatever is on disk.
     unit.write_text(render_unit(ctx))
     monkeypatch.setattr(boot_unit, "IS_LINUX", False)
-    assert uninstall(ctx.home) == []
+    assert uninstall() == []
     assert unit.exists()
 
 
@@ -267,10 +260,10 @@ def test_uninstall_leaves_no_failed_record_behind(
     """A boot unit whose stop failed stays listed as `not-found failed` after its
     file is removed and the manager reloaded (A/B/A run 6's destroy)."""
     units, recorded = _manager_reports(monkeypatch, tmp_path, "failed")
-    name = unit_name(ctx.home)
+    name = "ava-boot.service"
     (units / name).write_text(render_unit(ctx))
 
-    steps = uninstall(ctx.home)
+    steps = uninstall()
 
     reset = ["systemctl", "reset-failed", name]
     assert recorded.index(["systemctl", "daemon-reload"]) < recorded.index(reset)
@@ -278,7 +271,7 @@ def test_uninstall_leaves_no_failed_record_behind(
     # A residue a previous destroy left (no file any more) is cleared too.
     (units / name).unlink()  # what the mocked `rm -f` would have done
     recorded.clear()
-    assert uninstall(ctx.home) == [f"cleared the failed record of {name}"]
+    assert uninstall() == [f"cleared the failed record of {name}"]
     assert recorded == [reset]
 
 
@@ -286,7 +279,7 @@ def test_uninstall_resets_nothing_it_did_not_leave_failed(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _units, recorded = _manager_reports(monkeypatch, tmp_path, "inactive")
-    assert uninstall(ctx.home) == []
+    assert uninstall() == []
     assert recorded == []
 
 
@@ -304,11 +297,11 @@ def test_privileged_translates_a_missing_sudo(monkeypatch: pytest.MonkeyPatch) -
         boot_unit.privileged(["true"])
 
 
-def test_paths_and_names_are_home_scoped(tmp_path: Path) -> None:
-    first, second = tmp_path / "a", tmp_path / "b"
-    assert unit_name(first) == f"ava-boot.{home_slug(first)}.service"
-    assert unit_name(first) != unit_name(second)
-    assert boot_unit.unit_path(first) == boot_unit.SYSTEM_UNIT_DIR / unit_name(first)
+def test_the_boot_unit_carries_no_home() -> None:
+    """One unit per host: its name and path name no home, so the gate of
+    `owns_os_jobs` is what keeps a scratch home off it."""
+    assert boot_unit.UNIT_NAME == "ava-boot.service"
+    assert boot_unit.unit_path() == boot_unit.SYSTEM_UNIT_DIR / "ava-boot.service"
 
 
 def test_interactive_start_never_publishes(
@@ -321,7 +314,7 @@ def test_interactive_start_never_publishes(
     def interactive(_pid: int) -> str:
         return "/user.slice/interactive.scope"
 
-    def no_manager(_home: Path) -> dict[str, str]:
+    def no_manager() -> dict[str, str]:
         pytest.fail("interactive")
 
     monkeypatch.setattr(boot_unit, "process_cgroup", interactive)
@@ -336,9 +329,9 @@ def test_root_publication_binds_native_custody(
     from base.native_process.ownership import OwnedProcess
 
     owner = OwnedProcess(123, 1.0, 1)
-    expected = f"/system.slice/{unit_name(ctx.home)}"
+    expected = "/system.slice/ava-boot.service"
 
-    def in_unit(_home: Path) -> bool:
+    def in_unit() -> bool:
         return True
 
     def cgroup(_pid: int) -> str:
@@ -349,7 +342,7 @@ def test_root_publication_binds_native_custody(
     def live(_self: OwnedProcess) -> bool:
         return next(alive)
 
-    def properties(_home: Path) -> dict[str, str]:
+    def properties() -> dict[str, str]:
         return {
             "MainPID": "0",
             "ControlPID": "999" if fault == "manager" else str(boot_unit.os.getpid()),
@@ -379,7 +372,7 @@ def test_uninstall_failed_stop_preserves_unit(
 ) -> None:
     monkeypatch.setattr(boot_unit, "IS_LINUX", True)
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", tmp_path)
-    target = boot_unit.unit_path(ctx.home)
+    target = boot_unit.unit_path()
     target.write_text(render_unit(ctx))
     calls: list[list[str]] = []
 
@@ -389,9 +382,9 @@ def test_uninstall_failed_stop_preserves_unit(
 
     monkeypatch.setattr(boot_unit, "privileged", fail_stop)
     with pytest.raises(RuntimeError, match="stop failed"):
-        uninstall(ctx.home)
+        uninstall()
     assert target.exists()
-    assert calls == [["systemctl", "disable", "--now", unit_name(ctx.home)]]
+    assert calls == [["systemctl", "disable", "--now", "ava-boot.service"]]
 
 
 def test_install_enables_native_unit_without_recursively_starting(
@@ -400,33 +393,21 @@ def test_install_enables_native_unit_without_recursively_starting(
     recorded, installed = _install_seams(monkeypatch, tmp_path, enabled=False)
     steps = install(context=ctx)
     assert installed["content"] == render_unit(ctx)
-    assert ["systemctl", "enable", unit_name(ctx.home)] in recorded
-    assert ["systemctl", "start", unit_name(ctx.home)] not in recorded
+    assert ["systemctl", "enable", "ava-boot.service"] in recorded
+    assert ["systemctl", "start", "ava-boot.service"] not in recorded
     assert not any("crontab" in arg for call in recorded for arg in call)
-    assert f"enabled {unit_name(ctx.home)}" in steps
+    assert "enabled ava-boot.service" in steps
 
 
 def test_unchanged_enabled_unit_never_restarts_or_rewrites(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recorded, _installed = _install_seams(monkeypatch, tmp_path, enabled=True)
-    target = boot_unit.unit_path(ctx.home)
+    target = boot_unit.unit_path()
     target.parent.mkdir()
     target.write_text(render_unit(ctx))
     assert install(context=ctx) == []
     assert recorded == []
-
-
-def test_default_context_carries_the_resolved_host_state_dir(
-    ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import base.paths as paths_module
-
-    def _host_state_dir() -> Path:
-        return ctx.host_state_dir
-
-    monkeypatch.setattr(paths_module, "host_state_dir", _host_state_dir)
-    assert boot_unit._default_context().host_state_dir == ctx.host_state_dir
 
 
 @pytest.mark.parametrize("verb", ["install", "uninstall", "status"])

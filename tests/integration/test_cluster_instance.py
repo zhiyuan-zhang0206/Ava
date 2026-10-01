@@ -106,12 +106,11 @@ def _free_port() -> int:
 
 @pytest.fixture()
 def isolated_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[int, int]]:
-    """A temp $AVA_HOME + host state dir + cluster identity, yielding (pg_port,
+    """A temp $AVA_HOME + cluster identity, yielding (pg_port,
     redis_port). Tears the instance down on exit."""
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("AVA_HOME", str(home))
-    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _BEARER)
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", _REDIS_ADMIN)
     monkeypatch.setattr(settings.data_plane, "events_channel", "ava:tinst:events")
