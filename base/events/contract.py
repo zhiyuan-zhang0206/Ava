@@ -103,7 +103,6 @@ from base.events.system import OtlpBackendDisabled as OtlpBackendDisabled
 from base.events.system import OtlpBackendRecovered as OtlpBackendRecovered
 from base.events.system import PageServeDirMissing as PageServeDirMissing
 from base.events.system import PassiveRecall as PassiveRecall
-from base.events.system import PitrRemoteInventory as PitrRemoteInventory
 from base.events.system import PluginLoadFailed as PluginLoadFailed
 from base.events.system import ProcessExit as ProcessExit
 from base.events.system import PromQueryBudget as PromQueryBudget
