@@ -282,13 +282,27 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return files
 
 
-def _files_to_scan(argv: list[str]) -> list[Path]:
-    """Explicit paths as given; otherwise every file the default scan reads."""
+def _files_to_scan(argv: list[str], scope: frozenset[str] | None) -> list[Path]:
+    """Explicit paths as given; otherwise every file the default scan reads, narrowed to the
+    `--only` changed files when `scope` names them."""
     if argv:
         return _iter_py_files([Path(a).resolve() for a in argv])
     targets = [_REPO_ROOT / d for d in _SCAN_DIRS] + [_REPO_ROOT / "tests"]
     targets += [_REPO_ROOT / d for d in _TEST_ONLY_DIRS if (_REPO_ROOT / d).is_dir()]
-    return [p for p in _iter_py_files(targets) if _in_default_scope(p)]
+    default = [p for p in _iter_py_files(targets) if _in_default_scope(p)]
+    return lint_common.restrict(default, scope, _REPO_ROOT)
+
+
+def _rel_label(path: Path) -> str:
+    """Repo-relative posix path, or the absolute path of a file outside the repo."""
+    try:
+        return path.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+# The config registry decides which env names Rule 2 treats as Settings-managed, for every test.
+_RULE_INPUTS = ("base/config/", "base/host/env/")
 
 
 def _in_default_scope(path: Path) -> bool:
@@ -304,22 +318,27 @@ def _in_default_scope(path: Path) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
-    # argv non-empty = pre-commit passed the changed-file list; empty = default scan of all _SCAN_DIRS + tests/.
+    argv, only = lint_common.split_only(argv)
+    # argv non-empty = explicit paths; empty = default scan of all _SCAN_DIRS + tests/, or
+    # the `--only` changed files (the commit hook) under that same scope.
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    py_files = _files_to_scan(argv)
-    managed_envs = _settings_managed_aliases()
+    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_RULE_INPUTS)
+    py_files = _files_to_scan(argv, scope)
+    # Only Rule 2 (tests) reads the config registry, and importing it is the slow part of a
+    # run that judges a few non-test files.
+    managed_envs: frozenset[str] = (
+        _settings_managed_aliases()
+        if any(_is_test_file(_rel_label(path)) for path in py_files)
+        else frozenset[str]()
+    )
 
     total_violations = 0
     for path in sorted(py_files):
-        try:
-            rel = path.relative_to(_REPO_ROOT).as_posix()
-        except ValueError:
-            # Path not under repo — pre-commit usually passes absolute paths so this is rare; safety net.
-            rel = path.as_posix()
+        rel = _rel_label(path)
         violations = _scan_file(path, rel, managed_envs)
         for lineno, content, kind in violations:
             total_violations += 1

@@ -175,3 +175,27 @@ def test_read_at_returns_none_before_the_shard_directory_ever_existed(
     _git(tmp_path, "commit", "--quiet", "-m", "Before the shard scheme existed")
 
     assert baseline_shards.read_at(tmp_path, "HEAD") is None
+
+
+def test_read_at_returns_every_committed_shard_byte_for_byte(tmp_path: pathlib.Path) -> None:
+    """The shards come back from one batched read; each must match what `git show`
+    prints for that file, multi-byte text and a trailing-newline-free shard included,
+    and the rules file and README stay out."""
+    directory = tmp_path / baseline_shards.SHARD_DIR
+    directory.mkdir(parents=True)
+    contents = {
+        "agent.json": '{"files": {"agent/a.py": 801}}\n',
+        "base.db.json": '{"files": {"base/db/é.py": 900}}',  # no final newline
+        "scripts.json": '{"directories": {"scripts": 30}}\n',
+    }
+    for name, text in contents.items():
+        (directory / name).write_text(text, encoding="utf-8")
+    (directory / baseline_shards.RULES_FILE).write_text('{"patch_targets": 2}\n', encoding="utf-8")
+    (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
+    _git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
+    _git(tmp_path, "commit", "--quiet", "-m", "Three shards")
+
+    assert baseline_shards.read_at(tmp_path, "HEAD") == {
+        name.removesuffix(".json"): text for name, text in contents.items()
+    }
