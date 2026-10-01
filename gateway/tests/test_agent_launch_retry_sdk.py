@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 import ava
-from tests.ava.test_agents_sdk import _sdk_via_inprocess_gateway, _spawn_agent
+from gateway.tests.test_agents_sdk import _sdk_via_inprocess_gateway, _spawn_agent
 
 
 @pytest.mark.usefixtures(_sdk_via_inprocess_gateway.__name__)

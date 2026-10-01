@@ -158,6 +158,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "agent/tests/test_external.py",
             "gateway/tests/test_presets_sdk.py",
             "gateway/tests/test_ui.py",
+            "gateway/tests/test_agents_sdk.py",
         ),
         65,
     ),

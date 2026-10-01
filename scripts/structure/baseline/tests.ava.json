@@ -1,7 +1,4 @@
 {
-  "files": {
-    "tests/ava/test_agents_sdk.py": 1162
-  },
   "patch_targets": {
     "tests/ava/sdk_surface/test_metering.py::ava.sdk_surface.metering._instrument_targets": 2,
     "tests/ava/sdk_surface/test_validation.py::ava.self._publish_self_inbound_wake": 1,
@@ -15,14 +12,11 @@
     "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._entry_path": 2,
     "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._upsert_index": 1,
     "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._write_atomically": 1,
-    "tests/ava/test_agents_sdk.py::ava.gateway_client.transport._client": 1,
-    "tests/ava/test_agents_sdk.py::gateway.agents.router._forward_spawn_to_remote": 1,
     "tests/ava/test_external_integration.py::ava.gateway_client.transport._client": 2
   },
   "tests_location": {
     "tests/ava/sdk_surface/test_metering.py::top-level": 1,
     "tests/ava/sdk_surface/test_validation.py::top-level": 1,
-    "tests/ava/test_agents_sdk.py::top-level": 1,
     "tests/ava/test_external_integration.py::top-level": 1
   }
 }
