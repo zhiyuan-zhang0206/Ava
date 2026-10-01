@@ -79,7 +79,7 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
 @pytest.mark.parametrize(
     "argv",
     [
-        # What a read-only list once let through.
+        # Commands that only read are refused like the rest.
         ["status"],
         ["maintenance", "status"],
         ["cluster", "status"],

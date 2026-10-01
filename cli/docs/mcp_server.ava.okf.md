@@ -57,8 +57,9 @@ instruction ending. Tool schemas still come from the local function signatures.
 - **Identity is not a parameter.** `base.cluster.machine.gateway_api_base` +
   `gateway_auth_headers` resolve the gateway and bearer of the home the running
   process resolves (`AVA_HOME`, else `~/.ava`) — the same rule as every CLI verb,
-  so a bare `ava` and a worktree's `.venv/bin/ava` both serve the cluster
-  `$AVA_HOME` names. There is no cluster argument to get wrong.
+  so a bare `ava` serves the cluster `$AVA_HOME` names (a worktree's `.venv/bin/ava`
+  is refused against a home that carries its own `source`). There is no cluster
+  argument to get wrong.
 - **stdout is the wire.** Under stdio transport a stray `print()` corrupts the
   JSON-RPC stream. The mcp SDK logs through a stderr `RichHandler` and
   `base.log` adds only stderr sinks, which is what makes this path safe.

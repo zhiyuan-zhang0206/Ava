@@ -124,7 +124,7 @@ a later bundle, with `install-unit`):
 # on the gateway (its checkout's CLI), for one unit:
 ava cluster db-authority issue-unit --machine <name> --home <unit $AVA_HOME> --out <bundle>
 # carry the 0600 bundle to the unit and the printed transport key separately; then, on the
-# unit (its checkout's `.venv/bin/ava` — the home's own CLI link does not exist until its first start):
+# unit (its checkout's `.venv/bin/ava` — the host's bare `ava` is linked by its first start):
 read -rs AVA_DB_CAPABILITY_KEY && export AVA_DB_CAPABILITY_KEY
 .venv/bin/ava init --db-capability <bundle>         # first join, plus the identity flags
 ava cluster db-authority install-unit <bundle>      # a later bundle: stop the unit first, start it after
