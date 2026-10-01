@@ -40,7 +40,6 @@
     "tests/services/test_pitr_base_candidate.py::services.pitr.base_backup.candidate._load_facts": 3,
     "tests/services/test_pitr_base_candidate.py::services.pitr.base_backup.candidate._verify_candidate": 2,
     "tests/services/test_pitr_base_scheduler.py::services.pitr.retention.scheduler._logical_retention": 1,
-    "tests/services/test_pitr_native_custody.py::services.backup_scheduler.operation.custody._prune_quarantine": 1,
     "tests/services/test_pitr_retention_sidecars.py::services.pitr.stores.baidu.inventory.BaiduRetentionInventoryReader._store": 1,
     "tests/services/test_pitr_uploader.py::services.pitr.wal.uploader.PitrUploader._write_ack": 2
   },

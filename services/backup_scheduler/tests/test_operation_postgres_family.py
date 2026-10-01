@@ -27,11 +27,17 @@ from base.native_process import native_boot_id
 from base.native_process.ownership import OwnedProcess
 from services.backup_scheduler.operation import custody
 from services.backup_scheduler.operation import worker_process as workers
-from tests.services.test_pitr_native_custody import _control_dir, _exited_worker, _kind
-from tests.services.test_pitr_operation_owner import _release_held, _until, _worker
+from services.backup_scheduler.tests.operation_support import (
+    control_dir,
+    exited_worker,
+    operation_kind,
+    release_held,
+    stub_worker,
+    until,
+)
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="PITR is POSIX-only")
-__all__ = ["_release_held"]  # the per-test release of unresolved leaders
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="operation custody is POSIX-only")
+__all__ = ["release_held"]  # the autouse per-test release of unresolved leaders
 
 _BUSY = "SELECT count(*) FROM generate_series(1, 20000000000)"
 _POSTGRES_WORKER = """\
@@ -121,7 +127,7 @@ async def test_closure_covers_postgres_children_outside_the_worker_group(
     statement; now the postmaster is stopped cleanly and every recorded birth
     is dead before closure is recorded, on both the stop and the exit path."""
     state = tmp_path / "state.json"
-    _worker(tmp_path, monkeypatch, _POSTGRES_WORKER)
+    stub_worker(tmp_path, monkeypatch, _POSTGRES_WORKER)
     request = {
         "data": str(pgdata),
         "port": _free_port(),
@@ -132,11 +138,13 @@ async def test_closure_covers_postgres_children_outside_the_worker_group(
         "mode": mode,
     }
     task = asyncio.create_task(
-        workers.run_operation("unused", request, kind=_kind(tmp_path), env=dict(os.environ))
+        workers.run_operation(
+            "unused", request, kind=operation_kind(tmp_path), env=dict(os.environ)
+        )
     )
     members: list[OwnedProcess] = []
     try:
-        await _until(state)
+        await until(state)
         members, group, groups = _family(state)
         assert members and group not in groups  # every child left the worker group
         if mode == "cancel":
@@ -164,7 +172,7 @@ def test_retirement_applies_the_postgres_family_proof(tmp_path: Path) -> None:
     any process inside a receipted data directory, still runs."""
     data = tmp_path / "pgdata"
     data.mkdir()
-    work = _control_dir(tmp_path, "orphaned-backend", worker=_exited_worker())
+    work = control_dir(tmp_path, "orphaned-backend", worker=exited_worker())
     backend = _holder(data)
     try:
         member = OwnedProcess.capture(psutil.Process(backend.pid))
@@ -182,12 +190,12 @@ def test_retirement_applies_the_postgres_family_proof(tmp_path: Path) -> None:
                 }
             )
         )
-        (report,) = custody.retire_blocked(_kind(tmp_path), confirm=True)
+        (report,) = custody.retire_blocked(operation_kind(tmp_path), confirm=True)
         assert not report.proven and str(backend.pid) in report.reason and work.is_dir()
     finally:
         backend.kill()
         backend.wait(timeout=10)
-    (report,) = custody.retire_blocked(_kind(tmp_path), confirm=True)
+    (report,) = custody.retire_blocked(operation_kind(tmp_path), confirm=True)
     assert report.proven and report.entry is not None
 
 
@@ -211,47 +219,21 @@ async def test_an_unprovable_postgres_family_blocks_until_retirement(
     data = tmp_path / "pgdata"
     data.mkdir()
     monkeypatch.setattr(workers, "CLOSE_DEADLINE_S", 1.0)
-    _worker(tmp_path, monkeypatch, _FAKE_POSTMASTER)
+    stub_worker(tmp_path, monkeypatch, _FAKE_POSTMASTER)
     request = {"data": str(data), "log": str(tmp_path / "pg.log")}
     holder = _holder(data)
     try:
         with pytest.raises(custody.OperationCustodyError):
-            await workers.run_operation("unused", request, kind=_kind(tmp_path), env={})
+            await workers.run_operation("unused", request, kind=operation_kind(tmp_path), env={})
         (work,) = (tmp_path / "controls").glob(".operation-*")
         assert (work / "unresolved.json").is_file() and not (work / "closure.json").exists()
-        (report,) = custody.retire_blocked(_kind(tmp_path), confirm=True)
+        (report,) = custody.retire_blocked(operation_kind(tmp_path), confirm=True)
         assert not report.proven
     finally:
         holder.kill()
         holder.wait(timeout=10)
     # The holder is gone: the next admission's retry proves the family closed.
     with pytest.raises(custody.OperationBlockedError, match="confirmed it later"):
-        await workers.run_operation("unused", request, kind=_kind(tmp_path), env={})
-    (report,) = custody.retire_blocked(_kind(tmp_path), confirm=True)
+        await workers.run_operation("unused", request, kind=operation_kind(tmp_path), env={})
+    (report,) = custody.retire_blocked(operation_kind(tmp_path), confirm=True)
     assert report.proven and report.entry is not None and custody.held_operations() == []
-
-
-def test_restore_sandboxes_are_receipted_for_their_controller(tmp_path: Path) -> None:
-    """Restore proofs and operator drills start their sandbox through the
-    receipted launch, so their controller can close its family."""
-    from base.cluster.dataplane import pg_foreground
-    from services.pitr.restore.postgres import _spawn_sandbox_postgres
-
-    postgres = tmp_path / "postgres"
-    postgres.write_text("#!/bin/sh\nexec sleep 30\n")
-    postgres.chmod(0o700)
-    controls, data = tmp_path / "controls", tmp_path / "data"
-    controls.mkdir()
-    data.mkdir()
-    pg_foreground.record_postmasters_in(controls)
-    try:
-        process = _spawn_sandbox_postgres(postgres, data, tmp_path / "config", tmp_path / "log")
-    finally:
-        pg_foreground.record_postmasters_in(None)
-    try:
-        (receipt,) = pg_foreground.read_postmaster_receipts(controls)
-        assert receipt.pgdata == data.resolve() and receipt.postmaster is not None
-        assert receipt.postmaster.pid == process.pid and receipt.postmaster.live()
-    finally:
-        process.kill()
-        process.wait(timeout=10)

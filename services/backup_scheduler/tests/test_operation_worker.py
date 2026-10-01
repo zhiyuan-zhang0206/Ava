@@ -13,8 +13,6 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Iterator
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -26,55 +24,23 @@ from base.native_process.exec_domain import ExecProcessDomain
 from base.native_process.ownership import OwnedProcess
 from services.backup_scheduler.operation import custody
 from services.backup_scheduler.operation import worker_process as workers
-from services.backup_scheduler.operation.custody import OperationKind
+from services.backup_scheduler.tests.operation_support import (
+    entries,
+    operation_kind,
+    release_held,
+    stub_worker,
+    until,
+)
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="PITR is POSIX-only")
-
-
-@pytest.fixture(autouse=True)
-def _release_held() -> Iterator[None]:
-    """Unresolved leaders are process-lifetime state; close them per test."""
-    yield
-    with custody._HELD_LOCK:
-        held = list(custody._HELD)
-        custody._HELD.clear()
-    for item in held:
-        if item.process.returncode is None:
-            with contextlib.suppress(Exception):
-                os.killpg(item.process.pid, signal.SIGKILL)
-            item.process.wait(timeout=5)
-
-
-def _kind(tmp_path: Path, **changes: Any) -> OperationKind:
-    return OperationKind("test", tmp_path / "controls", tmp_path / "quarantine", **changes)
-
-
-def _entries(tmp_path: Path, kind: str | None = None) -> list[Path]:
-    """Quarantined operations of the test kind, or of one production kind."""
-    root = tmp_path / "quarantine"
-    return custody.quarantine_entries(root if kind is None else root / kind)
-
-
-def _worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str):
-    script = tmp_path / "worker.py"
-    script.write_text("import os,sys,json,time,subprocess\nfrom pathlib import Path\n" + code)
-    launch = ExecProcessDomain.launch_posix
-    children: list[tuple[subprocess.Popen[bytes], ExecProcessDomain]] = []
-
-    def spawn(argv: list[str], **kwargs: Any):
-        child = launch([sys.executable, "-I", "-B", str(script), *argv[-2:]], **kwargs)
-        children.append(child)
-        return child
-
-    monkeypatch.setattr(ExecProcessDomain, "launch_posix", spawn)
-    return children
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="operation custody is POSIX-only")
+__all__ = ["release_held"]  # the autouse per-test release of unresolved leaders
 
 
 async def test_result_is_accepted_only_after_inherited_child_closes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pidfile = tmp_path / "descendant"
-    children = _worker(
+    children = stub_worker(
         tmp_path,
         monkeypatch,
         "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])\n"
@@ -82,14 +48,14 @@ async def test_result_is_accepted_only_after_inherited_child_closes(
         "Path(sys.argv[2]).write_text(json.dumps({'group':os.getpgrp()}))\n",
     )
     completed = await workers.run_operation(
-        "unused", {}, kind=_kind(tmp_path), env=dict(os.environ)
+        "unused", {}, kind=operation_kind(tmp_path), env=dict(os.environ)
     )
     pid = int(pidfile.read_text())
     assert not psutil.pid_exists(pid) or psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
     assert completed.result["group"] == children[0][0].pid
     assert children[0][0].returncode == 0
     await completed.commit(lambda: None)
-    assert not completed.work.exists() and not _entries(tmp_path)
+    assert not completed.work.exists() and not entries(tmp_path)
 
 
 @pytest.mark.parametrize("payload,code", [("{}", 3), ("invalid", 0), ("[]", 0), (None, 0)])
@@ -97,12 +63,14 @@ async def test_proven_closed_failure_quarantines_evidence_and_next_run_proceeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str | None, code: int
 ) -> None:
     write = "" if payload is None else f"Path(sys.argv[2]).write_text({payload!r});"
-    children = _worker(tmp_path, monkeypatch, f"{write}sys.exit({code})\n")
+    children = stub_worker(tmp_path, monkeypatch, f"{write}sys.exit({code})\n")
     with pytest.raises((RuntimeError, TypeError)) as caught:
-        await workers.run_operation("unused", {}, kind=_kind(tmp_path), env=dict(os.environ))
+        await workers.run_operation(
+            "unused", {}, kind=operation_kind(tmp_path), env=dict(os.environ)
+        )
     assert any("operation quarantined" in note for note in caught.value.__notes__)
     assert not list((tmp_path / "controls").glob(".operation-*"))
-    (entry,) = _entries(tmp_path)
+    (entry,) = entries(tmp_path)
     assert (entry / "request.json").is_file() and (entry / "stderr.log").is_file()
     assert json.loads((entry / "closure.json").read_text())["returncode"] == code
     assert "Error" in (entry / "failure.txt").read_text()
@@ -113,15 +81,17 @@ async def test_proven_closed_failure_quarantines_evidence_and_next_run_proceeds(
     assert children[0][0].returncode == code
     # Proven closure never blocks the kind: the next operation starts.
     with pytest.raises((RuntimeError, TypeError)):
-        await workers.run_operation("unused", {}, kind=_kind(tmp_path), env=dict(os.environ))
-    assert len(children) == 2 and len(_entries(tmp_path)) == 2
+        await workers.run_operation(
+            "unused", {}, kind=operation_kind(tmp_path), env=dict(os.environ)
+        )
+    assert len(children) == 2 and len(entries(tmp_path)) == 2
 
 
 async def test_cancel_closes_group_without_touching_unrelated_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     marker = tmp_path / "started"
-    children = _worker(
+    children = stub_worker(
         tmp_path,
         monkeypatch,
         "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])\n"
@@ -130,7 +100,7 @@ async def test_cancel_closes_group_without_touching_unrelated_process(
     unrelated = subprocess.Popen([sys.executable, "-I", "-B", "-c", "import time;time.sleep(60)"])
     identity = OwnedProcess.capture(psutil.Process(unrelated.pid))
     task = asyncio.create_task(
-        workers.run_operation("unused", {}, kind=_kind(tmp_path), env=dict(os.environ))
+        workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env=dict(os.environ))
     )
     try:
         deadline = time.monotonic() + 5
@@ -145,7 +115,7 @@ async def test_cancel_closes_group_without_touching_unrelated_process(
         assert children[0][0].returncode is not None
         assert identity.live()
         # A routine stop with proven closure quarantines; it never blocks.
-        (entry,) = _entries(tmp_path)
+        (entry,) = entries(tmp_path)
         assert (entry / "request.json").is_file()
     finally:
         if not task.done():
@@ -158,7 +128,7 @@ async def test_cancel_closes_group_without_touching_unrelated_process(
 async def test_signal_failure_keeps_live_direct_owner_and_controls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    children = _worker(tmp_path, monkeypatch, "time.sleep(60)\n")
+    children = stub_worker(tmp_path, monkeypatch, "time.sleep(60)\n")
     killpg = os.killpg
 
     def deny(pgid: int, sig: int) -> None:
@@ -168,7 +138,9 @@ async def test_signal_failure_keeps_live_direct_owner_and_controls(
     monkeypatch.setattr(os, "killpg", deny)
     try:
         with pytest.raises(custody.OperationCustodyError) as caught:
-            await workers.run_operation("unused", {}, kind=_kind(tmp_path), env={}, timeout_s=0.1)
+            await workers.run_operation(
+                "unused", {}, kind=operation_kind(tmp_path), env={}, timeout_s=0.1
+            )
         assert isinstance(caught.value.__cause__, TimeoutError)
         assert "private group signal refused" in "".join(caught.value.__notes__)
         process, domain = children[0]
@@ -177,17 +149,17 @@ async def test_signal_failure_keeps_live_direct_owner_and_controls(
         assert (work / "unresolved.json").is_file() and (work / "request.json").is_file()
         assert custody.held_operations() == [work]
         with pytest.raises(custody.OperationBlockedError, match="operations retire"):
-            await workers.run_operation("unused", {}, kind=_kind(tmp_path), env={})
+            await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
         assert len(children) == 1
-        (report,) = custody.retire_blocked(_kind(tmp_path), confirm=True)
+        (report,) = custody.retire_blocked(operation_kind(tmp_path), confirm=True)
         assert not report.proven and "still present" in report.reason
         # Once signals work again, the next admission's retry proves closure,
         # yet release stays an explicit operator retirement.
         monkeypatch.setattr(os, "killpg", killpg)
         with pytest.raises(custody.OperationBlockedError, match="confirmed it later"):
-            await workers.run_operation("unused", {}, kind=_kind(tmp_path), env={})
+            await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
         assert process.returncode is not None and custody.held_operations() == []
-        (report,) = custody.retire_blocked(_kind(tmp_path), confirm=True)
+        (report,) = custody.retire_blocked(operation_kind(tmp_path), confirm=True)
         assert report.entry is not None and not work.exists()
     finally:
         monkeypatch.setattr(os, "killpg", killpg)
@@ -217,7 +189,7 @@ async def test_unresolved_leader_stays_unreaped_after_the_error_is_dropped(
     monkeypatch.setattr(ExecProcessDomain, "launch_posix", spawn)
     monkeypatch.setattr(ExecProcessDomain, "close_confirmed", refuse)
     with contextlib.suppress(custody.OperationCustodyError):
-        await workers.run_operation("unused", {}, kind=_kind(tmp_path), env={})
+        await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
     gc.collect()
     subprocess.run([sys.executable, "-c", "pass"], check=True)  # runs subprocess._cleanup
     assert psutil.Process(pids[0]).status() == psutil.STATUS_ZOMBIE
@@ -230,7 +202,7 @@ async def test_birth_capture_failure_closes_the_unowned_launch(
     from base.native_process.exec_domain import ExecDomainBirthError
 
     marker = tmp_path / "descendant"
-    _worker(
+    stub_worker(
         tmp_path,
         monkeypatch,
         "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])\n"
@@ -246,12 +218,12 @@ async def test_birth_capture_failure_closes_the_unowned_launch(
 
     monkeypatch.setattr(OwnedProcess, "capture", classmethod(deny))
     with pytest.raises(ExecDomainBirthError) as caught:
-        await workers.run_operation("unused", {}, kind=_kind(tmp_path), env={})
+        await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
     monkeypatch.setattr(OwnedProcess, "capture", capture)
     assert isinstance(caught.value.__cause__, psutil.AccessDenied)
     assert caught.value.proc.returncode is not None
     assert _gone(_pids(marker))
-    (entry,) = _entries(tmp_path)
+    (entry,) = entries(tmp_path)
     assert json.loads((entry / "worker.json").read_text())["native"] is None
     assert (entry / "request.json").is_file() and (entry / "closure.json").is_file()
 
@@ -266,7 +238,7 @@ def _scheduled_dump(
     from services import backup
     from services.backup_scheduler import worker
 
-    children = _worker(
+    children = stub_worker(
         tmp_path,
         monkeypatch,
         f"artifact=Path(sys.argv[2]).parent/'artifact'/{_DUMP!r}\n"
@@ -361,27 +333,20 @@ async def test_scheduled_commit_failure_keeps_the_staged_artifact(
 async def test_unretired_controls_refuse_fresh_launch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    children = _worker(tmp_path, monkeypatch, "time.sleep(60)\n")
+    children = stub_worker(tmp_path, monkeypatch, "time.sleep(60)\n")
     controls = tmp_path / "controls"
     prior = controls / ".operation-interrupted"
     prior.mkdir(parents=True)
     request = prior / "request.json"
     request.write_bytes(b'{"original":"unknown ownership"}')
     with pytest.raises(custody.OperationBlockedError, match="stopped before proving closure"):
-        await workers.run_operation("unused", {}, kind=_kind(tmp_path), env={})
+        await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
     assert children == []
     assert request.read_bytes() == b'{"original":"unknown ownership"}'
 
 
 def _pids(path: Path) -> list[int]:
     return [int(line) for line in path.read_text().split()] if path.exists() else []
-
-
-async def _until(path: Path) -> None:
-    deadline = time.monotonic() + 10
-    while not path.exists() and time.monotonic() < deadline:
-        await asyncio.sleep(0.01)
-    assert path.exists(), f"{path.name} was never written"
 
 
 def _gone(pids: list[int]) -> bool:
@@ -401,7 +366,7 @@ async def test_late_forks_after_worker_exit_close_before_acceptance(
         " p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])\n"
         f" open({str(log)!r},'a').write(f'{{p.pid}}\\n')\n"
     )
-    children = _worker(
+    children = stub_worker(
         tmp_path,
         monkeypatch,
         f"p=subprocess.Popen([sys.executable,'-c',{forker!r}])\n"
@@ -410,7 +375,7 @@ async def test_late_forks_after_worker_exit_close_before_acceptance(
         "Path(sys.argv[2]).write_text(json.dumps({'late':True}))\n",
     )
     completed = await asyncio.wait_for(
-        workers.run_operation("unused", {}, kind=_kind(tmp_path), env={}), 30
+        workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={}), 30
     )
     group = children[0][0].pid
     try:
@@ -447,7 +412,7 @@ async def test_descendant_holding_worker_output_cannot_delay_acceptance(
     """Worker output is file-backed: no controller read waits for a late writer."""
     marker = tmp_path / "writer"
     writer = "import sys,time\nwhile True:\n sys.stderr.write('late\\n');sys.stderr.flush();time.sleep(.01)\n"
-    _worker(
+    stub_worker(
         tmp_path,
         monkeypatch,
         f"p=subprocess.Popen([sys.executable,'-c',{writer!r}])\n"
@@ -458,7 +423,7 @@ async def test_descendant_holding_worker_output_cannot_delay_acceptance(
     )
     # An EOF wait on the inherited output would never finish while the writer lives.
     completed = await asyncio.wait_for(
-        workers.run_operation("unused", {}, kind=_kind(tmp_path), env={}), 10
+        workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={}), 10
     )
     try:
         assert _gone(_pids(marker))
@@ -471,7 +436,7 @@ async def test_worker_capture_failure_after_birth_closes_group_and_quarantines(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     marker = tmp_path / "descendant"
-    children = _worker(
+    children = stub_worker(
         tmp_path,
         monkeypatch,
         "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])\n"
@@ -486,11 +451,11 @@ async def test_worker_capture_failure_after_birth_closes_group_and_quarantines(
 
     monkeypatch.setattr(custody.NativeProcess, "capture", classmethod(deny))
     with pytest.raises(psutil.AccessDenied) as caught:
-        await workers.run_operation("unused", {}, kind=_kind(tmp_path), env={})
+        await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
     assert any("operation quarantined" in note for note in caught.value.__notes__)
     assert children[0][0].returncode is not None
     assert _gone(_pids(marker))
-    (entry,) = _entries(tmp_path)
+    (entry,) = entries(tmp_path)
     assert (entry / "request.json").is_file()
 
 
@@ -512,12 +477,12 @@ async def test_cancel_lets_worker_unwind_private_cleanup_before_group_close(
 ) -> None:
     started, cleaned = tmp_path / "started", tmp_path / "cleaned"
     ignore = "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if stubborn else ""
-    children = _worker(tmp_path, monkeypatch, _COOPERATIVE.format(ignore=ignore))
+    children = stub_worker(tmp_path, monkeypatch, _COOPERATIVE.format(ignore=ignore))
     request = {"started": str(started), "cleaned": str(cleaned)}
     task = asyncio.create_task(
-        workers.run_operation("unused", request, kind=_kind(tmp_path), env={})
+        workers.run_operation("unused", request, kind=operation_kind(tmp_path), env={})
     )
-    await _until(started)
+    await until(started)
     cancelled = time.monotonic()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -527,7 +492,7 @@ async def test_cancel_lets_worker_unwind_private_cleanup_before_group_close(
     # Cooperative cleanup finishes inside the grace; a stubborn worker is killed after it.
     assert cleaned.exists() is not stubborn
     assert (elapsed >= custody.TERMINATE_GRACE_S) is stubborn
-    (entry,) = _entries(tmp_path)
+    (entry,) = entries(tmp_path)
     assert (entry / "request.json").is_file()
 
 
@@ -536,13 +501,13 @@ async def test_repeated_cancel_during_grace_still_closes_and_stays_cancelled(
 ) -> None:
     started, cleaned = tmp_path / "started", tmp_path / "cleaned"
     ignore = "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-    children = _worker(tmp_path, monkeypatch, _COOPERATIVE.format(ignore=ignore))
+    children = stub_worker(tmp_path, monkeypatch, _COOPERATIVE.format(ignore=ignore))
     request = {"started": str(started), "cleaned": str(cleaned)}
     stop = threading.Event()
     task = asyncio.create_task(
-        workers.run_operation("unused", request, kind=_kind(tmp_path), env={}, stop=stop)
+        workers.run_operation("unused", request, kind=operation_kind(tmp_path), env={}, stop=stop)
     )
-    await _until(started)  # the worker ignores SIGTERM from here on
+    await until(started)  # the worker ignores SIGTERM from here on
     stop.set()
     await asyncio.sleep(0.5)  # the stop was observed; the grace is running
     cancelled = time.monotonic()
@@ -552,7 +517,7 @@ async def test_repeated_cancel_during_grace_still_closes_and_stays_cancelled(
     # The second cancel cuts the grace short but never skips confirmed closure.
     assert time.monotonic() - cancelled < custody.TERMINATE_GRACE_S
     assert children[0][0].returncode is not None and not cleaned.exists()
-    (entry,) = _entries(tmp_path)
+    (entry,) = entries(tmp_path)
     assert (entry / "request.json").is_file()
 
 
@@ -564,14 +529,14 @@ async def test_worker_inherits_no_controller_descriptors(
     os.set_inheritable(read, True)
     os.set_inheritable(write, True)
     listing = "/proc/self/fd" if sys.platform == "linux" else "/dev/fd"
-    _worker(
+    stub_worker(
         tmp_path,
         monkeypatch,
         f"fds=sorted(int(fd) for fd in os.listdir({listing!r}))\n"
         "Path(sys.argv[2]).write_text(json.dumps({'fds':fds}))\n",
     )
     try:
-        completed = await workers.run_operation("unused", {}, kind=_kind(tmp_path), env={})
+        completed = await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
     finally:
         os.close(read)
         os.close(write)
@@ -586,7 +551,7 @@ async def test_spawned_python_child_inherits_the_operation_group(
 ) -> None:
     """A multiprocessing spawn child (the base stream producer's shape) is a member."""
     record = tmp_path / "spawned"
-    children = _worker(
+    children = stub_worker(
         tmp_path,
         monkeypatch,
         "import multiprocessing\n"
@@ -596,146 +561,10 @@ async def test_spawned_python_child_inherits_the_operation_group(
         f" Path({str(record)!r}).write_text(f'{{p.pid}} {{os.getpgid(p.pid)}}')\n"
         " Path(sys.argv[2]).write_text('{}');sys.stdout.flush();os._exit(0)\n",
     )
-    completed = await workers.run_operation("unused", {}, kind=_kind(tmp_path), env={})
+    completed = await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
     pid, group = _pids(record)
     assert group == children[0][0].pid and _gone([pid])
     await completed.commit(lambda: None)
-
-
-def _result_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result: object) -> None:
-    _worker(tmp_path, monkeypatch, f"Path(sys.argv[2]).write_text({json.dumps(result)!r})\n")
-
-
-def _operation_dirs(root: Path) -> list[Path]:
-    return sorted(root.glob(".operation-*"))
-
-
-async def test_deferred_base_candidate_retires_clean_controls(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.native_process.os_platform import LockTimeoutError
-    from services.pitr import base_worker
-
-    monkeypatch.setattr(base_worker, "ava_home", lambda: tmp_path)
-    _result_worker(tmp_path, monkeypatch, {"deferred": "backup_lock", "detail": "busy"})
-    with pytest.raises(LockTimeoutError):
-        await base_worker.run_candidate()
-    assert not _operation_dirs(tmp_path / "physical-backup" / "base-control")
-    assert not _entries(tmp_path / "physical-backup", "base-candidate")
-
-
-async def test_space_deferral_is_clean_and_never_quarantined(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from services.pitr.restore import operation_runtime
-
-    detail = "restore proof deferred: requires 9 bytes but only 1 are free"
-    _result_worker(tmp_path, monkeypatch, {"deferred": "space", "detail": detail})
-    with pytest.raises(custody.OperationDeferred) as caught:
-        await operation_runtime.run_restore_input(_restore_inputs(tmp_path))
-    assert (caught.value.reason, caught.value.detail) == ("space", detail)
-    assert not _operation_dirs(tmp_path / "restore-control")
-    assert not _entries(tmp_path, "restore-proof")
-
-
-async def test_base_commit_failure_after_closure_quarantines_candidate_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A closed zero-exit worker whose commit refuses keeps every control file."""
-    from services.pitr import base_worker
-    from tests.services.test_pitr_base_scheduler import _candidate
-
-    monkeypatch.setattr(base_worker, "ava_home", lambda: tmp_path)
-    candidate = _candidate("20260926T000000Z")
-    _result_worker(tmp_path, monkeypatch, {"candidate_json": candidate.to_json()})
-    root = tmp_path / "physical-backup"
-    owner = root / "base-facts" / f"{candidate.chain_id}.owner.json"
-    owner.parent.mkdir(parents=True)
-    owner.write_text(json.dumps({"chain_id": candidate.chain_id, "native": _other_worker()}))
-    with pytest.raises(RuntimeError, match="another operation worker"):
-        await base_worker.run_candidate()
-    assert not _operation_dirs(root / "base-control")
-    (entry,) = _entries(root, "base-candidate")
-    assert json.loads((entry / "result.json").read_text())["candidate_json"]
-    # Another worker's receipt is never claimed by this operation's quarantine.
-    assert owner.is_file() and not (root / "base-manifests").exists()
-
-
-def _other_worker() -> dict[str, object]:
-    current = custody.NativeProcess.capture(psutil.Process())
-    return replace(current, process=replace(current.process, pid=1)).value()
-
-
-def _restore_inputs(tmp_path: Path):
-    from services.pitr.restore.operation_runtime import RestoreWorkerInput
-    from services.pitr.restore.proof import RestoreSpaceBudget
-    from tests.services.test_pitr_base_scheduler import _candidate
-
-    return RestoreWorkerInput(
-        _candidate("20260926T000000Z").to_json(),
-        tmp_path,
-        tmp_path / "ack",
-        tmp_path / "backup.key",
-        "gcs",
-        (),
-        RestoreSpaceBudget(0, 0, 0),
-        "postgresql://viewer@127.0.0.1:1/ava",
-        "/live/data",
-        Path("/unused/pg_ctl"),
-        Path("/unused/pg_verifybackup"),
-    )
-
-
-async def test_restore_retirement_failure_after_closure_quarantines_controls(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from services.pitr.restore import operation_runtime
-
-    outcome = {"chain_id": "20260926T000000Z", "candidate_sha256": "c", "pending_sha256": "p"}
-    _result_worker(tmp_path, monkeypatch, outcome)
-    with pytest.raises(FileNotFoundError):  # the pending proof it names does not exist
-        await operation_runtime.run_restore_input(_restore_inputs(tmp_path))
-    assert not _operation_dirs(tmp_path / "restore-control")
-    (entry,) = _entries(tmp_path, "restore-proof")
-    assert json.loads((entry / "result.json").read_text()) == outcome
-    assert "live_db_url" not in json.loads((entry / "request.json").read_text())
-
-
-@pytest.mark.parametrize("outcome", ["pass", "fail"])
-async def test_drill_accepts_only_passing_evidence_for_the_candidate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
-) -> None:
-    from services.pitr.restore import operation_runtime
-
-    scratch = tmp_path / "scratch"
-    evidence = {"outcome": outcome, "chain_id": "20260926T000000Z"}
-    _worker(
-        tmp_path,
-        monkeypatch,
-        "import hashlib\n"
-        "drill=json.loads(Path(sys.argv[1]).read_text())['drill']\n"
-        "scratch=Path(drill['scratch']);scratch.mkdir()\n"
-        f"payload={json.dumps(evidence)!r}.encode()\n"
-        "(scratch/'drill-evidence.json').write_bytes(payload)\n"
-        "digest=hashlib.sha256(payload).hexdigest()\n"
-        "Path(sys.argv[2]).write_text(json.dumps({'evidence_sha256':digest}))\n",
-    )
-    run = operation_runtime.run_drill_input(
-        _restore_inputs(tmp_path),
-        scratch=scratch,
-        target_lsn="0/180",
-        target_wall="2026-09-26T00:00:00+00:00",
-        timeout_seconds=60,
-    )
-    if outcome == "pass":
-        assert await run == evidence
-        assert not _entries(tmp_path, "pitr-drill")
-    else:
-        with pytest.raises(RuntimeError, match="did not complete"):
-            await run
-        assert len(_entries(tmp_path, "pitr-drill")) == 1  # the outcome is data, not a block
-    assert not _operation_dirs(tmp_path / "drill-control")
-    assert json.loads((scratch / "drill-evidence.json").read_text()) == evidence
 
 
 async def test_scheduled_commit_runs_off_the_event_loop(
@@ -745,7 +574,7 @@ async def test_scheduled_commit_runs_off_the_event_loop(
     from services.backup_scheduler import worker
 
     name = "ava-20260926T000000Z.dump.enc"
-    _worker(
+    stub_worker(
         tmp_path,
         monkeypatch,
         f"artifact=Path(sys.argv[2]).parent/'artifact'/{name!r}\n"

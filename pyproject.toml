@@ -1090,6 +1090,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/backup_scheduler/operation/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/backup_scheduler/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
