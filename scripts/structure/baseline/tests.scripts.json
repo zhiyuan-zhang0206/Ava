@@ -3,15 +3,10 @@
     "tests/scripts/test_alert_rules.py::test_gateway_latency_rules_scope_to_route_class": 15,
     "tests/scripts/test_ci_secret_scanning.py::test_ci_secret_and_dependency_audits_are_wired_to_one_policy": 24
   },
-  "directories": {
-    "tests/scripts": 53
-  },
   "files": {
-    "tests/scripts/model_registry/test_check_model_updates.py": 899,
     "tests/scripts/test_alert_rules.py": 1150
   },
   "patch_targets": {
-    "tests/scripts/test_migrate_skill_identity.py::base.packages.extensions.install_registry._REGISTRY_LOCK_TIMEOUT_S": 1,
     "tests/scripts/test_rotate_cluster_secret.py::services.backup._run_with_progress": 1
   }
 }

@@ -2,7 +2,7 @@
 
 The index is the single scan behind every skill read path — the runtime loader
 mounts from it (tests/ava/test_skills.py covers the tree semantics on top),
-the repo frontmatter lint gates on it (tests/scripts/test_lint_skill_descriptions.py).
+the repo frontmatter lint gates on it (scripts/content_lint/tests/test_lint_skill_descriptions.py).
 These tests pin the scan itself: what becomes an entry, the tolerance contract
 (errors land on entries, never raise), the match_key fold, and the mtime cache
 (invalidation on edit / new file / delete, no re-read while unchanged).

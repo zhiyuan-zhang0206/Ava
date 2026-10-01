@@ -11,7 +11,7 @@
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 80
+    "tests/base": 74
   },
   "files": {
     "tests/base/test_config.py": 1705,
@@ -25,10 +25,6 @@
     "tests/base/test_telemetry_otlp_exit_delivery.py::_sent_pairs": 6
   },
   "patch_targets": {
-    "tests/base/log/test_log_batching.py::base.telemetry.emitter._BATCH_SIZE": 1,
-    "tests/base/log/test_log_batching.py::base.telemetry.emitter._FLUSH_INTERVAL_S": 1,
-    "tests/base/log/test_log_batching.py::base.telemetry.emitter._QUEUE_MAXSIZE": 1,
-    "tests/base/log/test_log_batching.py::base.telemetry.emitter._jsonl_failures": 1,
     "tests/base/test_bare_ava.py::cli.commands.converge._steps": 1,
     "tests/base/test_boot_unit.py::base.host.system.boot_unit._systemctl": 3,
     "tests/base/test_connect_helpers.py::base.db.code_version_gate._has_log_sink": 1,
