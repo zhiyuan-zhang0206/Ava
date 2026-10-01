@@ -63,13 +63,13 @@ def gateway_client(db_conn: psycopg.Connection) -> Iterator[httpx.Client]:
 
     # the module's `httpx` name is runtime-injected (ava SDK design),
     # so `_client`'s declared type does not resolve statically.
-    orig_client = gc._client
+    orig_client = gc._client  # pyright: ignore[reportUnknownMemberType]
     gc._client = httpx.Client(
         transport=transport, base_url="http://testserver", timeout=httpx.Timeout(10.0)
     )
 
     try:
-        yield gc._client
+        yield gc._client  # pyright: ignore[reportUnknownMemberType]
     finally:
-        gc._client = orig_client
+        gc._client = orig_client  # pyright: ignore[reportUnknownMemberType]
         pool.close()
