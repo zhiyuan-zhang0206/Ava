@@ -152,6 +152,25 @@ What this means for common edits:
   function defined in that same module) — `cli.main` is not a handler
   registry; its tests patch the parser module before `build_parser()` runs.
 
+## Ambient state: inject what is read to decide
+
+Inject what is read to decide; write-only facades (a logger, a meter, a tracer) may
+stay global, so for anything a module holds at import — an instance, a container,
+a `global` slot, a `ContextVar`, a platform constant, an import-time call or read —
+ask whether anything reads it to decide what to do, and if so build it in a
+composition root and hand it to the component that uses it. Background work must be
+durable or re-derivable from durable state and run as its own service loop; use a
+per-iteration `async with asyncio.TaskGroup()` for bounded parallelism, never a
+free-floating `create_task` or thread. Rule 9 of `scripts/lint/code_structure.py`
+(`scripts/structure/ambient_state/`) enforces both: new sites fail, today's are
+frozen in the `ambient_state` baseline section as `path::rule:name -> site count`
+(exact, shrink-only), and the only things let through are the closed, reasoned lists
+in `scripts/structure/ambient_state/allowlist.py` — write-only facades, framework wiring
+(`FastAPI()`, routers, argparse/Typer, `StateGraph`, locks), pure constants
+(`re.compile`, `TypeVar`, `timedelta`, `Path`) and memoized pure functions. There is
+no inline exemption; `schedules/` is in scope, tests, `__main__.py` and skill scripts
+are not.
+
 ## Function quality budgets: complexity and nesting
 
 Every function and method in the same recursive `.py` scope has two budgets:
@@ -274,7 +293,9 @@ contextvars (pregel `copy_context`, `get_runtime`), and the SDK / log /
 telemetry / retry-policy readers sit outside node signatures, so a blanket
 ban is not possible — but every use is a mechanism-layer decision. A new use
 point needs a written justification in the PR description before joining the
-allowlist.
+allowlist. Each `ContextVar` is also a frozen `contextvar` site of the
+[ambient-state rule](#ambient-state-inject-what-is-read-to-decide); the target is
+the LangGraph runtime context (`AvaContext`), not a module global.
 
 ## Model new cross-process / cross-layer wire shapes
 

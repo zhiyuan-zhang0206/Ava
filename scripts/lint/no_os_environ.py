@@ -143,6 +143,7 @@ _ALLOWED_FILES = frozenset(
         "scripts/model_registry/check_model_updates.py",  # tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback
         "scripts/structure/patch_points.py",  # recognizes a test's patch of "os.environ" by its AST text; it matches the string and never reads the environment
         "scripts/lint/fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body
+        "scripts/structure/ambient_state/scan.py",  # same reason: it MATCHES the strings "os.environ" / "os.getenv" against a module's AST to find an import-time read; it never reads the environment
         "base/sessions/env_forwarding.py",  # forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded
         "base/deploy/release/editable_install.py",  # editable_import_gate starts an isolated venv subprocess from the live inherited environment while removing VIRTUAL_ENV/PYTHONPATH; this process-boundary sanitation cannot use Settings' startup snapshot
         "base/sessions/pty/host.py",  # the pty child (post-fork, pre-exec) builds its environment from the 0600 envfile dict overlaid on the host's inherited env — the same whole-environment child handoff as base.sessions.env_forwarding / base.host.env.registry; Settings cannot enumerate non-modeled keys and the overlay must reflect the parent's live env

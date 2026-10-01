@@ -230,7 +230,7 @@ rule 4's ask-first loop is [workflow align](ava_builtins/skills/ava-workflow/ali
 ## Python conventions (quick reference)
 
 - No `if TYPE_CHECKING:` (lint-enforced). Exceptions in `_TYPE_CHECKING_ALLOWED`.
-- Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; function cc <15 (10–14 warn), nesting ≤5; packages + tests/scripts, frozen shrink-only baseline. Locality: no `_`-private import from outside its owning package; single-owner decisions (Postgres dial → `base/db/connections.py`); no path imports (`sys.path` edits, file loaders) under `ava_builtins/`, except a one-line `__file__`-derived `sys.path` guard that stays inside a skill's own directory — skill scripts stay thin over a package — all frozen in the same baseline.
+- Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; function cc <15 (10–14 warn), nesting ≤5; packages + tests/scripts, frozen shrink-only baseline. Locality: no `_`-private import from outside its owning package; single-owner decisions (Postgres dial → `base/db/connections.py`); no path imports under `ava_builtins/` (a within-skill `__file__` guard excepted); inject what is read to decide, write-only facades may stay global, background work is a service loop, never a free-floating `create_task` — all frozen in the same baseline.
 - No `print()` in framework code (use `base.log.logger`); no decorative emoji in core Python.
 - Import layering: `base < ava < agent < gateway < cli`.
 [Full conventions →](conventions/python-conventions.md)

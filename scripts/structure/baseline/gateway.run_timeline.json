@@ -1,4 +1,7 @@
 {
+  "ambient_state": {
+    "gateway/run_timeline/strip.py::ambient-instance:_STRIP_CACHE": 1
+  },
   "complexity": {
     "gateway/run_timeline/router.py::_bucket_rows": 25,
     "gateway/run_timeline/router.py::aggregate_turn_timeline": 28,
