@@ -243,6 +243,26 @@ class RootHealthExpected(TypedDict):
     expected_since_timestamp_seconds: float
 
 
+class RootRestartFailed(TypedDict):
+    """One member's failed replacement half, recorded explicitly (task #4872).
+
+    Emitted when a unit enters `restart_failed`: the unit ends an interrupted
+    replacement in an explicit failure state instead of a stop residue, its
+    intent stays running, and the health monitor retries under its backoff.
+    """
+
+    unit: str
+    stage: str
+    detail: str
+
+
+class RootRestartCleared(TypedDict):
+    """A recorded replacement failure cleared by a fresh active generation."""
+
+    unit: str
+    failed_for_s: float
+
+
 class ScheduleStalled(TypedDict):
     """`schedule_stalled` payload — gateway/schedules/manager.py.
 
