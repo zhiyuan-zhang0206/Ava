@@ -9,7 +9,6 @@
   },
   "patch_targets": {
     "base/tests/test_db.py::base.db.connections._restore_pooled_session": 1,
-    "base/tests/test_health.py::base.daemon.health._health_payload": 3,
     "base/tests/test_health.py::base.daemon.health._probe_daemon": 3,
     "base/tests/test_health.py::base.daemon.health._probe_home": 1,
     "base/tests/test_health.py::base.daemon.health._warned_windows_8106": 1,
