@@ -55,13 +55,8 @@ class RestartPolicy(StrEnum):
     NEVER = "never"
 
 
-class DesiredState(StrEnum):
-    """What the supervisor has been told to make true for a unit.
-
-    Carried across an exec upgrade in the handoff file; the vocabulary lives
-    beside the other closed tree-model enums so both sides of the handoff can
-    share it without an import cycle.
-    """
+class UnitState(StrEnum):
+    """What a unit's process is doing right now."""
 
     RUNNING = "running"
     STOPPED = "stopped"
