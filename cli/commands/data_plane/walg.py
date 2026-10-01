@@ -1,4 +1,4 @@
-"""`ava backup walg`: check that WAL-G can work, run the daily tick, show what it is doing."""
+"""`ava backup walg`: check that WAL-G can work, run the daily tick, restore, show what it is doing."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from base.cluster.dataplane import walg_binary
 from services.gateway_side.walg import check, probe, state, tick
 from services.gateway_side.walg import config as walg_config
 from services.gateway_side.walg.archive import expected_archive
+from services.gateway_side.walg.restore import RecoveryTarget, RestoreError, restored_instance
 
 
 def cmd_walg_check() -> int:
@@ -20,18 +21,52 @@ def cmd_walg_check() -> int:
     return 0 if all(step.ok for step in steps) else 1
 
 
+def _stamped(line: str) -> None:
+    """One output line with a UTC timestamp: the OS job's output is appended to a log file."""
+    print(f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
+
+
 def cmd_walg_run() -> int:
     """Run one daily tick (backup, verify, retention); non-zero only when a step failed.
 
     The OS job runs exactly this, and so can an operator: concurrent runs stand down
-    and a skipped or repeated run is harmless. Every output line carries a UTC
-    timestamp because the job's output is appended to `$AVA_HOME/logs/walg.log`.
+    and a skipped or repeated run is harmless.
     """
+    return tick.run_tick(_stamped)
 
-    def report(line: str) -> None:
-        print(f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
 
-    return tick.run_tick(report)
+def cmd_walg_restore(*, directory: str, backup: str, time: str | None, lsn: str | None) -> int:
+    """Restore a backup into an empty directory and recover it to the target.
+
+    The directory ends as a promoted database, its scratch Postgres shut down: it is
+    not started, and it is never this home's live data directory.
+    """
+    if not walg_config.enabled():
+        print("WAL-G is off (AVA_WALG_CONFIG_FILE is not set); nothing to restore from")
+        return 1
+    binary_problem = walg_binary.installed_problem()
+    if binary_problem is not None:
+        print(f"restore failed: {binary_problem} (ava converge installs it)", file=sys.stderr)
+        return 1
+    try:
+        walg_config.load_walg_config()
+        target = RecoveryTarget(time=time, lsn=lsn)
+    except (walg_config.WalgConfigError, ValueError) as exc:
+        print(f"restore failed: {exc}", file=sys.stderr)
+        return 1
+    try:
+        with restored_instance(
+            Path(directory).resolve(), backup=backup, target=target, report=_stamped, keep_data=True
+        ):
+            pass
+    except RestoreError as exc:
+        print(f"restore failed: {exc}", file=sys.stderr)
+        print(f"remove any partly restored content in {directory} before retrying", file=sys.stderr)
+        return 1
+    print(
+        f"restored: {directory} holds the recovered, promoted database; Postgres is not running on it"
+    )
+    return 0
 
 
 def _config_lines(path: Path) -> list[str]:

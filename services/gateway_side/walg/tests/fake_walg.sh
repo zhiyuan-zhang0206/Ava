@@ -6,6 +6,9 @@
 #                     (`st rm` is refused) or "corrupt" (`st get` returns other bytes)
 #   <dir>/store/      the object store: `wal-push` copies a segment to store/<basename>,
 #                     `st put/ls/get/rm` read and write store/ (put adds ".lz4", like wal-g)
+#   <dir>/basebackups/<name>/  a base backup the test took (e.g. `pg_basebackup`): `backup-fetch
+#                     DIR <name>` copies it into DIR (`LATEST` is the last by name); a
+#                     `wal-fetch SEGMENT DEST` copies store/SEGMENT, exit 74 when it is missing
 #   <dir>/calls.log   one line per call: the arguments after --config
 #   <dir>/env.log     `backup-push` only: the environment the tick handed it
 #   <dir>/fail-commands  space-separated command names (backup-list, backup-push,
@@ -84,6 +87,24 @@ case "$command" in
         ;;
     wal-push)
         cp "$1" "$store/$(basename "$1")"
+        ;;
+    wal-fetch)
+        if [ ! -f "$store/$1" ]; then
+            echo "fake wal-g: $1 is not in the store" >&2
+            exit 74
+        fi
+        cp "$store/$1" "$2"
+        ;;
+    backup-fetch)
+        name=$2
+        if [ "$name" = LATEST ]; then
+            name=$(ls "$dir/basebackups" | sort | tail -1)
+        fi
+        if [ ! -d "$dir/basebackups/$name" ]; then
+            echo "fake wal-g: no such backup $name" >&2
+            exit 1
+        fi
+        cp -R "$dir/basebackups/$name/." "$1"
         ;;
     st)
         sub=$1
