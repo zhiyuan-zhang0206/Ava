@@ -58,12 +58,12 @@ def test_old_references_ignores_unrelated_or_inexact_paths(text: str) -> None:
     assert gate._old_references("pkg_old.mod_name", text) == []
 
 
-def test_is_excluded_covers_frozen_axes_and_the_baseline_schema() -> None:
+def test_is_excluded_covers_the_frozen_axes_only() -> None:
     assert gate._is_excluded("") is True
     assert gate._is_excluded("decisions/x.md") is True
     assert gate._is_excluded("postmortems/y.md") is True
     assert gate._is_excluded("docs/history/2026/z.md") is True
-    assert gate._is_excluded("db/schema.sql") is True
+    assert gate._is_excluded("db/schema.sql") is False
     assert gate._is_excluded("base/packages/docs/notes.py") is False
 
 

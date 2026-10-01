@@ -30,4 +30,4 @@ It uses the same in-flight map, cooldown and RPC budget. The home resumes that
 allocation without replacing its identity or resetting the durable OS counter;
 ordinary idle agents and historical task-owner records do not qualify.
 
-`running` owners are never dispatched or alerted — a chat queued behind a long in-flight turn is normal; the claim's turn-end SELECT picks it up. `restarting` is left to its own reaper; unclaimed idling rows have no owner.
+`running` owners are never dispatched or alerted — a chat queued behind a long in-flight turn is normal; the claim's turn-end SELECT picks it up. Unclaimed idling rows have no owner.

@@ -348,7 +348,9 @@ def test_async_write_transaction_overrides_a_read_only_default() -> None:
         await db_pool.open()
         try:
             async with async_write_transaction(db_pool) as conn:
-                await conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+                await conn.execute(
+                    "UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1"
+                )
         finally:
             await db_pool.close()
 
@@ -366,7 +368,9 @@ def test_plain_autocommit_write_still_fails_under_a_read_only_default(
     with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         with connect(autocommit=True) as conn, pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
-            conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+            conn.execute(
+                "UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1"
+            )
 
 
 def test_pooler_isolates_one_clients_read_only_posture_from_another() -> None:
@@ -386,7 +390,9 @@ def test_pooler_isolates_one_clients_read_only_posture_from_another() -> None:
         poisoner.execute("SET default_transaction_read_only = on")
         row = other.execute("SHOW default_transaction_read_only").fetchone()
         assert row is not None and str(row[0]) == "off"
-        other.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+        other.execute(
+            "UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1"
+        )
         row = poisoner.execute("SHOW default_transaction_read_only").fetchone()
         assert row is not None and str(row[0]) == "on"
 
@@ -563,7 +569,9 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
                 row = conn.execute("SHOW search_path").fetchone()
                 assert row is not None and str(row[0]) != "nowhere"
                 assert _statement_timeout(conn) == "1min"
-                conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+                conn.execute(
+                    "UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1"
+                )
         finally:
             pool.close()
 

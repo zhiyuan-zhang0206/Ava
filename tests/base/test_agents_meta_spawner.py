@@ -94,7 +94,7 @@ def test_terminating_middle_of_chain_leaves_descendant_spawners_unchanged(
             (1, "user", "running", None),
             (2, "agent:1", "running", None),
             (3, "agent:2", "running", None),
-            (4, "agent:3", "restarting", None),
+            (4, "agent:3", "idling", None),
         ],
     )
 

@@ -171,7 +171,7 @@ def test_native_without_lease_still_requires_current_ownership(
             (owner.agent_id,),
         )
     else:
-        db_conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=%s", (owner.agent_id,))
+        db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="no longer owns"):
         leases.native_status(owner.agent_id, owner)
@@ -401,7 +401,7 @@ def test_attestation_and_same_machine_checks(db_conn: psycopg.Connection) -> Non
 def test_termination_atomically_revokes_but_restart_preserves(db_conn: psycopg.Connection) -> None:
     owner = _agent(db_conn)
     lease = _active(owner)
-    db_conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=%s", (owner.agent_id,))
+    db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     assert leases.get(lease["id"], attested_caller(lease))["status"] == "active"
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))

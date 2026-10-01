@@ -139,13 +139,12 @@ describe("useFleetGraph", () => {
     ]);
   });
 
-  it("projects raw fleet-node lifecycle states to the same public three-state model", async () => {
+  it("projects raw fleet-node lifecycle states to the public status model", async () => {
     const raw = {
       nodes: [
         { ...API_GRAPH.nodes[0], agent_id: 1, status: "running" },
         { ...API_GRAPH.nodes[0], agent_id: 2, status: "idling" },
-        { ...API_GRAPH.nodes[0], agent_id: 3, status: "restarting" },
-        { ...API_GRAPH.nodes[0], agent_id: 4, status: "terminated" },
+        { ...API_GRAPH.nodes[0], agent_id: 3, status: "terminated" },
       ],
       edges: [],
     } as unknown as WireFleetGraph;
@@ -159,17 +158,16 @@ describe("useFleetGraph", () => {
     expect(result.current.graph.nodes.map((node) => node.status)).toEqual([
       "running",
       "idling",
-      "idling",
       "terminated",
     ]);
   });
 
-  it("preserves offline liveness while projecting a restarting node to idling", async () => {
+  it("preserves offline liveness on an idling node", async () => {
     const raw = {
       nodes: [
         {
           ...API_GRAPH.nodes[0],
-          status: "restarting",
+          status: "idling",
           liveness_state: "offline",
         },
       ],

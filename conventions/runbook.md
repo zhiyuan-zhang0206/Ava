@@ -392,9 +392,7 @@ sequence USAGE), SELECT/UPDATE on `agents_meta` (status/liveness), SELECT/UPDATE
 `inbound_messages` (claim AND the agent-side self-lifecycle inbounds), UPDATE on
 `agents` (`ava.self.set_label`), INSERT/UPDATE/SELECT on `machine_units` + INSERT/UPDATE
 on `machines` and `host_deploy_state`, INSERT/UPDATE/DELETE on `api_idempotency`,
-INSERT/UPDATE on `agent_tasks`, INSERT/UPDATE/DELETE on `agent_watchers` (unused since
-2026-09-27 — a watcher is a plain shell session with no registry row; the grant and the
-table are follow-up debt for one contract migration), UPDATE on `agent_pages`, the shell
+INSERT/UPDATE on `agent_tasks`, UPDATE on `agent_pages`, the shell
 TTL rows, and full CRUD on the LangGraph checkpoint tables.
 `agents` INSERT, `agents_meta` INSERT, notices writes, the cluster deploy-state tables and
 any DDL fail under it by construction. Each write generation is one `ava_g<n>_gateway` and

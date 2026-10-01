@@ -132,9 +132,9 @@ def project_heartbeat(
     *future* value (a NULL / past pause arrives here as None = not paused). The
     display states are mutually exclusive:
 
-    - idle-family (idling / restarting), paused → `paused_until`.
-    - idle-family, not paused, a wake already queued → `heartbeat_pending`.
-    - idle-family, not paused, nothing queued → `next_at` (the daemon's projected
+    - idling, paused → `paused_until`.
+    - idling, not paused, a wake already queued → `heartbeat_pending`.
+    - idling, not paused, nothing queued → `next_at` (the daemon's projected
       check-in due time — the later of the idle clock plus its per-agent jitter
       and the durable last-reminder cadence floor; the daemon dispatches at its
       first poll tick at/after that, at most one 15s dispatch step later. The
@@ -167,7 +167,7 @@ def project_heartbeat(
     next_at: datetime | None = None
     active_pause: datetime | None = None
     heartbeat_pending = False
-    if status in (AgentStatus.IDLING, AgentStatus.RESTARTING):
+    if status == AgentStatus.IDLING:
         if paused_until is not None:
             active_pause = paused_until
         # Mirror the daemon's `NOT EXISTS (pending inbound)` guard: with a
@@ -178,7 +178,7 @@ def project_heartbeat(
         elif pending_inbound:
             heartbeat_pending = True
         else:
-            # Overdue (daemon skips restarting agents) → frontend shows "due".
+            # Overdue → frontend shows "due".
             # Match the daemon's due-time exactly: the later of the idle clock
             # plus per-agent jitter and the durable reminder floor. The actual
             # dispatch happens at the first daemon tick at/after this, so

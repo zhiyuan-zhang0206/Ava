@@ -58,18 +58,12 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("INSERT, UPDATE", ("machines", "host_deploy_state")),
     # The runner ops server dedupes inbound /ops calls.
     ("INSERT, UPDATE, DELETE", ("api_idempotency",)),
-    # SDK surfaces the runner writes directly: ava.tasks and impersonation
-    # (`agent_watchers` is unused; see its DELETE below).
-    ("INSERT, UPDATE", ("agent_tasks", "agent_watchers", "agent_impersonation_messages")),
+    # SDK surfaces the runner writes directly: ava.tasks and impersonation.
+    ("INSERT, UPDATE", ("agent_tasks", "agent_impersonation_messages")),
     # Understanding-tree regeneration reconciles superseded cuts (task #3704).
     ("SELECT, INSERT, UPDATE, DELETE", ("understanding_nodes",)),
     # Compact-boundary tree-build enqueue (task #4674).
     ("INSERT", ("hierarchy_jobs",)),
-    # Historical: a watcher used to delete its own registry row. Since 2026-09-27
-    # no code reads or writes `agent_watchers`
-    # (decisions/2026-09-27-watchers-are-never-restarted.md); its grants and the
-    # table stay until one contract migration drops them together.
-    ("DELETE", ("agent_watchers",)),
     # Page close at exit.
     ("UPDATE", ("agent_pages",)),
     # Shell TTL deadlines and their append-only renewal trail.
@@ -162,18 +156,6 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
             _grant(conn, f"GRANT {privileges} ON {{}} TO {{}}", table, runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
     grant_manifest_runner_access(conn, runner)
-    # No admission calls the legacy publication row-lock function any more; the
-    # grant goes with the function, which a later migration drops. Granted only
-    # while it exists.
-    row = conn.execute(
-        "SELECT to_regprocedure('public.lock_runtime_publication_admission()') IS NOT NULL"
-    ).fetchone()
-    if row is not None and row[0]:
-        _grant(
-            conn,
-            "GRANT EXECUTE ON FUNCTION public.lock_runtime_publication_admission() TO {}",
-            runner,
-        )
 
 
 def apply_group_grants(conn: Conn, *, owner: str, database: str, groups: Groups) -> None:

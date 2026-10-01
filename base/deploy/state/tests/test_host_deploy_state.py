@@ -79,17 +79,3 @@ def test_read_all_returns_every_machines_row() -> None:
     hds.set_posture("paused")
     rows = hds.read_all()
     assert rows[_machine()].posture == "paused"
-
-
-def test_set_posture_writes_the_posture_and_nothing_else(db_conn: psycopg.Connection) -> None:
-    """The retired pause-window anchor and updater lease are neither written nor
-    read: a transition leaves their columns NULL."""
-    hds.set_posture("paused")
-    hds.set_posture("idle")
-    hds.set_posture("paused")
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT paused_at, updater_lease_expires_at FROM host_deploy_state WHERE machine = %s",
-            (_machine(),),
-        )
-        assert cur.fetchone() == (None, None)

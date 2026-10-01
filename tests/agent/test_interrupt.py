@@ -134,29 +134,6 @@ class TestHasPendingInterrupt:
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         assert await has_pending_interrupt(aops_pool, tid) is False
 
-    async def test_false_on_a_restarting_row_with_a_pending_maintenance_restart(
-        self, db_conn, aops_pool: AsyncConnectionPool
-    ):
-        # A row's status alone is never an abort signal: a 'restarting' hosted
-        # row whose maintenance restart is still pending waits for its turn
-        # boundary like any other.
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(
-            db_conn,  # pyright: ignore[reportUnknownArgumentType]
-            tid,
-            "restart",
-            source="system:maintenance",
-            payload=_MAINTENANCE_PAYLOAD,
-        )
-        db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
-            "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
-            "VALUES(%s,'restarting',%s,'hosted')",
-            (tid, machine_name()),
-        )
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-        assert await has_pending_interrupt(aops_pool, tid) is False
-        assert await pending_interrupt_reason(aops_pool, tid) is None
-
 
 class TestSubscribeInterrupt:
     @pytest.mark.flaky  # initial SELECT fire within a real IO window

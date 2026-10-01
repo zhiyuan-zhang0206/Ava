@@ -284,7 +284,7 @@ async def test_restart_and_termination_without_a_lease_add_no_notices(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     owner, session = await _termination_session(db_conn, aops_pool)
-    db_conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=%s", (owner.agent_id,))
+    db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     assert _native_notices(db_conn, owner.agent_id) == []
     assert db_conn.execute(

@@ -3,9 +3,8 @@
 Each throws a dedicated `SystemExit` subclass (`AgentTermination` / `AgentRestart`),
 not swallowed by `except Exception`; the difference is what kind is written to the inbound queue:
 - terminate: writes 'terminate' → claim appends lifecycle marker + goto END process exits
-- restart:   writes 'restart'   → claim UPDATE status='restarting' + goto END,
-             restarter daemon automatically respawns a fresh process attached to the same agent_id + delivers
-             'restart_completed' inbound so the new process wakes up knowing the restart is done
+- restart:   writes 'restart'   → the hosted runtime applies it as a lifecycle command; the
+             agent stays idling and its next incarnation is admitted on the same agent_id
 
 (Explicit `idle()` removed: the model not calling execute_code this turn = automatically stops the turn, no SDK call needed.)
 """

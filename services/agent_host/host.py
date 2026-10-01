@@ -115,13 +115,6 @@ from services.agent_host.stall_guard import run_invocation_with_stall_guard
 
 _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 
-# Statuses whose owner must not be handed a turn. `terminated` is the real one:
-# a wake for a dead agent is the delivery watchdog's resurrect business, and
-# running a turn would revive it behind the gateway's back. Unclaimed `idling` and
-# `restarting` belong to the boot / respawn path, which owns the row until it
-# reaches a running state.
-_UNRUNNABLE_STATUSES = frozenset({"terminated", "restarting"})
-
 # The host's whole stop must fit ava-root's TERM window (`stop_timeout_s`, 10 s,
 # `services/ava_root/supervisor.py`) or root retains custody of it. With Postgres
 # unreachable the release would otherwise wait out the control pool's acquire
@@ -447,7 +440,7 @@ class AgentHost:
                 owner=stored.machine,
             )
             return False
-        if stored.status in _UNRUNNABLE_STATUSES:
+        if stored.status == "terminated":
             logger.info(
                 "hosted wake for agent {agent_id} ignored — status {status} is not runnable",
                 agent_id=agent_id,

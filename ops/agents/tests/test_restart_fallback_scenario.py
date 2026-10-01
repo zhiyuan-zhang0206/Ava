@@ -33,11 +33,11 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
     ).fetchone()
     assert row is not None
     original_request = row[0]
-    db_conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=%s", (agent_id,))
+    db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent_id,))
     db_conn.commit()
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == ("restarting",)
+    ).fetchone() == ("idling",)
     rows = db_conn.execute(
         "SELECT id,kind,source,status FROM inbound_messages WHERE agent_id=%s ORDER BY id",
         (agent_id,),
@@ -47,7 +47,7 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'",
         (agent_id,),
     ).fetchone() == (0,)
-    # Selection cannot manufacture completion: the row stays restarting until
+    # Selection cannot manufacture completion: the row stays idling until
     # the durable restarter admits the successor and writes its completion row.
     successor = lifecycle_restart.build("diagnostic")
     assert successor.cursor == 0
