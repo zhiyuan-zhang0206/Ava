@@ -309,7 +309,7 @@ def test_total_tokens_reads_restart_proof_retained_window(
 def test_node_exposes_canonical_status_and_independent_liveness(
     db_conn: psycopg.Connection,
 ) -> None:
-    a = _seed_agent(db_conn, status="restarting")
+    a = _seed_agent(db_conn, status="idling")
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET liveness_state = 'offline' WHERE id = %s",
@@ -320,7 +320,7 @@ def test_node_exposes_canonical_status_and_independent_liveness(
     with TestClient(app) as client:
         nodes = _nodes_by_id(client)
 
-    assert nodes[a]["status"] == "restarting"
+    assert nodes[a]["status"] == "idling"
     assert nodes[a]["liveness_state"] == "offline"
 
 
@@ -707,23 +707,23 @@ def test_edges_touching_terminated_agent_excluded_by_default(
     assert body["edges"] == []
 
 
-def test_restarting_node_with_terminated_spawner_shows_isolated(
+def test_live_node_with_terminated_spawner_shows_isolated(
     db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
-    """Task #1089/#1104 regression — the #2753 shape: a live (restarting)
-    agent whose spawner has since terminated. The live node renders on its
+    """Task #1089/#1104 regression — the #2753 shape: a live agent whose
+    spawner has since terminated. The live node renders on its
     own; the terminated partner is NOT a node and the spawn edge is NOT
     returned (user ruling 2026-08-09: terminated agents never appear in the
     graph; a live node with no live parent simply shows without the edge)."""
-    restarting = _seed_agent(db_conn, status="restarting")
+    live = _seed_agent(db_conn, status="idling")
     dead = _seed_agent(db_conn, status="terminated")
-    _event_loki(fake_loki, source_agent=dead, target_agent=restarting, event_type="spawn")
+    _event_loki(fake_loki, source_agent=dead, target_agent=live, event_type="spawn")
 
     with TestClient(app) as client:
         resp = client.get("/api/fleet/graph")
     assert resp.status_code == 200
     body = resp.json()
-    assert {n["agent_id"] for n in body["nodes"]} == {restarting}
+    assert {n["agent_id"] for n in body["nodes"]} == {live}
     assert body["edges"] == []
 
 

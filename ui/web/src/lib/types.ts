@@ -37,9 +37,9 @@ export type WireAgentDirectoryPage = Schemas["AgentDirectoryPage"];
 export type OpenImpersonationStatus = NonNullable<WireAgentCard["open_impersonation_status"]>;
 
 /** The console's complete, user-facing agent status model. Liveness remains a
- *  separate `AgentRow.liveness_state` axis, so an internally restarting agent
- *  whose runner is unreachable still renders as `idling` + `offline`, rather
- *  than leaking a control-plane transition or hiding the outage.
+ *  separate `AgentRow.liveness_state` axis, so an idling agent whose runner
+ *  is unreachable still renders as `idling` + `offline`, rather than hiding
+ *  the outage.
  *  `impersonated` is a card-level projection (see `projectAgentStatus`), not
  *  a wire lifecycle state — the backend `AgentStatus` enum never changes. */
 export type PublicAgentStatus =
@@ -68,7 +68,6 @@ export function projectAgentStatusValue(status: WireAgentStatus): Extract<WireAg
     case "terminated":
       return "terminated";
     case "idling":
-    case "restarting":
       return "idling";
     default: {
       const unknownStatus: never = status;
@@ -94,7 +93,7 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
     status === row.status &&
     "awaiting_response_count" in row
   ) {
-    return row as AgentRow;
+    return row;
   }
   // Hand-rebuilt allowlist: an omitted optional field vanishes silently (availability, task #4723).
   return {

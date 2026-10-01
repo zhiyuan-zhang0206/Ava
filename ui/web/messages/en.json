@@ -269,7 +269,6 @@
     "retryLaunchFailed": "Retry failed",
     "failureObservedAt": "Failure observed {time} on {machine}",
     "maintenance_hold": "Host admission held by maintenance",
-    "publication_deferred": "Host admission deferred by runtime publication",
     "resource_fence": "Host admission blocked by resource evidence",
     "admission_guard_refused": "Host admission guard refused this attempt",
     "machineDiagnostics": "Machine diagnostics"
@@ -575,7 +574,6 @@
     "forceKillConfirm": "Force kill Agent #{id}? This SIGKILLs the process immediately — any in-flight turn is lost. Use this only when Terminate did not work.",
     "statusRunning": "Running",
     "statusIdling": "Idling",
-    "statusRestarting": "Restarting",
     "statusImpersonated": "Impersonated",
     "statusTerminated": "Terminated",
     "statusOffline": "Offline — machine unreachable or process lost",

@@ -44,11 +44,11 @@ it("shows a fresh host-down reason and machine diagnostics on the selected agent
 it("shows the coarse admission refusal category without claiming a turn ran", async () => {
   getAgent.mockResolvedValue({ ...agent, availability: {
     reason: "admission_refused",
-    admission_outcome: "publication_deferred",
+    admission_outcome: "maintenance_hold",
     observed_at: now,
   } });
   show();
-  expect(await screen.findByText("Host admission deferred by runtime publication")).toBeTruthy();
+  expect(await screen.findByText("Host admission held by maintenance")).toBeTruthy();
 });
 
 it("labels admission without claiming first-turn completion", async () => {

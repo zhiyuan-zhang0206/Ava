@@ -83,9 +83,6 @@ Presets are used to reuse common configurations — for example, a "gmail-agent"
 ```
 IDLING (unclaimed) ──claim──→ RUNNING ──→ IDLING
                 │              │           │
-                │              │  restart  │
-                │              ↓           │
-                │         RESTARTING ──→ IDLING (unclaimed)
                 │
                 ↓ (fails)
            TERMINATED ←── terminate (from any state)

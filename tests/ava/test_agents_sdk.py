@@ -870,16 +870,14 @@ class TestListAgents:
     def test_default_scope_includes_all_nonterminated_states(
         self, db_conn: psycopg.Connection
     ) -> None:
-        ids = [_spawn_agent() for _ in range(4)]
-        for agent_id, status in zip(
-            ids, ("running", "idling", "restarting", "terminated"), strict=True
-        ):
+        ids = [_spawn_agent() for _ in range(3)]
+        for agent_id, status in zip(ids, ("running", "idling", "terminated"), strict=True):
             db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (status, agent_id))
         db_conn.commit()
 
         page = ava.agents.list_agents()
         assert isinstance(page, ava.agents.AgentDirectoryPage)
-        assert [row.agent_id for row in page.agents] == list(reversed(ids[:3]))
+        assert [row.agent_id for row in page.agents] == list(reversed(ids[:2]))
         assert page.next_cursor is None
 
     def test_terminated_pages_preserve_cursor_and_search(self, db_conn: psycopg.Connection) -> None:
