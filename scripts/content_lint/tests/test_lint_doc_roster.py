@@ -4,6 +4,10 @@ import importlib
 
 import pytest
 
+# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
+# pyright: reportUnknownMemberType = warning
+# pyright: reportUnknownArgumentType = warning
+
 _SENTINEL = "<!-- lint:roster-table -->"
 
 

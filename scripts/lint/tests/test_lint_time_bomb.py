@@ -29,6 +29,10 @@ from typing import Any
 
 import pytest
 
+# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
+# pyright: reportUnknownMemberType = warning
+# pyright: reportUnknownArgumentType = warning
+
 _lint = importlib.import_module("scripts.lint.time_bomb")
 
 

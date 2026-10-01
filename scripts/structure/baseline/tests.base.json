@@ -9,7 +9,7 @@
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 52
+    "tests/base": 50
   },
   "files": {
     "tests/base/test_config.py": 1705,
