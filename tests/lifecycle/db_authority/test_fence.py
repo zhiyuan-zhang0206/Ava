@@ -31,7 +31,7 @@ from base.cluster.authority import ledger as ledger_module
 from base.cluster.authority import roles as roles_module
 from base.cluster.authority.fence import close_revoked, prove_closure, revoke
 from base.cluster.authority.model import SurvivingSession
-from tests.lifecycle.db_authority.conftest import AuthorityCluster
+from tests.path_scoped.db_authority_tests import AuthorityCluster
 
 
 def _operation() -> OperationAuthority:

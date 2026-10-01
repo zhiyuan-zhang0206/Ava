@@ -1,4 +1,5 @@
-"""Real PostgreSQL 17 for the database write-generation authority.
+"""Real PostgreSQL 17 for the database write-generation authority (registered by
+`tests/fixtures/path_scopes.py` for the db_authority tests).
 
 One throwaway instance per test module (``_authority_instance``) carries a
 template database built exactly as provisioning builds it: ``db/schema.sql``,
@@ -57,7 +58,7 @@ from base.deploy.schema.migrations import apply_pending_migrations
 OWNER = "ava_test_owner"
 _TEMPLATE = "ava_test_tmpl"
 _SUPERUSER = "ava"
-_SCHEMA = Path(__file__).resolve().parents[3] / "db" / "schema.sql"
+_SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
 
 _HBA = """\
 # TYPE  DATABASE  USER  ADDRESS       METHOD
