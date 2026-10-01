@@ -20,8 +20,8 @@ __all_for_ava__ = [
 ]
 
 # Retained for backward-compatible is_flagged() checks. No longer prepended
-# to content by scan_content — findings now go through the in-memory buffer
-# and are delivered as system notes by the exec node.
+# to content by scan_content — findings are delivered as SECURITY system notes
+# (exec-child findings by the exec node, inbound findings by the claim node).
 MARKER = "[⚠️ SECURITY:"  # emoji-ok: security warning marker
 
 # Structural markup an attacker uses to forge a system message or a tool call.
@@ -100,52 +100,43 @@ class SecurityFindingEntry(BaseModel):
     triggers: list[str]
 
 
-# ── in-memory findings buffer ────────────────────────────────────────────
-# Findings accumulate in process-global lists while agent SDK calls run. The
-# exec-child list holds ordinary scan_content() findings. The inbound list is
-# filled only by scan_inbound_content() while claim builds an inbound message
-# for its imminent exec turn. Claim clears the inbound list on every route that
-# cannot reach that exec; the exec node drains both lists before it resolves
-# the call, then adds child-drained findings from the result envelope and
-# injects each finding as a SECURITY system note in the same exec's messages
-# delta, after the exec-result ToolMessage (the tool_use -> tool_result
-# adjacency invariant forbids interleaving notes between the AIMessage and its
-# ToolMessage).
-# Execs are serial per agent process (cycling topology, one agent per
-# process), so a module-level list is race-free in practice; the drain
-# happens before anything else can append.
+# ── exec-child findings buffer ───────────────────────────────────────────
+# scan_content() findings accumulate in this process-global list while agent
+# SDK code runs inside an exec child — a fresh process per execute_code, the
+# only place `ava.state` is set. The child drains the list with take_findings()
+# into its result envelope; the exec node re-validates each entry and injects it
+# as a SECURITY system note in the same exec's messages delta, after the
+# exec-result ToolMessage (the tool_use -> tool_result adjacency invariant
+# forbids interleaving notes between the AIMessage and its ToolMessage).
+#
+# The agent host is a different shape: one process serves many agents'
+# concurrent turns, so it holds no findings buffer. scan_content() drops its
+# finding there (`_in_exec_turn()` is False), and a claim-side inbound scan
+# hands its finding straight back to the claim node (scan_inbound_content),
+# which puts the note in that claim's own messages delta.
 _pending_findings: list[SecurityFindingEntry] = []
-_pending_inbound_findings: list[SecurityFindingEntry] = []
 
 
 def _in_exec_turn() -> bool:
-    """True when scan_content runs inside an exec turn — the only place a
+    """True when scan_content runs inside an exec child — the only place a
     finding can be delivered (there is a messages delta to inject into)."""
     import ava  # lazy: same-layer, avoids import cycle at module load
 
     return ava.state is not None
 
 
-def _record_finding(
-    source: str, triggers: list[str], *, attribute_to_inbound_turn: bool = False
-) -> None:
-    """Buffer one security finding for delivery by the exec node as a system
-    note. No-op when security scanning is disabled, or outside an exec turn
-    without explicit claim-side attribution (no messages delta exists to
-    inject into — a buffered finding could never be attributed to the right
-    turn, which is exactly the side-channel flaw this in-memory design
-    removes)."""
+def _record_finding(source: str, triggers: list[str]) -> None:
+    """Buffer one security finding for the exec child's result envelope. No-op
+    when security scanning is disabled, or outside an exec child (no messages
+    delta exists to inject into, and a host-wide buffer would be shared by
+    every agent the host serves)."""
     from base.config import settings
 
     if not settings.agent.security_scan_enabled:
         return
-    entry = SecurityFindingEntry(source=source, triggers=triggers)
-    if attribute_to_inbound_turn:
-        _pending_inbound_findings.append(entry)
-        return
     if not _in_exec_turn():
         return
-    _pending_findings.append(entry)
+    _pending_findings.append(SecurityFindingEntry(source=source, triggers=triggers))
 
 
 def scan_content(content: str, source: str = "unknown") -> str:
@@ -155,9 +146,8 @@ def scan_content(content: str, source: str = "unknown") -> str:
     in-memory for the exec node to deliver as a SECURITY system note in this
     exec's messages delta. Outside an exec turn the finding is deliberately
     dropped: there is no delta to own it. Claim-side inbound construction must
-    call scan_inbound_content() instead to explicitly attribute its finding to
-    the immediately following exec turn. The returned content is always clean
-    — no warning is prepended.
+    call scan_inbound_content() instead, whose caller owns the finding. The
+    returned content is always clean — no warning is prepended.
     """
     hits = _triggers(content)
     if hits:
@@ -165,43 +155,32 @@ def scan_content(content: str, source: str = "unknown") -> str:
     return content
 
 
-def scan_inbound_content(content: str, source: str) -> str:
-    """Return claimed inbound `content` unchanged and attribute any finding.
+def scan_inbound_content(content: str, source: str) -> SecurityFindingEntry | None:
+    """Scan claimed inbound `content`; return its finding, or None.
 
-    Claim uses this narrow entry point before the agent's next exec node has
-    started, so it can retain a finding for that exec delta. It is intentionally
-    separate from scan_content(): arbitrary outside-turn scans still drop their
-    findings rather than risking attribution to a later, unrelated turn.
+    None when nothing matched or scanning is disabled. Touches no process
+    state: the caller owns the finding and delivers it as a SECURITY note in
+    its own messages delta, so concurrent agent turns in one host process
+    cannot see each other's findings. The content itself is never altered.
     """
+    from base.config import settings
+
+    if not settings.agent.security_scan_enabled:
+        return None
     hits = _triggers(content)
-    if hits:
-        _record_finding(source, hits, attribute_to_inbound_turn=True)
-    return content
-
-
-def discard_inbound_findings() -> None:
-    """Discard claim-attributed findings when their claim cannot reach exec.
-
-    This is intentionally narrower than take_findings(): only the claim node
-    owns the inbound buffer's lifetime, while the exec node owns delivery.
-    """
-    global _pending_inbound_findings  # noqa: PLW0603 — clear is the claim-exit contract
-    _pending_inbound_findings = []
+    return SecurityFindingEntry(source=source, triggers=hits) if hits else None
 
 
 def take_findings() -> list[SecurityFindingEntry]:
-    """Return all pending findings and clear the buffer.
+    """Return all pending exec-child findings and clear the buffer.
 
-    The exec node drains parent findings before resolving its call, so both a
-    normal child execution and an early ToolMessage return consume their
-    claim-attributed findings in this turn. Claim clears its separate buffer
-    on non-exec and failed paths. Returns an empty list when nothing was
-    flagged. Clearing on read means each finding is delivered exactly once —
-    there is no file to truncate.
+    The exec child drains its findings into the result envelope when the run
+    ends. Returns an empty list when nothing was flagged. Clearing on read
+    means each finding is delivered exactly once — there is no file to
+    truncate.
     """
-    global _pending_findings, _pending_inbound_findings  # noqa: PLW0603 — drain-and-reset is the contract
-    out = _pending_inbound_findings + _pending_findings
-    _pending_inbound_findings = []
+    global _pending_findings  # noqa: PLW0603 — drain-and-reset is the contract
+    out = _pending_findings
     _pending_findings = []
     return out
 
