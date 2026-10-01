@@ -190,9 +190,8 @@ outcome, so a partial result keeps its evidence:
 
 The agent check judges the recorded execution body, never a digit in a timestamp or a
 model reply. Nothing is forwarded to the host. A browser UI check would need Chromium in the image at
-the Playwright version `uv.lock` pins (`scripts/provision/install-playwright.sh` still
-pins an older one; see the tech-debt ledger) and a large enough `--shm-size`; it is not
-built.
+the Playwright version `uv.lock` pins (`uv run playwright install --with-deps chromium`,
+as CI does) and a large enough `--shm-size`; it is not built.
 
 ### Run results
 
