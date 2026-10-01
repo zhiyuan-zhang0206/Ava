@@ -373,7 +373,7 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
             "-c",
             "import base.host.env.registry; import base.config; print('ok')",
         ],
-        cwd=Path(__file__).resolve().parents[2],  # repo root
+        cwd=Path(__file__).resolve().parents[4],  # repo root
         capture_output=True,
         text=True,
         timeout=120,

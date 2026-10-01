@@ -57,11 +57,11 @@ _GATEWAY_SOURCE_ROOTS = (
 
 
 def _repo_root() -> Path:
-    # This test lives at tests/base/test_gateway_consumer_guard.py — three
+    # This test lives at cli/commands/lifecycle/tests/test_gateway_consumer_guard.py — three
     # levels below the repo root. parent.parent would land on tests/ and the
     # scan would silently cover nothing (the guard became a no-op and let the
     # GEMINI_API_KEY / AVA_MODEL / AVA_LABELER_MODEL P0 through on 2026-08-06).
-    return Path(__file__).resolve().parent.parent.parent
+    return Path(__file__).resolve().parent.parent.parent.parent.parent
 
 
 def _production_py_files(root: Path, prefix: str) -> list[Path]:

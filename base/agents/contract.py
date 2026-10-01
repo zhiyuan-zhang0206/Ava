@@ -135,7 +135,7 @@ class ErrorReason(StrEnum):
 # entries automatically at class-declaration time; do **not** maintain
 # by hand — adding a new error only requires "add enum + add class
 # with reason/http_status", and registration follows on import.
-# tests/test_agent_error_wire_equivalence.py parametrizes this dict to
+# gateway/middleware/tests/test_agent_error_wire_equivalence.py parametrizes this dict to
 # lock the end-to-end loop; the assertion at the module end catches
 # "enum added but class missing" in the reverse direction.
 EXCEPTION_BY_REASON: dict[ErrorReason, type[AvaAgentError]] = {}

@@ -4,24 +4,20 @@
     "tests/base/test_delivery.py::test_real_relay_uses_snapshotted_config_across_restart": 17,
     "tests/base/test_delivery.py::test_two_attempts_each_get_a_full_window_then_native_observes_expiry": 16,
     "tests/base/test_event_contract.py::test_payload_keys_are_the_declared_attribute_contract": 24,
-    "tests/base/test_gateway_consumer_guard.py::_kind_closure": 18,
-    "tests/base/test_gateway_consumer_guard.py::_repo_internal_import_closure": 15,
     "tests/base/test_telemetry_otlp.py::test_log_mapping_full_record_shape": 18,
     "tests/base/test_telemetry_otlp.py::test_metric_mapping_int_counter_float_histogram": 17,
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 74
+    "tests/base": 52
   },
   "files": {
     "tests/base/test_config.py": 1705,
-    "tests/base/test_dotenv_boot.py": 969,
     "tests/base/test_editable_install.py": 883,
     "tests/base/test_runner_role.py": 1035,
     "tests/base/test_telemetry_otlp.py": 1169
   },
   "nesting": {
-    "tests/base/test_gateway_consumer_guard.py::_kind_closure": 6,
     "tests/base/test_telemetry_otlp_exit_delivery.py::_sent_pairs": 6
   },
   "patch_targets": {
@@ -31,7 +27,6 @@
     "tests/base/test_connect_helpers.py::base.db.code_version_gate._last_read_at": 2,
     "tests/base/test_connect_helpers.py::base.native_process.code_version._db_gate_exempt": 1,
     "tests/base/test_connect_helpers.py::base.native_process.code_version._version": 3,
-    "tests/base/test_db.py::base.db.connections._restore_pooled_session": 1,
     "tests/base/test_exec_request_evidence.py::base.agents.incarnation.exec_request_evidence._bounded_disposition_enabled": 1,
     "tests/base/test_no_secrets_on_argv.py::ava.shell.sessions._next_session_index_from_db": 1,
     "tests/base/test_no_secrets_on_argv.py::ava.shell.sessions._record_ttl": 1,

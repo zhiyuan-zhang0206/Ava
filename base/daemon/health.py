@@ -97,7 +97,7 @@ _log = logging.getLogger("base.daemon.health")
 #   DEFAULT_PORTS (below)                         — the fixed-table subset for health daemons
 #   _HEALTH_PORT_OVERRIDES (below)                — service -> settings field
 #
-# `tests/base/test_cluster_env.py` guards that they stay in sync.
+# `base/cluster/tests/test_cluster_env.py` guards that they stay in sync.
 
 # The health daemons' ports from the fixed table (base.host.env.port_table, 8103-8120).
 # The curl_url of ServiceSpec in cli/commands.py references the same ports. A

@@ -535,7 +535,7 @@ def test_ensure_pgbouncer_step_without_env_writes_nothing(
 def _rw_url(pw: str, *, host: str, user: str = "") -> str:
     """Build a credentialed redis URL from parts, so the source carries no
     `scheme://user:password@host` literal for a secret scanner to flag (same
-    convention as tests/base/test_url_secret.py) — every value is a throwaway
+    convention as base/tests/test_url_secret.py) — every value is a throwaway
     fixture, not a real credential."""
     return f"redis://{user}:{pw}@{host}/0"
 

@@ -4,7 +4,7 @@
 serving sides name the same shape. Keeping it (and the version constants in
 the package `__init__`) out of `pipeline.py` keeps the LLM generation stack out
 of every import closure that only stores or serves nodes --- the gateway
-process must not pull `base.lm` (tests/base/test_gateway_consumer_guard.py;
+process must not pull `base.lm` (cli/commands/lifecycle/tests/test_gateway_consumer_guard.py;
 the closure grew through `store` until this split).
 """
 

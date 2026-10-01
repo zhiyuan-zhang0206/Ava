@@ -27,7 +27,7 @@ _DB_URL = "postgresql://ava@127.0.0.1:5433/ava"
 def _pg_url(pw: str, *, host: str) -> str:
     """A credentialed postgres URL built from parts, so the source carries no
     `scheme://user:password@host` literal for a secret scanner to flag (same
-    convention as tests/base/test_url_secret.py)."""
+    convention as base/tests/test_url_secret.py)."""
     return f"postgresql://ava:{pw}@{host}/ava"
 
 

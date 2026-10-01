@@ -545,8 +545,8 @@ settings.general.machine_serve_gateway = None
 # binds :0); these were the ports that were not.
 #
 # Every port a test binds or dials comes from the kernel or from the private range
-# above 21000, and the whole table sits below it (tests/base/test_fixed_ports.py),
-# so no test port can equal a table port. `tests/base/test_fixed_ports.py` also
+# above 21000, and the whole table sits below it (base/cluster/tests/test_fixed_ports.py),
+# so no test port can equal a table port. `base/cluster/tests/test_fixed_ports.py` also
 # fails when a port-bearing setting in this session still holds its table value.
 #
 # Pinned in the settings singleton (in-process readers, which have already
