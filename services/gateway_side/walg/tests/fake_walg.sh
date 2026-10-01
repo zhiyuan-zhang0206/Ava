@@ -10,7 +10,8 @@
 #   <dir>/env.log     `backup-push` only: the environment the tick handed it
 #   <dir>/fail-commands  space-separated command names (backup-list, backup-push,
 #                     wal-verify, delete) that exit 1; every other command works
-#   <dir>/backups.json   what `backup-list` prints (default: one backup, name only)
+#   <dir>/backups.json   what `backup-list` prints (default: one backup, name only);
+#                     `backup-push` replaces it with backups-after.json when that exists
 #   <dir>/wal-verify.json, wal-verify.rc   what `wal-verify` prints and its exit code (default 0)
 #   <dir>/delete-dry.log, delete-confirm.log  WAL-G's log (stderr) of `delete`
 #                     without and with --confirm
@@ -64,6 +65,9 @@ case "$command" in
         ;;
     backup-push)
         echo "PGHOST=${PGHOST:-} PGPORT=${PGPORT:-} PGUSER=${PGUSER:-} WALG_DELTA_MAX_STEPS=${WALG_DELTA_MAX_STEPS:-}" >> "$dir/env.log"
+        if [ -f "$dir/backups-after.json" ]; then
+            cp "$dir/backups-after.json" "$dir/backups.json"
+        fi
         ;;
     wal-verify)
         cat "$dir/wal-verify.json"
