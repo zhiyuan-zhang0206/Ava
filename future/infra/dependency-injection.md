@@ -237,12 +237,14 @@ process-global `settings`, with a per-module shrink-only baseline.
   fixes the order of step 6 and how each existing duty maps onto the rule. Pending.
   Work that is neither a periodic duty nor a request-path side effect (for example a
   drain worker owned by a per-turn object) is classified by the same audit.
-- **Cost of splitting into services: memory.** Each Python service process holds
-  about 70 MiB of private memory today, by an import-baseline measurement: redis-py
-  about 34-38 MiB, psycopg about 20 MiB, pydantic about 10 MiB, and the
-  repository's own code about 7.5 MiB. A finer split therefore presupposes lowering
-  per-process memory. A read-only service-memory audit is in progress; this page
-  makes no reduction plan and no commitment beyond these figures until it reports.
+- **Cost of splitting into services: memory.** A Python service process holds
+  private memory on the order of 50 MiB today (measured with a warmed bytecode
+  cache; the full measurement is in progress). Most of it is the import of
+  third-party libraries, not this repository's code. A finer split therefore
+  presupposes lowering per-process memory. Pre-importing the shared libraries once
+  and forking so that children share those pages is the common industry practice;
+  no design is committed here. A read-only service-memory audit is in progress, and
+  this page makes no reduction plan until it reports.
 - **Cost of splitting into services: onboarding.** Adding a service today means
   editing `ops/roster/__init__.py`, `base/host/env/port_table.py` and
   `base/cluster/ports.py`, plus a health-check module under `services/healthchecks/`
