@@ -1045,7 +1045,7 @@ def test_agent_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
             getattr(s, domain)
 
 
-def test_keys_of_the_retired_pitr_stack_are_inert(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_keys_of_the_retired_stack_are_inert(monkeypatch: pytest.MonkeyPatch) -> None:
     """A unit `.env` that still carries the deleted PITR stack's keys must not stop
     Settings from building: every sub-model ignores keys it does not declare, so
     an upgrade never has to rewrite a home's `.env` before it can start."""
