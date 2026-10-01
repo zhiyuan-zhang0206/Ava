@@ -17,6 +17,7 @@ Every test in the repository runs under the same isolation: a private `AVA_HOME`
 
 ### Plugin roster and load order
 - `env_bootstrap` — import-time environment isolation and the session-wide runtime pins; loads **first**
+- `leak_guard` — names the test that leaves process-global state different (environment, module attributes, cwd, signal handlers, agent identity); loads **second**, so its fixture sets up first and compares last, after every function-scoped fixture's undo. Warn by default; findings reach CI through the shard JUnit reports: [[test-leak-guard.ava.okf.md]]
 - `plugin_registrations` — per-test reset of plugin registrations
 - `provisioning` — throwaway pg/redis, `_clean_state`, the DB connection fixtures, and the session hooks (full-run guard, non-test-database refusal, leaked OS-job / runaway-memory / home cleanup)
 - `guards` — autouse host guards and the `_stub_everywhere` helper
@@ -24,7 +25,7 @@ Every test in the repository runs under the same isolation: a private `AVA_HOME`
 - `milvus`, `log_capture`, `retry_waits` — opt-in `milvus_client`, `loguru_records`, and `retry_waits` (records the waits `base.host.net.resilience` retry loops request instead of sleeping them; never autouse, because a no-op wait under a wall-clock-bounded loop spins until memory runs away, issue #1001)
 - `path_scopes` — registers the per-directory fixture modules of `tests/path_scoped/` for the paths in its `PATH_SCOPES` table (below); a plugin with hooks only, it adds no fixture of its own
 - `_asyncio_stall_probe`, `collection_guard` — hook-only plugins (stall forensics; one collector node per directory)
-- **List order is load order and is load-bearing.** Same-scope autouse fixtures are set up in registration order and, inside one module, alphabetically — which is why `provisioning` (`_clean_state`) precedes `guards` (`_guard_*`). Adding a plugin means checking its autouse names against that order.
+- **List order is load order and is load-bearing.** Same-scope autouse fixtures are set up in registration order and, inside one module, alphabetically — which is why `leak_guard` precedes everything (it must tear down last) and `provisioning` (`_clean_state`) precedes `guards` (`_guard_*`). Adding a plugin means checking its autouse names against that order.
 
 ### Path-scoped fixtures (the former directory conftests)
 - A conftest's fixtures reach only the tests below it, so a test moved into a package's `tests/` directory would silently lose them. The modules in `tests/path_scoped/` (one per former conftest, plus `api_keys` and `pty_reaper` that several take) are registered for directories or single test files listed in `PATH_SCOPES` (`tests/fixtures/path_scopes.py`) when pytest starts collecting that node (`parsefactories(holder=, node=)`, the interface pytest uses for a conftest). A governed test therefore sees exactly the fixture closure it saw under the conftest: the same autouse names in the same order, the same visibility, and a session-scoped autouse fixture (the provider-plugin load for the gateway tests) instantiated only when a governed test runs.

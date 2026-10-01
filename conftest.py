@@ -11,18 +11,25 @@ Order is load-bearing:
    environment, and builds Settings; all of that must happen before any project
    module is imported, and it fails the run loudly when a project module was
    already loaded (`_assert_env_precedes_project_imports`).
-2. `plugin_registrations` before `provisioning` and `guards`: pytest sets
+2. `leak_guard` second, ahead of every other function-scoped autouse fixture:
+   pytest tears fixtures down in reverse setup order, so the first one set up
+   is the last torn down, and the guard then compares process-global state after
+   every function-scoped fixture (`monkeypatch` included) has restored what it
+   recorded. It imports only the standard library and pytest, so it may sit
+   before the plugins that import project modules.
+3. `plugin_registrations` before `provisioning` and `guards`: pytest sets
    same-scope autouse fixtures up in registration order, and this one has
-   always run first.
-3. `provisioning` before `guards`: within `guards`, autouse fixtures are set up
+   always run first of them.
+4. `provisioning` before `guards`: within `guards`, autouse fixtures are set up
    alphabetically, and `_clean_state` (in `provisioning`) sorts ahead of the
    `_guard_*` fixtures. The hooks in `provisioning` also stay registered
    before `collection_guard` and the stall probe, as they were.
-4. The opt-in fixture modules and the two hook-only plugins follow.
+5. The opt-in fixture modules and the two hook-only plugins follow.
 """
 
 pytest_plugins = [
     "tests.fixtures.env_bootstrap",
+    "tests.fixtures.leak_guard",
     "tests.fixtures.plugin_registrations",
     "tests.fixtures.provisioning",
     "tests.fixtures.guards",
