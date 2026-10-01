@@ -25,7 +25,6 @@ import time
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -73,7 +72,7 @@ def _block(root: Path, mode: str) -> None:
 def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
     """Run the real scheduled preparation with one blocking pipeline stage."""
     from services import backup
-    from services.pitr.stores import factory
+    from services.gateway_side.backup import offsite
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         size_path = kwargs["size_path"]
@@ -88,11 +87,9 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
         path.write_bytes(b"private-key")
         return path
 
-    def put(**_kwargs: object) -> None:
+    def publish(*_args: object, **_kwargs: object) -> None:
         _block(root, mode)
 
-    store = SimpleNamespace(put_base_if_absent=put)
-    group = SimpleNamespace(restartable_streaming_object_store=lambda: store)
     stack = contextlib.ExitStack()
     for patcher in (
         patch.object(backup, "backup_dir", return_value=root / "artifacts"),
@@ -101,7 +98,7 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
         patch.object(backup, "_db_size_breakdown", return_value="test"),
         patch.object(backup, "_run_with_progress", run),
         patch.object(backup, "_key_file", key),
-        patch.object(factory, "get_store_group", return_value=group),
+        patch.object(offsite, "publish", publish),
     ):
         stack.enter_context(patcher)
     return stack

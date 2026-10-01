@@ -21,18 +21,15 @@ mandatory.
 
 The package root holds only process entry points: their module paths are written into service
 manifests, custody records, pidfile identity checks and `postgresql.auto.conf`, so they never move.
-Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`, `wal/`,
-`operation/` and `stores/` (role protocols, GCS adapters, and the `baidu/`, `cos/`, `oss/` backends).
+Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`, `wal/`
+and `stores/` (role protocols, GCS adapters, and the `baidu/`, `cos/`, `oss/` backends).
 
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
 - `services/pitr/activation/state.py` — strict schema-v5 atomic activation record; CAS transitions persist config digests, the exact home operation/action/generation binding, WAL ACK/viewer evidence, and candidate/protected digests while preserving `started_at`; older transport schemas refuse rather than acquiring new authority
-- `services/gateway_side/backup/snapshot.py` — creates and verifies activation's
-  encrypted logical recovery floor independently of updater orchestration;
-  activation reuses a previously recorded artifact only after re-verifying it
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
 - `services/pitr/base_scheduler_daemon.py` — weekly bases, restore proofs, retention plans, and an arm-gated deletion tick
 - `services/pitr/retention/planner.py` — the default-off local dry-run planner (see *Remote retention* below)
-- `services/pitr/stores/logical_dump_names.py` — the shared managed-name grammar the daily backup writer and the retention classifier both parse, so a name the writer emits is exactly a name the planner may ever delete
+- `services/pitr/stores/logical_dump_names.py` — the retention classifier's grammar for `ava-logical/` names, wider than the daily writer's (`services/gateway_side/backup/names.py`): it still reads the `pre-update` and `pitr-activation` kinds and pre-cutover wall-clock stamps
 - `cli/commands/data_plane/pitr.py` — `ava pitr retention` inspection, status, arm, disable and run-once commands
 
 ## Gates and layers
@@ -76,12 +73,13 @@ Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`
 
 ## Operation custody
 
-Base candidates, restore proofs and operator drills (and the logical backup
-jobs) each run as one directly owned worker process group; results commit only
-after confirmed closure, a zero exit and validation. A failed or cancelled
-operation with proven closure is quarantined without plaintext and the next
-one proceeds; unproven closure blocks its kind until `ava pitr operations
-retire`: [[services/pitr/docs/operation-custody.ava.okf.md|Operation custody]].
+Base candidates, restore proofs and operator drills each run on the backup
+domain's operation core ([[services/backup_scheduler/docs/operation-custody.ava.okf.md|Operation custody]]):
+one directly owned worker process group; results commit only after confirmed
+closure, a zero exit and validation. A failed or cancelled operation with
+proven closure is quarantined without plaintext and the next one proceeds;
+unproven closure blocks its kind. `ava backup operations retire` covers the
+two logical backup kinds only.
 
 ## Remote retention
 
@@ -89,8 +87,8 @@ retire`: [[services/pitr/docs/operation-custody.ava.okf.md|Operation custody]].
   physical and `ava-logical/` objects: retain the latest two protected chains
   by capture identity, pin every unprotected candidate, keep continuous ACKed
   WAL/history from the oldest retained base, and mirror the local logical
-  window (seven newest dailies, newest pre-update, two newest activation
-  snapshots, and the in-flight activation pin).
+  window (seven newest dailies; the newest pre-update and two newest
+  activation snapshots stay as the classifier's defaults for old names).
 - Logical objects without verifiable sidecars (GCS/COS, or sidecar-less
   OSS/Baidu) use strict names plus live stat and appear as weak evidence;
   verified OSS/Baidu sidecar pairs carry stronger binding.

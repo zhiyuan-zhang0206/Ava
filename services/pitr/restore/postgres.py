@@ -19,8 +19,8 @@ from psycopg import sql
 
 from base.cluster.dataplane.pg_foreground import start_foreground_postgres
 from base.cluster.dataplane.pg_tools import pg_start_env
+from services.backup_scheduler.operation.custody import NativeProcess
 from services.pitr.base_backup.manifest import CandidateManifest, lsn
-from services.pitr.operation.custody import NativeProcess
 from services.pitr.restore.proof import (
     DrillResult,
     LivePostgresIdentity,

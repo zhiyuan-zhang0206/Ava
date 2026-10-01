@@ -21,9 +21,17 @@ from typing import Literal
 
 from base.native_process.child_env import inherited_process_env
 from base.paths import ava_home
-from services.pitr.operation.custody import OperationKind, OperationWorker, publish_result
-from services.pitr.operation.worker_process import CompletedOperation, run_operation, worker_request
-from services.pitr.stores.logical_dump_names import DUMP_NAME_RE
+from services.backup_scheduler.operation.custody import (
+    OperationKind,
+    OperationWorker,
+    publish_result,
+)
+from services.backup_scheduler.operation.worker_process import (
+    CompletedOperation,
+    run_operation,
+    worker_request,
+)
+from services.gateway_side.backup.names import DUMP_NAME_RE
 
 Job = Literal["dump", "restore"]
 

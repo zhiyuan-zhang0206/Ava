@@ -108,9 +108,10 @@ relative `--scratch` is resolved against the invoking shell's directory.
   drill starts normally. A stopped drill gets 45 s to stop its sandbox and
   write its evidence; the failure line says whether the evidence was kept.
 - If the drill's group closure could not be proven, the failure names the
-  blocked controls and `ava pitr operations status` shows `pitr-drill`
-  blocked. Wait for any listed process to exit, then
-  `ava pitr operations retire` (preview) and `--confirm`.
+  blocked controls and the `pitr-drill` kind refuses the next drill.
+  `ava backup operations` covers the two logical backup kinds only: wait for
+  any listed process to exit, then remove the named control directory under
+  `$AVA_HOME/physical-backup/drill-control/` by hand.
 - Identity mismatch, a missing segment or a base-authentication failure are
   chain-integrity findings: report them before any cleanup and keep the tree.
 - A sandbox process that the residue scan reports survived the drill's own

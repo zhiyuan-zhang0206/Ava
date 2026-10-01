@@ -25,6 +25,12 @@ from base.cluster.dataplane.pg_tools import pg_tool
 from base.db import connect_url
 from base.db.pg_admin import OwnerAuthority, local_owner_authority
 from services.backup import backup_lock
+from services.backup_scheduler.operation.custody import (
+    NativeProcess,
+    OperationWorker,
+    owned_receipts,
+)
+from services.backup_scheduler.operation.worker_process import StopSignal
 from services.pitr.base_backup.manifest import (
     SCHEMA_VERSION,
     CandidateManifest,
@@ -33,8 +39,6 @@ from services.pitr.base_backup.manifest import (
 )
 from services.pitr.base_backup.space_budget import CandidateSpaceBudget, require_candidate_space
 from services.pitr.base_backup.stream import BASE_MAGIC, load_or_create_source, snapshot_candidate
-from services.pitr.operation.custody import NativeProcess, OperationWorker, owned_receipts
-from services.pitr.operation.worker_process import StopSignal
 from services.pitr.stores.base_object_store import RestartableStreamingObjectStore
 from services.pitr.stores.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 
@@ -202,8 +206,8 @@ def _recover_owned_partials(root: Path) -> None:
     owners = list((root / "base-facts").glob("*.owner.json"))
     if partials or owners:
         raise BaseCandidateError(
-            "base candidate has unresolved operation evidence; `ava pitr operations "
-            "retire` must prove its worker closed, never receipt-based adoption: "
+            "base candidate has unresolved operation evidence; retiring its operation "
+            "must prove its worker closed, never receipt-based adoption: "
             f"{sorted(path.name for path in partials + owners)}"
         )
 

@@ -24,9 +24,9 @@ import pytest
 
 from base.native_process.exec_domain import ExecProcessDomain
 from base.native_process.ownership import OwnedProcess
-from services.pitr.operation import custody
-from services.pitr.operation import worker_process as workers
-from services.pitr.operation.custody import OperationKind
+from services.backup_scheduler.operation import custody
+from services.backup_scheduler.operation import worker_process as workers
+from services.backup_scheduler.operation.custody import OperationKind
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="PITR is POSIX-only")
 
@@ -496,7 +496,7 @@ async def test_worker_capture_failure_after_birth_closes_group_and_quarantines(
 
 _COOPERATIVE = (
     "import signal\n"
-    "from services.pitr.operation.worker_process import worker_request\n"
+    "from services.backup_scheduler.operation.worker_process import worker_request\n"
     "request, output = worker_request(sys.argv)\n"
     "{ignore}"
     "try:\n"

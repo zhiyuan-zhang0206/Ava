@@ -1,7 +1,7 @@
 """The one closure core for a process group whose leader this process launched.
 
 It imports only the standard library (no psutil, no pydantic); the exec
-domain, PITR operation custody and ava-root unit stop build on it.
+domain, backup operation custody and ava-root unit stop build on it.
 
 The direct child launched as its own group's leader (`process_group=0` or a new
 session) stays UNREAPED until closure is proven: its zombie keeps the group

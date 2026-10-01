@@ -39,7 +39,7 @@ _READ_ONLY_VERBS: frozenset[tuple[str, ...]] = frozenset(
         ("mcp", "ls"),
         ("memory", "search"),
         ("packages", "status"),
-        ("pitr", "operations", "status"),
+        ("backup", "operations", "status"),
         ("pitr", "retention", "inspect"),
         ("pitr", "retention", "status"),
         ("pitr", "multipart", "list"),

@@ -18,12 +18,16 @@ from typing import Protocol, cast
 import psutil
 
 from base.native_process import native_boot_id
+from services.backup_scheduler.operation.custody import (
+    NativeProcess,
+    OperationWorker,
+    owned_receipts,
+)
 from services.pitr.base_backup.manifest import CandidateManifest
 from services.pitr.base_backup.restore_crypto import (
     authenticate_base_ciphertext,
     extract_authenticated_base,
 )
-from services.pitr.operation.custody import NativeProcess, OperationWorker, owned_receipts
 from services.pitr.restore.manifest import (
     PROTECTED_SCHEMA_VERSION,
     ProtectedManifest,
@@ -332,8 +336,8 @@ def reconcile_restore_runtime(root: Path) -> None:
     owner_paths: set[Path] = set(owners.glob("*.owner.json")) if owners.exists() else set()
     if owner_paths or partials:
         raise RestoreProofError(
-            "interrupted restore requires native operation retirement "
-            "(`ava pitr operations retire`); persisted receipts do not authorize "
+            "interrupted restore requires native operation retirement; "
+            "persisted receipts do not authorize "
             f"process-group adoption: {sorted(path.name for path in owner_paths | partials)}"
         )
     reconcile_restore_pending(root)

@@ -9,7 +9,7 @@ tags: []
 
 `services/backup_scheduler/daemon.py` passes scheduled dumps and logical restore
 drills to `services/backup_scheduler/worker.py:run_job`. It launches one fixed
-worker module through `services/pitr/operation/worker_process.py:run_operation`: a fresh
+worker module through `services/backup_scheduler/operation/worker_process.py:run_operation`: a fresh
 interpreter in a new session whose unreaped direct child the controller keeps.
 Its request is complete before launch. Dump, encryption, off-site upload and
 restore tools are ordinary children in that group, so blocking work stays out
@@ -32,7 +32,7 @@ plus a complete encrypted artifact when the off-site upload was interrupted;
 plaintext dump output and key files are removed even when the worker was
 killed, and a killed drill's restored throwaway cluster is reaped. The next
 scheduled run proceeds. Closure doubt keeps the unreaped worker, blocks that
-kind and alerts until `ava pitr operations retire` re-proves closure; a killed
+kind and alerts until `ava backup operations retire` re-proves closure; a killed
 scheduler leaves the same block.
 
 Scheduled restore drills opt into `throwaway_postgres(foreground=True)`.
@@ -43,7 +43,6 @@ postmaster child calls `setsid`, so the group close alone never reaches them:
 the owner's stop is an immediate shutdown that reaps them, a postmaster that
 outlives it is killed with every descendant recorded by exact birth, and the
 controller proves that family gone before closure (see
-[[services/pitr/docs/operation-custody.ava.okf.md|Operation custody]]). A stop that
+[[services/backup_scheduler/docs/operation-custody.ava.okf.md|Operation custody]]). A stop that
 cannot confirm the postmaster exited retains PGDATA and its registration. Other throwaway callers keep the default
 pg_ctl behavior; orphaned throwaway directories are handled by their own sweep.
-Retained backup deletion and PITR upload are independent.

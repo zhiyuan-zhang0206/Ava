@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from base.log import init_restricted_process
+from services.backup_scheduler.operation.custody import publish_result
+from services.backup_scheduler.operation.worker_process import worker_request, worker_secrets
 from services.pitr.base_backup.manifest import CandidateManifest
-from services.pitr.operation.custody import publish_result
-from services.pitr.operation.worker_process import worker_request, worker_secrets
 from services.pitr.restore.postgres import IsolatedPostgresRestoreExecutor
 from services.pitr.restore.proof import (
     RestoreProofDeferredError,

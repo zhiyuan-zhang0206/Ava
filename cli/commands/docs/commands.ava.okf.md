@@ -31,7 +31,8 @@ subpackages hold the domains, each an independent package door:
 - `observability/` — native LGTM desired state, the OTel collector, trace
   shipping, logs; owns its converge steps (`lgtm_native.py`, `otel_collector.py`)
 - `data_plane/` — per-cluster Postgres/Redis/PgBouncer bring-up, their verified
-  maintenance stop (`maintenance_stop.py`), PITR; owns its converge steps
+  maintenance stop (`maintenance_stop.py`), backup-operation custody
+  (`backup_operations.py`), PITR; owns its converge steps
   (`pgbouncer.py`, `pitr_foundation.py`)
 - `cluster/` — whole-cluster verbs, the health probe, cron, the registry
 - `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),

@@ -1,33 +1,38 @@
 ---
 type: doc
-title: PITR Operation Custody
-description: How logical dumps, logical restore drills, base candidates, restore proofs and operator drills run as one directly owned worker process group plus the PostgreSQL families that leave it, when results are accepted, and how failed or cancelled operations are quarantined or block their kind until retirement.
+title: Backup Operation Custody
+description: How the scheduled logical dump and logical restore drill run as one directly owned worker process group plus the PostgreSQL families that leave it, when results are accepted, and how failed or cancelled operations are quarantined or block their kind until retirement.
 tags: []
 ---
 
-# PITR operation custody
+# Backup operation custody
 
-Every logical dump, logical restore drill, base candidate, restore proof and
-operator drill runs as one operation of its **kind**
-(`services/pitr/operation/custody.py:OperationKind`): a private control root,
-its own quarantine root and a sanitizer. `services/pitr/operation/worker_process.py:run_operation`
+Every scheduled logical dump and logical restore drill runs as one operation of
+its **kind** (`services/backup_scheduler/operation/custody.py:OperationKind`):
+a private control root, its own quarantine root and a sanitizer.
+`services/backup_scheduler/operation/worker_process.py:run_operation`
 launches a fixed worker module through `ExecProcessDomain.launch_posix` in a
 new session and retains the unreaped direct child. A bootstrap pins the
-controller's own code root; the live database URL reaches restore workers on
-stdin, never in a retained file. Trusted tools and each foreground postmaster are ordinary
-members of that group. PostgreSQL's own children are not: every one of them
-(checkpointer, walwriter, the startup process, each backend) calls `setsid` at
-birth, so the group proves nothing about them.
+controller's own code root and refuses any import origin outside it, so a
+package it names that does not exist stops every worker at start. Trusted tools
+and each foreground postmaster are ordinary members of that group.
+PostgreSQL's own children are not: every one of them (checkpointer, walwriter,
+the startup process, each backend) calls `setsid` at birth, so the group proves
+nothing about them.
 
-Each kind quarantines into `quarantine/<kind>/` beside its control root.
+Each kind quarantines into `quarantine/<kind>/` beside its control root. The
+core is kind-agnostic: the physical PITR stack registers its own kinds on it until
+that stack is removed, but `ava backup operations` covers the two kinds below.
 
 | Kind | Control root | Sanitizer |
 | --- | --- | --- |
 | `logical-dump` | `backups/operations/dump/` | keeps only complete `.dump.enc` |
 | `logical-restore-drill` | `backups/operations/restore-drill/` | removes the decrypted scratch, reaps the restored throwaway cluster |
-| `base-candidate` | `physical-backup/base-control/` | removes `.partial` PGDATA; keeps a resumable `.ready` unless its worker rejected it |
-| `restore-proof` | `physical-backup/restore-control/` | removes sandbox, WAL and ciphertext; keeps logs and owner |
-| `pitr-drill` | `physical-backup/drill-control/` | none (evidence stays in the operator's scratch) |
+
+Kind names, roots and the `.operation-*` control directories with their record
+files (`operation.json`, `worker.json`, `closure.json`, `committed.json`,
+`unresolved.json`, `quarantine-failed.json`, `failure.txt`) are on-disk state a
+rollout can find half-settled; none of them is renamed.
 
 **Closure** is proven only when three things hold:
 
@@ -61,8 +66,8 @@ The controller then closes in this order (`operation.custody.close_operation`):
 - **Deferred**: a busy backup lock or missing space, raised before any
   evidence exists, is `{"deferred", "detail"}`; the controls retire without an
   alert (`OperationDeferred`; a backup-lock deferral stays `LockTimeoutError`).
-  A kind lock held elsewhere raises `OperationBusyError`, which the schedulers
-  log as a deferral, never as a failed proof.
+  A kind lock held elsewhere raises `OperationBusyError`, which the scheduler
+  logs as a deferral, never as a failed proof.
 - **Quarantined**: every other outcome whose closure the controller proved.
   This includes stop, drain, timeout and a launch that never produced a
   process.
@@ -86,23 +91,17 @@ The controller then closes in this order (`operation.custody.close_operation`):
 
 Custody steps (launch, closure, commit, quarantine) run to completion in a
 thread; a stop arriving meanwhile waits for their outcome, then propagates.
-Cancellation sends SIGTERM for the kind's grace (3 s; 45 s for an
-operator drill, to stop its sandbox and write evidence), then runs the closure
+Cancellation sends SIGTERM for the kind's grace (3 s), then runs the closure
 above. An `ExecDomainBirthError` closes the pinned group at once
 ([[base/native_process/docs/group-closure.ava.okf.md|closure core]]). Admission
 finishes a quarantine or retirement its controller had proven but not
 completed. A failing progress sink (a closed operator pipe) is dropped.
 
-A base candidate whose own verification or loading fails (corruption,
-missing or contradicting facts, an unusable plan) is marked `rejected` in its
-owner receipt, and quarantine discards the tree instead of resuming it every
-retry. A stop keeps it resumable.
-
 ## Retirement
 
-`ava pitr operations status` lists blocked kinds and each kind's quarantine.
+`ava backup operations status` lists blocked kinds and each kind's quarantine.
 
-`ava pitr operations retire` re-proves closure of each blocked operation and
+`ava backup operations retire` re-proves closure of each blocked operation and
 `--confirm` quarantines it. A proof is one of:
 
 - a later controller closure;
@@ -119,12 +118,6 @@ Refusals are typed (`Refusal`); evidence that cannot be verified refuses as
 `unverifiable` rather than crashing. Receipts, saved PGIDs and deadlines never
 adopt or signal a group.
 
-`ava pitr operations discard-candidate CHAIN [--confirm]` removes one
-unfinished weekly `.ready` capture. Such a capture can refuse activation's
-forced candidate, and activation keeps the schedule from resuming it. The verb
-runs under the base-candidate kind lock, and refuses a blocked kind, a
-committed chain, or one an unsettled owner receipt still claims.
-
 ## Quarantine and alerts
 
 Each kind's quarantine keeps its newest entry, then at most ten entries and
@@ -136,14 +129,4 @@ both the group and its recorded parentage.
 `backup_operation_custody` telemetry alerts on quarantine (warning) and
 blocking (error) per kind.
 
-## Sandbox identity and credentials
-
-Sandbox birth, PGID and SID are captured before PID-file readiness and must
-equal the worker's group and session; live PostgreSQL proof compares native
-identity and exact SQL/data evidence. The restore worker runs under
-`restricted_process_env()`, never loads Settings, and is bounded by the
-credentials it receives: viewer-only for gcs and oss, read-write for cos and
-baidu.
-
-[[services/pitr/docs/pitr.ava.okf.md|Physical PITR]] ·
 [[shutdown.ava.okf.md|Backup job shutdown]]

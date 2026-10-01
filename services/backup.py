@@ -6,20 +6,18 @@ keeping the newest ``backup_keep`` dumps (``services.backup_keep``, default 7).
 rounds: at the first wake after ``backup_hour`` cluster time with no dump for
 the current cluster day, so a host that was down at 03:00 catches up. Its
 operation worker runs `run_backup(staging=...)` inside private controls; the
-controller publishes that artifact after the worker's group closed
-(`services.backup_scheduler.worker`). In-process snapshot callers use
-`run_backup()` directly.
+controller links that artifact into the backup directory after the worker's
+group closed (`services.backup_scheduler.worker`).
 
 Backup cadence follows the configured cluster timezone; artifact names carry
 UTC timestamps. Retention orders those timestamps independently of host DST.
 
 Local dumps guard against bad migrations / accidental deletes / DB
 corruption. `run_backup` is `dump -> encrypt -> optional off-site publish ->
-prune`. The best-effort off-site leg publishes the encrypted artifact iff
-absent through the shared backup store contract (`services.pitr.stores.factory`,
-the physical PITR plane's backend switch); a failed store keeps the local
-artifact. Remote objects are append-only except policy-owned, armed retention
-deletions (see `future/infra/pg-backup.md`). The dump uses PostgreSQL's
+prune`. The best-effort off-site leg publishes the encrypted artifact to OSS
+iff absent (`services.gateway_side.backup.offsite`); an unconfigured,
+unavailable or failing store keeps the local artifact, and nothing here deletes
+a remote object (see `future/infra/pg-backup.md`). The dump uses PostgreSQL's
 compressed custom format; legacy gzip artifacts stay restorable
 (`gunzip_if_needed`).
 
@@ -30,11 +28,9 @@ The custom dump is encrypted before publication, so local and optional off-site
 artifacts contain the complete recoverable database without storing plaintext
 conversation data at rest.
 
-Only files matching this module's naming are managed (counted for due-ness,
-pruned); a hand-made dump parked in the same directory is never touched. The
-encrypted UTC names and legacy plaintext `<dbname>-YYYYMMDD-HHMMSS.dump` names
-remain managed during the transition, so the old week of artifacts still prunes
-instead of becoming stranded.
+Only files matching `services.gateway_side.backup.names` are managed (counted
+for due-ness, pruned); a hand-made dump parked in the same directory is never
+touched.
 
 Restore procedure: `.agents/skills/operating-ava-cluster/references/db-restore.md`.
 """
@@ -47,12 +43,11 @@ import os
 import subprocess
 import threading
 import time
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
-from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
@@ -64,31 +59,20 @@ from base.db.pg_admin import local_owner_authority
 from base.host.private_storage import ensure_private_dir, ensure_private_file
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.paths import ava_home
+from services.gateway_side.backup import offsite
 from services.gateway_side.backup import passphrase as backup_passphrase
 from services.gateway_side.backup.intermediates import sweep_closed_partials
-from services.pitr.stores.logical_dump_names import (
-    ACTIVATION_MARKER,
-    DUMP_NAME_RE,
-    PRE_UPDATE_MARKER,
-    REMOTE_ROOT,
-    TS_FORMAT,
-    stamp_utc,
-)
+from services.gateway_side.backup.names import DUMP_NAME_RE, REMOTE_ROOT, TS_FORMAT, stamp_utc
 
 _log = logging.getLogger(__name__)
 
-# Newest activation snapshots kept in their own prune slot: the current PITR
-# activation's logical floor plus the one before it; an unresolved activation's
-# snapshot is pinned on top (task #3696 exception inventory). The managed name
-# grammar lives in `services.pitr.stores.logical_dump_names`, shared with retention.
-ACTIVATION_KEEP = 2
 # Headroom against a stall, not an expected runtime: a full dump with
 # checkpoint history takes about 6.3 min.
 _DUMP_TIMEOUT_S = 60 * 60
 # Heartbeat cadence while a dump or an encryption runs with a progress sink
-# attached. An in-process snapshot (the PITR activation's logical floor) may run
-# for many minutes without writing anything; a beat every 60 s keeps its
-# operator's view alive instead of reading a healthy dump as a hung one.
+# attached. Either may run for many minutes without writing anything; a beat
+# every 60 s keeps the sink's operator's view alive instead of reading a healthy
+# dump as a hung one.
 _PROGRESS_INTERVAL_S = 60.0
 # Bound the composition-sample connection (a dead DB must stall the backup log
 # line only this long before degrading to "unavailable", never hang it).
@@ -111,15 +95,6 @@ def _require_aware(now: datetime) -> datetime:
     return now
 
 
-def _parse_stamp(stamp: str) -> datetime:
-    """A managed dump's filename stamp as an aware UTC instant.
-
-    The reading rules (UTC by construction; legacy stamps read in cluster
-    time) live in `services.pitr.stores.logical_dump_names.stamp_utc`.
-    """
-    return stamp_utc(stamp, _cluster_tz())
-
-
 def backup_dir() -> Path:
     # `<home>/backups/db`: the home itself already scopes the cluster (path-only
     # identity), so the dump dir needs no per-cluster token. Pre-cutover dumps
@@ -132,8 +107,8 @@ def backup_dir() -> Path:
 def backup_lock(*, timeout_s: float | None = None) -> Generator[None]:
     """Serialize backup creation and verification across local processes.
 
-    The lock is re-entrant within one thread, so a pre-update snapshot can hold
-    it while calling `run_backup` and checking that dump's restore TOC.
+    The lock is re-entrant within one thread, so a caller holding it can call
+    `run_backup`.
     """
     with _backup_lock_guard:
         depth = getattr(_backup_lock_state, "depth", 0)
@@ -162,59 +137,8 @@ def _managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
     for path in directory.iterdir():
         m = DUMP_NAME_RE.match(path.name)
         if m and path.is_file():
-            dumps.append((_parse_stamp(m["ts"]), path))
+            dumps.append((stamp_utc(m["ts"]), path))
     return sorted(dumps)
-
-
-def activation_snapshot(operation_id: str) -> Path | None:
-    """The exact published dump owned by one durable activation operation."""
-    suffix = f".{ACTIVATION_MARKER}-{operation_id}.dump.enc"
-    matches = [
-        path for _timestamp, path in _managed_dumps(backup_dir()) if path.name.endswith(suffix)
-    ]
-    if len(matches) > 1:
-        raise RuntimeError("multiple snapshots belong to one PITR activation operation")
-    return matches[0] if matches else None
-
-
-def _is_pre_update(path: Path) -> bool:
-    """Whether a managed dump is an update-kind snapshot rather than a daily dump."""
-    m = DUMP_NAME_RE.match(path.name)
-    return bool(m and m.group("kind") == PRE_UPDATE_MARKER)
-
-
-def _is_activation(path: Path) -> bool:
-    """Whether a dump is pinned by a not-yet-protected PITR operation."""
-    m = DUMP_NAME_RE.match(path.name)
-    return bool(m and (m.group("kind") or "").startswith(ACTIVATION_MARKER))
-
-
-def _active_activation_pin(directory: Path) -> Path | None:
-    if directory.resolve() != backup_dir().resolve():
-        return None
-    from base.paths import ava_home
-    from services.pitr.activation.state import load_record
-
-    record = load_record(ava_home())
-    if record is None or record.phase in {"protected", "rolled_back"}:
-        return None
-    if record.pre_activation_snapshot is None:
-        return None
-    pin = Path(record.pre_activation_snapshot)
-    if pin.parent.resolve() != directory.resolve():
-        raise RuntimeError("active PITR snapshot lies outside the managed backup directory")
-    return pin
-
-
-def active_activation_snapshot_name() -> str | None:
-    """The file name of the in-flight activation operation's pinned snapshot.
-
-    The retention planner mirrors the local prune's pin, so the off-site copy
-    of the logical recovery floor survives while the activation is
-    unresolved. None when no operation holds the pin.
-    """
-    pin = _active_activation_pin(backup_dir())
-    return None if pin is None else pin.name
 
 
 def is_due(now: datetime) -> bool:
@@ -229,28 +153,14 @@ def is_due(now: datetime) -> bool:
 
 
 def _prune(directory: Path) -> list[Path]:
-    """Delete managed dumps beyond retention: the newest ``backup_keep`` daily dumps
-    plus the newest pre-update snapshot. Every migration-bearing `ava cluster
-    update` writes one snapshot into this same pool, so without a separate slot
-    the updates would silently shrink the daily window; the newest snapshot is
-    always the most recent full dump before a migration, so it is kept."""
+    """Delete managed dumps beyond retention: all but the newest ``backup_keep``."""
     dumps = _managed_dumps(directory)
-    dailies = [
-        (ts, path) for ts, path in dumps if not _is_pre_update(path) and not _is_activation(path)
-    ]
-    snapshots = [(ts, path) for ts, path in dumps if _is_pre_update(path)]
-    activations = [(ts, path) for ts, path in dumps if _is_activation(path)]
-    keep = set(dailies[-settings.services.backup_keep :]) | set(activations[-ACTIVATION_KEEP:])
-    active_pin = _active_activation_pin(directory)
-    if active_pin is not None:
-        keep.update(item for item in activations if item[1] == active_pin)
-    if snapshots:
-        keep.add(snapshots[-1])
+    keep = set(dumps[-settings.services.backup_keep :])
     removed: list[Path] = []
-    for ts, path in dumps:
-        if (ts, path) not in keep:
-            path.unlink()
-            removed.append(path)
+    for item in dumps:
+        if item not in keep:
+            item[1].unlink()
+            removed.append(item[1])
     return removed
 
 
@@ -365,98 +275,11 @@ def gunzip_if_needed(path: Path, *, timeout_s: float = _DUMP_TIMEOUT_S) -> None:
             decompressed.unlink(missing_ok=True)
 
 
-class _EncryptedFileSource:
-    """A ``RestartableEncryptedSource`` over the published encrypted artifact.
-
-    The store re-iterates the source (the Baidu backend hashes once and
-    uploads once), so every iteration re-opens the seekable file: the bytes
-    are deterministic for the artifact's lifetime — the publisher alone owns
-    this path between the publish and the local prune.
-    """
-
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self._crc32c: str | None = None
-
-    @property
-    def ciphertext_size(self) -> int:
-        return self._path.stat().st_size
-
-    @property
-    def ciphertext_crc32c(self) -> str:
-        if self._crc32c is None:
-            from services.pitr.stores.checksums import CRC32C, digest_file
-
-            self._crc32c = digest_file(CRC32C, str(self._path))
-        return self._crc32c
-
-    def iter_chunks(self) -> Iterable[bytes]:
-        with self._path.open("rb") as source:
-            while chunk := source.read(8 * 1024 * 1024):
-                yield chunk
-
-
-def _publish_offsite(artifact: Path) -> str | None:
-    """Best-effort BlobStore-contract publish; never sacrifice the local artifact.
-
-    Publishes the encrypted dump iff absent as ``{REMOTE_ROOT}/{name}`` on
-    the configured backup store backend and logs the store-verified ACK. A
-    missing or unconfigured store, or a failed publish, warns and retains the
-    local artifact — the off-site leg stays optional, exactly as the Drive
-    copy it replaces.
-    """
-    from services.pitr.stores.factory import get_store_group
-
-    try:
-        store = get_store_group().restartable_streaming_object_store()
-    except Exception:
-        _log.exception("[backup] off-site store unavailable; local artifact retained")
-        return None
-    object_name = f"{REMOTE_ROOT}/{artifact.name}"
-    try:
-        ack = store.put_base_if_absent(
-            source=_EncryptedFileSource(artifact),
-            object_name=object_name,
-            metadata={"ava-artifact-kind": "logical-backup"},
-        )
-    except Exception:
-        _log.exception(
-            "[backup] off-site publish of %s failed; local artifact retained", object_name
-        )
-        return None
-    _log.info(
-        "[backup] off-site published %s (size=%d, pin=%s, checksum=%s:%s)",
-        object_name,
-        ack.size,
-        ack.pin_token,
-        ack.checksum.algo,
-        ack.checksum.value,
-    )
-    return object_name
-
-
-def _available_target(
-    directory: Path,
-    dbname: str,
-    now: datetime,
-    *,
-    pre_update: bool,
-    pitr_activation: str | None,
-) -> Path:
-    """Return an unused managed dump path without replacing a prior snapshot.
-
-    `pre_update` marks a fleet-update snapshot with a kind segment so
-    prune can give update-kind artifacts their own retention slot.
-    """
-    if pre_update and pitr_activation:
-        raise ValueError("a backup cannot be both pre-update and PITR activation")
-    if pitr_activation is not None and str(UUID(pitr_activation)) != pitr_activation:
-        raise ValueError("PITR activation backup requires a canonical operation UUID")
-    marker = f"{ACTIVATION_MARKER}-{pitr_activation}" if pitr_activation else PRE_UPDATE_MARKER
-    kind = f".{marker}" if pre_update or pitr_activation else ""
+def _available_target(directory: Path, dbname: str, now: datetime) -> Path:
+    """Return an unused managed dump path without replacing a prior dump."""
     for offset_s in range(_TARGET_NAME_ATTEMPTS):
         stamp = (now + timedelta(seconds=offset_s)).astimezone(UTC).strftime(TS_FORMAT)
-        target = directory / f"{dbname}-{stamp}{kind}.dump.enc"
+        target = directory / f"{dbname}-{stamp}.dump.enc"
         if not target.exists():
             return target
     raise RuntimeError("could not choose a distinct backup filename within 60 seconds")
@@ -540,8 +363,6 @@ def run_backup(
     *,
     db_url: str | None = None,
     timeout_s: float = _DUMP_TIMEOUT_S,
-    pre_update: bool = False,
-    pitr_activation: str | None = None,
     publish: bool = True,
     progress: _ProgressSink | None = None,
     staging: Path | None = None,
@@ -554,12 +375,9 @@ def run_backup(
     `staging` writes into a scheduled operation's private controls instead
     and leaves publication and pruning to that operation's controller.
 
-    `timeout_s` lets bounded callers such as the pre-update snapshot use a
-    tighter ceiling than the daily backup default. `pre_update` names the
-    artifact `<db>-<ts>.pre-update.dump.enc` so prune keeps it in its own
-    retention slot (newest one) instead of consuming a daily-dump slot.
-    `publish=False` keeps the completed artifact local, so off-site network
-    latency cannot extend a pre-update snapshot.
+    `timeout_s` lets bounded callers use a tighter ceiling than the daily
+    backup default. `publish=False` keeps the completed artifact local, so
+    off-site network latency cannot extend the run.
 
     `progress` narrates the stages that may run for minutes without writing
     anything (`pg_dump` and the encryption pass) — see `_run_with_progress`.
@@ -576,12 +394,10 @@ def run_backup(
             directory=directory,
             db_url=db_url,
             timeout_s=timeout_s,
-            pre_update=pre_update,
-            pitr_activation=pitr_activation,
             progress=progress,
         )
         if publish:
-            _publish_offsite(target)
+            offsite.publish(target)
         if staging is None:
             _log_written(target, _prune(target.parent))
         return target
@@ -591,8 +407,8 @@ def prune_after_publish(target: Path) -> None:
     """Prune around a newly linked scheduled dump without waiting on the lock.
 
     Linking never replaces a managed name, so it needs no lock; pruning does.
-    A busy lock (a weekly base capture can hold it for hours) defers pruning
-    to the next backup instead of stalling the scheduler.
+    A busy lock defers pruning to the next backup instead of stalling the
+    scheduler.
     """
     try:
         with backup_lock(timeout_s=0):
@@ -654,8 +470,6 @@ def _run_backup(
     *,
     db_url: str | None = None,
     timeout_s: float = _DUMP_TIMEOUT_S,
-    pre_update: bool = False,
-    pitr_activation: str | None = None,
     directory: Path,
     progress: _ProgressSink | None = None,
 ) -> Path:
@@ -674,13 +488,7 @@ def _run_backup(
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
     _log.info("[backup] db composition: %s", _db_size_breakdown(db_url))
-    target = _available_target(
-        directory,
-        dbname,
-        now,
-        pre_update=pre_update,
-        pitr_activation=pitr_activation,
-    )
+    target = _available_target(directory, dbname, now)
     stem = target.name.removesuffix(".dump.enc")
     dump_partial = directory / f"{stem}.dump.partial"
     encrypted_partial = target.with_name(target.name + ".partial")
@@ -779,13 +587,21 @@ def _main(argv: list[str] | None = None) -> int:
     )
     parser = argparse.ArgumentParser(prog="python -m services.backup")
     parser.add_argument("--publish-offsite", type=Path, metavar="ARTIFACT")
+    parser.add_argument(
+        "--offsite-root",
+        default=REMOTE_ROOT,
+        metavar="PREFIX",
+        help=f"object-name prefix of the off-site namespace (default {REMOTE_ROOT})",
+    )
     args = parser.parse_args(argv)
     if args.publish_offsite is None:
         parser.error("--publish-offsite is required")
     artifact = args.publish_offsite
     if not artifact.is_absolute():
         parser.error("--publish-offsite ARTIFACT must be an absolute path")
-    _publish_offsite(artifact)
+    if not args.offsite_root or args.offsite_root != args.offsite_root.strip("/"):
+        parser.error("--offsite-root must be a non-empty prefix without surrounding slashes")
+    offsite.publish(artifact, root=args.offsite_root)
     return 0
 
 
