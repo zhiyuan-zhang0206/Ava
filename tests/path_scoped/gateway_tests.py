@@ -1,4 +1,4 @@
-"""Gateway test fixtures.
+"""Gateway test fixtures (registered by `tests/fixtures/path_scopes.py`).
 
 `POST /api/agents` and the lifecycle endpoints (terminate / resurrect /
 restart) are HTTP-uniform: they always reach a runner via that runner's ops
@@ -25,17 +25,19 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pytest
-from pydantic import SecretStr
 
 from base.cluster import machines as _machines
 from base.cluster.machine import machine_name
-from base.config import settings as _settings
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from gateway.agents import forward as _agents_forward_router
 from gateway.agents import router as _agents_router
 from gateway.app import app
 from ops.lifecycle import launch_agent_op, lifecycle_op
 from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
+
+# One definition shared with the ava and integration modules; imported here so it
+# registers for this module's paths.
+from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -53,23 +55,8 @@ def _provider_plugins_loaded() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _mock_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set all API keys to dummy values so spawn validation passes."""
-    for attr in (
-        "anthropic_api_key",
-        "deepseek_api_key",
-        "gemini_api_key",
-        "openai_api_key",
-        "xiaomi_api_key",
-        "moonshot_api_key",
-        "zhipu_api_key",
-        "dashscope_api_key",
-    ):
-        monkeypatch.setattr(_settings.lm, attr, SecretStr("sk-test"))
-
-
-@pytest.fixture(autouse=True)
 def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The integration tests take this fixture from here (imported into their module).
     async def _in_process_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         # The gateway creates the agent row in-process (create_agent_row, real
         # DB); the runner's ops daemon dispatches launch_agent_op in-process —
@@ -117,9 +104,9 @@ def _local_lifecycle_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
         # against the test DB. AvaAgentError raises propagate directly — the
         # same exception types the wire round-trip would reconstruct. model_dump
         # mirrors the daemon serializing the response model onto the wire dict.
-        return (await lifecycle_op(path, json_body, app.state.db_pool)).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
+        return (await lifecycle_op(path, json_body, app.state.db_pool)).model_dump(mode="json")
 
-    monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)
 
 
 @pytest.fixture(autouse=True)
@@ -171,4 +158,4 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
             idempotency_key=idempotency_key,
         )
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _in_process_config)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _in_process_config)
