@@ -15,9 +15,12 @@ import re
 from typing import get_type_hints
 from urllib.parse import urlsplit
 
+import pytest
+
 from base import cluster
 from base.cluster import ports as cluster_ports
 from base.config import FIELD_INFOS, get_field
+from base.host.env import registry
 from base.host.env.port_table import FIXED_PORTS
 
 # The private range the suite draws its own listening ports from when the kernel's
@@ -33,6 +36,20 @@ def test_fixed_ports_carry_the_production_values() -> None:
     assert FIXED_PORTS["postgres"] == 5433
     assert FIXED_PORTS["redis"] == 6380
     assert FIXED_PORTS["pgbouncer"] == 6433
+
+
+@pytest.mark.parametrize(
+    ("slot", "port"), [("gateway_watchdog", 8119), ("agent_runner_watchdog", 8120)]
+)
+def test_the_watchdog_slots_no_daemon_binds_are_not_in_the_table(slot: str, port: int) -> None:
+    """The per-capability watchdog daemons are gone, and with them the only thing
+    that could bind these two health ports: the table, the recorded ports type, the
+    health-port derive surface and the `Settings` override all stop naming them."""
+    assert slot not in FIXED_PORTS
+    assert port not in FIXED_PORTS.values()
+    assert slot not in get_type_hints(cluster.ClusterPorts)
+    assert slot not in registry.health_port_env_aliases()
+    assert f"{slot}_health_port" not in FIELD_INFOS
 
 
 def test_fixed_ports_are_unique() -> None:

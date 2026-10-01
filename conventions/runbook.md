@@ -172,7 +172,7 @@ in the repository do not establish a cluster runtime dependency.
 
 **Ports** come from one fixed table (`base/host/env/port_table.py`: gateway 8000,
 frontend 3000, pg 5433, redis 6380, pgbouncer 6433, daemon healthz ports in
-8103-8120, milvus 19530). A new home records the table in its start intent at birth, and
+8103-8116, milvus 19530). A new home records the table in its start intent at birth, and
 every later read is `rec.ports[...]` off that record; a unit whose `.env` names no
 port binds the same numbers. Watchdog probe URLs + daemon/milvus/frontend ports
 derive from settings. The table is closed: a record with more or fewer slots is
@@ -1324,11 +1324,13 @@ deleted code.
      every settings model ignores a key it does not declare. Do not edit the
      `.env` by hand to remove them.
 2. **Between `down` and `up`, on every gateway home** (a runner-only home has no
-   reservation and needs nothing): delete the two retired port slots from the
-   start intent. New code refuses a reservation whose slots differ from the
-   fixed port table, so this is a state-file rewrite that comes before any
-   command of the new code (see the rule above). The file is compact JSON with
-   sorted keys, mode 0600:
+   reservation and needs nothing): delete the four retired port slots from the
+   start intent in this one step, the two PITR slots (`pitr_uploader`,
+   `pitr_base_backup`) and the two watchdog slots (`gateway_watchdog` 8119,
+   `agent_runner_watchdog` 8120; no daemon binds or reads them). New code
+   refuses a reservation whose slots differ from the fixed port table, so this
+   is a state-file rewrite that comes before any command of the new code (see
+   the rule above). The file is compact JSON with sorted keys, mode 0600:
 
    ```bash
    python3 - <<'EOF'
@@ -1336,7 +1338,7 @@ deleted code.
    home = pathlib.Path(os.environ.get("AVA_HOME") or pathlib.Path.home() / ".ava")
    path = home / "start-intent.json"
    data = json.loads(path.read_text())
-   for slot in ("pitr_uploader", "pitr_base_backup"):
+   for slot in ("pitr_uploader", "pitr_base_backup", "gateway_watchdog", "agent_runner_watchdog"):
        data["record"]["ports"].pop(slot, None)
    staged = path.with_name(path.name + ".staged")
    staged.write_text(json.dumps(data, sort_keys=True) + "\n")

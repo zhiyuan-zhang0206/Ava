@@ -43,8 +43,6 @@ class ClusterPorts(TypedDict):
     agent_host: int
     pg_backup: int
     memory_search: int
-    gateway_watchdog: int
-    agent_runner_watchdog: int
 
 
 def port_free(port: int) -> bool:

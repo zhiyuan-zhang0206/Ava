@@ -308,8 +308,6 @@ class TestConsumptionMatrixDeclarations:
             "im_bridge",
             "page_server",
             "agent_host",
-            "gateway_watchdog",
-            "agent_runner_watchdog",
         }
         meta = _fields()
         for svc, alias in aliases.items():
