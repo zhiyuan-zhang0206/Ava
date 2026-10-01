@@ -7,9 +7,8 @@ identity it never set, so which tests fail depends on the shard composition, and
 files changes it. This fixture reads the identity slots before a test and writes them back after
 the test's own fixtures are torn down, so no test has to undo the convention.
 
-It is function-scoped autouse and registered right after `leak_guard`: it sets up after the guard
-and so tears down before it, and by the time the guard compares, the slots are back.
-`tests/ci/test_leak_guard.py` locks that order by experiment.
+It is function-scoped autouse. The leak guard does not compare these slots, so no order against the
+guard matters; it is registered ahead of the other autouse plugins so that its window covers what they do.
 
 `ava.self.AGENT_ID` is not touched. The module `__getattr__` serves it from these slots, and a name
 it serves must never be assigned: writing back what was read would store it as a real attribute for

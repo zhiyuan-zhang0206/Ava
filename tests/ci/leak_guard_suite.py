@@ -86,9 +86,7 @@ import pytest
 import leakdemo.identity  # the stand-in slot must be loaded before the first test, whatever file runs
 from tests.fixtures import identity_restore, leak_guard
 
-# The suite's own singleton stands in for the agent identity slots, for the guard and the restore alike.
-leak_guard.WATCHED_ATTRS = (("leakdemo.identity", ("_id",)),)
-leak_guard.WATCHED_CONTEXTVARS = ()
+# The suite's own singleton stands in for the agent identity slots.
 identity_restore.IDENTITY_SLOTS = (("leakdemo.identity", ("_id",)),)
 identity_restore.IDENTITY_CONTEXTVARS = ()
 
@@ -103,8 +101,8 @@ def _explode(*_args, **_kwargs):
 
 
 _FAULTS = set(filter(None, os.environ.get("LEAK_SUITE_FAULT", "").split(",")))
-if "snapshot" in _FAULTS:  # a renamed identity slot: the registry names a name that is gone
-    leak_guard.WATCHED_ATTRS = (("leakdemo.identity", ("_gone",)),)
+if "snapshot" in _FAULTS:
+    leak_guard._RUN.capture = _explode
 if "compare" in _FAULTS:
     leak_guard._RUN.compare = _explode
 if "collect" in _FAULTS:  # the controller cannot record what the workers found
@@ -197,7 +195,7 @@ def test_clean_preregistered_module_attr(monkeypatch: pytest.MonkeyPatch) -> Non
     registry.register_namespace(nsmod, "code")
 
 
-# ---- class 4: the identity slot assigned bare, the pattern 300+ test sites use
+# ---- class 4: the identity slot assigned bare, the pattern 300+ test sites use (undone by identity_restore)
 def test_leaker_bare_identity_assignment() -> None:
     identity._id = 7
 
