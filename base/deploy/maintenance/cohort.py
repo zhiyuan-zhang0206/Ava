@@ -84,15 +84,12 @@ def prepare(
             (machine,),
         ).fetchall()
         if host_absent:
-            from base.deploy.maintenance.cold import normalize_retired_intent
+            from base.deploy.maintenance.cold import require_cold_end
 
-            for index, values in enumerate(rows):
+            for values in rows:
                 row = _RuntimeRow(*values)
                 if row.retired_intent():
-                    normalize_retired_intent(
-                        conn, row.agent_id, restarting=row.status == "restarting"
-                    )
-                    rows[index] = row._replace(status="idling")
+                    require_cold_end(conn, row.agent_id)
         applied = _applied_capture(conn, hold, host_owner, holder, acquired_at)
         captured = _classify(
             [_RuntimeRow(*row) for row in rows], hold, host_owner, applied, host_absent=host_absent
@@ -154,12 +151,11 @@ class _RuntimeRow(NamedTuple):
 
     def retired_intent(self) -> bool:
         return (
-            self.status in ("idling", "restarting")
-            and (self.status == "restarting" or self.fresh is False)
+            self.status == "idling"
+            and self.fresh is False
             and self.kind == "hosted"
             and self.owner is not None
             and self.generation is not None
-            and self.fresh is not True
             and self.pid is None
             and self.resources is None
         )

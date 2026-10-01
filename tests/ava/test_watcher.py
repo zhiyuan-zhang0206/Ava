@@ -1050,29 +1050,3 @@ def test_cron_registered_twice_yields_two_independent_sessions(_agent_row: int) 
     finally:
         ava.shell.kill(first)
         ava.shell.kill(second)
-
-
-def test_kill_does_not_touch_any_registry_table(_agent_row: int) -> None:
-    """A watcher is just a shell session: kill must never read or write
-    `agent_watchers` — there is no registry left to consult.
-
-    Locked by seeding a row for the exact session about to be killed — the
-    shape an old, not-yet-updated runner's `register_watcher` would still
-    write during a rollout — and asserting kill leaves it untouched. The old
-    `kill()` deleted exactly this row, so this fails on the old code and
-    passes on the new."""
-    import psycopg
-
-    from base.config import settings
-
-    wid = watcher.launch("import time\ntime.sleep(60)\n", timeout="1h", name="test-no-registry")
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_watchers (agent_id, session_id, kind, name) "
-            "VALUES (%s, %s, 'launch', 'test-no-registry')",
-            (_agent_row, wid),
-        )
-    ava.shell.kill(wid)
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agent_watchers WHERE agent_id = %s", (_agent_row,))
-        assert cur.fetchone() == (1,)

@@ -3,7 +3,7 @@
 tests/fixtures/provisioning.py truncates a hand-written table list before every test
 (`_PER_TEST_TRUNCATE_TABLES`). A migration adding a new per-test data table
 that nobody adds to that list silently shares state across tests — the R1
-`deployment_state` near-miss and today's `agent_watchers` (audit round-2
+`deployment_state` near-miss and the retired `agent_watchers` (audit round-2
 cc-docs-tests P2) are the shape of that drift. This test derives the real
 isolation closure from the live test DB and fails when a public table is
 outside it:
@@ -142,9 +142,6 @@ _EXEMPT: dict[str, str] = {
     "checkpoint_migrations": "LangGraph migration bookkeeping — never test data",
     "agent_metric_collection": "migration-seeded collection cutover singleton — "
     "read-only after installation, never test data",
-    "cluster_pin": "cluster singleton state — infra, not test data",
-    "cluster_last_update": "cluster singleton outcome row — infra (mirrored into "
-    "deployment_state by the R1 migration)",
     "cluster_defaults": "cluster singleton defaults — infra, not test data",
     "deployment_state": "R1 singleton (id=1, CHECK) — its live consumer is the "
     "code-version gate (base/db/code_version_gate.py); the row is seeded by the "

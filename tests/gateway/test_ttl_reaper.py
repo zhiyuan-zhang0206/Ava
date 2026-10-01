@@ -781,23 +781,12 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
     watcher-shaped session — one that was actually running a script, exactly
     like a real watcher always is at its TTL deadline — gets the SAME
     interruption notice any other reclaimed shell with live work gets, and
-    exactly once.
-
-    A rollout can leave an old, not-yet-updated runner still writing the
-    `agent_watchers` row a watcher used to carry (the exact shape
-    `register_watcher` wrote: kind/name/timeout_secs, `status` defaulting to
-    `running`) — this pass must ignore it too, not just the row-less case, so
-    the row is seeded here deliberately."""
+    exactly once."""
     aid = _running_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
             "VALUES (%s, 7, now() - interval '1 minute', now() - interval '31 minutes')",
-            (aid,),
-        )
-        cur.execute(
-            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, timeout_secs) "
-            "VALUES (%s, 7, 'launch', 'test-watcher', 1800)",
             (aid,),
         )
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))

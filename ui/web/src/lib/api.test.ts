@@ -155,11 +155,10 @@ describe("lifecycle endpoints", () => {
     expect(calls[0].url).toMatch(/\/api\/agents\?scope=terminated&limit=100$/);
   });
 
-  it("listAgents projects every internal transition to the public three-state model", async () => {
+  it("listAgents projects every wire lifecycle state to the public model", async () => {
     const statuses = [
       "running",
       "idling",
-      "restarting",
       "terminated",
     ];
     vi.stubGlobal(
@@ -183,7 +182,6 @@ describe("lifecycle endpoints", () => {
 
     expect(rows.agents.map((row) => row.status)).toEqual([
       "running",
-      "idling",
       "idling",
       "terminated",
     ]);

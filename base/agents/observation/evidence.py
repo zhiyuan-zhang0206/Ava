@@ -46,7 +46,6 @@ ADMISSION_FRESH_FOR = timedelta(minutes=5)
 class AdmissionOutcome(StrEnum):
     ADMITTED = "admitted"
     MAINTENANCE_HOLD = "maintenance_hold"
-    PUBLICATION_DEFERRED = "publication_deferred"
     RESOURCE_FENCE = "resource_fence"
     ADMISSION_GUARD_REFUSED = "admission_guard_refused"
 

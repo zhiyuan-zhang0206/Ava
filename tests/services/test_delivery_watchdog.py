@@ -1174,22 +1174,6 @@ class TestSelectTerminatedOwnersWithPending:
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
 
-    def test_legacy_closure_stamp_does_not_exclude_the_owner(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        """Terminate has no closed state: a terminated owner that still carries
-        the retired `closed_at` stamp is selected like any other
-        (decisions/2026-09-27-terminate-has-no-closed-state.md)."""
-        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
-
-        aid = _make_terminated_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "hello?", source="user")
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET closed_at = now() WHERE id = %s", (aid,))
-        db_conn.commit()
-
-        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
-
     def test_deduplicates_per_agent(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
     ) -> None:
