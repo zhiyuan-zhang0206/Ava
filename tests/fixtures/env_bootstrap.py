@@ -498,8 +498,9 @@ _prewarm_full_settings()
 # ids are no longer reset between tests (see `_clean_state` — no RESTART IDENTITY),
 # so the first spawn is NOT guaranteed to be id 1. Any test that exercises
 # `ava.self.*` / `ava.agents.*` re-pins this to the id it actually created via
-# `ava.agent_identity._agent_id = spawn_agent()` (the pattern used across tests/ava/*). Do
-# not rely on "the first spawn is 1" — capture the returned id.
+# `ava.agent_identity._agent_id = spawn_agent()` (the pattern used across tests/ava/*); the
+# `identity_restore` plugin puts it back after the test. Do not rely on "the first spawn is 1" —
+# capture the returned id.
 ava.agent_identity._agent_id = 1
 ava.agent_identity._owns_loop = True
 # Remove AVA_AGENT_ID propagated from the agent process — any test that
