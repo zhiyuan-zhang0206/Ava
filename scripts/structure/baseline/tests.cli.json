@@ -50,5 +50,31 @@
     "tests/cli/test_storage_ownership.py::base.cluster.postgres._read": 1,
     "tests/cli/test_storage_ownership.py::base.cluster.postgres._require_closed": 2,
     "tests/cli/test_storage_ownership.py::base.cluster.postgres._spawn": 2
+  },
+  "tests_location": {
+    "tests/cli/test_commands_cluster_status.py::top-level": 1,
+    "tests/cli/test_converge_lgtm.py::top-level": 1,
+    "tests/cli/test_converge_redis_bridge.py::top-level": 1,
+    "tests/cli/test_grafana_render_cmd.py::top-level": 1,
+    "tests/cli/test_impersonation.py::top-level": 1,
+    "tests/cli/test_impersonation_bridge.py::top-level": 1,
+    "tests/cli/test_main_dispatch.py::top-level": 1,
+    "tests/cli/test_maintenance.py::top-level": 1,
+    "tests/cli/test_maintenance_stop.py::top-level": 1,
+    "tests/cli/test_mcp.py::top-level": 1,
+    "tests/cli/test_otel_bootstrap_relay.py::top-level": 1,
+    "tests/cli/test_packages_refresh.py::top-level": 1,
+    "tests/cli/test_pause_stop.py::top-level": 1,
+    "tests/cli/test_pgbouncer_config.py::top-level": 1,
+    "tests/cli/test_pgbouncer_wire.py::top-level": 1,
+    "tests/cli/test_pitr_drill_cli.py::top-level": 1,
+    "tests/cli/test_pitr_foundation.py::top-level": 1,
+    "tests/cli/test_pitr_multipart_cli.py::top-level": 1,
+    "tests/cli/test_pitr_retention_gate.py::top-level": 1,
+    "tests/cli/test_pitr_snapshot_archive.py::top-level": 1,
+    "tests/cli/test_plugin_scaffold.py::top-level": 1,
+    "tests/cli/test_root_driver.py::top-level": 1,
+    "tests/cli/test_schedules_cmd.py::top-level": 1,
+    "tests/cli/test_storage_ownership.py::top-level": 1
   }
 }

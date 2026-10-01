@@ -2238,6 +2238,11 @@ create), and one that a per-file verdict cannot see:
   home). A test's home follows what its subject's package imports, so a
   production import change can move the home of a test the commit-time
   `lint-patch-targets` never receives; CI's structure job scans everything too.
+- `lint-tests-location-full` runs the tests-location check over every tracked
+  top-level test at every push, unwrapped (paths only, under 0.1 s, so there is nothing
+  to skip). A deleted or renamed test is never passed to the commit-time
+  `lint-tests-location`, so its stale registry entry is found here; CI's structure job
+  checks everything too.
 
 `scripts/prepush-guard.sh` holds a separate lock for each of `pyright`,
 `tsc`, `eslint` (the whole-project run), and `vitest` across all worktrees on the host.
