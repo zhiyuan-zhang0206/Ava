@@ -20,7 +20,7 @@ tags:
 Split by kind: code/AST/Python-convention guards in [[scripts/lint/docs/lint.ava.okf.md]]; document/OKF/skill/migration-format guards in [[scripts/content_lint/docs/content_lint.ava.okf.md]].
 
 ### `audit/` — read-only drift audits
-`branch_protection.py` (live GitHub branch protection vs. `.trunk/trunk.yaml`), `module_moves.py`, `split_reexports.py` (package-door split/re-export shape checks, also called by the structure gate).
+`branch_protection.py` (live GitHub branch protection vs. `.trunk/trunk.yaml`), `where_used.py` + `where_used_scan.py` (before a change: every importer, test, string target, doc and baseline entry of a symbol, module or path, grouped; `--json` for scripts), `module_moves.py` (after a move: no reference to the old path may remain), `split_reexports.py` (package-door split/re-export shape checks, also called by the structure gate).
 
 ### `codegen/` — derived-artifact generation and OKF tooling
 `build_okf_data.py` (bundle → `graph_data.json`), `serve_okf_viz.py` (local viewer, `okf-d3-template.html` — also read by `gateway/routers/okf_graph.py`'s `/api/okf/graph`) — OKF tooling. `build_app_update_manifest.py` (Tauri archives → `latest.json`), `build_hierarchy_once.py`, `dump_event_fixtures.py`, `dump_frontend_constants.py`, `dump_openapi.py`, `gen_config_lite_table.py`, `gen_event_registry.py`, `gen_pyright_test_environments.py` (the `executionEnvironments` entries of `pyproject.toml` that hold each package's `tests/` directory to the tests type-checking standard, written between its GENERATED markers), `generate-ui-page.py` — one generator per artifact, each with a matching `check-*-fresh.sh` or pre-commit drift gate.
