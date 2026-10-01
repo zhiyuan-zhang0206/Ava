@@ -115,9 +115,9 @@ checkpoint conversation must be proved.
 After local encryption succeeds and before local pruning, the gateway publishes
 the `.dump.enc` artifact to Aliyun OSS under the `ava-logical/` namespace
 (`services/gateway_side/backup/offsite.py`). It needs
-`AVA_PITR_STORE_BACKEND=oss`, `AVA_PITR_OSS_ENDPOINT`, `AVA_PITR_OSS_BUCKET` and
-`AVA_PITR_OSS_CREDENTIALS_FILE`; a home without them skips the leg with one
-INFO log line. The publish is if-absent (server-enforced `x-oss-forbid-overwrite`
+`AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and
+`AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` (set through `ava config set`); a home
+without all three skips the leg with one INFO log line. The publish is if-absent (server-enforced `x-oss-forbid-overwrite`
 on completion; the bucket must stay versioning-off) and verified (per-part
 `Content-MD5` plus the multipart ETag chain). It is optional: a failed publish
 or an unusable credentials file logs the cause but never discards the local
