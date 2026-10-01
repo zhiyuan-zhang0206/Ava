@@ -289,18 +289,33 @@ def test_a_branch_that_only_deletes_an_input_reruns_that_hook_over_the_repo(
     assert "--all-files" in calls.read_text()
 
 
-def test_a_branch_that_also_changes_an_input_leaves_the_hook_to_the_branch_diff_run(
+def test_a_whole_repo_hook_is_left_to_the_branch_diff_run_when_the_branch_also_changes_an_input(
     freshness_repo: tuple[Path, Path],
 ) -> None:
-    """The nested branch-diff run executes a hook whose inputs the branch added or changed, whole
-    repository included, so the sweep does not repeat it."""
+    """The nested branch-diff run executes a whole-repository hook once the branch added or
+    changed one of its inputs, and that run judges the deletion with it: no repeat."""
+    repo, calls = freshness_repo
+    _branch_from(repo, {"base/config/gone.py": "x = 1\n", "base/config/kept.py": "x = 1\n"})
+    subprocess.run(["git", "-C", str(repo), "rm", "-q", "base/config/gone.py"], check=True)
+    (repo / "base/config/kept.py").write_text("x = 2\n")
+    _commit_all(repo, "delete one config module, change another")
+    assert _run_freshness(repo).returncode == 0
+    assert _hooks_run(calls) == []
+
+
+def test_a_per_file_hook_sees_the_deletion_only_through_the_sweep(
+    freshness_repo: tuple[Path, Path],
+) -> None:
+    """lint-ava-okf judges only the documents it is handed, so a branch that deletes one OKF
+    document and changes another still needs the whole-set re-check for links into the deleted
+    one; the whole-repository markdown check is already covered by the nested run."""
     repo, calls = freshness_repo
     _branch_from(repo, {"docs/gone.ava.okf.md": "x\n", "docs/kept.ava.okf.md": "x\n"})
     subprocess.run(["git", "-C", str(repo), "rm", "-q", "docs/gone.ava.okf.md"], check=True)
     (repo / "docs/kept.ava.okf.md").write_text("changed\n")
     _commit_all(repo, "delete one, change another")
     assert _run_freshness(repo).returncode == 0
-    assert _hooks_run(calls) == []
+    assert _hooks_run(calls) == ["lint-ava-okf"]
 
 
 def test_moving_an_input_out_of_a_hook_pattern_counts_as_deleting_it(

@@ -6,10 +6,12 @@ event registry, the config table or an OKF link target goes stale and nothing lo
 Only a whole-repository run of the hook can see what a deletion left behind.
 
 The nested branch-diff run (scripts/prepush-branch-lint.sh) already executes every commit-stage
-hook whose inputs the branch added or changed. This covers the rest: a hook whose `files:`
-pattern matches a deleted path, and no added or changed one, runs with `--all-files`. When the
-range cannot be known (no origin/main) every hook runs, because not knowing is not a reason to
-skip. CI re-checks every hook on the pushed and merged tree either way.
+hook whose inputs the branch added or changed, and a whole-repository hook (`pass_filenames:
+false`) judges the deletion along with it. This covers the rest: a whole-repository hook whose
+`files:` pattern matches a deleted path and no added or changed one, and a per-file hook (which
+sees only the files it is handed) whose pattern matches any deleted path, runs with `--all-files`.
+When the range cannot be known (no origin/main) every hook runs, because not knowing is not a
+reason to skip. CI re-checks every hook on the pushed and merged tree either way.
 """
 
 from __future__ import annotations
@@ -61,24 +63,32 @@ def branch_paths() -> tuple[set[str], set[str]] | None:
 
 
 def hooks_to_run(
-    patterns: dict[str, re.Pattern[str]], paths: tuple[set[str], set[str]] | None
+    patterns: dict[str, tuple[re.Pattern[str], bool]], paths: tuple[set[str], set[str]] | None
 ) -> list[str]:
-    """The hooks the nested run cannot cover: every one when the range is unknown, else those
-    whose pattern matches a deleted path and no added or changed one."""
+    """The hooks the nested run cannot cover (`patterns`: hook -> (files pattern, whole-repo)).
+
+    Every hook when the range is unknown. Otherwise those whose pattern matches a deleted path
+    and, for a whole-repository hook, no added or changed one (the nested run executes that hook
+    over the whole repository anyway); a per-file hook never judges the deletion itself.
+    """
     if paths is None:
         return list(patterns)
     deleted, other = paths
     return [
         hook
-        for hook, pattern in patterns.items()
-        if any(pattern.search(p) for p in deleted) and not any(pattern.search(p) for p in other)
+        for hook, (pattern, whole_repo) in patterns.items()
+        if any(pattern.search(p) for p in deleted)
+        and not (whole_repo and any(pattern.search(p) for p in other))
     ]
 
 
 def main() -> int:
     config = yaml.safe_load((_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
     declared = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
-    patterns = {hook: re.compile(declared[hook]["files"]) for hook in HOOKS}
+    patterns = {
+        hook: (re.compile(declared[hook]["files"]), declared[hook].get("pass_filenames") is False)
+        for hook in HOOKS
+    }
     paths = branch_paths()
     if paths is None:
         print("pre-push: branch range unknown (no origin/main); running every artifact hook")
