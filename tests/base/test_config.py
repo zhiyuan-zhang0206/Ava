@@ -521,20 +521,20 @@ def test_bootstrap_fields_derived_from_scope() -> None:
     assert not ({"machine_name", "gateway_pidfile", "sdk_disable"} & set(BOOTSTRAP_FIELDS))
 
 
-def test_physical_backup_cluster_pinned_fields_are_never_bootstrap_served() -> None:
-    """A runner must never receive backup enablement without its host credentials."""
-    from base.config import BOOTSTRAP_FIELDS, FIELD_INFOS, field_domain
+def test_offsite_backup_cluster_pinned_fields_are_never_bootstrap_served() -> None:
+    """A runner must never receive the off-site destination without its host credentials."""
+    from base.config import BOOTSTRAP_FIELDS, FIELD_INFOS
 
-    physical_backup_cluster_pinned = {
+    offsite_cluster_pinned = {
         name
         for name, field in FIELD_INFOS.items()
-        if field_domain(name) == "physical_backup"
+        if name.startswith("backup_offsite_")
         and isinstance(field.json_schema_extra, dict)
         and field.json_schema_extra.get("scope") == "cluster-pinned"  # pyright: ignore[reportUnknownMemberType]
     }
 
-    assert physical_backup_cluster_pinned
-    assert not (set(BOOTSTRAP_FIELDS) & physical_backup_cluster_pinned)
+    assert offsite_cluster_pinned
+    assert not (set(BOOTSTRAP_FIELDS) & offsite_cluster_pinned)
 
 
 @pytest.mark.usefixtures("served_gateway_home")
@@ -1045,6 +1045,29 @@ def test_agent_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
             getattr(s, domain)
 
 
+def test_keys_of_the_retired_stack_are_inert(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A unit `.env` that still carries the deleted PITR stack's keys must not stop
+    Settings from building: every sub-model ignores keys it does not declare, so
+    an upgrade never has to rewrite a home's `.env` before it can start."""
+    import os
+
+    from base import config
+
+    for key, value in {
+        "AVA_PITR_ENABLED": "true",
+        "AVA_PITR_STORE_BACKEND": "oss",
+        "AVA_PITR_OSS_BUCKET": "retired",
+        "AVA_PITR_GCS_PREFIX": "ava-pitr/retired",
+        "AVA_PITR_SPOOL_HARD_BYTES": "2362232013",
+        "AVA_PITR_UPLOADER_HEALTH_PORT": "8117",
+    }.items():
+        monkeypatch.setitem(os.environ, key, value)
+
+    settings = config.Settings()
+
+    assert not hasattr(settings, "physical_backup")
+
+
 def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
     """Support daemons include browser sandbox, telemetry, backup, and alerts;
     agent execution stays in the agent-host's separate profile."""
@@ -1060,7 +1083,6 @@ def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
         "lm",
         "sandbox",
         "observability",
-        "physical_backup",
         "alerts",
     ):
         assert s.has_domain(domain), domain

@@ -18,8 +18,7 @@ tags: []
   unregistered alias keeps its name with `old`/`new` null, and a metadata-lookup failure withholds
   every value (fail closed). Writers capture the pre-write values under the env lock and hand the
   raw diff to `record_env_write`, which owns the redaction: `runtime_config.write_fields`,
-  `dotenv_file.upsert_env` / `dotenv_file.remove_env` (actor + diff) and `dotenv_file.replace_env_bytes_cas`
-  (diff only); the rename/migration helpers record the diff-less form. A write whose rendered
+  `dotenv_file.upsert_env` / `dotenv_file.remove_env` (actor + diff); the rename/migration helpers record the diff-less form. A write whose rendered
   bytes equal the file on disk is not a write: `upsert_env` skips it entirely — no snapshot, no
   rewrite, no record (task #3637: repeated converge runs and boot-retry storms stop manufacturing
   `old == new` records; a quoted or oddly-spaced line still rewrites and normalizes on its first

@@ -323,7 +323,7 @@ def test_python_files_makes_location_the_test_definition(tmp_path: Path) -> None
         "base/pkg/tests/test_a.py",
         "base/pkg/tests/area/test_b.py",
         "ava_builtins/skills/x/scripts/tests/test_c.py",
-        "services/pitr/stores/cos/tests/test_d.py",
+        "services/example/area/tests/test_d.py",
         # Production modules that happen to be named test_*.py.
         "base/db/test_db_guard.py",
         "scripts/ci/test_selector.py",
@@ -344,7 +344,7 @@ def test_python_files_makes_location_the_test_definition(tmp_path: Path) -> None
         "ava_builtins/skills/x/scripts/tests/test_c.py::test_it",
         "base/pkg/tests/area/test_b.py::test_it",
         "base/pkg/tests/test_a.py::test_it",
-        "services/pitr/stores/cos/tests/test_d.py::test_it",
+        "services/example/area/tests/test_d.py::test_it",
         "tests/agent/test_nested.py::test_it",
         "tests/test_top.py::test_it",
     ], result.stdout + result.stderr

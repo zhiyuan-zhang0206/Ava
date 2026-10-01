@@ -42,8 +42,6 @@ class ClusterPorts(TypedDict):
     page_server: int
     agent_host: int
     pg_backup: int
-    pitr_uploader: int
-    pitr_base_backup: int
     memory_search: int
     gateway_watchdog: int
     agent_runner_watchdog: int

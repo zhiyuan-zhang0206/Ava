@@ -50,7 +50,6 @@ from cli.parsers.management import (
 )
 from cli.parsers.mcp import _add_mcp_parser, _add_memory_parser
 from cli.parsers.packages import _add_packages_parser
-from cli.parsers.pitr import _add_pitr_parser
 from cli.parsers.plugins import _add_plugins_parser, _add_skill_parser
 from cli.parsers.pty import _add_pty_parser
 
@@ -83,7 +82,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_trace_parser(sub)
     _add_logs_parser(sub)
     _add_backup_parser(sub)
-    _add_pitr_parser(sub)
     _add_agents_parser(sub)
     _add_impersonation_parser(sub)
     _add_config_parser(sub)

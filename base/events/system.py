@@ -275,24 +275,11 @@ class ScheduleStalled(TypedDict):
     stalled_seconds: float
 
 
-class PitrRemoteInventory(TypedDict):
-    """`pitr_remote_inventory` payload — retention scheduler snapshot.
-
-    The viewer-only inventory refresh emits the backend-scoped object and byte
-    footprint as absolute gauges. A remote retention delete path does not
-    exist here; the planner remains dry-run-only.
-    """
-
-    backend: str
-    object_count: int
-    bytes: int
-
-
 class BackupOperationCustody(TypedDict):
     """`backup_operation_custody` payload — scheduled backup operation custody.
 
-    ``operation`` names the operation kind (``logical-dump``, ``base-candidate``,
-    ...). ``custody`` is ``quarantined`` (closure proven; the next operation
+    ``operation`` names the operation kind (``logical-dump`` or
+    ``logical-restore-drill``). ``custody`` is ``quarantined`` (closure proven; the next operation
     proceeds), ``blocked`` (closure unproven; the kind refuses new work until
     ``ava backup operations retire``) or ``retired`` (an operator retirement).
     ``detail`` is the bounded diagnostic; it is never an alert grouping key.
@@ -304,7 +291,7 @@ class BackupOperationCustody(TypedDict):
 
 
 class RecoveryDrillFailed(TypedDict):
-    """`recovery_drill_failed` payload — scheduled logical/PITR proofs.
+    """`recovery_drill_failed` payload — the scheduled logical restore drill.
 
     ``drill`` identifies the recovery path that needs intervention. ``detail``
     is the bounded failure diagnostic retained in the event stream; it is not a

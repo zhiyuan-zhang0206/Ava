@@ -4,10 +4,10 @@
 
 `publish` uploads one encrypted ``.dump.enc`` iff absent as ``<root>/<name>``
 and logs the verified ACK; a missing or failed publish never costs the local
-artifact. The only backend is OSS (``AVA_PITR_STORE_BACKEND=oss`` with
-``AVA_PITR_OSS_ENDPOINT``, ``AVA_PITR_OSS_BUCKET`` and
-``AVA_PITR_OSS_CREDENTIALS_FILE``); any other setting skips the leg with one
-INFO line, because an unconfigured home is a supported state.
+artifact. The only backend is OSS (``AVA_BACKUP_OFFSITE_ENDPOINT``,
+``AVA_BACKUP_OFFSITE_BUCKET`` and ``AVA_BACKUP_OFFSITE_CREDENTIALS_FILE``); a home
+that has not set all three skips the leg with one INFO line, because an
+unconfigured home is a supported state.
 
 The upload is a multipart upload whose integrity is proven twice: every part
 carries a ``Content-MD5`` the server verifies, and the completed object's
@@ -124,24 +124,18 @@ class OssTarget:
 
 def configured_target() -> OssTarget | None:
     """The configured OSS destination, or None (one INFO line says why)."""
-    config = settings.physical_backup
-    if config.pitr_store_backend != "oss":
-        _log.info(
-            "[backup] off-site publish skipped: AVA_PITR_STORE_BACKEND=%s, only oss publishes",
-            config.pitr_store_backend,
-        )
-        return None
+    config = settings.services
     keys = {
-        "AVA_PITR_OSS_ENDPOINT": config.pitr_oss_endpoint,
-        "AVA_PITR_OSS_BUCKET": config.pitr_oss_bucket,
-        "AVA_PITR_OSS_CREDENTIALS_FILE": config.pitr_oss_credentials_file,
+        "AVA_BACKUP_OFFSITE_ENDPOINT": config.backup_offsite_endpoint,
+        "AVA_BACKUP_OFFSITE_BUCKET": config.backup_offsite_bucket,
+        "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE": config.backup_offsite_credentials_file,
     }
     unset = [key for key, value in keys.items() if not value]
-    credentials_file = config.pitr_oss_credentials_file
+    credentials_file = config.backup_offsite_credentials_file
     if unset or credentials_file is None:
         _log.info("[backup] off-site publish skipped: %s unset", ", ".join(unset))
         return None
-    return OssTarget(config.pitr_oss_endpoint, config.pitr_oss_bucket, credentials_file)
+    return OssTarget(config.backup_offsite_endpoint, config.backup_offsite_bucket, credentials_file)
 
 
 def open_bucket(target: OssTarget) -> OssBucket:

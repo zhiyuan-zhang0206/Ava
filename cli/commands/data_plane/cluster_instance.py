@@ -66,7 +66,6 @@ from base.cluster.dataplane.pg_tools import (
     pg_tz_args,
 )
 from base.config import settings
-from base.config.physical_backup import pitr_replication_hba_lines
 from base.db.pg_admin import pg_admin_url as _base_pg_admin_url
 from base.db.pg_admin import pg_socket_dir
 from base.host.net.url_secret import url_host
@@ -189,9 +188,6 @@ def _pg_hba_body(cluster_secret: str) -> str:
     and `trusted_cidrs` as SCRAM host lines, matching its bind posture
     (`port_preflight.bind_addrs`); a no-secret cluster has loopback lines only.
 
-    PITR adds loopback `replication` rows for its role (see
-    `pitr_replication_hba_lines`): pg_basebackup's PHYSICAL replication
-    connection matches only the literal `replication` keyword, never `all`.
     `cluster_secret` is the CALLER-PASSED cluster secret, never read from
     `settings`: install-time birth has no `.env` yet, so `settings` would see an
     inherited sibling secret (a prod-sourced shell) and widen a no-secret
@@ -211,7 +207,6 @@ def _pg_hba_body(cluster_secret: str) -> str:
             lines.append(f"host all all {host}/32 scram-sha-256")
         for cidr in (c.strip() for c in settings.data_plane.trusted_cidrs.split(",") if c.strip()):
             lines.append(f"host all all {cidr} scram-sha-256")
-    lines += pitr_replication_hba_lines()
     return "\n".join(lines) + "\n"
 
 

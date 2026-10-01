@@ -21,8 +21,7 @@ the startup process, each backend) calls `setsid` at birth, so the group proves
 nothing about them.
 
 Each kind quarantines into `quarantine/<kind>/` beside its control root. The
-core is kind-agnostic: the physical PITR stack registers its own kinds on it until
-that stack is removed, but `ava backup operations` covers the two kinds below.
+core is kind-agnostic; `ava backup operations` covers the two kinds below.
 
 | Kind | Control root | Sanitizer |
 | --- | --- | --- |

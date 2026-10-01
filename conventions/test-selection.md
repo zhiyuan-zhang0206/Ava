@@ -157,7 +157,7 @@ report is a no-op. Decisions: FULL 680 (forced roots and unmapped paths
 dominated), SELECTED 31 runs / 25 PRs, empty 267 (262 push runs plus a handful
 of concurrency-cancelled runs). One run recorded FALSE GREEN (PR #1842,
 2026-09-06): triage attributed it to a time-dependent assertion in
-tests/services/test_pitr_base_scheduler.py — unrelated to that PR's diff, and
+a daemon test in `tests/services/` — unrelated to that PR's diff, and
 fixed the same morning by #1840 (merged five minutes after this run's decision
 was recorded). Its decision payload had no changed blind file, so no static-map
 gap was involved. No other false green was observed, and no informational

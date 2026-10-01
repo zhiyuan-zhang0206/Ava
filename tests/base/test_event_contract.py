@@ -233,7 +233,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # pair and the two quiet-close events) lowers it by four, to 218. The unit
     # intent store's recorded-failure pair (task #4872: root_restart_failed —
     # an interrupted replacement's explicit failure state — and
-    # root_restart_cleared) raises the current total to 220.
+    # root_restart_cleared) raises it to 220. Retiring the PITR stack
+    # (decisions/2026-10-02-delete-the-self-written-pitr-stack.md: no remote
+    # inventory snapshot) lowers the current total by one, to 219.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
     assert "agent_reopened" not in _TELEMETRY_KINDS
     for retired in (
@@ -245,7 +247,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
         assert retired not in _TELEMETRY_KINDS
     # The suffix diagnostic adds one; retiring tool-call concatenation removes one.
     assert "multiple_tool_calls_merged" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 220
+    assert len(_TELEMETRY_KINDS) == 219
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",
@@ -430,16 +432,6 @@ def test_root_health_tick_payload_and_metric_disposition() -> None:
 
     assert payload_keys("root_health_tick") == ("home_id", "last_tick_timestamp_seconds")
     assert _METRIC_DISPOSITION[("root_health_tick", "last_tick_timestamp_seconds")] == "gauge"
-
-
-def test_pitr_remote_inventory_payload_and_metric_disposition() -> None:
-    """A remote inventory sample is absolute backend-scoped state, never a sum."""
-    from base.events.contract import payload_keys
-    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
-
-    assert payload_keys("pitr_remote_inventory") == ("backend", "object_count", "bytes")
-    assert _METRIC_DISPOSITION[("pitr_remote_inventory", "object_count")] == "gauge"
-    assert _METRIC_DISPOSITION[("pitr_remote_inventory", "bytes")] == "gauge"
 
 
 def test_stall_wave_mitigation_event_contract() -> None:

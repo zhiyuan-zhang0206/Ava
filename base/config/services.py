@@ -171,12 +171,9 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
         gt=0,
         alias="AVA_BACKUP_KEEP",
         description=(
-            "How many of the newest daily dumps the local pool keeps; the off-site "
-            "PITR retention planner mirrors this count so the remote namespace "
-            "cannot drift from the local prune. 7 is a week of dailies: a bad "
-            "migration found a day later must not have already overwritten the last "
-            "good copy. The pre-update/activation snapshots and the in-flight "
-            "activation pin are kept in their own slots on top of this window."
+            "How many of the newest daily dumps the local pool keeps. 7 is a week "
+            "of dailies: a bad migration found a day later must not have already "
+            "overwritten the last good copy."
         ),
         json_schema_extra={
             "restart_required": "gateway",
@@ -185,29 +182,50 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
             "scope": "cluster-pinned",
         },
     )
-
-    pitr_uploader_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "pitr_uploader.pid",
-        alias="AVA_PITR_UPLOADER_PIDFILE",
-        description="PITR uploader daemon pidfile path.",
+    backup_offsite_endpoint: str = Field(
+        default="",
+        alias="AVA_BACKUP_OFFSITE_ENDPOINT",
+        description=(
+            "Aliyun OSS region endpoint (e.g. https://oss-cn-shanghai.aliyuncs.com) "
+            "the daily dump is published to. The off-site leg is skipped, with one "
+            "log line, until the endpoint, the bucket and the credentials file are "
+            "all set."
+        ),
         json_schema_extra={
-            "restart_required": "",
-            "writable": False,
+            "restart_required": "gateway",
+            "writable": True,
             "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
-    pitr_base_backup_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "pitr_base_backup.pid",
-        alias="AVA_PITR_BASE_BACKUP_PIDFILE",
-        description="PITR base candidate scheduler daemon pidfile path.",
+    backup_offsite_bucket: str = Field(
+        default="",
+        alias="AVA_BACKUP_OFFSITE_BUCKET",
+        description="Aliyun OSS bucket the daily dump is published to (under `ava-logical/`).",
         json_schema_extra={
-            "restart_required": "",
-            "writable": False,
+            "restart_required": "gateway",
+            "writable": True,
             "sensitive": False,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
+        },
+    )
+    backup_offsite_credentials_file: Path | None = Field(
+        default=None,
+        alias="AVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
+        description=(
+            "0600 JSON holding the Aliyun OSS RAM AccessKey pair "
+            "(access_key_id, access_key_secret) the off-site publish uses. "
+            "Never the cluster secret."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": True,
             "scope": "host",
             "remote_writable": False,
+            "bootstrap": False,
         },
     )
 

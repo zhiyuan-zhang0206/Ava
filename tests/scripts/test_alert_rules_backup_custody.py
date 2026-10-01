@@ -41,4 +41,4 @@ def test_backup_operation_custody_rules_name_the_live_operator_verb(uid: str, ve
     rule = {r["uid"]: r for r in _load_rules()}[uid]
 
     assert verb in rule["annotations"]["description"]
-    assert "ava pitr operations" not in rule["annotations"]["description"]
+    assert "pitr" not in rule["annotations"]["description"].lower()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -14,98 +13,52 @@ from gateway.app import app
 from gateway.routers import config as config_router
 
 
-def _write_private_file(path: Path, content: str | bytes) -> Path:
-    path.write_text(content) if isinstance(content, str) else path.write_bytes(content)
-    path.chmod(0o600)
-    return path
-
-
 @pytest.fixture
-def gcs_restore_proof_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A valid GCS restore-proof state with all non-viewer OSS inputs present."""
+def configured_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A gateway home whose `.env` carries a valid sandbox timeout pair."""
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
-    backup_key = _write_private_file(tmp_path / "backup.key", b"k" * 32)
-    gcs_uploader = _write_private_file(
-        tmp_path / "gcs-uploader.json",
-        json.dumps(
-            {
-                "type": "service_account",
-                "client_email": "uploader@example.com",
-                "project_id": "test-project",
-                "private_key_id": "test-key",
-            }
-        ),
-    )
-    gcs_viewer = _write_private_file(
-        tmp_path / "gcs-viewer.json",
-        json.dumps(
-            {
-                "type": "service_account",
-                "client_email": "viewer@example.com",
-                "project_id": "test-project",
-                "private_key_id": "test-key",
-            }
-        ),
-    )
-    oss_uploader = _write_private_file(
-        tmp_path / "oss-uploader.json",
-        json.dumps({"access_key_id": "upload", "access_key_secret": "test-upload-secret"}),
-    )
     runtime_config.write_fields(
-        {
-            "pitr_enabled": True,
-            "pitr_base_backup_enabled": True,
-            "pitr_restore_proof_enabled": True,
-            "pitr_store_backend": "gcs",
-            "pitr_gcs_project": "test-project",
-            "pitr_gcs_bucket": "test-bucket",
-            "pitr_backup_key_file": backup_key,
-            "pitr_backup_key_id": "test-key",
-            "pitr_replication_db_url": "postgresql://replicator@127.0.0.1:5432/postgres",
-            "pitr_gcs_credentials_file": gcs_uploader,
-            "pitr_restore_gcs_credentials_file": gcs_viewer,
-            "pitr_oss_endpoint": "https://oss-cn-shanghai.aliyuncs.com",
-            "pitr_oss_bucket": "test-bucket",
-            "pitr_oss_credentials_file": oss_uploader,
-        },
-        set(),
+        {"exec_timeout_seconds": 300, "exec_node_timeout_seconds": 1200}, set()
     )
     return tmp_path
 
 
-def test_put_rejects_invalid_oss_candidate_without_writing(
-    gcs_restore_proof_home: Path,
-) -> None:
-    """A backend switch cannot persist an OSS restore-proof state without a viewer."""
-    env_path = gcs_restore_proof_home / ".env"
+def test_put_rejects_invalid_candidate_without_writing(configured_home: Path) -> None:
+    """A patch that breaks a cross-field invariant never reaches the `.env`."""
+    env_path = configured_home / ".env"
     before = env_path.read_bytes()
 
     with TestClient(app) as client:
-        response = client.put("/api/config", json={"pitr_store_backend": "oss"})
+        response = client.put("/api/config", json={"exec_node_timeout_seconds": 200})
 
     assert response.status_code == 400, response.text
     assert "candidate config rejected" in response.json()["detail"]
-    assert "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE" in response.json()["detail"]
+    assert "exec_node_timeout_seconds" in response.json()["detail"]
     assert env_path.read_bytes() == before
 
 
-def test_put_full_oss_atomic_patch_succeeds(gcs_restore_proof_home: Path) -> None:
-    """The complete OSS transition lands in one atomic PUT — backend, endpoint,
-    bucket, uploader credentials, and a distinct viewer — with restore proof
-    validating. This is the exact patch shape the prod OSS switch executes."""
-    oss_viewer = _write_private_file(
-        gcs_restore_proof_home / "oss-viewer.json",
-        json.dumps({"access_key_id": "view", "access_key_secret": "test-view-secret"}),
+def test_put_sets_the_offsite_backup_destination_beside_retired_keys(
+    configured_home: Path,
+) -> None:
+    """The daily dump's destination lands in one atomic PUT, the exact patch the
+    rollout runs through `ava config set`. Keys a retired feature left in the
+    `.env` are inert: they neither block the write nor change how it validates."""
+    env_path = configured_home / ".env"
+    env_path.write_text(
+        env_path.read_text()
+        + "AVA_PITR_ENABLED=true\n"
+        + "AVA_PITR_STORE_BACKEND=oss\n"
+        + "AVA_PITR_GCS_BUCKET=retired\n"
+        + "AVA_PITR_SPOOL_HARD_BYTES=2362232013\n"
     )
+    credentials = configured_home / "oss-credentials.json"
     with TestClient(app) as client:
         response = client.put(
             "/api/config",
             json={
-                "pitr_store_backend": "oss",
-                "pitr_oss_endpoint": "https://oss-cn-shanghai.aliyuncs.com",
-                "pitr_oss_bucket": "test-bucket",
-                "pitr_oss_credentials_file": str(gcs_restore_proof_home / "oss-uploader.json"),
-                "pitr_oss_viewer_credentials_file": str(oss_viewer),
+                "backup_offsite_endpoint": "https://oss-cn-shanghai.aliyuncs.com",
+                "backup_offsite_bucket": "backups",
+                "backup_offsite_credentials_file": str(credentials),
             },
         )
     assert response.status_code == 200, response.text
@@ -113,17 +66,27 @@ def test_put_full_oss_atomic_patch_succeeds(gcs_restore_proof_home: Path) -> Non
     assert body["applied"] is True
     assert "gateway" in body["restart_required"]
     aliases = runtime_config.read_env_aliases()
-    assert aliases["AVA_PITR_STORE_BACKEND"] == "oss"
-    assert aliases["AVA_PITR_OSS_ENDPOINT"] == "https://oss-cn-shanghai.aliyuncs.com"
-    assert aliases["AVA_PITR_OSS_BUCKET"] == "test-bucket"
-    assert aliases["AVA_PITR_OSS_CREDENTIALS_FILE"] == str(
-        gcs_restore_proof_home / "oss-uploader.json"
+    assert aliases["AVA_BACKUP_OFFSITE_ENDPOINT"] == "https://oss-cn-shanghai.aliyuncs.com"
+    assert aliases["AVA_BACKUP_OFFSITE_BUCKET"] == "backups"
+    assert aliases["AVA_BACKUP_OFFSITE_CREDENTIALS_FILE"] == str(credentials)
+    assert aliases["AVA_PITR_STORE_BACKEND"] == "oss"  # the retired keys stay as they were
+
+
+def test_put_unsets_the_offsite_backup_destination(configured_home: Path) -> None:
+    """The destination is removed through the same official path."""
+    runtime_config.write_fields(
+        {"backup_offsite_endpoint": "https://oss-cn-shanghai.aliyuncs.com"}, set()
     )
-    assert aliases["AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE"] == str(oss_viewer)
+
+    with TestClient(app) as client:
+        response = client.put("/api/config", json={"backup_offsite_endpoint": None})
+
+    assert response.status_code == 200, response.text
+    assert "AVA_BACKUP_OFFSITE_ENDPOINT" not in runtime_config.read_env_aliases()
 
 
 def test_host_only_put_skips_cluster_candidate_validation(
-    gcs_restore_proof_home: Path, monkeypatch: pytest.MonkeyPatch
+    configured_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A host-only edit cannot fail because an empty cluster patch went stale."""
 
@@ -143,7 +106,7 @@ def test_host_only_put_skips_cluster_candidate_validation(
 
 
 def test_put_returns_conflict_when_cluster_candidate_goes_stale(
-    gcs_restore_proof_home: Path, monkeypatch: pytest.MonkeyPatch
+    configured_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A write between validation and persistence is reported as a retryable 409."""
     original_validate = config_router.validate_env_patch_for_write

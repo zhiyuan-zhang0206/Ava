@@ -274,12 +274,12 @@ def test_moving_a_tests_directory_makes_the_check_fail_until_the_generator_runs(
     assert checkout.roots() == ["base/pkg/tests"]
 
     # A test moves into another package: the region is stale until the script runs.
-    checkout.add("services/pitr/tests/test_b.py")
+    checkout.add("services/example/tests/test_b.py")
     assert checkout.check() == 1
     assert checkout.roots() == ["base/pkg/tests"]  # --check writes nothing
     assert checkout.regenerate() == 0
     assert checkout.check() == 0
-    assert checkout.roots() == ["base/pkg/tests", "services/pitr/tests"]
+    assert checkout.roots() == ["base/pkg/tests", "services/example/tests"]
 
 
 def test_the_generator_changes_nothing_outside_the_fenced_region(checkout: _Checkout) -> None:
@@ -293,9 +293,9 @@ def test_the_generator_changes_nothing_outside_the_fenced_region(checkout: _Chec
 def test_a_pure_deletion_makes_the_region_stale_too(checkout: _Checkout) -> None:
     """The case a `files:`-filtered pre-commit hook never sees, hence the pre-push family."""
     checkout.add("base/pkg/tests/test_a.py")
-    checkout.add("services/pitr/tests/test_b.py")
+    checkout.add("services/example/tests/test_b.py")
     assert checkout.regenerate() == 0
-    checkout.remove("services/pitr/tests/test_b.py")
+    checkout.remove("services/example/tests/test_b.py")
     assert checkout.check() == 1
     assert checkout.regenerate() == 0
     assert checkout.roots() == ["base/pkg/tests"]

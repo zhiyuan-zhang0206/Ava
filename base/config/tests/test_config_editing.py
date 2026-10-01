@@ -332,10 +332,7 @@ _OUTBOUND_CREDENTIALS = {
     "OPENAI_API_KEY",
     "AVA_FEISHU_APP_SECRET",
     "AVA_TELEGRAM_BOT_TOKEN",
-    "AVA_PITR_BAIDU_TOKEN_FILE",
-    "AVA_PITR_OSS_CREDENTIALS_FILE",
-    "AVA_PITR_OSS_DELETE_CREDENTIALS_FILE",
-    "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE",
+    "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
     # Host-local proof, usable only together with a database login the fence
     # revokes (base/agents/impersonation/docs/manifest-certification.ava.okf.md).
     "AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET",

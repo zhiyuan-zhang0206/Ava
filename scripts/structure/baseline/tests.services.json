@@ -2,18 +2,14 @@
   "complexity": {
     "tests/services/test_ava_root_daemon.py::test_daemon_end_to_end": 15,
     "tests/services/test_backup.py::test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv": 17,
-    "tests/services/test_hosted_db_wait_liveness.py::test_real_db_wait_survives_both_stale_paths_and_clears_afterward": 16,
-    "tests/services/test_pitr_cos_store.py::test_cos_ack_normalizes_into_candidate_and_protected_manifests": 19,
-    "tests/services/test_pitr_oss_roles.py::test_put_base_if_absent_streams_multipart_and_writes_sidecar": 15
+    "tests/services/test_hosted_db_wait_liveness.py::test_real_db_wait_survives_both_stale_paths_and_clears_afterward": 16
   },
   "directories": {
     "tests/services": 63
   },
   "files": {
     "tests/services/test_agent_host.py": 1770,
-    "tests/services/test_backup.py": 902,
-    "tests/services/test_pitr_base_scheduler.py": 832,
-    "tests/services/test_pitr_uploader.py": 872
+    "tests/services/test_backup.py": 902
   },
   "patch_targets": {
     "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._executable_pids": 2,
@@ -36,13 +32,7 @@
     "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._remove_pidfile": 1,
     "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._write_pidfile": 1,
     "tests/services/test_healthcheck_browser_reach.py::services.healthchecks.browser_reach._canary_async": 1,
-    "tests/services/test_maintenance_readiness.py::gateway.app._cluster_is_paused": 1,
-    "tests/services/test_pitr_base_candidate.py::services.pitr.base_backup.candidate._load_facts": 3,
-    "tests/services/test_pitr_base_candidate.py::services.pitr.base_backup.candidate._verify_candidate": 2,
-    "tests/services/test_pitr_base_scheduler.py::services.pitr.retention.scheduler._logical_retention": 1,
-    "tests/services/test_pitr_native_custody.py::services.backup_scheduler.operation.custody._prune_quarantine": 1,
-    "tests/services/test_pitr_retention_sidecars.py::services.pitr.stores.baidu.inventory.BaiduRetentionInventoryReader._store": 1,
-    "tests/services/test_pitr_uploader.py::services.pitr.wal.uploader.PitrUploader._write_ack": 2
+    "tests/services/test_maintenance_readiness.py::gateway.app._cluster_is_paused": 1
   },
   "tests_location": {
     "tests/services/test_agent_host.py::top-level": 1,
@@ -61,46 +51,6 @@
     "tests/services/test_hosted_db_wait_liveness.py::top-level": 1,
     "tests/services/test_maintenance_readiness.py::top-level": 1,
     "tests/services/test_native_storage_diagnostics.py::top-level": 1,
-    "tests/services/test_numpy_backend.py::top-level": 1,
-    "tests/services/test_pitr_activation_evidence.py::top-level": 1,
-    "tests/services/test_pitr_activation_state.py::top-level": 1,
-    "tests/services/test_pitr_archive_shim.py::top-level": 1,
-    "tests/services/test_pitr_baidu_pcs.py::top-level": 1,
-    "tests/services/test_pitr_baidu_roles.py::top-level": 1,
-    "tests/services/test_pitr_base_candidate.py::top-level": 1,
-    "tests/services/test_pitr_base_manifest.py::top-level": 1,
-    "tests/services/test_pitr_base_object_store.py::top-level": 1,
-    "tests/services/test_pitr_base_restore_crypto.py::top-level": 1,
-    "tests/services/test_pitr_base_scheduler.py::top-level": 1,
-    "tests/services/test_pitr_base_scheduler_shutdown.py::top-level": 1,
-    "tests/services/test_pitr_base_stream.py::top-level": 1,
-    "tests/services/test_pitr_cos_roles.py::top-level": 1,
-    "tests/services/test_pitr_cos_signing.py::top-level": 1,
-    "tests/services/test_pitr_cos_store.py::top-level": 1,
-    "tests/services/test_pitr_identity_epochs.py::top-level": 1,
-    "tests/services/test_pitr_logical_inventory.py::top-level": 1,
-    "tests/services/test_pitr_logical_retention.py::top-level": 1,
-    "tests/services/test_pitr_migration.py::top-level": 1,
-    "tests/services/test_pitr_native_custody.py::top-level": 1,
-    "tests/services/test_pitr_operation_owner.py::top-level": 1,
-    "tests/services/test_pitr_oss_multipart.py::top-level": 1,
-    "tests/services/test_pitr_oss_roles.py::top-level": 1,
-    "tests/services/test_pitr_postgres_family.py::top-level": 1,
-    "tests/services/test_pitr_restore_drill.py::top-level": 1,
-    "tests/services/test_pitr_restore_lifecycle.py::top-level": 1,
-    "tests/services/test_pitr_restore_manifest.py::top-level": 1,
-    "tests/services/test_pitr_restore_object_store.py::top-level": 1,
-    "tests/services/test_pitr_restore_protocol.py::top-level": 1,
-    "tests/services/test_pitr_restore_wal_command.py::top-level": 1,
-    "tests/services/test_pitr_retention_delete.py::top-level": 1,
-    "tests/services/test_pitr_retention_policy.py::top-level": 1,
-    "tests/services/test_pitr_retention_scheduler.py::top-level": 1,
-    "tests/services/test_pitr_retention_sidecars.py::top-level": 1,
-    "tests/services/test_pitr_rollback_snapshot_archive.py::top-level": 1,
-    "tests/services/test_pitr_space_budget.py::top-level": 1,
-    "tests/services/test_pitr_state.py::top-level": 1,
-    "tests/services/test_pitr_store_contract.py::top-level": 1,
-    "tests/services/test_pitr_uploader.py::top-level": 1,
-    "tests/services/test_pitr_wal_validate.py::top-level": 1
+    "tests/services/test_numpy_backend.py::top-level": 1
   }
 }
