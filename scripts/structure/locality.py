@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import baseline_shards, path_imports
+from scripts.structure import ambient_state, baseline_shards, path_imports
 
 SECTIONS = ("private_imports", "owner_bypasses", "patch_targets", "tests_location")
 # section -> the lint that measures it. Frozen and guarded like the others, but measured over
@@ -27,6 +27,9 @@ EXTERNAL_SECTIONS = {
     "patch_targets": "scripts/lint/patch_targets.py",
     "tests_location": "scripts/structure/tests_location.py",
 }
+# section -> the lint script whose absence at the base revision means the section is being
+# introduced by this change (no earlier baseline to shrink from).
+INTRODUCED_WITH = {**EXTERNAL_SECTIONS, ambient_state.SECTION: ambient_state.LINT}
 # White-box tests reach into privates by design; only test *directories* are
 # exempt, since a governed module may legitimately be named test_*.py.
 _TEST_DIR = re.compile(r"(^|/)tests?/")
@@ -392,6 +395,8 @@ def _new_site_message(kind: str, target: str) -> str:
         )
     if kind == path_imports.SECTION:
         return f"imports by file path (`{target}`) — {path_imports.FIX}"
+    if kind == ambient_state.SECTION:
+        return ambient_state.site_message(target)
     return f"bypasses the single owner of `{target}` — {DECISIONS[target].fix}"
 
 
@@ -465,7 +470,7 @@ def introduced(shards: dict[str, str] | None, repo_root: Path, base: str) -> dic
         return None
     new = {
         kind
-        for kind, lint in EXTERNAL_SECTIONS.items()
+        for kind, lint in INTRODUCED_WITH.items()
         if not baseline_shards.exists_at(repo_root, base, lint)
     }
     carried = dict(shards)
@@ -510,6 +515,12 @@ def _pair_key(key: str) -> tuple[str, str]:
     return path, target.rsplit(".", 1)[-1]
 
 
+def _valid_target(kind: str, target: str) -> bool:
+    if kind == "owner_bypasses":
+        return target in DECISIONS
+    return ambient_state.is_target(target) if kind == ambient_state.SECTION else bool(target)
+
+
 def validate_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None:
     if not isinstance(entries, dict):
         raise ValueError(f"'{kind}' must be an object")  # noqa: TRY004 — invalid JSON schema
@@ -524,7 +535,7 @@ def validate_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None
             and path.parts[0] in _entry_scope(kind, scope)
             and path.suffix == ".py"
         )
-        valid_target = target in DECISIONS if kind == "owner_bypasses" else bool(target)
+        valid_target = _valid_target(kind, target)
         if (
             not valid_path
             or not separator

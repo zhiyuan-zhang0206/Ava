@@ -1,4 +1,20 @@
 {
+  "ambient_state": {
+    "ava/mcps/__init__.py::ambient-container:_session_locks": 1,
+    "ava/mcps/__init__.py::ambient-container:_session_stacks": 1,
+    "ava/mcps/__init__.py::ambient-container:_sessions": 1,
+    "ava/mcps/__init__.py::global-rebind:_exit_stack": 1,
+    "ava/mcps/__init__.py::global-rebind:_loop": 1,
+    "ava/mcps/__init__.py::thread:_get_loop": 1,
+    "ava/mcps/_daemon.py::ambient-container:session_locks": 1,
+    "ava/mcps/_daemon.py::ambient-container:sessions": 1,
+    "ava/mcps/_daemon.py::ambient-container:shared_locks": 1,
+    "ava/mcps/_daemon.py::ambient-container:shared_sessions": 1,
+    "ava/mcps/_daemon.py::ambient-container:shared_stacks": 1,
+    "ava/mcps/_daemon.py::ambient-container:stacks": 1,
+    "ava/mcps/_oauth.py::ambient-container:_oauth_locks": 1,
+    "ava/mcps/_remote.py::global-rebind:_remote_client": 1
+  },
   "files": {
     "ava/mcps/tests/test_daemon.py": 2110
   },

@@ -85,30 +85,18 @@ conventions/python-conventions.md.
 
 ### Rule 6: no path imports under ava_builtins/ (package doors)
 
-`scripts/structure/path_imports.py`: a skill or plugin module may not edit
-`sys.path` (a mutating call, an assignment, a slice assignment), call
-`site.addsitedir`, or load a module by file path
-(`importlib.util.spec_from_file_location`, `importlib.machinery.SourceFileLoader`,
-`runpy.run_path`). A path import sidesteps the package doors: the script's
-directory becomes an unreviewed code package, and splitting an oversized script
-into path-imported siblings satisfies the line budget without restoring
-locality. Shared code goes into a governed package that the script imports
-normally, and the script stays a thin entry point. Today's sites are frozen in
-the `path_imports` section as `path::target -> site count`, matched exactly like
-Rules 4 and 5. There is no allowlist and no pairing: once the section exists at
-the base revision, any new key is a violation.
+`scripts/structure/path_imports.py`: a skill or plugin module may not edit `sys.path`, call
+`site.addsitedir`, or load a module by file path (`spec_from_file_location`, `SourceFileLoader`,
+`runpy.run_path`): a path import sidesteps the package doors and the budgets. Shared code goes
+into a governed package the script imports normally. Frozen in the `path_imports` section as
+`path::target -> site count`, matched exactly like Rules 4 and 5, with no allowlist and no
+pairing. The one narrow exception (a within-skill `__file__` guard) is in `path_imports.py`.
 
-**One narrow exception**: a script under `ava_builtins/skills/<skill>/` may run a
-one-line `sys.path.insert(0, ...)` / `.append(...)` guard whose argument is
-derived from `__file__` and whose resolved directory stays inside that same
-`<skill>/` tree (typically the skill's own `scripts/`, or a sibling sub-skill's
-`scripts/`) — the pattern `lint_no_script_sibling_imports.py` already documents.
-`path_imports.measure()` recognizes this shape by AST and does not count it as a
-site, so it is never frozen in the baseline. A guard that reaches outside the
-script's own top-level skill directory (another skill, `ava_builtins/skills/`
-itself, or anything under `ava_builtins/plugins/`) is still a violation, and so
-is any file-loader call, even with an in-skill `__file__`-derived argument — a
-loader is a package-door bypass regardless of where it points.
+### Rule 9: ambient state (inject what is read to decide)
+
+`scripts/structure/ambient_state/`: module-level state read to decide and free-floating
+background work fail, except what the closed lists in `allowlist.py` allow. Frozen as
+`path::rule:name -> site count`, exact and shrink-only like Rules 4-6; also governs `schedules/`.
 
 ### Structure budgets: 800 lines per file, 20 direct entries per directory
 
@@ -155,6 +143,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import (  # noqa: E402 — standalone script
+    ambient_state,
     baseline_shards,
     directory_budget,
     lint_common,
@@ -165,11 +154,12 @@ from scripts.structure import quality_budget as quality  # noqa: E402 — standa
 
 _HARD_CEILING = 800
 # Baseline sections whose frozen `path::target` site counts must match reality exactly.
-_SITE_SECTIONS = (*locality.SECTIONS, path_imports.SECTION)
+_SITE_SECTIONS = (*locality.SECTIONS, path_imports.SECTION, ambient_state.SECTION)
 _DIRECTORY_CEILING = 20
 
 # AST rules track [tool.importlinter] root_packages; budgets also cover tooling/tests.
 _SCAN_DIRS = lint_common.FRAMEWORK_DIRS
+_AST_DIRS = ambient_state.SCOPE  # _SCAN_DIRS plus schedules/, which only Rule 9 governs
 _STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts")
 
 # Rule 3 allowlist — modules that may call machine_role(), each with the
@@ -406,7 +396,8 @@ def _parse_baseline(
     for kind in quality.QUALITY_SECTIONS:
         quality.validate_quality_entries(kind, baseline[kind], structure_dirs)
     for kind in _SITE_SECTIONS:
-        locality.validate_entries(kind, baseline[kind], _carried_scope(_SCAN_DIRS, renames or {}))
+        scope = ambient_state.SCOPE if kind == ambient_state.SECTION else _SCAN_DIRS
+        locality.validate_entries(kind, baseline[kind], _carried_scope(scope, renames or {}))
     _validate_structure_entries(baseline, structure_dirs)
     return baseline
 
@@ -687,7 +678,7 @@ def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> 
 
 def _ast_rule_files(argv: list[str]) -> set[Path]:
     # Preserve the AST rules' original resolved-target scope, including aliases.
-    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
+    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _AST_DIRS]
     return set(_iter_py_files(targets))
 
 
@@ -698,6 +689,12 @@ def _collect_locality(
     for kind, found in locality.measure(tree, rel, _SCAN_DIRS, _REPO_ROOT).items():
         sites[kind].update(found)
     sites[path_imports.SECTION].update(path_imports.measure(tree, rel))
+
+
+def _governed(path: Path, rel: str, ast_files: set[Path]) -> tuple[bool, bool]:
+    """(Rules 1, 3-6; Rule 9) govern this file: Rule 9 also reaches schedules/."""
+    in_ast = path in ast_files
+    return in_ast and _in_scan_scope(rel), in_ast and ambient_state.in_scope(rel)
 
 
 def _check_ast_and_quality(
@@ -720,8 +717,8 @@ def _check_ast_and_quality(
             rel = path.relative_to(_REPO_ROOT).as_posix()
         except ValueError:
             continue
-        ast_rules = path in ast_files and _in_scan_scope(rel)
-        if path not in files and not ast_rules:
+        ast_rules, ambient = _governed(path, rel, ast_files)
+        if path not in files and not (ast_rules or ambient):
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -733,6 +730,8 @@ def _check_ast_and_quality(
                 f"{rel}:{line}: {message}" for line, message in _scan_file(path, rel, tree)
             )
             _collect_locality(tree, rel, sites, scanned)
+        if ambient:
+            errors.extend(ambient_state.collect(tree, rel, _REPO_ROOT, sites, scanned))
         if path in files:
             for kind, values in quality.measure_quality(tree, rel).items():
                 measurements[kind].update(values)
@@ -743,6 +742,7 @@ def _check_ast_and_quality(
         )
     )
     errors.extend(locality.missing_allowlist_errors(_REPO_ROOT))
+    errors.extend(ambient_state.missing_allowlist_errors(_REPO_ROOT))
     quality.render_warnings(measurements["complexity"], full=full)
     return errors
 

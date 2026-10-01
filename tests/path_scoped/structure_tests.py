@@ -7,6 +7,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.structure import locality
+from scripts.structure.ambient_state import allowlist as ambient_allowlist
 
 
 @pytest.fixture(autouse=True)
@@ -22,3 +23,12 @@ def _synthetic_decision_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
         "DECISIONS",
         {name: replace(decision, allowed={}) for name, decision in locality.DECISIONS.items()},
     )
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_ambient_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the real repository's ambient-state lists out of synthetic roots, for the same
+    reason: their paths and sites do not exist in a temporary repository and would read as
+    stale. A test about a list installs its own entries."""
+    for name in ("SINK_FACADES", "ALLOWED", "DEFERRED", "PURE_REPO_CALLEES"):
+        monkeypatch.setattr(ambient_allowlist, name, {})

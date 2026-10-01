@@ -1,4 +1,7 @@
 {
+  "ambient_state": {
+    "base/db/code_version_gate.py::global-rebind:_last_read_at": 1
+  },
   "complexity": {
     "base/db/__init__.py::insert_inbound_message": 21
   }

@@ -23,7 +23,7 @@ SOURCES = {
     "base/__init__.py": "",
     "base/net/__init__.py": "",
     "base/net/retry.py": (
-        "import time\n\nREGISTRY = {}\n_TABLE = {}\n\n\n"
+        'import time\n\nREGISTRY = {"retries": 3}\n_TABLE = {"delay": 1}\n\n\n'
         "def backoff():\n    return 1\n\n\n"
         "def _sleep(seconds):\n    time.sleep(seconds)\n"
     ),
