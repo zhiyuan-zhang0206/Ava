@@ -6,8 +6,6 @@
 actually runs (see `base/lm/plugin_providers.py`).
 """
 
-# operates-on-cluster: config, home-files -- reads the enabled provider plugins, keeps $AVA_HOME/model-tracker
-
 from __future__ import annotations
 
 import argparse

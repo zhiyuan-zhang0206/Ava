@@ -15,11 +15,6 @@ REPO = Path(__file__).resolve().parent.parent.parent
 TEMPLATE = REPO / "scripts" / "codegen" / "okf-d3-template.html"
 
 sys.path.insert(0, str(REPO))
-from base.host.env.dotenv_boot import enter_scratch_home  # noqa: E402
-
-if __name__ == "__main__":
-    enter_scratch_home()
-
 
 from base.packages.docs.okf_graph import build_graph_data, render_html  # noqa: E402
 
