@@ -82,7 +82,9 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
 - **Pick targeted tests by dependency, not by directory.** Shared changes
   can break consumer-side enum or field-set assertions. Locate those consumers
   and include their specific test files locally, rather than expanding to a
-  directory or the full backend suite. For a new enum member,
+  directory or the full backend suite. `.venv/bin/python scripts/audit/where_used.py
+  <module-or-symbol>` lists them (its TESTS group) with every other reference in
+  one call. For a new enum member,
   search with
   `rg 'set\(<EnumName>\)|list\(<EnumName>\)' -g '**/tests/**'`. CI must still run the full
   suite before merge; an unrun or skipped CI suite is not a pass.

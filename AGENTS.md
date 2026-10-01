@@ -187,6 +187,7 @@ Five axes, one fact per place: `*.ava.okf.md` in each package's `docs/` = what t
 | Run ops / deploy | [`conventions/runbook.md`](conventions/runbook.md) |
 | Write a PR | **[`.agents/skills/write-a-pr-description/SKILL.md`](.agents/skills/write-a-pr-description/SKILL.md)** |
 | Understand part of the codebase interactively | [`ava_builtins/skills/ava-workflow/calibrate/SKILL.md`](ava_builtins/skills/ava-workflow/calibrate/SKILL.md) |
+| Find every reference before changing or moving something | `.venv/bin/python scripts/audit/where_used.py TARGET` (`pkg.mod:name`, `pkg.mod` or a path): importers, tests, patch targets, docs, baselines in one call; after a move, `scripts/audit/module_moves.py OLD=NEW` |
 | Follow coding conventions | [`conventions/python-conventions.md`](conventions/python-conventions.md) |
 | Write SDK docstrings | [`conventions/sdk-docstring-discipline.md`](conventions/sdk-docstring-discipline.md) |
 | Maintain docs | [`conventions/doc-maintenance.md`](conventions/doc-maintenance.md) |
@@ -230,8 +231,7 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 
 - No `if TYPE_CHECKING:` (lint-enforced). Exceptions in `_TYPE_CHECKING_ALLOWED`.
 - Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; function cc <15 (10–14 warn), nesting ≤5; packages + tests/scripts, frozen shrink-only baseline. Locality: no `_`-private import from outside its owning package; single-owner decisions (Postgres dial → `base/db/connections.py`); no path imports (`sys.path` edits, file loaders) under `ava_builtins/`, except a one-line `__file__`-derived `sys.path` guard that stays inside a skill's own directory — skill scripts stay thin over a package — all frozen in the same baseline.
-- No `print()` in framework code (use `base.log.logger`).
-- No decorative emoji in core Python.
+- No `print()` in framework code (use `base.log.logger`); no decorative emoji in core Python.
 - Import layering: `base < ava < agent < gateway < cli`.
 [Full conventions →](conventions/python-conventions.md)
 
