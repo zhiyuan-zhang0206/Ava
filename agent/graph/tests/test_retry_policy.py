@@ -201,6 +201,23 @@ def test_stall_pair_grants_the_delayed_schedule(bound_thread: str) -> None:
     assert policy.backoff_factor == 2.0
 
 
+def test_stall_pair_without_a_bound_identity_fails_fast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one host process serves every agent: a stall pair with no turn identity
+    raises instead of counting against a bucket all agents would share."""
+    from agent.graph.llm_errors import _stall_pair_streaks
+
+    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    policy = _build_llm_retry()
+
+    with pytest.raises(RuntimeError, match="turn identity"):
+        policy.retry_on(LLMStreamStallPairError("pair"))  # type: ignore[arg-type]
+    assert "?" not in _stall_pair_streaks
+    # Only the pair branch keys a streak; other retryable errors need no identity.
+    assert policy.retry_on(LLMStreamStallTimeoutError("stall"))  # type: ignore[arg-type]
+
+
 def test_stall_pair_wait_doubles_and_caps(bound_thread: str) -> None:
     """Waits follow initial x 2**(streak-1) capped at the max interval —
     5, 10, 20, 30 minutes — each in the configured jitter band."""
