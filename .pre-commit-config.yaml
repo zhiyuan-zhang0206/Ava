@@ -673,4 +673,3 @@ repos:
         entry: .venv/bin/python scripts/content_lint/lint_ava_okf.py
         language: system
         files: \.ava\.okf\.md$
-        pass_filenames: false

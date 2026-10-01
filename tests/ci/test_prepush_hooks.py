@@ -168,7 +168,6 @@ def test_artifact_freshness_hook_list_matches_config() -> None:
         hook = hooks[hook_id]
         # Each must still be a normal filtered pre-commit-stage hook: the freshness script
         # decides when to re-run it over the whole repository, not the hook's own definition.
-        assert hook.get("pass_filenames") is False
         assert "pre-commit" in hook.get("stages", config["default_stages"])
         assert hook.get("always_run") is not True
         assert hook["files"], (
