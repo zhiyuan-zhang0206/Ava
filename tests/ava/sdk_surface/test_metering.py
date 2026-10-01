@@ -12,9 +12,11 @@ from __future__ import annotations
 import contextlib
 import inspect
 import io
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -320,6 +322,20 @@ def test_a_plugin_load_leaves_no_section_behind_its_namespace(
     assert not _REGISTERED_NAMESPACES and not _REGISTERED_MEMBERS and not _EXTRA_FIELDS
     assert not hasattr(ava, "cwd")
     assert not any("_qualname" in vars(module) for module in stamped)
+
+
+def test_a_namespace_registered_without_the_agent_layer_is_seen() -> None:
+    """A plugin load that never imports `agent.state` (the schedule runner's in-process script)
+    still registers namespaces and members on the SDK surface. The gate must see them, or the
+    fixture never drops them and they stay for the rest of the worker."""
+    from tests.fixtures.plugin_registrations import plugin_registrations_present
+
+    assert not plugin_registrations_present()
+    ava.register_namespace("gate_probe", SimpleNamespace())  # the autouse teardown drops it
+    with patch.dict(sys.modules):
+        sys.modules.pop("agent.state", None)
+        assert plugin_registrations_present()
+        assert "agent.state" not in sys.modules, "asking must not load the agent layer"
 
 
 def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
