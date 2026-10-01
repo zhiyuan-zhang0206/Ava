@@ -71,7 +71,11 @@ the health monitor counts it and retries under its backoff. A root restart
 merges each stored record conservatively: an explicit operator or selection stop
 holds its unit down, a stop root recorded for itself during shutdown is
 superseded by the admitted start, and a recorded failure is carried until a
-generation proves it gone.
+generation proves it gone. A unit with no stored record — one adopted from a
+generation that predates this store — or with an unreadable one (the store logs
+it) takes the same default at its admitted start: `running`, source `selection`.
+Residue from an older scheme is discarded, never consulted; a fleet update's
+full stop/start leaves no mixed state.
 
 ## Control contract
 
