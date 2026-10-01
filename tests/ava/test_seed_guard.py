@@ -9,8 +9,7 @@ the wiring — that the helper actually calls it — without touching a database
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
+import importlib
 
 import pytest
 
@@ -18,14 +17,8 @@ from base.config import settings
 
 
 def _load_conftest() -> object:
-    """Import tests/ava/conftest.py as a module (it is not a package import —
-    tests/ has no __init__.py). Module-level side effects are import-only."""
-    path = Path(__file__).resolve().parent / "conftest.py"
-    spec = importlib.util.spec_from_file_location("ava_conftest_under_test", path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """The module that holds the `tests/ava` fixtures and the seed helper."""
+    return importlib.import_module("tests.path_scoped.ava_tests")
 
 
 def test_ensure_agents_meta_row_refuses_prod_db(

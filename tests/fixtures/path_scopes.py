@@ -38,6 +38,7 @@ import pytest
 # conftest, so the autouse names register in one alphabetical batch, as in a
 # conftest.
 PATH_SCOPES: dict[str, tuple[str, ...]] = {
+    "tests.path_scoped.ava_tests": ("tests/ava",),
     "tests.path_scoped.agent_tests": ("tests/agent",),
     "tests.path_scoped.services_tests": ("tests/services",),
     "tests.path_scoped.structure_tests": ("tests/scripts/structure",),
