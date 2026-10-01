@@ -337,3 +337,14 @@ def test_report_failure_uses_exact_label_and_existing_message(
         "Check the schedule log; backfill the missed window manually with "
         "`scripts/ci/accounting.py --since ... --until ... --append-ledger`.",
     )
+
+
+def test_load_accounting_resolves_under_scripts_ci() -> None:
+    """The loader must resolve accounting.py from its post-move home (scripts/ci/)."""
+    module = _load_schedule_module()
+    saved_path = list(sys.path)
+    try:
+        loaded = module._load_accounting()
+        assert Path(loaded.__file__).resolve() == REPO_ROOT / "scripts" / "ci" / "accounting.py"
+    finally:
+        sys.path[:] = saved_path
