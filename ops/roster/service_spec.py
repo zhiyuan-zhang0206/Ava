@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from base.cluster.machine import MachineRole
-from base.daemon.health import DaemonProbe
+from base.daemon.health import DEFAULT_PORTS, DaemonProbe
 
 # The capability groups a service can belong to. These are `MachineRole` values
 # (`machine_role()` returns a frozenset of them); "capability" and "role" are the
@@ -44,9 +45,11 @@ class ServiceSpec:
             sometimes dials the database (a selectable backend) declares it
             without ``requires_db``, so a database outage does not hold it.
         pidfile: pidfile path (None = no daemon-specific pidfile).
-        healthcheck_module: location of the service's protocol health probes.
-            Presence opts the service into root health monitoring; modules do not
-            launch or recover processes.
+        healthcheck_module: where the service's protocol probe code lives, for
+            documentation only. Root monitors a service through ``identity_probe``
+            (a unit without one is refused at root wiring); this field opts nothing
+            in and no code reads it to find a probe. A standard ``/healthz``
+            daemon (``health_name`` set) has no module at all.
         config_inputs: authoritative external files read at process birth.
             Their paths and bytes are part of the immutable launch generation.
         stop_ceiling_s: the longest this service's own SIGTERM cleanup may run,
@@ -84,6 +87,16 @@ class ServiceSpec:
             os.environ at boot, so ``settings.lm.*_api_key`` resolve to None and
             every model build fails (labeler, issue #1128 / task #1230). The
             root launcher uses this declaration on every service start.
+        health_name: set only by ``ops.roster.healthz.healthz_daemon``: this
+            service is a standard Ava ``/healthz`` daemon whose port is the
+            ``base.daemon.health.DEFAULT_PORTS[health_name]`` slot (the same name
+            the daemon passes to ``start_health_server``). None = any other shape.
+
+    Construction validates what the declaration alone can decide, so a malformed
+    spec fails where it is written instead of at ``ava start`` or root wiring:
+    non-empty known capabilities, a derivable database login class, one readiness
+    endpoint (``curl_url`` xor ``tcp_port``), a positive finite ``stop_ceiling_s``,
+    and, for a ``health_name``, an existing port slot and a ``/healthz`` URL.
     """
 
     session: str
@@ -101,6 +114,42 @@ class ServiceSpec:
     config_inputs: tuple[Path, ...] = ()
     db_access: DbAccess | None = None
     stop_ceiling_s: float | None = None
+    health_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.capabilities:
+            raise ValueError(f"service {self.session!r} declares no capabilities")
+        unknown = self.capabilities - set(get_args(MachineRole))
+        if unknown:
+            raise ValueError(
+                f"service {self.session!r} declares unknown capabilities {sorted(unknown)}; "
+                f"known: {sorted(get_args(MachineRole))}"
+            )
+        if self.curl_url is not None and self.tcp_port is not None:
+            raise ValueError(
+                f"service {self.session!r} declares both curl_url and tcp_port; "
+                "its readiness endpoint is exactly one"
+            )
+        if self.tcp_port is not None and not 0 < self.tcp_port < 65536:
+            raise ValueError(f"service {self.session!r} has invalid tcp_port {self.tcp_port}")
+        ceiling = self.stop_ceiling_s
+        if ceiling is not None and (not math.isfinite(ceiling) or ceiling <= 0):
+            raise ValueError(
+                f"service {self.session!r} stop_ceiling_s must be a positive finite number, "
+                f"got {ceiling!r}"
+            )
+        if self.health_name is not None:
+            if self.health_name not in DEFAULT_PORTS:
+                raise ValueError(
+                    f"service {self.session!r} names health slot {self.health_name!r}, "
+                    f"which has no port (known: {sorted(DEFAULT_PORTS)})"
+                )
+            if self.curl_url is None or not self.curl_url.endswith("/healthz"):
+                raise ValueError(
+                    f"service {self.session!r} serves /healthz (health_name "
+                    f"{self.health_name!r}) but its curl_url is {self.curl_url!r}"
+                )
+        db_access(self)  # raises for a database service whose login class cannot be decided
 
 
 def profile_marker(spec: ServiceSpec) -> str | None:

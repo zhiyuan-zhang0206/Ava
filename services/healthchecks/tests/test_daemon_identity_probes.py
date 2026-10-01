@@ -1,0 +1,43 @@
+"""The roster's identity probe for each standard daemon asks the right questions.
+
+`probe_daemon` believes a 200 only when the body's `name` and `home` match and its
+`pid` equals this unit's pidfile, so a probe built from the wrong name, URL or pidfile
+would accept another daemon as healthy or reject the right one forever. Root probes
+every standard `/healthz` daemon through `ops.roster.healthz.daemon_identity`; this pins
+that the three facts reaching `probe_daemon` are the daemon's own, for every such entry
+in the roster (the per-module copies of this check died with the modules).
+"""
+
+from __future__ import annotations
+
+from functools import partial
+from typing import cast
+
+from base.config import settings
+from base.daemon.health import DaemonProbe, health_port, probe_daemon
+from ops import roster
+from ops.roster.service_spec import ServiceSpec
+
+
+def _standard_daemons() -> list[ServiceSpec]:
+    return [s for s in roster.build_services() if s.health_name is not None]
+
+
+def _inner_probe(spec: ServiceSpec) -> partial[DaemonProbe]:
+    """The daemon probe inside the root-ownership wrapper `build_services` adds."""
+    outer = cast("partial[DaemonProbe]", spec.identity_probe)
+    return cast("partial[DaemonProbe]", outer.args[2])
+
+
+def test_every_standard_daemon_probe_is_scoped_to_its_name_url_and_pidfile() -> None:
+    specs = _standard_daemons()
+    assert specs
+
+    for spec in specs:
+        name = cast("str", spec.health_name)
+        probe = _inner_probe(spec)
+        assert probe.func is probe_daemon, spec.session
+        assert probe.args == (name, f"http://localhost:{health_port(name)}/healthz"), spec.session
+        assert probe.keywords == {"pidfile": getattr(settings.services, f"{name}_pidfile")}, (
+            spec.session
+        )

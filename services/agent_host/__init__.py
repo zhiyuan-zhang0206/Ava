@@ -9,6 +9,6 @@ Phase 1 of `future/infra/agent-runner-as-server.md`, in three parts:
 - `daemon.py` — the supervised process the other two live in.
 
 Importing `host` or `daemon` pulls the whole agent kernel; `dispatcher` does not,
-and neither does the healthcheck (`services/healthchecks/agent_host.py`), which
-is why the watchdog's every-60s probe stays cheap.
+and neither does the roster's identity probe for this daemon
+(`ops/roster/healthz.py`), which is why root's health round stays cheap.
 """

@@ -37,7 +37,7 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
 
 ## Entry Points
 - `services/heartbeat/daemon.py` — `.venv/bin/python -m services.heartbeat.daemon`
-- The application root supervises the daemon; `services/healthchecks/heartbeat.py` supplies its protocol probe.
+- The application root supervises the daemon through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).
 
 ## Notes
 - Idle-minute observations keep the PostgreSQL clock and cross the SQL boundary as double precision, matching the float slack used by next-cycle check-in reconciliation.

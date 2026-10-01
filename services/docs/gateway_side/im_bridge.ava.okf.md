@@ -10,7 +10,7 @@ tags: []
 ## What it is
 The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat / Feishu — one adapter per channel, sharing the bridge core). Since 2026-08 the bridge **is the product frontend** (user ruling: IM is the only frontend; the Telegram skill was removed — see `decisions/2026-08-03-telegram-skill-removed.md`): user-facing channels are not a side feature but the primary surface.
 
-**Role affiliation**: gateway side — the roster entry in `ops/roster/__init__.py` declares `ServiceSpec.capabilities=_GATEWAY` and `requires_db=True` (R3 door ④: notice_bridge reads and lazily expires `agent_notices` directly — previously declared False with the drift noted in-okf; the spec now matches). Kept alive by `services/healthchecks/im_bridge.py` (gateway watchdog).
+**Role affiliation**: gateway side — the roster entry in `ops/roster/__init__.py` declares `ServiceSpec.capabilities=_GATEWAY` and `requires_db=True` (R3 door ④: notice_bridge reads and lazily expires `agent_notices` directly — previously declared False with the drift noted in-okf; the spec now matches). Kept alive by the root supervisor's health monitor through the roster's `/healthz` identity probe.
 
 ## Core Responsibilities
 - **Adapters** (`services/im_bridge/adapters/<channel>.py`): each channel is one adapter sharing the core — envelope, command routing, per-channel session state. An adapter whose module is missing or credentials unset logs "skipped"; the daemon keeps serving the others. `AVA_IM_DISABLED_ADAPTERS` disables channels. Feishu inbound is dual-path: `im.message.receive_v1` WS events plus a ListMessage polling fallback (`AVA_FEISHU_POLL_INTERVAL_SECONDS` / `AVA_FEISHU_POLL_CHAT_ID`) for platforms that never push events — a shared seen-set keeps the two paths idempotent. The WS handshake honors the machine's proxy environment (`HTTP(S)_PROXY` / `ALL_PROXY`, `NO_PROXY` honored per target): the SDK pins `proxy=None` on websockets>=15 and `lark.ws.Client` exposes no proxy parameter, so `adapters/feishu_ws_proxy.py` replaces the SDK's module-level connect-kwargs builder (issue #2089).
@@ -30,7 +30,7 @@ The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat
 - `services/im_bridge/gateway_client.py` — gateway REST and SSE transport (`GatewayClient`)
 - `services/im_bridge/state.py` — persisted switch state and inbound outbox
 - `services/im_bridge/types.py` — shared message, chat-state, and adapter contracts
-- Watchdog keeps alive via `services/healthchecks/im_bridge.py`
+- Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`ops/roster/healthz.py`)
 
 ## Notes
 - Bridge ↔ agent dialog is human messages in, agent text out — tool execution / reasoning / other agents' messages are never pushed to IM

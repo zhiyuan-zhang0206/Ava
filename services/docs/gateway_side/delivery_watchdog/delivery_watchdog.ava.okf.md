@@ -10,7 +10,7 @@ tags: []
 ## What it is
 A gateway daemon with six jobs on one fast tick (user-confirmed design 2026-08-02, `delivery-dispatcher-design-2026-08-02.md`): it is the cluster-wide tripwire that a `pending` inbound actually reaches its owner. Config-gated by `AVA_DELIVERY_WATCHDOG_ENABLED`. The six job families — wake dispatch, stall alerting, terminated-owner resurrect retry, stale-inbound dead-letter sweeps, stalled crash-marked recovery request, and hosted-turn liveness recovery — are specified in [[services/docs/gateway_side/delivery_watchdog/jobs.ava.okf.md]].
 
-**Role affiliation**: gateway side — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`, `requires_db=True` (polls `inbound_messages`). Kept alive by `services/healthchecks/delivery_watchdog.py` (gateway watchdog).
+**Role affiliation**: gateway side — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`, `requires_db=True` (polls `inbound_messages`). Kept alive by the root supervisor's health monitor through the roster's `/healthz` identity probe.
 
 ## Key Dependencies
 - [[db.ava.okf.md]] — polls `inbound_messages` + reads `agents_meta` owner status
@@ -20,7 +20,7 @@ A gateway daemon with six jobs on one fast tick (user-confirmed design 2026-08-0
 ## Entry Points
 - `services/delivery_watchdog/daemon.py` — `.venv/bin/python -m services.delivery_watchdog.daemon`
 - `services/delivery_watchdog/dead_letter.py` — job 4's stale-inbound dead-letter sweeps (split out at the line budget; re-exported by `daemon.py`)
-- Watchdog keeps alive via `services/healthchecks/delivery_watchdog.py`
+- Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`ops/roster/healthz.py`)
 
 ## Notes
 - One instance per cluster (runs on the gateway, owns the data plane)

@@ -37,7 +37,7 @@ def test_probe_set_agent_runner_membership() -> None:
     assert views["browser-mcp"].kind == "identity"
     assert views["agent-host"].gate_reason is None
     assert views["agent-host"].kind == "identity"
-    assert views["agent-host"].healthcheck_module == "services.healthchecks.agent_host"
+    assert views["agent-host"].healthcheck_module is None  # a standard /healthz daemon has none
 
 
 def _spec(

@@ -194,9 +194,9 @@ def spec_healthchecks() -> set[str]:
     """The healthcheck modules registered on ServiceSpec rows inside this
     directory (`services.healthchecks.<x>`, last segment).
 
-    Plugin-registered services keep their healthchecks in their own namespace
-    (`ava_builtins.plugins.ava_fleet.task_maintenance.healthcheck`) and are out
-    of scope for this table — the roster documents this directory only."""
+    Standard `/healthz` daemons declare no module (`healthz_daemon` derives their
+    probe), and a plugin service that does keeps it in its own namespace; both are
+    out of scope for this table — the roster documents this directory only."""
     names: set[str] = set()
     for spec in build_services():
         hm = spec.healthcheck_module

@@ -694,7 +694,7 @@ def main() -> None:
     schema-drift surface.
     """
     init_gateway_process(name="memory_indexer")
-    install_graceful_shutdown("indexer")
+    install_graceful_shutdown("memory_indexer")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
     # awaits `shutdown_default_executor`, joining the default executor's
