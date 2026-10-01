@@ -1,7 +1,7 @@
 """The eager config assembly — everything `import base.config` used to do.
 
 Imported only by `base/config/_lite.py:upgrade()`, on the first touch of a
-config surface outside the boot-lite index: the fifteen per-domain sub-model
+config surface outside the boot-lite index: the sixteen per-domain sub-model
 imports, the flat field registry walk, the `Settings` aggregate, and the
 eager-only re-exports (the metadata / service-read / turn-view helpers) the
 facade publishes after the switch. `build()` constructs the singleton from the
@@ -46,6 +46,7 @@ from base.config.profiles import (
 from base.config.sandbox import SandboxSettings
 from base.config.services import ServiceSettings
 from base.config.telegram import TelegramSettings
+from base.config.walg import WalgSettings
 from base.config.web import WebSettings
 from base.host.env.config_registry import DOMAIN_ATTRS, DOMAIN_MODELS, schema_extra
 
@@ -85,6 +86,7 @@ class Settings(BaseModel):
     packages: PackagesSettings = Field(default_factory=PackagesSettings)
     feishu: FeishuSettings = Field(default_factory=FeishuSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
+    walg: WalgSettings = Field(default_factory=WalgSettings)
     general: GeneralSettings = Field(default_factory=GeneralSettings)
 
     def __init__(self, *, profile: str | None = PROFILE_UNSET, **data: Any) -> None:
@@ -206,6 +208,7 @@ def _facade_exports() -> dict[str, Any]:
         "SandboxSettings": SandboxSettings,
         "ServiceSettings": ServiceSettings,
         "TelegramSettings": TelegramSettings,
+        "WalgSettings": WalgSettings,
         "WebSettings": WebSettings,
     }
 
