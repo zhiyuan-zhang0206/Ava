@@ -73,7 +73,7 @@ scan produces 70+ false positives reflecting framework conventions):
 - Pydantic schemas referenced only by wire-format-freezing tests
 - Watchdog event handler methods (`on_created` / `on_modified` etc.)
 - Transport `Protocol` / interface signatures (parameter names with `...`
-  bodies — e.g. the `services/pitr` protocols, `SpanExporter.force_flush`)
+  bodies — e.g. `SpanExporter.force_flush`)
 
 The exclude list is itself an artifact — when it drifts (starts hiding real dead
 code, or a new convention appears), say so in the PR body. Two observed drift

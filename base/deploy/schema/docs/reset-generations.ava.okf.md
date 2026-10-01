@@ -11,7 +11,7 @@ tags:
 
 The 2026-09-23 reset folds the 101 preceding migration pairs into the baseline
 and removes their seed stamps. `base/deploy/schema/migration_history.py` retains that exact
-inventory plus the earlier 59-name generation: older backup/PITR restores have
+inventory plus the earlier 59-name generation: older backup restores have
 not been ruled out. Before convergence deletes tracking rows, either partial
 generation raises `MigrationHistoryGap`. Without the current reset anchor, the
 complete 101-name predecessor set is mandatory, including on baseline-only

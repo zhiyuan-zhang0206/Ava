@@ -22,9 +22,9 @@ listener when pooling is on (the default; 6433 on the default home), the direct
 Postgres port when off (5433). There is no separate pooler-port env key
 (`AVA_PGBOUNCER_PORT` is retired): the pooler port is a registry-record fact for
 the data-plane bring-up alone. The admin plane — migrations, `pg_dump`,
-provisioning, PITR — is the ONLY direct-Postgres consumer. On a locally owned
+provisioning — is the ONLY direct-Postgres consumer. On a locally owned
 plane it dials the home's owner-only socket as the OS user, acting as the
-schema owner for schema work, dumps and PITR reads (`base.db.pg_admin`), never
+schema owner for schema work and dumps (`base.db.pg_admin`), never
 the owner's own login or a write generation; a remote-managed plane uses its
 provider URL (`base.db.direct_db_url`). Everything else dials `AVA_DB_URL`
 as-is. Flipping `AVA_PGBOUNCER_ENABLED=false` is the kill-switch:
@@ -634,8 +634,6 @@ supervisor socket for agent shells / watchers).
 | `memory-search`          | `.venv/bin/python -m services.memory_search.daemon` (uvicorn on 127.0.0.1:19531 serving the exact-search store — in-memory matrix + npz persistence; the gateway and the indexer call it over HTTP when `AVA_MEMORY_SEARCH_BACKEND=numpy`) | `services.healthchecks.memory_search` (real POST /search probe :19531) |
 | `frontend`               | `cd ui/web && NEXT_PUBLIC_GATEWAY_PORT=<AVA_GATEWAY_PORT> npm run build && npm run start -- -p <app_port>` (Next.js prod build, **loopback-only bind** (`next start -H 127.0.0.1`); off-box browsers reach it only through the fleet UI gate on the entry port `:3000` — see Private-network deployment. The build-time port is injected from `AVA_GATEWAY_PORT` so the browser dials the gateway on the right port even when it is not the default 8000) | `services.healthchecks.frontend` (curl) |
 | `pg-backup` (gateway only) | `.venv/bin/python -m services.backup_scheduler.daemon` (cluster-clock daily dump schedule with bounded retry and owned, cancellable job processes; after the Sunday 03:00 successful dump, runs one isolated logical restore drill; `/healthz` reports last-success age) | `services.healthchecks.pg_backup` (identity-verified `/healthz` :8116) |
-| `pitr-uploader` (gateway only, `AVA_PITR_ENABLED`) | `.venv/bin/python -m services.pitr.uploader_daemon` (single-worker immutable GCS upload; WAL-only ciphertext staging is capped at 64 MiB and reported alongside spool bytes; disabled by default) | `services.healthchecks.pitr_uploader` (identity-verified `/healthz` :8117) |
-| `pitr-base-candidate` (gateway only, `AVA_PITR_BASE_BACKUP_ENABLED`) | `.venv/bin/python -m services.pitr.base_scheduler_daemon` (weekly unprotected base candidate; when the additional `AVA_PITR_RESTORE_PROOF_ENABLED` gate is true, runs one generation-pinned isolated proof in the first-day 06:00 cluster-time monthly window when a candidate is pending; both default off) | `services.healthchecks.pitr_base_backup` (identity-verified `/healthz` :8118; candidate and restore-proof states are separate non-readiness-gating components) |
 | `browser` (agent-runner only, auto-detect display; opt-out `AVA_BROWSER_ENABLED=false`) | `.venv/bin/python -m services.browser.daemon` (headed real Chrome, dedicated profile `~/.ava/chrome-profile/`, CDP :9222) | `services.healthchecks.browser` (HTTP probe `/json/version` :9222) |
 | `otel-collector` | `<otel-collector-dir>/otelcol-contrib --config <otel-collector-dir>/config.yaml` (native Go binary installed by converge on the `lgtm-host` gateway and pure runners; unmarked gateway homes skip it; the gateway fans out only its cluster's labeled resources, pure runners relay with bearer auth; traces mirror locally; trace/log queues are bounded and file-backed (1 GiB on-disk cap each) while metrics use bounded memory; every full queue rejects the newest batch without waiting, and every exporter gives up after a bounded 15-minute retry window) | `services.healthchecks.otel_collector` (valid empty OTLP POST must return 2xx on the local `AVA_TELEMETRY_OTLP_PORT`; both that port and `AVA_OTELCOL_METRICS_PORT` holders must resolve to this collector binary and its live session record, otherwise only a verified stale same-binary holder is reclaimed; failed listener inspection is reported as unavailable and never triggers respawn) |
 | `loki` (observability station) | Pinned native Loki under ava-root | `services.healthchecks.lgtm` (owned listener + `/ready` success) |
@@ -714,63 +712,18 @@ Grafana/pages and maintenance-state requests. API headers alone are not proof
 that the browser used HTTP/2. Full test suites run in CI; local verification
 uses the affected tests and the operator's authorized browser smoke.
 
-The base-candidate gate additionally requires `AVA_PITR_REPLICATION_DB_URL`, a
-local URL for a dedicated `LOGIN REPLICATION NOSUPERUSER` role. The role must be
-accepted by the cluster's private loopback `pg_hba.conf`; its password must not
-be embedded in commands or logs. This foundation does not create that identity
-or enable PostgreSQL archiving. Until the activation runbook provisions and
-verifies it, keep `AVA_PITR_BASE_BACKUP_ENABLED=false`. Candidate success never
-replaces or prunes daily logical dumps. A migration-bearing update can reuse a
-protected base plus freshly verified WAL as described in the update procedure.
+### Backup and recovery posture
 
-Physical PITR is disabled by default. Converge only prepares
-`$AVA_HOME/physical-backup/{spool,ack}` (0700) and atomically publishes the
-self-contained shim at `$AVA_HOME/runtime/pg-archive/archive-shim`; it does not
-set `archive_mode`, restart PostgreSQL, upload to GCS, or replace the daily and
-pre-update logical dumps. Do not set `AVA_PITR_ENABLED=true` until the GCS
-uploader and verified base-chain rollout have landed. Spool hard-bound failures
-make PostgreSQL retain WAL in `pg_wal`; monitor their combined disk usage and
-never delete unacknowledged segments to relieve pressure.
-The uploader's seekable staging contract is restricted to bounded WAL files;
-base backups must use the separate restartable streaming contract delivered by
-the base-chain rollout and must never materialize a full ciphertext sibling.
-
-`AVA_PITR_STORE_BACKEND` selects the object-store backend for the whole PITR
-plane (default `gcs`); the other supported values are `baidu` (Baidu
-Netdisk) and `oss` (Aliyun OSS). An unrecognized value fails fast at store
-construction — a typo never silently falls back to GCS. Switching backends
-is one env var + a restart; the previously retained copy stays primary until
-the switchover runbook has been executed and observed. The full cut-over
-procedure (restore drills, migration script, rollback): see
-`conventions/pitr-backend-switchover.md`.
-An interrupted publish can leave an incomplete multipart upload (orphan
-shard) behind: the lifecycle rule stays the standing channel (fragments
-aborted after 7 days), and `ava pitr multipart list/abort` is the explicit
-single-upload surface for anything that cannot wait out that window.
-
-Activation has no operator entry. A home whose
-activation completed keeps its archive settings and its durable record
-(`$AVA_HOME/physical-backup/activation/operation.json`), which the base-backup,
-uploader and retention services read. Never edit PostgreSQL or `.env` by hand to
-imitate an activation.
-
-Restore proof additionally requires
-`AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE`, a distinct 0600 viewer-only service
-account file; configuration rejects the uploader and viewer paths when they
-resolve to the same inode. Before enabling the gate, prove the viewer cannot
-create, overwrite, list-latest, or delete objects. The drill performs one
-generation-pinned GCS download per object, then authenticates and extracts the
-base locally under `$AVA_HOME/physical-backup/restore/`. Insufficient space
-defers protection; do not reduce the WAL/spool, logical-backup, or emergency
-reserves to force a run. A candidate remains `protected=false` until the real
-isolated replay, promotion, fingerprints, live-Postgres identity check, and
-immutable proof publication all succeed. Keep daily logical dumps; this
-boundary has no retention or remote-delete operation. Enabled PITR replaces
-the migration-bearing update's logical export only after its separate fresh
-recovery-point verification succeeds.
-To re-prove a protected chain at an operator-chosen target LSN, run the
-isolated drill: `ava pitr drill` (procedure:
-`.agents/skills/operating-ava-cluster/references/physical-restore-drill.md`).
+The recovery points are the daily encrypted logical dumps (`pg-backup`, due at
+`AVA_BACKUP_HOUR` cluster time, the newest `AVA_BACKUP_KEEP` kept in
+`$AVA_HOME/backups/db/`, published off-site under `ava-logical/` when
+`AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and
+`AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` are set through `ava config set`), proved
+by the weekly isolated logical restore drill. There is no continuous physical
+backup and no point-in-time recovery: the self-written PITR stack was deleted
+(`decisions/2026-10-02-delete-the-self-written-pitr-stack.md`) and its
+replacement is separate work. Never state a recovery point newer than the last
+published dump.
 
 Backup operations (the daily dump and the weekly logical restore drill) each
 run as one owned worker group of their kind. A failed or cancelled operation
@@ -788,10 +741,6 @@ ava backup operations retire            # preview: re-prove closure of each bloc
 ava backup operations retire --confirm  # quarantine every proven one; the kind proceeds
 ```
 
-The default-off PITR operations (base candidate, restore proof, operator drill)
-run on the same core under `$AVA_HOME/physical-backup/`; these two verbs cover
-the two logical kinds only.
-
 Closure covers the PostgreSQL children that `setsid` out of the worker group:
 retire also requires every recorded postgres birth dead and no process working
 inside a receipted data directory. Each refusal names its type and the PIDs
@@ -803,87 +752,6 @@ and `retire --confirm` retries it. An upload-interrupted dump keeps
 its complete encrypted artifact in quarantine: restore from it directly
 (`.agents/skills/operating-ava-cluster/references/db-restore.md`) or copy it
 into `backups/db/` (0600); the next scheduled run dumps again.
-
-When an activation record shows a failure, read the durable record first:
-`$AVA_HOME/physical-backup/activation/operation.json`
-(`error` / `error_code` / `error_detail`). The
-CLI refusal line keeps only the TAIL of the restore worker's traceback, so the
-outermost exception there is the actionable cause — but a cleanup refusal can
-mask it. Zombie signature (2026-09-06, activation #12): the refusal names
-"refusing to remove a live restore PostgreSQL data directory" while a
-`.partial` restore directory is left behind. That message does NOT mean a
-postgres is running: the direct-exec sandbox postmaster is the restore
-worker's child and, once stopped, lingers as a zombie (it fails the pgid
-identity probe, so the stop path never reaps it, and psutil's create-time
-probe still matches it). Verify with
-`ps -o pid,stat,command -p <sandbox_pid>` — status `Z` means dead-but-unreaped
-(`sandbox_pid` sits in the matching `restore-owners/*.owner.json`). Since
-#1860 the run() cleanup reaps the Popen and every live-process probe treats a
-zombie as dead, so a current failure surfaces unmasked in the refusal tail.
-
-`AVA_PITR_RETENTION_PLANNER_ENABLED=true` adds only a local dry-run after the
-restore-proof gate is enabled. The private canonical plan lives at
-`$AVA_HOME/physical-backup/retention-plans/latest.dry-run.json`; inspect its
-digest, blockers, object counts and byte totals with:
-
-```bash
-ava pitr retention inspect
-```
-
-A blocked plan exits 2 and always has zero eligible objects; with no plan on
-disk (before the first tick, or on a unit without a retention daemon) `retention
-inspect` prints a note and exits 1. The planner flag
-alone grants no delete credential and calls no remote delete API; deletion has
-its own gate -- the arm carriers and the explicit commands below. The gate does
-not alter Cloud Storage soft delete and leaves daily/pre-update `pg_dump`
-retention unchanged. Eligibility
-also remains zero while any candidate is unprotected, while the plan is stale,
-or while timeline history ancestry has not been authenticated. A WAL/history
-object is continuous only after its local ACK and viewer-only remote inventory
-entry match exactly on canonical archive/object path, generation, size, CRC32C,
-and immutable metadata; any missing, extra, duplicate, or conflicting entry
-blocks the complete plan.
-
-### Retention deletion gate (arm / run-once / disable)
-
-The deletion machinery ships armed-off, with exactly one sanctioned opener --
-the explicit command; the carriers in the unit `.env` are never hand-edited.
-
-```bash
-ava pitr retention status                            # carriers, plan, daemon state, journal tail
-ava pitr retention arm --digest <SHA256> --confirm   # approve the current plan digest
-ava pitr retention run-once --confirm                # operator-present first pass (same executor)
-ava pitr retention disable --confirm                 # clear the carriers; back to dry-run
-```
-
-`arm` fails closed unless the stored plan is unblocked and its digest equals
-`--digest`; every flipping command only previews without `--confirm`. The
-scheduler re-reads the carriers from the unit `.env` on every tick, so a flip
-takes effect on the next tick without a restart. Deletion still requires the
-approved digest to hold for consecutive ticks, and the first execution of a
-process recomputes the plan and re-compares the digest immediately before
-deleting; `run-once` runs exactly that recompute-then-execute sequence through
-the same bounded executor -- the operator-present form of the first real run.
-Every flip and every pass append to
-`$AVA_HOME/physical-backup/retention-journal/journal.jsonl` (actor, full
-command, plan digest, before/after carrier state); `retention status` shows the
-latest records.
-
-Retention depth rides one deploy-provisioned key, `AVA_PITR_RETAINED_WEEKLY_CHAINS`
-(default `2`, capped at `8`): that many newest protected chains are kept, each
-additional chain moving the deletable WAL floor roughly one week further back,
-so the key sets how far back point-in-time recovery reaches. It is read-only for
-`ava config` (`writable: false`) and is provisioned in the unit `.env` at deploy
-time, like `AVA_PITR_GCS_PREFIX`; align it before the shadow period starts so the
-observed digests describe the opening configuration instead of the default. The
-pre-open cost comparison (task #3292) measured about 30 GB of WAL per day on the
-live prefix and put each extra week near CNY 19/month; the opening parameter is
-`2` (the user's ruling on 2026-09-14: roughly a 14-day window, about CNY
-39/month). Deepening through the bucket's 90-day lifecycle ceiling stays
-deferred until after the shadow period.
-
-The full procedure and the pre-open cost comparison live with the retention
-design (task #2150).
 
 All sessions have cwd set to the prod path `~/.ava/source/` (see "Prod and dev clone paths" above).
 Session commands run under `bash -lc` (#476) — the login-shell flag pulls in the user's
@@ -1417,6 +1285,84 @@ itself (its own public key in its own `authorized_keys`):
   processes. The gateway's start in `up` raises the cluster's minimum code
   version, and those processes exit when they next touch the database
   ([code version gate](#code-version-gate)).
+
+### Release steps: retiring the PITR stack (one-time)
+
+The release that deletes the self-written PITR stack
+([decision](../decisions/2026-10-02-delete-the-self-written-pitr-stack.md)) needs
+three manual steps per gateway home, because the upgrade cannot do them itself.
+The last commit that still carries the stack is the tag `pitr-stack-final`. The
+daily dump, its off-site publish and the weekly restore drill import none of the
+deleted code.
+
+1. **Before `down`, with the old code running.**
+   - `SHOW archive_mode;` must read `off` and `SHOW archive_command;` must be
+     empty (`pg_stat_archiver.archived_count` zero). A home that reads `on`
+     first resets `archive_mode`, `archive_command`, `archive_timeout` and
+     `wal_compression` with `ALTER SYSTEM RESET` and restarts Postgres: the
+     uploader that drained the archive spool is gone, and a spool at its hard
+     bound makes `pg_wal` grow until the disk is full.
+   - Record the off-site destination: `AVA_PITR_OSS_ENDPOINT` and
+     `AVA_PITR_OSS_BUCKET` from `ava config get`, and the path in
+     `AVA_PITR_OSS_CREDENTIALS_FILE` (masked there; it is the 0600 file the old
+     configuration pointed at).
+   - Unset every writable retired key while the old code still knows it; after
+     the upgrade official config can no longer touch it:
+
+     ```bash
+     ava config unset AVA_PITR_ENABLED AVA_PITR_BASE_BACKUP_ENABLED \
+       AVA_PITR_RESTORE_PROOF_ENABLED AVA_PITR_RETENTION_PLANNER_ENABLED \
+       AVA_PITR_RETENTION_DELETE_ARMED AVA_PITR_RETENTION_DELETE_APPROVED_DIGEST \
+       AVA_PITR_STORE_BACKEND AVA_PITR_BAIDU_TOKEN_FILE AVA_PITR_OSS_ENDPOINT \
+       AVA_PITR_OSS_BUCKET AVA_PITR_OSS_CREDENTIALS_FILE \
+       AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE AVA_PITR_OSS_DELETE_CREDENTIALS_FILE
+     ```
+
+     The off-site leg of the daily dump is idle from here until step 3; the
+     local dump is unaffected. The other `AVA_PITR_*` keys are deploy-provisioned
+     and read-only (`ava config` refuses them). They stay in the `.env`, inert:
+     every settings model ignores a key it does not declare. Do not edit the
+     `.env` by hand to remove them.
+2. **Between `down` and `up`, on every gateway home** (a runner-only home has no
+   reservation and needs nothing): delete the two retired port slots from the
+   start intent. New code refuses a reservation whose slots differ from the
+   fixed port table, so this is a state-file rewrite that comes before any
+   command of the new code (see the rule above). The file is compact JSON with
+   sorted keys, mode 0600:
+
+   ```bash
+   python3 - <<'EOF'
+   import json, os, pathlib
+   home = pathlib.Path(os.environ.get("AVA_HOME") or pathlib.Path.home() / ".ava")
+   path = home / "start-intent.json"
+   data = json.loads(path.read_text())
+   for slot in ("pitr_uploader", "pitr_base_backup"):
+       data["record"]["ports"].pop(slot, None)
+   staged = path.with_name(path.name + ".staged")
+   staged.write_text(json.dumps(data, sort_keys=True) + "\n")
+   staged.chmod(0o600)
+   staged.replace(path)
+   EOF
+   ```
+3. **After `up`.** Set the off-site destination under its new names, then apply
+   the restart hint `ava config set` prints so `pg-backup` reads them:
+
+   ```bash
+   ava config set AVA_BACKUP_OFFSITE_ENDPOINT=<endpoint> AVA_BACKUP_OFFSITE_BUCKET=<bucket> \
+     AVA_BACKUP_OFFSITE_CREDENTIALS_FILE=<credentials file>
+   ```
+
+   Judge the next dump by its destination, not by silence: `ava-logical/<that
+   dump's file name>` exists in the bucket with the size of the local
+   `.dump.enc`, and the log carries `[backup] off-site published`. Also check
+   `ava backup operations status` (all ready), `pg_backup` health, and that
+   `$AVA_HOME/run/ava-root/manifests.json` no longer lists `pitr-*` services.
+
+Everything else the stack left is inert and removed only with separate
+approval: `$AVA_HOME/physical-backup/` and `$AVA_HOME/runtime/pg-archive/`
+on disk, a `REPLICATION` role and the `replication` rows it needed in
+`pg_hba.conf` (rewritten on every start, so the rows disappear by themselves),
+and the remote objects and lifecycle rule of the retired physical chain.
 
 ### Agent recovery after a provider billing stoppage
 
