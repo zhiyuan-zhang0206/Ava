@@ -94,28 +94,23 @@ def _capture(module: Any, home: Path) -> str:
     return buf.getvalue()
 
 
-# ─── decided transforms (405 ruling 2026-08-08) ─────────────────────────────
+# ─── dead-reference transforms ──────────────────────────────────────────────
 
 
-def test_transform_expands_bare_ava_code_and_drops_telegram() -> None:
+def test_transform_drops_dead_references_in_every_spelling() -> None:
     transformed = mig._transform_skill_list(
-        ["ava_code", "gmail", "telegram", "ava-code:pr"], {"wechat": "wechat-ocr"}
+        ["ava_code", "gmail", "telegram", "ava-code:pr", "ava_code.testing", "ava-code"],
+        {"wechat": "wechat-ocr"},
     )
-    assert transformed == [
-        "ava-code:worktree",
-        "ava-code:pr",
-        "ava-code:testing",
-        "ava-code:conventions",
-        "gmail",
-    ]  # telegram dropped; ava-code:pr deduped against the expansion
+    # telegram and the deleted ava_code skill family (bare name + four
+    # sub-skills, whatever spelling) are gone; live entries survive.
+    assert transformed == ["gmail"]
 
 
 def test_transform_maps_wechat_and_is_idempotent() -> None:
     once = mig._transform_skill_list(["wechat"], {"wechat": "wechat-ocr"})
     assert once == ["wechat-ocr"]
     assert mig._transform_skill_list(once, {"wechat": "wechat-ocr"}) == once
-    # bare dash spelling expands the same way
-    assert mig._transform_skill_list(["ava-code"], {}) == list(mig._AVA_CODE_SUBSKILLS)
 
 
 def test_apply_registry_contends_with_the_module_registry_lock(

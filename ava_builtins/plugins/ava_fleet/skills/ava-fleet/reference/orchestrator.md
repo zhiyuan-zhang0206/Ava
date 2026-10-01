@@ -95,7 +95,7 @@ A worker is as smart as you. You hand it a *piece* of the work and the context t
 
 ### Commit Attribution
 
-**Whoever is closest to the context signs the commit.** For the specific format, see the `ava-code.pr` skill.
+**Whoever is closest to the context signs the commit.** The format is the `Co-authored-by: Ava #<agent id>` trailer in your coding-tools section.
 
 Principle: When problems arise, you can precisely resurrect the person with context to fix them. The orchestrator only splits and assigns work, never signs workers' commits.
 

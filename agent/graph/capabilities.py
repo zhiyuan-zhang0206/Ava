@@ -108,11 +108,11 @@ def resolve_prompt_skills(wanted: list[str], *, config_field: str) -> list[Any]:
     + boot ordering keep it out of module scope, and TYPE_CHECKING is banned).
 
     `*` selects the whole loaded catalog. Otherwise each name resolves by
-    `.`-identifier first (unambiguous for namespaced skills like `ava-code.pr`),
+    `.`-identifier first (unambiguous for namespaced skills like `ava-memory.consolidation`),
     then bare frontmatter name for flat entries. Both sides of the match go
     through `base.packages.skills.names.match_key`, so a stored value still spelled
-    `ava_code.pr` (a preset row written before the dash rename, an operator
-    typing the Python form) resolves to the same skill as `ava-code.pr`. An
+    `ava_memory.consolidation` (a preset row written before the dash rename, an operator
+    typing the Python form) resolves to the same skill as `ava-memory.consolidation`. An
     unresolved name warns once per process (naming `config_field` so the operator
     sees which list is stale) and is skipped — a plugin-bundled skill only
     resolves while its plugin is enabled, and skills differ per machine.

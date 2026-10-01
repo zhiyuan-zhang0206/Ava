@@ -18,7 +18,7 @@ catalog, grouped by what each skill does, is
 ## How Skills Work
 Skills are loaded on-demand by agents via `ava.help(ava.skills.<name>)`.
 Each skill is a Markdown file with frontmatter describing when to use it.
-Skills can be nested — displayed as `ava.skills.ava-code:pr` (loadable as `ava.skills.ava_code.pr`).
+Skills can be nested — displayed as `ava.skills.ava-memory:consolidation` (loadable as `ava.skills.ava_memory.consolidation`).
 
 
 ## See Also
@@ -54,7 +54,7 @@ display `identifier()` joins the same segments with `:`
 (`ava.skills.web-ai:deep-research`).
 
 `base/packages/skills/names.py` is the single fold between them — `match_key` inbound
-(dash→underscore, and `:`→`.` so an ecosystem-style `ava-code:pr` resolves),
+(dash→underscore, and `:`→`.` so an ecosystem-style `ava-memory:consolidation` resolves),
 `display_name` outbound, `find` where a name has to become a real directory or
 registry key. Every dash/underscore comparison in the system routes through it,
 which is why a legacy underscore directory (a hand-installed
@@ -68,7 +68,7 @@ disk** (`ava_builtins/plugins/ava_code/`), because they are real Python
 packages — `__init__.py`, `from . import _code_namespace`, and `python -m
 ava_builtins.plugins.ava_fleet.task_maintenance.daemon` all require a legal
 module path. Name ≠ directory here: `identifier()` folds the namespace segment
-so the surface still reads `ava-code:pr` and `ava-fleet`, and the skills a
+so the surface still reads `ava-memory:consolidation` and `ava-fleet`, and the skills a
 plugin carries are dash-named like any other.
 
 ## Core API

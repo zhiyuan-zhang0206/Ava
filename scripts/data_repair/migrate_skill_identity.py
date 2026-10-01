@@ -23,10 +23,11 @@ Surface 3 — DB stores (optional, `AVA_DB_URL` or `--db-url`): the skill lists
 `agent_presets.config`. An entry that resolves to nothing against the catalog
 is reported; `--apply` rewrites it through the mapping derived from Surface-1
 fixes (old frontmatter name -> new display name), e.g. `wechat` -> `wechat-ocr`.
-The 405-ruled transforms (2026-08-08) are mirrored here and in the rollout SQL
-the v0.1.0 baseline (formerly migration 20260808T075000, squashed into db/schema.sql at the 2026-08-14 reset): bare `ava_code` / `ava-code` expands to the four
-sub-skill identifiers and `telegram` is dropped — reported as DECIDED and
-applied under `--apply`.
+Dead references are dropped under `--apply`: `telegram` (the skill was removed;
+the IM bridge is the only Telegram frontend) and the `ava_code` skill family
+(the plugin no longer carries skills — bare `ava_code` / `ava-code` and the four
+former sub-skill identifiers `ava-code:worktree` / `pr` / `testing` /
+`conventions`, in any spelling `match_key` folds).
 
 `--check` (default) is read-only and exits 1 when anything is inconsistent.
 `--apply` fixes, with a `.bak-<timestamp>` copy of every touched file and a
@@ -62,34 +63,32 @@ except Exception:  # pragma: no cover - importable in the repo venv
     registry_lock = None
 
 _SKILL_LIST_FIELDS = ("skills_to_inject_into_system_prompt", "skills_to_expand_at_start")
-# 405 ruling 2026-08-08: bare ava_code was never a skill (namespace with no
-# root SKILL.md) — the stored lists meant the family, which is these four.
-_AVA_CODE_SUBSKILLS = (
-    "ava-code:worktree",
-    "ava-code:pr",
-    "ava-code:testing",
-    "ava-code:conventions",
+# Dead references, compared by `match_key` so every spelling folds together.
+# telegram: the skill was removed from the repo; the IM bridge is the only
+# Telegram frontend. The ava_code entries: the plugin no longer carries skills —
+# bare `ava_code` was never a skill (a namespace with no root SKILL.md; stored
+# lists meant the family) and the four sub-skills were deleted.
+_DROP_REFS = frozenset(
+    match_key(name)
+    for name in (
+        "telegram",
+        "ava_code",
+        "ava-code:worktree",
+        "ava-code:pr",
+        "ava-code:testing",
+        "ava-code:conventions",
+    )
 )
-# Dead reference: the telegram skill was removed from the repo; the IM
-# bridge is the only Telegram frontend.
-_DROP_REFS = frozenset({"telegram"})
 
 
 def _transform_skill_list(entries: list[str], mapping: dict[str, str]) -> list[str]:
     """Apply the identity-config-refs transforms to one skill list, in
-    order, deduplicated: bare `ava_code` / `ava-code` expands to the four
-    sub-skills, `_DROP_REFS` entries are dropped, and `mapping` renames
-    (e.g. `wechat` -> `wechat-ocr`). Mirrors the rollout SQL migration
-    20260808T075000 so the operator tool and the deploy path cannot drift.
+    order, deduplicated: `_DROP_REFS` entries are dropped and `mapping`
+    renames (e.g. `wechat` -> `wechat-ocr`).
     """
     out: list[str] = []
     for entry in entries:
-        if entry in ("ava_code", "ava-code"):
-            for sub in _AVA_CODE_SUBSKILLS:
-                if sub not in out:
-                    out.append(sub)
-            continue
-        if entry in _DROP_REFS:
+        if match_key(entry) in _DROP_REFS:
             continue
         renamed = mapping.get(entry, entry)
         if renamed not in out:
@@ -346,10 +345,9 @@ def _sql_literal(value: str) -> str:
 
 def apply_db(db_url: str, mapping: dict[str, str]) -> list[str]:
     """Rewrite the skill-list entries across the three stores / two fields —
-    the same transforms as the rollout SQL migration 20260808T075000 (squashed into the v0.1.0 baseline at the 2026-08-14 reset): bare
-    `ava_code` expands to the four sub-skills, `telegram` is dropped, and
-    `mapping` renames (e.g. `wechat` -> `wechat-ocr`). Idempotent. Each
-    rewrite prints the exact UPDATE it runs."""
+    `_transform_skill_list`: dead references (`telegram`, the `ava_code`
+    family) are dropped and `mapping` renames (e.g. `wechat` ->
+    `wechat-ocr`). Idempotent. Each rewrite prints the exact UPDATE it runs."""
     done = []
     targets = (
         ("agents_meta", "config_overlay"),
@@ -442,14 +440,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"  UNRESOLVED {f['table']} id={f['id']} {f['field']}: {f['entry']!r}{hint}")
         elif f["kind"] == "decided-config-ref":
-            action = (
-                f"expand to {len(_AVA_CODE_SUBSKILLS)} sub-skills"
-                if f["entry"] in ("ava_code", "ava-code")
-                else "drop (dead reference)"
-            )
             print(
-                f"  DECIDED {f['table']} id={f['id']} {f['field']}: {f['entry']!r} -> {action} "
-                "(405 ruling; rollout migration 20260808T075000 — squashed into the v0.1.0 baseline — --apply mirrors)"
+                f"  DECIDED {f['table']} id={f['id']} {f['field']}: {f['entry']!r} -> "
+                "drop (dead reference; --apply drops it)"
             )
         elif f["kind"] in ("registry-unreadable", "db-unreadable"):
             print(f"  ERROR {f.get('table', 'registry')}: {f['error']}")

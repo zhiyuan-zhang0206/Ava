@@ -73,7 +73,7 @@ def contains_skill_md(d: Path) -> bool:
     Deliberately broader than `_package_at`'s root-SKILL.md rule, and the two
     are not interchangeable: the scanner mounts SKILL.md files at any depth
     (namespaced by folder path), so a plugin whose `skills/` root has only
-    nested skills (`ava_code/pr/SKILL.md`, no `skills/SKILL.md`) still syncs.
+    nested skills (`ava_fleet/ava-fleet/SKILL.md`, no `skills/SKILL.md`) still syncs.
     Install is the inverse — a *package* needs a root SKILL.md because its
     frontmatter name is the install identity.
     """
