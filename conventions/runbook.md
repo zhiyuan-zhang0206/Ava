@@ -719,11 +719,12 @@ The recovery points are the daily encrypted logical dumps (`pg-backup`, due at
 `$AVA_HOME/backups/db/`, published off-site under `ava-logical/` when
 `AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and
 `AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` are set through `ava config set`), proved
-by the weekly isolated logical restore drill. There is no continuous physical
-backup and no point-in-time recovery: the self-written PITR stack was deleted
-(`decisions/2026-10-02-delete-the-self-written-pitr-stack.md`) and its
-replacement is separate work. Never state a recovery point newer than the last
-published dump.
+by the weekly isolated logical restore drill. There is no point-in-time
+recovery: the self-written PITR stack was deleted
+(`decisions/2026-10-02-delete-the-self-written-pitr-stack.md`) and WAL-G
+(["WAL-G archiving"](#wal-g-archiving) below) so far archives WAL only: there is
+no base backup and no restore path, so archived WAL is not a recovery point. Never
+state a recovery point newer than the last published dump.
 
 Backup operations (the daily dump and the weekly logical restore drill) each
 run as one owned worker group of their kind. A failed or cancelled operation
@@ -1363,6 +1364,86 @@ approval: `$AVA_HOME/physical-backup/` and `$AVA_HOME/runtime/pg-archive/`
 on disk, a `REPLICATION` role and the `replication` rows it needed in
 `pg_hba.conf` (rewritten on every start, so the rows disappear by themselves),
 and the remote objects and lifecycle rule of the retired physical chain.
+
+### WAL-G archiving
+
+WAL archiving ships every completed WAL segment, encrypted, to an OSS prefix
+through a pinned WAL-G
+([decision](../decisions/2026-10-02-walg-physical-backup.md),
+[node](../services/gateway_side/walg/docs/walg.ava.okf.md)). It is off until
+`AVA_WALG_CONFIG_FILE` is set; unset, nothing of it runs. It archives WAL only: there
+is no base backup, retention or restore yet, so it is not a recovery path.
+
+**Files the operator places** (0600, owned by the gateway's OS user):
+
+- The WAL-G configuration JSON, in WAL-G's own format; every key below is required:
+
+  ```json
+  {
+    "WALG_OSS_PREFIX": "oss://<bucket>/ava-walg/<home label>/pg17/gen1/",
+    "OSS_ACCESS_KEY_ID": "...",
+    "OSS_ACCESS_KEY_SECRET": "...",
+    "OSS_ENDPOINT": "https://oss-<region>.aliyuncs.com",
+    "OSS_REGION": "<region>",
+    "WALG_LIBSODIUM_KEY_PATH": "<path of the key file>",
+    "WALG_LIBSODIUM_KEY_TRANSFORM": "hex",
+    "WALG_PREVENT_WAL_OVERWRITE": "true"
+  }
+  ```
+
+  The prefix names a path (the PG major and a generation number belong in it) and
+  cannot sit under `ava-logical/` (the daily dump), `ava-pitr-scratch/` or
+  `ava-wsl-cutover-*`. Use a dedicated storage account whose policy is limited to that
+  prefix with Get, Put, List and Delete (plus AbortMultipartUpload and ListParts):
+  retention deletes, and the logical-dump upload credential must not be able to touch
+  the physical chain.
+- The libsodium key, 32 random bytes in hex: `umask 077; openssl rand -hex 32 > <key
+  file>`. **Losing it makes every archived segment unreadable.** Copy it to two places
+  off the gateway host and decrypt-verify a copy before enabling. There is no rotation:
+  a new key means a new prefix (a new `gen`).
+- A bucket lifecycle rule must not expire objects under the WAL-G prefix: two independent
+  deleters break the chain (the retention that comes with the base backups is the only
+  one). Keep any bucket-wide expiry scoped to the other prefixes. Cleaning up abandoned
+  multipart uploads can stay bucket-wide.
+
+**Switching it on.** `ava backup walg check` proves the binary, the configuration, the
+key and the storage permissions (it writes and deletes one small object under the
+prefix). Then:
+
+```bash
+ava config set AVA_WALG_CONFIG_FILE=<path of the JSON>
+ava stop && ava start          # archive_mode is read only when Postgres is launched
+ava backup walg status         # archive_mode=on, failing_now=False, health: ok
+```
+
+Converge installs the pinned binary (`$AVA_HOME/runtime/walg/wal-g`; Linux x86_64 only,
+anything else fails here), validates the configuration and records the key fingerprint
+in `$AVA_HOME/backups/walg/key-id` before Postgres starts, so a bad configuration fails
+`ava start` instead of producing a Postgres whose archive command can never succeed. A
+plain update retains the running Postgres and does not activate or deactivate
+archiving: `ava start` prints a warning when the running Postgres differs, and the
+health probe reports it. After a start, `SELECT pg_switch_wal();` and an increase of
+`archived_count` in `pg_stat_archiver` show a segment arriving in the bucket.
+
+**Switching it off.** `ava config unset AVA_WALG_CONFIG_FILE`, then `ava stop && ava
+start`. Nothing is left in the data directory (the archive settings are launch
+arguments). The objects stay in the bucket; deleting them is a manual storage action.
+There is no way to stop archiving without a restart: when archiving misbehaves, repair
+its cause (credentials, network, disk).
+
+**What the health probe reports** (alert-only, graded like disk usage; the texts carry
+no number so one outage is one episode): the running Postgres does not carry the
+configured archive settings (restart pending); the archiver is failing; complete WAL has
+waited in `archive_status/` for longer than the 300 s RPO objective (this is also how a
+hung archive command shows, since it neither succeeds nor fails); the key file is not the
+pinned key (restore the pinned key or start a new prefix; never replace the key under an
+existing prefix). The probe reads the queue over the admin socket because the application
+login may not list `archive_status/`.
+
+**Before a planned stop**, look at `ava backup walg status`: Postgres' shutdown waits for
+the archiver to finish its queue, so a backlog (or a hung `wal-g`) delays `ava stop` and
+may end in "native shutdown did not complete; custody retained" while Postgres finishes
+on its own; run `ava stop` again.
 
 ### Agent recovery after a provider billing stoppage
 
