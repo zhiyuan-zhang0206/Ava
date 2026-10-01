@@ -64,6 +64,13 @@ def test_changed_scope_rejects_a_path_that_does_not_exist(tmp_path: Path) -> Non
         lint_common.changed_scope(["typo.py"], tmp_path)
 
 
+def test_changed_scope_accepts_a_tracked_symlink_whose_target_is_gone(tmp_path: Path) -> None:
+    """pre-commit hands a hook every tracked path that still exists as an entry, a dangling
+    symlink included; `--all-files` must not die on one."""
+    (tmp_path / "dangling.py").symlink_to(tmp_path / "missing.py")
+    assert lint_common.changed_scope(["dangling.py"], tmp_path) == {"dangling.py"}
+
+
 def test_restrict_keeps_only_the_changed_files(tmp_path: Path) -> None:
     paths = [tmp_path / "a.py", tmp_path / "b.py"]
     assert lint_common.restrict(paths, None, tmp_path) == paths
