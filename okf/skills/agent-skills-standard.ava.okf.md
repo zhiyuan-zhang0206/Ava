@@ -51,4 +51,4 @@ Every install runs **two gates over all discovered packages** (`cli/commands/ext
 
 ## Notes
 - The standard is a *format* contract, not a runtime one: it says nothing about how an agent is given the skill. Ava's progressive disclosure (description in the system prompt, body pulled on demand via `ava.help`) is its own choice, and is what makes a large installed set affordable.
-- Tests asserting the claim end-to-end (install → registry → namespace mount) live in `tests/cli/test_skill_install.py`; format tolerance in `base/packages/docs/tests/test_frontmatter.py` and `tests/ava/test_skills.py`.
+- Tests asserting the claim end-to-end (install → registry → namespace mount) live in `cli/tests/test_skill_install.py`; format tolerance in `base/packages/docs/tests/test_frontmatter.py` and `ava/tests/test_skills.py`.

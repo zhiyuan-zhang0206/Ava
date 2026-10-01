@@ -7,7 +7,7 @@ module `__dict__`s only: probing `getattr(mod, name)` invokes module-level
 the probe — `ava.mcps.__getattr__` formats its "no such server" message by
 calling the metered `servers()`, so the old probe emitted a burst of
 `sdk_call` telemetry rows on every test setup. Those rows landed in the
-per-test event mirror and made `tests/gateway/test_log_sink.py` fail when run
+per-test event mirror and made `base/agents/tests/test_log_sink.py` fail when run
 standalone (task #3950). A dynamically-served name is not a frozen alias
 anyway: the real object was never bound into that module's dict, which is
 exactly the surface the rebind sets on.

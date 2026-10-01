@@ -5,6 +5,10 @@
     "gateway/lgtm/_loki_event_rows.py::count_events": 15,
     "gateway/lgtm/_loki_logql.py::_agg_pipeline": 18,
     "gateway/lgtm/_loki_logql.py::_build_logql": 21,
-    "gateway/lgtm/prom_metrics.py::query_range": 16
+    "gateway/lgtm/prom_metrics.py::query_range": 16,
+    "gateway/lgtm/tests/test_loki_events.py::TestGlobalQueryBudget.test_observes_every_transition_and_types_local_rejections": 18
+  },
+  "files": {
+    "gateway/lgtm/tests/test_loki_events.py": 2716
   }
 }

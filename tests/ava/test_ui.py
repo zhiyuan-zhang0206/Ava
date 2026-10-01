@@ -7,7 +7,7 @@ serve_dir) and waits for the page_server daemon's server to answer on the
 port — in tests, a stub HTTP server stands in for the daemon's spawn.
 
 (`ava.ui.notify` is registered by the ava_fleet plugin; tests are in
-tests/agent/test_ava_fleet_plugin.py.)
+ava_builtins/plugins/ava_fleet/tests/test_ava_fleet_plugin.py.)
 """
 
 from __future__ import annotations

@@ -286,7 +286,7 @@ def test_ensure_worker_spawns_only_after_matching_pages_are_exhausted(
 def test_cli_takes_flags_only() -> None:
     """The runner hands this script a clean argv (``python <script>``), so its
     CLI carries no positional runner id — only the manual-run flags. The
-    runner-side contract is pinned by tests/gateway/test_schedule_runner.py
+    runner-side contract is pinned by gateway/tests/test_schedule_runner.py
     (``test_run_hands_py_script_a_clean_argv``)."""
     module = _load_schedule_module()
     parser = module.build_parser()

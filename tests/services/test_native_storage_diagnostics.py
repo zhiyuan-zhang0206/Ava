@@ -14,10 +14,10 @@ from base import cluster
 from base.config import settings
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane._pooler_stop import OwnedPooler
+from cli.commands.data_plane.tests.test_pooler_stop import native_pooler as native_pooler
 from services.ava_root.health import ProbeRunner
 from services.ava_root_glue import diagnostic_probes as probes
 from tests._containers import _free_port, redis_server
-from tests.cli.test_pooler_stop import native_pooler as native_pooler
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="native POSIX data plane")
 

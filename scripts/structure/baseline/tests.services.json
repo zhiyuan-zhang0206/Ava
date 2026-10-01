@@ -1,44 +1,19 @@
 {
   "complexity": {
-    "tests/services/test_agent_host_recrash_reap.py::test_settle_boundary_prompt_reaps_the_second_crash_at_once": 15,
     "tests/services/test_ava_root_daemon.py::test_daemon_end_to_end": 15,
-    "tests/services/test_ava_root_selfcheck.py::test_missing_process_opens_one_event_per_episode": 15,
     "tests/services/test_backup.py::test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv": 17,
-    "tests/services/test_delivery_watchdog.py::TestDispatchBackoffAndPoison.test_dispatch_cap_poisons_once_and_emits_event": 15,
-    "tests/services/test_embeddings.py::_embedding_server.<locals>.Handler.do_POST": 19,
-    "tests/services/test_host_pool_capacity.py::test_six_host_pools_settle_one_thousand_short_requests_through_pgbouncer": 15,
     "tests/services/test_hosted_db_wait_liveness.py::test_real_db_wait_survives_both_stale_paths_and_clears_afterward": 16,
-    "tests/services/test_im_bridge_core.py::test_spawn_menu_layers_render_with_summary_button": 22,
-    "tests/services/test_memory_indexer.py::test_reconcile_retry_drain_loop_converges_after_embed_failures": 15,
-    "tests/services/test_memory_indexer.py::test_reconcile_retry_schedule_backoff_and_reset": 21,
-    "tests/services/test_permissions_helper.py::_fake_tools.<locals>.run": 22,
     "tests/services/test_pitr_cos_store.py::test_cos_ack_normalizes_into_candidate_and_protected_manifests": 19,
-    "tests/services/test_pitr_oss_roles.py::test_put_base_if_absent_streams_multipart_and_writes_sidecar": 15,
-    "tests/services/test_tracing.py::test_turn_span_exports_root_at_start_not_at_end": 17
+    "tests/services/test_pitr_oss_roles.py::test_put_base_if_absent_streams_multipart_and_writes_sidecar": 15
   },
   "directories": {
-    "tests/services": 163
+    "tests/services": 65
   },
   "files": {
-    "tests/services/agent_ops/test_daemon.py": 1490,
     "tests/services/test_agent_host.py": 1770,
     "tests/services/test_backup.py": 1223,
-    "tests/services/test_browser_mcp_daemon.py": 1511,
-    "tests/services/test_computer_mcp_daemon.py": 1201,
-    "tests/services/test_delivery_watchdog.py": 2264,
-    "tests/services/test_embeddings.py": 922,
-    "tests/services/test_hierarchy_worker.py": 897,
-    "tests/services/test_im_bridge_core.py": 1423,
-    "tests/services/test_memory_indexer.py": 1515,
-    "tests/services/test_page_server_daemon.py": 855,
-    "tests/services/test_permissions_helper.py": 2033,
     "tests/services/test_pitr_base_scheduler.py": 832,
-    "tests/services/test_pitr_uploader.py": 872,
-    "tests/services/test_tracing.py": 1724,
-    "tests/services/test_turn_dispatcher.py": 1428
-  },
-  "nesting": {
-    "tests/services/test_host_pool_capacity.py::test_more_than_twenty_workload_leases_share_bounded_backends": 6
+    "tests/services/test_pitr_uploader.py": 872
   },
   "patch_targets": {
     "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._executable_pids": 2,
@@ -60,13 +35,9 @@
     "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._is_running": 1,
     "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._remove_pidfile": 1,
     "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._write_pidfile": 1,
-    "tests/services/test_embeddings.py::base.telemetry.tracing._state": 1,
-    "tests/services/test_events_maintenance_daemon.py::base.daemon.health.LivenessGroup.register._last_success_at": 1,
     "tests/services/test_healthcheck_browser_reach.py::services.healthchecks.browser_reach._canary_async": 1,
-    "tests/services/test_healthcheck_gateway.py::base.daemon.health._probe_home": 2,
     "tests/services/test_hosted_backlog_recovery.py::agent.turn.progress._PROGRESS": 1,
     "tests/services/test_maintenance_readiness.py::gateway.app._cluster_is_paused": 1,
-    "tests/services/test_memory_indexer.py::services.memory_indexer.embeddings.gemini._EMBED_POLICY": 1,
     "tests/services/test_pitr_base_candidate.py::services.pitr.base_backup.candidate._load_facts": 3,
     "tests/services/test_pitr_base_candidate.py::services.pitr.base_backup.candidate._verify_candidate": 2,
     "tests/services/test_pitr_base_scheduler.py::services.pitr.retention.scheduler._logical_retention": 1,

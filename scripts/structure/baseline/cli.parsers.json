@@ -1,0 +1,5 @@
+{
+  "patch_targets": {
+    "cli/parsers/tests/test_logs_retention.py::cli.commands.observability.logs._active_log_paths": 2
+  }
+}

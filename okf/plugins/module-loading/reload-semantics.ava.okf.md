@@ -18,7 +18,7 @@ Replacing the entry instead leaves whoever imported the plugin earlier — a
 module-level `from ...plugin import hook` — holding the old object, while
 `mock.patch` and every dotted-path `getattr` resolve the new one; a patch then
 lands on a module nothing under test is running. Issue #147: two
-`tests/agent/test_syntax_fix.py` cases passed alone and failed whenever a
+`ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix.py` cases passed alone and failed whenever a
 plugin-loading sibling ran first in the same xdist worker.
 
 Reuse is keyed on the **file**, not merely the dotted name: a different

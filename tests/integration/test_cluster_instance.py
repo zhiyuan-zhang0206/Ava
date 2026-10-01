@@ -7,7 +7,7 @@ SCRAM for every other role), start a per-cluster Redis with requirepass = an
 independent Redis-admin password, provision the NOLOGIN owner + db + schema
 (the `ava_tinst` identifier here, passed as data — names-as-data), and check
 the runtime Redis identity. Write generations and the pooler are covered by
-tests/lifecycle/db_authority/test_single_box.py; the rest of the suite mocks
+cli/commands/tests/test_single_box.py; the rest of the suite mocks
 the bring-up out.
 """
 

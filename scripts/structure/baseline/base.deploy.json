@@ -11,5 +11,9 @@
     "base/deploy/maintenance/state.py::MaintenanceHold.decode": 15,
     "base/deploy/release/editable_install.py::editable_import_gate": 15,
     "base/deploy/schema/migrations.py::apply_pending_migrations": 15
+  },
+  "patch_targets": {
+    "base/deploy/tests/test_migration_reset.py::base.deploy.schema.migrations._squash_history": 2,
+    "base/deploy/tests/test_migrations.py::base.deploy.schema.migrations._schema_mutation_lock": 1
   }
 }

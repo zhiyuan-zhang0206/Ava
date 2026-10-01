@@ -26,7 +26,7 @@ not live, even while the process table still contains its PID.
 a dead process; CI reports `assert not True` and a rerun is green.
 
 **Evidence.** PR #306 changed three such assertions in
-`tests/agent/test_exec_subprocess.py`, including
+`agent/tests/test_exec_subprocess.py`, including
 `test_natural_exit_reaps_ordinary_descendant_holding_stdout`.
 `ExecProcessDomain.close()` promises `SIGKILL` delivery, not immediate
 process-table removal. A descendant can remain a zombie until an OS reaper

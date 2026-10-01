@@ -3,7 +3,7 @@
 Covers what ``register_inspect_widget`` enforces at import time: PluginContext
 attribution, per-plugin id uniqueness, and the closed kind vocabulary plus the
 widget shape. The per-agent resolution side lives in
-`tests/gateway/test_agent_inspect_widgets.py`.
+`ava_builtins/plugins/tests/test_agent_inspect_widgets.py`.
 """
 
 from typing import Any

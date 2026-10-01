@@ -4,5 +4,11 @@
     "gateway/agents/router.py::_validate_fork_config": 21,
     "gateway/agents/timeline.py::_initial_window": 18,
     "gateway/agents/timeline.py::get_timeline": 22
+  },
+  "files": {
+    "gateway/agents/tests/test_timeline.py": 2771
+  },
+  "patch_targets": {
+    "gateway/agents/tests/test_timeline.py::base.agents.history.timeline._ai_message_items": 1
   }
 }

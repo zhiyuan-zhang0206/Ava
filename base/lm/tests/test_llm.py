@@ -1,7 +1,7 @@
 """base/lm/factory.py — per-model deepseek max_tokens dispatch + model context windows.
 
 The prefix-dispatch / provider-class / override-resolution contract is covered
-in tests/agent/test_llm_factory.py. This file covers the per-model pieces that
+in base/lm/tests/test_llm_factory.py. This file covers the per-model pieces that
 the deepseek tier split introduced: each registered deepseek model gets its own
 max output cap (an unregistered one fails fast), and MODEL_CONTEXT_WINDOW
 reports the right input ceiling for the frontend usage gauge.

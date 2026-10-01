@@ -11,7 +11,7 @@ from base.config.display import DisplaySettings
 from base.config.tests.test_display_config import DISPLAY_RANGES
 from base.host.env import runtime_config
 from gateway.app import app
-from tests.gateway.test_notices_endpoint import _seed_agent
+from gateway.tests.test_notices_endpoint import _seed_agent
 
 
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)

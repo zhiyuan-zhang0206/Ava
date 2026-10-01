@@ -1,0 +1,12 @@
+{
+  "patch_targets": {
+    "cli/tests/test_cluster_health_window.py::cli.commands.cluster.health._agent_population": 1,
+    "cli/tests/test_cluster_health_window.py::cli.commands.cluster.health._agent_population_failure_class": 1,
+    "cli/tests/test_cluster_health_window.py::cli.commands.cluster.health._data_plane_abnormal": 1,
+    "cli/tests/test_cluster_health_window.py::cli.commands.cluster.health._disk_usage_failure": 2,
+    "cli/tests/test_cluster_health_window.py::cli.commands.cluster.health._gateway_liveness_with_retry": 2,
+    "cli/tests/test_cluster_health_window.py::cli.commands.cluster.health._service_probes": 1,
+    "cli/tests/test_commands_register.py::cli.commands._probe": 2,
+    "cli/tests/test_mcp_install.py::cli.commands.extensions.mcp._uv_sync": 1
+  }
+}

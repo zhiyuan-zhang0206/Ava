@@ -4,7 +4,7 @@ Hermetic — no Postgres. The point is the *shape* of the write path, which is
 what went missing before: `314708af` added batching to the loguru Postgres
 sink, `e92f6e82` removed it three hours later while replaying a stale branch,
 and the whole suite stayed green for three weeks because
-`tests/gateway/test_log_sink.py` registered `_postgres_sink` directly with
+`base/agents/tests/test_log_sink.py` registered `_postgres_sink` directly with
 `enqueue=False` and never touched `_ThreadedPostgresSink` at all.
 
 The batching now lives in the unified emitter (`base.telemetry`), which the

@@ -1,6 +1,6 @@
 """Tests for `RedisInboundListener` — Redis pub/sub inbound wake listener.
 
-Mirrors the wait/wake pattern of `tests/agent/test_db.py`'s `wait_for_inbound`
+Mirrors the wait/wake pattern of `agent/db/tests/test_db.py`'s `wait_for_inbound`
 tests, over Redis pub/sub.
 
 Channel isolation + ACL awareness: the inbound channel is cluster-scoped
