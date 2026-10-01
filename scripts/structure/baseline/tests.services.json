@@ -11,7 +11,7 @@
   },
   "files": {
     "tests/services/test_agent_host.py": 1770,
-    "tests/services/test_backup.py": 1223,
+    "tests/services/test_backup.py": 902,
     "tests/services/test_pitr_base_scheduler.py": 832,
     "tests/services/test_pitr_uploader.py": 872
   },

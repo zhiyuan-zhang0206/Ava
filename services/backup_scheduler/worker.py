@@ -31,7 +31,7 @@ from services.backup_scheduler.operation.worker_process import (
     run_operation,
     worker_request,
 )
-from services.pitr.stores.logical_dump_names import DUMP_NAME_RE
+from services.gateway_side.backup.names import DUMP_NAME_RE
 
 Job = Literal["dump", "restore"]
 

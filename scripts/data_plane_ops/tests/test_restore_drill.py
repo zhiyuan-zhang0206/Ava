@@ -18,7 +18,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.config import settings
 from base.paths import ava_home
-from services.gateway_side.backup import passphrase
+from services.gateway_side.backup import offsite, passphrase
 
 _SCRIPT = Path(__file__).parents[3] / "scripts" / "data_plane_ops" / "restore_drill.py"
 _SPEC = importlib.util.spec_from_file_location("restore_drill", _SCRIPT)
@@ -117,7 +117,7 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     def _no_publish(_artifact: object) -> None:
         return None
 
-    monkeypatch.setattr(restore_drill.backup, "_publish_offsite", _no_publish)
+    monkeypatch.setattr(offsite, "publish", _no_publish)
     # The session database is not a born home: dump it through an explicit dial,
     # under the passphrase a gateway birth pins.
     passphrase.ensure_minted(ava_home())
