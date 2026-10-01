@@ -153,6 +153,11 @@ def test_an_object_of_a_backup_the_newest_one_is_an_increment_of_aborts() -> Non
         assert_invariants([f"basebackups_005/{FULL_2}/metadata.json"], [*listed, newest_increment])
 
 
+def test_an_empty_backup_list_aborts_instead_of_protecting_nothing() -> None:
+    with pytest.raises(RetentionAbortedError, match="nothing to protect"):
+        assert_invariants(PLANNED, [])
+
+
 def test_an_incomplete_chain_for_the_newest_backup_aborts() -> None:
     listed = [b for b in _backups(extra_full=False) if b.name != FULL_1]
     listed.append(
