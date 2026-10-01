@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "CI test gate and executed-test counts"
-description: "How the backend jobs' Trunk quarantine gate fails closed (empty secret, missing or empty JUnit report), and the per-shard and total executed-test counts CI prints."
+description: "How the backend jobs' Trunk quarantine gate fails closed (empty secret, missing or empty JUnit report), the per-shard and total executed-test counts CI prints, and where the root leak guard's findings are read."
 tags:
   - ci
   - testing
@@ -46,6 +46,17 @@ shards and the flaky bucket up and prints the difference against the previous
 main run's total, which each push to main records as the `test-count-baseline`
 artifact, so a moved test that fell out of the suite shows as a changed count.
 It is not required and cannot fail the run.
+
+### Leak-guard findings
+
+The root leak guard ([[../tests/docs/test-leak-guard.ava.okf.md]]) writes each finding as a JUnit property of the test that leaked. The same shard step carries them into `shard-counts-N.json` (`leaks`, `notes`, `faults`; absent when there are none), and the counts job reports the whole run from that one job, so a leak is read without pulling any shard log: the job summary, one `leak guard (warn)` annotation of at most 40 lines (one line per file, kind and thing leaked, the agent-identity slots last), and the `test-leak-report` artifact with the full list.
+
+```bash
+gh api repos/OWNER/REPO/check-runs/JOB_ID/annotations --jq '.[]|select(.title|startswith("leak guard"))|.message'
+gh run download RUN_ID --repo OWNER/REPO --name test-leak-report
+```
+
+The check-run API does not expose the Actions job summary, which is why the digest is an annotation. Nothing here can fail a run: a fault of the guard is a `GUARD FAULT` line (and a property), a fault of the report one `leak guard (report fault)` annotation, and the step and the job are `continue-on-error`.
 
 ## Key dependencies
 

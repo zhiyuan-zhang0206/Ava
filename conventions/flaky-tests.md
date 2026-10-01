@@ -10,6 +10,7 @@ class that has occurred here and the rule that prevents it.
 | Treat one red attempt as a regression | not lintable (operational) | Existing: attempt-history triage and rerun cap |
 | Read or mutate ambient host state | lintable now | Existing: fixture-scope and environment-write lints |
 | Depend on ordering | lintable with new rule | New: fixed-port heuristic; isolation guards |
+| Leave process-global state behind | not lintable (operational) | New: root leak guard names the leaker |
 | Quarantine timing races by default | not lintable (operational) | Existing: serial-group admission and exit policy |
 | Assume runner-load readiness | lintable with new rule | New: fake-timer-loop heuristic; bounded waits |
 | Pin wall-clock values or counts | lintable now | Existing: clock-lattice lint and topology tests |
@@ -277,6 +278,36 @@ unchanged.
 the runner image and browser stack. The workflow makes the environment a
 structural boundary; unit tests guard failure classification, complete
 candidate generation, and the PNG-only mutation rule.
+
+## 9. Leave process-global state as you found it
+
+**Rule.** A test returns the process to the state it started in: environment,
+module attributes, cwd, signal handlers and the agent identity. Undo a change
+through the tool that records it (`monkeypatch`, `patch.dict`, a `finally`).
+
+**Signature.** A test fails only in some shard compositions and always in the
+worker of an earlier test; it reads a key, attribute or identity it never set;
+moving test files makes the failure appear or vanish.
+
+**Evidence.** `monkeypatch.setattr(ava.self, "AGENT_ID", ...)` on a name the
+module `__getattr__` serves stored the dynamic value for good, and `tests/ava`
+tests failed in the shards where they ran after it (PR #3791).
+`monkeypatch.delenv(key, raising=False)` on an absent key records nothing, so
+five environment keys the code under test set outlived three test files (PR
+#3793). Both surfaced only when a batch of moved tests changed the order.
+
+**Correct form.** `setenv(name, "")` before `delenv`; `setitem(vars(module),
+name, value)` or `mock.patch.object` for a name served by `__getattr__`;
+`monkeypatch.chdir`; restore a handler in a `finally`; set the agent identity
+through `monkeypatch.setattr`. The root
+[leak guard](../tests/docs/test-leak-guard.ava.okf.md) compares these after
+every test and names the leaker in the CI annotation of the counts job; its
+fail mode, once enabled, restores after each leaker and fails it at its own
+teardown.
+
+**Lintability — not lintable (operational).** Whether a test restores what it
+changed is a runtime property; a static lint only sees an assignment that
+bypasses `monkeypatch`.
 
 ## Appendix: CI/QA ruling adopted 2026-09-01 21:01
 
