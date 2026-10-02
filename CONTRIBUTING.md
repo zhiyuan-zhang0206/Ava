@@ -42,28 +42,6 @@ Standard fork-and-PR — use whatever local git setup you like:
    (linear history, every commit kept — no merge commits, no squash), so
    make each commit stand on its own.
 
-### Merge gate: `qa-approved` label
-
-Every merge through the Trunk queue requires the `qa-approved` label in
-addition to green CI — a PR without it is never merged, even with green CI
-and an enqueued position. The label is applied by the maintainers' QA
-review only:
-
-- **When the label is applied:** QA sets `qa-approved` on a final **PASS** or
-  **PASS with nits** conclusion (nits are tracked on the PR and addressed by
-  the author). **BLOCK** or **CONDITIONAL** conclusions never carry the
-  label, and a later BLOCK removes it immediately.
-- **Who applies it:** QA / maintainers only — authors never self-apply the
-  label.
-- **Stale-PASS discipline:** any new commit after a PASS still requires a
-  delta re-review before the label is (re)applied.
-- **What it does:** the merge condition is green CI **plus**
-  `label=qa-approved`; automated PRs (e.g. Dependabot) are delayed until QA
-  labels them, never broken.
-
-External contributors need do nothing extra: after your PR passes review, a
-maintainer applies the label and the queue merges it.
-
 For a larger change, a description that shows the reviewer *where the critical
 path is* — the file-tree-diff style in
 [.agents/skills/write-a-pr-description/SKILL.md](.agents/skills/write-a-pr-description/SKILL.md) — gets reviewed

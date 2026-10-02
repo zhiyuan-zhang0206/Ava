@@ -47,25 +47,6 @@ def _meta(
     }
 
 
-def _receipt(
-    sha: str, verdict: str = "approved", at: str = "2026-09-12T02:30:00Z"
-) -> dict[str, Any]:
-    body = (
-        "```ava-qa\n"
-        + json.dumps(
-            {
-                "ava_qa_version": 1,
-                "pr_number": 1,
-                "head_sha": sha,
-                "verdict": verdict,
-                "asserted_ava_reviewer": "Ava #3242",
-            }
-        )
-        + "\n```"
-    )
-    return {"event": "commented", "created_at": at, "uid": 87293881, "body": body}
-
-
 # ── window + percentile math ────────────────────────────────────────────────
 
 
@@ -82,51 +63,7 @@ def test_percentile_linear_interpolation() -> None:
     assert pr_flow._percentile([7.0], 0.9) == 7.0
 
 
-# ── receipts + head deltas ──────────────────────────────────────────────────
-
-
-def test_parse_receipts_accepts_valid_skips_foreign_and_malformed() -> None:
-    valid = _receipt("a" * 40)
-    foreign = {**valid, "uid": 1}
-    malformed = {**valid, "body": "not a receipt"}
-    bad_json = {**valid, "body": "```ava-qa\n{oops\n```"}
-    non_hex = {**valid, "body": valid["body"].replace("a" * 40, "z" * 40)}
-    receipts = pr_flow.parse_receipts([valid, foreign, malformed, bad_json, non_hex])
-    assert receipts == [
-        {
-            "at": "2026-09-12T02:30:00Z",
-            "head_sha": "a" * 40,
-            "verdict": "approved",
-        }
-    ]
-
-
-def test_count_head_deltas_counts_receipts_followed_by_a_new_head() -> None:
-    sha1, sha2 = "a" * 40, "b" * 40
-    receipts = [
-        {"at": "2026-09-12T02:00:00Z", "head_sha": sha1, "verdict": "approved"},
-        {"at": "2026-09-12T04:00:00Z", "head_sha": sha2, "verdict": "approved"},
-    ]
-    events = [
-        {"event": "committed", "commit_date": "2026-09-12T03:00:00Z", "sha": sha2},
-    ]
-    # Receipt #1 is followed by a new sha before receipt #2 -> one delta;
-    # receipt #2 is followed by no commit before the merge -> none.
-    assert pr_flow.count_head_deltas(receipts, events, "2026-09-12T05:00:00Z") == 1
-
-
-def test_count_head_deltas_ignores_a_repushed_same_sha() -> None:
-    sha = "a" * 40
-    receipts = [{"at": "2026-09-12T02:00:00Z", "head_sha": sha, "verdict": "approved"}]
-    events = [{"event": "committed", "commit_date": "2026-09-12T02:30:00Z", "sha": sha}]
-    assert pr_flow.count_head_deltas(receipts, events, "2026-09-12T05:00:00Z") == 0
-
-
-def test_count_head_deltas_flags_a_post_receipt_change_before_merge() -> None:
-    sha1, sha2 = "a" * 40, "b" * 40
-    receipts = [{"at": "2026-09-12T02:00:00Z", "head_sha": sha1, "verdict": "approved"}]
-    events = [{"event": "committed", "commit_date": "2026-09-12T03:30:00Z", "sha": sha2}]
-    assert pr_flow.count_head_deltas(receipts, events, "2026-09-12T05:00:00Z") == 1
+# ── record building ─────────────────────────────────────────────────────────
 
 
 def test_build_record_prefers_ready_for_review_over_created_at() -> None:
@@ -140,22 +77,20 @@ def test_build_record_prefers_ready_for_review_over_created_at() -> None:
 # ── daily aggregation ───────────────────────────────────────────────────────
 
 
-def _record(number: int, *, merged: str, ready: str, receipts: int = 1, deltas: int = 0):
+def _record(number: int, *, merged: str, ready: str):
     return pr_flow.PrRecord(
         number=number,
         updated_at=merged,
         created_at=ready,
         merged_at=merged,
         ready_at=ready,
-        receipts=[{"at": ready, "head_sha": "a" * 40, "verdict": "approved"}] * receipts,
-        head_deltas=deltas,
     )
 
 
 def test_compute_days_groups_by_merge_day_and_omits_empty_samples() -> None:
     records = [
         _record(1, merged="2026-09-12T02:00:00Z", ready="2026-09-12T01:00:00Z"),  # 3600s
-        _record(2, merged="2026-09-12T03:00:00Z", ready="2026-09-12T01:00:00Z", deltas=1),  # 7200s
+        _record(2, merged="2026-09-12T03:00:00Z", ready="2026-09-12T01:00:00Z"),  # 7200s
         _record(3, merged="2026-09-13T03:00:00Z", ready="2026-09-13T02:30:00Z"),  # 1800s
     ]
     days = [date(2026, 9, 11), date(2026, 9, 12), date(2026, 9, 13)]
@@ -164,8 +99,8 @@ def test_compute_days_groups_by_merge_day_and_omits_empty_samples() -> None:
     assert d12["merged_count"] == 2
     assert d12["ready_to_merge_median_seconds"] == pytest.approx(5400.0)
     assert d12["ready_to_merge_p90_seconds"] == pytest.approx(6840.0)
-    assert d12["qa_rounds_mean"] == 1.0
-    assert d12["qa_rereview_share"] == 0.5
+    assert "qa_rounds_mean" not in d12
+    assert "qa_rereview_share" not in d12
     assert "flake_new_quarantines" not in d12  # unreachable flake source is not zero
     d11 = payload["2026-09-11"]
     assert d11 == {"merged_count": 0}
@@ -192,8 +127,6 @@ def test_collect_records_reuses_cache_only_when_updated_at_is_unchanged() -> Non
             "created_at": meta["created_at"],
             "merged_at": meta["merged_at"],
             "ready_at": meta["created_at"],
-            "receipts": [],
-            "head_deltas": 0,
             "partial": False,
         }
     }
@@ -228,8 +161,6 @@ def test_collect_records_falls_back_to_cache_then_partial_on_fetch_failure() -> 
             "created_at": meta["created_at"],
             "merged_at": meta["merged_at"],
             "ready_at": meta["created_at"],
-            "receipts": [],
-            "head_deltas": 0,
             "partial": False,
         }
     }
