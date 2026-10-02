@@ -226,7 +226,7 @@ Design decisions embedded above:
 
 - **Check ≠ fetch.** `ls-remote` answers "did the ref move" over the network without cloning; a full fetch happens only when it did. The core channel's fetch goes through the existing checkout's git, objects-only — the working tree, HEAD, and the source-tree guard are untouched. The package refresh executor (`cli/commands/_packages_refresh.py`) implements this objects-only fetch with a bounded timeout. A future wheel-mode deployment (no checkout) uses a data-dir bare mirror instead — same interface.
 - **Per-package granularity with a per-channel head.** The channel's head commit is a fleet-wide fact; which *packages* changed between `applied_rev` and the head is computed with `git diff --name-only <applied_rev> <head> -- <path>`, so a skill edit touches one package.
-- **Never auto-overwrite a human.** The local-edit guard is the existing R5 contract, reused verbatim; conflicts are recorded, not forced. `--force` remains a human-only flag.
+- **Core-channel copies are derived state.** The local-edit guard (R5 contract) blocks only non-core channels (git-sourced user packages): a conflict is recorded, not forced, and `--force` remains a human-only flag. A core-channel copy that no longer matches the last applied content is replaced anyway — the incoming tree is reviewed main content, the old tree stays at `.<name>.prev`, and a warning names the files that differed; a local fix belongs in a PR, and local-only subtrees belong behind a `.preserved` marker.
 - **Bounded and polite.** Per-run wall budget, apply cap, network timeouts, ±jitter on intervals, exponential backoff on repeated errors (recorded in `last_result`).
 - **Removal is out of scope.** The pass never deletes packages; a package whose source disappeared upstream is left as-is — removal belongs to the converge cleanup path.
 - **Never a rollout.** The pass takes the per-home refresh flock; it never restarts a service, never writes the checkout, never touches the DB schema. It may run while the cluster is fully live — that is the point.
@@ -334,7 +334,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Version gates wired into the refresh (§5.5) + the runtime skill filter (out-of-range skills excluded from the catalog with a status reason) + `ava packages rollback <name>`.
 - Acceptance (end-to-end on macmini, then a second machine):
   1. merge a skill-only PR to main → within the interval, the machine's load dir shows the new content, `applied_rev` = the merge commit, no service restarted (`ava status` shows nothing bounced), and an agent reads the new body via `ava.help`.
-  2. hand-edit a load-dir copy → the next refresh refuses with a conflict record, content preserved.
+  2. hand-edit a core-channel load-dir copy → the next refresh replaces it, keeps the edited tree at `.<name>.prev` and logs a warning naming the files; a git-channel copy refuses with a conflict record, content preserved.
   3. offline / fetch failure → old content stays, `last_result` records the error, backoff, cluster unaffected.
   4. a second refresh pass on the same home while one runs → skipped (recorded).
   5. `notify` package → a moved ref records "available" without applying.
