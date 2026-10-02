@@ -262,6 +262,17 @@ class ExecSubprocessKilled(TypedDict):
     grace: float
 
 
+class ExecMemoryGuardKilled(TypedDict):
+    """`exec_memory_guard_killed` payload — the host memory guard killed the largest
+    exec process domain at critical system memory pressure."""
+
+    agent_id: int | None
+    pid: int
+    footprint_bytes: int
+    running: int
+    pressure: str
+
+
 class Halt(TypedDict):
     """`halt` payload — compact/idle detection reads the body."""
 
