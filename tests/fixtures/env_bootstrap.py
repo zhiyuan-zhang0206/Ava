@@ -558,12 +558,20 @@ settings.general.machine_serve_gateway = None
 # never collide either.
 
 
-def _free_port() -> int:
-    """A free localhost port, released immediately. The small race before a server
-    binds it is the same one tests/_containers.py accepts for pg/redis."""
-    with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+def _distinct_free_ports(count: int) -> list[int]:
+    """`count` different free localhost ports: every socket stays bound until all
+    are chosen, so the kernel cannot hand the same number out twice. The small race
+    before a server binds one is the same that tests/_containers.py accepts for
+    pg/redis."""
+    with contextlib.ExitStack() as stack:
+        socks: list[socket.socket] = []
+        for _ in range(count):
+            sock = stack.enter_context(
+                contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+            )
+            sock.bind(("127.0.0.1", 0))
+            socks.append(sock)
+        return [int(sock.getsockname()[1]) for sock in socks]
 
 
 def _pin_setting(field: str, value: object) -> None:
@@ -576,43 +584,33 @@ def _pin_setting(field: str, value: object) -> None:
 # Every daemon that registers a health port — read off the same map health_port()
 # consults, so a newly registered daemon is isolated the moment it is added there
 # rather than silently inheriting its prod default.
-for _health_port_field in _HEALTH_PORT_OVERRIDES.values():
-    _pin_setting(_health_port_field, _free_port())
+#
+# One allocation hands out every port below, so no two of them (and none of the
+# session's table slots) can be the same number: separate `bind(0)` calls release
+# each port at once and the kernel may return it again.
+_HEALTH_PORT_FIELDS = tuple(_HEALTH_PORT_OVERRIDES.values())
+_ports = iter(_distinct_free_ports(len(_HEALTH_PORT_FIELDS) + 8 + len(FIXED_PORTS)))
+for _health_port_field in _HEALTH_PORT_FIELDS:
+    _pin_setting(_health_port_field, next(_ports))
 
-_pin_setting("gateway_health_url", f"http://127.0.0.1:{_free_port()}/api/health")
-_pin_setting("frontend_healthcheck_url", f"http://127.0.0.1:{_free_port()}")
-_pin_setting("milvus_port", _free_port())
+_pin_setting("gateway_health_url", f"http://127.0.0.1:{next(_ports)}/api/health")
+_pin_setting("frontend_healthcheck_url", f"http://127.0.0.1:{next(_ports)}")
+_pin_setting("milvus_port", next(_ports))
 # The rest of the settings that default to a table port. The permissions helper
 # port is pinned in the singleton only: its env key is popped above on purpose,
 # and a set key would read as a helper spawn context in every child.
-_pin_setting("gateway_port", _free_port())
-_pin_setting("browser_cdp_port", _free_port())
-_pin_setting("grafana_port", _free_port())
+_pin_setting("gateway_port", next(_ports))
+_pin_setting("browser_cdp_port", next(_ports))
+_pin_setting("grafana_port", next(_ports))
 _pin_setting("milvus_uri", f"http://127.0.0.1:{settings.services.milvus_port}")
-_pin_setting("memory_search_port", _free_port())
+_pin_setting("memory_search_port", next(_ports))
 _pin_setting("memory_search_uri", f"http://127.0.0.1:{settings.services.memory_search_port}")
-set_field("permissions_helper_port", _free_port())
-
-
-def _distinct_free_ports(count: int) -> list[int]:
-    """`count` different free localhost ports: every socket stays bound until all
-    are chosen, so the kernel cannot hand the same number out twice."""
-    with contextlib.ExitStack() as stack:
-        socks: list[socket.socket] = []
-        for _ in range(count):
-            sock = stack.enter_context(
-                contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
-            )
-            sock.bind(("127.0.0.1", 0))
-            socks.append(sock)
-        return [int(sock.getsockname()[1]) for sock in socks]
-
+set_field("permissions_helper_port", next(_ports))
 
 # The ports every test home born in this session records (`guards.py`): one
 # kernel-assigned port per slot of the fixed table.
-_SESSION_PORTS: dict[str, int] = dict(
-    zip(FIXED_PORTS, _distinct_free_ports(len(FIXED_PORTS)), strict=True)
-)
+_SESSION_PORTS: dict[str, int] = dict(zip(FIXED_PORTS, _ports, strict=True))
+
 
 # Belt-and-suspenders on the OS-jobs switch already in `os.environ` at the top of
 # this file: an operator's real `~/.ava/.env` is loaded by `base.host.env.dotenv_boot`
