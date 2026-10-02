@@ -57,12 +57,12 @@ class AlertsSettings(EnvSettings):
         default=None,
         alias="GRAFANA_ADMIN_PASSWORD",
         description=(
-            "Admin password for the co-located Grafana API. When set, the gateway "
-            "periodically reconciles stored Grafana alert instances against "
-            "Grafana's active Alertmanager view."
+            "Admin password for the co-located Grafana API. When set, the "
+            "events-maintenance service periodically reconciles stored Grafana "
+            "alert instances against Grafana's active Alertmanager view."
         ),
         json_schema_extra={
-            "restart_required": "gateway",
+            "restart_required": "all",
             "writable": False,
             "sensitive": True,
             "scope": "host",
