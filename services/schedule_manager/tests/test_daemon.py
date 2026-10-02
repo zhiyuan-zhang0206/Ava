@@ -164,7 +164,11 @@ async def test_a_quiesced_unit_polls_the_request_table_through_no_connection(
     """The request consumer reads the table every second even while holds are up
     (so a request stays queued); inside the stop window it must not borrow."""
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
-    monkeypatch.setattr(daemon.ScheduleManager, "reconcile", lambda _self: None)
+
+    def no_reconcile(_self: object) -> None:
+        return None
+
+    monkeypatch.setattr(daemon.ScheduleManager, "reconcile", no_reconcile)
     pool = MagicMock()
     pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchall.return_value = []
 

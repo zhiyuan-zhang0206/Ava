@@ -8,8 +8,16 @@ status: current
 # Quiesced window — loops hold off, pools release
 
 `admission.quiesced()` (phases `drained` through `ready`) is the stop window
-read by local background loops: the host daemon holds off ownership renewal and
-page reconciliation, and the ops daemon's delivery-outbox flush.
+read by every resident background loop that touches the database. The shared
+round runner (`base/daemon/round_loop.py:run_rounds`) skips a round while it
+holds, so the TTL reaper, the schedule manager and the delivery watchdog's
+recovery loops are gated by construction; the hand-written loops (host daemon
+renewal and page reconciliation, the ops delivery-outbox flush, the watchdog
+scan, heartbeat, events-maintenance, labeler, page-server, the IM bridge's
+notice poll, the memory indexer, the hierarchy tick, the gateway flushers)
+check it themselves, and `scripts/content_lint/lint_quiesced_loops.py` requires
+every resident periodic loop in `services/`, `gateway/` and `ops/` to gate or
+carry a reasoned `# quiesce-exempt:` marker.
 None of them may borrow the database across the window; an unreadable owner
 reads as quiesced, the same refuse-new-work posture the journal itself enforces
 by raising. The host's pending-turn scan reads the narrower
