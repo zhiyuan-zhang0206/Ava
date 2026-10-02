@@ -20,6 +20,7 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import daemon_acceptance
 from base.config import settings
 from base.db import Database
 
@@ -83,34 +84,10 @@ def _ops_bind_host(acceptance: frozenset[str] | None) -> str:
 
 
 def _ops_acceptance() -> frozenset[str] | None:
-    """SHA-256 digests of the bearers /ops accepts, or None for the open posture.
-
-    The gateway dials /ops with its gateway-class machine API token
-    (`ops.cluster_rpc`), and a runner-class process of the unit (the
-    agent-host's crash recovery) dials it with its runner token, so /ops
-    accepts exactly its write generation's two tokens. A remote unit takes the
-    gateway token digest its installed capability carries plus its own runner
-    token's (none when its cluster's API is open): it never holds the gateway
-    token or the human secret. The gateway home takes the active generation's
-    two tokens while the cluster secret is set (none while no generation is
-    active: fail closed). A remote-managed plane keeps no write generations and
-    accepts the human secret its gateway presents instead.
-    """
-    from base.cluster.authority.api import acceptance, token_digest
-    from base.cluster.authority.unit import load_unit_capability
-    from base.paths import ava_home
-
-    home = ava_home().resolve()
-    capability = load_unit_capability(home)
-    if capability is not None:
-        api = capability.api
-        return None if api is None else frozenset({api.gateway, token_digest(api.token)})
-    secret = settings.data_plane.cluster_secret
-    if not secret:
-        return None
-    if settings.data_plane.is_remote:
-        return frozenset({token_digest(secret)})
-    return frozenset(acceptance(home).values())
+    """SHA-256 digests of the bearers /ops accepts, or None for the open posture: the
+    daemon acceptance of `base.cluster.machine.daemon_acceptance` (the gateway dials /ops with its
+    gateway-class machine API token, a runner-class process of the unit with its runner token)."""
+    return daemon_acceptance()
 
 
 def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:

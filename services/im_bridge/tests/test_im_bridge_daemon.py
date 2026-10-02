@@ -61,15 +61,23 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
     beat task is actually created and running, not merely defined."""
     captured: list[Liveness] = []
 
+    send_auth: list[frozenset[str] | None] = []
+
     async def fake_start_health_server(
-        _name: str, _port: int, *, liveness: Liveness | None = None, **_kwargs: Any
+        _name: str,
+        _port: int,
+        *,
+        liveness: Liveness | None = None,
+        auth_digests: frozenset[str] | None = None,
+        **_kwargs: Any,
     ) -> _FakeServer:
         assert liveness is not None
         captured.append(liveness)
+        send_auth.append(auth_digests)
         return _FakeServer()
 
-    async def fake_login(_core: Any, _liveness: Liveness) -> None:
-        pass
+    # /send accepts the machine API tokens of the write generation, never the human secret.
+    monkeypatch.setattr(daemon, "daemon_acceptance", lambda: frozenset({"digest-of-a-token"}))
 
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
     monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
@@ -103,7 +111,6 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
         return []
 
     monkeypatch.setattr(daemon, "_load_adapters", fake_load_adapters)
-    monkeypatch.setattr(daemon, "_gateway_login_with_retry", fake_login)
     monkeypatch.setattr(daemon, "_LIVENESS_BEAT_INTERVAL_S", 0.02)
 
     async def scenario() -> None:
@@ -112,6 +119,7 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
             await asyncio.sleep(0.5)
             assert captured, "run() never started the health server"
             assert captured[0].is_alive()
+            assert send_auth == [frozenset({"digest-of-a-token"})]
             assert created_cores[0].outbox_replay_started  # Task #1032: drain on startup
             # The root builds the slice once and hands the same one to every consumer.
             assert created_cores[0].config == daemon.im_bridge_config()
@@ -201,10 +209,13 @@ def test_a_built_slice_carries_the_live_value_of_every_field(
         assert getattr(config, field.name) == expected
 
 
-def test_the_gateway_client_gets_the_gateway_url_and_secret_from_the_root() -> None:
+def test_the_gateway_client_gets_the_gateway_url_and_bearer_from_the_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(daemon, "gateway_auth_headers", lambda: {"Authorization": "Bearer t"})
     client = daemon.gateway_client(daemon.im_bridge_config())
     assert client._base == settings.gateway.gateway_url.rstrip("/")
-    assert client._cluster_secret == settings.data_plane.cluster_secret
+    assert client._headers() == {"Authorization": "Bearer t"}
 
 
 def test_httpx_info_logs_gated(caplog: pytest.LogCaptureFixture) -> None:
