@@ -127,6 +127,18 @@ def test_target_that_exists_nowhere_reports_a_plain_miss(tmp_path, monkeypatch, 
     assert "not an OKF node" not in out
 
 
+def test_labelled_wikilink_to_a_missing_target_reports_the_target(tmp_path, monkeypatch, capsys):
+    """`[[target|label]]` that resolves to nothing is a W008 naming the target half,
+    not the label."""
+    _node(tmp_path, "base/cluster/machine.ava.okf.md", "See [[no-such-node.ava.okf.md|the node]].")
+
+    code, out = _lint_tmp(tmp_path, monkeypatch, capsys)
+
+    assert code == 0, out
+    assert "W008: Wikilink target not found: [[no-such-node.ava.okf.md]]" in out
+    assert "the node" not in out
+
+
 def test_url_target_is_not_reported_as_a_doc(tmp_path, monkeypatch, capsys):
     """A URL is nothing on disk, so it gets the plain miss — never the axis message,
     which would send the reader hunting for a same-named file in an axis dir."""
