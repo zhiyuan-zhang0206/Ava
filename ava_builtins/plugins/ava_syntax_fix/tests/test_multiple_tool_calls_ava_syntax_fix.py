@@ -94,7 +94,7 @@ async def test_unfixable_syntax_does_not_skip_sibling(
 
     state = _state("return", 'print("sibling ran")')
 
-    def unchanged(code: str) -> tuple[str, list[str]]:
+    def unchanged(code: str, *, ruff_format: bool) -> tuple[str, list[str]]:
         return code, []
 
     monkeypatch.setattr(syntax, "_apply_fix_pipeline", unchanged)

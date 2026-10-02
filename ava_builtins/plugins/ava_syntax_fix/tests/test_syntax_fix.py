@@ -1653,7 +1653,7 @@ class TestSyntaxFixEvents:
         monkeypatch.setattr(_plugin, "_emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         # Force the pipeline to be a no-op (nothing to fix, nothing formatted)
         # so the event decision is what is under test — not ruff's formatting.
-        monkeypatch.setattr(_plugin, "_apply_fix_pipeline", lambda code: (code, []))  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_plugin, "_apply_fix_pipeline", lambda code, **_kw: (code, []))  # pyright: ignore[reportUnknownArgumentType]
         state = AgentState(
             messages=[
                 AIMessage(
