@@ -81,7 +81,6 @@ from base.events.registry_lifecycle import _EVENTS_LIFECYCLE
 from base.events.registry_ops import _EVENTS_OPS
 from base.events.system import AgentBootFailed as AgentBootFailed
 from base.events.system import AgentRegistry as AgentRegistry
-from base.events.system import ArchiveFetchDegraded as ArchiveFetchDegraded
 from base.events.system import AuditWriteFailed as AuditWriteFailed
 from base.events.system import Auth401Rejected as Auth401Rejected
 from base.events.system import BackupOperationCustody as BackupOperationCustody

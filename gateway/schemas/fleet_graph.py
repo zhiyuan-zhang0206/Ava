@@ -51,8 +51,8 @@ class FleetGraphEdge(BaseModel):
 class FleetGraphResponse(BaseModel):
     """GET /api/fleet/graph response.
 
-    `stale` identifies data-level degradation: a fallback snapshot, truncated
-    edge stream, or failed source response. `telemetry_stale` separately says
+    `stale` identifies data-level degradation: a fallback snapshot or a failed
+    source response. `telemetry_stale` separately says
     the heartbeat guard was old or missing while this otherwise fresh graph was
     read. `snapshot_at` records when a successful graph snapshot was produced;
     a fallback retains that timestamp so clients can show its age.
@@ -63,6 +63,5 @@ class FleetGraphResponse(BaseModel):
     nodes: list[FleetGraphNode]
     edges: list[FleetGraphEdge]
     stale: bool = False
-    truncated: bool = False
     telemetry_stale: bool = False
     snapshot_at: datetime | None = None

@@ -12,7 +12,6 @@ from base.events.registry import _telemetry as _telemetry
 from base.events.registry import _telemetry_audit as _telemetry_audit
 from base.events.system import (
     AgentRegistry,
-    ArchiveFetchDegraded,
     AuditWriteFailed,
     Auth401Rejected,
     BackupOperationCustody,
@@ -470,12 +469,6 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         tier="anomaly",
         payload=LokiQueryFailed,
         doc="a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape",
-    ),
-    "archive_fetch_degraded": _telemetry(
-        "archive_fetch_degraded",
-        "frozen Loki archive read degraded (lock-wait skip or failed scan)",
-        payload=ArchiveFetchDegraded,
-        tier="anomaly",
     ),
     "fleet_graph_stale": _telemetry(
         "fleet_graph_stale",

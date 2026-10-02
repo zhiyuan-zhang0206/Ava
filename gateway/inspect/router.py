@@ -8,10 +8,10 @@ import time as time_mod
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from opentelemetry import metrics
 from psycopg import Error as DatabaseError
+from psycopg.errors import QueryCanceled
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.agents import AgentNotFound
@@ -28,8 +28,6 @@ from gateway.inspect.schemas import (
     NeighborsResponse,
     PluginMetricResult,
 )
-from gateway.lgtm import loki_query_budget
-from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.schemas.stats import StatsWindowHours
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import ShellInfo
@@ -300,20 +298,14 @@ def get_agent_neighbors(
     if limit is None:
         limit = settings.display.neighbors_default_limit
     try:
-        ranked, ancestors_ranked, archive_degraded = neighbors.compute(
+        ranked, ancestors_ranked = neighbors.compute(
             root=agent_id,
             max_depth=depth,
             limit=limit,
             db_pool=request.app.state.db_pool,
         )
-    except loki_query_budget.LokiQueryBudgetError:
-        # Local admission saturation has its own typed 503 contract;
-        # the global handler preserves its reason.
-        raise
-    except httpx.HTTPError as exc:
-        # The 8s-bounded live read fails fast on a stall; the wire answer is
-        # the same retriable 503 the other Loki-reading routes return.
-        raise_backend_unavailable(exc)
+    except QueryCanceled as exc:
+        raise HTTPException(status_code=503, detail="neighbor tie read timed out") from exc
     ids = list({r[0] for r in ranked} | {r[0] for r in ancestors_ranked})
     label_status: dict[int, tuple[str | None, str]] = {}
     if ids:
@@ -348,9 +340,7 @@ def get_agent_neighbors(
         )
         for agent, depth_found, score in ancestors_ranked
     ]
-    return NeighborsResponse(
-        neighbors=neighbors_rows, ancestors=ancestors_rows, degraded=archive_degraded
-    )
+    return NeighborsResponse(neighbors=neighbors_rows, ancestors=ancestors_rows)
 
 
 @router.get("/api/agents/{agent_id}/inspect/metrics")
