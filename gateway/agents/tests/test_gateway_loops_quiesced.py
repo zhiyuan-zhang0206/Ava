@@ -1,5 +1,5 @@
-"""The stop window: the gateway's database-backed flush loops skip their passes while the
-unit is quiesced, so neither borrows a connection from a pool the stop is about to close."""
+"""The stop window: the gateway's database-backed flush loop skips its passes while the
+unit is quiesced, so it borrows no connection from a pool the stop is about to close."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.deploy.maintenance import admission
-from gateway.agents import completion_notice_flusher, max_id_gauge
+from gateway.agents import completion_notice_flusher
 
 _Loop = Callable[[ConnectionPool], Coroutine[Any, Any, None]]
 
@@ -21,14 +21,13 @@ _Loop = Callable[[ConnectionPool], Coroutine[Any, Any, None]]
 @pytest.mark.parametrize(
     ("module", "loop", "interval"),
     [
-        (max_id_gauge, max_id_gauge.max_agent_id_flusher, "FLUSH_INTERVAL_S"),
         (
             completion_notice_flusher,
             completion_notice_flusher.completion_notice_flusher,
             "FLUSH_INTERVAL_S",
         ),
     ],
-    ids=["max-id-gauge", "completion-digest"],
+    ids=["completion-digest"],
 )
 async def test_a_quiesced_unit_borrows_no_connection(
     monkeypatch: pytest.MonkeyPatch,

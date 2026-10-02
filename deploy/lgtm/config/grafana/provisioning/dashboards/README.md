@@ -48,7 +48,7 @@ restored by task #3689). All sections are **expanded by default**
    halt classes, SDK Top 20, frontend interactions ×3, settings changes.
 4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
    delivery-stalled total, SSE backlog, and the Max Agent ID growth curve
-   (the gateway's 60s `agent_registry` gauge + its deriv rate, task #2010).
+   (the events-maintenance service's 60s `agent_registry` gauge + its deriv rate, task #2010).
 5. **`ava_fleet`** — the task-completion-rate panel.
 6. **`ava_memory`** — recall-filter runs / empty ratio / error ratio /
    failures plus the passive-recall search and filter latencies.
