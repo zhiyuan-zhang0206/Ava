@@ -161,7 +161,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "cli/commands/converge/tests",
             "cli/commands/data_plane/tests/test_cluster_instance_bind.py",
             "cli/commands/data_plane/tests/test_pg_socket_dir.py",
-            "cli/commands/data_plane/tests/test_pgbouncer.py",
+            "base/cluster/dataplane/tests/test_pgbouncer.py",
             "cli/commands/data_plane/tests/test_pgbouncer_reachable_bind_wait.py",
             "cli/commands/data_plane/tests/test_pgbouncer_stop_isolation.py",
             "cli/commands/data_plane/tests/test_pooler_stop.py",
