@@ -12,8 +12,8 @@ import ops.roster as _roster
 import ops.roster.service_spec as _service_spec
 from cli.commands._repo import _register_machine_or_die
 from cli.commands._setup import SetupValues
-from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
-from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
+from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
+from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 
 # ─── probe gateway via HTTP, not relying on pidfile ───────────────────────────────────
 
