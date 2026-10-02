@@ -51,7 +51,9 @@ and the action (`x,y,action`).
 
 ## Chromium-based apps and the visual gap
 Electron, CEF and the Chrome family build their accessibility tree only when an
-assistive tool is attached. For a bundle that ships one of those frameworks the
+assistive tool is attached. For a bundle that ships one of those frameworks (or any framework with Chromium's
+`Helpers/... Helper (Renderer).app` layout, which catches renamed forks such as
+Lark) the
 helper's first unscoped walk per process sets `AXManualAccessibility` on the app
 (never `AXEnhancedUserInterface`, which VoiceOver owns and which changes native
 window behavior), then waits, bounded, for the window to list children. The

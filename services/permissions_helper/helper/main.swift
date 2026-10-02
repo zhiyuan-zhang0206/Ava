@@ -810,6 +810,16 @@ private func axFrameworkHint(_ app: NSRunningApplication) -> String {
         let path = bundle.appendingPathComponent("Contents/Frameworks/" + entry.marker).path
         if FileManager.default.fileExists(atPath: path) { return entry.name }
     }
+    // Chromium forks under their own name (Lark's "Lark Framework.framework")
+    // keep Chromium's multi-process layout: a framework whose Helpers directory
+    // holds a "... Helper (Renderer).app".
+    let frameworks = bundle.appendingPathComponent("Contents/Frameworks")
+    for entry in (try? FileManager.default.contentsOfDirectory(atPath: frameworks.path)) ?? []
+    where entry.hasSuffix(".framework") {
+        let helpers = frameworks.appendingPathComponent(entry + "/Helpers").path
+        if let inner = try? FileManager.default.contentsOfDirectory(atPath: helpers),
+           inner.contains(where: { $0.hasSuffix("Helper (Renderer).app") }) { return "chromium" }
+    }
     return ""
 }
 
