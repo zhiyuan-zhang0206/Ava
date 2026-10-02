@@ -165,14 +165,18 @@ def test_cmd_cluster_status_role_column_shows_observability_station(
 def test_cmd_cluster_status_read_timeout_reports_friendly(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A gateway that does not answer within the probe budget prints one stderr
-    line and exits 1. An unreachable machine is exactly when an operator runs
-    `ava cluster status`, and its roster probe can push the gateway's own
-    response past this client's budget — so a bare ReadTimeout traceback would
-    hide the diagnosis the command exists for (#219)."""
+    """A gateway that does not answer within the derived read budget prints one
+    stderr line and exits 1. An unreachable machine is exactly when an operator
+    runs `ava cluster status`; the derived budget already covers a black-holed
+    machine's probe (probe budget + margin), so a timeout here means the
+    gateway itself is silent — a bare ReadTimeout traceback would hide the
+    diagnosis the command exists for (#219, #4900)."""
     import httpx
 
+    from base.config import settings
+
     monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 5.0)
 
     def _slow_get(url: str, **_kw: object) -> None:
         raise httpx.ReadTimeout("timed out", request=None)
@@ -181,8 +185,42 @@ def test_cmd_cluster_status_read_timeout_reports_friendly(
     rc = cluster_control.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
-    assert "did not respond within" in err
+    assert "did not respond within 9s" in err
     assert "http://gw:8000/api/cluster/roster" in err
+
+
+def test_roster_read_timeout_derives_from_the_probe_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The roster read budget tracks the gateway's per-machine probe budget at
+    call time — a budget pinned at the probe budget collides with a black-holed
+    machine's probe (#4900)."""
+    from base.config import settings
+
+    monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 5.0)
+    assert cluster_control._roster_read_timeout_s() == 9.0
+
+
+def test_cmd_cluster_status_dials_the_derived_read_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fresh roster dial carries the derived budget (probe budget + margin),
+    not the thin-POST timeout constant (#4900)."""
+    from base.config import settings
+
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 5.0)
+    seen: dict[str, object] = {}
+
+    def _fake_get(url: str, **kwargs: object) -> _FakeResponse:
+        seen["url"] = url
+        seen["timeout"] = kwargs.get("timeout")
+        return _FakeResponse([])
+
+    monkeypatch.setattr("httpx.get", _fake_get)  # pyright: ignore[reportUnknownArgumentType]
+    assert cluster_control.cmd_cluster_status() == 0
+    assert seen["url"] == "http://gw:8000/api/cluster/roster?fresh=true"
+    assert seen["timeout"] == 9.0
 
 
 def test_cmd_cluster_status_connect_error_reports_friendly(
