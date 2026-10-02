@@ -72,6 +72,7 @@ from base.daemon.health import (
 )
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
 from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
@@ -402,6 +403,15 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), _MODULE)
 
 
+def _build_pools(
+    db: Database,
+) -> tuple[
+    AsyncConnectionPool[psycopg.AsyncConnection], AsyncConnectionPool[psycopg.AsyncConnection]
+]:
+    """The turn/checkpoint pool and the reserved control pool of one host."""
+    return build_shared_pool(db), build_control_pool(db)
+
+
 async def run() -> None:
     """Boot the host and serve wakes until cancelled. See the module docstring
     for why the order is what it is."""
@@ -427,7 +437,7 @@ async def run() -> None:
     land_cluster_extensions()
     load_process_extensions()
 
-    workload_pool, control_pool = build_shared_pool(), build_control_pool()
+    workload_pool, control_pool = _build_pools(Database.from_settings())
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[None] | None = None
     health = None

@@ -479,13 +479,14 @@ class TestPoolIsolation:
         self, monkeypatch: pytest.MonkeyPatch, turn_limit: int
     ) -> None:
         """Admitting more agents must not expand either database client pool."""
+        from base.db import Database
         from services.agent_host.pools import build_control_pool, build_shared_pool
 
         monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", turn_limit)
         monkeypatch.setattr(settings.daemon, "host_db_pool_max_size", 12)
         monkeypatch.setattr(settings.daemon, "host_control_pool_max_size", 3)
-        workload_pool = build_shared_pool()
-        control_pool = build_control_pool()
+        workload_pool = build_shared_pool(Database.from_settings())
+        control_pool = build_control_pool(Database.from_settings())
 
         assert workload_pool is not control_pool
         assert workload_pool.max_size == 12
