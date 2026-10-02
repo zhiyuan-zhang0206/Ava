@@ -86,10 +86,12 @@ def _mirror_dir() -> Path:
     return ava_home() / "logs"
 
 
-# Categories the collect pipeline consumes. Every other category in the
-# mirror (log rows carry exec stdout payloads — the largest rows) is dropped
-# before timestamp parsing.
-_KEPT_CATEGORIES = ("telemetry", "audit")
+# Categories the mirror stands in for. Every other category in the mirror (log
+# rows carry exec stdout payloads — the largest rows) is dropped before
+# timestamp parsing. Audit rows are not here: their record is Postgres
+# `audit_events`, which the gateway serves even with no observability stack,
+# so the fallback reads them through the normal `collect._fetch_events_window`.
+_KEPT_CATEGORIES = ("telemetry",)
 
 # Category -> [(ts string, byte offset)] in file order, built by backfill()
 # phase 1. The consumer sorts it by ts and streams the temp file through the
@@ -272,7 +274,7 @@ def _stage_window(
             writer.close()
     for day, n in sorted(per_day.items()):
         print(f"[mirror] {day}: {n} rows in window")
-    print(f"[mirror] telemetry={counts['telemetry']} audit={counts['audit']} rows in window")
+    print(f"[mirror] telemetry={counts['telemetry']} rows in window")
     if missing_days:
         print(
             "warning: mirror file missing for " + ", ".join(missing_days) + " — dataset is partial"
@@ -325,7 +327,19 @@ def collect_from_mirror(
         # same-process caller that collects again must go back to the Loki
         # path, not silently read a consumed temp dir (QA #1010 nit).
         original_fetch = collect._fetch_events_window
-        collect._fetch_events_window = _mirror_fetch_factory_from_dir(tmpdir, index)
+        mirror_fetch = _mirror_fetch_factory_from_dir(tmpdir, index)
+
+        def fetch(
+            category: str,
+            from_: datetime,
+            to: datetime,
+            agent_id: int | None = None,
+        ) -> Any:
+            if category in _KEPT_CATEGORIES:
+                return mirror_fetch(category, from_, to, agent_id)
+            return original_fetch(category, from_, to, agent_id)
+
+        collect._fetch_events_window = fetch
         try:
             records, record_counts = collect.collect_with_counts(
                 days, week, from_=window_from, to=window_to, include_test=include_test
