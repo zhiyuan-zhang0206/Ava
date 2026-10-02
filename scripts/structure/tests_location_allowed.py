@@ -34,6 +34,10 @@ BY_DESIGN: dict[str, str] = {
 }
 
 ALLOWED: dict[str, tuple[Category, str]] = {
+    "tests/agent/test_claim_auto_resurrect.py": (
+        "integration",
+        "agent and ops are peers: the claim node's resurrect batch is driven through ops.agents.wake.resurrect_agent",
+    ),
     "tests/agent/test_corpse_reap.py": (
         "integration",
         "the hosted corpse reaper's recrash trigger runs against real rows the ops lifecycle writes: spans agent, base, ops, no one of which may import all the others",
