@@ -22,8 +22,9 @@ non-test code:
   `insert_event_log_many` is a violation;
 - a call that builds an audit event, `prepare_event_log(...)` or
   `prepare_event("audit", ...)` / `emit("audit", ...)`, is a violation unless the
-  same function also calls `record_audit`, `record_audit_standalone` or
-  `emit_recorded_central_event` (the service-owned wrapper that records).
+  same function also calls a recorder: `record_audit*` (see
+  `base/telemetry/audit_events.py`) or `emit_recorded_central_event` (the
+  service-owned wrapper that records).
 
 `base/telemetry/audit_events.py` (the recording primitives) and
 `base/telemetry/emitter.py` (the event pipeline) are the only exempt files.
@@ -61,13 +62,6 @@ _SCAN_DIRS = lint_common.FRAMEWORK_DIRS
 
 # Audit emit sites that predate record_audit / record_audit_standalone (frozen, shrink-only).
 _BASELINE: dict[str, int] = {
-    "agent/hooks/compact.py::auto_compact_for_llm": 1,
-    "agent/ownership/corpse_reap.py::reap_crash_corpses": 1,
-    "agent/ownership/corpse_reap.py::reap_recrashed_corpse": 1,
-    "agent/ownership/hosted.py::admit_hosted_runtime": 2,
-    "agent/ownership/hosted.py::settle_hosted_runtime": 1,
-    "agent/turn/runloop.py::_handle_fatal_llm_error": 1,
-    "agent/turn/runloop.py::_record_permanent_reject_outcome": 1,
     "ava/self.py::compact": 1,
     "ava/skills.py::_insert_skill_events": 1,
     "ava_builtins/plugins/ava_fleet/_task_update.py::_log_task_update": 1,
@@ -75,13 +69,22 @@ _BASELINE: dict[str, int] = {
     "ava_builtins/plugins/ava_fleet/task_registry.py::_insert_task": 1,
     "base/host/env/audit.py::_emit_audit_event": 1,
     "gateway/mcp_server/endpoint.py::_AuditMiddleware.__call__": 2,
-    "ops/lifecycle/billing_recovery.py::_record_run_event": 1,
 }
 
 _EXEMPT_FILES = frozenset({"base/telemetry/audit_events.py", "base/telemetry/emitter.py"})
 _ENQUEUE_ONLY = frozenset({"insert_event_log", "insert_event_log_async", "insert_event_log_many"})
 _CONSTRUCTORS = frozenset({"prepare_event", "emit"})
-_RECORDERS = frozenset({"record_audit", "record_audit_standalone", "emit_recorded_central_event"})
+_RECORDERS = frozenset(
+    {
+        "record_audit",
+        "record_audit_async",
+        "record_audit_standalone",
+        "record_audit_standalone_async",
+        "record_audit_reported",
+        "record_audit_reported_async",
+        "emit_recorded_central_event",
+    }
+)
 _LEGACY_REASON = (
     "enqueue-only audit emit; record the event with record_audit / record_audit_standalone "
     "(base/telemetry/audit_events.py) so Postgres, not Loki, holds the fact"

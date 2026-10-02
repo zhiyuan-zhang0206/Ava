@@ -26,6 +26,7 @@ from base.agents.incarnation.resources import (
 )
 from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -343,17 +344,13 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
 ) -> None:
     events: list[tuple[int, str, str]] = []
 
-    async def _event(
-        event_type: str,
-        agent_id: int,
-        *,
-        payload: dict[str, object] | None = None,
-        **_kwargs: object,
-    ) -> None:
-        if payload is not None and payload.get("reason") == "corpse_reaper":
-            events.append((agent_id, event_type, "corpse_reaper"))
+    async def _event(_conn: object, event: Event) -> Event:
+        if event.attributes.get("reason") == "corpse_reaper":
+            assert event.agent_id is not None
+            events.append((event.agent_id, event.event_name, "corpse_reaper"))
+        return event
 
-    monkeypatch.setattr("agent.ownership.corpse_reap.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.ownership.corpse_reap.record_audit_async", _event)
     published: list[int] = []
 
     async def _publish(agent_id: int) -> None:
