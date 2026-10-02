@@ -3,7 +3,7 @@
 
 Dev-only harness (task #3384, parent #3195). It builds a throwaway
 ad-hoc-signed permissions-helper .app (same machinery as
-scripts/ci/two_section_chain_smoke.py), bootstraps it under a test launchd label,
+scripts/ci/two_section_chain_smoke/), bootstraps it under a test launchd label,
 then injects the macOS 26 LWCR staleness condition: the signed executable is
 replaced under the already-loaded job and the job is restarted. It records the
 spawn-failed / EX_CONFIG(78) symptoms (including the silence under KeepAlive

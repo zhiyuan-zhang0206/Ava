@@ -1,4 +1,4 @@
-"""Unit tests for the F12b/restart sampling helpers in scripts/ci/two_section_chain_smoke.py.
+"""Unit tests for the F12b/restart sampling helpers in scripts/ci/two_section_chain_smoke/.
 
 The smoke itself needs launchd, a compiled helper, and an unlocked desktop
 session, so CI cannot run it; these tests pin the pure parse/join/summary/
@@ -8,24 +8,13 @@ assert helpers with synthetic fixtures instead (F12b, task #3380).
 from __future__ import annotations
 
 import datetime
-import importlib.util
 import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "two_section_chain_smoke.py"
+sys.path.insert(0, str(_REPO_ROOT))
 
-
-def _load_script():
-    spec = importlib.util.spec_from_file_location("two_section_chain_smoke", _SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-smoke = _load_script()
+from scripts.ci import two_section_chain_smoke as smoke  # noqa: E402 - checkout path guard above
 
 
 def _line(stamp: str, requesting_pid: int, responsible_pid: int | None = 400) -> str:
