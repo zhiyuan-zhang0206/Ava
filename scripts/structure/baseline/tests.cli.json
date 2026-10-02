@@ -4,9 +4,6 @@
     "tests/cli/test_packages_refresh.py::test_refresh_applies_only_the_changed_package": 17,
     "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17
   },
-  "directories": {
-    "tests/cli": 27
-  },
   "files": {
     "tests/cli/test_impersonation_bridge.py": 965
   },
@@ -39,7 +36,6 @@
     "tests/cli/test_pgbouncer_wire.py::base.native_process.code_version._db_gate_exempt": 1,
     "tests/cli/test_pgbouncer_wire.py::base.native_process.code_version._version": 1,
     "tests/cli/test_plugin_scaffold.py::cli.commands.extensions._plugin_scaffold": 2,
-    "tests/cli/test_root_driver.py::ops.roster._plugin_services": 1,
     "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._alert_verify": 2,
     "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._check_script": 1,
     "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._open_verify_starts_at": 4,
@@ -65,7 +61,6 @@
     "tests/cli/test_pgbouncer_config.py::top-level": 1,
     "tests/cli/test_pgbouncer_wire.py::top-level": 1,
     "tests/cli/test_plugin_scaffold.py::top-level": 1,
-    "tests/cli/test_root_driver.py::top-level": 1,
     "tests/cli/test_schedules_cmd.py::top-level": 1,
     "tests/cli/test_storage_ownership.py::top-level": 1
   }

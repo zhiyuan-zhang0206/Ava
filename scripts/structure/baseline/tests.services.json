@@ -4,9 +4,6 @@
     "tests/services/test_backup.py::test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv": 17,
     "tests/services/test_hosted_db_wait_liveness.py::test_real_db_wait_survives_both_stale_paths_and_clears_afterward": 16
   },
-  "directories": {
-    "tests/services": 63
-  },
   "files": {
     "tests/services/test_agent_host.py": 1770,
     "tests/services/test_backup.py": 902
@@ -50,7 +47,6 @@
     "tests/services/test_healthcheck_browser_reach.py::top-level": 1,
     "tests/services/test_hosted_db_wait_liveness.py::top-level": 1,
     "tests/services/test_maintenance_readiness.py::top-level": 1,
-    "tests/services/test_native_storage_diagnostics.py::top-level": 1,
     "tests/services/test_numpy_backend.py::top-level": 1
   }
 }
