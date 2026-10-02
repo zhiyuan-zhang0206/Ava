@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -30,7 +30,7 @@ class _Pool:
         self._conn = conn
 
     @contextmanager
-    def connection(self) -> Iterator[psycopg.Connection]:
+    def connection(self) -> Generator[psycopg.Connection]:
         yield self._conn
 
 
