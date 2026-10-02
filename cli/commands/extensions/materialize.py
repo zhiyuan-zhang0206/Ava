@@ -42,7 +42,8 @@ def materialize_cluster_extensions() -> None:
     local-only result is drift; materialization is the moment a machine catches
     up.
     """
-    from base import db, paths
+    from base import paths
+    from base.db import Database
     from base.host.converge.preserve_report import report_converge_preserve
     from base.packages.extensions import materialize
 
@@ -50,7 +51,7 @@ def materialize_cluster_extensions() -> None:
         # The pool opens eagerly and owns worker threads; close it here rather
         # than letting ConnectionPool.__del__ run at interpreter exit (it then
         # joins its own worker and prints "cannot join current thread" noise).
-        with db.pool() as pool, pool.connection() as conn:
+        with Database.from_settings().pool() as pool, pool.connection() as conn:
             result = materialize.materialize_skills(conn, dest_root=paths.skills_dir())
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: cluster registry unreachable ({exc}); skipping", file=sys.stderr)
@@ -84,11 +85,12 @@ def adopt_local_extensions() -> None:
     disagree on, which `base.packages.extensions.adopt` logs and this reports again on
     the operator's terminal — it is the only outcome here that needs a person.
     """
-    from base import db, paths
+    from base import paths
+    from base.db import Database
     from base.packages.extensions import adopt
 
     try:
-        with db.pool() as pool:
+        with Database.from_settings().pool() as pool:
             result = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: could not adopt local installs ({exc}); skipping", file=sys.stderr)

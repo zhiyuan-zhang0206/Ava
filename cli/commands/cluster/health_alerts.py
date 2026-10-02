@@ -256,7 +256,7 @@ def _ingest_alert_fallback(
     database is down too, degrade to the legacy direct-IM path — the owner
     still hears, which matters more than the row when the UI is dark too.
     """
-    from base import db
+    from base.db import Database
     from base.telemetry.alerts import (
         display_language,
         notify_im,
@@ -283,7 +283,7 @@ def _ingest_alert_fallback(
         "fingerprint": fingerprint or compute_fingerprint({"alertname": OPS_RULE_NAME}),
     }
     try:
-        with db.connect() as conn:
+        with Database.from_settings().connect() as conn:
             text = notify_text(alert, display_language(conn))
             key, did_insert, should_notify, row = upsert_alert(conn, alert, source="health-probe")
             notified_at = row.get("notified_at")
@@ -364,6 +364,8 @@ def _alert_failure(
 
 def _alert_recovery(home: Path) -> None:
     """Resolve a fired episode across current and legacy marker formats."""
+    from base.db import Database
+
     marker = home / ALERT_STATE_FILE
     if not marker.exists():
         return
@@ -379,9 +381,7 @@ def _alert_recovery(home: Path) -> None:
         return
     open_rows: list[tuple[str, datetime]] | None = None
     try:
-        from base import db
-
-        with db.connect() as conn, conn.cursor() as cur:
+        with Database.from_settings().connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT fingerprint, starts_at FROM alerts "
                 "WHERE labels->>'alertname' = 'cluster health' "

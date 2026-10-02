@@ -425,9 +425,9 @@ def _read_schedule_rows() -> list[tuple[int, str, str]]:
     A direct read (not `/api/schedules`) so the check works while the gateway is
     down: the DB is the authority for what a runner materializes.
     """
-    from base.db import connect as db_connect
+    from base.db import Database
 
-    with db_connect(autocommit=True) as conn, conn.cursor() as cur:
+    with Database.from_settings().connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("SELECT id, name, script FROM schedules ORDER BY id")
         return [(row[0], row[1], row[2] or "") for row in cur.fetchall()]
 
@@ -505,9 +505,9 @@ def _open_verify_starts_at() -> str | None:
     The alerts table is the episode state (same derivation as the machine
     liveness pass): reusing an open instance's `starts_at` lets the ingest's
     notified_at gate keep a repeated red run from re-paging."""
-    from base.db import connect as db_connect
+    from base.db import Database
 
-    with db_connect(autocommit=True) as conn, conn.cursor() as cur:
+    with Database.from_settings().connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT starts_at FROM alerts WHERE labels->>'alertname' = %s "
             "AND status = 'unresolved' ORDER BY starts_at DESC LIMIT 1",
@@ -621,9 +621,9 @@ def cmd_schedules_provision() -> int:
     the same provision at every boot). Idempotent — existing schedules (by
     name) are never modified, so an operator's edits survive a provision."""
     from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
-    from base.db.transaction import write_transaction
+    from base.db import Database
 
-    with write_transaction() as conn:
+    with Database.from_settings().write_transaction() as conn:
         created = provision_builtin_schedules(conn)
     if created:
         print(f"provisioned built-in schedules: {', '.join(created)}")

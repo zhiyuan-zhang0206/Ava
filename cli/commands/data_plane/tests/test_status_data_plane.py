@@ -21,6 +21,7 @@ import cli.commands.data_plane.bringup as dp
 import cli.commands.data_plane.cluster_instance as ci
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
+from base.db.tests.fakes import patch_database
 
 _ADMIN = "pooler-admin-fixture"
 
@@ -124,7 +125,6 @@ def test_postgres_probe_dials_pooled_front_door(
     F8a (user ruling 2026-08 "always PgBouncer"): the pooled SELECT 1 proves the
     path every consumer dials (client scram at the pooler + the SCRAM
     pass-through backend hop); a direct probe would test a path no consumer uses."""
-    import base.db
 
     monkeypatch.setattr(ci, "_pg_running", lambda _p, _h: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ci, "_redis_reachable", lambda _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
@@ -145,7 +145,7 @@ def test_postgres_probe_dials_pooled_front_door(
         calls.append(kwargs)
         return _FakeConn()
 
-    monkeypatch.setattr(base.db, "connect", _fake_connect)
+    patch_database(monkeypatch, connect=_fake_connect)
     # pgbouncer off: pooled_db_url == db_url, the probe is direct in effect.
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
     ci.print_data_plane_status()
