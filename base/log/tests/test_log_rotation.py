@@ -2,8 +2,8 @@
 
 `_rotate_by_size_or_day` is the JSONL sink's rotation predicate: 100 MB
 ceiling OR the message's date moved past the file's creation date. The
-time half is anchored on the file's own ctime so the two processes sharing
-`agent-{N}.log` (kernel + exec) evaluate the same decision.
+time half is anchored on the file's own ctime so the processes sharing
+`agent-{N}.log` (the agent's exec subprocesses) evaluate the same decision.
 """
 
 from __future__ import annotations

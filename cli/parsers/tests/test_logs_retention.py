@@ -415,7 +415,7 @@ def test_configured_days_apply_when_the_flag_is_omitted(
     [
         ("ava-gateway.out.log", "gateway"),
         ("ava-ops.out.log", "ops"),
-        ("ava-agent-runner-watchdog.out.log", "watchdog"),
+        ("ava-delivery-watchdog.out.log", "watchdog"),
         ("ava-otel-collector.out.log", "other"),
         ("ava-agent-host.out.log", "agent"),
     ],

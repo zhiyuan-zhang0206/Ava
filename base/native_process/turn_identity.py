@@ -16,8 +16,8 @@ Resolution order everywhere identity is read:
 
     turn contextvar  >  process bootstrap slot (`ava.agent_identity`)  >  AVA_AGENT_ID env
 
-Process mode binds nothing here, the contextvar stays None, and every read
-falls through to the process slot / env — behavior unchanged.
+Outside a bound turn (services, the exec child) nothing binds here, the
+contextvar stays None, and every read falls through to the process slot / env.
 
 This lives in `base/` (not `ava/`) because identity consumers exist below
 the `ava` layer (`base/lm/_providers.py` cache affinity, `base/host/net/resilience.py`

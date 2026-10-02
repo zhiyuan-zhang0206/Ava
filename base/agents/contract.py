@@ -63,7 +63,7 @@ class TerminationSource(StrEnum):
     # row (OOM/SIGKILL/crash leaves no finally, so it never reaches EXIT).
     REAPER = "reaper"
     # Involuntary — a launch that never confirmed: the launcher's confirm poll timed
-    # out (`ops/agent_launch.py`), or the child's own early-boot gates rejected the
+    # out, or the child's own early-boot gates rejected the
     # boot before claiming its row (`agent/_starting.py` — schema mismatch or
     # placement mismatch). Both are "the wake never came up", and both self-heal
     # once the cause clears, so both are resurrect-eligible (backoff-spaced).
