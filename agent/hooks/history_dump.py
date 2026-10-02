@@ -43,7 +43,6 @@ from langchain_core.messages import AnyMessage, HumanMessage
 from agent.messages import NoteTag, system_note_message
 from base.agents.context.slices import HistoryDump
 from base.agents.messages.kwargs import read_ava_kwargs
-from base.config.turn_view import turn_settings
 from base.log import logger
 from base.paths import workspace_dir
 
@@ -169,7 +168,7 @@ def history_dump_note(path: Path) -> HumanMessage:
     )
 
 
-def workspace_section_hint() -> str:
+def workspace_section_hint(config: HistoryDump) -> str:
     """The ``# Workspace`` system-prompt sentence: where the dumps live and the
     grep recipe for recovering details the compact summary dropped. Empty while
     the feature is off, so the section never points at a folder that stays
@@ -180,7 +179,7 @@ def workspace_section_hint() -> str:
     settings read as the dump itself; that module also sits at its line-budget
     ceiling, so the call site is one line.
     """
-    if not turn_settings.agent.history_dump_enabled:
+    if not config.history_dump_enabled:
         return ""
     return (
         f" Pre-compact message history is dumped under `{_DUMP_DIRNAME}/` "

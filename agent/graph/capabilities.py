@@ -13,9 +13,10 @@ same thing.
 """
 
 import logging
+from collections.abc import Sequence
 from typing import Any, NamedTuple
 
-from base.config.turn_view import turn_settings
+from base.agents.context.slices import AgentSlices, Prompt
 from base.lm.registry import resolve_setting
 from base.packages.skills.names import match_key
 
@@ -27,23 +28,21 @@ from base.packages.skills.names import match_key
 _DESC_MAX_CHARS = 300
 
 
-def _disabled_by_sdk_config(path: str) -> bool:
+def _disabled_by_sdk_config(path: str, sdk_disable_config: Sequence[str]) -> bool:
     """True when `path` or one of its dotted parents is SDK-disabled.
 
     `path` is relative to the `ava` namespace and therefore has no `ava.`
     prefix.
 
-    Two disable sources, one rendering rule. `turn_settings.agent.sdk_disable`
-    carries the env (`AVA_SDK_DISABLE`) and per-agent overlay entries; the
+    Two disable sources, one rendering rule. `sdk_disable_config` (the agent's
+    `Prompt.sdk_disable`) carries the env (`AVA_SDK_DISABLE`) and per-agent overlay entries; the
     eval-isolation boundary (`_apply_per_agent_eval_isolation`) records surfaces
     removed at runtime by `sdk_disable.apply_sdk_disable` in
     `sdk_disable.applied_disable_entries` without touching settings. Only configured
     entries and registry-recorded runtime removals count as disabled; an
     unresolved path that appears in neither source remains eligible for the
     expansion resolver's diagnostic warning."""
-    if any(
-        path == entry or path.startswith(entry + ".") for entry in turn_settings.agent.sdk_disable
-    ):
+    if any(path == entry or path.startswith(entry + ".") for entry in sdk_disable_config):
         return True
     from ava.sdk_surface import sdk_disable
 
@@ -99,7 +98,9 @@ def _warn_unresolved_once(config_field: str, name: str) -> None:
     )
 
 
-def resolve_prompt_skills(wanted: list[str], *, config_field: str) -> list[Any]:
+def resolve_prompt_skills(
+    wanted: Sequence[str], sdk_disable_config: Sequence[str], *, config_field: str
+) -> list[Any]:
     """Resolve a config list of skill names to loaded `ava.skills.Skill` entries
     — the one resolver shared by the capabilities index (name + one-line
     description) and the preloaded-skills note (full SKILL.md body), so both
@@ -120,7 +121,7 @@ def resolve_prompt_skills(wanted: list[str], *, config_field: str) -> list[Any]:
     Returns `[]` when the `skills` SDK surface is disabled, nothing is
     configured, or nothing resolves.
     """
-    if _disabled_by_sdk_config("skills"):
+    if _disabled_by_sdk_config("skills", sdk_disable_config):
         return []
     if not wanted:
         return []
@@ -155,7 +156,7 @@ def _one_line(description: str) -> str:
     return flat if len(flat) <= _DESC_MAX_CHARS else flat[: _DESC_MAX_CHARS - 1] + "…"
 
 
-def indexed_skills() -> list[Any]:
+def indexed_skills(prompt: Prompt) -> list[Any]:
     """The skills `# Capabilities` covers, resolved against the catalog as it is
     **right now**.
 
@@ -170,7 +171,8 @@ def indexed_skills() -> list[Any]:
     preloaded-skills note via `resolve_prompt_skills`. Empty when nothing is
     configured, `skills` is SDK-disabled, or nothing resolves."""
     return resolve_prompt_skills(
-        turn_settings.agent.skills_to_inject_into_system_prompt,
+        prompt.skills_to_inject_into_system_prompt,
+        prompt.sdk_disable,
         config_field="skills_to_inject_into_system_prompt",
     )
 
@@ -200,18 +202,18 @@ def _index_line(skill: Any) -> str:
     return f"- `ava.skills.{ava.skills.identifier(skill)}` — {_one_line(description)}"
 
 
-def _skill_index_lines() -> list[str]:
+def _skill_index_lines(prompt: Prompt) -> list[str]:
     """The skills half of the capabilities index: one `ava.skills.<path>` +
     one-line-description entry per injected skill."""
-    return [_index_line(s) for s in indexed_skills()]
+    return [_index_line(s) for s in indexed_skills(prompt)]
 
 
-def indexed_skill_identifiers() -> set[str]:
+def indexed_skill_identifiers(prompt: Prompt) -> set[str]:
     """Display identifiers of `indexed_skills()` — the key a snapshot of the
     index is taken on, and the same string an index line names."""
     import ava
 
-    return {ava.skills.identifier(s) for s in indexed_skills()}
+    return {ava.skills.identifier(s) for s in indexed_skills(prompt)}
 
 
 class IndexDrift(NamedTuple):
@@ -228,7 +230,7 @@ class IndexDrift(NamedTuple):
     added: list[Any]
 
 
-def index_drift(known: set[str]) -> IndexDrift:
+def index_drift(known: set[str], prompt: Prompt) -> IndexDrift:
     """Diff the live index membership against `known`, in one scan.
 
     One scan matters: `identifiers` and `added` have to describe the same moment,
@@ -239,7 +241,7 @@ def index_drift(known: set[str]) -> IndexDrift:
     index over-promising until the next build, which `ava.skills.<name>` already
     fails fast on; dropping it from `identifiers` is enough, and makes a
     reinstall announce itself again."""
-    live = indexed_skills()
+    live = indexed_skills(prompt)
     import ava
 
     return IndexDrift(
@@ -285,11 +287,11 @@ def new_skills_note_text(skills: list[Any]) -> str:
     return _NEW_SKILLS_FRAMING + "\n\n" + "\n".join(lines)
 
 
-def _mcp_index_lines() -> list[str]:
+def _mcp_index_lines(sdk_disable_config: Sequence[str]) -> list[str]:
     """The MCP half of the capabilities index: one `ava.mcps.<server>` entry per
     configured server, carrying its config `description` when set (name only
     otherwise). Empty when no server is configured."""
-    if _disabled_by_sdk_config("mcps"):
+    if _disabled_by_sdk_config("mcps", sdk_disable_config):
         return []
     import ava
 
@@ -338,7 +340,7 @@ _MATCH_FIRST = (
 )
 
 
-def capability_index_is_empty() -> bool:
+def capability_index_is_empty(prompt: Prompt) -> bool:
     """True when `capabilities_section()` would render nothing — no skill lines
     and no MCP servers. The delegation check reads this to decide whether it can
     point at a `# Capabilities` section: with `skills` SDK-disabled, an empty
@@ -348,10 +350,10 @@ def capability_index_is_empty() -> bool:
     Resolves the same two halves the section does. The skill half's attribution
     write is dedup'd per (agent, skill, depth), so the section's own resolve a
     few sections later is a no-op rather than a second write."""
-    return not _skill_index_lines() and not _mcp_index_lines()
+    return not _skill_index_lines(prompt) and not _mcp_index_lines(prompt.sdk_disable)
 
 
-def capabilities_section() -> str:
+def capabilities_section(slices: AgentSlices) -> str:
     """Always-on index of capabilities this agent already has — skills (reusable
     playbooks) and live MCP tool servers — so a concrete task starts from what
     exists instead of being rebuilt from general knowledge. Names + one-line
@@ -363,8 +365,8 @@ def capabilities_section() -> str:
 
     Registered by `system_prompt` rather than decorated here — see the module
     docstring."""
-    skill_lines = _skill_index_lines()
-    mcp_lines = _mcp_index_lines()
+    skill_lines = _skill_index_lines(slices.prompt)
+    mcp_lines = _mcp_index_lines(slices.prompt.sdk_disable)
     if not skill_lines and not mcp_lines:
         return ""
 
@@ -383,7 +385,7 @@ def capabilities_section() -> str:
         intro.append(_MCP_HOWTO)
 
     parts = ["# Capabilities\n\n" + " ".join(intro) + "\n\n" + _MATCH_EVERY_TASK]
-    if resolve_setting("prompt_capabilities_match_first_enabled", model=turn_settings.lm.llm_model):
+    if resolve_setting("prompt_capabilities_match_first_enabled", model=slices.brain.llm_model):
         parts.append(_MATCH_FIRST)
     if skill_lines:
         parts.append("**Skills** — reusable playbooks:\n" + "\n".join(skill_lines))

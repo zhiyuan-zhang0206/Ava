@@ -511,8 +511,10 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
         return state.model_copy(update=update)
 
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
-    monkeypatch.setattr("agent.graph._init_context.build_system_prompt", lambda: "standing head")
-    monkeypatch.setattr("agent.graph._init_context.context_notes", list)
+    monkeypatch.setattr(
+        "agent.graph._init_context.build_system_prompt", lambda _slices: "standing head"
+    )
+    monkeypatch.setattr("agent.graph._init_context.context_notes", lambda _slices: [])
     summary = AsyncMock(return_value="the retained summary is still above the ceiling " * 30)
     monkeypatch.setattr("agent.hooks.compact.generate_summary", summary)
 

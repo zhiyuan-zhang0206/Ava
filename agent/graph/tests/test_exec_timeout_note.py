@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.context_notes import exec_timeout_note
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.native_process.turn_identity import bind_turn_identity
@@ -28,7 +29,7 @@ def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_declares_the_configured_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """The value comes from the setting, not a hard-coded constant."""
     monkeypatch.setattr(settings.sandbox, "exec_timeout_seconds", 600.0)
-    note = exec_timeout_note()
+    note = exec_timeout_note(AgentSlices.resolve())
     assert note is not None
     content = str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert "600 seconds (10 minutes)" in content
@@ -39,7 +40,7 @@ def test_declares_the_configured_timeout(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_opts_out_without_an_agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("ava.agent_identity._agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    assert exec_timeout_note() is None
+    assert exec_timeout_note(AgentSlices.resolve()) is None
 
 
 def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,7 +51,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
     with bind_turn_identity(29):
-        note = exec_timeout_note()
+        note = exec_timeout_note(AgentSlices.resolve())
 
     assert note is not None
     assert "hard wall-clock timeout" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

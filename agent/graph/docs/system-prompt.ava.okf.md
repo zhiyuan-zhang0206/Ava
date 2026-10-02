@@ -20,7 +20,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 - Injects the skill and MCP server index — **once**. `# Capabilities` is the sole index; the expanded SDK reference's `*` skips `ava.skills` / `ava.mcps` (`_CAPABILITY_SURFACES`) so it renders call contracts only, never a second capability listing
 
 ### Plugin Registration (`register_system_prompt_section`)
-- Signature `() -> str`, returning `""` means no contribution
+- Signature `(slices: AgentSlices) -> str` — the agent's per-turn configuration (`base/agents/context/slices.py`); returning `""` means no contribution
 - Runs in registration order—order is priority
 - Framework's built-in sections are grouped: SDK detail → Conversation → Conduct → Capabilities
 
@@ -61,10 +61,10 @@ The system prompt carried in every LLM call, built **once per context window** �
 
 ## Entry Points
 
-- `agent/graph/system_prompt.py:build_system_prompt()` — Build the complete prompt
+- `agent/graph/system_prompt.py:build_system_prompt(slices)` — Build the complete prompt
 - `agent/graph/system_prompt.py:register_system_prompt_section(fn)` — Plugin registration
-- `agent/graph/capabilities.py:capabilities_section()` / `resolve_prompt_skills()` — the `# Capabilities` index and the name→skill resolver it shares with the preloaded-skills note
-- `agent/graph/capabilities.py:indexed_skills()` / `index_drift()` — what the index covers right now, and the diff against a snapshot of it
+- `agent/graph/capabilities.py:capabilities_section(slices)` / `resolve_prompt_skills()` — the `# Capabilities` index and the name→skill resolver it shares with the preloaded-skills note
+- `agent/graph/capabilities.py:indexed_skills(prompt)` / `index_drift(known, prompt)` — what the index covers right now, and the diff against a snapshot of it
 - `agent/hooks/capabilities.py:register_capabilities_hooks()` — the `before_llm` hook that names skills installed since the index was built
 - `agent/graph/_init_context.py:init_context_node()` — caller of `build_system_prompt()`, and where the snapshot is recorded
 

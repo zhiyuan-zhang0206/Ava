@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE, timezone_note
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 
@@ -27,7 +28,7 @@ def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _content(monkeypatch: pytest.MonkeyPatch, tz: str) -> str:
     monkeypatch.setattr(settings.general, "timezone", tz)
-    note = timezone_note()
+    note = timezone_note(AgentSlices.resolve())
     assert note is not None
     return str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
@@ -54,7 +55,7 @@ def test_carries_the_timezone_note_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tag drives the UI chip; an unmapped one renders as a loud alarm
     (`scripts/lint/note_tags.py` enforces the frontend half)."""
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    note = timezone_note()
+    note = timezone_note(AgentSlices.resolve())
     assert note is not None
     assert note.additional_kwargs["ava_note_tag"] == NoteTag.TIMEZONE  # pyright: ignore[reportUnknownMemberType]
 
@@ -73,7 +74,7 @@ def test_opts_out_without_an_agent_identity(monkeypatch: pytest.MonkeyPatch) -> 
     rather than producing a head fragment out of context."""
     monkeypatch.setattr("ava.agent_identity._agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    assert timezone_note() is None
+    assert timezone_note(AgentSlices.resolve()) is None
 
 
 def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -88,7 +89,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
 
     with bind_turn_identity(29):
-        note = timezone_note()
+        note = timezone_note(AgentSlices.resolve())
 
     assert note is not None
     assert "Asia/Shanghai" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

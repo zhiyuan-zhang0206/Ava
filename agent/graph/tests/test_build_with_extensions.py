@@ -250,7 +250,7 @@ def test_clear_plugin_registrations_keeps_framework_sections():
     saved = _SYSTEM_PROMPT_SECTIONS[:]
     try:
 
-        def _plugin_section() -> str:
+        def _plugin_section(_slices: object) -> str:
             return "## plugin section"
 
         register_system_prompt_section(_plugin_section)

@@ -54,7 +54,11 @@ def _fake_notes(monkeypatch: pytest.MonkeyPatch, *tags: str) -> list[HumanMessag
     """Pin the ordered registry to a known list so ordering assertions do not
     depend on which layers happen to be enabled in the test environment."""
     notes = [_note(t) for t in tags]
-    monkeypatch.setattr("agent.graph._init_context.context_notes", lambda: list(notes))
+
+    def fake_notes(_slices: AgentSlices) -> list[HumanMessage]:
+        return list(notes)
+
+    monkeypatch.setattr("agent.graph._init_context.context_notes", fake_notes)
     return notes
 
 
