@@ -581,7 +581,7 @@ def _pin_setting(field: str, value: object) -> None:
     os.environ[f"AVA_{field.upper()}"] = str(value)
 
 
-# Every daemon that registers a health port — read off the same map health_port()
+# Every daemon that registers a health port — read off the same map the endpoint table
 # consults, so a newly registered daemon is isolated the moment it is added there
 # rather than silently inheriting its prod default.
 #

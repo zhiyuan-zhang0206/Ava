@@ -190,7 +190,7 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     im_bridge_health_url: str = Field(
         default="",
         alias="AVA_IM_BRIDGE_HEALTH_URL",
-        description="IM Bridge healthcheck URL. Empty = derive via base.daemon.health.health_port('im_bridge').",
+        description="IM Bridge healthcheck URL. Empty = derive from the im_bridge row of base.daemon.endpoints.ServiceEndpoints.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,

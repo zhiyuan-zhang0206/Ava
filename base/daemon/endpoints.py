@@ -4,8 +4,8 @@ A daemon's endpoint is a fact of the unit: the healthz port (the fixed port tabl
 `AVA_<NAME>_HEALTH_PORT` override) and the pidfile under `$AVA_HOME/run`. A composition root
 builds the table once (`ServiceEndpoints.from_settings()`) and hands a daemon its own row
 (`endpoints.of("labeler")`) and a supervisor, probe or command the table; nothing below the root
-asks `health_port(name)` / `pid_path(name)`, which read the settings and `AVA_HOME` at each call
-and remain as the process-default shim that the `ambient-endpoint` rule bans package by package.
+reads the settings or `AVA_HOME` for a port or pidfile; the `ambient-endpoint` rule bans building
+the table outside the roots a package names.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.daemon.health import health_port
+from base.daemon.health import _health_port
 from base.host.env.registry import health_port_env_aliases
 from base.paths import run_dir
 
@@ -44,7 +44,7 @@ class ServiceEndpoints:
         runtime = run_dir()
         return cls(
             {
-                name: ServiceEndpoint(name, health_port(name), runtime / f"{name}.pid")
+                name: ServiceEndpoint(name, _health_port(name), runtime / f"{name}.pid")
                 for name in health_port_env_aliases()
             }
         )

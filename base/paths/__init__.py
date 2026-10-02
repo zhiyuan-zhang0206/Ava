@@ -31,14 +31,6 @@ def run_dir() -> Path:
     return target
 
 
-def pid_path(service_name: str) -> Path:
-    """Pidfile path for a named service ($AVA_HOME/run/<service>.pid).
-
-    The single source of truth for pidfile naming — all daemons write their
-    pid through this function so a future move is one-line."""
-    return run_dir() / f"{service_name}.pid"
-
-
 def plugins_config_path() -> Path:
     """plugins.json path — returns the path only; load() decides whether to write defaults."""
     return ava_home() / "plugins.json"

@@ -4,7 +4,7 @@ Validates:
 - GET /healthz → 200 + JSON includes name / pid / home / started_at
 - Other paths → 404
 - start server + stop pair is idempotent (stop called twice does not raise)
-- health_port: env override takes priority, defaults to DEFAULT_PORTS, unregistered raises KeyError
+- _health_port: env override takes priority, defaults to DEFAULT_PORTS, unregistered raises KeyError
 - probe_daemon: 200 only counts as alive when the name/home/pid triple matches
 - probe_home: the pid-less sibling for `/api/health`, where the reload fork makes
   a pid comparison meaningless — 200 plus this unit's `$AVA_HOME`
@@ -356,26 +356,26 @@ async def test_stop_idempotent() -> None:
 
 
 def test_health_port_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With nothing overriding it, health_port falls back to DEFAULT_PORTS.
+    """With nothing overriding it, _health_port falls back to DEFAULT_PORTS.
 
     The overrides have to be cleared to see that: the suite pins a free port per
     daemon for the whole session (tests/fixtures/env_bootstrap.py) precisely so no test can bind
     or probe a prod default. Stubbing the settings lookup is what "unconfigured"
-    means to `health_port`."""
+    means to `_health_port`."""
     monkeypatch.setattr(health, "get_field", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    assert health.health_port("agent_host") == 8114
-    assert health.health_port("labeler") == 8103
-    assert health.health_port("memory_indexer") == 8105
-    assert health.health_port("heartbeat") == 8107
-    assert health.health_port("task_maintenance") == 8108
-    assert health.health_port("events_maintenance") == 8109
+    assert health._health_port("agent_host") == 8114
+    assert health._health_port("labeler") == 8103
+    assert health._health_port("memory_indexer") == 8105
+    assert health._health_port("heartbeat") == 8107
+    assert health._health_port("task_maintenance") == 8108
+    assert health._health_port("events_maintenance") == 8109
 
 
 def test_health_ports_are_isolated_from_prod_defaults() -> None:
     """The session's own pinned ports are in force — the property that keeps a
     daemon leaked out of a test run off prod's ports."""
     for name in health.DEFAULT_PORTS:
-        assert health.health_port(name) != health.DEFAULT_PORTS[name], (
+        assert health._health_port(name) != health.DEFAULT_PORTS[name], (
             f"{name} health port is not isolated from its prod default"
         )
 
@@ -657,13 +657,13 @@ def test_health_port_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "agent_host_health_port", 9999)
-    assert health.health_port("agent_host") == 9999
+    assert health._health_port("agent_host") == 9999
 
 
 def test_health_port_unknown_raises_key_error() -> None:
     """Unregistered daemon name — fail fast (no silent fallback)."""
     with pytest.raises(KeyError):
-        health.health_port("never_registered_daemon")
+        health._health_port("never_registered_daemon")
 
 
 # ─── probe_daemon always returns a verdict ───────────────────────────────
@@ -865,8 +865,8 @@ def test_health_port_warns_once_on_windows_8106(
         lambda _name: 8106,  # pyright: ignore[reportUnknownArgumentType]
     )
     with caplog.at_level(logging.WARNING, logger="base.daemon.health"):  # pyright: ignore[reportUnknownMemberType]
-        assert health.health_port("events_maintenance") == 8106
-        assert health.health_port("events_maintenance") == 8106  # same daemon: silent now
+        assert health._health_port("events_maintenance") == 8106
+        assert health._health_port("events_maintenance") == 8106  # same daemon: silent now
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]  # pyright: ignore[reportUnknownMemberType]
     assert len(warnings) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert "8106" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]

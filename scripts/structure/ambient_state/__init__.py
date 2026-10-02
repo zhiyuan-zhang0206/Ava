@@ -21,8 +21,8 @@ scripts/structure/baseline/ shards as `path::rule:name -> site count`. The rule 
 - database and bundle wiring: `ambient-db` (a package in `allowlist.DB_HANDLE_PACKAGES` dials
   from the live settings instead of taking a `Database`, see `dbhandle.py`) and `bundle-leak` (a
   `@root_bundle` class named outside its defining module, see `bundle.py`);
-- `ambient-endpoint`: a package in `allowlist.ENDPOINT_PACKAGES` looks a daemon's port or pidfile
-  up from the live settings (`health_port`, `pid_path`) instead of taking `ServiceEndpoints`;
+- `ambient-endpoint`: a package in `allowlist.ENDPOINT_PACKAGES` builds the endpoint table
+  (`ServiceEndpoints.from_settings()`) outside the roots named for it;
 - free-floating background work: `asyncio-task`, `thread` (keyed by the enclosing
   function). Background work must be durable or re-derivable from durable state and
   run as its own service loop; use a per-iteration `async with asyncio.TaskGroup()`
@@ -82,7 +82,7 @@ _FIXES: dict[str, str] = {
     scan.CACHE: "a memoized function is state unless it is pure — a pure derivation goes in ALLOWED in scripts/structure/ambient_state/allowlist.py with a reason",
     scan.CALL: "a call that runs at import (a registry fill or side effect) — register from a composition root, not at import",
     dbhandle.AMBIENT_DB: f"an ambient database dial in a package that holds a Database handle — {dbhandle.FIX}",
-    endpointrule.AMBIENT_ENDPOINT: f"an ambient endpoint lookup in a package that holds endpoints — {endpointrule.FIX}",
+    endpointrule.AMBIENT_ENDPOINT: f"the endpoint table built outside a root — {endpointrule.FIX}",
     bundle.BUNDLE_LEAK: f"a root bundle named outside its composition root — {bundle.FIX}",
     sliced.SETTINGS_READ: f"reads the global configuration in a sliced package — {sliced.FIX}",
     scan.READ: "reads settings, the environment, the clock or the filesystem at import — read it where it is used, or inject it",
