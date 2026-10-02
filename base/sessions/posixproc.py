@@ -10,7 +10,7 @@ only the agents' own persistent shells live elsewhere, each in its own
 detached pty host (`base/sessions/pty`), which keeps the long-lived
 interactive pane.
 
-`ops.agent_launch` and the reap / status consumers use this surface:
+The agent launch and the reap / status consumers use this surface:
 
 - a "session" is a named process launched **double-forked** (via
   `base._reparent`) so it reparents to init immediately — a long-lived spawner

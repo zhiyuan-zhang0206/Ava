@@ -31,10 +31,6 @@ dispatcher's stall scan reads ``admission_wait_age_s`` to tell "queued" from
 is observability (``/stats`` + the ``host_admission_wait_exceeded`` event),
 never a cancellation trigger.
 
-Process mode does not use this registry: its wedged controller already owns
-per-agent recovery over a pid, and a process-internal clock would be invisible
-to the controller that lives in another daemon.
-
 Module-level state on purpose. One host process serves every local agent, both
 consumers are that process, and per-agent monotonic timestamps need no
 cross-process coordination. No locks: every writer runs on the host's single

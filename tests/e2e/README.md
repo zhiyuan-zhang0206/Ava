@@ -70,11 +70,9 @@ multi-chunk.
   a fresh generation before gateway launch; after its health checks, the process
   restarter or hosted agent-host marks that generation serving. The fixture clears
   it after each test, because the file-backed marker outlives database truncation.
-- **AVA_* env forwarding**: the gateway launches an agent as a detached, native process
-  with an explicitly built child env dict (`ops.agent_launch.agent_spawn_env_dict`), so the
-  test's `AVA_*` overrides reach it. Sessions (daemons, agent shells) need the same
-  explicitness — the env is handed over out-of-band, never argv — and get it from the
-  built env dict / 0600 envfile (argv is world-readable, issue #974).
+- **AVA_* env forwarding**: sessions (daemons, agent shells) get an explicitly built env —
+  handed over out-of-band, never argv — from the built env dict / 0600 envfile (argv is
+  world-readable, issue #974).
 
 ## Current scenarios
 
