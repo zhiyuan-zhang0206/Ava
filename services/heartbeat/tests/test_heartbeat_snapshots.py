@@ -12,7 +12,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
-from base.daemon.health import Liveness
+from base.daemon.loop_health import LoopProgress
 from services.heartbeat import daemon as heartbeat_daemon
 from services.heartbeat.liveness import run_liveness_pass
 
@@ -172,7 +172,11 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
     monkeypatch.setattr(heartbeat_daemon, "_sleep_with_liveness", fake_sleep)
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(heartbeat_daemon._liveness_loop(cast(ConnectionPool, object()), Liveness(60.0)))
+        asyncio.run(
+            heartbeat_daemon._liveness_loop(
+                cast(ConnectionPool, object()), LoopProgress("liveness", 60.0)
+            )
+        )
 
     assert events == ["pass", "sleep"]
 
@@ -195,6 +199,10 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
     monkeypatch.setattr(heartbeat_daemon, "_sleep_with_liveness", sleep)
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(heartbeat_daemon._liveness_loop(cast(ConnectionPool, object()), Liveness(60.0)))
+        asyncio.run(
+            heartbeat_daemon._liveness_loop(
+                cast(ConnectionPool, object()), LoopProgress("liveness", 60.0)
+            )
+        )
 
     assert events == ["pass", "sleep", "pass", "sleep"]  # no hot loop on a failing pass

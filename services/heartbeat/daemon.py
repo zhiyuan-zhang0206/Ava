@@ -22,7 +22,6 @@ identity probe (`ops/roster/healthz.py`).
 """
 
 import asyncio
-import contextlib
 import logging
 import math
 import os
@@ -38,13 +37,14 @@ import base.db
 from base import telemetry
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
-from base.daemon.health import Liveness, start_health_server, stop_health_server
+from base.daemon.health import start_health_server, stop_health_server
+from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
-from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
+from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S, completion_digest
 from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -66,6 +66,9 @@ def _pidfile() -> Path:
 # -> watchdog respawn.
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
+# One digest round is a bounded read plus one delivery per completed agent-hour; the
+# loop also beats during its 60 s waits.
+_DIGEST_LIVENESS_TIMEOUT_S = 300.0
 
 # ── Wakeup-storm flattening (density hardening) ──
 # A check-in wakes an idle agent: its ~90MB compressed heap decompresses (~25-40ms
@@ -481,7 +484,7 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), "services.heartbeat.daemon")
 
 
-async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
+async def _sleep_with_liveness(liveness: LoopProgress, total_s: float) -> None:
     """Sleep `total_s`, beating liveness every `_LIVENESS_BEAT_STEP_S` so a long
     inter-poll wait keeps /healthz fresh instead of reading as a wedged loop."""
     remaining = total_s
@@ -492,7 +495,7 @@ async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
         remaining -= step
 
 
-async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+async def _dispatch_loop(pool: ConnectionPool, liveness: LoopProgress) -> None:
     """Main loop: on bounded dispatch steps, send a check-in to due idle agents
     that have not paused.
 
@@ -574,7 +577,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
             _log.exception("[heartbeat] poll iteration failed")
 
 
-async def _liveness_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+async def _liveness_loop(pool: ConnectionPool, liveness: LoopProgress) -> None:
     """Run agent-liveness checks, the first at start so the roster read model is
     populated at once; a failed pass is retried on the next interval."""
     while True:
@@ -598,24 +601,27 @@ async def run() -> None:
     _write_pidfile()
     _log.info("[heartbeat] pidfile written: %s", _pidfile())
 
-    liveness = Liveness(_LIVENESS_TIMEOUT_S)
+    liveness = LivenessGroup()
+    dispatch_progress = liveness.register("dispatch", _LIVENESS_TIMEOUT_S)
+    liveness_progress = liveness.register("liveness", _LIVENESS_TIMEOUT_S)
+    digest_progress = liveness.register("completion_digest", _DIGEST_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint()
     health = await start_health_server("heartbeat", endpoint.health_port, liveness=liveness)
     _log.info("[heartbeat] healthz listening on :%s", endpoint.health_port)
 
     pool = base.db.pool()
-    # Liveness pass (Task #1174): a slow independent task alongside the check-in
-    # loop, so a stalled probe fan-out (bounded by _PROBE_TIMEOUT_S) can never
-    # delay a check-in. One pass per _PASS_INTERVAL_S, first pass after one full
-    # interval (the DB merge is cheap; there is nothing to judge before the
-    # first probe anyway).
-    liveness_task = asyncio.create_task(_liveness_loop(pool, liveness))
     try:
-        await _dispatch_loop(pool, liveness)
+        # One TaskGroup owns the resident loops, each with its own progress tracker
+        # so a stalled loop cannot be masked by a busy sibling. The liveness pass
+        # (Task #1174) is a slow independent loop beside the check-in loop, so a
+        # stalled probe fan-out (bounded by _PROBE_TIMEOUT_S) can never delay a
+        # check-in; the completion digest is a third. A loop that raises cancels
+        # its siblings and ends the process, and the supervisor restarts it.
+        async with asyncio.TaskGroup() as loops:
+            loops.create_task(_dispatch_loop(pool, dispatch_progress))
+            loops.create_task(_liveness_loop(pool, liveness_progress))
+            loops.create_task(completion_digest.completion_digest_loop(pool, digest_progress))
     finally:
-        liveness_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await liveness_task
         pool.close()
         await stop_health_server(health)
         _remove_pidfile()

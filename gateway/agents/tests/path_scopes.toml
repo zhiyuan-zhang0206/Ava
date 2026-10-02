@@ -1,7 +1,7 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.gateway_tests" = [
-    "test_completion_notice_flusher.py",
+    "test_completion_digest_not_in_gateway.py",
     "test_context_breakdown.py",
     "test_inbound_provenance.py",
     "test_resurrect_forward.py",

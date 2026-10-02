@@ -1,5 +1,6 @@
-"""The stop window: the heartbeat's check-in and liveness loops skip their passes while the
-unit is quiesced, so neither borrows a connection from a pool the stop is about to close."""
+"""The stop window: the heartbeat's check-in, liveness and completion-digest loops skip their
+passes while the unit is quiesced, so none borrows a connection from a pool the stop is about
+to close."""
 
 from __future__ import annotations
 
@@ -11,25 +12,25 @@ from unittest.mock import MagicMock
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.daemon.health import Liveness
+from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
-from services.heartbeat import daemon
+from services.heartbeat import completion_digest, daemon
 
 
 async def _run_briefly(
     monkeypatch: pytest.MonkeyPatch,
-    loop: Callable[[ConnectionPool, Liveness], Coroutine[Any, Any, None]],
+    loop: Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]],
     pool: object,
     *,
     quiesced: bool,
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
 
-    async def short_sleep(_liveness: Liveness, _total_s: float) -> None:
+    async def short_sleep(_progress: LoopProgress, _total_s: float) -> None:
         await asyncio.sleep(0.01)
 
     monkeypatch.setattr(daemon, "_sleep_with_liveness", short_sleep)
-    task = asyncio.create_task(loop(cast("ConnectionPool", pool), Liveness(60.0)))
+    task = asyncio.create_task(loop(cast("ConnectionPool", pool), LoopProgress("loop", 60.0)))
     try:
         await asyncio.sleep(0.2)
     finally:
@@ -58,3 +59,21 @@ async def test_a_quiesced_unit_runs_no_liveness_pass(
     monkeypatch.setattr(daemon, "run_liveness_pass", record_pass)
     await _run_briefly(monkeypatch, daemon._liveness_loop, MagicMock(), quiesced=quiesced)
     assert bool(passes) is (not quiesced)
+
+
+@pytest.mark.parametrize("quiesced", [True, False])
+async def test_a_quiesced_unit_flushes_no_completion_digest(
+    monkeypatch: pytest.MonkeyPatch, quiesced: bool
+) -> None:
+    flushes: list[object] = []
+
+    async def record_flush(pool: object) -> int:
+        flushes.append(pool)
+        return 0
+
+    monkeypatch.setattr(completion_digest, "flush_once", record_flush)
+    monkeypatch.setattr(completion_digest, "FLUSH_INTERVAL_S", 0.01)
+    await _run_briefly(
+        monkeypatch, completion_digest.completion_digest_loop, MagicMock(), quiesced=quiesced
+    )
+    assert bool(flushes) is (not quiesced)
