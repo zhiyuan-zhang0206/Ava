@@ -16,7 +16,6 @@
     "tests/gateway/test_agents_endpoints.py::gateway.routers.memory._backend_topk": 1,
     "tests/gateway/test_alerts_api.py::gateway.alerts.router._notify_im": 10,
     "tests/gateway/test_cluster_endpoints.py::ops.cluster_status._supervisor_online": 1,
-    "tests/gateway/test_cluster_status_fields.py::ops.cluster_status._collect_sessions": 1,
     "tests/gateway/test_runtime_metrics.py::gateway.middleware.runtime_metrics._sse_active_connections": 2
   },
   "tests_location": {

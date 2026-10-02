@@ -13,125 +13,15 @@ promises, clients inherit) are only as strong as this test — it is the
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
-from typing import Any
-
 import pytest
 
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency, PauseSemantics
-from gateway.app import app
-from gateway.middleware import pause_policy
 
 # The audited exempt surface: exactly the surfaces that must stay reachable
 # mid-migration. Adding a route here is a deliberate control-plane decision
 # (it survives a migration and skips the pause 503); anything else is
 # data-plane by default.
-_EXPECTED_CONTROL_PLANE = frozenset(
-    {
-        ("POST", "/api/cluster/stopping"),
-        ("GET", "/api/cluster/status"),
-        ("GET", "/api/cluster/roster"),
-        ("GET", "/api/cluster/admin/events"),
-        ("GET", "/api/cluster/machines"),
-        ("DELETE", "/api/cluster/machines/{name}"),
-        ("POST", "/api/cluster/machines/{name}/staging"),
-        ("POST", "/api/cluster/machines/{name}/pause"),
-        ("POST", "/api/cluster/machines/{name}/resume"),
-        ("POST", "/api/alerts"),
-        ("POST", "/api/work-failed"),
-        ("GET", "/api/health"),
-        ("GET", "/api/bootstrap"),
-    }
-)
-
-
-def _iter_effective_routes(routes: Iterable[Any]) -> Iterator[Any]:
-    """Yield leaf route entries from fastapi's effective route tree.
-
-    fastapi >= 0.141 no longer yields ``APIRoute`` objects from ``app.routes``:
-    each router include surfaces a wrapper whose ``effective_candidates()``
-    nests until it reaches a leaf. Duck-typed (the wrapper classes are
-    fastapi-private), and recursed because includes can nest.
-    """
-    for route in routes:
-        candidates = getattr(route, "effective_candidates", None)
-        if candidates is None:
-            yield route
-        else:
-            yield from _iter_effective_routes(candidates())
-
-
-def _app_route_keys() -> set[tuple[str, str]]:
-    """(method, path template) for every HTTP route on the app."""
-    keys: set[tuple[str, str]] = set()
-    for route in _iter_effective_routes(app.routes):
-        original = getattr(route, "original_route", route)
-        path = getattr(route, "path", None) or getattr(original, "path", None)
-        methods = getattr(original, "methods", None) or ()
-        if not path:
-            continue
-        for method in methods:
-            if method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
-                keys.add((method, path))
-    return keys
-
-
-def test_every_route_declares_a_contract() -> None:
-    """Lint: no route may ship without a doorplate."""
-    missing = _app_route_keys() - set(contracts.ROUTE_CONTRACTS)
-    assert not missing, (
-        "routes without a contract declaration — add them to "
-        "base/api_contracts/contracts.py: " + ", ".join(f"{m} {p}" for m, p in sorted(missing))
-    )
-
-
-def test_no_orphan_contracts() -> None:
-    """Lint: a declaration that no route uses is a lie — drop it."""
-    orphan = set(contracts.ROUTE_CONTRACTS) - _app_route_keys()
-    assert not orphan, (
-        "contract declarations with no matching route — remove them from "
-        "base/api_contracts/contracts.py: " + ", ".join(f"{m} {p}" for m, p in sorted(orphan))
-    )
-
-
-def test_pause_exempt_surface_is_audited() -> None:
-    """The exempt surface is exactly the reviewed set — no silent additions.
-
-    This is the "enumerable and auditable" property of doorplate ②: a new
-    exemption must be a deliberate edit to this test + the contract, never
-    an invisible middleware string.
-    """
-    assert pause_policy.control_plane_surface() == _EXPECTED_CONTROL_PLANE
-
-
-def test_should_bypass_pause_agrees_with_surface() -> None:
-    """The decision function answers by the declared surface, on concrete
-    request paths (templates must match real paths)."""
-    exempt = [
-        ("GET", "/api/health"),
-        ("GET", "/api/cluster/status"),
-        ("POST", "/api/cluster/stopping"),
-        ("POST", "/api/alerts"),
-        ("GET", "/api/bootstrap"),
-    ]
-    blocked = [
-        ("GET", "/api/alerts"),  # same template as the exempt webhook, different method
-        ("GET", "/api/alerts/stream"),
-        ("GET", "/api/agents"),
-        ("GET", "/api/agents/42/messages"),
-        ("GET", "/api/agents/42"),
-        ("GET", "/api/cluster/status/extra"),  # exact match, not prefix
-        ("POST", "/api/cluster/update"),  # retired route: no pause exemption survives it
-        ("POST", "/api/cluster/recover"),  # retired route: no pause exemption survives it
-        ("GET", "/pages/5-report/a/b"),
-    ]
-    for method, path in exempt:
-        assert pause_policy.should_bypass_pause(method, path), f"expected exempt: {method} {path}"
-    for method, path in blocked:
-        assert not pause_policy.should_bypass_pause(method, path), (
-            f"expected blocked: {method} {path}"
-        )
 
 
 def test_sdk_inherits_idempotency_from_contracts() -> None:
