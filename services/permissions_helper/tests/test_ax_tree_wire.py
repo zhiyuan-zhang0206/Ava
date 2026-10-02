@@ -47,9 +47,20 @@ def test_ax_tree_request_carries_the_bounds_and_omits_an_absent_scope(
 
 def test_ax_tree_request_forwards_a_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _capture(monkeypatch)
-    client.ax_tree("Finder", scope="e12", max_nodes=50)
-    assert seen[0][1]["scope"] == "e12"
+    client.ax_tree("Finder", scope=12, scope_fp="abc", max_nodes=50)
+    assert (seen[0][1]["scope"], seen[0][1]["scope_fp"]) == (12, "abc")
     assert seen[0][1]["max_nodes"] == 50
+
+
+def test_ax_act_request_carries_the_value_only_when_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _capture(monkeypatch)
+    client.ax_act("Mail", 7, "press")
+    client.ax_act("Mail", 7, "set_value", value="hi")
+    (method, plain), (_, with_value) = seen
+    assert method == "ax_act"
+    assert (plain["app"], plain["id"], plain["action"]) == ("Mail", 7, "press")
+    assert "value" not in plain
+    assert with_value["value"] == "hi"
 
 
 def test_swift_gates_ax_tree_on_the_accessibility_grant_and_advertises_it() -> None:
@@ -60,9 +71,30 @@ def test_swift_gates_ax_tree_on_the_accessibility_grant_and_advertises_it() -> N
 
 
 def test_swift_walk_is_bounded_and_never_echoes_secure_fields() -> None:
-    walk = _SWIFT.split("func axTree(", 1)[1].split("// MARK: - Root keeper", 1)[0]
+    walk = _SWIFT.split("func axTree(", 1)[1].split("func axAct(", 1)[0]
     assert "AXUIElementSetMessagingTimeout" in walk
     assert "timeIntervalSince(started) > budget" in walk
     assert "nodes.count >= maxNodes" in walk
     assert "depth + 1 >= maxDepth" in walk
     assert 'node["subrole"] as? String != "AXSecureTextField"' in walk
+
+
+def test_swift_ax_act_gates_validates_and_never_echoes_the_value() -> None:
+    gated = _SWIFT.split("let axGatedMethods: Set<String> = [", 1)[1].split("]", 1)[0]
+    assert '"ax_act"' in gated
+    assert 'case "ax_act": result = try axAct(req)' in _SWIFT
+    assert '"ax_act_v1": true' in _SWIFT
+    act = _SWIFT.split("func axAct(", 1)[1].split("// MARK: - Root keeper", 1)[0]
+    # A recycled or vanished element answers stale instead of being acted on.
+    assert "axSignature(role: role, values: values) == entry.sig" in act
+    assert "AXUIElementIsAttributeSettable" in act
+    assert "AXUIElementSetMessagingTimeout" in act
+    assert 'result["value"]' not in act and "\\(text)" not in act
+
+
+def test_swift_fingerprints_exclude_values_and_chain_from_the_parent() -> None:
+    walk = _SWIFT.split("func axTree(", 1)[1].split("func axAct(", 1)[0]
+    assert 'ordinalKey = parentFp + "/" + segment' in walk
+    assert "siblingCounts[ordinalKey" in walk
+    discriminator = _SWIFT.split("private func axDiscriminator", 1)[1].split("private func", 1)[0]
+    assert "values[4]" not in discriminator  # index 4 is the value attribute

@@ -30,7 +30,14 @@ def node(
     frame: tuple[float, float, float, float] | None = (10.0, 20.0, 100.0, 40.0),
     **attrs: Any,
 ) -> AxNode:
-    out: dict[str, Any] = {"id": nid, "depth": depth, "n": n, "role": role, **attrs}
+    out: dict[str, Any] = {
+        "id": nid,
+        "fp": f"fp{nid}",
+        "depth": depth,
+        "n": n,
+        "role": role,
+        **attrs,
+    }
     if parent is not None:
         out["parent"] = parent
     if frame is not None:
@@ -219,8 +226,10 @@ def fake_ax(monkeypatch: pytest.MonkeyPatch) -> FakeAxHelper:
     return fake
 
 
-async def call_ax(args: dict[str, Any] | None = None) -> dict[str, Any]:
-    daemon = ComputerMcpDaemon(sock="/nonexistent-test.sock")
+async def call_ax(
+    args: dict[str, Any] | None = None, daemon: ComputerMcpDaemon | None = None
+) -> dict[str, Any]:
+    daemon = daemon or ComputerMcpDaemon(sock="/nonexistent-test.sock")
     resp = await daemon._dispatch(
         {"id": 1, "method": "call_tool", "tool": "ax_tree", "args": args or {}, "agent_id": None}
     )
@@ -238,10 +247,25 @@ async def test_ax_tree_defaults_to_the_frontmost_app_and_renders(fake_ax: FakeAx
     assert fake_ax.calls[-1][1]["scope"] is None
 
 
-async def test_ax_tree_passes_scope_and_widens_the_raw_walk(fake_ax: FakeAxHelper) -> None:
-    await call_ax({"app": "Notes", "scope": "e12", "max_nodes": 300})
+async def test_ax_tree_scope_goes_through_the_raw_id_and_widens_the_walk(
+    fake_ax: FakeAxHelper,
+) -> None:
+    daemon = ComputerMcpDaemon(sock="/nonexistent-test.sock")
+    await call_ax({"app": "Mail"}, daemon)
+    await call_ax({"app": "Mail", "scope": "e2", "max_nodes": 300}, daemon)
     call = fake_ax.calls[-1][1]
-    assert (call["app"], call["scope"], call["max_nodes"]) == ("Notes", "e12", 1200)
+    assert (call["app"], call["scope"], call["scope_fp"], call["max_nodes"]) == (
+        "Mail",
+        2,
+        "fp2",
+        1200,
+    )
+
+
+async def test_ax_tree_scope_without_a_prior_walk_is_refused(fake_ax: FakeAxHelper) -> None:
+    with pytest.raises(ComputerUseError, match="call ax_tree first"):
+        await call_ax({"app": "Mail", "scope": "e2"})
+    assert all(name != "ax_tree" for name, _ in fake_ax.calls)
 
 
 async def test_ax_tree_unusable_window_returns_the_verdict_and_no_tree(
