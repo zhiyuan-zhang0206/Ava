@@ -39,6 +39,9 @@ newer than the backup had been archived), the duration and, on failure, Postgres
    ava backup walg restore --dir /srv/restore/pg            # newest backup, end of the archive
    ```
 
+   Run as an OS user other than the one that ran initdb on the source, add `--user <that
+   user>`: it is the restored cluster's superuser, and a role that does not exist ends the
+   restore at once with Postgres' error.
 3. The directory is left as a promoted database on a new timeline, Postgres not running.
    A failure leaves the directory for inspection; empty it before retrying.
 4. Before it replaces the live database or backs a new primary, switch to a new WAL-G

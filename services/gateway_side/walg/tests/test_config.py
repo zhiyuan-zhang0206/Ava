@@ -66,6 +66,15 @@ def test_every_required_setting_must_be_present(sandbox: Sandbox, missing: str) 
     assert missing in _refused(sandbox, "must set")
 
 
+def test_the_region_is_the_bare_id_not_the_endpoint_form(sandbox: Sandbox) -> None:
+    """OSS signs with `cn-shanghai`; `oss-cn-shanghai` fails with "Invalid signing region"."""
+    sandbox.write_config(valid_config(sandbox.key_file, OSS_REGION="oss-cn-shanghai"))
+
+    message = _refused(sandbox, "OSS_REGION")
+
+    assert "cn-shanghai, not oss-cn-shanghai" in message
+
+
 def test_the_key_transform_must_be_hex(sandbox: Sandbox) -> None:
     sandbox.write_config(valid_config(sandbox.key_file, WALG_LIBSODIUM_KEY_TRANSFORM="base64"))
 
