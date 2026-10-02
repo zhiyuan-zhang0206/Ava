@@ -139,7 +139,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
                 pending.append((key, _notify_text(alert, lang)))
         conn.commit()
 
-    publish_alert_rows(rows)
+    publish_alert_rows(request.app.state.bus, rows)
 
     if pending:
         with write_transaction(request.app.state.db_pool) as conn:
@@ -170,7 +170,7 @@ async def get_alerts_stream(request: Request) -> StreamingResponse:
 
     return StreamingResponse(
         event_stream(
-            settings.data_plane.redis_url,
+            request.app.state.bus,
             0,
             request,
             channel=ALERTS_CHANNEL,

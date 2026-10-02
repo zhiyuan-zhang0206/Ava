@@ -96,7 +96,11 @@ def _reset_health_state(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def published(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    monkeypatch.setattr("gateway.alerts.publish.publish_alert_rows", rows.extend)
+
+    def publish(_bus: object, published: list[dict[str, Any]]) -> None:
+        rows.extend(published)
+
+    monkeypatch.setattr("gateway.alerts.publish.publish_alert_rows", publish)
     return rows
 
 
