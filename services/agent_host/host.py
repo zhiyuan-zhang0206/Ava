@@ -87,6 +87,7 @@ from base.config import settings
 from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from base.deploy.maintenance import admission
 from base.events.live.announce import publish_agent_updated
+from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.redis_client import get_async_redis
 from base.log import logger
@@ -358,7 +359,7 @@ class AgentHost:
                     bind_agent_plugin_config(plugin_pins),
                     recovery_reconstruction_scope(self._checkpointer, str(agent_id)),
                 ):
-                    await publish_agent_updated(agent_id)
+                    await publish_agent_updated(EventBus.from_settings(), agent_id)
                     runtime = await self._runtime_for(agent_id, stored.fingerprint)
                     outcome = await self._drive_turns(agent_id, runtime)
             except asyncio.CancelledError:

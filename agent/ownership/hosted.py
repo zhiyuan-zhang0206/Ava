@@ -33,6 +33,7 @@ from base.deploy.progress_timeout import (
     LEGACY_HOST_ADOPTION_SILENCE_S,
 )
 from base.events.live.announce import publish_agent_updated
+from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import ava_home
@@ -169,7 +170,7 @@ async def apply_hosted_lifecycle(
                 (incarnation.agent_id, row[0]),
             )
     if lifecycle_kind == "terminate":
-        await publish_agent_updated(incarnation.agent_id)
+        await publish_agent_updated(EventBus.from_settings(), incarnation.agent_id)
     return lifecycle_kind
 
 
@@ -615,7 +616,7 @@ async def settle_hosted_runtime(
     if settled_event is not None:
         telemetry.emit_prepared(settled_event)
     if changed:
-        await publish_agent_updated(incarnation.agent_id)
+        await publish_agent_updated(EventBus.from_settings(), incarnation.agent_id)
     return changed
 
 

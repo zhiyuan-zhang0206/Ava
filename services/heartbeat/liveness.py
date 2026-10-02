@@ -65,6 +65,7 @@ from base.config import settings
 from base.db.transaction import write_transaction
 from base.deploy.transition import transition_severity
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from ops import cluster_rpc
 from ops.cluster_status import ClusterStatus
 
@@ -393,7 +394,7 @@ async def run_liveness_pass(
     changed_agent_ids = _merge_liveness(pool)
     # `_merge_liveness` committed before these best-effort invalidation hints.
     for agent_id in changed_agent_ids:
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     _log.info(
         "[heartbeat] liveness pass: %d machines probed (%d reachable), agents_meta merged",
         len(machines),

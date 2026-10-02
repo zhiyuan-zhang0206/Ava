@@ -1,6 +1,6 @@
 """Hosted ownership as the agent layer observes it: status events, restart release, the lifecycle advertisement and the owner beat."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 from uuid import UUID, uuid4
 
 import psutil
@@ -82,7 +82,7 @@ async def test_hosted_status_changes_publish_agent_updated(
 
     publish.reset_mock()
     assert await settle_hosted_runtime(aops_pool, incarnation)
-    publish.assert_awaited_once_with(agent_id)
+    publish.assert_awaited_once_with(ANY, agent_id)
 
     incarnation = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling"
@@ -93,7 +93,7 @@ async def test_hosted_status_changes_publish_agent_updated(
     with bind_turn_identity(agent_id, incarnation=incarnation):
         await claim_inbound_batch(aops_pool, agent_id)
         assert await apply_hosted_lifecycle(aops_pool, incarnation) == "terminate"
-    publish.assert_awaited_once_with(agent_id)
+    publish.assert_awaited_once_with(ANY, agent_id)
 
 
 async def test_hosted_restart_releases_before_new_incarnation(

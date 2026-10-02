@@ -105,7 +105,7 @@ def stubs(monkeypatch: pytest.MonkeyPatch) -> _Stubs:
             payload=payload,
         )
 
-    def _record_publish(agent_id: int) -> None:
+    def _record_publish(_bus: object, agent_id: int) -> None:
         published.append(agent_id)
 
     monkeypatch.setattr(lifecycle, "prepare_event_log", _record_event)

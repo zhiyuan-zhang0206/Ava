@@ -41,6 +41,7 @@ from base.config import settings
 from base.db.transaction import async_write_transaction
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from base.events.live.announce import publish_agent_updated
+from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
@@ -167,7 +168,7 @@ async def _publish_reaped_corpses(reaped: list[int]) -> None:
     """Best-effort refresh of mounted frontends; the durable flip already committed."""
     for agent_id in reaped:
         try:
-            await publish_agent_updated(agent_id)
+            await publish_agent_updated(EventBus.from_settings(), agent_id)
         except Exception:
             logger.exception(
                 "corpse reap lifecycle hint publish failed",

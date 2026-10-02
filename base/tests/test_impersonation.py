@@ -15,6 +15,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import create_agent, insert_inbound_message
 from base.events.live.projection import Cancelled
+from base.events.live.tests.fakes import patch_announcements
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 
@@ -72,8 +73,7 @@ def test_impersonation_wake_reconciles_roster_only_for_status_changes(
         pass
 
     monkeypatch.setattr(leases, "publish_inbound_wake", no_wake)
-    monkeypatch.setattr(leases, "publish_impersonation_changed_sync", timeline.append)
-    monkeypatch.setattr(leases, "publish_agent_updated_sync", roster.append)
+    patch_announcements(monkeypatch, leases, changed=timeline, updated=roster)
     leases._wake(7)
     leases._wake(7, roster_changed=True)
     assert timeline == [7, 7]
@@ -471,8 +471,7 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
 
     announced: list[int] = []
     roster_announced: list[int] = []
-    monkeypatch.setattr(maintenance, "publish_impersonation_changed_sync", announced.append)
-    monkeypatch.setattr(maintenance, "publish_agent_updated_sync", roster_announced.append)
+    patch_announcements(monkeypatch, maintenance, changed=announced, updated=roster_announced)
 
     owner = _agent(db_conn)
     lease = _active(owner)
@@ -529,8 +528,9 @@ def test_operator_force_expire_closes_only_observed_session(
         wakes.append(agent_id)
 
     monkeypatch.setattr(maintenance, "publish_inbound_wake", record_wake)
-    monkeypatch.setattr(maintenance, "publish_impersonation_changed_sync", announcements.append)
-    monkeypatch.setattr(maintenance, "publish_agent_updated_sync", roster_announcements.append)
+    patch_announcements(
+        monkeypatch, maintenance, changed=announcements, updated=roster_announcements
+    )
     with pool(max_size=2) as gateway_pool:
         assert (
             maintenance.force_expire_impersonation(

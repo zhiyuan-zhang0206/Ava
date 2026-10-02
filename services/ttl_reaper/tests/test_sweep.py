@@ -502,7 +502,7 @@ def test_reap_expired_notices_does_not_resurrect_terminated_agent(
 
     observed: list[tuple[int, str | None]] = []
 
-    def capture_hint(agent_id: int) -> None:
+    def capture_hint(_bus: object, agent_id: int) -> None:
         # A different connection must see the expiry before its hint can fire.
         with db_conn.cursor() as cur:
             cur.execute("SELECT resolution FROM agent_notices WHERE id = %s", (nid,))

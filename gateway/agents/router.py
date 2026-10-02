@@ -37,6 +37,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from base.log import logger
 from gateway.agents import forward
 from gateway.agents.forward import _forward_spawn_to_remote
@@ -483,7 +484,7 @@ def _mark_launch_failure(
         )
         changed = cur.rowcount > 0
     if changed:
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
 
 
 def _clear_launch_failure(pool: ConnectionPool, agent_id: int, attempt_id: UUID) -> None:
@@ -495,7 +496,7 @@ def _clear_launch_failure(pool: ConnectionPool, agent_id: int, attempt_id: UUID)
         )
         changed = cur.rowcount > 0
     if changed:
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
 
 
 def _read_launch_state(pool: ConnectionPool, agent_id: int) -> tuple[dict[str, object], bool, bool]:

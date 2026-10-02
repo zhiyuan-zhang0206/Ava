@@ -27,6 +27,7 @@ from base.agents.messages.chat_delivery import (
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.db import publish_inbound_wake
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from base.log import logger
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
@@ -103,7 +104,7 @@ async def deliver_chat_inbound(
     # neither roll back the inbound nor skip its arrival/resurrection tail.
     if refresh_badge:
         try:
-            await asyncio.to_thread(publish_agent_updated_sync, agent_id)
+            await asyncio.to_thread(publish_agent_updated_sync, EventBus.from_settings(), agent_id)
         except Exception as exc:
             logger.warning(
                 "deliver_chat_inbound: badge refresh for agent {aid} failed after "
