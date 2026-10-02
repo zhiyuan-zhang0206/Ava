@@ -16,11 +16,11 @@ from psycopg_pool import AsyncConnectionPool
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import BaseAgentState
+from agent.tests.test_inbound_ownership import _agent
 from base.agents.context import AvaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from base.config import settings
 from services.agent_host import host as host_module
-from tests.agent.test_inbound_ownership import _agent
 
 
 async def test_host_trace_reads_final_messages_after_nstep_flush(

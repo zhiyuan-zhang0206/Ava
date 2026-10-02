@@ -1,5 +1,7 @@
 {
   "complexity": {
+    "gateway/tests/test_agents_endpoints.py::test_get_models_reasoning_effort_options_match_factory_tables": 35,
+    "gateway/tests/test_agents_endpoints.py::test_get_models_returns_grouped_supported_models": 17,
     "gateway/tests/test_mcp_clients.py::test_create_shows_token_once_and_list_redacts_credentials": 18,
     "gateway/tests/test_metrics_router.py::test_metrics_agents_multi_agent": 17,
     "gateway/tests/test_notices_endpoint.py::test_escalations_return_open_task_notices_with_task_context": 16,
@@ -12,6 +14,7 @@
   },
   "files": {
     "gateway/tests/test_agent_inspect.py": 823,
+    "gateway/tests/test_agents_endpoints.py": 1401,
     "gateway/tests/test_agents_sdk.py": 1162,
     "gateway/tests/test_auth.py": 1161,
     "gateway/tests/test_idempotency.py": 859,
@@ -22,6 +25,8 @@
   },
   "patch_targets": {
     "gateway/tests/test_agent_inspect.py::gateway.inspect._live": 1,
+    "gateway/tests/test_agents_endpoints.py::gateway.agents.router._forward_spawn_to_remote": 1,
+    "gateway/tests/test_agents_endpoints.py::gateway.routers.memory._backend_topk": 1,
     "gateway/tests/test_agents_sdk.py::ava.gateway_client.transport._client": 1,
     "gateway/tests/test_agents_sdk.py::gateway.agents.router._forward_spawn_to_remote": 1,
     "gateway/tests/test_cache.py::gateway.cluster._stats_dashboard": 2,

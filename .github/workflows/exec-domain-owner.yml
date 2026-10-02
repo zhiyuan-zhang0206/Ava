@@ -13,8 +13,8 @@ on:
       - 'base/agents/incarnation/exec_owner*.py'
       - 'base/agents/incarnation/resource_admission.py'
       - 'base/native_process/exec_domain.py'
-      - 'tests/agent/test_exec_owner_entry.py'
-      - 'tests/agent/test_resource_admission.py'
+      - 'agent/tests/test_exec_owner_entry.py'
+      - 'agent/tests/test_resource_admission.py'
       - 'agent/graph/exec/tests/test_resource_admission_exec.py'
       - 'base/agents/incarnation/tests/test_resource_admission.py'
 permissions:
@@ -39,8 +39,8 @@ jobs:
         run: |
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
-          uv run pyright base/agents/incarnation/resources.py base/agents/incarnation/resource_admission.py base/agents/incarnation/exec_owner_protocol.py base/agents/incarnation/exec_owner_recovery.py agent/graph/exec/_owned_run.py agent/exec_domain_owner.py agent/exec_owner_child.py base/agents/incarnation/tests/test_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py agent/graph/exec/tests/test_resource_admission_exec.py base/agents/incarnation/tests/test_resource_admission.py
-          timeout 240 uv run pytest base/agents/incarnation/tests/test_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py agent/graph/exec/tests/test_resource_admission_exec.py base/agents/incarnation/tests/test_resource_admission.py -q --junitxml=proof/resource-fences.xml
+          uv run pyright base/agents/incarnation/resources.py base/agents/incarnation/resource_admission.py base/agents/incarnation/exec_owner_protocol.py base/agents/incarnation/exec_owner_recovery.py agent/graph/exec/_owned_run.py agent/exec_domain_owner.py agent/exec_owner_child.py base/agents/incarnation/tests/test_resources.py tests/ava/test_migration_baseline.py agent/tests/test_resource_admission.py agent/graph/exec/tests/test_resource_admission_exec.py base/agents/incarnation/tests/test_resource_admission.py
+          timeout 240 uv run pytest base/agents/incarnation/tests/test_resources.py tests/ava/test_migration_baseline.py agent/tests/test_resource_admission.py agent/graph/exec/tests/test_resource_admission_exec.py base/agents/incarnation/tests/test_resource_admission.py -q --junitxml=proof/resource-fences.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -71,7 +71,7 @@ jobs:
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
           uv run pyright base/native_process/exec_domain.py agent/graph/exec/_process.py tests/agent/test_exec_domain_confirmation.py
-          uv run pytest --confcutdir=tests/agent tests/agent/test_exec_domain_confirmation.py tests/agent/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
+          uv run pytest --confcutdir=tests/agent tests/agent/test_exec_domain_confirmation.py agent/tests/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:

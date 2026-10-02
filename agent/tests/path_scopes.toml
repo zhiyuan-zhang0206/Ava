@@ -3,13 +3,16 @@
 "tests.path_scoped.agent_tests" = [
     "test_checkpoint_interval.py",
     "test_exec_child.py",
+    "test_exec_owner_entry.py",
     "test_exec_subprocess.py",
     "test_history_dump.py",
     "test_impersonation_integration.py",
+    "test_inbound_ownership.py",
     "test_lazy_child_imports.py",
     "test_messages_delta_switch.py",
     "test_plugin_catalog.py",
     "test_plugin_load_containment.py",
+    "test_resource_admission.py",
     "test_state_slot.py",
 ]
 "tests.path_scoped.ava_tests" = [

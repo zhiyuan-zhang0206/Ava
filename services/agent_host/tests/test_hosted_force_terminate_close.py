@@ -21,13 +21,13 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.agents.impersonation import ImpersonationError
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host.host import AgentHost
 from services.agent_host.settlement import close_hosted_turn
-from tests.agent.test_inbound_ownership import _admit, _agent
 
 _FORCE_ERROR = "Native runtime no longer owns this agent"
 

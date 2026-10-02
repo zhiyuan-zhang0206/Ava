@@ -9,6 +9,7 @@
     "test_hosted_db_recovery.py",
     "test_hosted_failure_settlement_recovery.py",
     "test_maintenance_prior_failure.py",
+    "test_maintenance_receipt_grading.py",
     "test_maintenance_recovery.py",
     "test_pooled_checkpoint.py",
     "test_reconcile_after_abort.py",
@@ -18,6 +19,7 @@
     "test_hosted_dispatcher_cancellation.py",
 ]
 "tests.path_scoped.services_tests" = [
+    "test_agent_host.py",
     "test_agent_host_abort_reconcile.py",
     "test_agent_host_boot_defer.py",
     "test_agent_host_log_rotate.py",
