@@ -256,7 +256,7 @@ os.environ["AVA_MACHINE_HOST"] = "localhost"
 # into the rendered native dir — a production credential flowing through test
 # output. Pinned empty like the telegram token; a test that needs a credential
 # monkeypatches `settings.alerts.grafana_admin_password`
-# (tests/cli/test_converge_lgtm.py does).
+# (cli/commands/observability/tests/test_converge_lgtm.py does).
 os.environ["GRAFANA_ADMIN_PASSWORD"] = ""
 
 # The gateway address every client-side caller resolves (`gateway_api_base()` ->

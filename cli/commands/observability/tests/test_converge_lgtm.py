@@ -7,7 +7,6 @@ carrying the $AVA_HOME/lgtm-host marker.
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 from pathlib import Path
@@ -80,53 +79,13 @@ def _empty_native_versions(_repo: Path) -> dict[str, dict[str, str]]:
     return {}
 
 
-def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_defaults(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The native Loki and Prometheus listeners are rendered from
-    settings.observability.lgtm_listen_host; the loopback default reproduces the
-    pre-parameterization output byte for byte (the contract lock for the
-    AVA_LGTM_LISTEN_HOST knob)."""
-    native = Path(__file__).resolve().parents[2] / "deploy/lgtm/native"
-    loki = (native / "config/loki.yaml").read_text(encoding="utf-8")
-    assert "http_listen_address: __LGTM_LISTEN_HOST__" in loki
-    assert "grpc_listen_address: __LGTM_LISTEN_HOST__" in loki
-    # Single-binary internal addresses stay pinned to loopback by design.
-    assert "instance_addr: 127.0.0.1" in loki
-    assert "address: 127.0.0.1" in loki
-    assert (
-        "--web.listen-address={lgtm_listen_host}:{lgtm_prometheus_port}"
-        in lgtm_native._NATIVE_CONSTANTS["prometheus"].arguments
-    )
-
-    repo = Path(__file__).resolve().parents[2]
-    home = tmp_path / "home"
-    native_dir = home / "lgtm/native"
-    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "127.0.0.1")
-    lgtm_native._render_configs(repo, native_dir, home)
-    rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
-    assert "http_listen_address: 127.0.0.1" in rendered_loki
-    assert "grpc_listen_address: 127.0.0.1" in rendered_loki
-    prometheus_argv = service_argv(home, "prometheus")
-    assert "--web.listen-address=127.0.0.1:9090" in prometheus_argv
-
-    # A non-loopback setting flows through to the rendered listeners.
-    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "10.0.0.5")
-    lgtm_native._render_configs(repo, native_dir, home)
-    rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
-    assert "http_listen_address: 10.0.0.5" in rendered_loki
-    assert "grpc_listen_address: 10.0.0.5" in rendered_loki
-    prometheus_argv = service_argv(home, "prometheus")
-    assert "--web.listen-address=10.0.0.5:9090" in prometheus_argv
-
-
 def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Grafana's http_addr is rendered from settings.observability.lgtm_grafana_listen_host;
     the 0.0.0.0 default writes out the historical all-interfaces bind explicitly —
     the one byte-level change the parameterization makes (semantics preserved)."""
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
@@ -184,93 +143,13 @@ def _assert_rendered_provisioning(
     assert "{{" not in contact_text
 
 
-def _assert_contains(text: str, *needles: str) -> None:
-    for needle in needles:
-        assert needle in text
-
-
-def test_native_grafana_renders_from_the_repo_and_host_setting(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    repo = Path(__file__).resolve().parents[2]
-    home = tmp_path / "home"
-    native_dir = home / "lgtm/native"
-    monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_query_url",
-        "http://tempo.test:3200/",
-    )
-    monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_endpoint",
-        "http://tempo.test:14318/",
-    )
-
-    lgtm_native._render_configs(repo, native_dir, home)
-    grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
-    runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
-    run_script = (native_dir / "grafana/run.sh").read_text(encoding="utf-8")
-    prometheus = yaml.safe_load((native_dir / "config/prometheus.yml").read_text(encoding="utf-8"))
-
-    for text in (grafana_ini, runtime_env, run_script):
-        assert "{{" not in text
-    _assert_contains(
-        runtime_env,
-        f"GRAFANA_PROVISIONING_PATH={native_dir}/config/provisioning/dashboards",
-        "AVA_TELEMETRY_TEMPO_QUERY_URL=http://tempo.test:3200",
-    )
-    _assert_contains(
-        run_script,
-        "admin_password",
-        'export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://localhost:3003}"',
-        f"{repo}/deploy/lgtm/.env",
-        f"{native_dir}/config/runtime.env",
-        str(native_dir / "grafana-home/bin/grafana"),
-        str(native_dir / "config/grafana.ini"),
-        str(native_dir / "grafana-home"),
-    )
-    assert {
-        job["job_name"]: job["static_configs"][0]["targets"] for job in prometheus["scrape_configs"]
-    }["tempo"] == ["tempo.test:3200"]
-
-    # The repo datasources.yml is a template; the rendered copy under the
-    # native dir carries the baked URLs (default = loopback, byte-identical
-    # to the pre-parameterization content).
-    template = (
-        repo / "deploy/lgtm/config/grafana/provisioning/datasources/datasources.yml"
-    ).read_text(encoding="utf-8")
-    _assert_contains(
-        template,
-        "$__env{AVA_TELEMETRY_LOKI_URL}",
-        "$__env{AVA_TELEMETRY_PROMETHEUS_URL}",
-        "$__env{AVA_PG_URL}",
-        "$__env{AVA_TELEMETRY_TEMPO_QUERY_URL}",
-    )
-    # The rendered provisioning tree keeps the $__env{} references verbatim;
-    # the two-state VALUES are baked into runtime.env (Grafana expands at
-    # runtime from its process env).
-    rendered_datasources = (
-        native_dir / "config/provisioning/datasources/datasources.yml"
-    ).read_text(encoding="utf-8")
-    assert "$__env{AVA_TELEMETRY_LOKI_URL}" in rendered_datasources
-    for text in (template, rendered_datasources):
-        assert "{{" not in text
-    rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
-    _assert_contains(
-        rendered_runtime_env,
-        "AVA_TELEMETRY_LOKI_URL=http://127.0.0.1:3100",
-        "AVA_TELEMETRY_PROMETHEUS_URL=http://127.0.0.1:9090",
-        "AVA_PG_URL=127.0.0.1:5433",
-        "AVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts",
-    )
-    _assert_rendered_provisioning(native_dir, loki="$__env{AVA_TELEMETRY_LOKI_URL}")
-
-
 def test_native_provisioning_renders_remote_observatory_urls(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """AVA_OBSERVABILITY_URL set -> the datasources + alert webhook render the
     remote observatory endpoints; unset -> the current loopback defaults
     (locked by test_native_grafana_renders_from_the_repo_and_host_setting)."""
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
@@ -308,7 +187,7 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
     """No observatory -> the webhook stays byte-identical 127.0.0.1:8000 even
     when reachable_host() would resolve to a tailnet address — self-dialing
     a tailnet IP from the gateway host can hit VPN hairpin filtering."""
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
@@ -330,7 +209,7 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
 ) -> None:
     """A rendered provisioning file the user hand-edited is warned about and
     preserved on the next converge — never overwritten (web-sources precedent)."""
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
 
@@ -356,7 +235,7 @@ def test_native_provisioning_removes_stale_rendered_files(
 ) -> None:
     """A rendered file whose source template vanished is removed when untouched
     (pure derived state) — matching the web-sources cleanup rule."""
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
 
@@ -414,7 +293,7 @@ def test_observability_url_validation_warns_and_falls_back(
 def test_native_converge_renders_grafana_password_only_when_configured(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
@@ -438,7 +317,7 @@ def test_native_converge_renders_grafana_password_only_when_configured(
 def test_native_converge_leaves_unconfigured_grafana_password_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
@@ -476,7 +355,7 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
         "base.config.settings.observability.telemetry_tempo_endpoint", intake_endpoint
     )
 
-    lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
+    lgtm_native._render_configs(Path(__file__).resolve().parents[4], tmp_path / "native", tmp_path)
 
     captured = capsys.readouterr()
     if warns:
@@ -535,7 +414,7 @@ def test_native_config_warns_when_widened_listen_host_has_loopback_read_urls(
         "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
 
-    lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
+    lgtm_native._render_configs(Path(__file__).resolve().parents[4], tmp_path / "native", tmp_path)
 
     captured = capsys.readouterr()
     for env_var in expected_warns:
@@ -574,53 +453,10 @@ def test_native_config_warns_only_when_read_urls_stay_loopback_after_widening(
         "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
 
-    lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
+    lgtm_native._render_configs(Path(__file__).resolve().parents[4], tmp_path / "native", tmp_path)
 
     captured = capsys.readouterr()
     assert captured.err == ""
-
-
-def _without_loki_transport_paths(config: dict[str, object]) -> dict[str, object]:
-    """Drop the explicitly host/container-specific Loki transport paths."""
-    comparable = copy.deepcopy(config)
-    for path in (
-        ("common", "path_prefix"),
-        ("common", "storage", "filesystem", "chunks_directory"),
-        ("common", "storage", "filesystem", "rules_directory"),
-        ("compactor", "working_directory"),
-        ("server", "http_listen_address"),
-        ("server", "grpc_listen_address"),
-        ("server", "http_listen_port"),
-        ("server", "grpc_listen_port"),
-        ("common", "ring", "instance_addr"),
-        ("frontend", "address"),
-    ):
-        parent: dict[str, object] = comparable
-        for key in path[:-1]:
-            child = parent.get(key)
-            if child is None:
-                break
-            assert isinstance(child, dict)
-            parent = child
-        else:
-            parent.pop(path[-1], None)
-    if comparable.get("frontend") == {}:
-        comparable.pop("frontend")
-    return comparable
-
-
-def test_native_loki_limits_match_the_container_rollback_config() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    container = yaml.safe_load((repo / "deploy/lgtm/config/loki.yaml").read_text(encoding="utf-8"))
-    native = yaml.safe_load(
-        (repo / "deploy/lgtm/native/config/loki.yaml").read_text(encoding="utf-8")
-    )
-
-    assert _without_loki_transport_paths(native) == _without_loki_transport_paths(container)
-    # Both variants must ship the noise-reducing level (task #1978): the
-    # default info writes every flush stream per chunk into the launchd log.
-    assert container["server"]["log_level"] == "warn"
-    assert native["server"]["log_level"] == "warn"
 
 
 def test_native_step_runs_only_for_the_marker_home(
@@ -684,7 +520,7 @@ def test_station_role_renders_full_native_set_without_marker(
     """Dry-run: a second machine declaring the station role renders the FULL
     native set — configs, launchd plists, and storage dirs — with no marker
     and no version downloads (the WP1 acceptance render)."""
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "station-home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
@@ -713,7 +549,7 @@ def test_native_storage_dir_default_matches_historical_layout(
     """Empty AVA_LGTM_STORAGE_DIR renders the historical
     $AVA_HOME/lgtm/native/data paths byte-for-byte — the macmini re-render
     diff stays empty (the storage-parameterization zero-regression contract)."""
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", "")
@@ -732,7 +568,7 @@ def test_native_storage_dir_default_matches_historical_layout(
 def test_native_storage_dir_parameterized(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A per-machine AVA_LGTM_STORAGE_DIR moves the Loki filesystem store and
     the Prometheus TSDB onto the configured data volume."""
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", "/data/obs")
@@ -753,7 +589,7 @@ def test_station_role_creates_configured_storage_dirs(
 ) -> None:
     """The converge render creates the configured storage root plus the loki
     and prom subdirs (start.sh parity for a custom data volume)."""
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "station-home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()

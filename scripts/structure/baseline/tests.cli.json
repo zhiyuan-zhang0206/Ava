@@ -11,8 +11,5 @@
     "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._check_script": 1,
     "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._open_verify_starts_at": 4,
     "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._read_schedule_rows": 2
-  },
-  "tests_location": {
-    "tests/cli/test_converge_lgtm.py::top-level": 1
   }
 }

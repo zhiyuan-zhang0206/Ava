@@ -94,6 +94,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "drift locks of the generated config index, base/host/env/config_lite_table.json, against its generator and the live registry",
     ),
+    "tests/base/test_connect_helpers_contract.py": (
+        "contract",
+        "the migration restores the column the baseline schema, db/schema.sql, gives a fresh database",
+    ),
     "tests/base/test_crash_row_writers.py": (
         "contract",
         "scans every production module for writers of the crash-row predicate fields",
@@ -201,6 +205,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/ci/test_workflow_paths.py": (
         "contract",
         "scans every .github/workflows file for unfiltered pull_request/push triggers",
+    ),
+    "tests/cli/test_converge_lgtm_contract.py": (
+        "contract",
+        "the rendered LGTM configs equal the repository's deploy/lgtm provisioning files (loki.yaml, datasources.yml) and the native Loki limits match the container rollback config",
     ),
     "tests/cli/test_converge_redis_bridge.py": (
         "integration",
