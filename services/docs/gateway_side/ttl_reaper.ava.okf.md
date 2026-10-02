@@ -25,7 +25,7 @@ Two resident sequential loops under one `TaskGroup` (`services/ttl_reaper/daemon
 ## Key Dependencies
 - `agent_shell_ttls`, `agent_pages`, `web_sessions`, `agent_notices`, `work_failed_events`, `maintenance_state` — the tables it reads and settles.
 - `ops.cluster_rpc` — the `shell_kill` op to runners' ops servers.
-- [[delivery_watchdog.ava.okf.md]] — shares `services/delivery_watchdog/rounds.py` (the round runner and bounded fan-out).
+- `base/daemon/round_loop.py` — the round runner and bounded fan-out the resident service loops share (also the delivery watchdog).
 
 ## Entry Points
 - `services/ttl_reaper/daemon.py` — `.venv/bin/python -m services.ttl_reaper.daemon`

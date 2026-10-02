@@ -24,6 +24,7 @@ from base import telemetry
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from base.agents.observation.db_wait import database_wait_matches
 from base.config.service_read import current_field_values
+from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from services.delivery_watchdog import attempts, rounds
 
@@ -292,7 +293,7 @@ async def hosted_turn_recovery_round(
         HOSTED_TURN_RECOVERY_COOLDOWN_S,
     )
     by_agent = {wedge.agent_id: wedge for wedge in wedges}
-    await rounds.fan_out(
+    await round_loop.fan_out(
         [functools.partial(_recover_within_deadline, pool, by_agent[a]) for a in claimed],
         concurrency=_HOSTED_TURN_RECOVERY_MAX_CONCURRENCY,
         progress=progress,
@@ -307,4 +308,4 @@ async def hosted_turn_recovery_loop(
     async def one_round() -> None:
         await hosted_turn_recovery_round(pool, progress, threshold_s)
 
-    await rounds.run_rounds("hosted-turn recovery", progress, interval_s, one_round)
+    await round_loop.run_rounds("hosted-turn recovery", progress, interval_s, one_round)

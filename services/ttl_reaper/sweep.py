@@ -48,13 +48,13 @@ from base.agents.impersonation.maintenance import (
     remind_expiring_impersonations,
 )
 from base.config import settings
+from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.projection import PageClosed
 from base.events.live.redis_client import publish_best_effort_sync
 from ops import lifecycle
-from services.delivery_watchdog import rounds
 from services.ttl_reaper import cadence
 from services.ttl_reaper.lifecycle_fences import (
     _scan_torn_lifecycle_pointers_blocking,
@@ -294,6 +294,6 @@ async def sweep_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     async def one_round() -> None:
         await sweep_round(pool, progress)
 
-    await rounds.run_rounds(
+    await round_loop.run_rounds(
         "sweep", progress, settings.daemon.ttl_reaper_poll_interval_seconds, one_round
     )

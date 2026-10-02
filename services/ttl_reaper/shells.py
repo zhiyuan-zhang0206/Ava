@@ -49,10 +49,10 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.config import cluster_tz
+from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db.transaction import write_transaction
 from ops import cluster_rpc
-from services.delivery_watchdog import rounds
 from services.ttl_reaper.owner_notice import PASS_BATCH, notify_owner
 
 _log = logging.getLogger(__name__)
@@ -325,7 +325,7 @@ async def reap_expired_shells(
                 reaped.append(settled)
             progress.beat()
 
-    await rounds.fan_out(
+    await round_loop.fan_out(
         [functools.partial(reclaim_machine, machine, rs) for machine, rs in by_machine.items()],
         concurrency=_MACHINE_CONCURRENCY,
         progress=progress,
