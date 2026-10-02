@@ -20,7 +20,6 @@ from typing import Any
 
 from psycopg import Connection
 
-from base.config import settings
 from base.paths import logs_dir
 from base.telemetry import event_id
 from base.telemetry.loki_index_labels import (
@@ -38,6 +37,7 @@ from base.telemetry.metrics.observed_metrics import (
     write_observations,
 )
 from base.telemetry.observability import cluster_label
+from services.events_maintenance.config import EventsMaintenanceConfig
 from services.events_maintenance.rollup import _query_budget
 
 _EVENTS = ["llm_usage", "turn_end", "exec", "exec_.+", "exec\\(.*", "node_exit"]
@@ -52,7 +52,9 @@ def _remaining(deadline: float) -> float:
     return min(10.0, remaining)
 
 
-def _fetch(logql: str, start_ns: int, end_ns: int, deadline: float) -> list[tuple[int, str]]:
+def _fetch(
+    logql: str, start_ns: int, end_ns: int, deadline: float, config: EventsMaintenanceConfig
+) -> list[tuple[int, str]]:
     """One bounded background query; no count query and no interactive admission."""
     params = urllib.parse.urlencode(
         {
@@ -63,9 +65,7 @@ def _fetch(logql: str, start_ns: int, end_ns: int, deadline: float) -> list[tupl
             "direction": "forward",
         }
     )
-    url = (
-        settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range?" + params
-    )
+    url = config.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range?" + params
     with (
         _query_budget.slot(),
         urllib.request.urlopen(url, timeout=_remaining(deadline)) as response,  # noqa: S310 -- configured HTTP endpoint
@@ -94,16 +94,17 @@ def _recover_range(
     start_ns: int,
     end_ns: int,
     deadline: float,
+    config: EventsMaintenanceConfig,
 ) -> int:
     """Bisect full pages, refusing ambiguous equal-timestamp overflow."""
-    rows = _fetch(logql, start_ns, end_ns, deadline)
+    rows = _fetch(logql, start_ns, end_ns, deadline, config)
     if len(rows) < _PAGE_LIMIT:
         return _persist_lines(conn, rows)
     if end_ns - start_ns <= 1:
         raise RuntimeError("Metric source exceeds the page limit at one timestamp; scan incomplete")
     middle = (start_ns + end_ns) // 2
-    return _recover_range(conn, logql, start_ns, middle, deadline) + _recover_range(
-        conn, logql, middle, end_ns, deadline
+    return _recover_range(conn, logql, start_ns, middle, deadline, config) + _recover_range(
+        conn, logql, middle, end_ns, deadline, config
     )
 
 
@@ -128,6 +129,7 @@ def replay_loki(
     *,
     now: datetime,
     deadline: float,
+    config: EventsMaintenanceConfig,
     archive: bool = False,
 ) -> int:
     """Recover retained hours incrementally; rerun recent hours for late ingestion."""
@@ -138,7 +140,7 @@ def replay_loki(
     )
     end = min(now, ARCHIVE_FREEZE_AT + timedelta(microseconds=1)) if archive else now
     source = "archive_loki" if archive else "loki"
-    source_key = settings.observability.telemetry_loki_url.rstrip("/")
+    source_key = config.telemetry_loki_url.rstrip("/")
     with conn.cursor() as cur:
         cur.execute(
             "SELECT window_start,window_end FROM agent_metric_scans "
@@ -186,7 +188,12 @@ def replay_loki(
                     + '"'
                 )
                 count += _recover_range(
-                    conn, query, int(lo.timestamp() * 1e9), int(hi.timestamp() * 1e9), deadline
+                    conn,
+                    query,
+                    int(lo.timestamp() * 1e9),
+                    int(hi.timestamp() * 1e9),
+                    deadline,
+                    config,
                 )
             _record_scan(conn, source, source_key, start, stop)
         start = stop
@@ -279,14 +286,16 @@ def replay_jsonl(conn: Connection[Any], path: Path, *, deadline: float) -> int:
     return count
 
 
-def recover_observations(conn: Connection[Any], *, now: datetime | None = None) -> int:
+def recover_observations(
+    conn: Connection[Any], config: EventsMaintenanceConfig, *, now: datetime | None = None
+) -> int:
     """One bounded maintenance pass; failures preserve already committed batches."""
     now = now or datetime.now(UTC)
     deadline = time.monotonic() + _PASS_SECONDS
     count = 0
     failures: list[Exception] = []
     try:
-        count += replay_loki(conn, now=now, deadline=deadline - _PASS_SECONDS / 2)
+        count += replay_loki(conn, now=now, deadline=deadline - _PASS_SECONDS / 2, config=config)
     except Exception as exc:
         conn.rollback()
         failures.append(exc)
@@ -309,6 +318,7 @@ def recover_observations(conn: Connection[Any], *, now: datetime | None = None) 
 def main() -> None:
     """Operator-controlled recovery; this command never changes retained sources."""
     from base.db import connect
+    from services.events_maintenance.daemon import events_maintenance_config
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jsonl", type=Path, action="append", default=[])
@@ -320,7 +330,13 @@ def main() -> None:
             for path in args.jsonl:
                 replay_jsonl(conn, path, deadline=deadline)
         else:
-            replay_loki(conn, now=datetime.now(UTC), deadline=deadline, archive=args.archive)
+            replay_loki(
+                conn,
+                now=datetime.now(UTC),
+                deadline=deadline,
+                config=events_maintenance_config(),
+                archive=args.archive,
+            )
 
 
 if __name__ == "__main__":

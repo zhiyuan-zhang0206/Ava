@@ -32,8 +32,8 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.config import settings
 from base.telemetry.loki_index_labels import escape_logql_label
+from services.events_maintenance.config import EventsMaintenanceConfig
 from services.events_maintenance.rollup import _query_instant
 
 _log = logging.getLogger("services.events_maintenance.resolution")
@@ -132,7 +132,9 @@ def grouped_count_query(window: str, *, cluster: str | None = None) -> str:
     )
 
 
-def _query_class_counts(window: str, at: datetime) -> dict[EventClass, int]:
+def _query_class_counts(
+    window: str, at: datetime, config: EventsMaintenanceConfig
+) -> dict[EventClass, int]:
     """Read one grouped Loki vector as exact event-class counts.
 
     ``sum by`` gives one series per class via :func:`grouped_count_query` —
@@ -142,7 +144,7 @@ def _query_class_counts(window: str, at: datetime) -> dict[EventClass, int]:
     stale zero would make an unhealthy Loki side look resolved.
     """
 
-    rows = _query_instant(grouped_count_query(window), at)
+    rows = _query_instant(grouped_count_query(window), at, config)
     counts: dict[EventClass, int] = {}
     for labels, value in rows:
         event_class = EventClass(
@@ -235,7 +237,9 @@ def _insert_auto_dismissal(conn: Any, event_class: EventClass, days: int) -> boo
         return cur.fetchone() is not None
 
 
-def _stable_auto_classes(now: datetime, current: dict[EventClass, int]) -> set[EventClass]:
+def _stable_auto_classes(
+    now: datetime, current: dict[EventClass, int], config: EventsMaintenanceConfig
+) -> set[EventClass]:
     """Classes non-empty in every six-hour slice of the configured history.
 
     This is deliberately a small daily scan and default-off. It does not add a
@@ -243,15 +247,15 @@ def _stable_auto_classes(now: datetime, current: dict[EventClass, int]) -> set[E
     and the partial unique index makes a restart's same-day repeat harmless.
     """
 
-    if not settings.daemon.events_auto_dismiss_enabled:
+    if not config.events_auto_dismiss_enabled:
         return set()
     if _last_auto_dismiss_day[0] == now.date():
         return set()
 
-    slots = settings.daemon.events_auto_dismiss_days * 4
+    slots = config.events_auto_dismiss_days * 4
     stable = {event_class for event_class, count in current.items() if count > 0}
     for slot in range(1, slots):
-        observed = _query_class_counts(_UNRESOLVED_WINDOW, now - slot * _AUTO_SLICE)
+        observed = _query_class_counts(_UNRESOLVED_WINDOW, now - slot * _AUTO_SLICE, config)
         stable &= {event_class for event_class, count in observed.items() if count > 0}
         if not stable:
             break
@@ -368,7 +372,7 @@ def level_splits(counts: dict[EventClass, int], active: set[EventClass]) -> dict
 
 
 def run_resolution_slice(
-    pool: ConnectionPool, *, now: datetime | None = None
+    pool: ConnectionPool, config: EventsMaintenanceConfig, *, now: datetime | None = None
 ) -> ResolutionResult | None:
     """Run one fixed-window resolution pass, or return None when Loki is unsafe.
 
@@ -379,12 +383,12 @@ def run_resolution_slice(
 
     at = now or datetime.now(UTC)
     try:
-        unresolved_counts = _query_class_counts(_UNRESOLVED_WINDOW, at)
+        unresolved_counts = _query_class_counts(_UNRESOLVED_WINDOW, at, config)
         if not unresolved_counts:
             _log.warning("resolution query returned no six-hour classes; gauge not emitted")
             return None
-        burst_counts = _query_class_counts(_BURST_WINDOW, at)
-        auto_classes = _stable_auto_classes(at, unresolved_counts)
+        burst_counts = _query_class_counts(_BURST_WINDOW, at, config)
+        auto_classes = _stable_auto_classes(at, unresolved_counts, config)
     except Exception:
         _log.warning("resolution Loki query failed; gauge not emitted", exc_info=True)
         return None
@@ -396,16 +400,15 @@ def run_resolution_slice(
         active_classes = {dismissal.event_class for dismissal in active}
         for dismissal in active:
             burst_count = _burst_count_for(dismissal.event_class, burst_counts)
-            if (
-                burst_count > settings.daemon.events_resolution_burst_threshold
-                and _reopen_for_burst(conn, dismissal, burst_count)
+            if burst_count > config.events_resolution_burst_threshold and _reopen_for_burst(
+                conn, dismissal, burst_count
             ):
                 reopened.append((dismissal, burst_count))
                 active_classes.discard(dismissal.event_class)
         for event_class in auto_classes:
             if _is_dismissed(event_class, active_classes):
                 continue
-            if _insert_auto_dismissal(conn, event_class, settings.daemon.events_auto_dismiss_days):
+            if _insert_auto_dismissal(conn, event_class, config.events_auto_dismiss_days):
                 auto_dismissed.append(event_class)
                 active_classes.add(event_class)
         conn.commit()
@@ -413,7 +416,7 @@ def run_resolution_slice(
     for dismissal, burst_count in reopened:
         _emit_reopened(dismissal, burst_count)
     for event_class in auto_dismissed:
-        _emit_auto_resolved(event_class, settings.daemon.events_auto_dismiss_days)
+        _emit_auto_resolved(event_class, config.events_auto_dismiss_days)
 
     splits = level_splits(unresolved_counts, active_classes)
     warning = splits.get("warning", LevelSplit(0, 0, 0))
