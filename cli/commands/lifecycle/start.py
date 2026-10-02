@@ -175,6 +175,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     import cli.commands._repo as _repo_commands
     import cli.commands._setup as _setup_commands
     import cli.commands.lifecycle.root_driver as _root_driver_commands
+    from base.db import Database
     from base.deploy.maintenance import admission
 
     admission.require_start_allowed()
@@ -261,9 +262,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if rc:
         return rc
     if live:
-        from base import cluster, db
+        from base import cluster
 
-        cluster.assert_checkpoint_schema_current(db.direct_db_url())
+        cluster.assert_checkpoint_schema_current(Database.from_settings().direct_url())
 
     # 3) UPSERT this host into the machines table. The table is informational
     # for ops (`ava cluster status`) + drives agent-runner self-update orchestration;

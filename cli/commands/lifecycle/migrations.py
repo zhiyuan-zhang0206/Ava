@@ -31,10 +31,9 @@ def cmd_migrations_apply() -> list[str]:
     because a migration that created a table is the moment `ava_runner`'s
     point-in-time read grant went stale; failure is raised, not returned.
     """
-    import base.db
     from base import cluster
     from base.config import settings
-    from base.db import pg_admin
+    from base.db import Database, pg_admin
 
     # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
     # must first be mirrored in an Ava migration. Failing before
@@ -52,9 +51,9 @@ def cmd_migrations_apply() -> list[str]:
     # statement ceiling (large-table rebuilds, partition backfills).
     if settings.data_plane.is_remote:
         # A remote-managed plane's provider URL is its only authority.
-        with base.db.connect(direct=True, unbounded=True) as conn:
+        with Database.from_settings().connect(direct=True, unbounded=True) as conn:
             done = _apply(conn)
-        cluster.assert_checkpoint_schema_current(base.db.direct_db_url())
+        cluster.assert_checkpoint_schema_current(Database.from_settings().direct_url())
     else:
         # A locally owned plane migrates as the administrator acting as the
         # schema owner over the home's own socket: objects stay owner-owned and

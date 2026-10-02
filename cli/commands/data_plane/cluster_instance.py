@@ -66,6 +66,7 @@ from base.cluster.dataplane.pg_tools import (
     pg_tz_args,
 )
 from base.config import settings
+from base.db import Database
 from base.db.pg_admin import pg_admin_url as _base_pg_admin_url
 from base.db.pg_admin import pg_socket_dir
 from base.host.net.url_secret import url_host
@@ -631,7 +632,6 @@ def print_data_plane_status() -> None:
     actually use — client SCRAM against the userlist plus the SCRAM pass-through
     backend hop. With PgBouncer disabled `pooled_db_url == db_url` and the probe
     is direct anyway."""
-    import base.db
 
     if settings.data_plane.is_remote:
         # A remote-managed plane has no local instance to manage — probe the
@@ -656,7 +656,9 @@ def print_data_plane_status() -> None:
         print(f"  ✗ postgres ({pg_host}:{pg_port}) unreachable")
     else:
         try:
-            with base.db.connect() as conn:  # pooled front door (PgBouncer when enabled)
+            with (
+                Database.from_settings().connect() as conn
+            ):  # pooled front door (PgBouncer when enabled)
                 conn.execute("select 1")
             print(f"  ✓ postgres ({pg_host}:{pg_port})")
         except Exception as exc:

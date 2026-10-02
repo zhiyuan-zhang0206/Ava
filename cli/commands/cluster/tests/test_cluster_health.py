@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from base.db.tests.fakes import patch_database
 from cli.commands.cluster import _provider_guard, health_alerts
 from cli.commands.cluster import health as cluster_health
 
@@ -57,15 +58,12 @@ def test_schema_health_db_flake_is_healthy(monkeypatch: pytest.MonkeyPatch) -> N
         def __init__(self, *a: object, **kw: object) -> None:
             raise ConnectionError("pgbouncer blip")
 
-    import base.db
-
-    monkeypatch.setattr(base.db, "connect", _FlakyConnect)
+    patch_database(monkeypatch, connect=_FlakyConnect)
     assert cluster_health._schema_health() is True
 
 
 def test_schema_health_real_skew_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
     """A genuine code/DB migration-set disagreement still fails the check."""
-    import base.db
     from base.deploy.schema.migrations import CodeBehindSchema
 
     class _AheadConnect:
@@ -91,18 +89,17 @@ def test_schema_health_real_skew_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -
         def execute(self, *a: object) -> None:
             raise CodeBehindSchema("DB has migrations this checkout lacks")
 
-    monkeypatch.setattr(base.db, "connect", _AheadConnect)
+    patch_database(monkeypatch, connect=_AheadConnect)
     assert cluster_health._schema_health() is False
 
 
 def test_agent_population_db_error_is_environment_class(monkeypatch: pytest.MonkeyPatch) -> None:
     """A failed population query is not evidence that the running code regressed."""
-    import base.db
 
     def _down(**_kwargs: object) -> object:
         raise ConnectionError("pgbouncer unavailable")
 
-    monkeypatch.setattr(base.db, "connect", _down)
+    patch_database(monkeypatch, connect=_down)
     assert cluster_health._agent_population_failure_class(1) == "environment"
 
 
@@ -1269,10 +1266,9 @@ class _FakeConn:
 def test_ingest_alert_fallback_persists_and_notifies(monkeypatch: pytest.MonkeyPatch) -> None:
     """Gateway down but DB up: the fallback upserts the row and sends the IM
     itself (same ingest code), stamps notified_at, commits."""
-    import base.db
 
     conn = _FakeConn(notified_row=None)
-    monkeypatch.setattr(base.db, "connect", lambda **_: conn)  # pyright: ignore[reportUnknownArgumentType]
+    patch_database(monkeypatch, connect=lambda **_: conn)  # pyright: ignore[reportUnknownArgumentType]
     key = ("health-probe", datetime(2026, 8, 5, 0, 10, tzinfo=UTC))
     upserted: list[tuple[Any, str]] = []
     notified: list[str] = []
@@ -1313,10 +1309,9 @@ def test_ingest_alert_fallback_skips_im_when_already_notified(
 ) -> None:
     """A gateway that processed the POST but lost the response must not cause
     a second IM: the row's notified_at is set -> the fallback stays silent."""
-    import base.db
 
     conn = _FakeConn(notified_row=None)
-    monkeypatch.setattr(base.db, "connect", lambda **_: conn)  # pyright: ignore[reportUnknownArgumentType]
+    patch_database(monkeypatch, connect=lambda **_: conn)  # pyright: ignore[reportUnknownArgumentType]
     key = ("health-probe", datetime(2026, 8, 5, 0, 10, tzinfo=UTC))
     monkeypatch.setattr(
         "base.telemetry.alerts.upsert_alert",
@@ -1338,12 +1333,11 @@ def test_ingest_alert_fallback_direct_im_when_db_down(
 ) -> None:
     """Gateway AND DB down: the fallback degrades to the legacy direct-IM path —
     the owner still hears, even though no row can be persisted."""
-    import base.db
 
     def _boom(**_: object) -> None:
         raise ConnectionError("pg down")
 
-    monkeypatch.setattr(base.db, "connect", _boom)
+    patch_database(monkeypatch, connect=_boom)
     direct: list[str] = []
     monkeypatch.setattr(health_alerts, "notify_owner", direct.append)
 
@@ -1446,7 +1440,6 @@ def test_fired_episode_recovery_replays_open_row_fingerprint(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Recovery finds pre-convention rows by identity and replays their key."""
-    import base.db
 
     marker_start = datetime(2026, 8, 26, tzinfo=UTC)
     row_start = datetime(2026, 8, 5, tzinfo=UTC)
@@ -1478,7 +1471,7 @@ def test_fired_episode_recovery_replays_open_row_fingerprint(
         def cursor(self) -> _Cursor:
             return _Cursor()
 
-    monkeypatch.setattr(base.db, "connect", _Connection)
+    patch_database(monkeypatch, connect=_Connection)
     edges: list[dict[str, object]] = []
     monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -1501,7 +1494,6 @@ def test_legacy_two_line_recovery_replays_open_row_fingerprint(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A pre-upgrade marker still closes its severity-in-fingerprint row."""
-    import base.db
 
     marker_start = datetime(2026, 8, 26, tzinfo=UTC)
     row_start = datetime(2026, 8, 5, tzinfo=UTC)
@@ -1533,7 +1525,7 @@ def test_legacy_two_line_recovery_replays_open_row_fingerprint(
         def cursor(self) -> _Cursor:
             return _Cursor()
 
-    monkeypatch.setattr(base.db, "connect", _Connection)
+    patch_database(monkeypatch, connect=_Connection)
     edges: list[dict[str, object]] = []
     monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 

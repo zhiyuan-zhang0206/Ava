@@ -96,11 +96,11 @@ def _gateway_liveness_with_retry() -> bool:
 
 def _data_plane_abnormal() -> bool:
     """True when either dependency behind the gateway is currently unreachable."""
-    from base import db
+    from base.db import Database
     from base.events.live.redis_client import sync_redis
 
     try:
-        with db.connect(autocommit=True):
+        with Database.from_settings().connect(autocommit=True):
             pass
     except Exception:
         return True
@@ -120,10 +120,10 @@ def _agent_population(min_agents: int) -> bool:
 
     Queries the central DB directly — the probe runs on the gateway machine
     and has DB access. A cluster with zero live agents is effectively dead."""
-    from base import db
+    from base.db import Database
 
     try:
-        with db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with Database.from_settings().connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
@@ -142,12 +142,12 @@ def _agent_population(min_agents: int) -> bool:
 
 def _agent_population_failure_class(min_agents: int) -> str | None:
     """Classify observed low population against DB availability and local intent."""
-    from base import db
+    from base.db import Database
     from base.deploy.lifecycle import service_selection
     from base.deploy.maintenance import pause_owner
 
     try:
-        with db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with Database.from_settings().connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
@@ -254,6 +254,7 @@ def _schema_health() -> bool:
     must not fire a false schema alert while code and DB are actually in sync
     (2026-08-03: probe alerted "applied version behind required" on a
     connection error during a pgbouncer flake)."""
+    from base.db import Database
     from base.deploy.schema.migrations import (
         CodeBehindSchema,
         SchemaVersionMismatch,
@@ -262,9 +263,8 @@ def _schema_health() -> bool:
 
     try:
         # check_schema_version expects a connection; connect+check inline
-        from base import db
 
-        with db.connect(autocommit=True) as conn:
+        with Database.from_settings().connect(autocommit=True) as conn:
             check_schema_version(conn)
         return True
     except (CodeBehindSchema, SchemaVersionMismatch):

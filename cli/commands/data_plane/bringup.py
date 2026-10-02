@@ -111,12 +111,12 @@ def remote_pg_reachable() -> tuple[bool, str]:
     line. Bounded by the connect keepalives (5s connect timeout). Returns
     (ok, detail) and never raises.
     """
-    import base.db
+    from base.db import Database
 
     host = url_host(settings.data_plane.db_url)
     port = urlsplit(settings.data_plane.db_url).port or 5432
     try:
-        with base.db.connect() as conn:
+        with Database.from_settings().connect() as conn:
             conn.execute("select 1")
         return True, f"postgres ({host}:{port})"
     except Exception as exc:
@@ -241,16 +241,17 @@ def prepare_memory_vectors() -> None:
     A local plane writes it acting as the schema owner, before the runner grants
     refresh; a remote-managed plane uses its provider URL, like its migrations.
     """
+    from base.db import Database
+
     if settings.services.memory_search_backend != "pgvector":
         return
-    import base.db
     from base.db.pg_admin import local_owner_authority
     from services.memory_indexer.backends.pgvector import prepare_table
     from services.memory_indexer.embeddings.factory import get_provider
 
     dim = get_provider().dim
     if settings.data_plane.is_remote:
-        with base.db.connect(direct=True) as conn:
+        with Database.from_settings().connect(direct=True) as conn:
             prepare_table(conn, dim)
         return
     with local_owner_authority().session() as conn:

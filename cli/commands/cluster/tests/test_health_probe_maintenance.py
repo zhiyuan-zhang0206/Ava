@@ -8,6 +8,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.db.tests.fakes import patch_database
 from base.deploy.lifecycle import service_selection
 from base.deploy.maintenance import pause_owner
 from cli.commands.cluster import health as cluster_health
@@ -159,7 +160,7 @@ def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
     def down(**_kwargs: object) -> None:
         raise ConnectionError("private test data plane unavailable")
 
-    monkeypatch.setattr("base.db.connect", down)
+    patch_database(monkeypatch, connect=down)
     assert cluster_health._agent_population_failure_class(1) == "environment"
     assert cluster_health.run_health_probe() == 1
     assert rollbacks == []

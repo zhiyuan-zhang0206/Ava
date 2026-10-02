@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from base import db, paths
+from base import paths
+from base.db.tests.fakes import patch_database
 from base.packages.extensions import adopt, materialize
 from cli.commands.extensions.materialize import (
     adopt_local_extensions,
@@ -39,7 +40,7 @@ class _PoolSpy:
 def _install_pool_spy(monkeypatch: pytest.MonkeyPatch) -> _PoolSpy:
     """Replace the lazy CLI pool factory with a pool whose close is observable."""
     spy = _PoolSpy()
-    monkeypatch.setattr(db, "pool", lambda: spy)
+    patch_database(monkeypatch, pool=lambda: spy)
     return spy
 
 
