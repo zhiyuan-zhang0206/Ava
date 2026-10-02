@@ -29,6 +29,7 @@ from base.agents.incarnation.hosted_force import (
     recover_orphaned_hosted_forces,
 )
 from base.config import settings
+from base.db import Database
 from base.events.live.bus import EventBus
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
@@ -73,6 +74,7 @@ def _observed_host(
         graph=graph,
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     patch.setattr(host, "_runtime_for", AsyncMock(return_value=Mock(llm=None)))
     original = host._run_turn
@@ -146,6 +148,7 @@ async def _prove_successor_ignores_old_cancel(
         graph=graph,
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     patch.setattr(replacement, "_runtime_for", AsyncMock(return_value=Mock()))
     scheduler = TurnScheduler(replacement.run_turn)
@@ -263,6 +266,7 @@ async def test_idle_force_only_original_live_host_can_observe(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     assert (
         await admit_hosted_runtime(
@@ -298,6 +302,7 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     assert (
         await admit_hosted_runtime(
@@ -340,6 +345,7 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     assert (
         await admit_hosted_runtime(
@@ -401,6 +407,7 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     assert (
         await admit_hosted_runtime(
@@ -469,6 +476,7 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     assert (
         await admit_hosted_runtime(
@@ -544,6 +552,7 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     assert (
         await admit_hosted_runtime(
@@ -599,6 +608,7 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     assert (
         await admit_hosted_runtime(
@@ -643,6 +653,7 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     assert (
         await admit_hosted_runtime(

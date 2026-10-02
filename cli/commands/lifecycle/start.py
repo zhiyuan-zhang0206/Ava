@@ -274,7 +274,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # agent-runner will also fail every subsequent `ava cluster status` and
     # The fleet update orchestration.
     print("\n→ register machine in central DB")
-    rc = _repo_commands._register_machine_or_die(resolved, roles)
+    rc = _repo_commands._register_machine_or_die(Database.from_settings(), resolved, roles)
     if rc != 0:
         return rc
 

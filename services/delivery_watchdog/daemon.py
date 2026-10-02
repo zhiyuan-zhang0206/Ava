@@ -486,7 +486,9 @@ async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
             _log.exception("[delivery] poll iteration failed")
 
 
-async def _run_loops(pool: ConnectionPool, bus: EventBus, liveness: LivenessGroup) -> None:
+async def _run_loops(
+    pool: ConnectionPool, db: Database, bus: EventBus, liveness: LivenessGroup
+) -> None:
     """Own the four resident loops: the scan loop and the three recovery loops
     (resurrect retry, stalled crash-marked harvest, hosted-turn recovery).
 
@@ -504,6 +506,7 @@ async def _run_loops(pool: ConnectionPool, bus: EventBus, liveness: LivenessGrou
         loops.create_task(
             resurrect_retry.resurrect_loop(
                 pool,
+                db,
                 resurrect,
                 interval,
                 settings.daemon.delivery_watchdog_max_resurrect_per_tick,
@@ -512,12 +515,12 @@ async def _run_loops(pool: ConnectionPool, bus: EventBus, liveness: LivenessGrou
         )
         loops.create_task(
             stall_recovery.stall_recovery_loop(
-                pool, harvest, interval, settings.daemon.delivery_watchdog_threshold_seconds
+                pool, db, harvest, interval, settings.daemon.delivery_watchdog_threshold_seconds
             )
         )
         loops.create_task(
             turn_liveness.hosted_turn_recovery_loop(
-                pool, bus, hosted_turn, interval, turn_liveness.hosted_turn_threshold_seconds()
+                pool, db, bus, hosted_turn, interval, turn_liveness.hosted_turn_threshold_seconds()
             )
         )
 
@@ -538,9 +541,10 @@ async def run() -> None:
 
     # Four loops share the pool; each borrows a connection only for the length
     # of one short statement batch.
-    pool = Database.from_settings().pool(max_size=_POOL_MAX_SIZE)
+    db = Database.from_settings()
+    pool = db.pool(max_size=_POOL_MAX_SIZE)
     try:
-        await _run_loops(pool, EventBus.from_settings(), liveness)
+        await _run_loops(pool, db, EventBus.from_settings(), liveness)
     finally:
         pool.close()
         await stop_health_server(health)

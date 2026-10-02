@@ -391,7 +391,7 @@ def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
     import gateway.agents.router as _agents_router
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
-    async def _explode(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+    async def _explode(_db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(_agents_router, "_forward_spawn_to_remote", _explode)

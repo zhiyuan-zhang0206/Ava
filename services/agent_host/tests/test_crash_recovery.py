@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from agent.ownership.corpse_reap import ReapedCorpse
+from base.db import Database
 from services.agent_host.crash_recovery import recover_reaped_corpses
 
 
@@ -22,7 +23,9 @@ async def test_attempts_the_guarded_resurrect_per_wake(
 ) -> None:
     calls: list[tuple[int, int, str]] = []
 
-    async def _attempt(agent_id: int, *, trigger_inbound_id: int, trigger_inbound_kind: str) -> str:
+    async def _attempt(
+        _db: object, agent_id: int, *, trigger_inbound_id: int, trigger_inbound_kind: str
+    ) -> str:
         calls.append((agent_id, trigger_inbound_id, trigger_inbound_kind))
         return "spawned"
 
@@ -30,7 +33,9 @@ async def test_attempts_the_guarded_resurrect_per_wake(
 
     monkeypatch.setattr(ops.lifecycle, "resurrect_if_terminated", _attempt)
 
-    await recover_reaped_corpses([ReapedCorpse(7, 101), ReapedCorpse(8, 102)])
+    await recover_reaped_corpses(
+        Database.from_settings(), [ReapedCorpse(7, 101), ReapedCorpse(8, 102)]
+    )
 
     assert calls == [(7, 101, "chat"), (8, 102, "chat")]
 
@@ -43,8 +48,8 @@ async def test_wake_less_entries_are_skipped(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(ops.lifecycle, "resurrect_if_terminated", _attempt)
 
-    await recover_reaped_corpses([])
-    await recover_reaped_corpses([ReapedCorpse(7, None)])
+    await recover_reaped_corpses(Database.from_settings(), [])
+    await recover_reaped_corpses(Database.from_settings(), [ReapedCorpse(7, None)])
 
 
 async def test_an_attempt_failure_defers_without_stopping_the_next(
@@ -53,7 +58,9 @@ async def test_an_attempt_failure_defers_without_stopping_the_next(
 ) -> None:
     attempted: list[int] = []
 
-    async def _attempt(agent_id: int, *, trigger_inbound_id: int, trigger_inbound_kind: str) -> str:
+    async def _attempt(
+        _db: object, agent_id: int, *, trigger_inbound_id: int, trigger_inbound_kind: str
+    ) -> str:
         if trigger_inbound_id == 101:
             raise RuntimeError("resurrect dispatch exploded")
         attempted.append(agent_id)
@@ -63,7 +70,9 @@ async def test_an_attempt_failure_defers_without_stopping_the_next(
 
     monkeypatch.setattr(ops.lifecycle, "resurrect_if_terminated", _attempt)
 
-    await recover_reaped_corpses([ReapedCorpse(7, 101), ReapedCorpse(8, 102)])
+    await recover_reaped_corpses(
+        Database.from_settings(), [ReapedCorpse(7, 101), ReapedCorpse(8, 102)]
+    )
 
     assert attempted == [8]
     deferred = [

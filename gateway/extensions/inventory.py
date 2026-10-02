@@ -84,8 +84,11 @@ async def _dispatch_inventory_read(
     aggregate passes 1 (one fast retry inside its budget), the single-machine
     view leaves the cluster default.
     """
+    from gateway.app import app
+
     return InventoryReadResult.model_validate(
         await _cluster_rpc.dispatch_to_machine(
+            app.state.db,
             target_machine=target,
             kind="inventory_read",
             payload={},
@@ -101,8 +104,11 @@ async def _dispatch_inventory_write(
     """Run inventory_write on agent-runner `target` by POSTing to its ops server.
 
     Caller has already verified the target is a registered agent-runner."""
+    from gateway.app import app
+
     try:
         wire = await _cluster_rpc.dispatch_to_machine(
+            app.state.db,
             target_machine=target,
             kind="inventory_write",
             payload={"plugins": plugins, "mcp_servers": mcp_servers},

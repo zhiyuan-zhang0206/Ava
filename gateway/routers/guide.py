@@ -46,6 +46,10 @@ async def draft_guide(body: GuideDraftRequest, request: Request) -> GuideDraftRe
         label="ava-guide",
     )
     spawned = await create_and_launch_agent(
-        body_obj, machine_name(), request.app.state.db_pool, request.app.state.bus
+        body_obj,
+        machine_name(),
+        request.app.state.db_pool,
+        request.app.state.db,
+        request.app.state.bus,
     )
     return GuideDraftResponse(agent_id=spawned.id)

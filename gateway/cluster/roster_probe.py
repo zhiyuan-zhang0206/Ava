@@ -34,7 +34,7 @@ async def dispatch_status_probe(
         timeout_s = settings.gateway.status_probe_timeout_seconds
     try:
         async with asyncio.timeout(timeout_s):
-            return await cluster_rpc.dispatch_to_machine(
+            return await cluster_rpc.dispatch_to_url(
                 target_machine=name,
                 kind="status_probe",
                 payload={},

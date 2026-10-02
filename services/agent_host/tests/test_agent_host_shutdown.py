@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from base.db import Database
 from base.events.live.bus import EventBus
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from tests.services.daemon_shutdown_test_support import (
@@ -235,6 +236,7 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
         graph=cast(Any, object()),
         machine="this-box",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     started = time.monotonic()
     with pytest.raises(TimeoutError, match="ownership release"):

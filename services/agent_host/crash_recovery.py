@@ -17,10 +17,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from agent.ownership.corpse_reap import ReapedCorpse
+from base.db import Database
 from base.log import logger
 
 
-async def recover_reaped_corpses(reaped: Sequence[ReapedCorpse]) -> None:
+async def recover_reaped_corpses(db: Database, reaped: Sequence[ReapedCorpse]) -> None:
     """Best-effort guarded resurrection for each freshly reaped corpse.
 
     Never raises for an ordinary failure: a reaped corpse whose wake exists
@@ -37,6 +38,7 @@ async def recover_reaped_corpses(reaped: Sequence[ReapedCorpse]) -> None:
 
         try:
             status = await lifecycle.resurrect_if_terminated(
+                db,
                 corpse.agent_id,
                 trigger_inbound_id=wake_id,
                 trigger_inbound_kind="chat",

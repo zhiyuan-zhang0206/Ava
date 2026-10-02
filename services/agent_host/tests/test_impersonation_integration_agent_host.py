@@ -13,7 +13,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.db import create_agent
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from tests.impersonation_support import attested_caller, recorded_tree
 
@@ -65,6 +65,7 @@ async def test_replacement_host_adopts_held_agent_without_model(
         graph=graph,
         machine=machine,
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     assert agent_id in {wake.agent_id for wake in await host.pending_inbound_wakes(180)}
     # Original host has stopped renewing; admission still uses its ordinary

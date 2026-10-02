@@ -22,6 +22,7 @@ from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.config import settings
+from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
@@ -55,6 +56,7 @@ async def test_hosted_applies_only_after_continuation_returns(
         graph=graph,
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     host._runtimes[agent_id] = Mock()
     with bind_turn_identity(agent_id, incarnation=old):
@@ -120,6 +122,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
         graph=graph,
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     host._runtimes[agent_id] = Mock()
     original_execute = psycopg.AsyncConnection.execute
@@ -188,6 +191,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     wakes = await host.pending_inbound_wakes(stale_after_s=60)
     assert agent_id in [wake.agent_id for wake in wakes]
@@ -244,6 +248,7 @@ async def _run_terminating_turn(aops_pool: AsyncConnectionPool, agent_id: int) -
         graph=graph,
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     host._runtimes[agent_id] = Mock()
     assert await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
@@ -350,6 +355,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     await admit_hosted_runtime(
         aops_pool, agent_id, "claim-test", host._owner, expected_from="idling"
@@ -383,6 +389,7 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     await admit_hosted_runtime(
         aops_pool, agent_id, "claim-test", old._owner, expected_from="idling"

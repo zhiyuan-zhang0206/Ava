@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 from base.daemon.schedules.completion_notices import CompletionNotice, record_hourly_notice
-from base.db import create_agent
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from services.heartbeat import completion_digest
 
@@ -63,7 +63,10 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
         assert (
             asyncio.run(
                 completion_digest.flush_once(
-                    pool, EventBus.from_settings(), now=datetime(2026, 9, 22, 12, tzinfo=UTC)
+                    pool,
+                    Database.from_settings(),
+                    EventBus.from_settings(),
+                    now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                 )
             )
             == 1
@@ -99,7 +102,10 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
         assert (
             asyncio.run(
                 completion_digest.flush_once(
-                    pool, EventBus.from_settings(), now=datetime(2026, 9, 22, 12, tzinfo=UTC)
+                    pool,
+                    Database.from_settings(),
+                    EventBus.from_settings(),
+                    now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                 )
             )
             == 0
@@ -141,17 +147,22 @@ def test_flush_once_continues_after_one_digest_delivery_failure(
 
     real_deliver = completion_digest.deliver_chat_inbound
 
-    async def fail_one(pool: object, bus: object, agent_id: int, **kwargs: object) -> object:
+    async def fail_one(
+        pool: object, db: object, bus: object, agent_id: int, **kwargs: object
+    ) -> object:
         if agent_id == blocked_agent:
             raise RuntimeError("poison digest")
-        return await real_deliver(pool, bus, agent_id, **kwargs)  # type: ignore[arg-type]
+        return await real_deliver(pool, db, bus, agent_id, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(completion_digest, "deliver_chat_inbound", fail_one)
     pool = base.db.pool(max_size=2)
     try:
         delivered = asyncio.run(
             completion_digest.flush_once(
-                pool, EventBus.from_settings(), now=datetime(2026, 9, 22, 12, tzinfo=UTC)
+                pool,
+                Database.from_settings(),
+                EventBus.from_settings(),
+                now=datetime(2026, 9, 22, 12, tzinfo=UTC),
             )
         )
     finally:

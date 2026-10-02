@@ -266,6 +266,7 @@ async def post_agent_message(
         try:
             existing = await reconcile_chat_delivery(
                 request.app.state.db_pool,
+                request.app.state.db,
                 request.app.state.bus,
                 agent_id,
                 client_message_id=idempotency_key,
@@ -300,6 +301,7 @@ async def post_agent_message(
     try:
         delivery = await deliver_chat_inbound(
             request.app.state.db_pool,
+            request.app.state.db,
             request.app.state.bus,
             agent_id,
             prepare=lambda _conn: text,
@@ -342,15 +344,8 @@ def _system_note_blocking(
             "note_tag": note_tag,
             **({"task_id": task_id} if task_id is not None else {}),
         }
-        if provenance is None:
-            return insert_inbound_message(
-                conn,
-                agent_id,
-                content=content,
-                source=source,
-                kind=InboundKind.SYSTEM_NOTE.value,
-                payload=payload,
-            )
+        # No `provenance` keyword at all when there is none (the insert's own default applies).
+        extra = {} if provenance is None else {"provenance": provenance}
         return insert_inbound_message(
             conn,
             agent_id,
@@ -358,7 +353,7 @@ def _system_note_blocking(
             source=source,
             kind=InboundKind.SYSTEM_NOTE.value,
             payload=payload,
-            provenance=provenance,
+            **extra,
         )
 
 
@@ -411,6 +406,7 @@ async def post_agent_system_note(
     )
     if body.resurrect:
         status = await _ops.resurrect_if_terminated(
+            request.app.state.db,
             agent_id,
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind=note_kind,
@@ -442,6 +438,7 @@ async def reconcile_agent_message(
     try:
         delivery = await reconcile_chat_delivery(
             request.app.state.db_pool,
+            request.app.state.db,
             request.app.state.bus,
             agent_id,
             client_message_id=idempotency_key,

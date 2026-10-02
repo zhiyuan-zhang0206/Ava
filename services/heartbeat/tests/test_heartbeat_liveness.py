@@ -23,6 +23,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.daemon.loop_health import LoopProgress
+from base.db import Database
 from base.events.live.bus import EventBus
 from services.heartbeat import JITTER_SPAN_S
 from services.heartbeat import daemon as heartbeat_daemon
@@ -156,14 +157,23 @@ class TestLivenessPass:
 
         import asyncio
 
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=host_down))
+        asyncio.run(
+            run_liveness_pass(
+                Database.from_settings(), pool, EventBus.from_settings(), probe=host_down
+            )
+        )
         row = db_conn.execute(
             "SELECT online,agent_host_online FROM machine_probe WHERE machine_name=%s", (_MACHINE,)
         ).fetchone()
         assert row == (True, False)
 
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: False}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: False}),
+            )
         )
         row = db_conn.execute(
             "SELECT online,agent_host_online FROM machine_probe WHERE machine_name=%s", (_MACHINE,)
@@ -224,7 +234,10 @@ class TestLivenessPass:
 
         asyncio.run(
             run_liveness_pass(
-                pool, EventBus.from_settings(), probe=RecordingProbe({_MACHINE: True})
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=RecordingProbe({_MACHINE: True}),
             )
         )
         assert seen["timeout_s"] == 12.0
@@ -240,7 +253,12 @@ class TestLivenessPass:
         import asyncio
 
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: True}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: True}),
+            )
         )
         state, probed_at = _state(db_conn, aid)
         assert state == "offline"
@@ -254,7 +272,12 @@ class TestLivenessPass:
         import asyncio
 
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: True}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: True}),
+            )
         )
         assert _state(db_conn, aid)[0] == "online"
 
@@ -293,12 +316,21 @@ class TestLivenessPass:
         import asyncio
 
         fail = FakeProbe({_MACHINE: False})
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=fail))
+        asyncio.run(
+            run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=fail)
+        )
         assert _state(db_conn, aid)[0] == "online"  # 1 failure: blip
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=fail))
+        asyncio.run(
+            run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=fail)
+        )
         assert _state(db_conn, aid)[0] == "offline"  # 2 failures: offline
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: True}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: True}),
+            )
         )
         assert _state(db_conn, aid)[0] == "online"  # success resets
 
@@ -309,15 +341,24 @@ class TestLivenessPass:
         import asyncio
 
         fail = FakeProbe({_MACHINE: False})
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=fail))
+        asyncio.run(
+            run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=fail)
+        )
         started_at = _transition_since(db_conn, _MACHINE)
         assert started_at is not None
 
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=fail))
+        asyncio.run(
+            run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=fail)
+        )
         assert _transition_since(db_conn, _MACHINE) == started_at
 
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: True}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: True}),
+            )
         )
         assert _transition_since(db_conn, _MACHINE) is None
 
@@ -342,28 +383,49 @@ class TestLivenessPass:
         import asyncio
 
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: True}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: True}),
+            )
         )
         assert announced == []  # unknown already renders as online
 
         announced.clear()
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: True}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: True}),
+            )
         )
         assert announced == []  # last_probe_at alone never broadcasts the fleet
 
         fail = FakeProbe({_MACHINE: False})
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=fail))
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=fail))
+        asyncio.run(
+            run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=fail)
+        )
+        asyncio.run(
+            run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=fail)
+        )
         assert announced == [aid]  # online -> offline
 
         announced.clear()
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=fail))
+        asyncio.run(
+            run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=fail)
+        )
         assert announced == []  # offline -> offline is steady state
 
         announced.clear()
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: True}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: True}),
+            )
         )
         assert announced == [aid]  # offline -> online
 
@@ -377,7 +439,12 @@ class TestLivenessPass:
         import asyncio
 
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: True}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: True}),
+            )
         )
         assert _state(db_conn, aid)[0] == "unknown"
 
@@ -397,7 +464,12 @@ class TestLivenessPass:
         import asyncio
 
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: True}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: True}),
+            )
         )
         assert _state(db_conn, aid)[0] == "unknown"
 
@@ -409,7 +481,11 @@ class TestLivenessPass:
         aid = _make_agent(db_conn, status="idling", lease_s_ahead=-10, machine="ghost-host")
         import asyncio
 
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({})))
+        asyncio.run(
+            run_liveness_pass(
+                Database.from_settings(), pool, EventBus.from_settings(), probe=FakeProbe({})
+            )
+        )
         assert _state(db_conn, aid)[0] == "unknown"
 
     def test_merge_is_offline_recovery_ready(
@@ -423,11 +499,20 @@ class TestLivenessPass:
         import asyncio
 
         fail = FakeProbe({_MACHINE: False})
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=fail))
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=fail))
+        asyncio.run(
+            run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=fail)
+        )
+        asyncio.run(
+            run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=fail)
+        )
         assert _state(db_conn, aid)[0] == "offline"
         asyncio.run(
-            run_liveness_pass(pool, EventBus.from_settings(), probe=FakeProbe({_MACHINE: True}))
+            run_liveness_pass(
+                Database.from_settings(),
+                pool,
+                EventBus.from_settings(),
+                probe=FakeProbe({_MACHINE: True}),
+            )
         )
         assert _state(db_conn, aid)[0] == "online"
 
@@ -440,7 +525,9 @@ class TestMachineAlertEdges:
     """
 
     async def _run(self, pool: ConnectionPool, probe: FakeProbe) -> None:
-        await run_liveness_pass(pool, EventBus.from_settings(), probe=probe)
+        await run_liveness_pass(
+            Database.from_settings(), pool, EventBus.from_settings(), probe=probe
+        )
 
     def _alerts(self, db: psycopg.Connection) -> list[tuple[object, ...]]:
         with db.cursor() as cur:
@@ -603,7 +690,9 @@ class TestMachineAlertEdges:
 
         import asyncio
 
-        asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=probe))
+        asyncio.run(
+            run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=probe)
+        )
         # the live member is probed, the paused one is not
         assert probe.calls == ["still-here"]
         assert "away" not in probe.calls

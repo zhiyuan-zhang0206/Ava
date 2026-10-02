@@ -235,6 +235,7 @@ def _require_write_scope(tool: str) -> None:
 def _register_read_tools(
     server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     pool: Any,
+    db: Database,
 ) -> None:
     """Read-side tools: list / inspect / cluster snapshot."""
     from mcp.server.mcpserver import MCPServer
@@ -268,14 +269,15 @@ def _register_read_tools(
 
     @typed_server.tool(description=tool_description("cluster_status", "gateway"))
     async def cluster_status() -> dict[str, Any]:
-        from gateway.cluster.router import get_cluster_status
+        from gateway.cluster.router import cluster_status_snapshot
 
-        snapshot = await get_cluster_status()
+        snapshot = await cluster_status_snapshot(db)
         return snapshot.model_dump(mode="json")
 
 
 async def _mcp_deliver_send_message(
     pool: Any,
+    db: Database,
     bus: EventBus,
     agent_id: int,
     content: str,
@@ -317,6 +319,7 @@ async def _mcp_deliver_send_message(
         await asyncio.to_thread(get_agent_status, agent_id)
         delivery = await deliver_chat_inbound(
             pool,
+            db,
             bus,
             agent_id,
             prepare=lambda _conn: content,
@@ -374,7 +377,7 @@ def _register_fleet_tools(
         # through the router module so tests patch the same seam as the REST
         # spawn route.
         try:
-            spawned = await _agents_router.create_and_launch_agent(body, target, pool, bus)
+            spawned = await _agents_router.create_and_launch_agent(body, target, pool, db, bus)
         except AvaAgentError as exc:
             # The old stdio serve forwarded the gateway's `detail` verbatim;
             # in-process the same business errors are AvaAgentError instances —
@@ -399,6 +402,7 @@ def _register_fleet_tools(
         _require_write_scope("send_message")
         return await _mcp_deliver_send_message(
             pool,
+            db,
             bus,
             agent_id,
             content,
@@ -457,7 +461,7 @@ def _build_server(pool: Any, db: Database, bus: EventBus):  # noqa: ANN202 — i
     server = MCPServer(
         "ava", instructions=server_instructions("gateway"), middleware=[_AuditMiddleware()]
     )
-    _register_read_tools(server, pool)
+    _register_read_tools(server, pool, db)
     _register_fleet_tools(server, pool, db, bus)
     return server
 

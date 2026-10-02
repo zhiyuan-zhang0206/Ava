@@ -9,7 +9,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
-from base.db import create_agent
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 
 
@@ -68,6 +68,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
         graph=Mock(),
         machine="host-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     # Exercise the owned work task itself. ``run_turn`` deliberately shields
     # this inner task from scheduler cancellation; injecting cancellation at
@@ -116,6 +117,7 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
         graph=Mock(),
         machine="host-test",
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
 
     async def forbidden_runtime(_agent_id: int, _fingerprint: str) -> None:

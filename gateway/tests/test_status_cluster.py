@@ -339,7 +339,7 @@ class TestClusterPanel:
                 "paused": False,
             }
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", retry_aware_dispatch)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", retry_aware_dispatch)
         with TestClient(app) as client:
             first = client.get("/api/status")
             second = client.get("/api/status")
@@ -381,7 +381,7 @@ class TestProbeAgentRunner:
                 "paused": False,
             }
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
@@ -403,7 +403,7 @@ class TestProbeAgentRunner:
             called = True
             raise AssertionError("missing roster URL must not trigger a DB re-lookup")
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", must_not_dispatch)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", must_not_dispatch)
         row = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], None, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
@@ -433,7 +433,7 @@ class TestProbeAgentRunner:
                 raise
             raise AssertionError("unreachable")
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", blackhole)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", blackhole)
         row = await asyncio.wait_for(
             status_router._probe_agent_runner(
                 "wsl",
@@ -456,7 +456,7 @@ class TestProbeAgentRunner:
         async def fake_enqueue(*_a: object, **_kw: object) -> dict[str, object]:
             raise cluster_rpc.ClusterOpUnreachable("ops server unreachable")
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         stopped = datetime(2026, 5, 25, tzinfo=UTC)
         r = await status_router._probe_agent_runner(
             "wsl",
@@ -485,7 +485,7 @@ class TestProbeAgentRunner:
                 "paused": True,
             }
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl",
             ["agent-runner"],
@@ -513,7 +513,7 @@ class TestProbeAgentRunner:
                 "head_sha": "def5678",
             }
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )
@@ -533,7 +533,7 @@ class TestProbeAgentRunner:
             # Missing the required serve_gateway / serve_agent_runner / serve_observability_station fields.
             return {"machine_name": "wsl", "paused": True}
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_enqueue)
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
         )

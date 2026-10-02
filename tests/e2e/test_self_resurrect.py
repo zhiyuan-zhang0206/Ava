@@ -10,6 +10,7 @@ import psycopg
 import pytest
 
 from base.config import settings
+from base.db import Database
 from ops.cluster_rpc import dispatch_to_machine
 from tests.base.poll_until import poll_until
 from tests.e2e._db import wait_for_status
@@ -46,6 +47,7 @@ def test_resurrect_brings_back_terminated_agent(
             response = executor.submit(
                 asyncio.run,
                 dispatch_to_machine(
+                    Database.from_settings(),
                     target_machine=original[1],
                     kind="lifecycle",
                     payload={

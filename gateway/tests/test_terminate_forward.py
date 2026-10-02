@@ -181,7 +181,7 @@ def test_remote_home_machine_is_forwarded(
     just the special case where the ops server lives at localhost."""
     captured: dict[str, Any] = {}
 
-    async def _capture_enqueue(target: str, path: str, json_body: dict) -> dict:
+    async def _capture_enqueue(_db: object, target: str, path: str, json_body: dict) -> dict:
         captured["target"] = target
         return {"status": "enqueued"}
 

@@ -69,6 +69,7 @@ async def get_agent_shell(
 
     try:
         result = await _cluster_rpc.dispatch_to_machine(
+            request.app.state.db,
             machine,
             "shell_capture",
             {"agent_id": agent_id, "session_id": session_id, "lines": lines},

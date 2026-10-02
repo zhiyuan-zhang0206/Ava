@@ -898,7 +898,7 @@ def test_get_config_audit_default_last_comes_from_display_config(
 
     monkeypatch.setattr(config_router, "_assert_machine_known", _known)
 
-    def _unregistered(_name: str) -> list[str]:
+    def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
     monkeypatch.setattr("base.cluster.machines.lookup_role", _unregistered)
@@ -938,7 +938,7 @@ def test_get_config_audit_reads_own_records(
 
     monkeypatch.setattr(config_router, "_assert_machine_known", _known)
 
-    def _unregistered(_name: str) -> list[str]:
+    def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
     monkeypatch.setattr("base.cluster.machines.lookup_role", _unregistered)
@@ -981,7 +981,7 @@ async def test_get_config_audit_all_merges_runners_newest_first(
 
     monkeypatch.setattr(config_router, "_dispatch_config_audit_read", _fake_dispatch)
 
-    def _runners() -> list[tuple[str, str | None]]:
+    def _runners(_db: object) -> list[tuple[str, str | None]]:
         return [("m1", None), ("m2", None)]
 
     monkeypatch.setattr("base.cluster.machines.list_agent_runners", _runners)

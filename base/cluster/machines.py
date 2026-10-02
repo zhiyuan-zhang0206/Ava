@@ -32,7 +32,6 @@ from urllib.parse import urlparse
 
 import psycopg
 
-import base.db
 from base.agents import MachineNotRegistered
 from base.cluster.machine import (
     MachineRoles,
@@ -43,7 +42,7 @@ from base.cluster.machine import (
     machine_description,
     machine_name,
 )
-from base.db.transaction import write_transaction
+from base.db import Database
 from base.host.net.predicates import is_loopback_host
 from base.paths import ava_home
 
@@ -269,7 +268,7 @@ def _station_ingress_url() -> str:
     return f"http://{reachable_host()}:{settings.observability.telemetry_otlp_port}"
 
 
-def register_self(url: str | None = None) -> None:
+def register_self(db: Database, url: str | None = None) -> None:
     """UPSERT THIS UNIT's machine_units row, then recompute the machines row.
 
     A unit is identified by (machine_name, home) where home = this unit's
@@ -325,7 +324,7 @@ def register_self(url: str | None = None) -> None:
         serve_agent_runner=serve_agent_runner,
         serve_observability_station=serve_observability_station,
     )
-    with write_transaction() as conn, conn.cursor() as cur:
+    with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_units "
             "(machine_name, home, serve_gateway, serve_agent_runner, "
@@ -351,7 +350,7 @@ def register_self(url: str | None = None) -> None:
         conn.commit()
 
 
-def mark_stopping(name: str, home: str) -> None:
+def mark_stopping(db: Database, name: str, home: str) -> None:
     """Stamp `stopped_at = NOW()` on the (name, home) UNIT, then recompute.
 
     Called by the `POST /api/cluster/stopping` handler when a unit announces it
@@ -370,7 +369,7 @@ def mark_stopping(name: str, home: str) -> None:
     unit row simply updates zero rows, and recompute leaves the composed machines
     row consistent.
     """
-    with write_transaction() as conn, conn.cursor() as cur:
+    with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machine_units SET stopped_at = NOW() WHERE machine_name = %s AND home = %s",
             (name, home),
@@ -474,7 +473,7 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
     )
 
 
-def lookup(name: str) -> str:
+def lookup(db: Database, name: str) -> str:
     """SELECT gateway_url FROM machines WHERE name=%s.
 
     Raises:
@@ -483,7 +482,7 @@ def lookup(name: str) -> str:
             misspelled).
         MachineGatewayUrlMissing: row exists but gateway_url is NULL.
     """
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT gateway_url FROM machines WHERE name = %s", (name,))
         row = cur.fetchone()
     if row is None:
@@ -498,7 +497,7 @@ def lookup(name: str) -> str:
     return row[0]
 
 
-def lookup_role(name: str) -> list[str]:
+def lookup_role(db: Database, name: str) -> list[str]:
     """SELECT role FROM machines WHERE name=%s — the target's capability set.
 
     Used by the spawn router to reject a target that cannot run agents with a
@@ -508,7 +507,7 @@ def lookup_role(name: str) -> list[str]:
         MachineNotRegistered: no such row (the host has not run `ava start`, or
             the name is misspelled).
     """
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT role FROM machines WHERE name = %s", (name,))
         row = cur.fetchone()
     if row is None:
@@ -519,14 +518,14 @@ def lookup_role(name: str) -> list[str]:
     return row[0]
 
 
-def list_all() -> list[tuple[str, str | None]]:
+def list_all(db: Database) -> list[tuple[str, str | None]]:
     """SELECT name, gateway_url FROM machines — for `ava machines list` (future) / debug."""
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT name, gateway_url FROM machines ORDER BY name")
         return cur.fetchall()
 
 
-def list_agent_runners() -> list[tuple[str, str | None]]:
+def list_agent_runners(db: Database) -> list[tuple[str, str | None]]:
     """SELECT (name, gateway_url) FROM machines WHERE role='agent-runner' AND not
     intentionally stopped — the agent-runner target list for cluster-wide fan-outs.
 
@@ -558,7 +557,7 @@ def list_agent_runners() -> list[tuple[str, str | None]]:
     boot), not a heartbeat, so it cannot judge "online"; that determination is
     deferred to the live HTTP call.
     """
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT name, gateway_url FROM machines "
             "WHERE 'agent-runner' = ANY(role) AND stopped_at IS NULL "
@@ -567,13 +566,13 @@ def list_agent_runners() -> list[tuple[str, str | None]]:
         return cur.fetchall()
 
 
-def list_roster_agent_runners() -> list[tuple[str, str | None]]:
+def list_roster_agent_runners(db: Database) -> list[tuple[str, str | None]]:
     """SELECT (name, gateway_url) of every agent-runner the roster shows: the
     rollout targets of `list_agent_runners()` plus staging and intentionally stopped
     hosts. Only the pause latch hides a host (`ava cluster pause`). The heartbeat
     liveness pass snapshots these for the roster read model; it judges and alerts
     on the rollout targets alone."""
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT name, gateway_url FROM machines "
             "WHERE 'agent-runner' = ANY(role) AND paused_at IS NULL ORDER BY name"
@@ -581,7 +580,7 @@ def list_roster_agent_runners() -> list[tuple[str, str | None]]:
         return cur.fetchall()
 
 
-def list_stopped_agent_runners() -> list[tuple[str, str | None]]:
+def list_stopped_agent_runners(db: Database) -> list[tuple[str, str | None]]:
     """SELECT (name, gateway_url) FROM machines WHERE role='agent-runner' AND the
     row IS marked intentionally stopped — the exact complement of
     `list_agent_runners()` over the same capability predicate.
@@ -600,7 +599,7 @@ def list_stopped_agent_runners() -> list[tuple[str, str | None]]:
     rollout leaves it writing the central DB on old code (the 2026-07-28
     runner rollout), so the probe stays the authority.
     """
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT name, gateway_url FROM machines "
             "WHERE 'agent-runner' = ANY(role) AND stopped_at IS NOT NULL "
@@ -609,7 +608,7 @@ def list_stopped_agent_runners() -> list[tuple[str, str | None]]:
         return cur.fetchall()
 
 
-def set_staging(name: str, *, is_staging: bool) -> bool:
+def set_staging(db: Database, name: str, *, is_staging: bool) -> bool:
     """Set or clear the operator staging flag on a machine row; True when a row
     changed.
 
@@ -625,7 +624,7 @@ def set_staging(name: str, *, is_staging: bool) -> bool:
             rollout fan-out);
             False restores it as a normal rollout target.
     """
-    with write_transaction() as conn, conn.cursor() as cur:
+    with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machines SET is_staging = %s WHERE name = %s",
             (is_staging, name),
@@ -633,7 +632,7 @@ def set_staging(name: str, *, is_staging: bool) -> bool:
         return cur.rowcount > 0
 
 
-def clear_stopped_marker(name: str) -> bool:
+def clear_stopped_marker(db: Database, name: str) -> bool:
     """Clear the composed `machines` row's `stopped_at` for `name`; True if a row
     changed.
 
@@ -650,7 +649,7 @@ def clear_stopped_marker(name: str) -> bool:
     an unrelated recompute (a peer unit stopping) may legitimately re-stamp the
     composed row.
     """
-    with write_transaction() as conn, conn.cursor() as cur:
+    with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machines SET stopped_at = NULL WHERE name = %s AND stopped_at IS NOT NULL",
             (name,),
@@ -660,7 +659,7 @@ def clear_stopped_marker(name: str) -> bool:
     return changed
 
 
-def pause(name: str, reason: str | None = None) -> bool:
+def pause(db: Database, name: str, reason: str | None = None) -> bool:
     """Set the operator pause latch on a machine row; True when a row changed.
 
     `paused_at = NOW()` + `pause_reason` on the composed `machines` row
@@ -688,7 +687,7 @@ def pause(name: str, reason: str | None = None) -> bool:
     Returns:
         True when a row matched and was updated; False when no such machine.
     """
-    with write_transaction() as conn, conn.cursor() as cur:
+    with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machines SET paused_at = NOW(), pause_reason = %s "
             "WHERE name = %s AND paused_at IS NULL",
@@ -699,7 +698,7 @@ def pause(name: str, reason: str | None = None) -> bool:
     return changed
 
 
-def resume(name: str) -> bool:
+def resume(db: Database, name: str) -> bool:
     """Clear the operator pause latch on a machine row; True when a row changed.
 
     The machine becomes a normal cluster member again: the next heartbeat
@@ -717,7 +716,7 @@ def resume(name: str) -> bool:
     Args:
         name: the machines-table row to resume.
     """
-    with write_transaction() as conn, conn.cursor() as cur:
+    with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machines SET paused_at = NULL, pause_reason = NULL "
             "WHERE name = %s AND paused_at IS NOT NULL",
@@ -728,7 +727,7 @@ def resume(name: str) -> bool:
     return changed
 
 
-def is_paused(name: str) -> bool:
+def is_paused(db: Database, name: str) -> bool:
     """True when `name`'s machines row carries the operator pause latch.
 
     Used by the spawn preflight to refuse a paused spawn target with a precise
@@ -739,7 +738,7 @@ def is_paused(name: str) -> bool:
     Raises:
         MachineNotRegistered: no such row.
     """
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT paused_at IS NOT NULL FROM machines WHERE name = %s", (name,))
         row = cur.fetchone()
     if row is None:
@@ -750,7 +749,7 @@ def is_paused(name: str) -> bool:
     return row[0]
 
 
-def list_paused() -> list[tuple[str, str | None]]:
+def list_paused(db: Database) -> list[tuple[str, str | None]]:
     """SELECT (name, gateway_url) FROM machines WHERE paused_at IS NOT NULL —
     the operator's view of the paused set, ordered by name.
 
@@ -761,7 +760,7 @@ def list_paused() -> list[tuple[str, str | None]]:
     a paused machine is expected to be unreachable, so probing it would
     answer nothing useful.
     """
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT name, gateway_url FROM machines WHERE paused_at IS NOT NULL ORDER BY name"
         )

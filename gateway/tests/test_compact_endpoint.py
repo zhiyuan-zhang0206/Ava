@@ -92,6 +92,7 @@ def test_compact_passes_inserted_id_and_kind_to_guarded_resurrect(
     calls: list[tuple[int, int | None, str | None]] = []
 
     async def _resurrect(
+        _db: object,
         agent_id: int,
         *,
         trigger_inbound_id: int | None = None,

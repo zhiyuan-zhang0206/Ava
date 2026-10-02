@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from typing import Literal, cast
+from typing import Any, cast
 
 import httpx2
 import psycopg
@@ -212,14 +212,9 @@ class TestOwner:
         db_conn.commit()
         resurrection_calls: list[tuple[int, str]] = []
 
-        async def _record_resurrection(
-            agent_id: int,
-            *,
-            trigger_inbound_id: int,
-            trigger_inbound_kind: Literal["chat", "compact_request", "system_note"],
-        ) -> AgentStatus:
-            assert trigger_inbound_id > 0
-            resurrection_calls.append((agent_id, trigger_inbound_kind))
+        async def _record_resurrection(_db: object, agent_id: int, **kw: Any) -> AgentStatus:
+            assert kw["trigger_inbound_id"] > 0
+            resurrection_calls.append((agent_id, kw["trigger_inbound_kind"]))
             return cast("AgentStatus", "idling")
 
         monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _record_resurrection)

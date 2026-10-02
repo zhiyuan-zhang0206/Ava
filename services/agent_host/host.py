@@ -85,6 +85,7 @@ from base.agents.history.delta_read_compat import recovery_reconstruction_scope
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from base.db import Database
 from base.deploy.maintenance import admission
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
@@ -166,8 +167,10 @@ class AgentHost:
         graph: _HostGraph,
         machine: str | None = None,
         bus: EventBus,
+        db: Database,
     ) -> None:
         self._bus = bus
+        self._db = db
         self._pool = pool
         self._control_pool = control_pool if control_pool is not None else pool
         self._checkpointer = checkpointer
@@ -380,7 +383,12 @@ class AgentHost:
             finally:
                 self._cache_after_turn(agent_id)
                 await close_hosted_turn(
-                    self._pool, self._control_pool, self._checkpointer, incarnation, outcome
+                    self._pool,
+                    self._control_pool,
+                    self._db,
+                    self._checkpointer,
+                    incarnation,
+                    outcome,
                 )
 
     async def _run_held_controls(self, agent_id: int, status: str) -> None:
@@ -757,7 +765,7 @@ class AgentHost:
         await renew_hosted_owner(self._control_pool, self._machine, self._owner)
         try:
             reaped = await reap_crash_corpses(self._control_pool, self._machine, self._owner)
-            await recover_reaped_corpses(reaped)
+            await recover_reaped_corpses(self._db, reaped)
         except Exception:
             logger.exception(
                 "corpse reap failed — retrying next beat",

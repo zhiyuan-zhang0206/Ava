@@ -25,6 +25,7 @@ from base.agents.incarnation.resources import (
     ResourceProcess,
     decode_resources,
 )
+from base.db import Database
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.cohort import _classify, _RuntimeRow
 from base.deploy.maintenance.state import MaintenanceHold
@@ -162,7 +163,13 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
     config: RunnableConfig = {"configurable": {"thread_id": str(agent)}}
     messages = [HumanMessage(content="Existing question"), AIMessage(content="Already answered")]
     await graph.aupdate_state(config, {"messages": messages, "halted": True})
-    host = AgentHost(pool=aops_pool, graph=graph, checkpointer=saver, bus=EventBus.from_settings())
+    host = AgentHost(
+        pool=aops_pool,
+        graph=graph,
+        checkpointer=saver,
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     scheduler = TurnScheduler(host.run_turn)
     dispatcher = InboundWakeDispatcher(
         EventBus.from_settings(),
@@ -193,7 +200,11 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     )
     db_conn.commit()
     host = AgentHost(
-        pool=aops_pool, graph=AsyncMock(), checkpointer=AsyncMock(), bus=EventBus.from_settings()
+        pool=aops_pool,
+        graph=AsyncMock(),
+        checkpointer=AsyncMock(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     assert [wake.agent_id for wake in await host.pending_inbound_wakes(60)] == [agent]
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()

@@ -35,7 +35,7 @@ def _insert_agent(db: psycopg.Connection, *, machine: str = "unknown") -> int:
 
 
 async def _ok_dispatch(
-    target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
 ) -> dict[str, object]:
     """A reachable runner answering shell_capture — echoes the request fields
     back so the test can assert what was forwarded."""
@@ -63,7 +63,7 @@ def test_shell_no_such_session_404(
     db_conn.commit()
 
     async def _failed_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         raise cluster_rpc.ClusterOpFailed(
             {"error": "ShellNotFoundError: agent 1 has no live shell 0 on this host"}
@@ -89,12 +89,12 @@ def test_shell_capture_success(
     seen: dict[str, object] = {}
 
     async def _capture_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         seen["machine"] = target_machine
         seen["kind"] = kind
         seen["payload"] = payload
-        return await _ok_dispatch(target_machine, kind, payload)
+        return await _ok_dispatch(_db, target_machine, kind, payload)
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _capture_dispatch)
 
@@ -130,10 +130,10 @@ def test_shell_capture_custom_lines_forwarded(
     seen: dict[str, object] = {}
 
     async def _capture_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         seen["payload"] = payload
-        return await _ok_dispatch(target_machine, kind, payload)
+        return await _ok_dispatch(_db, target_machine, kind, payload)
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _capture_dispatch)
 
@@ -157,10 +157,10 @@ def test_shell_capture_default_lines_follow_display_config(
     seen: dict[str, object] = {}
 
     async def _capture_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         seen["payload"] = payload
-        return await _ok_dispatch(target_machine, kind, payload)
+        return await _ok_dispatch(_db, target_machine, kind, payload)
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _capture_dispatch)
 
@@ -189,7 +189,7 @@ def test_shell_capture_carries_created_at_and_ttl_deadline(
     db_conn.commit()
 
     async def _meta_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {
             "session_name": f"ava-agent-{aid}-shell-3-dev",
@@ -224,7 +224,7 @@ def test_shell_capture_without_row_has_no_deadline(
     db_conn.commit()
 
     async def _meta_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {
             "session_name": f"ava-agent-{aid}-shell-7-{name}",
@@ -251,7 +251,7 @@ def test_shell_capture_without_row_and_epoch_keeps_no_deadline(
     db_conn.commit()
 
     async def _meta_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {
             "session_name": f"ava-agent-{aid}-shell-8",
@@ -284,7 +284,7 @@ def test_shell_capture_returns_recorded_deadline(
     db_conn.commit()
 
     async def _meta_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {
             "session_name": f"ava-agent-{aid}-shell-9",
@@ -309,7 +309,7 @@ def test_shell_machine_unreachable_503(
     db_conn.commit()
 
     async def _unreachable_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         raise cluster_rpc.ClusterOpUnreachable("connect failed")
 

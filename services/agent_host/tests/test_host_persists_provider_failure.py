@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.llm_errors import FatalProviderError
 from agent.state import AgentState, CircuitState
 from base.agents.context import AvaContext
+from base.db import Database
 from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
 
@@ -60,6 +61,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
             graph=graph,
             machine="test",
             bus=EventBus.from_settings(),
+            db=Database.from_settings(),
         )
         assert not (await host._invoke_until_done(agent_id, _breaker_ctx())).exited
     # New saver/connection prevents in-memory buffered state from faking success.

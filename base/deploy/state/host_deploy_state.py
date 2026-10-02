@@ -21,6 +21,7 @@ from typing import Any
 
 import base.db
 from base.cluster.machine import machine_name
+from base.db import Database
 from base.db.transaction import write_transaction
 
 POSTURE_IDLE = "idle"
@@ -79,7 +80,7 @@ def read(machine: str | None = None, *, conn: Any | None = None) -> HostDeploySt
         return _read_with_conn(owned_conn, machine)
 
 
-def read_all() -> dict[str, HostDeployState]:
+def read_all(db: Database) -> dict[str, HostDeployState]:
     """Every machine's deploy-state row, keyed by machine name.
 
     The deploy-window posture signal reads the roster this way (R1, Task #1021)
@@ -88,7 +89,7 @@ def read_all() -> dict[str, HostDeployState]:
     stops with the services it would report on. A machine with no row has never
     transitioned and reads as idle.
     """
-    with base.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("SELECT machine, posture, updated_at, now() FROM host_deploy_state")
         return {
             row[0]: HostDeployState(

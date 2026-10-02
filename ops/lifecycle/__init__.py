@@ -38,7 +38,7 @@ from base.agents import (
     ResurrectAlreadyAlive,
 )
 from base.cluster.machine import machine_name
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.registry import normalize_overlay_llm_model
@@ -330,6 +330,7 @@ async def resurrect_agent_op(
 
 
 async def resurrect_if_terminated(
+    db: Database,
     agent_id: int,
     *,
     trigger_inbound_id: int,
@@ -423,6 +424,7 @@ async def resurrect_if_terminated(
                 "trigger_inbound_kind": trigger_inbound_kind,
             }
             forwarded = await _cluster_rpc.dispatch_to_machine(
+                db,
                 target_machine=home,
                 kind="lifecycle",
                 payload=lifecycle_payload,
@@ -635,7 +637,7 @@ async def recover_crash_marked_op(agent_id: int) -> RecoverCrashMarkedResponse:
 
 
 async def recover_crash_marked_if_stalled(
-    agent_id: int, *, stalled_inbound_id: int
+    db: Database, agent_id: int, *, stalled_inbound_id: int
 ) -> tuple[str, str | None]:
     """Ask `agent_id`'s home machine to adjudicate harvesting its crash-marked
     corpse, so the stalled chat `stalled_inbound_id` stops waiting on a dead
@@ -668,6 +670,7 @@ async def recover_crash_marked_if_stalled(
                 "body": {},
             }
             forwarded = await _cluster_rpc.dispatch_to_machine(
+                db,
                 target_machine=home,
                 kind="lifecycle",
                 payload=payload,

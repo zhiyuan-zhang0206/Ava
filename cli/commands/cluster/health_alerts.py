@@ -22,6 +22,7 @@ from typing import Any, Literal
 
 import httpx
 
+from base.db import Database
 from base.deploy.transition import transition_severity
 
 # Transition state for owner alerts: message, episode starts_at, last-fired
@@ -417,5 +418,5 @@ def _deploy_suppression() -> str | None:
     """
     from ops.deploy_window import deploy_in_flight
 
-    window = deploy_in_flight()
+    window = deploy_in_flight(Database.from_settings())
     return window.detail if window.active else None

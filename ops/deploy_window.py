@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from base.db import Database
 from base.deploy.state.host_deploy_state import POSTURE_IDLE, HostDeployState, read_all
 from base.log import logger
 
@@ -47,18 +48,18 @@ class DeployWindow:
 _IDLE = DeployWindow(active=False, detail="no deploy in flight")
 
 
-def _machines() -> list[tuple[str, str | None]]:
+def _machines(db: Database) -> list[tuple[str, str | None]]:
     """Every registered machine, or an empty list when the table cannot be read."""
     try:
         import base.cluster.machines
 
-        return base.cluster.machines.list_all()
+        return base.cluster.machines.list_all(db)
     except Exception as exc:
         logger.warning("[deploy-window] could not list machines: {exc!r}", exc=exc)
         return []
 
 
-def _read_excluded() -> dict[str, tuple[str, datetime | None]]:
+def _read_excluded(db: Database) -> dict[str, tuple[str, datetime | None]]:
     """machine -> (reason, since) for the machines an operator latch excludes
     from the rollout cohort; {} when the read fails.
 
@@ -72,7 +73,7 @@ def _read_excluded() -> dict[str, tuple[str, datetime | None]]:
     try:
         from base.cluster.machine_exclusions import list_excluded_machines
 
-        return {name: (reason, since) for name, reason, since in list_excluded_machines()}
+        return {name: (reason, since) for name, reason, since in list_excluded_machines(db)}
     except Exception as exc:
         logger.warning("[deploy-window] could not list excluded machines: {exc!r}", exc=exc)
         return {}
@@ -133,7 +134,7 @@ def _log_excluded_posture(
     )
 
 
-def _posture_signal() -> DeployWindow | None:
+def _posture_signal(db: Database) -> DeployWindow | None:
     """Any machine mid-deploy, read from the host_deploy_state table instead of
     probing each machine's ops server (R1, Task #1021).
 
@@ -148,11 +149,11 @@ def _posture_signal() -> DeployWindow | None:
     posture row on it is not a competing deployment. See the module docstring.
     Never raises.
     """
-    machines = _machines()
+    machines = _machines(db)
     if not machines:
         return None
-    states = _read_deploy_states()
-    excluded = _read_excluded()
+    states = _read_deploy_states(db)
+    excluded = _read_excluded(db)
     for name, _url in machines:
         state = states.get(name)
         if state is None or state.posture == POSTURE_IDLE:
@@ -165,23 +166,23 @@ def _posture_signal() -> DeployWindow | None:
     return None
 
 
-def _read_deploy_states() -> dict[str, HostDeployState]:
+def _read_deploy_states(db: Database) -> dict[str, HostDeployState]:
     """machine -> deploy-state row for every machine in the table; {} on failure.
 
     Best-effort by contract: an unreadable table degrades to "cannot tell"."""
     try:
-        return read_all()
+        return read_all(db)
     except Exception as exc:
         logger.warning("[deploy-window] reading host_deploy_state failed: {exc!r}", exc=exc)
         return {}
 
 
-def deploy_in_flight() -> DeployWindow:
+def deploy_in_flight(db: Database) -> DeployWindow:
     """Whether a deploy or maintenance window is open on this cluster right now:
     some machine's posture row is not `idle` (see the module docstring).
 
     Never raises: the signal degrades to "cannot tell". The caller is the health
     probe's alert grading, where an exception is worse than a miss.
     """
-    signal = _posture_signal()
+    signal = _posture_signal(db)
     return signal if signal is not None else _IDLE

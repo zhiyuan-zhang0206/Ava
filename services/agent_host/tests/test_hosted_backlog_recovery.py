@@ -20,7 +20,7 @@ from agent.state import AgentState
 from agent.turn import progress
 from base.agents.incarnation import resources as resource_codec
 from base.cluster.machine import machine_name
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from services.agent_host import dispatcher
 from services.agent_host import host as host_module
@@ -58,7 +58,11 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
     lifecycle = insert_inbound_message(db_conn, agent, "", "system:test", kind="restart")
     db_conn.commit()
     host = AgentHost(
-        pool=aops_pool, checkpointer=AsyncMock(), graph=AsyncMock(), bus=EventBus.from_settings()
+        pool=aops_pool,
+        checkpointer=AsyncMock(),
+        graph=AsyncMock(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
 
     assert [(wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(60)] == [
@@ -111,7 +115,13 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
         return {"turn_idle": True, "halted": True, "messages": [AIMessage(content="Completed")]}
 
     graph, saver = await _graph(aops_pool, agent, work)
-    host = AgentHost(pool=aops_pool, graph=graph, checkpointer=saver, bus=EventBus.from_settings())
+    host = AgentHost(
+        pool=aops_pool,
+        graph=graph,
+        checkpointer=saver,
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     host._owner = incarnation.owner
     scheduler = TurnScheduler(host.run_turn)
     dispatcher = InboundWakeDispatcher(
@@ -184,7 +194,13 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
         },
         as_node="work",
     )
-    host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, bus=EventBus.from_settings())
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=saver,
+        graph=graph,
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     # A host boot while the dead predecessor still has a fresh lease cannot settle it.
     assert await settle_stale_running_rows(aops_pool, machine_name()) == []
     assert await host.pending_inbound_wakes(60) == []
@@ -239,7 +255,11 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
     host = AgentHost(
-        pool=aops_pool, checkpointer=AsyncMock(), graph=AsyncMock(), bus=EventBus.from_settings()
+        pool=aops_pool,
+        checkpointer=AsyncMock(),
+        graph=AsyncMock(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     if boundary == "same_owner":
         host._owner = incarnation.owner
@@ -271,7 +291,11 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
     host = AgentHost(
-        pool=aops_pool, checkpointer=AsyncMock(), graph=AsyncMock(), bus=EventBus.from_settings()
+        pool=aops_pool,
+        checkpointer=AsyncMock(),
+        graph=AsyncMock(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     with subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE
@@ -740,6 +764,7 @@ class TestHostedHostWakePacing:
             graph=object(),  # pyright: ignore[reportArgumentType]
             machine="this-box",
             bus=EventBus.from_settings(),
+            db=Database.from_settings(),
         )
 
         def held_wakes(_fences: object) -> list[dispatcher.PendingInboundWake]:

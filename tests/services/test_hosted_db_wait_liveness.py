@@ -17,7 +17,7 @@ from base.agents.observation import db_wait
 from base.agents.observation.db_wait import database_wait_snapshot
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
@@ -60,6 +60,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # n
         graph=graph,
         machine=machine_name(),
         bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     host._owner = incarnation.owner
     if held:

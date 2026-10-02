@@ -26,7 +26,7 @@ from agent.ownership.hosted import (
     admit_hosted_runtime,
 )
 from base.config import settings
-from base.db import create_agent
+from base.db import Database, create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from services.agent_host import settlement as settlement_mod
@@ -67,6 +67,7 @@ async def _close_captured(
     await settlement_mod.close_hosted_turn(
         cast(AsyncConnectionPool[Any], object()),
         cast(AsyncConnectionPool[Any], object()),
+        Database.from_settings(),
         cast(AsyncPostgresSaver, object()),
         RuntimeIncarnation(42, uuid4(), uuid4()),
         outcome,
@@ -236,7 +237,7 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
     attempts: list[list[ReapedCorpse]] = []
 
-    async def _recover(reaped: list[ReapedCorpse]) -> None:
+    async def _recover(_db: object, reaped: list[ReapedCorpse]) -> None:
         attempts.append(list(reaped))
 
     monkeypatch.setattr(settlement_mod, "recover_reaped_corpses", _recover)
@@ -250,6 +251,7 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     await settlement_mod.close_hosted_turn(
         aops_pool,
         aops_pool,
+        Database.from_settings(),
         cast(AsyncPostgresSaver, object()),
         first,
         TurnOutcome(exited=False, crashed=True),
@@ -273,6 +275,7 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     await settlement_mod.close_hosted_turn(
         aops_pool,
         aops_pool,
+        Database.from_settings(),
         cast(AsyncPostgresSaver, object()),
         retry,
         TurnOutcome(exited=False, crashed=True),

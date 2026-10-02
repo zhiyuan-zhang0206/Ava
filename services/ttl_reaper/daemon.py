@@ -66,13 +66,15 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), "services.ttl_reaper.daemon")
 
 
-async def _run_loops(pool: ConnectionPool, bus: EventBus, liveness: LivenessGroup) -> None:
+async def _run_loops(
+    pool: ConnectionPool, db: Database, bus: EventBus, liveness: LivenessGroup
+) -> None:
     """Own the two resident loops; one that raises ends the process."""
     sweep_progress = liveness.register("sweep", _SWEEP_LIVENESS_TIMEOUT_S)
     remote_progress = liveness.register("remote", shells.dispatch_deadline_s() + _LIVENESS_SLACK_S)
     async with asyncio.TaskGroup() as loops:
         loops.create_task(sweep.sweep_loop(pool, bus, sweep_progress))
-        loops.create_task(remote.remote_loop(pool, bus, remote_progress))
+        loops.create_task(remote.remote_loop(pool, db, bus, remote_progress))
 
 
 async def run() -> None:
@@ -87,9 +89,10 @@ async def run() -> None:
     health = await start_health_server("ttl_reaper", endpoint.health_port, liveness=liveness)
     _log.info("[ttl-reaper] healthz listening on :%s", endpoint.health_port)
 
-    pool = Database.from_settings().pool(max_size=_POOL_MAX_SIZE)
+    db = Database.from_settings()
+    pool = db.pool(max_size=_POOL_MAX_SIZE)
     try:
-        await _run_loops(pool, EventBus.from_settings(), liveness)
+        await _run_loops(pool, db, EventBus.from_settings(), liveness)
     finally:
         pool.close()
         await stop_health_server(health)

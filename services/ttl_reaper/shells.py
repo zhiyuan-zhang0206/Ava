@@ -51,6 +51,7 @@ from base import telemetry
 from base.clock import Clock
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.db import Database
 from base.db.transaction import write_transaction
 from ops import cluster_rpc
 from services.ttl_reaper.owner_notice import PASS_BATCH, notify_owner
@@ -199,7 +200,7 @@ def delete_shell_row(
 
 
 async def _dispatch_shell_kill(
-    machine: str, agent_id: int, session_id: int
+    db: Database, machine: str, agent_id: int, session_id: int
 ) -> dict[str, Any] | None:
     """One ``shell_kill`` dispatch; None means "defer to the next round".
 
@@ -213,6 +214,7 @@ async def _dispatch_shell_kill(
     try:
         async with asyncio.timeout(dispatch_deadline_s()):
             return await cluster_rpc.dispatch_to_machine(
+                db,
                 machine,
                 "shell_kill",
                 {"agent_id": agent_id, "session_id": session_id},
@@ -238,7 +240,7 @@ async def _dispatch_shell_kill(
 
 
 async def _reclaim_row(
-    pool: ConnectionPool, machine: str, row: dict[str, Any]
+    pool: ConnectionPool, db: Database, machine: str, row: dict[str, Any]
 ) -> tuple[int, int] | None:
     """Reclaim one expired shell on `machine`; the (agent, session) when its row
     was settled, None when the row is left for the next round."""
@@ -249,7 +251,7 @@ async def _reclaim_row(
         # forward, so the session is no longer reaper business.
         _log.info("[ttl-reaper] shell %s of agent %s was renewed — skipping", session_id, agent_id)
         return None
-    result = await _dispatch_shell_kill(machine, agent_id, session_id)
+    result = await _dispatch_shell_kill(db, machine, agent_id, session_id)
     if result is None:
         return None
     mode = result.get("mode")
@@ -295,7 +297,7 @@ async def _reclaim_row(
 
 
 async def reap_expired_shells(
-    pool: ConnectionPool, progress: LoopProgress
+    pool: ConnectionPool, db: Database, progress: LoopProgress
 ) -> list[tuple[int, int]]:
     """Kill every TTL-expired shell session on its home machine; return the
     (agent, session) pairs whose rows were settled.
@@ -320,7 +322,7 @@ async def reap_expired_shells(
 
     async def reclaim_machine(machine: str, machine_rows: list[dict[str, Any]]) -> None:
         for row in machine_rows:
-            settled = await _reclaim_row(pool, machine, row)
+            settled = await _reclaim_row(pool, db, machine, row)
             if settled is not None:
                 reaped.append(settled)
             progress.beat()
