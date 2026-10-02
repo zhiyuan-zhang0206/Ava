@@ -251,7 +251,9 @@ class AxTreeResult(TypedDict):
     pid: int
     windows: int
     framework: str  # "electron" / "cef" / "chromium" when the bundle ships one, else ""
-    ax_enable: str  # Chromium accessibility switch: n/a | off | set | already | failed
+    ax_enable: NotRequired[
+        str
+    ]  # Chromium switch: n/a | off | set | already | failed (older helpers omit it)
     nodes: list[AxNode]
     visited: int
     truncated: bool  # the node or depth cap cut the walk

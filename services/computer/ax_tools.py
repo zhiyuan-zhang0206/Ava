@@ -321,7 +321,7 @@ def _sparse_reason(result: AxTreeResult) -> str:
     if not result["framework"]:
         return "sparse"
     return {"off": "electron_ax_disabled", "failed": "electron_enable_failed"}.get(
-        result["ax_enable"], "electron_not_exposed"
+        result.get("ax_enable", "n/a"), "electron_not_exposed"
     )
 
 
