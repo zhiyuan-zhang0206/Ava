@@ -45,6 +45,7 @@ from base.paths import ava_home, pid_path
 from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
 from base.sessions.page_session import page_session_name
 from base.sessions.record import SessionRecord
+from services.page_server.config import PageServerConfig
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 from . import dead_pages
@@ -61,6 +62,15 @@ _LIVENESS_TIMEOUT_S = 60.0
 # A dead-page round probes every open show page of the host (1.5 s each, eight at once);
 # a loop that completed nothing for this long is wedged.
 _DEAD_PAGES_LIVENESS_TIMEOUT_S = 600.0
+
+
+def page_server_config() -> PageServerConfig:
+    """The composition root: the one place this package reads `settings`."""
+    return PageServerConfig(
+        page_server_poll_interval_seconds=settings.daemon.page_server_poll_interval_seconds,
+        events_channel=settings.data_plane.events_channel,
+        heartbeat_interval_seconds=settings.daemon.heartbeat_interval_seconds,
+    )
 
 
 def _pidfile() -> Path:
@@ -459,11 +469,12 @@ def _ensure_handle(
     degraded: dict[tuple[int, str], _DegradedServeDir],
     now: float,
     live_names: set[str] | None,
+    config: PageServerConfig,
 ) -> tuple[_ServerHandle | None, bool]:
     """Return a managed handle and whether this pass created its shell."""
     if handle := managed.get(key):
         return handle, False
-    if _reconcile_serve_dir(pool, row, key, degraded, backoff, now):
+    if _reconcile_serve_dir(pool, row, key, degraded, backoff, now, config):
         return None, False
     if now < backoff.get(key, 0.0):
         return None, False
@@ -565,6 +576,7 @@ def _reconcile_once(
     backoff: dict[tuple[int, str], float],
     degraded: dict[tuple[int, str], _DegradedServeDir],
     host: str,
+    config: PageServerConfig,
 ) -> None:
     """Reconcile page rows with durable page-shell sessions and their health.
 
@@ -586,7 +598,9 @@ def _reconcile_once(
     # the stale-row race (a row closed or re-registered mid-pass is skipped).
     for key, row in wanted.items():
         if key not in managed:
-            _ensure_handle(pool, backend, row, key, managed, backoff, degraded, now, live_names)
+            _ensure_handle(
+                pool, backend, row, key, managed, backoff, degraded, now, live_names, config
+            )
     # Re-scan: sessions created above must be visible to the liveness checks
     # below, or a stale scan would reap them as dead in this same pass.
     live = _live_session_records(backend)
@@ -604,7 +618,7 @@ def _reconcile_once(
             # re-created here, after the teardown work — same-pass recovery
             # the pre-fast-path loop always had.
             handle, _ = _ensure_handle(
-                pool, backend, row, key, managed, backoff, degraded, now, live_names
+                pool, backend, row, key, managed, backoff, degraded, now, live_names, config
             )
         if handle is not None and _supervise_handle(
             backend, row, key, handle, managed, backoff, occupants, shell_pids, now
@@ -616,10 +630,14 @@ def _reconcile_once(
             # (task #2670).
             if live_names is not None:
                 live_names.discard(handle.session_name)
-            _ensure_handle(pool, backend, row, key, managed, backoff, degraded, now, live_names)
+            _ensure_handle(
+                pool, backend, row, key, managed, backoff, degraded, now, live_names, config
+            )
 
 
-async def _reconcile_loop(pool: ConnectionPool, liveness: LoopProgress) -> None:
+async def _reconcile_loop(
+    pool: ConnectionPool, liveness: LoopProgress, config: PageServerConfig
+) -> None:
     """Run page-shell reconciliation at the configured poll interval."""
     host = reachable_host()
     managed: dict[tuple[int, str], _ServerHandle] = {}
@@ -634,8 +652,8 @@ async def _reconcile_loop(pool: ConnectionPool, liveness: LoopProgress) -> None:
     while True:
         liveness.beat()
         try:
-            await asyncio.sleep(settings.daemon.page_server_poll_interval_seconds)
-            await asyncio.to_thread(_reconcile_once, pool, managed, backoff, degraded, host)
+            await asyncio.sleep(config.page_server_poll_interval_seconds)
+            await asyncio.to_thread(_reconcile_once, pool, managed, backoff, degraded, host, config)
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:
@@ -659,14 +677,15 @@ async def run() -> None:
     dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
     health = await start_health_server("page_server", liveness=liveness)
     pool = base.db.pool()
+    config = page_server_config()
     try:
         # One TaskGroup owns the resident loops, each with its own progress tracker so
         # a stalled loop cannot be masked by a busy sibling: a loop that raises cancels
         # its sibling and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_reconcile_loop(pool, reconcile_progress))
+            loops.create_task(_reconcile_loop(pool, reconcile_progress, config))
             loops.create_task(
-                dead_pages.dead_pages_loop(pool, reachable_host(), dead_pages_progress)
+                dead_pages.dead_pages_loop(pool, reachable_host(), dead_pages_progress, config)
             )
     finally:
         await stop_health_server(health)
