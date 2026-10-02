@@ -23,11 +23,13 @@ from typing import Any, cast
 
 import pytest
 from psycopg_pool import ConnectionPool
+from pydantic import SecretStr
 
 from base.config.daemon import DaemonSettings
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import LivenessGroup, LoopProgress
 from services.events_maintenance import daemon
+from services.events_maintenance.config import EventsMaintenanceConfig
 from services.events_maintenance.tests.slices import (
     events_maintenance_config,
     events_maintenance_db,
@@ -470,3 +472,67 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} crashed"]
     assert sorted(cancelled) == sorted({"dispatch", "resolution", "registry_gauge"} - {crashing})
     assert sorted(closed) == ["health", "pidfile", "pool"]
+
+
+def _run_with_alert_loop(monkeypatch: pytest.MonkeyPatch, *, configured: bool) -> dict[str, object]:
+    seen: dict[str, object] = {"alert_loop": False, "trackers": []}
+
+    class _RunPool:
+        def close(self) -> None:
+            return None
+
+    async def parked(*_args: object) -> None:
+        return None
+
+    async def alert_loop(_pool: object, progress: LoopProgress, _config: object) -> None:
+        seen["alert_loop"] = True
+
+    async def fake_start(
+        _name: str, _port: int, *, liveness: LivenessGroup, components: Any
+    ) -> object:
+        seen["trackers"] = sorted(liveness.snapshot())
+        return object()
+
+    async def fake_stop(_server: object) -> None:
+        return None
+
+    monkeypatch.setattr(daemon, "_is_running", lambda: False)
+    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "start_health_server", fake_start)
+    monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
+    monkeypatch.setattr(
+        daemon,
+        "_endpoint",
+        lambda: ServiceEndpoint("events_maintenance", 8109, Path("/nonexistent/em.pid")),
+    )
+
+    def fake_pool(_self: object) -> _RunPool:
+        return _RunPool()
+
+    monkeypatch.setattr(daemon.Database, "pool", fake_pool)
+    monkeypatch.setattr(daemon, "_dispatch_loop", parked)
+    monkeypatch.setattr(daemon, "_resolution_loop", parked)
+    monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", parked)
+    monkeypatch.setattr(daemon.alert_reconciler, "reconciliation_loop", alert_loop)
+    password = SecretStr("grafana-test-password") if configured else None
+    config = events_maintenance_config(grafana_admin_password=password)
+
+    def build_config() -> EventsMaintenanceConfig:
+        return config
+
+    monkeypatch.setattr(daemon, "events_maintenance_config", build_config)
+    asyncio.run(asyncio.wait_for(daemon.run(), timeout=5.0))
+    return seen
+
+
+def test_the_alert_reconciliation_loop_runs_only_with_the_grafana_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    on = _run_with_alert_loop(monkeypatch, configured=True)
+    assert on["alert_loop"] is True
+    assert "alert_reconciliation" in cast(list[str], on["trackers"])
+
+    off = _run_with_alert_loop(monkeypatch, configured=False)
+    assert off["alert_loop"] is False
+    assert "alert_reconciliation" not in cast(list[str], off["trackers"])

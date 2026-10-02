@@ -1,9 +1,15 @@
 """Repair Grafana alert rows whose resolution webhook was lost.
 
 Grafana's notification policy repeats an unchanged firing only every four
-hours, so webhook silence is not current state. This service reads the embedded
-Alertmanager's active instances at gateway startup and every five minutes,
-then resolves stored Grafana-owned instances absent from that truth set.
+hours, so webhook silence is not current state. This loop of the
+events-maintenance service reads the embedded Alertmanager's active instances at
+service start and every five minutes, then resolves stored Grafana-owned
+instances absent from that truth set and publishes the resolved rows.
+
+A Grafana that is down, answers with an error or sends a malformed snapshot is an
+operating condition, not a bug: the round logs it, leaves every row untouched and
+tries again at the next tick. An unreachable database skips the round; any other
+exception ends the loop and, through the service's `TaskGroup`, the process.
 """
 
 from __future__ import annotations
@@ -11,8 +17,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from contextlib import suppress
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -22,32 +26,30 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from base.config import settings
-from base.deploy.maintenance import admission
+from base.daemon import round_loop
+from base.daemon.loop_health import LoopProgress
 from base.telemetry.alerts import AlertKey, parse_ts
+from gateway.alerts.publish import publish_alert_rows
+from services.events_maintenance.config import EventsMaintenanceConfig
 
 _log = logging.getLogger(__name__)
 
 _GRAFANA_ALERTS_PATH = "/api/alertmanager/grafana/api/v2/alerts"
-_RECONCILE_INTERVAL_S = 300.0
+RECONCILE_INTERVAL_S = 300.0
 _RECONCILIATION_NOTE = "reconciled: no longer firing"
 _GRAFANA_API_TIMEOUT = httpx.Timeout(10.0)
 
 PublishRows = Callable[[list[dict[str, Any]]], None]
 
 
-@dataclass(frozen=True)
-class GrafanaAlertReconciler:
-    """Owned background task plus the event that drains it before shutdown."""
-
-    task: asyncio.Task[None]
-    stop: asyncio.Event
+class GrafanaSnapshotError(ValueError):
+    """Grafana's active-alert response is not a complete, well-formed snapshot."""
 
 
-def grafana_reconciliation_configured() -> bool:
-    """Whether this gateway has the credential needed to read Grafana truth."""
+def grafana_reconciliation_configured(config: EventsMaintenanceConfig) -> bool:
+    """Whether this unit has the credential needed to read Grafana truth."""
 
-    password = settings.alerts.grafana_admin_password
+    password = config.grafana_admin_password
     return password is not None and bool(password.get_secret_value())
 
 
@@ -60,21 +62,21 @@ def _grafana_active_alert_keys(payload: object) -> set[AlertKey]:
     """
 
     if not isinstance(payload, list):
-        raise TypeError("Grafana active-alert response must be a list")
+        raise GrafanaSnapshotError("Grafana active-alert response must be a list")
     keys: set[AlertKey] = set()
     for raw_object in cast("list[object]", payload):
         if not isinstance(raw_object, dict):
-            raise TypeError("Grafana active-alert entry must be an object")
+            raise GrafanaSnapshotError("Grafana active-alert entry must be an object")
         raw = cast("dict[str, object]", raw_object)
         fingerprint = raw.get("fingerprint")
         starts_at_raw = raw.get("startsAt")
         if not isinstance(fingerprint, str) or not fingerprint:
-            raise ValueError("Grafana active-alert entry has no fingerprint")
+            raise GrafanaSnapshotError("Grafana active-alert entry has no fingerprint")
         if not isinstance(starts_at_raw, str):
-            raise TypeError("Grafana active-alert entry has no startsAt")
+            raise GrafanaSnapshotError("Grafana active-alert entry has no startsAt")
         starts_at = parse_ts(starts_at_raw)
         if starts_at is None:
-            raise ValueError("Grafana active-alert entry has an invalid startsAt")
+            raise GrafanaSnapshotError("Grafana active-alert entry has an invalid startsAt")
         keys.add((fingerprint, starts_at))
     return keys
 
@@ -149,24 +151,26 @@ async def _reconcile_once(
     db_pool: ConnectionPool,
     grafana_client: httpx.AsyncClient,
     publish_rows: PublishRows,
+    config: EventsMaintenanceConfig,
 ) -> int:
     """Fetch one complete Grafana snapshot, resolve omissions, publish rows."""
 
-    password = settings.alerts.grafana_admin_password
+    password = config.grafana_admin_password
     if password is None or not password.get_secret_value():
         return 0
     # This timestamp precedes the upstream read: any webhook racing with or
     # following the snapshot has a newer updated_at and is ineligible.
     snapshot_started_at = datetime.now(UTC)
-    host = settings.gateway.grafana_host
-    port = settings.gateway.grafana_port
     response = await grafana_client.get(
-        f"http://{host}:{port}{_GRAFANA_ALERTS_PATH}",
+        f"http://{config.grafana_host}:{config.grafana_port}{_GRAFANA_ALERTS_PATH}",
         auth=httpx.BasicAuth("admin", password.get_secret_value()),
         timeout=_GRAFANA_API_TIMEOUT,
     )
     response.raise_for_status()
-    payload: object = response.json()
+    try:
+        payload: object = response.json()
+    except ValueError as exc:
+        raise GrafanaSnapshotError("Grafana active-alert response is not JSON") from exc
     active_keys = _grafana_active_alert_keys(payload)
     resolved_at = datetime.now(UTC)
     rows = await asyncio.to_thread(
@@ -181,53 +185,38 @@ async def _reconcile_once(
     return len(rows)
 
 
-async def reconciliation_loop(
+async def reconciliation_round(
     db_pool: ConnectionPool,
     grafana_client: httpx.AsyncClient,
     publish_rows: PublishRows,
-    stop: asyncio.Event,
+    progress: LoopProgress,
+    config: EventsMaintenanceConfig,
 ) -> None:
-    """Reconcile immediately at startup, then every five minutes.
+    """One reconciliation: log and keep every row when Grafana cannot give a
+    complete snapshot (fail closed), otherwise resolve the omissions."""
 
-    Every upstream/validation/DB failure is fail-closed: log it, leave all
-    rows untouched, and retry on the next interval.
-    """
-
-    while not stop.is_set():
-        if not admission.quiesced():
-            try:
-                resolved = await _reconcile_once(db_pool, grafana_client, publish_rows)
-                if resolved:
-                    _log.info("alerts: reconciled %d alert(s) against Grafana", resolved)
-            except Exception:
-                _log.warning("alerts: Grafana reconciliation failed", exc_info=True)
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=_RECONCILE_INTERVAL_S)
-        except TimeoutError:
-            continue
-
-
-def start_grafana_alert_reconciler(
-    db_pool: ConnectionPool,
-    grafana_client: httpx.AsyncClient,
-    publish_rows: PublishRows,
-) -> GrafanaAlertReconciler | None:
-    """Start the configured reconciler, or return None when Grafana auth is absent."""
-
-    if not grafana_reconciliation_configured():
-        return None
-    stop = asyncio.Event()
-    task = asyncio.create_task(reconciliation_loop(db_pool, grafana_client, publish_rows, stop))
-    return GrafanaAlertReconciler(task=task, stop=stop)
-
-
-async def stop_grafana_alert_reconciler(reconciler: GrafanaAlertReconciler | None) -> None:
-    """Drain a bounded in-flight pass before its shared client/pool are closed."""
-
-    if reconciler is None:
+    try:
+        resolved = await _reconcile_once(db_pool, grafana_client, publish_rows, config)
+    except (httpx.HTTPError, GrafanaSnapshotError) as exc:
+        progress.mark_error(str(exc))
+        _log.warning("alerts: Grafana reconciliation failed: %r", exc)
         return
-    # Cancelling during asyncio.to_thread would leave its DB worker alive while
-    # the gateway closes the pool. The event wakes sleeps and lets one pass drain.
-    reconciler.stop.set()
-    with suppress(asyncio.CancelledError):
-        await reconciler.task
+    if resolved:
+        _log.info("alerts: reconciled %d alert(s) against Grafana", resolved)
+
+
+async def reconciliation_loop(
+    db_pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig
+) -> None:
+    """Reconcile immediately at start, then every five minutes, as a resident
+    sequential loop. Owns its Grafana client: one connection pool for the loop's
+    life, closed when it ends."""
+
+    async with httpx.AsyncClient(trust_env=False, timeout=_GRAFANA_API_TIMEOUT) as client:
+
+        async def one_round() -> None:
+            await reconciliation_round(db_pool, client, publish_alert_rows, progress, config)
+
+        await round_loop.run_rounds(
+            "alert-reconciliation", progress, RECONCILE_INTERVAL_S, one_round
+        )

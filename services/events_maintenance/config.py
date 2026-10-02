@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pydantic import SecretStr
+
 
 @dataclass(frozen=True)
 class EventsMaintenanceConfig:
@@ -24,3 +26,8 @@ class EventsMaintenanceConfig:
     # Shared with the Loki readers and the clock: read by this package too.
     telemetry_loki_url: str
     timezone: str
+    # The co-located Grafana the alert reconciliation reads; no admin password means
+    # this unit does not reconcile alerts.
+    grafana_host: str
+    grafana_port: int
+    grafana_admin_password: SecretStr | None

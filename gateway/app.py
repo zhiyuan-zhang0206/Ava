@@ -81,7 +81,6 @@ from gateway.agents import notices as notices_router
 from gateway.agents import router as agents_router
 from gateway.agents import state as agents_state_router
 from gateway.agents import timeline as timeline_router
-from gateway.alerts import reconciliation
 from gateway.alerts import router as alerts_router
 from gateway.auth import rejection_log
 from gateway.auth import router as auth_router
@@ -217,11 +216,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Cheap when the proxy is disabled: no connection exists until the first
     # proxied request.
     app.state.grafana_client = grafana_router.build_proxy_client()
-    app.state.alert_reconciler = reconciliation.start_grafana_alert_reconciler(
-        app.state.db_pool,
-        app.state.grafana_client,
-        alerts_router.publish_alert_rows,
-    )
 
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start
@@ -265,7 +259,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     finally:
         app.state.mcp_manager = None
         app.state.runtime_metrics.stop()
-        await reconciliation.stop_grafana_alert_reconciler(app.state.alert_reconciler)
         await app.state.grafana_client.aclose()
         for flusher in (
             app.state.latency_flusher,
