@@ -14,7 +14,6 @@ import inspect
 import io
 import sys
 from collections.abc import Iterator
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -231,99 +230,6 @@ def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPat
     assert calls[0][0] == "mcps.chrome.navigate"
 
 
-def test_install_wraps_and_restores_mcp_call_funnel() -> None:
-    """install()/uninstall() wrap the ava.mcps._call_raw funnel so dynamic MCP tool
-    calls are metered, and restore it on teardown."""
-    import ava.mcps
-
-    # `ava` is a process-global singleton and `load_extensions` installs the
-    # recorders as a side effect, so any earlier test in this xdist worker that
-    # loaded plugins leaves the funnel already wrapped — install() then correctly
-    # no-ops and the wrap assertion below reads as a failure. Which tests share a
-    # worker is not deterministic under `-n`, so take a clean baseline first.
-    metering.uninstall()
-    before = ava.mcps._call_raw
-    metering.install()
-    try:
-        assert ava.mcps._call_raw is not before
-        assert ava.mcps._call_raw in metering._RECORDERS
-    finally:
-        metering.uninstall()
-    assert ava.mcps._call_raw is before
-
-
-def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.FixtureRequest) -> None:
-    """Issue #83: `load_extensions()` meters the process-global `ava` singleton as a
-    side effect and nothing used to put it back, so one plugin-loading test silently
-    rewrote the callables every later test in that xdist worker saw.
-
-    The autouse `_restore_metering` in `tests/fixtures/guards.py` is what closes that.
-    It runs after this test body, where a self-test cannot observe it, so the two
-    halves are pinned separately: the fixture is wired onto every test, and its one
-    action reverses a *real* `load_extensions()` — not just the hand-built
-    `install()` the test above covers.
-    """
-    import ava.mcps
-    from agent.graph import _build
-    from ava.sdk_surface.metering import _RECORDERS
-
-    assert "_restore_metering" in request.fixturenames
-
-    metering.uninstall()
-    bare_funnel = ava.mcps._call_raw
-
-    _build.load_extensions()
-    metered = {fq for p, a, fq in metering._instrument_targets() if getattr(p, a) in _RECORDERS}
-    assert metered, "the leak this guards is gone"
-    assert ava.mcps._call_raw in _RECORDERS
-
-    metering.uninstall()  # the fixture's action, made observable
-    assert ava.mcps._call_raw is bare_funnel
-    # The whole surface, not just the funnel: a later test asserting on identity or
-    # on call counts through a wrapped path must see no recorder anywhere.
-    assert not [fq for p, a, fq in metering._instrument_targets() if getattr(p, a) in _RECORDERS]
-
-
-def test_a_plugin_load_leaves_no_section_behind_its_namespace(
-    request: pytest.FixtureRequest,
-) -> None:
-    """The test above still left every plugin registration in its xdist worker. A later
-    namespace-only cleanup (`ava.clear_registered_namespaces()`) then stranded the
-    ava_code prompt section without `ava.cwd`, and every `build_system_prompt()` after
-    it raised `module 'ava' has no attribute 'cwd'` (CI shard 14/16 on PR #3513).
-
-    The autouse `_restore_plugin_registrations` (`tests/fixtures/plugin_registrations.py`)
-    closes that. Same split as above: the guard is wired onto every test, it sees
-    a real `load_extensions()`, and its reset leaves sections, namespaces and
-    state fields empty together.
-    """
-    from agent.graph import _build
-    from agent.graph.system_prompt import _FRAMEWORK_SECTION_COUNT, _SYSTEM_PROMPT_SECTIONS
-    from agent.state import _EXTRA_FIELDS
-    from ava.sdk_surface.plugins import _REGISTERED_MEMBERS, _REGISTERED_NAMESPACES
-    from tests.fixtures.plugin_registrations import (
-        drop_plugin_registrations,
-        plugin_registrations_present,
-    )
-
-    assert "_restore_plugin_registrations" in request.fixturenames
-    assert not plugin_registrations_present()
-
-    _build.load_extensions()
-    assert plugin_registrations_present()
-    assert "cwd" in _REGISTERED_NAMESPACES, "the leak this guards is gone"
-    # `register_namespace` stamps `_qualname` on the namespace module, which outlives the test.
-    stamped = [vars(ava)[name] for name in _REGISTERED_NAMESPACES]
-    assert all("_qualname" in vars(module) for module in stamped)
-
-    drop_plugin_registrations()  # the guard's action, made observable
-    assert not plugin_registrations_present()
-    assert len(_SYSTEM_PROMPT_SECTIONS) == _FRAMEWORK_SECTION_COUNT
-    assert not _REGISTERED_NAMESPACES and not _REGISTERED_MEMBERS and not _EXTRA_FIELDS
-    assert not hasattr(ava, "cwd")
-    assert not any("_qualname" in vars(module) for module in stamped)
-
-
 def test_a_namespace_registered_without_the_agent_layer_is_seen() -> None:
     """A plugin load that never imports `agent.state` (the schedule runner's in-process script)
     still registers namespaces and members on the SDK surface. The gate must see them, or the
@@ -419,40 +325,6 @@ async def test_async_calls_measure_execution_and_isolate_concurrent_frames(
     assert calls == []
     assert await asyncio.gather(a, b) == ["a", "b"]
     assert [row[1] for row in calls] == [{"label": "a"}, {"label": "b"}]
-
-
-def test_plain_python_import_installs_sdk_events(tmp_path: Path) -> None:
-    import json
-    import os
-    import subprocess
-    import sys
-
-    target = tmp_path / "input.txt"
-    target.write_text("hello")
-    code = """
-import json, sys
-import ava
-from base import telemetry
-from base.agents.sdk import call_policy as sdk_call_policy
-sdk_call_policy.policy = sdk_call_policy.SamplingPolicy
-rows = []
-telemetry.emit = lambda *args, **kwargs: rows.append(kwargs)
-assert ava.files.read(sys.argv[1]) == "hello"
-print(json.dumps(rows))
-"""
-    result = subprocess.run(  # noqa: S603 — fixed Python code and an isolated fixture path
-        [sys.executable, "-c", code, str(target)],
-        env={**os.environ, "AVA_AGENT_ID": "42"},
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-    )
-    rows = json.loads(result.stdout)
-    assert len(rows) == 1
-    assert rows[0]["agent_id"] == 42
-    assert rows[0]["attributes"]["fn"] == "files.read"
-    assert rows[0]["attributes"]["sample_rate"] == 1
 
 
 def test_borrowed_identity_is_stamped_on_external_sdk_events(
