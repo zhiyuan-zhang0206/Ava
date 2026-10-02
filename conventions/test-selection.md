@@ -45,7 +45,7 @@ test from a changed source file, and a green subset must not miss a
 tree-wide gate (task #4183: PR #3020's subset passed while the full
 population was red on tests/test_lint_event_kinds.py). Name a new scan test
 `test_lint_*.py` to join automatically, or extend `_TREE_SCAN_TESTS`;
-tests/scripts/test_test_selector.py guards completeness and staleness.
+scripts/tests/test_test_selector.py guards completeness and staleness.
 
 The documentation predicate reuses base.deploy.git.repo_change.is_doc_path. Files under
 scripts/, schedules/, and any `tests/` directory (the top-level one or a package's own

@@ -322,7 +322,7 @@ asks nor dials unbounded. Note that `ConnectTimeout` is not the bound — an
 caller's bound is the only real one.
 
 Not lint-enforced repo-wide yet; the modules that drive git are guarded by
-`tests/base/test_proc.py::test_git_driving_modules_do_not_bound_with_subprocess_run`.
+`base/host/tests/test_proc.py::test_git_driving_modules_do_not_bound_with_subprocess_run`.
 
 ## Reach a stubbable name through its owning module
 

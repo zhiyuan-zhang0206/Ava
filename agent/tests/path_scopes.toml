@@ -3,6 +3,7 @@
 "tests.path_scoped.agent_tests" = [
     "test_checkpoint_interval.py",
     "test_claim.py",
+    "test_compact.py",
     "test_exec_child.py",
     "test_exec_subprocess.py",
     "test_fork_notes.py",

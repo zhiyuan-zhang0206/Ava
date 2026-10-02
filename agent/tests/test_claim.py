@@ -13,7 +13,7 @@ Coverage includes:
 
 Not tested:
 - Redis pub/sub wake integration for ops_db AsyncConnection (tested in test_db.py)
-- auto-compact behavior (now a before_llm hook, tests in tests/agent/test_compact.py)
+- auto-compact behavior (now a before_llm hook, tests in agent/tests/test_compact.py)
 """
 
 import asyncio
@@ -2044,7 +2044,7 @@ async def test_claim_multiple_chat_inbounds_all_appended_in_fifo_order(
 
 
 # auto-compact behavior is now implemented by the before_llm hook in agent/hooks/compact.py,
-# tests in tests/agent/test_compact.py's hook tests. This file only tests claim node
+# tests in agent/tests/test_compact.py's hook tests. This file only tests claim node
 # itself (inbound dispatch + state replacement), no longer tests auto-compact.
 
 

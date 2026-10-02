@@ -24,7 +24,7 @@ Three vocabularies are closed, each for its own reason:
   cannot invent one, and it cannot ship a selector or a rule. That is what
   makes a skin survive UI refactors (the token layer is the stable interface,
   component markup is not) and incapable of injecting layout or behavior.
-  `tests/base/test_ui_contributions.py` locks the tuple against the
+  `base/packages/plugins/tests/test_ui_contributions.py` locks the tuple against the
   stylesheet, so a token added to the console fails the suite until it is
   either offered to skins or listed as deliberately non-themable.
 - `NAV_ICONS` — lucide icon names, i.e. data rather than markup: the frontend

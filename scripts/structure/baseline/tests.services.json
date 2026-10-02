@@ -36,7 +36,6 @@
     "tests/services/test_ava_root_manifest.py::top-level": 1,
     "tests/services/test_ava_root_supervisor.py::top-level": 1,
     "tests/services/test_backup.py::top-level": 1,
-    "tests/services/test_backup_recovery_contract.py::top-level": 1,
     "tests/services/test_backup_scheduler_daemon.py::top-level": 1
   }
 }
