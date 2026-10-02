@@ -42,7 +42,6 @@ from base.events.payloads import (
     PluginActivation,
     PrFlowDaily,
     PrFlowRun,
-    RetentionClass,
     SdkCall,
     ServiceStarted,
     ShellTtlRenewed,
@@ -71,7 +70,6 @@ def _audit(
     *,
     payload: Any | None = None,
     tier: EventTier = "business",
-    retention_class: RetentionClass | None = None,
 ) -> EventSpec:
     return EventSpec(
         name=name,
@@ -79,7 +77,6 @@ def _audit(
         tier=tier,
         payload=payload,
         doc=doc,
-        retention_class=retention_class,
     )
 
 
@@ -104,7 +101,6 @@ def _telemetry(
     family: str | None = None,
     destination: Literal["events", "file"] = "events",
     tier: EventTier = "observation",
-    retention_class: RetentionClass | None = None,
 ) -> EventSpec:
     return EventSpec(
         name=name,
@@ -114,20 +110,18 @@ def _telemetry(
         family=family,
         destination=destination,
         doc=doc,
-        retention_class=retention_class,
     )
 
 
 _EVENTS_RUNTIME: dict[str, EventSpec] = {
     # ── audit (category=audit) — registry.md §2, append-only operations ──
-    # Keep spawn/fork/resurrect and their telemetry mirrors for complete lineage.
-    "spawn": _audit("spawn", "new agent born", payload=Spawn, retention_class="lineage"),
-    "fork": _audit("fork", "agent forked from another", retention_class="lineage"),
+    "spawn": _audit("spawn", "new agent born", payload=Spawn),
+    "fork": _audit("fork", "agent forked from another"),
     "send_message": _audit("send_message", "message sent to an agent"),
     "terminate": _audit("terminate", "agent terminated"),
     "restart": _audit("restart", "agent restart initiated"),
     "cancel": _audit("cancel", "in-flight turn cancelled"),
-    "resurrect": _audit("resurrect", "terminated agent woken", retention_class="lineage"),
+    "resurrect": _audit("resurrect", "terminated agent woken"),
     "billing_resurrect": _audit(
         "billing_resurrect",
         "billing batch recovery run: billing-class halt victims reinstated after "

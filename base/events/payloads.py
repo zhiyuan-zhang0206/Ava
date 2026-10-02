@@ -7,28 +7,6 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 Category = Literal["audit", "telemetry", "log"]
 EventTier = Literal["business", "anomaly", "observation", "noise"]
-RetentionClass = Literal["lineage", "audit", "lifecycle", "telemetry", "log"]
-
-# Retention class is the third, independent dimension (design 2026-09-02,
-# user ruling): `category` decides access semantics, `tier` decides display
-# priority, and neither can say "this row must never be deleted" — lineage is
-# 5 of the 17 audit names. It answers one question: after this row is gone,
-# can the fact still be reconstructed?
-#
-# - lineage: no. Who spawned whom is not derivable from any current state
-#   (`agents_meta.spawner` is folded on terminate), and the class is tiny
-#   (~412 rows/day, 0.11% of the stream), so it is retained permanently and
-#   append-only — a 100-year Loki per-stream period plus its own JSONL mirror.
-# - audit / lifecycle / telemetry / log: reconstructable, approximable, or
-#   aggregated. Their windows are not declared here yet (this change ships the
-#   lineage class only); the names exist so the vocabulary is fixed and a later
-#   declaration is one field, not a new dimension.
-#
-# Declaring a class here is half a change: the deployed Loki `retention_stream`
-# rule is derived from `lineage_event_names()` and pinned by
-# `base/loki_index_labels.validate_loki_deploy_config`, because the
-# 2026-08-20 archive loss shipped as exactly that half — the per-stream
-# override landed nine days after the global 168h bucket had deleted the data.
 
 # Event tiers control the human-facing event stream, independently from the
 # category that controls event-class access semantics:
