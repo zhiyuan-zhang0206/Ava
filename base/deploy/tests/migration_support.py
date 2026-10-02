@@ -19,7 +19,7 @@ from base.deploy.schema.migrations import (
     required_migration_set,
 )
 
-_SCHEMA_SQL = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
+_SCHEMA_SQL = Path(__file__).resolve().parents[3] / "db" / "schema.sql"
 _SYN = "29991231T235959_synthetic"
 _SYN2 = "29991231T235960_synthetic-two"
 SYN_ORPHAN = "20260815T000001_synthetic-orphan"
