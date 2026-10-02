@@ -11,7 +11,7 @@ import pytest
 from scripts.lint import patch_targets as lint
 from scripts.structure import baseline_shards, locality, patch_points, patch_targets
 from scripts.structure.placement import ModuleIndex
-from tests.scripts.structure.patch_repo import make_repo, write
+from scripts.structure.tests.patch_repo import make_repo, write
 
 # A test whose subject is `cli.commands.run`: its home is `cli/commands`.
 _SUBJECT = "from cli.commands import run\n\nrun.main()\n"
