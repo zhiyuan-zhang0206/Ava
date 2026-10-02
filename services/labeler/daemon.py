@@ -32,6 +32,7 @@ from base.config import settings
 from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.paths import pid_path
 from services.labeler.config import LabelerConfig
@@ -237,6 +238,8 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness, config: Label
         liveness.beat()
         try:
             await asyncio.sleep(_POLL_INTERVAL_S)
+            if admission.quiesced():
+                continue
             now = time.monotonic()
             cooling = _cooling_ids(now)
             with pool.connection() as conn, conn.cursor() as cur:

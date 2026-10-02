@@ -294,6 +294,7 @@ def wait_for_browser_startup_readiness() -> None:
     """Block the supervised daemon until macOS can safely serve Chrome's keys."""
     last_reason: str | None = None
     last_reported_at = 0.0
+    # quiesce-exempt: a bounded startup wait on browser readiness; no database
     while True:
         readiness = probe_startup_readiness()
         if readiness.ready:

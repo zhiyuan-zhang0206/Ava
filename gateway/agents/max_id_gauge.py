@@ -27,6 +27,7 @@ import logging
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.deploy.maintenance import admission
 
 _log = logging.getLogger(__name__)
 
@@ -68,6 +69,8 @@ async def max_agent_id_flusher(pool: ConnectionPool) -> None:
     """
     while True:
         await asyncio.sleep(FLUSH_INTERVAL_S)
+        if admission.quiesced():
+            continue
         try:
             max_id = await asyncio.to_thread(read_max_agent_id_blocking, pool)
             if max_id is not None:
