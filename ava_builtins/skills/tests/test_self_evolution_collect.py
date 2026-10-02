@@ -21,6 +21,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from base.config import settings
+from base.db.tests.fakes import patch_database
 from tests.skills import load_skill_script
 
 
@@ -879,7 +880,7 @@ def test_collect_with_counts_keeps_records_and_reports_filters(
     def _fresh_conn() -> psycopg.Connection:
         return psycopg.connect(collect_mod.settings.data_plane.db_url)
 
-    monkeypatch.setattr(collect_mod, "connect", _fresh_conn)
+    patch_database(monkeypatch, connect=_fresh_conn)
 
     def _fake_build_record(agent_id: int, *_args: object, **_kwargs: object) -> dict[str, object]:
         return {"agent_id": agent_id, "label": "ok"}
