@@ -1,7 +1,7 @@
 {
   "ambient_state": {
     "services/agent_host/daemon.py::asyncio-task:_PageEventPublisher.emit": 1,
-    "services/agent_host/daemon.py::asyncio-task:_spawn_background_tasks": 4,
+    "services/agent_host/daemon.py::asyncio-task:_spawn_background_tasks": 1,
     "services/agent_host/daemon.py::asyncio-task:run": 1,
     "services/agent_host/dispatcher.py::asyncio-task:TurnScheduler._start": 1,
     "services/agent_host/host.py::asyncio-task:AgentHost.run_turn": 2,

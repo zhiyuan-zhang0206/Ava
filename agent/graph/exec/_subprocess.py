@@ -51,6 +51,7 @@ from base.host.env.registry import (
     MANIFEST_CERTIFICATION_SECRET_ENV,
 )
 from base.log import logger
+from base.native_process.exec_kill_notice import read_notice
 from base.native_process.turn_identity import current_hosted_resources
 from base.paths import exec_run_dir
 
@@ -545,6 +546,7 @@ async def _run_legacy_subprocess(
                 timed_out=timed_out,
                 envelope_error=envelope_error,
                 stream_cap=stream.cap(),
+                memory_guard_notice=read_notice(result_path),
             ),
             payload,
         )
@@ -622,6 +624,37 @@ def _read_result_envelope(
         return None, f"exec result envelope could not be decoded: {exc}"
 
 
+def _child_exception(
+    payload: ResultPayload | None, envelope_error: str | None
+) -> BaseException | None:
+    """The exception the child's outcome stands for, or None for a clean exit."""
+    if envelope_error is not None:
+        return ExecChildError("exec_result_envelope_invalid", envelope_error, None)
+    if payload is not None and payload.kind == "lifecycle" and payload.lifecycle_type:
+        exc = lifecycle_exception_from_name(payload.lifecycle_type)
+        if exc is None:
+            exc = ExecChildError(
+                "unknown_lifecycle_class",
+                "child reported unknown lifecycle class " + repr(payload.lifecycle_type),
+                None,
+            )
+        return exc
+    if payload is not None and payload.exc_type:
+        # Crash, or a signal exception the agent raised itself
+        # (KeyboardInterrupt / TimeoutError written by its own code): if the
+        # parent's flags confirm the signal, the construction priority below
+        # still wins (cancel/timeout outrank a crash exc).
+        return ExecChildError(payload.exc_type, payload.exc_msg or "", payload.full_traceback)
+    if payload is None:
+        return ExecChildError(
+            "exec_subprocess_aborted",
+            "the exec child exited without writing a result envelope "
+            "(SIGKILLed, watchdog, or the agent's own os._exit)",
+            None,
+        )
+    return None
+
+
 def _result_from_payload(
     output: str,
     payload: ResultPayload | None,
@@ -630,6 +663,7 @@ def _result_from_payload(
     timed_out: bool,
     envelope_error: str | None = None,
     stream_cap: StreamCap | None = None,
+    memory_guard_notice: str | None = None,
 ) -> _ExecResult:
     """Map the child's outcome onto the `_ExecResult` sum type.
 
@@ -638,36 +672,16 @@ def _result_from_payload(
     lifecycle — the envelope carries the `LifecycleExit` class name, which the
     parent reconstructs for the dispatcher's isinstance match. A missing
     envelope with a non-zero exit (agent called os._exit) becomes a crash with
-    an explanatory error.
+    an explanatory error; when the host memory guard killed the child, that
+    error and the agent-visible output state the guard's reason instead.
     """
-    exc: BaseException | None = None
-    if envelope_error is not None:
-        exc = ExecChildError("exec_result_envelope_invalid", envelope_error, None)
-    elif payload is not None and payload.kind == "lifecycle" and payload.lifecycle_type:
-        exc = lifecycle_exception_from_name(payload.lifecycle_type)
-        if exc is None:
-            exc = ExecChildError(
-                "unknown_lifecycle_class",
-                "child reported unknown lifecycle class " + repr(payload.lifecycle_type),
-                None,
-            )
-    elif payload is not None and payload.exc_type:
-        # Crash, or a signal exception the agent raised itself
-        # (KeyboardInterrupt / TimeoutError written by its own code): if the
-        # parent's flags confirm the signal, the construction priority below
-        # still wins (cancel/timeout outrank a crash exc).
-        exc = ExecChildError(
-            payload.exc_type,
-            payload.exc_msg or "",
-            payload.full_traceback,
+    if memory_guard_notice is not None and payload is None:
+        output = f"{output}\n{memory_guard_notice}\n" if output else f"{memory_guard_notice}\n"
+        exc: BaseException | None = ExecChildError(
+            "exec_memory_guard_killed", memory_guard_notice, None
         )
-    elif payload is None:
-        exc = ExecChildError(
-            "exec_subprocess_aborted",
-            "the exec child exited without writing a result envelope "
-            "(SIGKILLed, watchdog, or the agent's own os._exit)",
-            None,
-        )
+    else:
+        exc = _child_exception(payload, envelope_error)
     result = _construct_exec_result(
         output,
         exc,
