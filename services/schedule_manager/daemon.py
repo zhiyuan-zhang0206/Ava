@@ -34,7 +34,6 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-import base.db
 from base.config import settings
 from base.daemon import round_loop
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -42,6 +41,7 @@ from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
 from base.log import init_gateway_process
 from base.paths import prod_service_checkout_error
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -128,7 +128,7 @@ async def run() -> None:
     health = await start_health_server("schedule_manager", endpoint.health_port, liveness=liveness)
     _log.info("[schedule-manager] healthz listening on :%s", endpoint.health_port)
 
-    pool = base.db.pool(max_size=_POOL_MAX_SIZE)
+    pool = Database.from_settings().pool(max_size=_POOL_MAX_SIZE)
     try:
         # Automatic seeding is explicit configuration; unseeded previews still use
         # the schedule APIs without launching background workloads.
