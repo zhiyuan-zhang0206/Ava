@@ -380,7 +380,7 @@ def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
     attachment = external.attach("lease")
     participant = manifest.LocalParticipant("lease", attachment.agent_id, 0, "post-close-sdk")
     manifest.bind_local_participant(participant)
-    attachment._manifest_participant = participant
+    attachment._event_participant = participant
     delivered: list[tuple[int, str]] = []
 
     def record_send(agent_id: int, *, content: str, source: str) -> None:
@@ -391,8 +391,11 @@ def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
         with pytest.raises(RuntimeError, match="closing"):
             ava.agents.send_message(99, "must not reach gateway")
 
+    def skip_seal(_participant: manifest.LocalParticipant) -> None:
+        return None
+
     monkeypatch.setattr(gateway_client, "send_message", record_send)
-    monkeypatch.setattr(attachment, "_seal_manifest_participant", lambda: None)
+    monkeypatch.setattr(manifest, "seal_local_participant", skip_seal)
     monkeypatch.setattr(attachment, "flush", new_call_during_close)
     attachment.close()
     assert delivered == []
@@ -408,7 +411,7 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
     attachment = external.attach("lease")
     participant = manifest.LocalParticipant("lease", attachment.agent_id, 0, "pre-close-sdk")
     manifest.bind_local_participant(participant)
-    attachment._manifest_participant = participant
+    attachment._event_participant = participant
     entered, release = Event(), Event()
     delivered: list[tuple[int, str]] = []
 
@@ -419,7 +422,6 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
         delivered.append((agent_id, content))
 
     monkeypatch.setattr(gateway_client, "send_message", held_send)
-    monkeypatch.setattr(attachment, "_seal_manifest_participant", lambda: None)
 
     def skip_seal(_participant: manifest.LocalParticipant) -> None:
         return None
