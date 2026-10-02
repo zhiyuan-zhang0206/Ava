@@ -36,6 +36,7 @@
     "cli/commands/tests/test_lgtm_native.py::test_ensure_renders_configs_with_native_paths_and_loopback": 24
   },
   "files": {
+    "cli/commands/agents/tests/test_impersonation_bridge.py": 808,
     "cli/commands/cluster/tests/test_cluster_health.py": 2115,
     "cli/commands/management/tests/test_config_cmd.py": 804,
     "cli/commands/observability/tests/test_converge_otel_collector.py": 1249
