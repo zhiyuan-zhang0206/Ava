@@ -114,3 +114,11 @@ def test_swift_enables_chromium_accessibility_narrowly() -> None:
     for name in ('"chromium"', '"electron"', '"cef"'):
         markers = _SWIFT.split("private let axTreeFrameworkMarkers", 1)[1].split("\n]", 1)[0]
         assert name in markers
+
+
+def test_swift_detects_renamed_chromium_forks_by_their_renderer_helper() -> None:
+    hint = _SWIFT.split("private func axFrameworkHint", 1)[1].split("private func axPickWindow", 1)[
+        0
+    ]
+    assert 'hasSuffix("Helper (Renderer).app")' in hint
+    assert 'appendingPathComponent(entry + "/Helpers")' in hint
