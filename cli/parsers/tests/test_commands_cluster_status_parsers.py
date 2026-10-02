@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 
 import cli.commands.cluster.control as cluster_control
-from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
-from tests.cli._commands_helpers import _FakeResponse
-from tests.cli._commands_helpers import _gateway_role_pinned as _gateway_role_pinned
-from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
+from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
+from cli.tests._commands_helpers import _FakeResponse
+from cli.tests._commands_helpers import _gateway_role_pinned as _gateway_role_pinned
+from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 
 
 def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(

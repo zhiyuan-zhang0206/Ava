@@ -17,9 +17,9 @@ import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle.status as _status_commands
 import ops.roster as _roster
 from base.config import settings
-from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
-from tests.cli._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
-from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
+from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
+from cli.tests._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
+from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 
 
 @pytest.fixture(autouse=True)

@@ -18,13 +18,13 @@ import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
 from base.deploy.lifecycle.start_serving import RootBirth
 from cli.commands.lifecycle.stop import _force_stop
-from tests.cli._commands_helpers import (
+from cli.tests._commands_helpers import (
     _FakeResponse,
     _FakeResult,
     _git_aware,
     _patch_gateway_http,
 )
-from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
+from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 
 _real_reap_cluster_chrome = _stop_commands._reap_cluster_chrome
 
