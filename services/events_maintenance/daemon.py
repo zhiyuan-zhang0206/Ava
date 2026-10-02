@@ -1,7 +1,7 @@
 """Events-maintenance daemon — gateway-owned unified event-stream + checkpoint maintenance.
 
-Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Two
-loops:
+Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Three
+resident loops under one `TaskGroup` (one that raises ends the process):
 
 - Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): recompute
   the day-grain rollup tables (`services.events_maintenance.rollup`), replay
@@ -14,6 +14,9 @@ loops:
   in the Loki archive stream.
 - Resolution loop (`AVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m):
   refresh immutable-event class-resolution state and gauges from Loki.
+- Registry-gauge loop (every 60s): sample `max(agents.id)` and emit the
+  `agent_registry` event the growth dashboard reads
+  (`services.events_maintenance.registry_gauge`).
 
 The checkpoint trim opt-in was retired on 2026-09-30 under the never-delete
 ruling. Its implementation remains in `checkpoint_reaper.py` but is not scheduled.
@@ -75,6 +78,7 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.paths import pid_path
+from services.events_maintenance import registry_gauge
 from services.events_maintenance.blob_vacuum import (
     emit_checkpoint_table_sizes,
     run_blob_vacuum,
@@ -111,6 +115,9 @@ def _pidfile() -> Path:
 
 
 _LIVENESS_BEAT_STEP_S = 30.0
+# One registry-gauge round is a single-row read; a loop that completed nothing for this
+# long (three sample intervals) is wedged.
+_REGISTRY_GAUGE_LIVENESS_TIMEOUT_S = 180.0
 
 
 class WedgedPassError(RuntimeError):
@@ -365,7 +372,7 @@ async def _resolution_loop(
 
 
 async def run() -> None:
-    """Start healthz, register per-loop progress, then enter all maintenance loops."""
+    """Start healthz, register per-loop progress, then enter all resident loops."""
     if _is_running():
         _log.info(
             "[events-maintenance] daemon already running (pidfile=%s), exiting",
@@ -383,6 +390,7 @@ async def run() -> None:
     resolution_progress = liveness.register(
         "resolution", config.events_maintenance_resolution_deadline_s
     )
+    gauge_progress = liveness.register("registry_gauge", _REGISTRY_GAUGE_LIVENESS_TIMEOUT_S)
     health = await start_health_server(
         "events_maintenance",
         liveness=liveness,
@@ -392,10 +400,12 @@ async def run() -> None:
 
     pool = base.db.pool()
     try:
-        await asyncio.gather(
-            _dispatch_loop(pool, dispatch_progress, config),
-            _resolution_loop(pool, resolution_progress, config),
-        )
+        # One TaskGroup owns the three loops: one that raises cancels its siblings
+        # and ends the process, and the supervisor restarts it.
+        async with asyncio.TaskGroup() as loops:
+            loops.create_task(_dispatch_loop(pool, dispatch_progress, config))
+            loops.create_task(_resolution_loop(pool, resolution_progress, config))
+            loops.create_task(registry_gauge.registry_gauge_loop(pool, gauge_progress))
     finally:
         pool.close()
         await stop_health_server(health)

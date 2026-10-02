@@ -93,7 +93,7 @@ def emit_memory_search_stats(rows: int, last_save_seconds: float | None) -> None
     metric is not zero).
 
     Exposed separately from the flusher so tests can drive it directly
-    (mirrors `gateway/agents/max_id_gauge.py:emit_max_agent_id`).
+    (mirrors `services/events_maintenance/registry_gauge.py:emit_max_agent_id`).
     """
     attributes: dict[str, int | float] = {"rows": rows}
     if last_save_seconds is not None:
