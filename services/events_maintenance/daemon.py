@@ -337,9 +337,8 @@ async def _resolution_loop(
 ) -> None:
     """Refresh immutable-event class-resolution gauges on their own cadence.
 
-    The six-hour Loki read and safety-valve write are unrelated to the frozen
-    archive's hourly rollup and must run while archive maintenance is disabled.
-    As with the rollup loop, a transient backend outage waits one full
+    The six-hour class count and safety-valve write are independent of the hourly
+    rollup pass. As with the rollup loop, a transient backend outage waits one full
     configured interval; schema drift exits for watchdog recovery.
     """
 

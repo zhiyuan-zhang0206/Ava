@@ -135,7 +135,7 @@ def active_dismissals(conn: Any) -> list[Dismissal]:
 
     An empty ``process`` is a wildcard pattern; a concrete one targets a
     single emitting process (task #4329 B5). The v1 API rejects a non-NULL
-    agent_id rather than subtracting it from a class-wide Loki aggregate
+    agent_id rather than subtracting it from a class-wide count
     incorrectly; a manually inserted future per-agent row therefore remains
     visible in history but has no arithmetic effect until the query grouping
     grows that dimension.
@@ -331,7 +331,7 @@ def level_splits(counts: dict[EventClass, int], active: set[EventClass]) -> dict
     ``dismissed`` instead — an exact (process-scoped) row or a wildcard
     (``process=""``) row, see :func:`_is_dismissed`. Levels are ``"warning"``
     and ``"error"`` — ``critical`` classes fold into ``error`` exactly as the
-    Loki query's level domain (``warning|error|critical``) and the operator
+    count's level domain (``warning|error|critical``) and the operator
     gauges do, so the three-way split always sums to the raw level counts.
 
     This is the single arithmetic both the daemon's fixed-window gauges and
