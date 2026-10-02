@@ -1,7 +1,7 @@
 {
   "ambient_state": {
     "gateway/app.py::ambient-container:_session_last_touch": 1,
-    "gateway/app.py::asyncio-task:lifespan": 3,
+    "gateway/app.py::asyncio-task:lifespan": 2,
     "gateway/schedule_runner.py::thread:_stall_action": 1,
     "gateway/schedule_runner.py::thread:_start_stall_guard": 1
   }

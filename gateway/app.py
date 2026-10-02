@@ -74,7 +74,6 @@ from base.config import settings
 from base.host.system.cron import register_os_cron
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from gateway._server import main as _run_gateway
-from gateway.agents import completion_notice_flusher
 from gateway.agents import conversation as conversation_router
 from gateway.agents import lifecycle as agents_lifecycle_router
 from gateway.agents import notices as notices_router
@@ -238,13 +237,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Periodic telemetry emitters (latency / auth-401 / runtime): each
     # drains its accumulator or DB sample once per 60s and emits ONE bounded
-    # event; the lifespan owns and stops every task or scheduled callback. The
-    # completion-notice digest flusher rides the same lifespan-owned task set.
+    # event; the lifespan owns and stops every task or scheduled callback.
     app.state.latency_flusher = asyncio.create_task(latency.latency_flusher())
     app.state.auth401_flusher = asyncio.create_task(rejection_log.auth401_flusher())
-    app.state.completion_notice_flusher = asyncio.create_task(
-        completion_notice_flusher.completion_notice_flusher(app.state.db_pool)
-    )
     app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
 
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
@@ -270,7 +265,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         for flusher in (
             app.state.latency_flusher,
             app.state.auth401_flusher,
-            app.state.completion_notice_flusher,
         ):
             flusher.cancel()
             with suppress(asyncio.CancelledError):

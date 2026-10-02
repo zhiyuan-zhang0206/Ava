@@ -22,7 +22,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
-from base.daemon.health import Liveness
+from base.daemon.loop_health import LoopProgress
 from services.heartbeat import JITTER_SPAN_S
 from services.heartbeat import daemon as heartbeat_daemon
 from services.heartbeat.liveness import (
@@ -635,6 +635,6 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
     monkeypatch.setattr(heartbeat_daemon, "_sweep_backoff_resets", skip_sweep)
 
     with pytest.raises(asyncio.CancelledError):
-        await heartbeat_daemon._dispatch_loop(pool, Liveness(60.0))
+        await heartbeat_daemon._dispatch_loop(pool, LoopProgress("dispatch", 60.0))
 
     assert sent_on_ticks == [0, 3]
