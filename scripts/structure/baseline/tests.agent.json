@@ -14,19 +14,13 @@
   "files": {
     "tests/agent/test_claim.py": 3069,
     "tests/agent/test_compact.py": 1142,
-    "tests/agent/test_impersonation.py": 935
+    "tests/agent/test_impersonation.py": 842
   },
   "patch_targets": {
     "tests/agent/test_claim.py::agent.graph.claim._dispatch": 2,
     "tests/agent/test_claim.py::agent.graph.claim.node._claim_node_impl": 1,
     "tests/agent/test_compact.py::base.telemetry.tracing._state": 1,
     "tests/agent/test_exec_domain_confirmation.py::base.native_process.exec_domain._process_group_has_live_member": 2,
-    "tests/agent/test_impersonation.py::agent.impersonation._PROCESS_STARTED_MONOTONIC": 7,
-    "tests/agent/test_impersonation.py::agent.impersonation._PROCESS_STARTED_WALL": 5,
-    "tests/agent/test_impersonation.py::agent.impersonation._RELAY_READY_TIMEOUT_S": 1,
-    "tests/agent/test_impersonation.py::agent.impersonation._provider_anchor_states": 3,
-    "tests/agent/test_impersonation.py::agent.impersonation._spawn_codex_relay": 7,
-    "tests/agent/test_impersonation.py::agent.impersonation._terminate_relay": 3,
     "tests/agent/test_impersonation_integration.py::agent.impersonation._PROCESS_STARTED_MONOTONIC": 2,
     "tests/agent/test_impersonation_integration.py::agent.impersonation._provider_anchor_states": 3,
     "tests/agent/test_impersonation_integration.py::agent.impersonation._spawn_codex_relay": 1,
