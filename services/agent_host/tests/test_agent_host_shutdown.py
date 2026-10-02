@@ -1,4 +1,8 @@
-"""A failed background task cannot skip turn drain or ownership release.
+"""A failed background loop exits the host, and cannot skip turn drain or ownership release.
+
+The loops share one `TaskGroup` with the wake dispatcher: a loop that raises
+cancels the dispatcher and its siblings, and `run` raises so `ava-root` restarts
+the process after the turns drain.
 
 The sweep's bounded-exit regression (task #4224) rides the shared child-process
 harness: production ``main()`` must exit within a small bound of SIGTERM even
@@ -26,6 +30,13 @@ from tests.services.daemon_shutdown_test_support import (
     KILL_SLACK_S,
     spawn_child,
 )
+
+
+def _describe(exc: BaseException) -> str:
+    if isinstance(exc, BaseExceptionGroup):
+        members = cast("BaseExceptionGroup[BaseException]", exc).exceptions
+        return f"ExceptionGroup[{','.join(type(e).__name__ for e in members)}]"
+    return type(exc).__name__
 
 
 def _exercise_shutdown(failure: str) -> None:
@@ -58,21 +69,18 @@ def _exercise_shutdown(failure: str) -> None:
         raise ValueError("background failed")
 
     async def dispatch() -> None:
-        if failure == "exception":
-            # Let the failed task finish before entering the cleanup path.
-            await asyncio.sleep(0.01)
-            return
-        await asyncio.Event().wait()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            events.append("dispatcher_cancelled")
+            raise
 
-    original_spawn = daemon._spawn_background_tasks
+    original_loops = daemon._background_loops
 
-    def spawn(pool: object) -> dict[str, asyncio.Task[object]]:
+    def loops(pool: object) -> dict[str, Any]:
         if failure == "plugin":
-            return original_spawn(pool)  # type: ignore[arg-type] -- pools are test doubles
-        return {
-            "failed": asyncio.create_task(fail()),
-            "sibling": asyncio.create_task(background()),
-        }
+            return original_loops(pool)  # type: ignore[arg-type] -- pools are test doubles
+        return {"failed": fail(), "sibling": background()}
 
     host = MagicMock(aclose=partial(record, "owner_released"))
     scheduler = MagicMock(aclose=partial(record, "turns_drained"))
@@ -111,7 +119,7 @@ def _exercise_shutdown(failure: str) -> None:
             settle_stale_running_rows=AsyncMock(return_value=[]),
             start_health_server=AsyncMock(return_value=object()),
             stop_health_server=close_health,
-            _spawn_background_tasks=spawn,
+            _background_loops=loops,
             _plugins_fingerprint=MagicMock(side_effect=["before", "after"]),
             _PLUGINS_POLL_INTERVAL_S=0.01,
             _page_reconcile_forever=background,
@@ -122,14 +130,18 @@ def _exercise_shutdown(failure: str) -> None:
         daemon.install_graceful_shutdown("agent_host_test")
         try:
             asyncio.run(daemon.run())
-        except (KeyboardInterrupt, ValueError, asyncio.CancelledError) as exc:
-            events.append(type(exc).__name__)
+        except (KeyboardInterrupt, asyncio.CancelledError, ExceptionGroup) as exc:
+            events.append(_describe(exc))
     print(json.dumps(events))  # noqa: T201 -- child result protocol
 
 
 @pytest.mark.parametrize(
     "failure,exception",
-    [("plugin", "KeyboardInterrupt"), ("signal", "KeyboardInterrupt"), ("exception", "ValueError")],
+    [
+        ("plugin", "KeyboardInterrupt"),
+        ("signal", "KeyboardInterrupt"),
+        ("exception", "ExceptionGroup[ValueError]"),
+    ],
 )
 def test_failed_background_still_drains_and_releases(failure: str, exception: str) -> None:
     result = subprocess.run(  # noqa: S603 -- fixed test helper in this checkout
@@ -159,11 +171,15 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
         exception,
     ]
     assert [
-        event for event in events if event not in {"background_joined", "beat_stopped"}
+        event
+        for event in events
+        if event not in {"background_joined", "beat_stopped", "dispatcher_cancelled"}
     ] == ordered
     assert events.index("background_joined") < events.index("turns_drained")
     assert events.index("beat_stopped") < events.index("owner_released")
     if failure == "exception":
+        # The crashed loop took the dispatcher down with it, before any drain.
+        assert events.index("dispatcher_cancelled") < events.index("turns_drained")
         assert events.index("turns_drained") < events.index("beat_stopped")
 
 
