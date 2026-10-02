@@ -59,6 +59,7 @@ from base.daemon.health import (
     stop_health_server,
 )
 from base.daemon.shutdown import install_graceful_shutdown
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.log import init_gateway_process
@@ -540,7 +541,7 @@ async def run() -> None:
     health = await start_health_server("task_maintenance", endpoint.health_port, liveness=liveness)
     _log.info("[task-maintenance] healthz listening on :%s", endpoint.health_port)
 
-    pool = base.db.pool()
+    pool = Database.from_settings().pool()
     try:
         await _dispatch_loop(pool, liveness)
     finally:

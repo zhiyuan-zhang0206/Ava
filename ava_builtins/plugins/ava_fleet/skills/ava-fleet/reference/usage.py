@@ -42,7 +42,7 @@ import sys
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, LiteralString, cast
 
-from base.db import connect
+from base.db import Database
 from base.events.contract import LLM_USAGE_KEYS
 
 _NUMBER = r"^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$"
@@ -186,7 +186,7 @@ def _rows(agent_ids: list[int], since: datetime | None, hours: float | None) -> 
     """The merged row set for one request: windowed = the window's event rows; whole life = the
     ledger + each agent's event tail from its ledger watermark."""
     from_, to = _window_bounds(since, hours)
-    with connect() as conn:
+    with Database.from_settings().connect() as conn:
         if from_ is not None:
             if not agent_ids:
                 agent_ids = sorted(
