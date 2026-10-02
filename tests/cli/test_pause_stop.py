@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import psutil
@@ -25,36 +24,13 @@ from cli.parsers import build_parser
 from ops import agent_pause
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
-from tests.cli.test_maintenance_stop import Launcher
-from tests.cli.test_maintenance_stop import home as home
-from tests.cli.test_maintenance_stop import launch as launch
+from tests.cli._commands_helpers import Launcher, dependencies, drained
+from tests.cli._commands_helpers import home as home
+from tests.cli._commands_helpers import launch as launch
 from tests.path_scoped.pty_reaper import PtyReaper
 
 _NORMAL = "import signal,sys,time\nsignal.signal(signal.SIGTERM,lambda *_:sys.exit(0))\nprint('ready',flush=True)\nwhile True:time.sleep(.02)"
 _IGNORE = "import signal,time\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nprint('ready',flush=True)\nwhile True:time.sleep(.02)"
-
-
-def drained() -> None:
-    pause_owner.begin_maintenance("local", WHEN)
-    pause_owner.change_maintenance("local", WHEN, MaintenanceHold(), MaintenanceHold("drained"))
-
-
-def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    monkeypatch.setattr(command, "pause_agents", lambda _timeout, **_kw: drained())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(command, "machine_role", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(
-        command,
-        "build_services",
-        lambda: [
-            SimpleNamespace(session="worker", requires_db=False),
-            SimpleNamespace(session="browser", requires_db=False),
-        ],
-    )
-    monkeypatch.setattr(command, "ops_quiescent", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.host.proc.hosting_supervised_session", lambda: None)
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", lambda _value: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_pause_preserves_unselected_process_and_real_pty(
