@@ -20,7 +20,6 @@ from base.host import atomic_io
 from base.sessions import coding_session_owner_record
 from base.sessions.pty import allocation_freeze
 from cli.commands.observability import grafana_render, observatory_urls, otel_collector
-from ops import pty_close_notices
 
 _START_GENERATION = "00000000-0000-4000-8000-000000000001"
 
@@ -143,10 +142,9 @@ def test_cli_writer_commits_utf8_without_directory_sync(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("case", ["outbox", "close-notice"])
 @pytest.mark.skipif(os.name == "nt", reason="journals skip parent fsync on Windows")
 def test_journal_directory_sync_failure_raises_after_visible_commit(
-    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "record.json"
     original_fsync = os.fsync
@@ -157,53 +155,29 @@ def test_journal_directory_sync_failure_raises_after_visible_commit(
         original_fsync(fd)
 
     monkeypatch.setattr(os, "fsync", fail_directory_sync)
-    if case == "outbox":
-        entry = delivery_outbox.OutboxEntry(
-            schema_version=1,
-            agent_id=1,
-            source="test",
-            content="message",
-            client_message_id="key",
-            created_at="2026-09-24T00:00:00+00:00",
-            last_attempt_at="2026-09-24T00:00:00+00:00",
-            attempts=1,
-            origin_agent_id=None,
-            origin_pid=None,
-            flush_attempts=0,
-            last_flush_at=None,
-            state="pending",
-            abandon_reason=None,
-            abandon_detail=None,
-            abandoned_at=None,
-        )
+    entry = delivery_outbox.OutboxEntry(
+        schema_version=1,
+        agent_id=1,
+        source="test",
+        content="message",
+        client_message_id="key",
+        created_at="2026-09-24T00:00:00+00:00",
+        last_attempt_at="2026-09-24T00:00:00+00:00",
+        attempts=1,
+        origin_agent_id=None,
+        origin_pid=None,
+        flush_attempts=0,
+        last_flush_at=None,
+        state="pending",
+        abandon_reason=None,
+        abandon_detail=None,
+        abandoned_at=None,
+    )
 
-        def write() -> None:
-            delivery_outbox._write_atomic(path, entry)
-
-        expected = entry.as_dict()
-    else:
-        notice = pty_close_notices.ClosureNotice(
-            machine="host",
-            agent_id=1,
-            session_id=2,
-            name="ava-agent-1-shell-2-test",
-            shell_pid=42,
-            shell_birth="birth",
-            operation="test",
-            acquired_at="2026-09-24T00:00:00+00:00",
-            reason="test",
-            closed_at="2026-09-24T00:00:01+00:00",
-        )
-        monkeypatch.setattr(pty_close_notices, "journal_dir", lambda: tmp_path)
-        path = pty_close_notices._record_path(notice)
-
-        def write() -> None:
-            pty_close_notices._write_atomic(notice)
-
-        expected = notice.as_dict()
+    expected = entry.as_dict()
 
     with pytest.raises(OSError, match="directory sync failure"):
-        write()
+        delivery_outbox._write_atomic(path, entry)
     assert path.read_bytes() == json.dumps(expected, separators=(",", ":"), sort_keys=True).encode()
     assert sorted(tmp_path.iterdir()) == [path]
 

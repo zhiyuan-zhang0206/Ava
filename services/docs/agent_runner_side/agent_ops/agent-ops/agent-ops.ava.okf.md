@@ -34,8 +34,8 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 Dependency APIs remain available until existing native actions finish.
 Local service teardown closes new API admission only after the drain; normal
 start resumes the existing hold after readiness. The dispatch pool runs
-`min_size=0` and the shell-closure-notice flush waits while the unit is
-quiesced, then delivers once the start releases its hold. A cluster update stops and starts each unit through
+`min_size=0`. Shell-closure notices are not an ops task: `ava stop` writes
+them itself (`ops/pty_close_notices.py`). A cluster update stops and starts each unit through
 `cli.fleet_update`, not through ops kinds. See [[base/deploy/maintenance/docs/maintenance.ava.okf.md|Native pause and maintenance]].
 
 ## Strongly-Typed Wire Layer (`ops/rpc_schemas/__init__.py`)

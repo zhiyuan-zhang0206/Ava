@@ -275,8 +275,7 @@ def _entry_path_name(agent_id: int, message_fingerprint: str, stamp: datetime) -
 
 
 def _write_atomic(path: Path, entry: OutboxEntry) -> None:
-    """Write one entry durably (tmp + fsync + replace), mirroring the
-    pty-close-notices journal discipline."""
+    """Write one entry durably (tmp + fsync + replace)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(
         path,

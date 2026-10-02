@@ -346,6 +346,7 @@ def _close(
     terminals: list[_Terminal],
     notice: _Notice,
     *,
+    direct_db: bool,
     grace_until: float,
     kill_s: float,
     stage: str,
@@ -369,7 +370,7 @@ def _close(
     _hang_up(terminals)
     graceful = _await_members(terminals, grace_until)
     killed = [] if graceful else _kill_leftovers(terminals, kill_s)
-    _record_close_notices(_closed(terminals, killed), notice)
+    _record_close_notices(_closed(terminals, killed), notice, direct_db=direct_db)
     survivors = killed + _end_hosts(terminals, kill_s)
     if live_identities(identity for _terminal, identity in survivors):
         raise _terminals_incomplete(survivors, stage)
@@ -433,43 +434,48 @@ def _named(identities: list[OwnedProcess]) -> list[tuple[int, str]]:
     return named
 
 
-def _record_close_notices(closed: _Closed, notice: _Notice) -> None:
-    """Durably record one closure notice per closed busy session (issue #2044).
+def _record_close_notices(closed: _Closed, notice: _Notice, *, direct_db: bool) -> None:
+    """Write one closure notice per closed busy session to the database (issue #2044).
 
     Each entry names the session's shell and the processes of it that outlived
-    the SIGKILL. A session recorded twice — a stop and its retry — keeps one
-    record: the dedup key is the shell's, and delivery is exactly-once per key.
-    An idle session or a Windows unit records nothing. A write failure is loud
-    but never fails the closure — retrying the whole stop would not restore
-    the resources it closes.
+    the SIGKILL. The write is one short connection, made here while the data
+    plane is still up and closed before this returns (`pty_close_notices`). An
+    idle session or one that is not an agent shell yields no notice, and no
+    notice means no connection. A notice that cannot be written is loud on
+    stderr, with the text its owner would have read, but never fails the
+    closure — retrying the whole stop would not restore the resources it closes.
     """
+    notices: list[pty_close_notices.ClosureNotice] = []
     for name, (shell, left) in closed.items():
         if shell.starttime is not None:
             birth = f"starttime:{shell.starttime}"
         else:
             birth = f"birth:{shell.birth!r}"
-        try:
-            pty_close_notices.record_close(
-                machine=machine_name(),
-                name=name,
-                shell_pid=shell.pid,
-                shell_birth=birth,
-                operation=notice.operation,
-                acquired_at=notice.acquired_at,
-                reason=notice.reason,
-                survivors=_named(left),
-            )
-        except Exception as exc:
-            # The side-channel notice must never fail a closure; stay loud so
-            # the gap is visible either way.
-            print(
-                f"closure notice for session {name!r} could not be recorded: "
-                f"{type(exc).__name__}: {exc}",
-                file=sys.stderr,
-            )
+        built = pty_close_notices.closure_notice(
+            machine=machine_name(),
+            name=name,
+            shell_pid=shell.pid,
+            shell_birth=birth,
+            operation=notice.operation,
+            acquired_at=notice.acquired_at,
+            reason=notice.reason,
+            survivors=_named(left),
+        )
+        if built is not None:
+            notices.append(built)
+    for unwritten, exc in pty_close_notices.write_notices(notices, direct=direct_db):
+        # The side-channel notice must never fail a closure; stay loud so the
+        # gap is visible either way.
+        print(
+            f"closure notice for session {unwritten.name!r} (agent {unwritten.agent_id}) "
+            f"could not be written: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
 
 
-def close_terminals(deadline: float, operation: str, acquired_at: datetime) -> None:
+def close_terminals(
+    deadline: float, operation: str, acquired_at: datetime, *, direct_db: bool
+) -> None:
     """Close this unit's terminals at `ava stop`: HUP/TERM, a bounded grace, then SIGKILL.
 
     The grace is `_TERMINAL_STOP_GRACE_S`, capped by the stop's `deadline`;
@@ -482,15 +488,17 @@ def close_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     at least `_TERMINAL_KILL_WAIT_S`, to clear its record.
 
     Busy sessions whose shell is verified gone — a job the SIGKILL cut short
-    included — leave a durable closure notice for their owner agent (issue
-    #2044): the gateway and ops server are already down by now, so the notice
-    is delivered by the next ops daemon once its start releases the hold. That
-    holds when a process outlived the SIGKILL too (the notice names it) and
-    when another session keeps the stop incomplete (`_closed`).
+    included — get a closure notice for their owner agent (issue #2044),
+    written to the database over one short connection here, before the data
+    plane stops (`direct_db`: this unit's own Postgres, bypassing its pooler,
+    rather than the gateway's database a runner-only unit dials). That holds
+    when a process outlived the SIGKILL too (the notice names it) and when
+    another session keeps the stop incomplete (`_closed`).
     """
     _close(
         list(capture_terminals().terminals),
         _Notice(operation, acquired_at, pty_close_notices.STOP_REASON),
+        direct_db=direct_db,
         grace_until=min(deadline, time.monotonic() + _TERMINAL_STOP_GRACE_S),
         kill_s=_TERMINAL_KILL_WAIT_S,
         stage="terminals",

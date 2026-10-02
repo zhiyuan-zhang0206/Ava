@@ -75,7 +75,7 @@ from ops.rpc_schemas import (
     OpEnvelope,
     is_op_kind,
 )
-from services.agent_ops import close_notices, health, outbox_flusher
+from services.agent_ops import health, outbox_flusher
 from services.agent_ops import maintenance as maintenance_activity
 from services.agent_ops._boot import (
     _open_db_pool,
@@ -477,9 +477,6 @@ async def _main() -> None:
 
     pool = _open_db_pool()
     _db_pool = pool
-    # Flush shell-closure notices the previous stop journaled (issue #2044) —
-    # the first moment the DB is reachable again. Never fatal.
-    close_notices.start(pool)
     # Redeliver recorded delivery failures whenever the data plane allows
     # (task #3757): a daemon-lifetime loop that outlives every sender process.
     # Never fatal; a failed initial config read only skips the loop.
@@ -519,7 +516,6 @@ async def _main() -> None:
             await stop_health_server(server)
             _remove_pidfile()
     finally:
-        close_notices.stop()
         outbox_flusher.stop()
         pool.close()
         _db_pool = None
