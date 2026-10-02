@@ -23,7 +23,7 @@ from typing import Any
 DEFAULT_IDLE_S = 600.0
 
 # emit(event_type, agent_id, payload) — the daemon wires this to
-# audit_events.insert_event_log; tests swap in a recorder.
+# `emit_recorded_central_event`; tests swap in a recorder.
 Emit = Callable[[str, int, dict[str, Any]], None]
 
 

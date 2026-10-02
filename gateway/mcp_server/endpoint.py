@@ -54,7 +54,7 @@ from base.api_contracts.mcp_tool_contract import (
     tool_description,
 )
 from base.cluster.machine import machine_name
-from base.telemetry.audit_events import insert_event_log
+from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 from gateway.agents import router as _agents_router
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.lifecycle import terminate_agent_with_open_tasks
@@ -167,23 +167,15 @@ class _AuditMiddleware:
             _validate_mcp_identity_arguments(tool, args)
             result = await typed_call_next(typed_ctx)
         except Exception as exc:
-            insert_event_log(
-                event_type="mcp_tool_call",
-                agent_id=None,
-                source=caller.source(),
-                payload=payload
-                | {
-                    "outcome": "error",
-                    "error": type(exc).__name__,
-                },
+            await _record_tool_call(
+                caller,
+                payload | {"outcome": "error", "error": type(exc).__name__},
             )
             raise
         is_error = _tool_result_is_error(result)
-        insert_event_log(
-            event_type="mcp_tool_call",
-            agent_id=None,
-            source=caller.source(),
-            payload=payload
+        await _record_tool_call(
+            caller,
+            payload
             | (
                 {"outcome": "error", "error": "tool call returned an error"}
                 if is_error
@@ -191,6 +183,21 @@ class _AuditMiddleware:
             ),
         )
         return result
+
+
+async def _record_tool_call(caller: CallerIdentity, payload: dict[str, Any]) -> None:
+    """Record one MCP tool call in `audit_events`.
+
+    The tool has already run, so a failed audit write must not turn it into a
+    tool error (the client would retry and repeat the side effect): it is
+    reported (error log with traceback plus an `audit_write_failed` event)
+    instead of raised. The write is a short blocking transaction, so it runs off
+    the event loop.
+    """
+    event = prepare_event_log(
+        event_type="mcp_tool_call", agent_id=None, source=caller.source(), payload=payload
+    )
+    await asyncio.to_thread(record_audit_reported, event)
 
 
 def _select_directory_blocking(
