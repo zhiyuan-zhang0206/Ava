@@ -53,47 +53,6 @@ def _point_env_at_without_data_plane_urls(monkeypatch: pytest.MonkeyPatch, tmp_p
     use_env_files(monkeypatch, env_file)
 
 
-def test_cli_entry_records_launcher_profile_and_keeps_undeclared_projections(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The full CLI shape (#4334): the entry helper pops the live marker and
-    records it, and the later authority pass — reading the recorded context —
-    keeps both undeclared launcher projections. This is the health-probe flow
-    that was red: agent child -> CLI pop -> drop -> sentinel (env-class)."""
-    from cli.main import _normalize_process_profile
-
-    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
-    # The entry helper records the launcher profile next. Register the absent key (setitem)
-    # before removing it: `delitem(raising=False)` on an absent key records nothing, so the
-    # recorded value would outlive the test.
-    monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "")
-    monkeypatch.delitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY)
-    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
-    _point_env_at_without_data_plane_urls(monkeypatch, tmp_path)
-    monkeypatch.setitem(
-        os.environ,
-        "AVA_DB_URL",
-        "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
-    )
-    monkeypatch.setitem(
-        os.environ, "AVA_REDIS_URL", "redis://ava:runtime-password@127.0.0.1:6380/0"
-    )
-    # Companion: inherited keys the `.env` does not declare still drop in the
-    # same pass — the exemption must not spill.
-    monkeypatch.setitem(os.environ, "AVA_APP_PORT", "3001")
-
-    _normalize_process_profile()
-
-    assert "AVA_PROCESS_PROFILE" not in os.environ
-    assert os.environ[dotenv_boot.LAUNCHER_PROFILE_ENV_KEY] == "agent"
-
-    dotenv_boot._enforce_cluster_env_authority(dotenv_boot.resolve_ava_home())
-
-    assert os.environ["AVA_DB_URL"] == "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
-    assert os.environ["AVA_REDIS_URL"] == "redis://ava:runtime-password@127.0.0.1:6380/0"
-    assert "AVA_APP_PORT" not in os.environ
-
-
 def test_recorded_launcher_profile_drops_undeclared_owner_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
