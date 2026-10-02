@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The real merged pin map of a `deepseek-v4-flash` exec child (task #3621
 # BLK-1): what `AVA_AGENT_CONFIG_OVERLAY` carries in production.

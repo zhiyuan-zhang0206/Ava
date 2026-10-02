@@ -1,9 +1,8 @@
-"""Tests for base/daemon/schedules/builtin_schedules.py — the built-in schedules manifest
-and its idempotent create-if-missing provisioning.
+"""Provisioning of the built-in schedules: the gateway side of `builtin_schedules`.
 
 The provision path is also exercised at the gateway-boot level by
-test_schedules_api.py's TestClient(app) lifespan; these tests pin the
-manifest parsing + DB behavior directly.
+test_schedules_api.py's TestClient(app) lifespan; these tests pin the DB behavior
+directly. The manifest parsing lives in base/daemon/schedules/tests/test_builtin_schedules.py.
 """
 
 from __future__ import annotations
