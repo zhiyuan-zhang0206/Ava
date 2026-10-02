@@ -271,7 +271,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/schedule_manager/tests/test_requests.py",
             "services/ttl_reaper/tests",
         ),
-        119,
+        118,
     ),
     "tests.path_scoped.integration_tests": Scope(
         (
