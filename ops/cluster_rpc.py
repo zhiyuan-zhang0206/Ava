@@ -119,16 +119,17 @@ def _retry_delay_s(attempt: int) -> float:
     return base * random.uniform(0.5, 1.5)  # noqa: S311
 
 
-def worst_case_dispatch_seconds() -> float:
-    """Longest one `dispatch_to_machine` call can take with the default timeout
-    and retry budget: every attempt runs to its timeout and every backoff sleeps
-    its jittered maximum. Callers that put an overall deadline around a
-    dispatch size it from this."""
+def worst_case_dispatch_seconds(timeout_s: float | None = None) -> float:
+    """Longest one `dispatch_to_machine` call can take with the default retry
+    budget: every attempt runs to its timeout (`timeout_s`, default the cluster
+    RPC timeout) and every backoff sleeps its jittered maximum. Callers that put
+    an overall deadline around a dispatch size it from this."""
     retries = max(settings.gateway.cluster_rpc_max_retries, 0)
     backoff = sum(
         min(_RETRY_BASE_DELAY_S * (2**attempt), _RETRY_MAX_DELAY_S) for attempt in range(retries)
     )
-    return (retries + 1) * settings.gateway.cluster_rpc_timeout_seconds + backoff * 1.5
+    attempt_s = settings.gateway.cluster_rpc_timeout_seconds if timeout_s is None else timeout_s
+    return (retries + 1) * attempt_s + backoff * 1.5
 
 
 def _default_idempotency_key(target_machine: str, kind: OpKind, payload: dict[str, Any]) -> str:

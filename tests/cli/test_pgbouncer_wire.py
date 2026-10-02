@@ -278,7 +278,7 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
     """Rule B's pool-borrow DELETE declares its transaction writable first."""
     from base import config
     from base.db import pool
-    from gateway.ttl_reaper import _delete_shell_row_blocking
+    from services.ttl_reaper.shells import delete_shell_row
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
@@ -291,7 +291,7 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
             )
         db_pool = pool(min_size=1, max_size=2)
         try:
-            _delete_shell_row_blocking(db_pool, agent_id, 7, interrupted=False)
+            delete_shell_row(db_pool, agent_id, 7, interrupted=False)
         finally:
             db_pool.close()
 

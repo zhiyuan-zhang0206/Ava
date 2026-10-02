@@ -29,6 +29,7 @@ def _rec(tmp_path: Path):
             "im_bridge": 18017,
             "agent_host": 18019,
             "pg_backup": 18021,
+            "ttl_reaper": 18025,
             "memory_search": 18024,
             "page_server": 18018,
         },
