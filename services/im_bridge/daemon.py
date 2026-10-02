@@ -22,7 +22,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from base.cluster.authority.api import token_digest
+from base.cluster.machine import daemon_acceptance, gateway_auth_headers
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
@@ -124,7 +124,7 @@ def gateway_client(config: ImBridgeConfig) -> GatewayClient:
     return GatewayClient(
         config,
         gateway_url=settings.gateway.gateway_url,
-        cluster_secret=settings.data_plane.cluster_secret,
+        auth_headers=gateway_auth_headers(),
     )
 
 
@@ -164,22 +164,6 @@ def _load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:
         except Exception:
             _log.exception("im_bridge: adapter %s failed to load (skipped)", name)
     return loaded
-
-
-async def _gateway_login_with_retry(core: Any, liveness: Liveness) -> None:
-    """Login to the gateway with backoff — the gateway may be mid-restart."""
-    delay = 2.0
-    # quiesce-exempt: a bounded gateway login retry; no database
-    while True:
-        liveness.beat()
-        try:
-            await core.gateway.login()
-            _log.info("im_bridge: gateway login ok")
-            return
-        except Exception as exc:
-            _log.warning("im_bridge: gateway login failed: %r (retry in %.0fs)", exc, delay)
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 60.0)
 
 
 async def _liveness_loop(liveness: Liveness) -> None:
@@ -263,12 +247,9 @@ async def run() -> None:
             endpoint.health_port,
             liveness=liveness,
             extra_routes={("POST", "/send"): await _handle_send(core)},
-            # Bearer = the cluster secret (a gateway-local caller); empty-secret
-            # clusters (single-box no-auth posture) get no auth — consistent
-            # with the gateway.
-            auth_digests=frozenset({token_digest(settings.data_plane.cluster_secret)})
-            if settings.data_plane.cluster_secret
-            else None,
+            # Bearer = a machine API token of the write generation (the gateway's, or this
+            # unit's); an open cluster (no secret) gets no auth — consistent with the gateway.
+            auth_digests=daemon_acceptance(),
         )
     except Exception:
         _remove_pidfile()
@@ -282,7 +263,6 @@ async def run() -> None:
     liveness_task: asyncio.Task[None] | None = None
     notice_task: asyncio.Task[None] | None = None
     try:
-        await _gateway_login_with_retry(core, liveness)
         # Drain anything the previous process outboxed when the gateway was
         # down (Task #1032: user messages must not drop across restarts).
         core.ensure_outbox_replay()

@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from typing import Any, Literal
 
 import httpx
@@ -20,11 +20,13 @@ _log = logging.getLogger("services.im_bridge.gateway_client")
 class GatewayClient:
     """REST + SSE client for the Ava gateway (the Post Gateway)."""
 
-    def __init__(self, config: ImBridgeConfig, *, gateway_url: str, cluster_secret: str) -> None:
+    def __init__(
+        self, config: ImBridgeConfig, *, gateway_url: str, auth_headers: Mapping[str, str]
+    ) -> None:
         self._config = config
         self._base = gateway_url.rstrip("/")
-        self._cluster_secret = cluster_secret
-        self._cookie: str | None = None
+        # The machine API token's Bearer (`gateway_auth_headers()`), empty in the open posture.
+        self._auth_headers = dict(auth_headers)
         self._client: httpx.AsyncClient | None = None
 
     async def _http(self) -> httpx.AsyncClient:
@@ -34,19 +36,8 @@ class GatewayClient:
             )
         return self._client
 
-    async def login(self) -> None:
-        """POST /api/auth/login with the cluster secret; keep the session cookie."""
-        client = await self._http()
-        resp = await client.post(
-            "/api/auth/login",
-            json={"password": self._cluster_secret},
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(f"gateway login failed: HTTP {resp.status_code}")
-        self._cookie = resp.headers.get("set-cookie", "")
-
     def _headers(self) -> dict[str, str]:
-        return {"Cookie": self._cookie} if self._cookie else {}
+        return dict(self._auth_headers)
 
     async def list_agents(
         self,

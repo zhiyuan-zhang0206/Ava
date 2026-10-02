@@ -27,16 +27,15 @@ def test_directory_page_passes_scope_search_and_cursor() -> None:
             "before_id": "500",
             "limit": "100",
         }
-        assert request.headers["cookie"] == "session=test"
+        assert request.headers["authorization"] == "Bearer machine-token"
         return httpx.Response(200, json=page)
 
     async def scenario() -> None:
         async with httpx.AsyncClient(
             base_url="http://gateway", transport=httpx.MockTransport(handler)
         ) as http:
-            client = gateway_client()
+            client = gateway_client(auth_headers={"Authorization": "Bearer machine-token"})
             client._client = http
-            client._cookie = "session=test"
             assert await client.list_agents(scope="live", query="Target", before_id=500) == page
 
     asyncio.run(scenario())
