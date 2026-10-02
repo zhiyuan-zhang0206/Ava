@@ -574,7 +574,7 @@ class InboundWakeDispatcher:
         from base.events.live.redis_client import open_async_redis, retry_auth_failures_async
 
         pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
-        while True:
+        while True:  # quiesce-exempt: scan gated by in_stop_leg, never the start leg
             redis = open_async_redis(self._redis_url)
             pubsub = None
             try:

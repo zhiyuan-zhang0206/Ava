@@ -476,6 +476,7 @@ async def _await_death_or_stop(daemon: ChromeMcpDaemon, stop: asyncio.Event) -> 
 async def _upstream_watchdog(daemon: ChromeMcpDaemon, stop: asyncio.Event) -> None:
     """Periodically ping the upstream session; a wedged one (no reply within the
     timeout) sets `dead` so run() reconnects even with no client calling."""
+    # quiesce-exempt: watches the upstream browser process; no database
     while not stop.is_set():
         try:
             await asyncio.wait_for(

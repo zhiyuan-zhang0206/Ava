@@ -27,6 +27,7 @@ from base.config import settings
 from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.paths import pid_path
 from services.im_bridge.config import (
@@ -163,6 +164,7 @@ def _load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:
 async def _gateway_login_with_retry(core: Any, liveness: Liveness) -> None:
     """Login to the gateway with backoff — the gateway may be mid-restart."""
     delay = 2.0
+    # quiesce-exempt: a bounded gateway login retry; no database
     while True:
         liveness.beat()
         try:
@@ -183,6 +185,7 @@ async def _liveness_loop(liveness: Liveness) -> None:
     a wedged event loop stops scheduling it and the staleness ceiling trips.
     """
 
+    # quiesce-exempt: beats the health liveness; no database
     while True:
         liveness.beat()
         await asyncio.sleep(_LIVENESS_BEAT_INTERVAL_S)
@@ -193,7 +196,8 @@ async def _notice_loop(core: Any) -> None:
     chat (Task #884). Cursor + filter persist across restarts."""
 
     while True:
-        await core.notice_bridge.poll_once()
+        if not admission.quiesced():
+            await core.notice_bridge.poll_once()
         await asyncio.sleep(3.0)
 
 

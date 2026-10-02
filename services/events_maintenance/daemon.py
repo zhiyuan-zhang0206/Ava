@@ -72,6 +72,7 @@ from base.daemon.health import (
 from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.paths import pid_path
 from services.events_maintenance.blob_vacuum import (
@@ -293,7 +294,8 @@ async def _dispatch_loop(
     )
     while True:
         try:
-            await _maintenance_with_liveness(pool, progress, config)
+            if not admission.quiesced():
+                await _maintenance_with_liveness(pool, progress, config)
         except asyncio.CancelledError:
             raise
         except WedgedPassError:
@@ -334,12 +336,13 @@ async def _resolution_loop(
     )
     while True:
         try:
-            await _maintenance_with_liveness(
-                pool,
-                progress,
-                config,
-                run=lambda target_pool: _run_resolution(target_pool, progress, config),
-            )
+            if not admission.quiesced():
+                await _maintenance_with_liveness(
+                    pool,
+                    progress,
+                    config,
+                    run=lambda target_pool: _run_resolution(target_pool, progress, config),
+                )
         except asyncio.CancelledError:
             raise
         except WedgedPassError:

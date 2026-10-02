@@ -61,6 +61,7 @@ from base.config import settings
 from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import gateway_memory_dir, pid_path
@@ -525,6 +526,8 @@ async def _drain_loop(
     while True:
         liveness.beat()
         await asyncio.sleep(_LOOP_INTERVAL_S)
+        if admission.quiesced():
+            continue  # the pgvector backend borrows the pool; dirty paths wait in the queue
         now = time.monotonic()
         if now >= next_checkout_refresh:
             next_checkout_refresh = now + _CHECKOUT_REFRESH_INTERVAL_S

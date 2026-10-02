@@ -115,6 +115,7 @@ async def _rotate_stdout_log_forever() -> None:
     logged and the loop waits for the next interval.
     """
     _rotate_stdout_log_if_needed()
+    # quiesce-exempt: rotates a log file; no database
     while True:
         await asyncio.sleep(_STDOUT_LOG_ROTATE_POLL_S)
         try:
