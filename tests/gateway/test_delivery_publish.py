@@ -17,8 +17,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from base.agents import AgentStatus
 from base.config import settings
 from base.db import create_agent
-from base.events.live import bus as bus_module
-from base.events.live import redis_client
+from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 from gateway.agents.delivery import deliver_chat_inbound
 
 
@@ -67,19 +66,8 @@ async def test_deliver_survives_publish_failure(
     not stop the inbound INSERT from committing, and nothing may escape."""
     tid = _seed_idling_agent(db_conn)
 
-    monkeypatch.setattr(
-        redis_client,
-        "sync_redis",
-        lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(
-        bus_module,
-        "open_sync_redis",
-        lambda *_a, **_k: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(
-        redis_client, "get_async_redis", lambda: _BoomAsyncClient(RedisConnectionError("down"))
-    )
+    patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(RedisConnectionError("down")))
+    patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(RedisConnectionError("down")))
 
     with _sync_pool() as pool:
         # Must NOT raise despite every publish on the path throwing.

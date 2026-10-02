@@ -178,12 +178,12 @@ def publish_inbound_wake(agent_id: int, payload: str) -> bool:
     # lazy-imported to keep this module importable without the lease layer.
     from base.agents.impersonation import relay_liveness_alert
     from base.cluster import WAKE_KEY_TTL_S, inbound_channel, wake_key
-    from base.events.live.redis_client import sync_redis
+    from base.events.live.bus import EventBus
 
     relay_liveness_alert(agent_id)
     channel = inbound_channel(agent_id)
     try:
-        r = sync_redis()
+        r = EventBus.from_settings().sync_redis()
         try:
             # redis-py types publish()'s **kwargs as Unknown, so the bound
             # method reads as partially-unknown; the call itself is fully typed.

@@ -7,7 +7,6 @@ import ava
 from ava.attachment_transport import attach as attach
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
-from base.config import settings
 from base.config.turn_view import turn_settings
 
 # Deliberately NOT in __all_for_ava__ (importable, but out of the rendered SDK
@@ -323,11 +322,10 @@ def compact(summary: str) -> NoReturn:
     # never-raise primitive so redis can never interrupt this lifecycle exit.
     # Imported here, not at module scope: `import ava` must not pull the redis /
     # live-events stacks into every exec child (startup-path laziness, task #3816).
+    from base.events.live.bus import EventBus
     from base.events.live.projection import CompactRequest
-    from base.events.live.redis_client import publish_best_effort_sync
 
-    publish_best_effort_sync(
-        settings.data_plane.events_channel,
+    EventBus.from_settings().publish_best_effort_sync(
         CompactRequest(
             agent_id=agent_identity.require_agent_id(),
             content=f"[compact requested, {len(summary)} chars]",

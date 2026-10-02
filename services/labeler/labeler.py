@@ -12,6 +12,7 @@ from loguru import logger
 from base.agents.labels import publish_label_updated
 from base.agents.messages.kwargs import message_content
 from base.db import Database
+from base.events.live.bus import EventBus
 from base.lm.content import content_blocks
 from base.lm.factory import build_chat_model
 from services.labeler.config import LabelerConfig
@@ -249,7 +250,7 @@ async def generate_label_async(
         rowcount = cur.rowcount
         conn.commit()
     if rowcount == 1:
-        await publish_label_updated(agent_id, label)
+        await publish_label_updated(EventBus.from_settings(), agent_id, label)
         logger.info(
             "label generated for agent {agent_id}: {label!r}",
             event="label_generated",

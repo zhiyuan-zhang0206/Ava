@@ -73,7 +73,7 @@ async def patch_agent(agent_id: int, body: LabelPatchRequest, request: Request) 
     """
     new_label: str | None = body.label if body.label else None
     await asyncio.to_thread(_patch_label_blocking, request.app.state.db_pool, agent_id, new_label)
-    await publish_label_updated(agent_id, new_label)
+    await publish_label_updated(request.app.state.bus, agent_id, new_label)
     return Response(status_code=204)
 
 
