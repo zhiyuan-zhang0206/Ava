@@ -1,4 +1,4 @@
-"""Read-side heartbeat guard for telemetry served from Loki and Prometheus.
+"""Read-side heartbeat guard for the telemetry served from Prometheus.
 
 The heartbeat is the gateway's own ``gateway_latency`` telemetry event. Its
 60-second flusher advances whenever request traffic exists, regardless of agent
@@ -23,11 +23,11 @@ import contextlib
 import threading
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from base.log import logger
-from gateway.lgtm import loki_events, prom_metrics
+from gateway.lgtm import prom_metrics
 
 HEARTBEAT_EVENT = "gateway_latency"
 HEARTBEAT_METRIC = "ava_gateway_latency_count_total"
@@ -62,27 +62,6 @@ def prometheus_heartbeat_age(timeout_s: float | None = None) -> float | None:
         return None
     newest_sample_s = max(value for _labels, value in rows)
     return time.time() - newest_sample_s
-
-
-def loki_heartbeat_age(timeout_s: float | None = None) -> float | None:
-    """Age in seconds of the newest Loki heartbeat event, if any."""
-    now_s = time.time()
-    now = datetime.fromtimestamp(now_s, UTC)
-    rows, _has_more = loki_events.query_events(
-        event_names=[HEARTBEAT_EVENT],
-        categories=["telemetry"],
-        from_=now - timedelta(seconds=3 * STALENESS_THRESHOLD_S),
-        to=now,
-        limit=1,
-        direction="backward",
-        timeout_s=timeout_s,
-    )
-    if not rows:
-        return None
-    newest_ts = rows[0]["ts"]
-    if not isinstance(newest_ts, datetime):
-        raise TypeError(f"Loki heartbeat timestamp is not a datetime: {newest_ts!r}")
-    return now_s - newest_ts.timestamp()
 
 
 def _emit(event_name: str, attributes: dict[str, Any]) -> None:
@@ -154,10 +133,7 @@ def check_and_report(*, now: datetime | None = None, timeout_s: float = 3.0) -> 
             logger.debug("telemetry heartbeat check could not read the clock: {}", exc)
             return False
         stale = False
-        checks = (
-            ("prometheus", prometheus_heartbeat_age),
-            ("loki", loki_heartbeat_age),
-        )
+        checks = (("prometheus", prometheus_heartbeat_age),)
         for source, heartbeat_age in checks:
             try:
                 age_s = heartbeat_age(timeout_s=timeout_s)

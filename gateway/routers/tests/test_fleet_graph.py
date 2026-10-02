@@ -82,11 +82,6 @@ def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
         "prometheus_heartbeat_age",
         _fresh_heartbeat_age,
     )
-    monkeypatch.setattr(
-        telemetry_staleness,
-        "loki_heartbeat_age",
-        _fresh_heartbeat_age,
-    )
     monkeypatch.setattr(telemetry_staleness, "_source_states", {})
     monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
 
