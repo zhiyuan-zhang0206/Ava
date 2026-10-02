@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Callable, Coroutine, Iterator
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -338,7 +338,7 @@ def test_the_dispatch_deadline_covers_the_clients_full_retry_budget(
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_borrows_no_connection(
     monkeypatch: pytest.MonkeyPatch,
-    loop: Callable[[ConnectionPool, LoopProgress], Awaitable[None]],
+    loop: Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]],
     quiesced: bool,
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)

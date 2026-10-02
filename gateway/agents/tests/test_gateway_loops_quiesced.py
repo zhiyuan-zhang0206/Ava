@@ -4,8 +4,8 @@ unit is quiesced, so neither borrows a connection from a pool the stop is about 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from typing import cast
+from collections.abc import Callable, Coroutine
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,7 +14,7 @@ from psycopg_pool import ConnectionPool
 from base.deploy.maintenance import admission
 from gateway.agents import completion_notice_flusher, max_id_gauge
 
-_Loop = Callable[[ConnectionPool], Awaitable[None]]
+_Loop = Callable[[ConnectionPool], Coroutine[Any, Any, None]]
 
 
 @pytest.mark.parametrize("quiesced", [True, False])

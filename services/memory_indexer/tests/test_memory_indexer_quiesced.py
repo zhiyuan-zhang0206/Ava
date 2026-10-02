@@ -22,7 +22,13 @@ async def test_a_quiesced_unit_processes_no_batch(
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
     monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
     batches: list[set[Path]] = []
-    monkeypatch.setattr(daemon, "_process_paths", lambda _b, batch, _p, _l: batches.append(batch))
+
+    def record_batch(
+        _backend: object, batch: set[Path], _provider: object, _liveness: object
+    ) -> None:
+        batches.append(batch)
+
+    monkeypatch.setattr(daemon, "_process_paths", record_batch)
     dirty: queue.Queue[Path] = queue.Queue()
     dirty.put(tmp_path / "note.md")
     retry = daemon._ReconcileRetrySchedule(base_s=1.0, cap_s=2.0)
