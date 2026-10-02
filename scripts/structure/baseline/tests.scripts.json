@@ -8,8 +8,5 @@
   },
   "patch_targets": {
     "tests/scripts/test_rotate_cluster_secret.py::services.backup._run_with_progress": 1
-  },
-  "tests_location": {
-    "tests/scripts/test_render_wsl_boot_task.py::top-level": 1
   }
 }

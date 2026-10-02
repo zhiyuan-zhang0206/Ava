@@ -94,7 +94,7 @@ def test_invalid_identity_or_executable_fails_before_rendering(field: str, value
 @pytest.mark.parametrize("windows_user", [r"HOST\windows-owner", "HOST\\\u6d4b\u8bd5\u7528\u6237"])
 def test_standalone_cli_needs_no_ava_install_or_runtime(tmp_path: Path, windows_user: str) -> None:
     script = (
-        Path(__file__).resolve().parents[2] / "scripts" / "host_ops" / "render_wsl_boot_task.py"
+        Path(__file__).resolve().parents[3] / "scripts" / "host_ops" / "render_wsl_boot_task.py"
     )
     inputs = _INPUT | {"windows_user": windows_user}
     args = [part for key, value in inputs.items() for part in ("--" + key.replace("_", "-"), value)]
