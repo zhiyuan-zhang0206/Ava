@@ -83,7 +83,7 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     to load, a file without a ``services()`` function, or a ``services()`` call
     that raises is skipped with a loud report
     (``base.packages.plugins.load_report``) — one broken plugin must not block
-    `ava start` / the watchdog roster for every other plugin. The session-name
+    `ava start` / the root roster for every other plugin. The session-name
     collision guard stays fail-closed: no rule can pick a winner between two
     owners of one session name.
     """
@@ -148,7 +148,7 @@ def _load_plugin_module(name: str, services_py: Path) -> object:
 
 def _assert_unique_sessions(core: tuple[ServiceSpec, ...], plugin: tuple[ServiceSpec, ...]) -> None:
     """Fail fast if a plugin service's session name collides with a core service or
-    another plugin's — the roster is keyed on `session` (session, watchdog
+    another plugin's — the roster is keyed on `session` (session, root
     roster, status), so a duplicate would silently shadow one entry."""
     seen = {s.session for s in core}
     for s in plugin:
@@ -190,7 +190,7 @@ def _otel_collector_gate_reason() -> str | None:
     ``services/healthchecks/otel_collector.py``. All three share
     ``collector_allowed_for_home`` (marker OR station capability OR explicit
     ``AVA_TELEMETRY_OTLP_ENDPOINT`` override) so the roster, ``ava start``,
-    ``ava status``, watchdog, rollout readiness, and cluster health probe agree
+    ``ava status``, the root, rollout readiness, and cluster health probe agree
     about which gateway owns the collector. Pure agent-runners retain their
     relay collector.
     """
@@ -261,8 +261,8 @@ def _core_gate_reason(session: str) -> str | None:
     if session == "mcp-daemon" and not unix_sockets_available():
         # Same transport story as browser-mcp: the daemon binds a Unix socket
         # (ava/mcps/_daemon.py) and its healthcheck dials it, so without AF_UNIX
-        # the service can never start and the watchdog would judge it dead every
-        # 60s and log a restart failure — a Windows agent-runner, exactly.
+        # the service can never start and the root would judge it dead every
+        # round and log a restart failure — a Windows agent-runner, exactly.
         return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
     if session == "computer-mcp":
         return _computer_mcp_gate_reason()

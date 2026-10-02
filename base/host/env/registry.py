@@ -176,7 +176,7 @@ _GUIDE_PASSTHROUGH_KEYS = frozenset(
 
 # OS-canonical keys the delivery builders apply by mechanism, declared once for
 # the A1 inventory: PATH + VIRTUAL_ENV are REBUILT by the venv activation at the
-# delivery site (session_env / agent_launch — a login shell's profile would
+# delivery site (session_env — a login shell's profile would
 # otherwise drop them, and forwarding a launchd/cron PATH would degrade daemon
 # PATH), while TMPDIR / TEMP / TMP are copied non-empty into every child dict by
 # `child_env` below (a child without TMPDIR falls back to the OS default temp

@@ -570,8 +570,8 @@ def native_proc() -> NativeProcessSupervisor:
     `base.sessions.posixproc` on other hosts.
 
     Both modules expose the same surface (`has_session` / `new_session` /
-    `kill_session` / `list_sessions` / `session_log_path`), so `ops.agent_launch`
-    (attempt launch) and the reap / force-terminate / status consumers
+    `kill_session` / `list_sessions` / `session_log_path`), so the agent launch
+    and the reap / force-terminate / status consumers
     dispatch to one of the two by platform. Agent processes always run here (a
     non-interactive agent needs no PTY, and the per-box PTY ceiling then stops
     bounding agent count); daemons use `get_backend()`, while agents'

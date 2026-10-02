@@ -186,10 +186,6 @@ directory is a full suite and belongs to CI's independent `e2e` job
 → `base/lm/factory.py:build_chat_model` detects env and goes through importlib + factory; unset env
 takes the original path (no impact in prod).
 
-**Three-layer env inheritance**: pytest setenv → gateway subprocess → gateway launches the
-agent detached with an explicit child env dict (`ops.agent_launch.agent_spawn_env_dict`) —
-nothing is inherited implicitly, and no value rides argv (issue #974).
-
 See `tests/e2e/README.md` for details.
 
 ## Leaked throwaway Postgres (`shmmni` wedge)

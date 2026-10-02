@@ -5,9 +5,8 @@ Two tables are checked, both by set equality in both directions:
 
 1. the runbook daemon roster (`conventions/runbook.md`) against
    `ops/spec.py:build_services()` (re-exported by `cli/commands/_repo.py`) —
-   the single source of truth for the long-running sessions the cluster runs
-   (gateway, restarter, labeler, milvus, memory-indexer, telegram, frontend,
-   watchdog, runner, browser). The runbook carries a human-readable roster
+   the single source of truth for the long-running sessions the cluster runs.
+   The runbook carries a human-readable roster
    table documenting the same set. Nothing kept the two in sync, so a PR could
    delete (or add) a daemon and silently leave the table wrong — exactly what
    happened in #728, which removed the `scheduler` daemon but left its roster
