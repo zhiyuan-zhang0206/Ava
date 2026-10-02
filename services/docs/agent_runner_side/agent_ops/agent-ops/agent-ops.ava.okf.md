@@ -44,6 +44,10 @@ The wire contract — `OpEnvelope`/`OpResponse` envelopes, the `OpKind` literal,
 and the per-kind payload/result models the daemon validates before dispatch —
 is specified in [[services/docs/agent_runner_side/agent_ops/agent-ops/wire-layer.ava.okf.md]].
 
+## Resident Loops
+
+The ops server and the **delivery-outbox redelivery loop** (`services/agent_ops/outbox_flusher.py`) run under one `TaskGroup` in `_main`: a loop that raises cancels the server and ends the process, and the supervisor restarts the unit. The loop re-commits this machine's `$AVA_HOME/state/delivery-outbox/` records (chat sends that exhausted their retries) through the canonical chat-inbound path, one round per `AVA_DELIVERY_OUTBOX_FLUSH_INTERVAL_SECONDS`, skipping rounds while the unit is quiesced. Record state (attempts, backoff position, abandonment) lives in the record file, so a restart resumes every cooldown. The loop reports progress per record to `/healthz` (`loops.delivery-outbox`); a pass that handles no record for four flush intervals plus a minute reads as wedged.
+
 ## Key Dependencies
 - [[gateway-cli.ava.okf.md]] — Gateway issues ops commands to agent-runner via this service
 - [[services/ava_root_glue/docs/ava_root_glue.ava.okf.md]] — keeps alive every 60s (HTTP `/healthz`)
