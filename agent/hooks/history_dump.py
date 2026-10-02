@@ -10,10 +10,10 @@ The filename carries two UTC stamps: ``start`` is the earliest message timestamp
 the dumped conversation (where the round began), ``end`` the compaction moment —
 microsecond precision, so two dumps can never collide. The dump is the agent-side
 retrieval aid behind "the compaction summary dropped a detail I need": grep it.
-Enabled by default via ``turn_settings.agent.history_dump_enabled``; disable per
+Enabled by default via ``history_dump_enabled``; disable per
 cluster or per agent to save disk. Each dump is
 bounded by the context window itself and rotation keeps only the newest
-``turn_settings.agent.history_dump_keep``, so the workspace cost is bounded by
+``history_dump_keep``, so the workspace cost is bounded by
 ``keep x context``.
 
 Wire format: one LangChain BaseMessage ``model_dump(mode="json")`` per line —
