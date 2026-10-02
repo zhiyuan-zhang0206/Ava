@@ -27,6 +27,7 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base.agents import AgentStatus
+from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from services.delivery_watchdog import attempts, resurrect_guard, rounds
 
@@ -165,7 +166,7 @@ async def resurrect_round(
         )
     if claimed:
         _log.info("[delivery] retrying %s resurrect(s)", len(claimed))
-    await rounds.fan_out(
+    await round_loop.fan_out(
         [functools.partial(resurrect_one, pool, a, trigger_of[a]) for a in claimed],
         concurrency=_RESURRECT_MAX_CONCURRENCY,
         progress=progress,
@@ -184,4 +185,4 @@ async def resurrect_loop(
     async def one_round() -> None:
         await resurrect_round(pool, progress, max_per_round, threshold_s)
 
-    await rounds.run_rounds("resurrect retry", progress, interval_s, one_round)
+    await round_loop.run_rounds("resurrect retry", progress, interval_s, one_round)
