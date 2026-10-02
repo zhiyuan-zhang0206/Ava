@@ -130,10 +130,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "scans every .github/workflows file for unfiltered pull_request/push triggers",
     ),
-    "tests/cli/test_agent_profile_launch_env.py": (
-        "integration",
-        "one pipeline test: cli root driver, ops spec and the services ava_root_glue manifest",
-    ),
     "tests/cli/test_maintenance_readiness.py": (
         "integration",
         "cli start against a real gateway app: cli and gateway are peers",
