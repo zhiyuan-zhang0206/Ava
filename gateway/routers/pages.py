@@ -34,8 +34,8 @@ from starlette.background import BackgroundTask
 from base.agents import AgentStatus
 from base.config import settings
 from base.db import agent_exists
+from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed, PageOpened
-from base.events.live.redis_client import publish_best_effort
 from base.log import logger
 from base.packages.docs.pages_copy import (
     PAGE_EXPIRED_BODY,
@@ -165,11 +165,9 @@ def _validate_proxy_rest(rest: str) -> None:
             raise HTTPException(status_code=400, detail=f"invalid page path segment {seg!r}")
 
 
-async def _publish_page_event(event: PageOpened | PageClosed) -> None:
+async def _publish_page_event(bus: EventBus, event: PageOpened | PageClosed) -> None:
     """Publish a page lifecycle event to the events channel — best-effort, never raises."""
-    await publish_best_effort(
-        settings.data_plane.events_channel, event.model_dump_json(), context="page_event"
-    )
+    await bus.publish_best_effort(event.model_dump_json(), context="page_event")
 
 
 @router.post("/api/agents/{agent_id}/pages", status_code=201, response_model=PageRow)
@@ -195,8 +193,9 @@ async def post_page_register(agent_id: int, body: PageRegisterRequest, request: 
     record = _absolutize(request, record)
     # Publish PageClosed events for any pages that were auto-closed.
     for name in closed_names:
-        await _publish_page_event(PageClosed(agent_id=agent_id, name=name))
+        await _publish_page_event(request.app.state.bus, PageClosed(agent_id=agent_id, name=name))
     await _publish_page_event(
+        request.app.state.bus,
         PageOpened(
             agent_id=agent_id,
             page_id=record.id,
@@ -204,7 +203,7 @@ async def post_page_register(agent_id: int, body: PageRegisterRequest, request: 
             port=record.port,
             title=record.title,
             url=record.url,
-        )
+        ),
     )
     return record
 
@@ -221,7 +220,7 @@ async def delete_page(agent_id: int, name: str, request: Request) -> PageRow:
         _close_page_blocking, request.app.state.db_pool, agent_id, name
     )
     record = _absolutize(request, record)
-    await _publish_page_event(PageClosed(agent_id=agent_id, name=name))
+    await _publish_page_event(request.app.state.bus, PageClosed(agent_id=agent_id, name=name))
     return record
 
 

@@ -9,6 +9,7 @@ joins by adding its own file, and a moved or deleted package carries its declara
     db = ["daemon.py"]         # the only modules here that may call `Database.from_settings()`
     endpoints = ["daemon.py"]  # the only modules here that may call `ServiceEndpoints.from_settings()`
     bus = ["daemon.py"]        # the only modules here that may call `EventBus.from_settings()`
+    bus = []                   # a package that takes the handle and builds none (not for `settings`)
 """
 
 from __future__ import annotations
@@ -21,6 +22,17 @@ from typing import cast
 ROOTS_FILE = "ambient_roots.toml"
 KINDS = frozenset({"settings", "db", "endpoints", "bus"})
 _SKIPPED_DIRS = frozenset({"node_modules", "__pycache__"})
+
+
+def _modules(package: str, kind: str, declared: object) -> list[str]:
+    """The declared module names, refused unless a list of strings (empty only off `settings`)."""
+    if (
+        not isinstance(declared, list)
+        or not all(isinstance(n, str) for n in cast("list[object]", declared))
+        or (not declared and kind == "settings")
+    ):
+        raise ValueError(f"{package}/{ROOTS_FILE}: {kind} must be a list of modules")
+    return cast("list[str]", declared)
 
 
 def package_roots(repo_root: Path, kind: str) -> dict[str, frozenset[str]]:
@@ -40,12 +52,7 @@ def package_roots(repo_root: Path, kind: str) -> dict[str, frozenset[str]]:
         declared_names = declared.get(kind)
         if declared_names is None:
             continue
-        names = cast("list[str]", declared_names)
-        if (
-            not isinstance(declared_names, list)
-            or not names
-            or not all(isinstance(n, str) for n in names)
-        ):
-            raise ValueError(f"{package}/{ROOTS_FILE}: {kind} must be a non-empty list of modules")
-        found[package] = frozenset(f"{package}/{name}" for name in names)
+        found[package] = frozenset(
+            f"{package}/{name}" for name in _modules(package, kind, declared_names)
+        )
     return dict(sorted(found.items()))

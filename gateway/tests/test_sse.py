@@ -25,6 +25,7 @@ from redis.asyncio.client import PubSub
 
 from base.config import settings
 from base.db import create_agent
+from base.events.live.bus import EventBus
 from base.events.live.projection import (
     GLOBAL_ROLES,
     SYSTEM_ROLES,
@@ -88,7 +89,7 @@ async def _collect_frames(
     """
     req = _FakeRequest()
     gen = event_stream(  # type: ignore[arg-type]
-        settings.data_plane.redis_url,
+        EventBus.from_settings(),
         agent_id,
         req,  # type: ignore[arg-type]
         channel=channel,
@@ -428,7 +429,7 @@ async def _collect_throttled_frames(
     """
     req = _FakeRequest()
     gen = throttled_event_stream(
-        settings.data_plane.redis_url,
+        EventBus.from_settings(),
         req,  # type: ignore[arg-type]
         channel=channel,
         throttle_rate=throttle_rate,
@@ -710,7 +711,7 @@ def test_busy_channel_still_emits_keepalive_comments(
 
     req = _FakeRequest()
     gen = event_stream(  # type: ignore[arg-type]
-        settings.data_plane.redis_url,
+        EventBus.from_settings(),
         tid,
         req,  # type: ignore[arg-type]
     )
@@ -755,7 +756,7 @@ def test_sse_survives_redis_typeerror(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _drive() -> list[bytes]:
         req = _FakeRequest()
         gen = event_stream(  # type: ignore[arg-type]
-            settings.data_plane.redis_url,
+            EventBus.from_settings(),
             4242,
             req,  # type: ignore[arg-type]
         )

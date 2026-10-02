@@ -26,6 +26,7 @@ from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
 from base.config import settings
+from base.events.live.tests.fakes import record_publishes
 from gateway.alerts import router as alerts_router
 from gateway.app import app
 
@@ -289,18 +290,8 @@ def test_ingest_notify_im_false_stores_and_publishes_without_im(
         notified.append(text)
         return True
 
-    class _FakeRedis:
-        def __enter__(self) -> _FakeRedis:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        def publish(self, channel: str, frame: str) -> None:
-            published.append((channel, frame))
-
     monkeypatch.setattr(alerts_router, "_notify_im", _capture)
-    monkeypatch.setattr("gateway.alerts.publish.sync_redis", _FakeRedis)
+    record_publishes(monkeypatch, published)
 
     with TestClient(app) as client:
         resp = _ingest(client, _webhook(notify_im="false"))
@@ -591,17 +582,7 @@ def test_ingest_publishes_sse_frames(
 
     published: list[tuple[str, str]] = []
 
-    class _FakeRedis:
-        def __enter__(self) -> _FakeRedis:
-            return self
-
-        def __exit__(self, *_a: object) -> None:
-            return None
-
-        def publish(self, channel: str, frame: str) -> None:
-            published.append((channel, frame))
-
-    monkeypatch.setattr("gateway.alerts.publish.sync_redis", _FakeRedis)
+    record_publishes(monkeypatch, published)
     with TestClient(app) as client:
         _ingest(
             client,

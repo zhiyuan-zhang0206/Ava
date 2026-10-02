@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from base.events.live.redis_client import sync_redis
+from base.events.live.bus import EventBus
 from gateway.alerts.schemas import AlertRow
 
 _log = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ _log = logging.getLogger(__name__)
 ALERTS_CHANNEL = "ava:alerts"
 
 
-def publish_alert_rows(rows: list[dict[str, Any]]) -> None:
+def publish_alert_rows(bus: EventBus, rows: list[dict[str, Any]]) -> None:
     """Publish each upserted row to the SSE channel (best-effort).
 
     A Redis outage must not fail the ingest — the SSE stream is a live tail
@@ -29,7 +29,7 @@ def publish_alert_rows(rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
     try:
-        with sync_redis() as client:
+        with bus.sync_redis() as client:
             for row in rows:
                 frame = AlertRow(**row).model_dump_json()
                 client.publish(ALERTS_CHANNEL, frame)  # pyright: ignore[reportUnknownMemberType] — redis-py from_url kwargs typed Unknown (same pattern as base/events/live/redis_client.py)

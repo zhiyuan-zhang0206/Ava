@@ -44,6 +44,13 @@ def test_a_malformed_declaration_is_refused(tmp_path: pathlib.Path, text: str) -
         package_roots(tmp_path, "settings")
 
 
+def test_a_handle_package_may_declare_no_root(tmp_path: pathlib.Path) -> None:
+    """A package that only takes the bus builds none; its `bus = []` still governs it."""
+    _declare(tmp_path, "gateway/events", "bus = []\n")
+
+    assert package_roots(tmp_path, "bus") == {"gateway/events": frozenset()}
+
+
 def test_an_unknown_kind_is_refused(tmp_path: pathlib.Path) -> None:
     with pytest.raises(ValueError, match="unknown composition-root kind"):
         package_roots(tmp_path, "database")
