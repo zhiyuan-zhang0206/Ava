@@ -19,15 +19,15 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 ---
 
-## 0. Quick overview (numbers)
+## 0. Quick overview
 
-| mechanism | table/channel | registered event_names | destination |
-|------|------|-------------|------|
-| audit (category=audit) | `events` | 25 | event stream |
-| telemetry (category=telemetry) | `events` | 225 | event stream |
-| log (category=log) | `events` | 12 | event stream |
-| file-only (destination=file) | file log | 1 | file only (not the stream) |
-| SSE live | Redis → frontend (not persisted) | 30 role | live projection |
+| mechanism | table/channel | destination |
+|------|------|------|
+| audit (category=audit) | `events` | event stream |
+| telemetry (category=telemetry) | `events` | event stream |
+| log (category=log) | `events` | event stream |
+| file-only (destination=file) | file log | file only (not the stream) |
+| SSE live | Redis → frontend (not persisted) | live projection |
 
 All persistent events land in the unified event stream (`category` distinguishes
 audit / telemetry / log). The four legacy mechanisms under the unified event model
@@ -55,7 +55,7 @@ spans go through the trace channel (30d).
 
 ---
 
-## 2. Audit events (25 primary category=audit; 25 status_change with extra_categories)
+## 2. Audit events
 
 **Meaning convention**: category=audit rows are append-only operation audits, one row
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
@@ -92,7 +92,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 225)
+## 3. Telemetry events (category=telemetry)
 
 Telemetry-side event name resolution (`base/log/__init__.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -346,7 +346,7 @@ consumers: see the comments at each emit point.
 | `lifecycle_pointer_done_torn` | the TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples | anomaly | — | events |
 | `lifecycle_fences_settled_absent_machine` | the TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples | observation | — | events |
 
-## 5. SSE roles (live channel, not persisted, 30)
+## 5. SSE roles (live channel, not persisted)
 
 Typed Pydantic discriminators in `base/events/live/projection.py` (role is a Literal);
 `EVENT_ADAPTER` / `SYSTEM_ROLES` / `GLOBAL_ROLES` derive from the single

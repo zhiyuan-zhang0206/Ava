@@ -53,15 +53,15 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 ---
 
-## 0. Quick overview (numbers)
+## 0. Quick overview
 
-| mechanism | table/channel | registered event_names | destination |
-|------|------|-------------|------|
-| audit (category=audit) | `events` | {n_audit} | event stream |
-| telemetry (category=telemetry) | `events` | {n_telemetry} | event stream |
-| log (category=log) | `events` | {n_log} | event stream |
-| file-only (destination=file) | file log | {n_file} | file only (not the stream) |
-| SSE live | Redis → frontend (not persisted) | {n_sse} role | live projection |
+| mechanism | table/channel | destination |
+|------|------|------|
+| audit (category=audit) | `events` | event stream |
+| telemetry (category=telemetry) | `events` | event stream |
+| log (category=log) | `events` | event stream |
+| file-only (destination=file) | file log | file only (not the stream) |
+| SSE live | Redis → frontend (not persisted) | live projection |
 
 All persistent events land in the unified event stream (`category` distinguishes
 audit / telemetry / log). The four legacy mechanisms under the unified event model
@@ -91,7 +91,7 @@ spans go through the trace channel (30d).
 """
 
 _AUDIT_INTRO = """
-## 2. Audit events ({primary_n} primary category=audit; {n} status_change with extra_categories)
+## 2. Audit events
 
 **Meaning convention**: category=audit rows are append-only operation audits, one row
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
@@ -105,7 +105,7 @@ Emit sites and consumers: see the comments at each emit point.
 """
 
 _TELEMETRY_INTRO = """
-## 3. Telemetry events (category=telemetry, {n})
+## 3. Telemetry events (category=telemetry)
 
 Telemetry-side event name resolution (`base/log/__init__.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -126,7 +126,7 @@ _LOG_INTRO = """
 """
 
 _SSE_INTRO = """
-## 5. SSE roles (live channel, not persisted, {n})
+## 5. SSE roles (live channel, not persisted)
 
 Typed Pydantic discriminators in `base/events/live/projection.py` (role is a Literal);
 `EVENT_ADAPTER` / `SYSTEM_ROLES` / `GLOBAL_ROLES` derive from the single
@@ -293,24 +293,14 @@ def render() -> str:
     audit = [n for n, s in EVENTS.items() if s.category == "audit"]
     telemetry = [n for n, s in EVENTS.items() if s.category == "telemetry"]
     log = [n for n, s in EVENTS.items() if s.category == "log"]
-    file_only = [n for n, s in EVENTS.items() if s.destination == "file"]
 
-    out = _HEADER.format(
-        n_audit=len(audit),
-        n_telemetry=len(telemetry),
-        n_log=len(log),
-        n_file=len(file_only),
-        n_sse=len(SYSTEM_ROLES),
-    )
+    out = _HEADER
 
-    out += _AUDIT_INTRO.format(
-        n=len(audit),
-        primary_n=len([n for n, s in EVENTS.items() if s.category == "audit"]),
-    )
+    out += _AUDIT_INTRO
     for name in audit:
         out += _row(name) + "\n"
 
-    out += _TELEMETRY_INTRO.format(n=len(telemetry))
+    out += _TELEMETRY_INTRO
     for name in telemetry:
         out += _row_telemetry(name) + "\n"
 
@@ -318,7 +308,7 @@ def render() -> str:
     for name in log:
         out += _row(name) + "\n"
 
-    out += _SSE_INTRO.format(n=len(SYSTEM_ROLES))
+    out += _SSE_INTRO
     for role in sorted(SYSTEM_ROLES):
         flag = "✓" if role in GLOBAL_ROLES else "—"
         out += f"| `{role}` | {flag} |\n"
