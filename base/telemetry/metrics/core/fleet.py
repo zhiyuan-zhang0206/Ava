@@ -1,7 +1,7 @@
 """Core Fleet growth panels (task #2010) — a separate registration module.
 
 The two Fleet growth panels read the gateway's absolute agent-registry
-max-id gauge (``gateway/agents/max_id_gauge.py``, 60s sample): a Prometheus
+max-id gauge (``services/events_maintenance/registry_gauge.py``, 60s sample): a Prometheus
 timeseries of ``ava_agent_registry_max_id_ratio`` and its ``deriv()`` slope
 in agents per day. They live here — beside ``dismissed`` — so
 the core panels module (already at 787 lines) stays untouched, while the
@@ -27,7 +27,7 @@ catalog.register_core_metric(
         unit="short",
         panel="timeseries",
         # The absolute registry high-water mark, sampled by the gateway every
-        # 60s (gateway/agents/max_id_gauge.py, task #2010). Unit-"1" gauges export
+        # 60s (services/events_maintenance/registry_gauge.py, task #2010). Unit-"1" gauges export
         # with the `_ratio` suffix (same naming as the resolution_status
         # tiles). The gauge is per gateway process and the process restarts on
         # every rollout, so a bare read draws one overlapping series per

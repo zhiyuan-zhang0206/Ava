@@ -89,7 +89,7 @@ class Auth401Rejected(TypedDict):
 
 
 class AgentRegistry(TypedDict):
-    """`agent_registry` payload — gateway/agents/max_id_gauge.py 60s flusher.
+    """`agent_registry` payload — services/events_maintenance/registry_gauge.py 60s loop.
 
     One event per 60s window carrying the ``agents`` table high-water mark
     (max id) — the fleet's growth curve (task #2010). Absolute state, never
@@ -279,7 +279,9 @@ EVENTS: dict[str, EventSpec] = {
         "agent registry max id — the agents-table high-water mark (absolute state, 60s sample)",
         payload=AgentRegistry,
         tier="noise",
-        site=('gateway/agents/max_id_gauge.py:emit_max_agent_id telemetry.emit("telemetry", ...)'),
+        site=(
+            'services/events_maintenance/registry_gauge.py:emit_max_agent_id telemetry.emit("telemetry", ...)'
+        ),
     ),
     # memory search store stats (row-growth monitoring, task #2088) — one
     # absolute gauge sample per 60s window: row count + last npz save
