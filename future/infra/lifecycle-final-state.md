@@ -182,6 +182,7 @@ Each (machine × cluster) has one complete **process tree**: a general root supe
 ## B7 · Observability and self-checking (proving I2 at runtime; preventing silent chain breaks)
 - **Chain patrol**: root periodically (suggested 60s) walks its own tree — checking each unit's liveness and parent/child relationships; on macOS it also samples the responsible attribution (observable surfaces = tccd logs / ps chains). A broken chain = an event + a count.
 - **Metrics (minimal set)**: broken-chain event count / unit restart counts / attribution coverage (the fraction of attribution-requiring units with attribution present) / reseed latency (root recovery → key units' attribution restored).
+- **Status 2026-10-02**: the attribution-coverage and reseed-latency metrics were never fed (no helper-side data source) and their empty slots were removed; chain integrity is checked at runtime, attribution transfer is proven only by the CI two-section chain smoke, and F12 stays a measurement debt.
 - **Status surface**: `status()` output = a tree snapshot (structure + health + metrics), consistent for CLI/monitoring/user.
 - Design discipline: **tree properties are not assumed at design time; they are continuously self-proven at runtime**.
 
