@@ -55,6 +55,7 @@
     "cli/commands/data_plane/tests/test_maintenance_stop.py::cli.commands.lifecycle.root_driver._root_tree_selection": 3,
     "cli/commands/data_plane/tests/test_maintenance_stop.py::cli.commands.lifecycle.root_driver._stop_root_service_tree": 3,
     "cli/commands/lifecycle/tests/test_commands_status.py::base.deploy.git.cluster_drift._prod_source_dir": 3,
+    "cli/commands/lifecycle/tests/test_maintenance.py::ops.agent_pause._wake": 1,
     "cli/commands/lifecycle/tests/test_remote_data_plane.py::cli.commands.data_plane.bringup._local_listener": 1,
     "cli/commands/lifecycle/tests/test_remote_data_plane.py::cli.commands.data_plane.cluster_instance._pg_running": 1,
     "cli/commands/lifecycle/tests/test_root_driver.py::ops.roster._plugin_services": 1,
