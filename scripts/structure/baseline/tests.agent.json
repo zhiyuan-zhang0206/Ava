@@ -9,7 +9,7 @@
     "tests/agent/test_maintenance.py::test_admitted_model_finishes_real_exec_and_after_exec_before_drain_receipt": 18
   },
   "directories": {
-    "tests/agent": 28
+    "tests/agent": 23
   },
   "files": {
     "tests/agent/test_claim.py": 3069,
@@ -21,8 +21,6 @@
     "tests/agent/test_claim.py::agent.graph.claim.node._claim_node_impl": 1,
     "tests/agent/test_compact.py::base.telemetry.tracing._state": 1,
     "tests/agent/test_exec_domain_confirmation.py::base.native_process.exec_domain._process_group_has_live_member": 2,
-    "tests/agent/test_hosted_force_quiescence.py::agent.graph.exec._process": 2,
-    "tests/agent/test_hosted_force_quiescence.py::agent.graph.exec._subprocess": 1,
     "tests/agent/test_impersonation.py::agent.impersonation._PROCESS_STARTED_MONOTONIC": 7,
     "tests/agent/test_impersonation.py::agent.impersonation._PROCESS_STARTED_WALL": 5,
     "tests/agent/test_impersonation.py::agent.impersonation._RELAY_READY_TIMEOUT_S": 1,
@@ -43,9 +41,7 @@
     "tests/agent/test_maintenance_receipt_grading.py::ops.agent_pause._wake": 3,
     "tests/agent/test_maintenance_receipt_grading.py::ops.cluster_pause._unpause_local_cluster": 1,
     "tests/agent/test_multiple_tool_calls.py::agent.graph.exec.node._run_agent_code": 7,
-    "tests/agent/test_resource_admission.py::agent.graph.exec._owned_run": 7,
-    "tests/agent/test_startup_restore_pages.py::agent.startup._last_reconcile_at": 7,
-    "tests/agent/test_startup_restore_pages.py::agent.startup._page_server_alive": 9
+    "tests/agent/test_resource_admission.py::agent.graph.exec._owned_run": 2
   },
   "tests_location": {
     "tests/agent/test_claim.py::top-level": 1,
@@ -54,9 +50,7 @@
     "tests/agent/test_exec_domain_confirmation.py::top-level": 1,
     "tests/agent/test_exec_owner_entry.py::top-level": 1,
     "tests/agent/test_fork_notes.py::top-level": 1,
-    "tests/agent/test_hosted_force_quiescence.py::top-level": 1,
     "tests/agent/test_hosted_lifecycle.py::top-level": 1,
-    "tests/agent/test_hosted_ownership.py::top-level": 1,
     "tests/agent/test_impersonation.py::top-level": 1,
     "tests/agent/test_impersonation_integration.py::top-level": 1,
     "tests/agent/test_inbound_ownership.py::top-level": 1,
@@ -68,9 +62,6 @@
     "tests/agent/test_maintenance_lifecycle_wait.py::top-level": 1,
     "tests/agent/test_maintenance_receipt_grading.py::top-level": 1,
     "tests/agent/test_multiple_tool_calls.py::top-level": 1,
-    "tests/agent/test_plugin_config.py::top-level": 1,
-    "tests/agent/test_preloaded_skills.py::top-level": 1,
-    "tests/agent/test_resource_admission.py::top-level": 1,
-    "tests/agent/test_startup_restore_pages.py::top-level": 1
+    "tests/agent/test_resource_admission.py::top-level": 1
   }
 }

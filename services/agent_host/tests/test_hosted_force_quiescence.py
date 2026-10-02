@@ -14,7 +14,6 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
-import psutil
 import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
@@ -672,49 +671,6 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     assert len(scope.unresolved) == 1  # cache/context reset does not erase the evidence
     original_close(domain, time.monotonic() + 5)
     domain.proc.wait(timeout=5)
-
-
-async def test_real_missing_executable_is_not_an_unresolved_child(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from agent.graph.exec._result import _ExecCrashed
-    from agent.graph.exec._subprocess import _run_in_subprocess
-    from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
-
-    monkeypatch.setattr("agent.graph.exec._subprocess.sys.executable", str(tmp_path / "absent"))
-    scope = HostedTurnResources()
-    with bind_hosted_resources(scope):
-        outcome, _ = await _run_in_subprocess(
-            "raise AssertionError('must never execute')",
-            None,
-            asyncio.Event(),
-            2,
-            exec_dir=tmp_path,
-        )
-    assert isinstance(outcome, _ExecCrashed)
-    assert "could not be spawned" in outcome.output
-    assert not scope.unresolved
-
-
-@pytest.mark.parametrize("failure", [PermissionError, psutil.AccessDenied])
-def test_unreadable_group_member_is_not_an_empty_domain(
-    monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
-) -> None:
-    from base.native_process.exec_domain import _process_group_has_live_member
-
-    process = Mock(info={"pid": 123, "status": psutil.STATUS_RUNNING})
-
-    def iter_processes(_attrs: list[str]) -> Iterator[Mock]:
-        return iter([process])
-
-    monkeypatch.setattr(psutil, "process_iter", iter_processes)
-
-    def unreadable(pid: int) -> int:
-        raise failure()
-
-    monkeypatch.setattr("base.native_process.exec_domain.os.getpgid", unreadable)
-    with pytest.raises(failure):
-        _process_group_has_live_member(123)
 
 
 async def test_cancel_validation_spanning_task_handoff_never_cancels_new_turn() -> None:

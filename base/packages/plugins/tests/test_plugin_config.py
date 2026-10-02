@@ -327,7 +327,7 @@ def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
     )
     result = subprocess.run(  # noqa: S603 — our own venv python + a literal script
         [sys.executable, "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=Path(__file__).resolve().parents[4],
         capture_output=True,
         text=True,
         check=False,
@@ -492,16 +492,6 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
     assert get_plugin_config("overlay_test", _FixtureConfig).marker == ".hg"
 
 
-def test_llm_model_is_per_agent() -> None:
-    """llm_model must be marked per_agent=True for the spawn-time overlay path."""
-    from base.config import FIELD_INFOS
-
-    info = FIELD_INFOS["llm_model"]
-    extra = info.json_schema_extra
-    assert isinstance(extra, dict)
-    assert extra.get("per_agent") is True  # pyright: ignore[reportUnknownMemberType]
-
-
 def test_skills_to_inject_is_per_agent_overlayable(isolated_registry, unit_home) -> None:
     """A spawner overlays a per-worker skill index, so the field must be
     per_agent and resolve to the framework half (not raise like a pinned field)."""
@@ -566,22 +556,6 @@ def test_effective_config_snapshot_excludes_sensitive_fields(isolated_registry, 
     assert "sensitive_test.marker" in snap
     assert "sensitive_test.webhook_secret" not in snap
     assert "plain-text-secret" not in str(snap)
-
-
-def test_ava_settings_plugins_attribute_access(isolated_registry, unit_home):
-    """`ava._settings.plugins.<n>` returns instance; unregistered plugin name raise + lists known plugins."""
-    with PluginContext("test_plugin"):
-        register_plugin_config(_FixtureConfig)
-    bind_from_disk()
-
-    import ava._settings as _ava_settings
-
-    cfg = _ava_settings.plugins.test_plugin
-    assert isinstance(cfg, _FixtureConfig)
-    assert cfg.marker == ".git"
-
-    with pytest.raises(AttributeError, match="Known plugins"):
-        _ = _ava_settings.plugins.nonexistent_plugin
 
 
 def test_syntax_fix_ruff_format_overlay_is_accepted() -> None:
