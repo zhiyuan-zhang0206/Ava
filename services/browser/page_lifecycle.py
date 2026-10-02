@@ -701,6 +701,7 @@ async def dead_page_reaper(daemon: _PageDaemon, stop: asyncio.Event) -> None:
     deadline). Runs per upstream connection like the daemon's watchdog; a
     pass that hits upstream death returns so the daemon reconnects.
     """
+    # quiesce-exempt: reaps dead browser pages; no database
     while not stop.is_set():
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(stop.wait(), timeout=_DEAD_PAGE_SWEEP_INTERVAL_S)

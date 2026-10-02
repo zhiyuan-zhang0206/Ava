@@ -213,6 +213,7 @@ class TreeSelfCheck:
             await task
 
     async def _loop(self) -> None:
+        # quiesce-exempt: probes the root's own state; no database
         while True:
             await asyncio.sleep(self._config.interval_s)
             try:

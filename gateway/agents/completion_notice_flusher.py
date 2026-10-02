@@ -15,6 +15,7 @@ from base.daemon.schedules.completion_notices import (
     pending_digests,
     prune_delivered_notices,
 )
+from base.deploy.maintenance import admission
 from gateway.agents.delivery import deliver_chat_inbound
 
 _log = logging.getLogger(__name__)
@@ -95,8 +96,9 @@ async def flush_once(pool: ConnectionPool, *, now: datetime | None = None) -> in
 async def completion_notice_flusher(pool: ConnectionPool) -> None:
     """Run the gateway's sole periodic completion-digest flush loop."""
     while True:
-        try:
-            await flush_once(pool)
-        except Exception:
-            _log.warning("completion-notice digest flush failed", exc_info=True)
+        if not admission.quiesced():
+            try:
+                await flush_once(pool)
+            except Exception:
+                _log.warning("completion-notice digest flush failed", exc_info=True)
         await asyncio.sleep(FLUSH_INTERVAL_S)

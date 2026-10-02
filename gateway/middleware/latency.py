@@ -200,6 +200,7 @@ async def latency_flusher() -> None:
     the next tick retries (a dropped bucket is only a monitoring gap, and the
     emit pipeline itself is already best-effort).
     """
+    # quiesce-exempt: drains an in-process accumulator into telemetry; no database
     while True:
         await asyncio.sleep(FLUSH_INTERVAL_S)
         try:

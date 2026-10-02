@@ -88,3 +88,7 @@ Forward link: the "never force Postgres" part of item 1 is replaced for Postgres
 Forward: [decisions/2026-10-02-close-notices-written-at-terminals.md](2026-10-02-close-notices-written-at-terminals.md)
 removes the close-notice flush named in the third decision point: the stop
 writes the notices itself in its `terminals` phase.
+
+Forward: [decisions/2026-10-02-every-resident-database-loop-gates-on-quiesced.md](2026-10-02-every-resident-database-loop-gates-on-quiesced.md)
+extends the third decision point from the three named writers to every resident database
+loop, gated once in the shared round loop and by a lint for the hand-written ones.
