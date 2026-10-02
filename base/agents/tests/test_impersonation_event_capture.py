@@ -11,6 +11,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from base import telemetry
 from base.agents import impersonation as leases
 from base.agents import impersonation_manifest as capture
 from base.agents.impersonation import history as history
@@ -20,6 +21,7 @@ from base.agents.impersonation_manifest import (
     bind_local_participant,
     capture_local_event,
     close_local_participant_admission,
+    emit_recorded_central_event,
     open_local_participant,
     pending_reason,
     record_central_event,
@@ -32,7 +34,7 @@ from base.config import settings
 from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
-from base.telemetry.audit_events import prepare_event_log
+from base.telemetry.audit_events import audit_event_uid, prepare_event_log
 from tests._containers import grant_runner_login
 from tests.base import test_history as history_cases
 from tests.impersonation_support import attested_caller, recorded_tree
@@ -141,6 +143,31 @@ def test_central_events_belong_to_the_asserted_actor_not_the_recipient(
         )
         assert "impersonation_session" not in untagged.attributes
     assert _rows(db_conn, lease["id"], capture.CENTRAL_SOURCE) == 1
+
+
+def test_a_service_owned_central_event_is_recorded_in_both_logs_before_it_is_emitted(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipient = _owner(db_conn)
+    seen_at_emit: list[tuple[int, int]] = []
+
+    def emit(event: Event) -> None:
+        recorded = db_conn.execute(
+            "SELECT count(*) FROM audit_events WHERE event_uid=%s",
+            (audit_event_uid(event),),
+        ).fetchone()
+        db_conn.commit()
+        assert recorded is not None
+        seen_at_emit.append((int(recorded[0]), _rows(db_conn, lease["id"], capture.CENTRAL_SOURCE)))
+
+    monkeypatch.setattr(telemetry, "emit_prepared", emit)
+
+    emit_recorded_central_event(_send_event(owner.agent_id, recipient.agent_id))
+
+    assert seen_at_emit == [(1, 1)]
 
 
 def test_manual_leases_keep_no_event_log_and_protocol_less_leases_stay_legacy(

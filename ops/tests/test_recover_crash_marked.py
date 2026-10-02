@@ -162,6 +162,16 @@ class TestRecoverCrashMarkedOp:
             }
         ]
         assert stubs.published == [aid]
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT source, attributes FROM audit_events "
+                "WHERE agent_id = %s AND event_name = 'status_change'",
+                (aid,),
+            )
+            recorded = cur.fetchall()
+        assert recorded == [
+            ("system", {"from": "idling", "to": "terminated", "reason": "corpse_reaper"})
+        ]
 
     def test_repeat_call_is_idempotent(self, db_conn: psycopg.Connection, stubs: _Stubs) -> None:
         aid = _park_corpse(db_conn)

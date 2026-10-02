@@ -22,7 +22,8 @@ non-test code:
   `insert_event_log_many` is a violation;
 - a call that builds an audit event, `prepare_event_log(...)` or
   `prepare_event("audit", ...)` / `emit("audit", ...)`, is a violation unless the
-  same function also calls `record_audit` or `record_audit_standalone`.
+  same function also calls `record_audit`, `record_audit_standalone` or
+  `emit_recorded_central_event` (the service-owned wrapper that records).
 
 `base/telemetry/audit_events.py` (the recording primitives) and
 `base/telemetry/emitter.py` (the event pipeline) are the only exempt files.
@@ -72,26 +73,15 @@ _BASELINE: dict[str, int] = {
     "ava_builtins/plugins/ava_fleet/_task_update.py::_log_task_update": 1,
     "ava_builtins/plugins/ava_fleet/plugin.py::set_label": 1,
     "ava_builtins/plugins/ava_fleet/task_registry.py::_insert_task": 1,
-    "base/agents/messages/chat_delivery.py::_insert_chat_inbound_once": 1,
-    "base/db/__init__.py::announce_spawn_prompt": 1,
-    "base/db/__init__.py::insert_compact_request_inbound": 1,
-    "base/db/__init__.py::insert_inbound_message": 1,
-    "base/db/__init__.py::insert_restart_completed_inbound": 1,
     "base/host/env/audit.py::_emit_audit_event": 1,
     "gateway/mcp_server/endpoint.py::_AuditMiddleware.__call__": 2,
-    "ops/agents/spawn.py::_announce_created_agent": 1,
-    "ops/agents/wake.py::_stage_resurrect_event": 1,
-    "ops/lifecycle/__init__.py::_recover_crash_marked_blocking": 1,
     "ops/lifecycle/billing_recovery.py::_record_run_event": 1,
-    "ops/lifecycle/termination.py::_stage_termination_event": 1,
-    "services/computer/mcp_daemon.py::ComputerMcpDaemon._emit_action": 1,
-    "services/computer/mcp_daemon.py::ComputerMcpDaemon._emit_session_event": 1,
 }
 
 _EXEMPT_FILES = frozenset({"base/telemetry/audit_events.py", "base/telemetry/emitter.py"})
 _ENQUEUE_ONLY = frozenset({"insert_event_log", "insert_event_log_async", "insert_event_log_many"})
 _CONSTRUCTORS = frozenset({"prepare_event", "emit"})
-_RECORDERS = frozenset({"record_audit", "record_audit_standalone"})
+_RECORDERS = frozenset({"record_audit", "record_audit_standalone", "emit_recorded_central_event"})
 _LEGACY_REASON = (
     "enqueue-only audit emit; record the event with record_audit / record_audit_standalone "
     "(base/telemetry/audit_events.py) so Postgres, not Loki, holds the fact"

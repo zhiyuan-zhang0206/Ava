@@ -28,7 +28,7 @@ from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.telemetry.audit_events import prepare_event_log
+from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops.agents.resurrection_retry import (
     ResurrectSettlementDeferredError,
     hosted_resurrection_target,
@@ -320,7 +320,7 @@ def _stage_resurrect_event(
     )
     from base.agents.impersonation_manifest import record_central_event
 
-    return record_central_event(conn, event)
+    return record_audit(conn, record_central_event(conn, event))
 
 
 def resurrect_agent(
