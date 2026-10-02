@@ -312,6 +312,17 @@ repos:
         files: ^(.*\.py|scripts/structure/baseline/.*\.json)$
         require_serial: true
 
+      # Ratchet on library packages that still dial the database ambiently
+      # (shim calls, self-built `Database.from_settings()`): per-package counts
+      # frozen in scripts/structure/ambient_state/handle_ratchet_baseline.json, only ever lowered.
+      - id: lint-handle-ratchet
+        name: lint library database-handle ratchet (counts only fall)
+        entry: .venv/bin/python scripts/structure/ambient_state/handle_ratchet.py
+        language: system
+        files: ^((agent|ava|ava_builtins|base|cli|gateway|ops|services|schedules)/.*\.py|scripts/structure/ambient_state/handle_ratchet(_baseline\.json|\.py))$
+        pass_filenames: false
+        require_serial: true
+
       # AGENTS.md line-count ceiling (constants in the script; hard + a
       # transitional note zone below it). Prevents progressive bloat —
       # specialized rules go in conventions/.
