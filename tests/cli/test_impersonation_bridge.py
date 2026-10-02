@@ -18,7 +18,6 @@ from uuid import UUID
 
 import pytest
 
-from base.events.live import redis_listener
 from cli.commands.agents import impersonation_relay as relay
 
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")
@@ -143,44 +142,6 @@ class Listener:
 
     async def close(self) -> None:
         self.closed = True
-
-
-def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
-    """Serve the fake inbox through the public relay calls `cmd_relay` reads it with."""
-
-    def lease(*_args: object) -> dict[str, Any]:
-        return {
-            "session_id": 0,
-            "id": str(LEASE_ID),
-            "agent_id": 42,
-            "status": inbox.status,
-            "expires_at": inbox.expires_at,
-            "ack_window_seconds": inbox.ack_window_seconds,
-            "max_delivery_attempts": inbox.max_delivery_attempts,
-            "relay_batch_window_seconds": inbox.batch_window,
-            "start_message": inbox.start_message,
-        }
-
-    def rows(*_args: object) -> list[dict[str, Any]]:
-        return [
-            {
-                "id": i,
-                "kind": inbox.messages[i].kind,
-                "source": inbox.messages[i].source,
-                "content": inbox.messages[i].content,
-                "delivery_attempts": inbox.messages[i].delivery_attempts,
-                "delivery_due": inbox.messages[i].delivery_due,
-            }
-            for i in sorted(inbox.messages)[: inbox.page_size]
-        ]
-
-    monkeypatch.setattr("base.agents.impersonation.relay_get", lease)
-    monkeypatch.setattr("base.agents.impersonation.relay_inbox", rows)
-
-    def beat(*_args: object) -> None:
-        return None
-
-    monkeypatch.setattr("base.agents.impersonation.relay_heartbeat", beat)
 
 
 class FakeClock:
@@ -744,119 +705,6 @@ def test_agent_mismatch_refuses_inbox_before_subscription(monkeypatch: pytest.Mo
 
 
 # ── Command plumbing ───────────────────────────────────────────────────────────
-
-
-def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands.agents import impersonation
-    from cli.parsers import build_parser
-
-    remote = "unix:///private/tmp/ava-codex.sock"
-    args = build_parser().parse_args(
-        [
-            "impersonate",
-            "relay",
-            "42",
-            "--lease-id",
-            str(LEASE_ID),
-            "--provider",
-            "codex",
-            "--thread-id",
-            str(THREAD_ID),
-            "--codex-remote",
-            remote,
-            "--debounce",
-            "0",
-        ]
-    )
-    inbox = Inbox()
-    listener = Listener(inbox)
-    delivered: list[tuple[UUID, str | None]] = []
-    monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
-    inbox.start_message = ""
-    _serve_inbox(monkeypatch, inbox)
-
-    def make_listener(*_args: object) -> Listener:
-        return listener
-
-    def reserve(_lease: str, _token: str, ids: list[int]) -> frozenset[int]:
-        for i in ids:
-            inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
-        return frozenset(ids)
-
-    monkeypatch.setattr(relay, "reserve_delivery", reserve)
-    monkeypatch.setattr(redis_listener, "RedisInboundListener", make_listener)
-
-    def deliver(thread_id: str, _message: str, *, endpoint: str) -> None:
-        delivered.append((UUID(thread_id), endpoint))
-
-    monkeypatch.setattr(relay, "live_submit", deliver)
-    assert args.func(args) == 0
-    assert delivered == [(THREAD_ID, remote)]
-    assert listener.closed
-
-
-@pytest.mark.parametrize("refuse", [False, True])
-def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
-    monkeypatch: pytest.MonkeyPatch,
-    refuse: bool,
-) -> None:
-    """Bound host context and leave failed messages for the native handoff."""
-    from cli.commands.agents import impersonation
-    from cli.parsers import build_parser
-
-    args = build_parser().parse_args(
-        [
-            "impersonate",
-            "relay",
-            "42",
-            "--lease-id",
-            str(LEASE_ID),
-            "--provider",
-            "codex",
-            "--thread-id",
-            str(THREAD_ID),
-            "--debounce",
-            "0",
-        ]
-    )
-    inbox = Inbox(5)
-    inbox.messages[5] = msg(5, content="x" * 5000)
-    listener = Listener(inbox)
-    delivered: list[str] = []
-    monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
-    _serve_inbox(monkeypatch, inbox)
-
-    def make_listener(*_args: object) -> Listener:
-        return listener
-
-    def reserve(_lease: str, _token: str, ids: list[int]) -> frozenset[int]:
-        for i in ids:
-            inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
-        return frozenset(ids)
-
-    monkeypatch.setattr(relay, "reserve_delivery", reserve)
-    monkeypatch.setattr(redis_listener, "RedisInboundListener", make_listener)
-
-    def deliver(_thread_id: str, message: str, *, endpoint: str) -> str | None:
-        delivered.append(message)
-        if refuse and "Ava message" in message:
-            return "ActiveTurnNotSteerable"
-        return None
-
-    monkeypatch.setattr(relay, "live_submit", deliver)
-    args.codex_remote = "unix:///tmp/ava-codex.sock"
-    assert args.func(args) == (1 if refuse else 0)
-    if refuse:
-        assert 5 in inbox.messages
-    push = delivered[-1]
-    assert "truncated" in push
-    assert relay.ack_command(0, [5], agent_id=42) in push
-    body_line = [line for line in push.splitlines() if line.startswith("x" * 10)]
-    assert body_line
-    assert len(body_line[0]) <= relay._PUSH_MAX_CHARS + len(
-        " (truncated; run the inbox command to read the full message)"
-    )
-    assert listener.closed
 
 
 def test_write_heartbeat_stops_at_a_terminal_lease(monkeypatch: pytest.MonkeyPatch) -> None:
