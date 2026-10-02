@@ -181,3 +181,61 @@ async def test_a_recovery_wake_is_refused_without_a_force(
         )
 
     assert _inbound_count(db_conn, agent_id) == before
+
+
+def _audit_rows(
+    db: psycopg.Connection, agent_id: int, event_name: str
+) -> list[tuple[str, dict[str, object]]]:
+    rows = db.execute(
+        "SELECT source, attributes FROM audit_events WHERE agent_id=%s AND event_name=%s "
+        "ORDER BY id",
+        (agent_id, event_name),
+    ).fetchall()
+    db.commit()
+    return [(r[0], r[1]) for r in rows]
+
+
+def test_a_force_terminate_records_its_audit_fact_in_the_same_transaction(
+    db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
+) -> None:
+    _, _, _, fence = termination._force_terminate_transaction(agent_id, db_pool, source="system")
+
+    assert _audit_rows(db_conn, agent_id, "terminate") == [("system", {"inbound_id": fence})]
+
+
+def test_a_force_terminate_whose_audit_fact_cannot_be_recorded_does_not_terminate(
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    agent_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(_conn: psycopg.Connection, _event: object) -> None:
+        raise RuntimeError("audit write failed")
+
+    monkeypatch.setattr(termination, "record_audit", refuse)
+
+    with pytest.raises(RuntimeError, match="audit write failed"):
+        termination._force_terminate_transaction(agent_id, db_pool, source="system")
+
+    row = db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+    db_conn.commit()
+    assert row == ("idling",)
+    assert _audit_rows(db_conn, agent_id, "terminate") == []
+
+
+def test_a_resurrection_records_its_audit_fact(
+    db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
+) -> None:
+    termination._force_terminate_transaction(
+        agent_id, db_pool, source="system", recovery_wake=_WAKE
+    )
+    [(wake_id, _, _, _)] = _wakes(db_conn, agent_id)
+
+    wake.resurrect_agent(
+        agent_id,
+        resurrected_by="system",
+        trigger_inbound_id=wake_id,
+        trigger_inbound_kind="chat",
+    )
+
+    assert [source for source, _ in _audit_rows(db_conn, agent_id, "resurrect")] == ["system"]
