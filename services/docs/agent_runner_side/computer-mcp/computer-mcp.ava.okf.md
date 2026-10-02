@@ -128,5 +128,5 @@ complete facts for replay.
 - [[../browser/browser/browser.ava.okf.md]] — browser tasks go through chrome MCP (DOM path,
   preferred); computer-mcp is the pixel-level fallback for surfaces DOM cannot
   reach (canvas, native apps, system settings).
-- [[watchdog.ava.okf.md]] — the healthcheck (`services.healthchecks.computer_mcp`)
-  probes the daemon with a lock-free ping; the watchdog respawns it.
+- [[ava_root.ava.okf.md]] — the healthcheck (`services.healthchecks.computer_mcp`)
+  probes the daemon with a lock-free ping; the root's health monitor restarts it.

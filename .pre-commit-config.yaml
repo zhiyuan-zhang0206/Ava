@@ -409,7 +409,7 @@ repos:
       # scripts/content_lint/check_doc_references.py's own docstring for the full rationale
       # (including issue #1045, why future/ is no longer a blanket skip).
       - id: check-doc-references
-        name: check doc references (CLI flags + relative links resolve)
+        name: check doc references (CLI flags + relative links + wikilinks resolve)
         language: system
         entry: .venv/bin/python scripts/content_lint/check_doc_references.py
         files: (\.md$|^cli/main\.py$|^scripts/(content_lint/check_doc_references\.py|.*\.sh)$)

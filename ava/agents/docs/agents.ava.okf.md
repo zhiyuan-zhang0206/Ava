@@ -45,7 +45,7 @@ tags:
 
 ## Key Dependencies
 - [[agent/docs/state.ava.okf.md]] — agent state storage
-- [[lifecycle.ava.okf.md]] — process lifecycle
+- [[agent/docs/lifecycle.ava.okf.md]] — process lifecycle
 - [[gateway-cli.ava.okf.md]] — gateway is the actual entry point for agent spawn
 
 ## Notes

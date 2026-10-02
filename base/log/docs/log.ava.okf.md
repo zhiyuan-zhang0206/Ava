@@ -27,7 +27,7 @@ Every log line is also an **event** in the unified event stream (event-system de
 - All are **idempotent** (`_init_done` process-level guard) — `logger.add` is not idempotent; repeated calls accumulate sinks until fd exhaustion (errno 24); watchdog reusing healthcheck every 60s would hit this, the guard blocks it.
 
 ### Three sink types
-stderr, a rotated JSONL file and the unified event pipeline, and how every sink is registered: [[log_sinks.ava.okf.md|log sinks]].
+stderr, a rotated JSONL file and the unified event pipeline, and how every sink is registered: [[sinks.ava.okf.md|log sinks]].
 
 ### Two key mechanisms
 - The seven-day full, 90-day rollup-source and 365-day lineage JSONL mirrors preserve Loki-stable IDs; [[services/docs/gateway_side/events_maintenance/events_maintenance.ava.okf.md|events maintenance]] replays the rollup tier.
