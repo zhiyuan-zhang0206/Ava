@@ -5,7 +5,6 @@
     "test_baseline_shard_validity_gate.py",
     "test_directory_budget_entries.py",
     "test_lint_code_structure.py",
-    "test_lint_common.py",
     "test_locality_gate.py",
     "test_patch_targets_baseline.py",
     "test_rename_aware_baseline.py",
