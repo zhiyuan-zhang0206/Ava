@@ -342,6 +342,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "reads the test-selection wiring of .github/workflows/ci.yml",
     ),
+    "tests/scripts/test_refresh_test_durations_contract.py": (
+        "contract",
+        "the shard counts and coverage arguments track both workflow matrices of .github/workflows/ci.yml",
+    ),
     "tests/scripts/test_rotate_cluster_secret.py": (
         "integration",
         "the rotation script keeps the backup passphrase pinned across the backup service and the gateway side: spans scripts, services.backup, services.gateway_side, no one of which may import all the others",
@@ -353,6 +357,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/scripts/test_toolchain_uv_pin.py": (
         "contract",
         "keeps the workflows and scripts/provision/toolchain.sh on one uv version",
+    ),
+    "tests/scripts/test_update_model_pricing_contract.py": (
+        "contract",
+        "the reconcile tests run against the reviewed catalog base/lm/pricing_catalog_archive.json, and the update-model-pricing workflow runs only trusted main code with write permissions",
     ),
     "tests/scripts/test_worktree_sh_clean.py": (
         "contract",
