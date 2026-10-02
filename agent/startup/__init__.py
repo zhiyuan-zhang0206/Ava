@@ -12,11 +12,9 @@
 - `notify_desktop_permissions_at_startup` — surface broken Screen Recording
   or Accessibility permission (detected at converge) to the user, exactly once
 - `reconcile_open_pages` — probe every open page's server and restore it
-  (re-serve dead serve_dir pages, close dead no-dir pages); runs at boot,
-  on heartbeat, and in the host's periodic scan so busy agents also heal
-- `reconcile_all_open_pages` — the hosted daemon's periodic scan (task
-  #2260): one pass over every agent with open pages, sharing the same
-  per-agent interval throttle
+  (re-serve dead serve_dir pages, close dead no-dir pages); runs at boot and
+  on heartbeat. The periodic scan of busy agents' pages (task #2260) is a loop
+  of the page-server service (`services/page_server/dead_pages.py`)
 - `_close_dead_show_pages` — close dead no-serve_dir rows in one
   transaction with a re-serve notice to the agent (deduped per 6h)
 
@@ -27,7 +25,6 @@ The dead-page recovery writes and notifications live in the package-private
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -545,35 +542,20 @@ def _page_server_alive(host: str, port: int) -> bool:
         return False
 
 
-# time.monotonic() of the last reconcile pass per agent (boot, heartbeat,
-# or periodic). The host daemon scan skips an agent's pass when
-# another path already scanned it within the interval, keeping the combined
-# cadence at ~one pass per interval instead of two. Keyed by agent_id
-# because the hosted daemon serves MANY agents in one process: a single
-# timestamp would let one agent's heartbeat scan suppress every other
-# agent's pass. Plain float values (no asyncio.Lock — which would bind to
-# one event loop): each agent runs a single loop, tests run one loop per
-# case. The no-lock argument assumes a single event loop per process —
-# the current host runtime; revisit if multi-threaded execution
-# is ever introduced.
-_last_reconcile_at: dict[int, float] = {}
-
-
 async def reconcile_open_pages(
     pool: AsyncConnectionPool,
     agent_id: int,
     *,
     event_publisher: Any | None = None,
 ) -> None:
-    """Probe every open page's server and restore it — boot, heartbeat, and periodic.
+    """Probe every open page's server and restore it — boot and heartbeat.
 
     The page-server daemon creates and supervises every serve() page inside a
     daemon-owned persistent shell session for this agent. Those sessions are
-    outside rollout service teardown, while the heartbeat probe and the
-    periodic page-reconcile loop remain the catch-alls for server death
-    (crash, OOM, or manual kill): an idle agent checks its pages on every
-    heartbeat, and `page_reconcile_loop` covers the busy agent whose
-    heartbeats never arrive.
+    outside rollout service teardown, while this probe remains a catch-all for
+    server death (crash, OOM, or manual kill): an idle agent checks its pages on
+    every heartbeat. The busy agent whose heartbeats never arrive is covered by
+    the page-server service's own scan, which closes its dead show() pages.
 
     Per open page row:
     - server alive -> keep (log only)
@@ -595,11 +577,6 @@ async def reconcile_open_pages(
     ctx.event_publisher.
     """
     import asyncio
-
-    # This pass counts as this agent's recent scan (boot, heartbeat, or
-    # periodic) so the periodic loops can skip their own pass for it. Dict
-    # mutation needs no `global` — the name itself is never rebound.
-    _last_reconcile_at[agent_id] = time.monotonic()
 
     rows: list[
         tuple[str, int, str, str | None, str | None]
@@ -669,103 +646,3 @@ async def reconcile_open_pages(
 
     if dead_shows:
         await _close_dead_show_pages(pool, agent_id, dead_shows, event_publisher)
-
-
-async def page_reconcile_loop(
-    pool: AsyncConnectionPool,
-    agent_id: int,
-    *,
-    event_publisher: Any | None = None,
-    interval_s: float | None = None,
-) -> None:
-    """Periodically probe + restore open pages — the heartbeat-independent scan.
-
-    The gateway heartbeat only reaches idle agents, so a busy agent's pages
-    would otherwise stay unreconciled for the whole turn (task #2257: a
-    serve() page died at a platform update and stayed dead ~4h because its
-    owner was mid-work and never got a heartbeat). This loop runs every
-    `interval_s` — defaulting to the heartbeat interval
-    (AVA_HEARTBEAT_INTERVAL_SECONDS, 300 s) so a cluster tuning the
-    heartbeat cadence scales the page scan with it — regardless of
-    idle/busy; a pass is skipped when another path (boot or heartbeat)
-    already reconciled within the interval. The agent's own boot scan
-    covers t=0; this loop covers everything after. Self-protecting like
-    the lease renewer: any failure is logged and the loop waits for the
-    next interval instead of dying silently.
-    """
-    import asyncio
-
-    from base.config import settings
-
-    if interval_s is None:
-        interval_s = float(settings.daemon.heartbeat_interval_seconds)
-
-    while True:
-        await asyncio.sleep(interval_s)
-        try:
-            if time.monotonic() - _last_reconcile_at.get(agent_id, 0.0) < interval_s:
-                continue
-            await reconcile_open_pages(pool, agent_id, event_publisher=event_publisher)
-        except Exception:
-            logger.warning(
-                "page-reconcile loop pass failed — retrying next interval",
-                event="page_restore_failed",
-                agent_id=agent_id,
-                exc_info=True,
-            )
-
-
-async def reconcile_all_open_pages(
-    pool: AsyncConnectionPool,
-    *,
-    interval_s: float,
-    event_publisher: Any | None = None,
-) -> None:
-    """Reconcile every open page on this machine — the hosted daemon's scan.
-
-    The agent host scans independently of turns so a busy agent's pages
-    are reconciled while its turn is running. One query lists this
-    machine's agents with open pages; each is reconciled through the
-    ordinary per-agent pass (which stamps its own throttle key, so a
-    heartbeat scan of that agent within `interval_s` suppresses this pass).
-
-    Each pass runs under `bind_turn_identity(agent_id)`: the daemon process
-    has no agent identity of its own (no turn context, no AVA_AGENT_ID), and
-    the re-serve arm calls ava.ui.serve, whose registration reads
-    ava.agent_identity.agent_id() — without the bind it would POST to /agents/None
-    and the re-serve would fail silently (P1, #1312 adversarial review).
-    asyncio.to_thread copies contextvars, so the probe/serve threads see
-    the bind too. Best-effort like the per-agent pass: failures are logged
-    per agent and never raise.
-    """
-    from base.cluster.machine import reachable_host
-    from base.native_process.turn_identity import bind_turn_identity
-
-    try:
-        async with pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                "SELECT DISTINCT agent_id FROM agent_pages "
-                "WHERE host = %s AND closed_at IS NULL AND expired_at IS NULL",
-                (reachable_host(),),
-            )
-            agent_ids = [r[0] for r in await cur.fetchall()]
-    except Exception:
-        logger.opt(exception=True).warning(
-            "page-restore: open-page agent query failed",
-            event="page_restore_query_failed",
-        )
-        return
-
-    for agent_id in agent_ids:
-        if time.monotonic() - _last_reconcile_at.get(agent_id, 0.0) < interval_s:
-            continue
-        try:
-            with bind_turn_identity(agent_id):
-                await reconcile_open_pages(pool, agent_id, event_publisher=event_publisher)
-        except Exception:
-            logger.warning(
-                "page-restore: per-agent pass failed",
-                event="page_restore_failed",
-                agent_id=agent_id,
-                exc_info=True,
-            )
