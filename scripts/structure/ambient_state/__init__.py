@@ -18,6 +18,9 @@ scripts/structure/baseline/ shards as `path::rule:name -> site count`. The rule 
 - configuration reads: `settings-read` — a module of a slice-governed package
   (`allowlist.SLICED_PACKAGES`, see `sliced.py`) other than its composition root imports the
   process-global `settings`;
+- database and bundle wiring: `ambient-db` (a package in `allowlist.DB_HANDLE_PACKAGES` dials
+  from the live settings instead of taking a `Database`, see `dbhandle.py`) and `bundle-leak` (a
+  `@root_bundle` class named outside its defining module, see `bundle.py`);
 - free-floating background work: `asyncio-task`, `thread` (keyed by the enclosing
   function). Background work must be durable or re-derivable from durable state and
   run as its own service loop; use a per-iteration `async with asyncio.TaskGroup()`
@@ -43,7 +46,7 @@ from pathlib import Path
 
 from scripts.structure import lint_common
 from scripts.structure.ambient_state import allowlist as allow
-from scripts.structure.ambient_state import scan, sliced
+from scripts.structure.ambient_state import bundle, dbhandle, scan, sliced
 
 SECTION = "ambient_state"
 # The file whose absence at the base revision means this section is being introduced.
@@ -76,6 +79,8 @@ _FIXES: dict[str, str] = {
     scan.SINGLETON: f"a zero-argument cache is a hidden singleton — {_STATE_FIX}; a memoized pure derivation goes in ALLOWED with a reason",
     scan.CACHE: "a memoized function is state unless it is pure — a pure derivation goes in ALLOWED in scripts/structure/ambient_state/allowlist.py with a reason",
     scan.CALL: "a call that runs at import (a registry fill or side effect) — register from a composition root, not at import",
+    dbhandle.AMBIENT_DB: f"an ambient database dial in a package that holds a Database handle — {dbhandle.FIX}",
+    bundle.BUNDLE_LEAK: f"a root bundle named outside its composition root — {bundle.FIX}",
     sliced.SETTINGS_READ: f"reads the global configuration in a sliced package — {sliced.FIX}",
     scan.READ: "reads settings, the environment, the clock or the filesystem at import — read it where it is used, or inject it",
     scan.HOST: "a platform constant computed at import — inject a `Platform` instead of recomputing the fact per module",
@@ -107,7 +112,14 @@ def site_key(rel: str, hit: scan.Hit) -> str:
 
 
 def _hits(tree: ast.Module, rel: str, repo_root: Path) -> list[scan.Hit]:
-    return [*scan.scan(tree, rel, repo_root), *sliced.hits(tree, rel)] if in_scope(rel) else []
+    if not in_scope(rel):
+        return []
+    return [
+        *scan.scan(tree, rel, repo_root),
+        *sliced.hits(tree, rel),
+        *dbhandle.hits(tree, rel),
+        *bundle.hits(tree, repo_root),
+    ]
 
 
 def measure(tree: ast.Module, rel: str, repo_root: Path) -> Sites:
@@ -171,6 +183,12 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
             if not (repo_root / path).is_file():
                 errors.append(
                     f"{_LIST_FILE}:1: stale SLICED_PACKAGES entry {package} — {path} does not exist; fix or remove it"
+                )
+    for package, roots in sorted(allow.DB_HANDLE_PACKAGES.items()):
+        for path in sorted(roots):
+            if not (repo_root / path).is_file():
+                errors.append(
+                    f"{_LIST_FILE}:1: stale DB_HANDLE_PACKAGES entry {package} — {path} does not exist; fix or remove it"
                 )
     for callee in sorted(allow.PURE_REPO_CALLEES):
         owner, _, name = callee.rpartition(".")
