@@ -12,6 +12,7 @@ import psutil
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
+from base import telemetry
 from base.agents.incarnation.host_process_evidence import local_host_evidence
 from base.agents.incarnation.lifecycle_acceptance import (
     RECORD_APPLIED,
@@ -35,7 +36,7 @@ from base.events.live.announce import publish_agent_updated
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import ava_home
-from base.telemetry.audit_events import insert_event_log_async
+from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
 class _HostedAdmissionRefusedError(Exception):
@@ -426,6 +427,7 @@ async def admit_hosted_runtime(
     native = psutil.Process()
     host_identity = ResourceProcess.capture(native)
     legacy_adoption = await _legacy_dead_host_adoption(pool, agent_id, machine, owner)
+    recorded: list[telemetry.Event] = []
     try:
         async with async_write_transaction(pool) as conn:
             previous = await (
@@ -514,10 +516,9 @@ async def admit_hosted_runtime(
                 _refuse_hosted_admission()
             if legacy_adoption_used and legacy_adoption is not None:
                 # The adoption audit: who was replaced, on what evidence, and
-                # how stale the predecessor's ownership beat was. Enqueued
-                # best-effort beside the takeover — the emitter owns the write,
-                # so a failure only loses the audit event, never the admission.
-                await insert_event_log_async(
+                # how stale the predecessor's ownership beat was. Recorded in
+                # the takeover's own transaction.
+                adoption_event = prepare_event_log(
                     event_type="hosted_legacy_adoption",
                     agent_id=agent_id,
                     source="system",
@@ -528,6 +529,7 @@ async def admit_hosted_runtime(
                         "agent_exec_children": 0,
                     },
                 )
+                recorded.append(await record_audit_async(conn, adoption_event))
                 logger.info(
                     "hosted legacy adoption: admitted agent {agent_id} over dead local "
                     "predecessor {predecessor} after {silence}s of lease silence "
@@ -542,17 +544,20 @@ async def admit_hosted_runtime(
             await align_accepting_binding(
                 conn, agent_id, RuntimeIncarnation(agent_id, row[0], owner)
             )
-            await insert_event_log_async(
+            admitted_event = prepare_event_log(
                 event_type="status_change",
                 agent_id=agent_id,
                 source="system",
                 payload={"from": expected_from, "to": "running"},
             )
+            recorded.append(await record_audit_async(conn, admitted_event))
     except _HostedAdmissionRefusedError as exc:
         await _record_admission_refusal(
             pool, agent_id, machine, expected_from, attempt_at, exc.outcome, exc.detail
         )
         return None
+    for event in recorded:
+        telemetry.emit_prepared(event)
     logger.info(
         "hosted runtime admitted", agent_id=agent_id, generation=str(row[0]), owner=str(owner)
     )
@@ -594,13 +599,21 @@ async def settle_hosted_runtime(
             ),
         )
         changed = cur.rowcount == 1
-        if changed:
-            await insert_event_log_async(
-                event_type="status_change",
-                agent_id=incarnation.agent_id,
-                source="system",
-                payload={"from": "running", "to": "idling"},
+        settled_event = (
+            await record_audit_async(
+                conn,
+                prepare_event_log(
+                    event_type="status_change",
+                    agent_id=incarnation.agent_id,
+                    source="system",
+                    payload={"from": "running", "to": "idling"},
+                ),
             )
+            if changed
+            else None
+        )
+    if settled_event is not None:
+        telemetry.emit_prepared(settled_event)
     if changed:
         await publish_agent_updated(incarnation.agent_id)
     return changed

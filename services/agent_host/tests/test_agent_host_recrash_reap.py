@@ -28,6 +28,7 @@ from agent.ownership.hosted import (
 from base.config import settings
 from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event
 from services.agent_host import settlement as settlement_mod
 from services.agent_host.runtime import TurnOutcome
 
@@ -221,14 +222,12 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     """
     events: list[dict[str, object]] = []
 
-    async def _event(
-        event_type: str, agent_id: int, *, payload: dict[str, object] | None = None, **_kw: object
-    ) -> None:
-        del event_type, agent_id
-        if payload is not None and payload.get("reason") == "corpse_reaper":
-            events.append(payload)
+    async def _event(_conn: object, event: Event) -> Event:
+        if event.attributes.get("reason") == "corpse_reaper":
+            events.append(event.attributes)
+        return event
 
-    monkeypatch.setattr("agent.ownership.corpse_reap.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.ownership.corpse_reap.record_audit_async", _event)
     published: list[int] = []
 
     async def _publish(agent_id: int) -> None:

@@ -404,13 +404,13 @@ def _record_run_event(
     balance: BillingBalanceReport, outcomes: list[BillingResurrectAgentOutcome]
 ) -> None:
     from base import telemetry
-    from base.telemetry.audit_events import insert_event_log
+    from base.telemetry.audit_events import prepare_event_log, record_audit_standalone
 
     resurrected = [o.agent_id for o in outcomes if o.status == "resurrected"]
     refused = [o.agent_id for o in outcomes if o.status == "refused"]
     deferred = [o.agent_id for o in outcomes if o.status == "deferred"]
     failed = [o.agent_id for o in outcomes if o.status == "failed"]
-    insert_event_log(
+    run_event = prepare_event_log(
         event_type="billing_resurrect",
         agent_id=None,
         source="user",
@@ -437,3 +437,6 @@ def _record_run_event(
             "failed": len(failed),
         },
     )
+    # Last: the batch already ran, so a failed write raises after its summary
+    # event went out.
+    record_audit_standalone(run_event)
