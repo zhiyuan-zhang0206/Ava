@@ -445,6 +445,17 @@ repos:
         entry: .venv/bin/python scripts/lint/termination_source.py --only
         files: \.py$
 
+      # Postgres (`audit_events`) is the system of record for category=audit
+      # events; Loki is a projection that sheds and expires. An emit site that
+      # builds or enqueues an audit event without record_audit /
+      # record_audit_standalone leaves a fact only the projection has. The
+      # pre-primitive sites are frozen in `_BASELINE` in scripts/content_lint/lint_audit_record.py.
+      - id: lint-audit-record
+        name: lint audit record (every audit emit site records to Postgres first)
+        language: system
+        entry: .venv/bin/python scripts/content_lint/lint_audit_record.py --only
+        files: \.py$
+
       - id: lint-clock-lattice
         name: lint clock lattice (lattice-vocabulary clocks only in the family modules)
         language: system
