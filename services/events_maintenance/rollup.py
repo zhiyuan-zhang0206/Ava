@@ -169,7 +169,7 @@ def _day_arg(value: str) -> date:
 
 def main(argv: list[str] | None = None) -> int:
     """Operator CLI: recompute a range of closed UTC days (monotone guard applies)."""
-    from base.db import connect
+    from services.events_maintenance.daemon import events_maintenance_db
 
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     parser.add_argument("--from", dest="first", type=_day_arg, required=True, metavar="YYYYMMDD")
@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.first > args.last:
         parser.error("--from is after --to")
-    with connect() as conn:
+    with events_maintenance_db().connect() as conn:
         result = roll_days(conn, args.first, args.last)
     sys.stdout.write(
         f"rolled {result.start_day}..{result.end_day}: "
