@@ -202,6 +202,7 @@ SLICED_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "settings
 # as stale.
 DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = {
     "services/labeler": frozenset({"services/labeler/daemon.py"}),
+    "services/page_server": frozenset({"services/page_server/daemon.py"}),
 }
 
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────

@@ -31,7 +31,6 @@ import psutil
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import base.db
 import base.sessions.pty.cli
 from base.cluster.machine import machine_name, reachable_host
 from base.config import settings
@@ -39,6 +38,7 @@ from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
@@ -679,7 +679,7 @@ async def run() -> None:
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
     dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
     health = await start_health_server("page_server", liveness=liveness)
-    pool = base.db.pool()
+    pool = Database.from_settings().pool()
     config = page_server_config()
     try:
         # One TaskGroup owns the resident loops, each with its own progress tracker so
