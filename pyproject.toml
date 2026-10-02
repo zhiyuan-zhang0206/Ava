@@ -858,6 +858,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/deploy/release/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/deploy/schema/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

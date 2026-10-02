@@ -11,8 +11,8 @@ from pathlib import Path
 
 import psutil
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from tests.base.process_evidence import detached_to_known_reaper
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from base.sessions.tests.process_evidence import detached_to_known_reaper
 
 
 def middle(root: Path) -> None:

@@ -562,7 +562,7 @@ def test_editable_import_gate_requires_the_checkout_editable_import(
 def test_uv_native_editable_records_are_legal_and_exec_guard_accepts_them(tmp_path: Path) -> None:
     """A real uv install keeps its per-wheel pointer byte-identical through both guards."""
 
-    checkout = Path(__file__).parents[2]
+    checkout = Path(__file__).parents[4]
     uv_built_venv_root = tmp_path / "uv-built-venv"
     venv.create(uv_built_venv_root / ".venv", with_pip=False, symlinks=True)
     interpreter = uv_built_venv_root / ".venv" / "bin" / "python"
