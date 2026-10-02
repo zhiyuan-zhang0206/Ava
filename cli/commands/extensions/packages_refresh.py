@@ -65,6 +65,7 @@ _DEFAULT_INTERVAL_S = 86400
 _DURATION_RE = re.compile(r"^\s*(\d+)\s*([smhd]?)\s*$")
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+_CONFLICT = "conflict: local copy differs from the last applied content"
 
 
 def parse_duration(text: str) -> int:
@@ -577,13 +578,10 @@ class _Pass:
             host_errors += manifest_module.check_host_commit(manifest, self.repo)
             if host_errors:
                 return f"blocked_version: {'; '.join(host_errors)}", None
-        recorded = pkg.installed_hash or pkg.content_hash
-        if (
-            dest_hash is not None
-            and not self.force
-            and install_registry.copy_changed(dest, recorded, skip_subtrees=skip)
+        if dest_hash is not None and (
+            conflict := self._local_edit_conflict(pkg, staged, dest, dest_hash)
         ):
-            return "conflict: local copy differs from the last applied content", None
+            return conflict, None
         for parts in skip:
             sub = dest.joinpath(*parts)
             if sub.exists():
@@ -599,6 +597,21 @@ class _Pass:
         self.applies_used += 1
         logger.info("packages refresh: applied '{}' at {}", pkg.name, remote_rev[:7])
         return "applied", install_registry.tree_hash(dest, skip_subtrees=skip)
+
+    def _local_edit_conflict(
+        self, pkg: install_registry.InstalledPackage, staged: Path, dest: Path, dest_hash: str
+    ) -> str | None:
+        """Conflict result when `dest` no longer matches the last applied content.
+        A core-channel copy is derived state of reviewed main content: reported
+        (old tree kept as `.<name>.prev`), never blocking."""
+        if dest_hash == (pkg.installed_hash or pkg.content_hash):
+            return None
+        if install_registry.resolved_policy(pkg).channel != "core":
+            return None if self.force else _CONFLICT
+        skip = install_registry.preserved_subpaths(dest)
+        names = install_registry.differing_paths(dest, staged, skip_subtrees=skip)
+        logger.warning("packages refresh: '{}' local copy replaced; differs: {}", pkg.name, names)
+        return None
 
     # -- git channel ---------------------------------------------------------
 
