@@ -11,6 +11,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.daemon.loop_health import LivenessGroup, LoopProgress
+from base.events.live.bus import EventBus
 from ops.cluster_rpc import worst_case_dispatch_seconds
 from services.delivery_watchdog import attempts, daemon, rounds
 
@@ -72,7 +73,7 @@ async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     _patch_loops(monkeypatch, crashing=crashing, cancelled=cancelled)
 
     with pytest.raises(ExceptionGroup) as raised:
-        await daemon._run_loops(pool, LivenessGroup())
+        await daemon._run_loops(pool, EventBus.from_settings(), LivenessGroup())
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} loop crashed"]
     assert sorted(cancelled) == sorted({"scan", "resurrect", "harvest", "hosted_turn"} - {crashing})
@@ -85,7 +86,7 @@ async def test_each_loop_reports_its_own_progress(
     _patch_loops(monkeypatch, crashing="scan", cancelled=[])
 
     with pytest.raises(ExceptionGroup):
-        await daemon._run_loops(pool, liveness)
+        await daemon._run_loops(pool, EventBus.from_settings(), liveness)
 
     assert set(liveness.snapshot()) == {"scan", "resurrect", "harvest", "hosted_turn"}
 

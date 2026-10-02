@@ -13,9 +13,9 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-import base.events.live.redis_client
 from base.config import settings
 from base.daemon.loop_health import LoopProgress
+from base.events.live.bus import EventBus
 from services.delivery_watchdog import attempts, resurrect_retry, rounds
 from services.delivery_watchdog import daemon as delivery_daemon
 from services.delivery_watchdog import turn_liveness as watchdog
@@ -421,11 +421,11 @@ async def test_a_committed_recovery_is_never_recovered_twice(
 
 def _wedged_runner_redis(monkeypatch: pytest.MonkeyPatch) -> None:
     """Runner-a's host beat is missing: every stale hosted agent on it is a wedge."""
-    monkeypatch.setattr(
-        base.events.live.redis_client,
-        "get_async_redis",
-        lambda: FakeRedis({"host_turn_progress:runner-a": None}),
-    )
+
+    def async_redis(_bus: EventBus) -> FakeRedis:
+        return FakeRedis({"host_turn_progress:runner-a": None})
+
+    monkeypatch.setattr(EventBus, "async_redis", async_redis)
 
 
 def _expire_recovery_cooldown(db: psycopg.Connection, agent_id: int) -> None:
@@ -454,13 +454,19 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
     monkeypatch.setattr(watchdog, "_recover_hosted_turn", fake_recover)
     progress = LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s())
 
-    await watchdog.hosted_turn_recovery_round(pool, progress, _THRESHOLD_S)
-    await watchdog.hosted_turn_recovery_round(pool, progress, _THRESHOLD_S)
+    await watchdog.hosted_turn_recovery_round(
+        pool, EventBus.from_settings(), progress, _THRESHOLD_S
+    )
+    await watchdog.hosted_turn_recovery_round(
+        pool, EventBus.from_settings(), progress, _THRESHOLD_S
+    )
     assert recovered == [agent_id]
     assert watchdog.HOSTED_TURN_RECOVERY_COOLDOWN_S == 600.0
 
     _expire_recovery_cooldown(db_conn, agent_id)
-    await watchdog.hosted_turn_recovery_round(pool, progress, _THRESHOLD_S)
+    await watchdog.hosted_turn_recovery_round(
+        pool, EventBus.from_settings(), progress, _THRESHOLD_S
+    )
     assert recovered == [agent_id, agent_id]
 
 
@@ -479,7 +485,10 @@ async def test_a_hung_recovery_is_cut_at_the_deadline_and_still_enters_the_coold
     monkeypatch.setattr(rounds, "rpc_deadline_s", lambda: 0.05)
 
     await watchdog.hosted_turn_recovery_round(
-        pool, LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()), _THRESHOLD_S
+        pool,
+        EventBus.from_settings(),
+        LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()),
+        _THRESHOLD_S,
     )
 
     claimed, _ = attempts.claim_attempts(pool, attempts.HOSTED_TURN, [agent_id], 600.0)
@@ -506,6 +515,7 @@ async def test_a_slow_recovery_is_never_started_twice(
     loop_task = asyncio.create_task(
         watchdog.hosted_turn_recovery_loop(
             pool,
+            EventBus.from_settings(),
             LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()),
             0.01,
             _THRESHOLD_S,

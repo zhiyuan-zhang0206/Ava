@@ -101,6 +101,7 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from base.log import init_gateway_process
 from services.delivery_watchdog import (
     dispatch_guard,
@@ -485,7 +486,7 @@ async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
             _log.exception("[delivery] poll iteration failed")
 
 
-async def _run_loops(pool: ConnectionPool, liveness: LivenessGroup) -> None:
+async def _run_loops(pool: ConnectionPool, bus: EventBus, liveness: LivenessGroup) -> None:
     """Own the four resident loops: the scan loop and the three recovery loops
     (resurrect retry, stalled crash-marked harvest, hosted-turn recovery).
 
@@ -516,7 +517,7 @@ async def _run_loops(pool: ConnectionPool, liveness: LivenessGroup) -> None:
         )
         loops.create_task(
             turn_liveness.hosted_turn_recovery_loop(
-                pool, hosted_turn, interval, turn_liveness.hosted_turn_threshold_seconds()
+                pool, bus, hosted_turn, interval, turn_liveness.hosted_turn_threshold_seconds()
             )
         )
 
@@ -539,7 +540,7 @@ async def run() -> None:
     # of one short statement batch.
     pool = Database.from_settings().pool(max_size=_POOL_MAX_SIZE)
     try:
-        await _run_loops(pool, liveness)
+        await _run_loops(pool, EventBus.from_settings(), liveness)
     finally:
         pool.close()
         await stop_health_server(health)

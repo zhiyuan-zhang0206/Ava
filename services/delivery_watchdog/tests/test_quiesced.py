@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from services.delivery_watchdog import daemon, resurrect_retry, stall_recovery, turn_liveness
 
 _Loop = Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]]
@@ -27,7 +28,7 @@ _LOOPS: dict[str, _Loop] = {
         pool, progress, 0.01, 60.0
     ),
     "hosted_turn": lambda pool, progress: turn_liveness.hosted_turn_recovery_loop(
-        pool, progress, 0.01, 60.0
+        pool, cast("EventBus", MagicMock()), progress, 0.01, 60.0
     ),
 }
 

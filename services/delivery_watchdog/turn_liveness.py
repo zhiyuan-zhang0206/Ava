@@ -19,13 +19,13 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-import base.events.live.redis_client
 from base import telemetry
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from base.agents.observation.db_wait import database_wait_matches
 from base.config.service_read import current_field_values
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.events.live.bus import EventBus
 from services.delivery_watchdog import attempts, rounds
 
 _log = logging.getLogger("services.delivery_watchdog.turn_liveness")
@@ -279,11 +279,11 @@ async def _recover_within_deadline(pool: ConnectionPool, wedge: _HostedTurnWedge
 
 
 async def hosted_turn_recovery_round(
-    pool: ConnectionPool, progress: LoopProgress, threshold_s: float
+    pool: ConnectionPool, bus: EventBus, progress: LoopProgress, threshold_s: float
 ) -> None:
     """One Redis-confirmed scan; recover the wedges whose per-agent cooldown
     has elapsed, then return."""
-    redis_client = cast(_RedisReader, base.events.live.redis_client.get_async_redis())
+    redis_client = cast(_RedisReader, bus.async_redis())
     wedges = await _detect_hosted_turn_wedges(pool, threshold_s, redis_client)
     claimed, _deferred = await asyncio.to_thread(
         attempts.claim_attempts,
@@ -301,11 +301,15 @@ async def hosted_turn_recovery_round(
 
 
 async def hosted_turn_recovery_loop(
-    pool: ConnectionPool, progress: LoopProgress, interval_s: float, threshold_s: float
+    pool: ConnectionPool,
+    bus: EventBus,
+    progress: LoopProgress,
+    interval_s: float,
+    threshold_s: float,
 ) -> None:
     """The hosted-turn liveness recovery as a resident sequential loop."""
 
     async def one_round() -> None:
-        await hosted_turn_recovery_round(pool, progress, threshold_s)
+        await hosted_turn_recovery_round(pool, bus, progress, threshold_s)
 
     await round_loop.run_rounds("hosted-turn recovery", progress, interval_s, one_round)
