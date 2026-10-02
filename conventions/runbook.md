@@ -633,6 +633,7 @@ body's name, home and pid are this unit's own daemon.
 | `heartbeat` (gateway only) | `.venv/bin/python -m services.heartbeat.daemon` (every `AVA_HEARTBEAT_INTERVAL_SECONDS`, default 15 min, scans `idling` agents past `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS` that have not called `ava.self.pause_heartbeat()` and INSERTs a `heartbeat` check-in inbound; cluster-wide — the inbound-insert trigger wakes the agent on any machine, so it runs once on the gateway, not per agent-runner) | roster identity probe (`/healthz` :8107) |
 | `delivery-watchdog` (gateway only) | `.venv/bin/python -m services.delivery_watchdog.daemon` (six jobs on four resident loops, default 0.5s per `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS`: **(1) wake dispatch** — re-publishes the Redis wake (with the wake-key breadcrumb) for every `pending` inbound of an `idling` owner older than `AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS` (default 1s), collapsing the lost-publish recovery from the claim loop's 30s recheck to ~1.5s; host-gated: re-dispatch and poisoning apply only while the owner's `machine_probe` verdict is fresh (machine graded online by the two-consecutive-failure rule, agent host alive — the host check is excused inside the one-failure grace window, where a failed probe nulls it — `AVA_DELIVERY_WATCHDOG_HOST_STALENESS_SECONDS` default 120s), a stale, graded-offline or (outside that window) host-less verdict freezes the row (no counter burn, no poison) and it resumes once the verdict is fresh (task #4872 route D); constant ~2 qps load, independent of fleet size; **(2) stall alerting** — WARNINGs chat inbounds still `pending` past `AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS` (default 30s) whose owner is `idling`/`terminated`, once per row while stuck, with a `delivery_stalled` event emitted to the unified `events` stream; **(3) terminated-owner resurrect retry** — re-runs `resurrect_if_terminated` for each terminated owner holding a post-death `pending` chat younger than `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h; Task #689 G4) — including the corpse reaper's committed crash-recovery wake (task #4039), with persisted per-agent cooldowns (`delivery_watchdog_attempts`) and the escalating `resurrect_failed` wake-suppression ladder (30-minute exponential window capped at 24 h, after five consecutive failed attempts); **(4) stale-inbound dead-letter sweeps** — every 30s flips `claimed` then `pending` chat rows of terminated owners past the same stale threshold to `done` (Tasks #654/#2049), so the sweep and the G4 trigger share one age gate; **(5) stalled crash-marked recovery request** — escalates a chat still `pending` past the stall threshold whose owner is a crash-marked idling corpse over the internal `recover-crash-marked-v2` path (one request per owner, 60s cooldown, `delivery_recovery_decision` per decision, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618); **(6) hosted-turn liveness recovery** — confirms any hosted `running` agent whose DB activity is older than the 2400 s wedged-agent budget (`wedged_agent_inbound_age_seconds`) against the agent-host's 15 s Redis progress heartbeat (missing heartbeats or stale per-turn marks = wedged), then force-terminates the incarnation and queues the marked `hosted_turn_recovery` chat so guarded resurrection survives restarts; one attempt per agent per 10-minute cooldown, `host_turn_stall_detected` evidence (Task #1712). `running` owners are never dispatched or alerted (mid-turn queues are normal). Gate cluster-level on/off with `AVA_DELIVERY_WATCHDOG_ENABLED`) | roster identity probe (`/healthz` :8110) |
 | `ttl-reaper` (gateway only) | `.venv/bin/python -m services.ttl_reaper.daemon` (two resident loops under one `TaskGroup`, a round every `AVA_TTL_REAPER_POLL_INTERVAL_SECONDS`, default 60s; a loop that raises ends the process and root restarts it. **`sweep`** (database only) — terminalizes `agent_pages` past `expires_at` (`page_ttl_expired`, `PageClosed` published), deletes expired `web_sessions`, auto-resolves expired `agent_notices`, reminds then reaps impersonation leases, and runs three slow phases whose clocks live in `maintenance_state` so a restart resumes them: the `schedule_fire_log` retention prune (`AVA_SCHEDULE_FIRE_LOG_CLEANUP_INTERVAL_SECONDS`, daily, keeps the newest claim per schedule), the torn lifecycle-pointer scan and the absent-machine fence settle (both hourly). **`remote`** — kills TTL-expired persistent shell sessions (`agent_shell_ttls`, watchers included) on their home machines with a `shell_kill` op (machines concurrently, one machine's rows in order, a row is deleted only on a definitive verdict, `shell_ttl_expired`), then retries stale `work_failed_events` deliveries. Each dispatch and each delivery runs under a deadline sized from the RPC client's budget. Always runs: no config gate; stopping it leaves the gateway untouched) | roster identity probe (`/healthz` :8121) |
+| `schedule-manager` (gateway only) | `.venv/bin/python -m services.schedule_manager.daemon` (two resident loops under one `TaskGroup`; a loop that raises ends the process and root restarts it, the schedule sessions survive it. **`reconcile`**, every 5 s: desired (enabled `schedules` rows) against actual (live `ava-schedule-<id>` PTY sessions) — launches the missing ones under the crash backoff (`launch_count` / `next_launch_at` on the row, a launch claimed with one conditional UPDATE) and the breaker (5 launches, then `status='error'`), reaps the unwanted, closes orphaned run rows, and raises the two-hour no-session alert once per outage (`not_live_since` / `stall_alerted_at`). **`requests`**, every second: consumes `schedule_sync_requests` rows the API leaves on start / stop / restart / script edit / delete (kill, relaunch if enabled, clear the backoff), staying queued during a maintenance hold. Seeds the built-in schedules at start (`AVA_PROVISION_BUILTIN_SCHEDULES`). Refuses to start from a checkout that does not own the home) | roster identity probe (`/healthz` :8122) |
 | `task-maintenance` (gateway only; **registered by the `ava_fleet` plugin**, not core — see `ava_builtins/plugins/ava_fleet/services.py`) | `.venv/bin/python -m ava_builtins.plugins.ava_fleet.task_maintenance.daemon` (every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS`, default 5 min, reminds owners of overdue in-progress tasks past their `remind_interval_seconds` window via a `chat` inbound; after `AVA_TASK_ESCALATE_N` (default 3) unanswered reminders, notifies the parent task's owner. Cluster-wide, runs once on the gateway. Discovered whenever the `ava_fleet` plugin code is present; gate its cluster-level on/off with `AVA_TASK_MAINTENANCE_ENABLED`) | roster identity probe (`/healthz` :8108) |
 | `events-maintenance` (gateway only) | `.venv/bin/python -m services.events_maintenance.daemon` (every `AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h. Each pass incrementally maintains the Since-Birth day-grain rollups — `agent_metrics_daily` / `agent_model_tokens_daily` (the durable token+cost ledger) — from **Loki** (the unified event stream's live store): one union-family count probe compares retained candidate days with `rollup_day_state`; missing, failed, count-changed, and the latest `AVA_EVENTS_ROLLUP_LATE_WRITE_LOOKBACK_DAYS` (default 1) get a full-day overwrite, while clean days avoid the fourteen aggregate queries. The scan clamps to Loki's 84h retention floor (an outage longer than retention loses those days' Loki aggregates — logged loudly; the filtered `events-YYYYMMDD.rollup.jsonl` mirror (90-day retention by default, tunable via `AVA_EVENTS_JSONL_ROLLUP_RETENTION_DAYS`) then automatically repairs older ledger-watermark gaps: zero-known-row files fail loudly and are not counted as replayed, missing files remain unrecoverable; pre-LGTM history was backfilled once by the llm-cost-rollup-columns migration from the frozen PG archive), uses its own capacity-one Loki budget, and stops between days at `AVA_EVENTS_ROLLUP_PASS_DEADLINE_S` (default 1200), leaving untouched/failed state for the next pass. Today is served live by the readers (whole-life cost = ledger + Loki tail from the watermark). Full-day overwrite upsert keyed on the PK ⇒ idempotent; a zero-row indexed slice preserves existing ledger rows and marks the day failed for retry. Cluster-wide, runs once on the gateway — it owns the data plane. The rollup, JSONL replay, blob vacuum and hourly checkpoint size sample are unconditional — the PG `events` archive slices (partition rolling, retention, index governance) were removed with the task #1281/#1823 cleanup. The current baseline omits that archive. The checkpoint trim opt-in was retired on 2026-09-30 under the never-delete ruling; its reaper implementation remains unscheduled pending separate retirement) | roster identity probe (`/healthz` :8109) |
 | `milvus`                 | `.venv/bin/python -m services.milvus.daemon` (`milvus-lite server` gRPC :19530, data dir `~/.ava/milvus-data/`) | `services.healthchecks.milvus` (TCP probe :19530) |
@@ -1295,18 +1296,18 @@ itself (its own public key in its own `authorized_keys`):
   version, and those processes exit when they next touch the database
   ([code version gate](#code-version-gate)).
 
-### Release steps: adding the `ttl-reaper` port slot (one-time)
+### Release steps: adding the `ttl-reaper` and `schedule-manager` port slots (one-time)
 
-The release that moves the TTL reaper out of the gateway process into its own
-`ttl-reaper` service adds one slot to the fixed port table (`ttl_reaper` 8121), so
-every gateway home's start intent needs one more key before any command of the new
-code (see the rule above). A runner-only home has no reservation and needs nothing;
-a home's `.env` needs nothing either, the unset `AVA_TTL_REAPER_HEALTH_PORT` binds
-the table's number. The step is idempotent (it adds the key only when absent), so a
-home that already ran it, or that ran the PITR step above in the same window, is
-unchanged by a second run.
+The release that moves the TTL reaper and the schedule manager out of the gateway
+process into their own `ttl-reaper` and `schedule-manager` services adds two slots to
+the fixed port table (`ttl_reaper` 8121, `schedule_manager` 8122), so every gateway
+home's start intent needs those keys before any command of the new code (see the rule
+above). A runner-only home has no reservation and needs nothing; a home's `.env` needs
+nothing either, the unset `AVA_<NAME>_HEALTH_PORT` binds the table's number. The step is
+idempotent (it adds a key only when absent), so a home that already ran it, or that ran
+the PITR step below in the same window, is unchanged by a second run.
 
-1. **Between `down` and `up`, on every gateway home**, add the slot. The file is
+1. **Between `down` and `up`, on every gateway home**, add the slots. The file is
    compact JSON with sorted keys, mode 0600:
 
    ```bash
@@ -1315,17 +1316,21 @@ unchanged by a second run.
    home = pathlib.Path(os.environ.get("AVA_HOME") or pathlib.Path.home() / ".ava")
    path = home / "start-intent.json"
    data = json.loads(path.read_text())
-   data["record"]["ports"].setdefault("ttl_reaper", 8121)
+   for slot, port in (("ttl_reaper", 8121), ("schedule_manager", 8122)):
+       data["record"]["ports"].setdefault(slot, port)
    staged = path.with_name(path.name + ".staged")
    staged.write_text(json.dumps(data, sort_keys=True) + "\n")
    staged.chmod(0o600)
    staged.replace(path)
    EOF
    ```
-2. **After `up`**, the migration `maintenance_state` has been applied by the gateway's
-   cold start and the unit is running: `ava status` lists `ttl-reaper` ready, and
-   `curl -s localhost:8121/healthz` answers with `"name": "ttl_reaper"` and both loops
-   (`sweep`, `remote`) alive. The gateway no longer runs a reaper loop of its own.
+2. **After `up`**, the migrations (`maintenance_state`, the schedule-manager columns and
+   `schedule_sync_requests`) have been applied by the gateway's cold start and the units
+   are running: `ava status` lists `ttl-reaper` and `schedule-manager` ready, and
+   `curl -s localhost:8121/healthz` / `localhost:8122/healthz` answer with their names and
+   all loops alive. The gateway no longer runs a reaper or a schedule manager of its own.
+   Schedule sessions are not restarted by the rollout: the new service re-adopts the live
+   ones (a gateway-less window only delays launches and sync requests).
 
 ### Release steps: retiring the PITR stack (one-time)
 

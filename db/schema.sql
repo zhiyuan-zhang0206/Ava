@@ -1300,9 +1300,21 @@ CREATE TABLE schedules (
                 CHECK (status IN ('running', 'stopped', 'error', 'completed')),  -- completed = clean exit (rc=0), a terminal state
     last_error  TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    launch_count     INT NOT NULL DEFAULT 0,  -- crash-backoff launch counter (schedule-manager)
+    next_launch_at   TIMESTAMPTZ,             -- no relaunch before this
+    not_live_since   TIMESTAMPTZ,             -- first sessionless observation of the current outage
+    stall_alerted_at TIMESTAMPTZ              -- the two-hour no-session alert fired for this outage
 );
 CREATE INDEX ON schedules (enabled);
+
+CREATE TABLE schedule_sync_requests (
+    schedule_id  BIGINT PRIMARY KEY,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+
+COMMENT ON TABLE schedule_sync_requests IS
+    'Pending API requests for the schedule-manager service to converge one schedule''s session now (kill, relaunch if enabled). The consumer deletes a row after the sync ran, only if requested_at is unchanged.';
 
 CREATE TABLE schedule_versions (
     id          BIGSERIAL PRIMARY KEY,

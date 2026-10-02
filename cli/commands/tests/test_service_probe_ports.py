@@ -121,6 +121,7 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "page-server",
         "pg-backup",
         "ttl-reaper",
+        "schedule-manager",
         "otel-collector",
         "agent-host",
         # The native LGTM backends are root units of an observability station.

@@ -1,15 +1,18 @@
-"""Gateway-internal ScheduleManager — supervises one session per enabled schedule.
+"""ScheduleManager — supervises one session per enabled schedule.
 
 A schedule (the ``schedules`` table) is a supervised *resident* process: a script
-+ a command, kept up by the manager. The gateway owns one ScheduleManager: a
-single background task that every ``_POLL_INTERVAL_S`` reconciles *desired*
-(enabled rows) against *actual* (live sessions named
-``ava-schedule-<id>``), launching the missing ones and killing sessions
-whose schedule was disabled/deleted.
++ a command, kept up by the manager. The ``schedule-manager`` service
+(``services/schedule_manager/daemon.py``) owns one ScheduleManager: its reconcile
+loop every ``POLL_INTERVAL_S`` reconciles *desired* (enabled rows) against
+*actual* (live sessions named ``ava-schedule-<id>``), launching the missing ones
+and killing sessions whose schedule was disabled/deleted. API start / stop /
+restart / edit and delete reach it as rows in ``schedule_sync_requests``
+(``requests.py``), never as a call into the process.
 
 Liveness is the session itself (its name is the schedule's stable identity),
-so schedules survive a gateway restart — the manager re-adopts live sessions
-instead of respawning them. Why a session vanished decides what happens next:
+so schedules survive a restart of the service — the manager re-adopts live
+sessions instead of respawning them. Why a session vanished decides what happens
+next:
 
   - clean exit (rc=0): the runner records ``status='completed'`` before the
     session dies — a resident process that finished on its own. Terminal: the
@@ -19,11 +22,13 @@ instead of respawning them. Why a session vanished decides what happens next:
     and the schedule is left ``status='error'`` until re-enabled — this keeps a
     crash-looping schedule from respawning forever (and it never touches the
     agent-resurrect crash-loop signal the health probe watches, since a schedule
-    restart is not an agent resurrect). The trip lives in the DB, not the
-    manager's in-memory backoff, so reconcile treats ``status='error'`` as
-    terminal (same as ``'completed'``) and does not relaunch it — a gateway
-    restart, which wipes the in-memory counters, cannot resurrect a schedule the
-    breaker already gave up on. Recovery is an explicit start/restart.
+    restart is not an agent resurrect). The launch count and the next-launch time
+    are columns of the schedule row (``launch_count`` / ``next_launch_at``), and a
+    launch is claimed with one conditional UPDATE, so a restart of the service
+    resumes the backoff instead of granting a crash-looping schedule a fresh
+    counter; reconcile treats ``status='error'`` as terminal (same as
+    ``'completed'``) and does not relaunch it. Recovery is an explicit
+    start/restart.
 
 The manager reads liveness before status each tick, so a session seen dead is
 guaranteed to already carry the runner's terminal write (completed / last_error).
@@ -38,21 +43,21 @@ shows a permanent in-progress "…" only for a run that is actually running
 
 An enabled schedule that is not completed and has no live session for more
 than two hours emits one WARNING and one ``schedule_stalled`` telemetry event.
-Seeing the session live again rearms the alert for a later outage; breaker-
-tripped ``error`` rows remain eligible because their silence is the failure the
-alert exists to expose.
+The first sessionless observation (``not_live_since``) and the alert
+(``stall_alerted_at``) are columns of the row; seeing the session live again
+clears both and rearms the alert for a later outage; breaker-tripped ``error``
+rows remain eligible because their silence is the failure the alert exists to
+expose.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import shlex
 import threading
 import time
-from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from psycopg_pool import ConnectionPool
 
@@ -61,7 +66,7 @@ from base.cluster import session_name
 from base.config import settings
 from base.daemon.schedules.timing import SCHEDULE_STALL_ALERT_AFTER_S
 from base.db.transaction import write_transaction
-from base.paths import ava_home, prod_service_checkout_error
+from base.paths import ava_home
 from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 
@@ -70,7 +75,7 @@ _log = logging.getLogger(__name__)
 # Reconcile cadence. Snappier than cron (a schedule is a resident process, not a
 # wall-clock fire) — a few seconds of detection
 # lag on a crash is fine and keeps the polling cheap.
-_POLL_INTERVAL_S = 5.0
+POLL_INTERVAL_S = 5.0
 
 # Circuit breaker: a schedule launched more than _BREAKER_MAX times before it
 # stays up trips the breaker (status='error', no more auto-launch). Backoff grows
@@ -83,131 +88,73 @@ _STABLE_S = 60.0
 _PTY_FAILURE_LOG_INTERVAL_S = 60.0
 _STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 
-# Repo root (gateway/schedules/../.. == <repo>/) — the cwd the runner launches from, so its
+# Repo root (services/schedule_manager/../.. == <repo>/) — the cwd the runner launches from, so its
 # relative `.venv/bin/python` resolves into this checkout's venv.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _SCHEDULE_PREFIX = session_name("schedule-")  # ava-schedule-
 
 
+class _Enabled(NamedTuple):
+    """One enabled schedule as the reconcile reads it: its status and the
+    launch-claim state kept on its row."""
+
+    status: str
+    launch_count: int
+    backoff_remaining_s: float
+
+
 class ScheduleManager:
-    """Background reconcile loop for the ``schedules`` table. One per gateway,
-    owned by the app lifespan: ``start()`` launches the task, ``stop()`` cancels
-    it (schedule sessions are left running — they survive the gateway)."""
+    """The reconcile logic for the ``schedules`` table. One per cluster, owned by
+    the ``schedule-manager`` service, whose loops call `reconcile` and
+    `sync_one`. The crash backoff and the stall-alert clock are columns of the
+    schedule row; schedule sessions are never touched when the service stops
+    (they survive it)."""
 
     def __init__(self, db_pool: ConnectionPool[Any]) -> None:
         self._pool = db_pool
-        self._task: asyncio.Task[None] | None = None
-        # schedule_id -> (launch_count, next-eligible monotonic time). launch_count
-        # climbs on each (re)launch and resets after _STABLE_S of uptime.
-        self._backoff: dict[int, tuple[int, float]] = {}
         # Enabled sessions whose stale same-name survivor resisted a reap. A
         # live session normally means adopt, but these need another official
-        # reap before their replacement may launch.
+        # reap before their replacement may launch. In memory: a restarted
+        # service meets the same survivor again (a session of another generation
+        # is reaped by `_live_ids` itself).
         self._reap_retries: set[int] = set()
         # schedule id -> (last error-log monotonic time, suppressed failures).
         # A D-state survivor can resist each five-second reconcile forever; log
         # the first failure and periodic summaries rather than flooding ERROR.
         self._reap_failure_logs: dict[int, tuple[float, int]] = {}
-        # Missing-session alert state is owned by this manager's reconcile
-        # thread under _lock. A live observation clears both maps, rearming a
-        # later outage without sharing mutable state across execution flows.
-        self._not_live_since: dict[int, float] = {}
-        self._stall_alerted: set[int] = set()
-        # Serializes the reconcile tick against API-driven control ops (restart),
-        # which run on separate threads via asyncio.to_thread and both touch
-        # backend + _backoff.
+        # Serializes the reconcile tick against the sync requests, which run on
+        # separate threads and both touch the backend and the backoff columns.
         self._lock = threading.Lock()
 
-    async def provision_builtins(self) -> None:
-        """Seed missing schedules when requested; never edit existing workload rows."""
-        if not settings.gateway.provision_builtin_schedules:
-            return
-        from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
+    # ── control (the sync-request consumer calls this) ──────────────────────
 
-        def provision() -> list[str]:
-            # Pool acquisition and provisioning both block; keep them off the event loop.
-            with self._pool.connection() as conn:
-                return provision_builtin_schedules(conn)
-
-        try:
-            created = await asyncio.to_thread(provision)
-            if created:
-                _log.info("provisioned built-in schedules: %s", ", ".join(created))
-        except Exception:
-            _log.warning("built-in schedule provisioning failed", exc_info=True)
-
-    async def start(self) -> None:
-        # issue #194: a gateway launched from a foreign checkout (e.g. a dev
-        # worktree against the prod home) must not supervise schedules — the
-        # manager anchors each session to its own repo root, so its schedules
-        # would run un-reviewed worktree code and die silently when the
-        # worktree is removed. Same guard as `ava start` (Task #966).
-        refusal = prod_service_checkout_error(_REPO_ROOT)
-        if refusal is not None:
-            _log.error("schedule supervision refused: %s", refusal)
-            return
-        self._task = asyncio.create_task(self._run(), name="schedule-manager")
-
-    async def stop(self) -> None:
-        if self._task is None:
-            return
-        self._task.cancel()
-        with suppress(asyncio.CancelledError):
-            await self._task
-        self._task = None
-
-    # ── API-driven control (the /api/schedules/{id}/… routes call these) ────
-
-    async def sync(self, schedule_id: int) -> None:
+    def sync_one(self, schedule_id: int) -> bool:
         """Converge one schedule's session to its DB `enabled` state right
         now (kill it, then relaunch if enabled), clearing its crash backoff. This
         is the immediate path behind start / stop / restart and an edited-script
         save (the relaunch makes the runner re-materialize the new script) —
-        rather than waiting up to a poll interval for the reconcile loop."""
-        await asyncio.to_thread(self._sync_blocking, schedule_id)
+        rather than waiting up to a poll interval for the reconcile loop.
 
-    def _sync_blocking(self, schedule_id: int) -> None:
+        Returns False without acting while a maintenance hold is up: the
+        request must stay queued."""
         from base.deploy.maintenance import admission
 
         if admission.held():
-            return
+            return False
         with self._lock:
-            self._backoff.pop(schedule_id, None)
+            self._clear_backoff([schedule_id])
             if not self._reap(schedule_id):
                 if schedule_id in self._load_enabled():
                     self._reap_retries.add(schedule_id)
-                return
+                return True
             if schedule_id in self._load_enabled():
                 self._launch(schedule_id)
-
-    async def capture(self, schedule_id: int, lines: int) -> str | None:
-        """The schedule session's recent output, or None when
-        no session is live."""
-        return await asyncio.to_thread(self._capture_blocking, schedule_id, lines)
-
-    def _capture_blocking(self, schedule_id: int, lines: int) -> str | None:
-        name = session_name(f"schedule-{schedule_id}")
-        backend = get_shell_backend()
-        if not backend.has_session(name):
-            return None
-        return backend.capture_pane(name, lines)
-
-    async def _run(self) -> None:
-        _log.info("schedule manager started (reconcile every %ss)", _POLL_INTERVAL_S)
-        while True:
-            try:
-                await asyncio.to_thread(self._reconcile)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                # One bad tick (DB blip / backend hiccup) must not kill the loop.
-                _log.exception("schedule manager reconcile failed")
-            await asyncio.sleep(_POLL_INTERVAL_S)
+        return True
 
     # ── reconcile (blocking: session backend + DB, run via asyncio.to_thread) ──
 
-    def _reconcile(self) -> None:
+    def reconcile(self) -> None:
         with self._lock:
             self._reconcile_locked()
 
@@ -221,8 +168,8 @@ class ScheduleManager:
         # session seen dead here is guaranteed to already carry its terminal status.
         retrying = self._reap_retries.copy()
         live = self._live_ids()  # {id}
-        status = self._load_enabled()  # {id: status}
-        enabled = set(status)
+        enabled_rows = self._load_enabled()
+        enabled = set(enabled_rows)
         known = live | enabled
         self._reap_retries.intersection_update(known)
         self._reap_failure_logs = {
@@ -230,10 +177,7 @@ class ScheduleManager:
             for schedule_id, state in self._reap_failure_logs.items()
             if schedule_id in known
         }
-        now = time.monotonic()
-        self._report_stalled_schedules(status, live, now)
-        from base.deploy.lifecycle import start_serving
-
+        self._report_stalled_schedules({sid: row.status for sid, row in enabled_rows.items()}, live)
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
         # reconcile retry rather than adopting the stale survivor forever.
@@ -243,41 +187,16 @@ class ScheduleManager:
                 live.remove(sid)
 
         # Kill sessions we no longer want (disabled / deleted).
-        for sid in live - enabled:
-            self._backoff.pop(sid, None)
+        orphans = live - enabled
+        self._clear_backoff(sorted(orphans))
+        for sid in orphans:
             if sid not in retrying:
                 self._reap(sid)
 
-        # (Re)launch enabled schedules with no live session — unless the row is in
-        # a terminal status that must not be auto-launched:
-        #   - 'completed': a resident process that finished on its own.
-        #   - 'error': the breaker already tripped. This is the DB, not memory, so
-        #     the trip survives a gateway restart — a crash-looping schedule that
-        #     already tripped is not relaunched with a fresh counter (the
-        #     in-memory self._backoff is empty after a restart). Recovery is an
-        #     explicit API restart/start, which relaunches and resets status.
-        for sid in enabled - live:
-            if status[sid] in ("completed", "error"):
-                self._backoff.pop(sid, None)  # terminal — clear any prior backoff
-                continue
-            count, deadline = self._backoff.get(sid, (0, 0.0))
-            if now < deadline:
-                continue  # backing off
-            if count >= _BREAKER_MAX:
-                self._trip_breaker(sid, count)
-                continue
-            with start_serving.recovery_permitted() as permitted:
-                if not permitted:
-                    continue
-                self._launch(sid)
-                delay = min(_BACKOFF_BASE_S * 2**count, _BACKOFF_CAP_S)
-                self._backoff[sid] = (count + 1, now + delay)
+        self._launch_missing(enabled_rows, sorted(enabled - live))
 
         # Reset backoff for schedules that have stayed live past the stable window.
-        for sid in enabled & live:
-            count, deadline = self._backoff.get(sid, (0, 0.0))
-            if count > 0 and now > deadline + _STABLE_S:
-                self._backoff.pop(sid, None)
+        self._reset_stable_backoff(sorted(enabled & live))
 
         # Close run rows the runner could not close: a NULL row is legitimate
         # only while the schedule has a live session (QA P2-2). Launches above
@@ -286,30 +205,62 @@ class ScheduleManager:
         # rows from before this sweep existed).
         self._close_orphan_runs()
 
-    def _report_stalled_schedules(
-        self,
-        status_by_id: dict[int, str],
-        live_ids: set[int],
-        now: float,
-    ) -> None:
-        """Alert once when an active schedule has been sessionless for 2h."""
-        eligible = {
-            schedule_id for schedule_id, status in status_by_id.items() if status != "completed"
-        }
-        missing = eligible - live_ids
-        self._not_live_since = {
-            schedule_id: since
-            for schedule_id, since in self._not_live_since.items()
-            if schedule_id in missing
-        }
-        self._stall_alerted.intersection_update(missing)
+    def _launch_missing(self, enabled_rows: dict[int, _Enabled], missing: list[int]) -> None:
+        """(Re)launch enabled schedules with no live session — unless the row is in
+        a terminal status that must not be auto-launched:
 
-        for schedule_id in missing:
-            if schedule_id not in self._not_live_since:
-                self._not_live_since[schedule_id] = now
-            stalled_seconds = now - self._not_live_since[schedule_id]
-            if stalled_seconds <= _STALL_ALERT_AFTER_S or schedule_id in self._stall_alerted:
+        - 'completed': a resident process that finished on its own.
+        - 'error': the breaker already tripped. This is the DB, so the trip
+          survives a restart of the service. Recovery is an explicit API
+          restart/start, which relaunches and resets status."""
+        from base.deploy.lifecycle import start_serving
+
+        for sid in missing:
+            row = enabled_rows[sid]
+            if row.status in ("completed", "error"):
+                self._clear_backoff([sid])  # terminal — clear any prior backoff
                 continue
+            if row.backoff_remaining_s > 0:
+                continue  # backing off
+            if row.launch_count >= _BREAKER_MAX:
+                self._trip_breaker(sid, row.launch_count)
+                continue
+            with start_serving.recovery_permitted() as permitted:
+                if not permitted:
+                    continue
+                if self._claim_launch(sid, row.launch_count):
+                    self._launch(sid)
+
+    def _report_stalled_schedules(self, status_by_id: dict[int, str], live_ids: set[int]) -> None:
+        """Alert once when an active schedule has been sessionless for 2h.
+
+        The clock is the row's ``not_live_since``; the alert claims
+        ``stall_alerted_at`` in the same statement that finds it due, so one
+        outage alerts once even across restarts. A live, completed or disabled
+        schedule has both cleared, which rearms a later outage."""
+        eligible = {sid for sid, status in status_by_id.items() if status != "completed"}
+        missing = sorted(eligible - live_ids)
+        with write_transaction(self._pool) as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE schedules SET not_live_since = NULL, stall_alerted_at = NULL "
+                "WHERE NOT (id = ANY(%s)) "
+                "AND (not_live_since IS NOT NULL OR stall_alerted_at IS NOT NULL)",
+                (missing,),
+            )
+            cur.execute(
+                "UPDATE schedules SET not_live_since = clock_timestamp() "
+                "WHERE id = ANY(%s) AND not_live_since IS NULL",
+                (missing,),
+            )
+            cur.execute(
+                "UPDATE schedules SET stall_alerted_at = clock_timestamp() "
+                "WHERE id = ANY(%s) AND stall_alerted_at IS NULL "
+                "AND not_live_since < clock_timestamp() - make_interval(secs => %s) "
+                "RETURNING id, EXTRACT(EPOCH FROM clock_timestamp() - not_live_since)",
+                (missing, _STALL_ALERT_AFTER_S),
+            )
+            alerts = [(int(r[0]), float(r[1])) for r in cur.fetchall()]
+        for schedule_id, stalled_seconds in alerts:
             rounded_seconds = round(stalled_seconds, 3)
             status = status_by_id[schedule_id]
             _log.warning(
@@ -328,7 +279,6 @@ class ScheduleManager:
                     "stalled_seconds": rounded_seconds,
                 },
             )
-            self._stall_alerted.add(schedule_id)
 
     def _live_ids(self) -> set[int]:
         from base.sessions.pty.allocation_freeze import current_generation
@@ -458,7 +408,7 @@ class ScheduleManager:
         # session behind for the reconcile's session-existence liveness to
         # misread (the Task #1115 bug-B class).
         cmd = (
-            f"cd {shlex.quote(str(_REPO_ROOT))} && "
+            f"cd {shlex.quote(str(REPO_ROOT))} && "
             f".venv/bin/python -m gateway.schedule_runner {schedule_id}; exit $?"
         )
         # No shell-TTL row is written here (deliberate exemption, task
@@ -469,7 +419,7 @@ class ScheduleManager:
         # deadline would make the TTL reaper kill a resident schedule every
         # day, one kill/relaunch cycle per schedule.
         try:
-            backend.new_session(name, cmd, _REPO_ROOT, env=env)
+            backend.new_session(name, cmd, REPO_ROOT, env=env)
         except Exception as exc:
             # A supervisor/daemon failure must not kill the reconcile tick; the
             # breaker's next launch attempt backs off and retries.
@@ -566,12 +516,58 @@ class ScheduleManager:
 
     # ── DB ──────────────────────────────────────────────────────────────────
 
-    def _load_enabled(self) -> dict[int, str]:
-        """Enabled schedules as ``{id: status}`` — the reconcile loop needs the
-        status to leave a cleanly-exited ('completed') schedule alone."""
+    def _load_enabled(self) -> dict[int, _Enabled]:
+        """Enabled schedules as ``{id: _Enabled}`` — the reconcile loop needs the
+        status to leave a cleanly-exited ('completed') schedule alone, and the
+        launch-claim state to honor the backoff."""
         with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT id, status FROM schedules WHERE enabled = true")
-            return {r[0]: r[1] for r in cur.fetchall()}
+            cur.execute(
+                "SELECT id, status, launch_count, "
+                "GREATEST(0, EXTRACT(EPOCH FROM next_launch_at - clock_timestamp())) "
+                "FROM schedules WHERE enabled = true"
+            )
+            return {r[0]: _Enabled(r[1], r[2], float(r[3] or 0.0)) for r in cur.fetchall()}
+
+    def _claim_launch(self, schedule_id: int, seen_count: int) -> bool:
+        """Claim one launch attempt: bump the count and push the next-launch time
+        out by the backoff (2s, 4s, ... capped), in one statement that holds only
+        while the row is still the one the reconcile read and is not backing off.
+        Counted when claimed, launched or not — a launch that fails is an attempt."""
+        with write_transaction(self._pool) as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE schedules SET launch_count = launch_count + 1, "
+                "next_launch_at = clock_timestamp() "
+                "  + make_interval(secs => LEAST(%s * POWER(2, launch_count), %s)) "
+                "WHERE id = %s AND launch_count = %s "
+                "AND (next_launch_at IS NULL OR next_launch_at <= clock_timestamp())",
+                (_BACKOFF_BASE_S, _BACKOFF_CAP_S, schedule_id, seen_count),
+            )
+            return cur.rowcount == 1
+
+    def _clear_backoff(self, schedule_ids: list[int]) -> None:
+        """Forget the crash backoff of these schedules (a deliberate sync, a
+        clean finish, a disabled or deleted schedule)."""
+        if not schedule_ids:
+            return
+        with write_transaction(self._pool) as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE schedules SET launch_count = 0, next_launch_at = NULL "
+                "WHERE id = ANY(%s) AND (launch_count > 0 OR next_launch_at IS NOT NULL)",
+                (schedule_ids,),
+            )
+
+    def _reset_stable_backoff(self, live_ids: list[int]) -> None:
+        """Reset the counter of live schedules that stayed up past the stable
+        window after their last launch's backoff deadline: they recovered."""
+        if not live_ids:
+            return
+        with write_transaction(self._pool) as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE schedules SET launch_count = 0, next_launch_at = NULL "
+                "WHERE id = ANY(%s) AND launch_count > 0 "
+                "AND clock_timestamp() > next_launch_at + make_interval(secs => %s)",
+                (live_ids, _STABLE_S),
+            )
 
     def _set_status(
         self,

@@ -169,7 +169,6 @@ from gateway.routers import (
 )
 from gateway.run_timeline import router as run_timeline_router
 from gateway.schedules import router as schedules_router
-from gateway.schedules.manager import ScheduleManager
 
 _log = logging.getLogger(__name__)
 
@@ -233,16 +232,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception:
         _log.warning("OS health-probe cron registration failed", exc_info=True)
 
-    # Cluster-internal schedule manager — one per cluster, owned by the gateway.
-    # Supervises one session per enabled `schedules` row (the successor to
-    # the retired cron scheduler).
-    app.state.schedule_manager = ScheduleManager(app.state.db_pool)
-    await app.state.schedule_manager.start()
-
-    # Automatic seeding is explicit configuration; unseeded previews still use
-    # the normal manager and schedule APIs without launching background workloads.
-    await app.state.schedule_manager.provision_builtins()
-
     # Config migrations (the retired override layers -> .env) run in the converge
     # phase before the gateway process starts, so by the time this Settings is
     # built the .env is already complete; nothing to do at lifespan startup.
@@ -290,7 +279,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             flusher.cancel()
             with suppress(asyncio.CancelledError):
                 await flusher
-        await app.state.schedule_manager.stop()
         app.state.db_pool.close()
         app.state.control_db_pool.close()
 

@@ -76,7 +76,7 @@ def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[dict[str, Any]]:
     deadline first.
 
     Schedule sessions never carry rows at all (they have no agent id; the
-    ScheduleManager reaps them — see ``gateway/schedules/manager.py``
+    ScheduleManager reaps them — see ``services/schedule_manager/manager.py``
     ``_launch``).
 
     Each row carries ``expires_at`` and ``created_at`` so the interruption

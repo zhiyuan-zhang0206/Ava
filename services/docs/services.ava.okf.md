@@ -15,7 +15,7 @@ must provide a readiness probe. A matching HTTP response is insufficient without
 native ownership of the responding listener.
 
 - [[services/docs/gateway_side/gateway_side.ava.okf.md|Gateway services]] include gateway, Gate, frontend,
-  heartbeat, messaging, delivery-watchdog, ttl-reaper, maintenance, indexing, and backups.
+  heartbeat, messaging, delivery-watchdog, ttl-reaper, schedule-manager, maintenance, indexing, and backups.
 - [[services/docs/agent_runner_side/agent_runner_side.ava.okf.md|Agent-runner services]] include agent-host,
   ops, page-server, browser, and local MCP services.
 - [[services/ava_root_glue/docs/ava_root_glue.ava.okf.md|Root deployment wiring]] registers

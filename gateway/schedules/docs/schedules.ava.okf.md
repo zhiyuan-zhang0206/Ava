@@ -1,35 +1,29 @@
 ---
 type: doc
 title: Schedule Manager & Runner
-description: Gateway's built-in schedule supervisor—a schedule is a supervised resident process (not a cron trigger). The ScheduleManager background coroutine guarantees a live session for every enabled schedule.
+description: The built-in schedule supervisor—a schedule is a supervised resident process (not a cron trigger). The schedule-manager service guarantees a live session for every enabled schedule.
 tags: []
 ---
 
 # Schedule Manager & Runner
 
-A **schedule** is a resident process supervised by the gateway. Its script controls timing, typically with a resumable loop; the `schedules` table has no time fields. ScheduleManager maintains enabled sessions, restarts crashes and alerts on prolonged absence. Clean completion is terminal.
+A **schedule** is a resident process supervised by the `schedule-manager` service (`services/schedule_manager/daemon.py`, its own root unit; the gateway only serves the API). Its script controls timing, typically with a resumable loop; the `schedules` table has no time fields. ScheduleManager maintains enabled sessions, restarts crashes and alerts on prolonged absence. Clean completion is terminal.
 
 ## Two Components
 
-### ScheduleManager (`gateway/schedules/manager.py`)
-- **Built-in seeding**: gateway boot calls `provision_builtins`, which creates missing manifest schedules when `AVA_PROVISION_BUILTIN_SCHEDULES=1` (default). Setting it to `0` keeps a fresh cluster unseeded; existing schedules still run and explicit `ava schedules provision` still works. Existing rows are never rewritten by seeding..
-- **Background reconcile loop**: every 5 seconds, compares the database `schedules` table (desired: enabled rows) against actual sessions (actual: live sessions). Each missing enabled session launch holds the local `base.deploy.lifecycle.start_serving` generation lock and proceeds only while serving; cleanup (disabled/deleted session reaping and orphan run closure) remains active before that boundary.
+### ScheduleManager (`services/schedule_manager/manager.py`)
+- **Built-in seeding**: the service's start calls `provision_builtin_schedules`, which creates missing manifest schedules when `AVA_PROVISION_BUILTIN_SCHEDULES=1` (default). Setting it to `0` keeps a fresh cluster unseeded; existing schedules still run and explicit `ava schedules provision` still works. Existing rows are never rewritten by seeding..
+- **Reconcile loop** (one of the service's two resident loops; a loop that raises ends the process and root restarts it): every 5 seconds, compares the database `schedules` table (desired: enabled rows) against actual sessions (actual: live sessions). Each missing enabled session launch holds the local `base.deploy.lifecycle.start_serving` generation lock and proceeds only while serving; cleanup (disabled/deleted session reaping and orphan run closure) remains active before that boundary.
+- **API requests**: start / stop / restart / script edit / delete do not call the service; the router upserts a row in `schedule_sync_requests` (`gateway/schedules/session_control.py`) and waits up to 8 s for it to be consumed. The service's `requests` loop (every second) runs the sync (kill, relaunch if enabled, clear the backoff) and deletes the row only if it is unchanged; while a maintenance hold is up the rows stay queued. Log capture reads the session straight from the shell backend in the gateway.
 - **Starts missing** sessions, **kills excess** sessions (when a schedule is disabled/deleted). Every explicit stop and enabled-state value change synchronously invokes the identity-checked PTY backend; `stopped` is written only after that backend confirms the session is gone, while a failed reap remains queued for an identity-checked retry.
-- **Generation boundary**: exact old-session records support cleanup only; they never decide desired state. A missing PTY is rebuilt after gateway restart when, and only when, the current schedule row remains enabled.
+- **Generation boundary**: exact old-session records support cleanup only; they never decide desired state. A missing PTY is rebuilt after a restart when, and only when, the current schedule row remains enabled.
 - **Liveness identity**: the session name `ava-schedule-<id>` is the schedule's stable identity—it encodes no cluster/machine name (path-only cluster identity, #629/#633); the PTY session namespace itself is host-local + per-home (`$AVA_HOME/run/pty/`), and home already isolates sessions adequately
-- **Gateway restart safe**: after a restart, it re-identifies existing sessions (no need to recreate)
+- **Restart safe**: after a restart of the service (or the gateway), it re-identifies existing sessions (no need to recreate), and resumes the crash backoff and the stall clock from the row
 - **Distinguishes clean exit from crash**: each tick reads liveness before status. When a session disappears, it reads its terminal state—`status='completed'` (written by the runner before exiting with rc=0) = the resident process finished on its own, **terminal state, no restart, not counted toward circuit breaker**; no completed marker = crash (non-zero rc / signal / hard kill), brought up according to crash handling
-- **Alerts on prolonged silence**: an enabled schedule with no live session for more than two hours emits one WARNING plus one `schedule_stalled` telemetry event. `status='error'` remains eligible even though the breaker will not relaunch it. Seeing the session live again rearms a later outage; completed and disabled schedules are excluded.
+- **Alerts on prolonged silence**: an enabled schedule with no live session for more than two hours emits one WARNING plus one `schedule_stalled` telemetry event. `status='error'` remains eligible even though the breaker will not relaunch it. The first sessionless observation (`not_live_since`) and the alert (`stall_alerted_at`) are columns of the row, so one outage alerts once across restarts. Seeing the session live again clears both and rearms a later outage; completed and disabled schedules are excluded.
 
 ### ScheduleRunner (`gateway/schedule_runner.py`)
-- **In-session entrypoint**: `.venv/bin/python -m gateway.schedule_runner <id>`
-- Loads the schedule's script + command from the DB
-- Materializes the script to `$AVA_HOME/schedules/<id>/`
-- Binds the `schedule:<id>` actor identity (so `ava.agents.*` invocations are attributed to the schedule)
-- `.py` scripts are executed in-process via `runpy`; other commands are run as subprocesses
-- **Stall guard**: a deepest non-park frame stable beyond `schedule_stall_timeout_seconds` triggers cleanup. Wrapped sleep/sleep-family waits, subprocess `_wait` and selectors' `select` directly inside `_communicate` park; caller `timeout=` bounds child waits when supplied. Spawn, conversion, stdin flush and other selectors stay guarded. Leaving a park resets the budget.
-- **Hard-exit cleanup**: before failure writes, capture descendants and verify birth identity + current ancestry. TERM, 3s grace, KILL survivors (recheck identity), reap up to 5s. Runner/shared PTY group excluded; `setsid()` covered. Already-reparented daemons, pre-signal ancestry/identity mismatches and later births are exempt. Failure writes share a daemon-thread budget, `schedule_stall_exit_record_deadline_seconds` (default 10s); always hard-exit 1. An abandoned NULL run row is closed as `interrupted` by manager reconcile.
-- **Exit means terminal**: script exits cleanly with rc=0 → runner writes `status='completed'` before exiting (the resident process finished, manager will not restart); non-zero rc / uncaught exception → traceback written to `schedules.last_error` (crash, handed to manager to restart); SIGTERM/SIGHUP active kill → nothing written, not counted as a crash
+- The in-session entrypoint `.venv/bin/python -m gateway.schedule_runner <id>`; its script execution, stall guard, hard-exit cleanup and exit semantics are in [[schedule-runner.ava.okf.md]].
 
 ### Built-in Cron Slot Claims (`schedules/catchup.py`)
 
@@ -44,16 +38,16 @@ A **schedule** is a resident process supervised by the gateway. Its script contr
 |---|---|---|
 | `running` | manager has launched, session alive | maintain |
 | `completed` | script exited cleanly with rc=0 (**terminal**) | **no restart, no breaker**; `start`/`restart` can rerun |
-| `error` | crash loop breaker tripped (see below, **relaunch-terminal**) | **no auto restart** (same skip as `completed`)—breaker state lives in DB, not in-memory `_backoff`, so **gateway restart won't restart it**; the two-hour silence alert still applies; recover via `start`/`restart` manually (the existing API resets status + clears backoff) |
+| `error` | crash loop breaker tripped (see below, **relaunch-terminal**) | **no auto restart** (same skip as `completed`)—breaker state lives in the DB (`status`, `launch_count`, `next_launch_at`), so **a restart won't relaunch it**; the two-hour silence alert still applies; recover via `start`/`restart` manually (the existing API resets status + clears backoff) |
 | `stopped` | disabled / killed by manager | don't restart |
 
 ## Circuit Breaker
 
 Only applies to **crashes** (not clean exits) looping—clean exits go to `completed` terminal state and never reach the breaker:
 - **Max retries**: 5 (`_BREAKER_MAX`)
-- **Exponential backoff**: 2s → 4s → 8s → ... cap 60s (`_BACKOFF_CAP_S`)
+- **Exponential backoff**: 2s → 4s → 8s → ... cap 60s (`_BACKOFF_CAP_S`); the launch is claimed with one conditional UPDATE of `launch_count` / `next_launch_at`
 - **Recovery condition**: schedule runs continuously for more than 60s (`_STABLE_S`) → counter reset
-- **After breaker trips**: `status='error'`, no more auto restart, waiting for manual re-enable. This `error` is **persisted**—reconcile treats it as a terminal state and skips it (same as `completed`), so a gateway restart that clears in-memory counters will **not** re-launch an already-tripped crash loop with a fresh counter.
+- **After breaker trips**: `status='error'`, no more auto restart, waiting for manual re-enable. This `error` is **persisted**—reconcile treats it as a terminal state and skips it (same as `completed`), and the counter itself is a column, so a restart will **not** re-launch an already-tripped crash loop with a fresh counter.
 
 ## Key Dependencies
 
@@ -63,5 +57,6 @@ Only applies to **crashes** (not clean exits) looping—clean exits go to `compl
 
 ## Entry Points
 
-- `gateway/schedules/manager.py:ScheduleManager` — reconcile loop
+- `services/schedule_manager/daemon.py` — `.venv/bin/python -m services.schedule_manager.daemon`: the service, its two loops and the checkout guard
+- `services/schedule_manager/manager.py:ScheduleManager` — reconcile logic
 - `gateway/schedule_runner.py:run()` — loads and runs a single schedule (the in-session entrypoint of `main()` → `.venv/bin/python -m gateway.schedule_runner <id>`)

@@ -1218,6 +1218,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/schedule_manager/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
