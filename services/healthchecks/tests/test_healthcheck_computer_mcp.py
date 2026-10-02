@@ -16,6 +16,7 @@ import pytest
 
 import services.healthchecks.computer_mcp as hc
 from services.computer.mcp_daemon import ComputerMcpDaemon
+from services.computer.tests.slices import computer_use_config
 
 
 @pytest.fixture
@@ -25,7 +26,7 @@ async def daemon_sock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     sock = f"/tmp/computer-hc-test-{os.getpid()}.sock"  # noqa: S108 — test-only short AF_UNIX path
     with suppress(OSError):
         Path(sock).unlink()
-    daemon = ComputerMcpDaemon(sock=sock)
+    daemon = ComputerMcpDaemon(computer_use_config(), sock=sock)
     server = await asyncio.start_unix_server(daemon.handle, path=sock)
 
     def _sock() -> Any:

@@ -182,6 +182,7 @@ ALLOWED: dict[str, str] = {
 # leaving needs a decision record. A listed package or root that no longer exists
 # fails as stale.
 SLICED_PACKAGES: dict[str, frozenset[str]] = {
+    "services/computer": frozenset({"services/computer/mcp_daemon.py"}),
     "services/events_maintenance": frozenset({"services/events_maintenance/daemon.py"}),
     "services/im_bridge": frozenset({"services/im_bridge/daemon.py"}),
     "services/labeler": frozenset({"services/labeler/daemon.py"}),
