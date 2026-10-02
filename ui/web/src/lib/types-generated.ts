@@ -3241,9 +3241,11 @@ export interface paths {
          *
          *     Node score (windowed, drives node size):
          *         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
-         *     over the agent's `llm_usage` rows in the window, summed from
-         *     `telemetry_events`. `total_tokens` is the sum of the same two fields over
-         *     the retained 7d window.
+         *     over the agent's `llm_usage` rows in the window. `total_tokens` is the sum of
+         *     the same two fields over the retained 7d window. Both are read in parts
+         *     (`gateway/routers/_fleet_tokens.py`): raw rows of the newest two days, the
+         *     day-grain ledger before them, and for the all-time score the folded
+         *     `agent_token_totals`, so the read does not scan history.
          *
          *     Edge weight:
          *         lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,

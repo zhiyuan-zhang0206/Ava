@@ -212,12 +212,14 @@ def _instrument_maintenance_slices(
         "rollup": _CallRecorder(
             SimpleNamespace(start_day=None, end_day=None, metrics_rows=0, tokens_rows=0)
         ),
+        "fold": _CallRecorder(0),
         "vacuum": _CallRecorder(SimpleNamespace(ran=False, summary=lambda: "")),
         "emit_sizes": _CallRecorder(None),
     }
     monkeypatch.setattr(daemon, "recover_observations", rec["observed_metrics"])
     monkeypatch.setattr(daemon, "recover_telemetry_events", rec["telemetry_events"])
     monkeypatch.setattr(daemon, "compute_rollup", rec["rollup"])
+    monkeypatch.setattr(daemon, "fold_totals", rec["fold"])
     monkeypatch.setattr(daemon, "run_blob_vacuum", rec["vacuum"])
     monkeypatch.setattr(daemon, "emit_checkpoint_table_sizes", rec["emit_sizes"])
     return rec
@@ -250,6 +252,7 @@ def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPa
         "observed_metrics",
         "telemetry_events",
         "rollup",
+        "fold",
         "vacuum",
         "emit_sizes",
     ):

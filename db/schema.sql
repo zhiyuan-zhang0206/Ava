@@ -775,8 +775,8 @@ COMMENT ON COLUMN api_idempotency.op_status IS
 -- instead of an event snapshot. model '' = an llm_usage row that carried no
 -- model field. The per-agent daily token total = SUM over that day's model
 -- rows (not re-stored in agent_metrics_daily). Whole days land here from the
--- events-maintenance Loki rollup pass; the cost read path is these rows + a
--- live Loki tail for today.
+-- events-maintenance rollup pass over telemetry_events; the cost read path is these rows + the
+-- newest raw rows.
 CREATE TABLE agent_model_tokens_daily (
     agent_id         BIGINT NOT NULL REFERENCES agents(id),
     day              DATE   NOT NULL,
@@ -791,6 +791,21 @@ CREATE TABLE agent_model_tokens_daily (
     unpriced_calls   BIGINT NOT NULL DEFAULT 0,
     estimated_calls  BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, day, model)
+);
+
+-- The whole-life token sum per agent, folded from agent_model_tokens_daily once its days can no
+-- longer change (migration 20261003T020000_agent-token-totals). A reader of "all time" adds this
+-- to the days after the fold and to the newest raw rows. `agent_token_totals_through` holds the
+-- single watermark: the last UTC day folded in.
+CREATE TABLE IF NOT EXISTS agent_token_totals (
+    agent_id   BIGINT PRIMARY KEY REFERENCES agents(id),
+    tokens_in  BIGINT NOT NULL DEFAULT 0,
+    tokens_out BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS agent_token_totals_through (
+    singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton),
+    day       DATE NOT NULL
 );
 
 -- One row per Loki-sourced rollup day. source_count is the event-family count
