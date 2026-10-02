@@ -208,7 +208,12 @@ DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "db")
 # their composition root and look no port or pidfile up ambiently: package dir -> the modules
 # that may call `ServiceEndpoints.from_settings()` (scripts/structure/ambient_state/
 # endpointrule.py). A listed package or root that no longer exists fails as stale.
-ENDPOINT_PACKAGES: dict[str, frozenset[str]] = {}
+ENDPOINT_PACKAGES: dict[str, frozenset[str]] = {
+    "services/events_maintenance": frozenset({"services/events_maintenance/daemon.py"}),
+    "services/im_bridge": frozenset({"services/im_bridge/daemon.py"}),
+    "services/labeler": frozenset({"services/labeler/daemon.py"}),
+    "services/page_server": frozenset({"services/page_server/daemon.py"}),
+}
 
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 

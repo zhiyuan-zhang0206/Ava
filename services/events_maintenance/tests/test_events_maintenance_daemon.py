@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -24,6 +25,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config.daemon import DaemonSettings
+from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import LivenessGroup, LoopProgress
 from services.events_maintenance import daemon
 from services.events_maintenance.tests.slices import (
@@ -355,7 +357,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     health_components: list[Callable[[], list[dict[str, object]]]] = []
     received: dict[str, LoopProgress] = {}
 
-    async def fake_start(_name: str, *, liveness: object, components: Any) -> object:
+    async def fake_start(_name: str, _port: int, *, liveness: object, components: Any) -> object:
         health_liveness.append(liveness)
         health_components.append(components)
         return health
@@ -376,15 +378,16 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     async def gauge(_pool: object, progress: LoopProgress) -> None:
         received["registry_gauge"] = progress
 
-    def fake_health_port(_name: str) -> int:
-        return 8109
-
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
     monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
     monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
-    monkeypatch.setattr(daemon, "health_port", fake_health_port)
+    monkeypatch.setattr(
+        daemon,
+        "_endpoint",
+        lambda: ServiceEndpoint("events_maintenance", 8109, Path("/nonexistent/em.pid")),
+    )
 
     def fake_pool(_self: object) -> _RunPool:
         return pool
