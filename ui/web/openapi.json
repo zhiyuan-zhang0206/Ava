@@ -2973,19 +2973,43 @@
     "/api/cluster/roster": {
       "get": {
         "summary": "Get Cluster Roster",
-        "description": "The full multi-machine roster — every registered machine + live status.\n\nBacks the thin-client `ava cluster status`: the gateway's own row is\nresolved locally; each agent-runner is probed in parallel via the\nstatus_probe op (total wall ≈ the probe timeout regardless\nof N). Same fan-out the `/api/status` cluster panel uses. Bypasses 503 mode\nso the roster stays visible during pause.",
+        "description": "The full multi-machine roster — every registered machine + status.\n\nBacks the thin-client `ava cluster status`: the gateway's own row is\nresolved locally; each agent-runner renders from the heartbeat liveness\npass's last status_probe (`MachineStatus.observed_at` says how old), so the\nread dials nothing and a down host cannot slow it. `fresh=true` probes every\nrunner in parallel via the status_probe op instead (total wall ≈ the probe\ntimeout regardless of N) — for a caller that must see a restart land, such as\nthe fleet update. Same fan-out the `/api/status` cluster panel uses. Bypasses\n503 mode so the roster stays visible during pause.",
         "operationId": "get_cluster_roster_api_cluster_roster_get",
+        "parameters": [
+          {
+            "name": "fresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Dial every runner now instead of reading the last probe.",
+              "default": false,
+              "title": "Fresh"
+            },
+            "description": "Dial every runner now instead of reading the last probe."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/MachineStatus"
                   },
-                  "type": "array",
                   "title": "Response Get Cluster Roster Api Cluster Roster Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -3133,19 +3157,43 @@
     "/api/cluster/machines": {
       "get": {
         "summary": "Get Cluster Machines",
-        "description": "List every registered machine with its description + live status.\n\nBacks ava.agents.list_machines(). Live status comes from the same\nstatus_probe op round-trip the status panel uses\n(gateway is live from its own perspective); total wall time is\nbounded by the probe timeout regardless of machine count. role /\ngateway_url are intentionally omitted — agents reason over the free-text\ndescription, not ops topology.",
+        "description": "List every registered machine with its description + live status.\n\nBacks ava.agents.list_machines(). Live status comes from the same source the\nroster uses: the heartbeat liveness pass's last status_probe, or with\n`fresh=true` a probe of every runner now (gateway is live from its own\nperspective). role / gateway_url are intentionally omitted — agents reason\nover the free-text description, not ops topology.",
         "operationId": "get_cluster_machines_api_cluster_machines_get",
+        "parameters": [
+          {
+            "name": "fresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Dial every runner now instead of reading the last probe.",
+              "default": false,
+              "title": "Fresh"
+            },
+            "description": "Dial every runner now instead of reading the last probe."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/AgentMachineRow"
                   },
-                  "type": "array",
                   "title": "Response Get Cluster Machines Api Cluster Machines Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -11040,6 +11088,18 @@
             "title": "Identity Mismatch",
             "default": false
           },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
           "shell_count": {
             "type": "integer",
             "title": "Shell Count",
@@ -11108,7 +11168,7 @@
           "paused"
         ],
         "title": "MachineStatus",
-        "description": "A machines-table row state — augmented with live probe results.\n\n`online` / `paused` come from each machine's ops `status_probe` within\nthe configured roster deadline:\n- online=True + paused has a value: probe succeeded\n- online=False + paused=None: probe failed (network unreachable /\n  gateway down)\n- online=True + paused=None: ops server responded, but the operation failed\n  or its response did not match ClusterStatus (abnormal)"
+        "description": "A machines-table row state — augmented with live probe results.\n\n`online` / `paused` come from each machine's ops `status_probe`: the last one\nthe heartbeat liveness pass made (the default read, see `observed_at`), or a\ndial within the configured roster deadline (a fresh read):\n- online=True + paused has a value: probe succeeded\n- online=False + paused=None: probe failed (network unreachable /\n  gateway down)\n- online=True + paused=None: ops server responded, but the operation failed\n  or its response did not match ClusterStatus (abnormal)"
       },
       "McpClientCreate": {
         "properties": {

@@ -49,16 +49,18 @@ DB merge without dialing real ops servers.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.agents.observation.evidence import (
     LIVENESS_PASS_INTERVAL_S,
     MACHINE_OFFLINE_AFTER_FAILURES,
 )
-from base.cluster.machines import list_agent_runners
+from base.cluster.machines import list_agent_runners, list_roster_agent_runners
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.deploy.transition import transition_severity
@@ -85,11 +87,25 @@ _OFFLINE_AFTER_FAILURES = MACHINE_OFFLINE_AFTER_FAILURES
 _PASS_INTERVAL_S = LIVENESS_PASS_INTERVAL_S
 
 
+@dataclass(frozen=True)
+class ProbeOutcome:
+    """What one status_probe round-trip told: whether the ops server answered, the
+    agent-host verdict, and the validated ClusterStatus payload (None when the host
+    did not answer or its body is not a ClusterStatus)."""
+
+    reached: bool
+    host_online: bool | None
+    status: dict[str, Any] | None
+
+
+_UNREACHED = ProbeOutcome(reached=False, host_online=None, status=None)
+
+
 async def _probe_machine(
     name: str,
     probe: Callable[..., Awaitable[object]] = cluster_rpc.dispatch_to_machine,
-) -> tuple[bool, bool | None]:
-    """One status_probe round-trip; return ops reachability and host verdict.
+) -> ProbeOutcome:
+    """One status_probe round-trip.
 
     Any failure (unreachable, op failure, timeout, transport error) is a probe
     failure — the caller counts consecutive failures.
@@ -109,10 +125,14 @@ async def _probe_machine(
             status = ClusterStatus.model_validate(result)
         except ValueError:
             # A reachable old/malformed ops server is not evidence of a host.
-            return True, None
-        return True, status.agent_host_online if status.machine_name == name else None
+            return ProbeOutcome(reached=True, host_online=None, status=None)
+        return ProbeOutcome(
+            reached=True,
+            host_online=status.agent_host_online if status.machine_name == name else None,
+            status=status.model_dump(mode="json"),
+        )
     except Exception:
-        return False, None
+        return _UNREACHED
 
 
 def _machine_alert_edges(
@@ -319,27 +339,63 @@ def _merge_liveness(pool: ConnectionPool) -> list[int]:
     ]
 
 
+async def _record_snapshot(pool: ConnectionPool, name: str, outcome: ProbeOutcome) -> None:
+    """UPSERT the roster's read-model row for one machine: the latest attempt, and
+    the last ClusterStatus kept across a failed attempt (a reachable answer that is
+    not a ClusterStatus clears it, so the roster shows reached-but-unknown)."""
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO machine_status_snapshot "
+            "(machine_name, observed_at, reachable, consecutive_failures, status, status_at) "
+            "VALUES (%s, now(), %s, CASE WHEN %s THEN 0 ELSE 1 END, %s, "
+            "        CASE WHEN %s THEN now() END) "
+            "ON CONFLICT (machine_name) DO UPDATE SET "
+            "  observed_at = now(), "
+            "  reachable = EXCLUDED.reachable, "
+            "  consecutive_failures = CASE WHEN EXCLUDED.reachable THEN 0 "
+            "    ELSE machine_status_snapshot.consecutive_failures + 1 END, "
+            "  status = CASE WHEN EXCLUDED.reachable THEN EXCLUDED.status "
+            "    ELSE machine_status_snapshot.status END, "
+            "  status_at = CASE WHEN EXCLUDED.reachable THEN EXCLUDED.status_at "
+            "    ELSE machine_status_snapshot.status_at END",
+            (
+                name,
+                outcome.reached,
+                outcome.reached,
+                None if outcome.status is None else Jsonb(outcome.status),
+                outcome.status is not None,
+            ),
+        )
+
+
 async def run_liveness_pass(
     pool: ConnectionPool, probe: Callable[..., Awaitable[object]] = cluster_rpc.dispatch_to_machine
 ) -> None:
-    """One liveness pass: probe every agent-runner machine, then merge.
+    """One liveness pass: probe every roster-visible agent-runner once, record the
+    outcome of the rollout targets as agent-liveness state, snapshot every probed
+    machine for the roster read, then merge.
 
     `probe` is injectable for tests (default: the real cluster RPC). Probe
     failures are per-machine and quiet — a down host is steady-state; the
     pass keeps running for the hosts that are up.
     """
-    runners = list_agent_runners()
-    if not runners:
+    targets = {name for name, _url in list_agent_runners()}
+    machines = sorted(targets | {name for name, _url in list_roster_agent_runners()})
+    if not machines:
         return
-    results = await asyncio.gather(*(_probe_machine(name, probe=probe) for name, _url in runners))
-    for (name, _url), (ok, host_online) in zip(runners, results, strict=True):
-        await _record_probe(pool, name, ok=ok, host_online=host_online)
+    results = await asyncio.gather(*(_probe_machine(name, probe=probe) for name in machines))
+    outcomes = dict(zip(machines, results, strict=True))
+    for name in machines:
+        outcome = outcomes[name]
+        if name in targets:
+            await _record_probe(pool, name, ok=outcome.reached, host_online=outcome.host_online)
+        await _record_snapshot(pool, name, outcome)
     changed_agent_ids = _merge_liveness(pool)
     # `_merge_liveness` committed before these best-effort invalidation hints.
     for agent_id in changed_agent_ids:
         publish_agent_updated_sync(agent_id)
     _log.info(
         "[heartbeat] liveness pass: %d machines probed (%d reachable), agents_meta merged",
-        len(runners),
-        sum(ok for ok, _host_online in results),
+        len(machines),
+        sum(outcome.reached for outcome in results),
     )

@@ -1777,13 +1777,16 @@ export interface paths {
         };
         /**
          * Get Cluster Roster
-         * @description The full multi-machine roster — every registered machine + live status.
+         * @description The full multi-machine roster — every registered machine + status.
          *
          *     Backs the thin-client `ava cluster status`: the gateway's own row is
-         *     resolved locally; each agent-runner is probed in parallel via the
-         *     status_probe op (total wall ≈ the probe timeout regardless
-         *     of N). Same fan-out the `/api/status` cluster panel uses. Bypasses 503 mode
-         *     so the roster stays visible during pause.
+         *     resolved locally; each agent-runner renders from the heartbeat liveness
+         *     pass's last status_probe (`MachineStatus.observed_at` says how old), so the
+         *     read dials nothing and a down host cannot slow it. `fresh=true` probes every
+         *     runner in parallel via the status_probe op instead (total wall ≈ the probe
+         *     timeout regardless of N) — for a caller that must see a restart land, such as
+         *     the fleet update. Same fan-out the `/api/status` cluster panel uses. Bypasses
+         *     503 mode so the roster stays visible during pause.
          */
         get: operations["get_cluster_roster_api_cluster_roster_get"];
         put?: never;
@@ -1843,12 +1846,11 @@ export interface paths {
          * Get Cluster Machines
          * @description List every registered machine with its description + live status.
          *
-         *     Backs ava.agents.list_machines(). Live status comes from the same
-         *     status_probe op round-trip the status panel uses
-         *     (gateway is live from its own perspective); total wall time is
-         *     bounded by the probe timeout regardless of machine count. role /
-         *     gateway_url are intentionally omitted — agents reason over the free-text
-         *     description, not ops topology.
+         *     Backs ava.agents.list_machines(). Live status comes from the same source the
+         *     roster uses: the heartbeat liveness pass's last status_probe, or with
+         *     `fresh=true` a probe of every runner now (gateway is live from its own
+         *     perspective). role / gateway_url are intentionally omitted — agents reason
+         *     over the free-text description, not ops topology.
          */
         get: operations["get_cluster_machines_api_cluster_machines_get"];
         put?: never;
@@ -5730,8 +5732,9 @@ export interface components {
          * MachineStatus
          * @description A machines-table row state — augmented with live probe results.
          *
-         *     `online` / `paused` come from each machine's ops `status_probe` within
-         *     the configured roster deadline:
+         *     `online` / `paused` come from each machine's ops `status_probe`: the last one
+         *     the heartbeat liveness pass made (the default read, see `observed_at`), or a
+         *     dial within the configured roster deadline (a fresh read):
          *     - online=True + paused has a value: probe succeeded
          *     - online=False + paused=None: probe failed (network unreachable /
          *       gateway down)
@@ -5782,6 +5785,8 @@ export interface components {
              * @default false
              */
             identity_mismatch: boolean;
+            /** Observed At */
+            observed_at?: string | null;
             /**
              * Shell Count
              * @default 0
@@ -10363,7 +10368,10 @@ export interface operations {
     };
     get_cluster_roster_api_cluster_roster_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Dial every runner now instead of reading the last probe. */
+                fresh?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10377,6 +10385,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MachineStatus"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -10420,7 +10437,10 @@ export interface operations {
     };
     get_cluster_machines_api_cluster_machines_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Dial every runner now instead of reading the last probe. */
+                fresh?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10434,6 +10454,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentMachineRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
