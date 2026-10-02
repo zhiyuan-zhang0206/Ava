@@ -167,6 +167,19 @@ def test_a_test_inside_the_owning_package_may_reach_its_private_names(
     assert (result.home, _cats(result)) == ("base/net", ["B"])
 
 
+def test_a_support_module_belongs_to_the_package_whose_tests_directory_holds_it(
+    root: pathlib.Path,
+) -> None:
+    text = (
+        "from base.db import pool\n\ndef fixture(monkeypatch):\n"
+        "    pool.acquire()\n    monkeypatch.setattr('base.net.retry._sleep', None)\n"
+    )
+    support = _analyze(root, "base/net/tests/support.py", text)
+    assert (support.home, _cats(support)) == ("base/net", ["B"])
+    test = _analyze(root, "base/net/tests/test_x.py", text)
+    assert (test.home, _cats(test)) == ("base/db", ["D"])
+
+
 def test_a_test_below_the_owner_may_reach_it_but_a_test_above_it_may_not(
     root: pathlib.Path,
 ) -> None:

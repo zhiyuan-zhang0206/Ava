@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 
 from scripts.ci import shard_counts
-from tests.ci import leak_guard_suite
+from scripts.ci.tests import leak_guard_suite
 from tests.fixtures import identity_restore
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

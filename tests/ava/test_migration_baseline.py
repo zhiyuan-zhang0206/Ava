@@ -16,12 +16,12 @@ from base.deploy.schema.migrations import (
     apply_pending_migrations,
     required_migration_set,
 )
-from tests.ava.migration_support import (
+from base.deploy.tests.migration_support import (
     _SCHEMA_SQL,
     _schema_sql_stamped_migration_names,
     _throwaway_database,
 )
-from tests.ava.migration_support import (
+from base.deploy.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
 )
 

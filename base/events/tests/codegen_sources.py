@@ -4,6 +4,12 @@ import ast
 from collections import defaultdict
 from pathlib import Path
 
+# Untyped test helper: its call sites report Unknown. File-level downgrade of the two call-site
+# rules keeps the rest of this package's strict checks intact (the same two rules are warnings
+# outside every package tests directory).
+# pyright: reportUnknownMemberType = warning
+# pyright: reportUnknownArgumentType = warning
+
 
 class SourceGraph:
     def __init__(self, root):

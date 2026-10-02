@@ -13,13 +13,13 @@ from base.deploy.schema.migrations import (
     validate_migration_layout,
     validate_migrations_at_ref,
 )
-from tests.ava.migration_support import (
+from base.deploy.tests.migration_support import (
     _SYN,
     _SYN2,
     _git,
     _init_repo,
 )
-from tests.ava.migration_support import (
+from base.deploy.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
 )
 
