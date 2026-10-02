@@ -109,6 +109,7 @@ async def _stats_flusher(store: MemoryStore, lock: asyncio.Lock) -> None:
     snapshot (save runs in a worker thread under that same lock); a failed
     emit never kills the loop — a dropped sample is only a monitoring gap.
     """
+    # quiesce-exempt: samples an in-memory store; no database
     while True:
         await asyncio.sleep(_STATS_FLUSH_INTERVAL_S)
         try:
