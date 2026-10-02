@@ -41,6 +41,7 @@ from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
@@ -603,7 +604,7 @@ async def run() -> None:
     health = await start_health_server("heartbeat", endpoint.health_port, liveness=liveness)
     _log.info("[heartbeat] healthz listening on :%s", endpoint.health_port)
 
-    pool = base.db.pool()
+    pool = Database.from_settings().pool()
     # Liveness pass (Task #1174): a slow independent task alongside the check-in
     # loop, so a stalled probe fan-out (bounded by _PROBE_TIMEOUT_S) can never
     # delay a check-in. One pass per _PASS_INTERVAL_S, first pass after one full
