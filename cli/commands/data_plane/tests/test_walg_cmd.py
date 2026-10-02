@@ -68,7 +68,7 @@ def test_the_parser_reaches_every_verb() -> None:
 def test_run_hands_the_tick_a_timestamping_reporter_and_returns_its_exit_code(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def fake_tick(report: Any) -> int:
+    def fake_tick(_db: object, report: Any) -> int:
         report("skipped: postgres is not accepting connections")
         return 1
 
