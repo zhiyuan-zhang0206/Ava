@@ -343,7 +343,10 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
 ) -> None:
     from psycopg.types.json import Jsonb
 
-    monkeypatch.setattr(history, "workspace_dir", lambda _agent_id: tmp_path)
+    def workspace_for_agent(_agent_id: int) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
     participant = _participant(owner, lease, "late-export")
     _expire(db_conn, lease)
     ended = history.resolve(owner.agent_id, 0)
@@ -362,3 +365,29 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
     delivery = exported["statistics"]["event_delivery"]
     assert delivery["state"] == "complete"
     assert delivery["sdk_calls"]["consumed_event_count"] == 1
+
+
+def test_the_reaper_pass_alerts_on_a_stuck_source_and_resolves_it_when_it_seals(
+    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+) -> None:
+    from base.agents.impersonation import maintenance
+    from base.db import pool
+
+    participant = _participant(owner, lease, "reaper-stuck")
+    _expire(db_conn, lease)
+
+    def alert_status() -> tuple[Any, ...] | None:
+        return db_conn.execute(
+            "SELECT status FROM alerts WHERE labels->>'lease_id'=%s "
+            "AND alertname='ImpersonationEventSealStuck'",
+            (participant.lease_id,),
+        ).fetchone()
+
+    with pool(max_size=2) as reaper_pool:
+        assert maintenance.alert_stuck_event_logs(reaper_pool) == 1
+        assert alert_status() == ("unresolved",)
+        assert maintenance.alert_stuck_event_logs(reaper_pool) == 0  # one instance per episode
+        seal_local_participant(participant)
+        assert maintenance.alert_stuck_event_logs(reaper_pool) == 1
+    db_conn.rollback()
+    assert alert_status() == ("resolved",)
