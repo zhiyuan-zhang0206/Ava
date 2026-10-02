@@ -52,7 +52,7 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
 ) -> None:
     emitted: list[dict[str, Any]] = []
 
-    def open_redis(_url: str) -> _RedisClient:
+    def open_redis(_url: str, **_kw: object) -> _RedisClient:
         return _RedisClient()
 
     patch_open_async_redis(monkeypatch, open_redis)
