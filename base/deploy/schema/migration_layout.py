@@ -12,16 +12,14 @@ from base.log import logger
 from base.native_process.os_platform import CREATE_NO_WINDOW
 
 # The squashed baseline: one sentinel row that stands in for the entire history
-# folded into db/schema.sql. Always a member of `required_migration_set()`; has
-# no .down.sql (it is the rollback floor). The all-zeros timestamp sorts before
-# every real migration, so it is never selected into a rollback diff.
+# folded into db/schema.sql. Always a member of `required_migration_set()`. The
+# all-zeros timestamp sorts before every real migration.
 _BASELINE_NAME = "00000000T000000_baseline"
 
 # Filename schema: `YYYYMMDDTHHMMSS_<kebab-name>.sql`. Timestamp = 8-digit date +
 # 'T' + 6-digit time; name = lowercase alnum words joined by single hyphens.
 _STEM_RE = r"(\d{8}T\d{6}_[a-z0-9]+(?:-[a-z0-9]+)*)"
 _FILENAME_RE = re.compile(rf"^{_STEM_RE}\.sql$")
-_DOWN_FILENAME_RE = re.compile(rf"^{_STEM_RE}\.down\.sql$")
 
 
 def _migrations_dir() -> Path:
@@ -48,21 +46,9 @@ def _git_probe(args: list[str], *, cwd: Path | None = None) -> subprocess.Comple
 
 def _migration_stem(filename: str) -> str | None:
     """Return the migration NAME (stem without `.sql`) if `filename` is a valid
-    up-migration name, else None. Down files / dotfiles / non-.sql -> None."""
+    up-migration name, else None. Dotfiles / non-.sql -> None."""
     m = _FILENAME_RE.match(filename)
     return m.group(1) if m else None
-
-
-def _down_path(name: str) -> Path:
-    """Return the `.down.sql` Path for a migration name.
-
-    Raises MigrationLayoutError if absent (a post-baseline migration with no
-    down is a layout bug the lint also catches)."""
-    migrations_dir = _migrations_dir()
-    path = migrations_dir / f"{name}.down.sql"
-    if not path.is_file():
-        raise MigrationLayoutError(f"no .down.sql for migration {name!r}")
-    return path
 
 
 def _assert_unique(names: Iterable[str]) -> None:
@@ -143,8 +129,6 @@ def _list_migration_files() -> list[tuple[str, Path]]:
     for path in sorted(migrations_dir.iterdir()):
         if path.name.startswith(".") or not path.is_file():
             continue
-        if path.name.endswith(".down.sql"):
-            continue
         if not path.name.endswith(".sql"):
             continue
         if path not in tracked:
@@ -177,7 +161,7 @@ def untracked_migration_files() -> list[str]:
     for an operator-facing surface (the converge step), so a migration written
     into the running checkout without a commit is SEEN at converge time, not
     just logged at apply time. Mirrors the loader's skip rule: `.sql` up-files
-    only (`.down.sql` excluded), dotfiles ignored. Empty when migrations/ is
+    only, dotfiles ignored. Empty when migrations/ is
     not inside a git worktree — the loader fails closed there and a warning
     would add nothing.
     """
@@ -191,7 +175,6 @@ def untracked_migration_files() -> list[str]:
         if path.is_file()
         and not path.name.startswith(".")
         and path.name.endswith(".sql")
-        and not path.name.endswith(".down.sql")
         and path not in tracked
     )
 
@@ -230,8 +213,8 @@ def unreadable_migration_files() -> list[tuple[str, str]]:
 def validate_migration_layout(names: Iterable[str]) -> None:
     """Validate a set of migration filenames (basenames) for the on-disk layout
     invariants — each up-migration matches `YYYYMMDDTHHMMSS_<kebab-name>.sql`,
-    names are unique. Pure: no filesystem, no DB, no git. Down files
-    (`.down.sql`), dotfiles, and non-`.sql` entries are ignored, mirroring the
+    names are unique. Pure: no filesystem, no DB, no git. Dotfiles
+    and non-`.sql` entries are ignored, mirroring the
     on-disk loader. An empty set (no migrations over the baseline) is valid.
     Raises MigrationLayoutError on the first violation.
 
@@ -241,7 +224,7 @@ def validate_migration_layout(names: Iterable[str]) -> None:
     """
     stems: list[str] = []
     for name in names:
-        if name.startswith(".") or not name.endswith(".sql") or name.endswith(".down.sql"):
+        if name.startswith(".") or not name.endswith(".sql"):
             continue
         stem = _migration_stem(name)
         if stem is None:

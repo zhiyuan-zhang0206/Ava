@@ -506,9 +506,9 @@ repos:
         files: ^(base/agents/messages/kwargs\.py|ui/web/src/components/timeline/markers\.tsx)$
         pass_filenames: false
 
-      # Migration layout: timestamp-id filename format, unique names, up/down
-      # pairing (every post-baseline migration must be reversible — the baseline
-      # is the rollback floor), and db/schema.sql's baseline seed. CI has always
+      # Migration layout: timestamp-id filename format, unique names, merged
+      # migrations immutable (against the merge-base with origin/main), and
+      # db/schema.sql's baseline seed. CI has always
       # run this; locally it ran nowhere, so a malformed migration was only
       # caught after push — and migrations are the change class where finding
       # out late costs the most. Gated on migrations/ + db/schema.sql (the two
@@ -521,7 +521,7 @@ repos:
       # for reasons unrelated to the commit — which is precisely the pressure
       # that produces a `--no-verify` habit (see .agents/skills/ship-a-change/SKILL.md).
       - id: lint-migrations
-        name: lint migrations (timestamp-id format + up/down pairing + baseline seed)
+        name: lint migrations (timestamp-id format + merged files immutable + baseline seed)
         entry: .venv/bin/python scripts/content_lint/lint_migrations.py
         language: system
         files: ^(migrations/|db/schema\.sql$)

@@ -93,9 +93,9 @@ otherwise. Each entry: symptom → how it reads in a diff → evidence anchor.
   the schema truth lags a merged migration; fresh databases only work
   because every migration is idempotent. Any future non-idempotent
   migration fails on fresh DBs.
-- **E2 Down migration destroys live data.** A `.down.sql` whose safety
-  precondition (a mirror still writing) was removed by later code —
-  rollback mechanically executes the down and drops live rows.
+- **E2 Merged migration rewritten.** A migration already on main is edited,
+  deleted or renamed — a DB that applied it never re-runs it, so fresh and
+  applied databases diverge; the fix is a new migration.
 - **E3 Event contract vs emitter drift.** EventSpec declares payload keys /
   retention that the emitter never writes or the daemon never reads;
   "derived views live here and nowhere else" is false.

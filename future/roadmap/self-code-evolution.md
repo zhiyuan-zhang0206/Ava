@@ -63,5 +63,5 @@ name — they are one gated cluster behind the sandbox, not independent noes.
   regression on the eval blocks the merge.
 - Blast-radius containment beyond CI: can a bad self-change brick the cluster's
   ability to run the *next* self-change (i.e. is the rollout reversible enough —
-  this leans on the paired down-migrations + `rollback_to` work already in
+  migrations are fixed forward, there is no down path; see
   `future/infra/commit-pinned-cluster.md`).

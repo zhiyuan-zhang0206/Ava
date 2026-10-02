@@ -15,8 +15,8 @@ Migrations are applied as a step of `ava start`.
 Identity model (2026-07-19 timestamp-id + re-baseline cutover):
 - File layout: `<repo-root>/migrations/YYYYMMDDTHHMMSS_<kebab-name>.sql` — a
   second-precision UTC timestamp prefix + a kebab-case name, body is raw SQL
-  (`apply_pending_migrations` auto-wraps in a transaction). The paired
-  `.down.sql` reverses it. The timestamp makes names collision-free without a
+  (`apply_pending_migrations` auto-wraps in a transaction). There is no down
+  migration: a mistake is fixed forward by a new migration. The timestamp makes names collision-free without a
   coordinating counter, so parallel branches never fight over the "next number"
   (the 0060 / 0062 / 0080 collision incidents).
 - Tracking is an **applied set**, not a high-water integer: `schema_migrations`
@@ -27,9 +27,7 @@ Identity model (2026-07-19 timestamp-id + re-baseline cutover):
 - The **baseline** (`_BASELINE_NAME`) is a squashed snapshot: `db/schema.sql`
   is the current full schema and stamps this one sentinel row on a fresh DB
   instead of replaying history. `required_migration_set()` always includes it,
-  so a DB missing the baseline is "not provisioned". It has no `.down.sql` — it
-  is the down-migration floor; a rollback that would remove it is refused
-  (`RollbackBelowFloor`).
+  so a DB missing the baseline is "not provisioned".
 
 Design points:
 - Startup check **compares but does not apply** — apply is an explicit step of
@@ -84,16 +82,13 @@ from base.deploy.schema.migration_errors import MigrationError as MigrationError
 from base.deploy.schema.migration_errors import MigrationFailed as MigrationFailed
 from base.deploy.schema.migration_errors import MigrationHistoryGap as MigrationHistoryGap
 from base.deploy.schema.migration_errors import MigrationLayoutError as MigrationLayoutError
-from base.deploy.schema.migration_errors import RollbackBelowFloor as RollbackBelowFloor
 from base.deploy.schema.migration_errors import SchemaVersionMismatch as SchemaVersionMismatch
 from base.deploy.schema.migration_history import _RESET_ANCHOR, assert_reset_history
 from base.deploy.schema.migration_history import _V010_PRE_RESET_SET as _V010_PRE_RESET_SET
 from base.deploy.schema.migration_layout import _BASELINE_NAME as _BASELINE_NAME
-from base.deploy.schema.migration_layout import _DOWN_FILENAME_RE as _DOWN_FILENAME_RE
 from base.deploy.schema.migration_layout import _FILENAME_RE as _FILENAME_RE
 from base.deploy.schema.migration_layout import _STEM_RE as _STEM_RE
 from base.deploy.schema.migration_layout import _assert_unique as _assert_unique
-from base.deploy.schema.migration_layout import _down_path as _down_path
 from base.deploy.schema.migration_layout import _git_probe as _git_probe
 from base.deploy.schema.migration_layout import _list_migration_files as _list_migration_files
 from base.deploy.schema.migration_layout import _migration_stem as _migration_stem
@@ -161,8 +156,7 @@ def _applied_migration_set(conn: psycopg.Connection) -> set[str]:
 
 def applied_migration_names(conn: psycopg.Connection) -> set[str]:
     """The DB's applied-migration name set — the snapshot a start captures
-    right before it applies a batch, so a failed start can roll the schema back
-    to exactly the pre-update set (`rollback_to`)."""
+    right before it applies a batch."""
     return _applied_migration_set(conn)
 
 
@@ -242,11 +236,10 @@ def assert_schema_current(db_url: str) -> None:
 
 @contextlib.contextmanager
 def _schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
-    """Hold a Postgres advisory lock for a whole schema-mutation loop (forward
-    apply or rollback).
+    """Hold a Postgres advisory lock for a whole schema-mutation loop.
 
     Serializes *every* path that mutates the schema — a manual / watchdog
-    `ava start`, a recovery `rollback_to` — on one key, so a second mutator blocks
+    `ava start` — on one key, so a second mutator blocks
     until the first finishes instead of racing and losing on the
     `schema_migrations` primary key. It guards the mutation step itself, so even
     the bootstrap `ava start` is safe without a wider orchestration lock.
@@ -420,68 +413,3 @@ def apply_pending_migrations(conn: psycopg.Connection) -> list[str]:
             logger.info("[migration] {name} applied", name=name)
             applied_now.append(name)
         return applied_now
-
-
-def apply_down(conn: psycopg.Connection, name: str) -> None:
-    """Run a migration's `.down.sql` + delete its schema_migrations row, one
-    transaction (the reverse of forward apply). Requires a non-autocommit conn.
-    Inside `rollback_to`'s single rollback transaction, this transaction is a
-    savepoint; standalone, it is its own transaction.
-
-    Exceptions:
-        MigrationFailed: the down SQL failed; `__cause__` is the psycopg error.
-        MigrationLayoutError: no `.down.sql` for this name.
-        RollbackBelowFloor: the requested name is a baseline anchor.
-    """
-    if name in {_BASELINE_NAME, _RESET_ANCHOR}:
-        raise RollbackBelowFloor("the squashed baseline has no reversible migration history")
-    path = _down_path(name)
-    body = path.read_text()
-    logger.info("[migration] {name} rolling back...", name=name)
-    try:
-        with conn.transaction(), conn.cursor() as cur:
-            # prepare=False: same reason as the forward apply — a down body may be
-            # multi-statement, which the prepared-statement protocol rejects, and
-            # the conn may carry prepare_threshold=0.
-            cur.execute(body, prepare=False)  # type: ignore[arg-type]
-            cur.execute("DELETE FROM schema_migrations WHERE name = %s", (name,))
-    except psycopg.Error as exc:
-        raise MigrationFailed(f"down migration {name} ({path.name}) failed: {exc}") from exc
-    logger.info("[migration] {name} rolled back", name=name)
-
-
-def rollback_to(conn: psycopg.Connection, keep: set[str]) -> list[str]:
-    """Roll back every applied migration NOT in `keep` (the target's required
-    set), in reverse-name (≈ reverse-chronological) order; return the names
-    rolled back.
-
-    `keep` is the applied set the DB should have after the rollback — typically
-    the snapshot from `applied_migration_names` (recovery) or the target commit's
-    migration set (`ava cluster rollback`). Rolling back the baseline sentinel is
-    refused: the baseline has no down, and folded strict deltas cannot be
-    replayed safely by an older release.
-
-    The whole rollback runs in one transaction. If any down fails, the batch
-    aborts atomically and leaves the schema and applied set unchanged, so the
-    caller can fix-forward safely.
-
-    Exceptions:
-        RollbackBelowFloor: the rollback set includes the baseline (target
-            predates the reset).
-        MigrationFailed / MigrationLayoutError: from `apply_down`.
-    """
-    with _schema_mutation_lock(conn):
-        rolled: list[str] = []
-        with conn.transaction():
-            applied = _applied_migration_set(conn)
-            to_roll = applied - keep
-            if {_BASELINE_NAME, _RESET_ANCHOR} & to_roll:
-                raise RollbackBelowFloor(
-                    "rollback target is below the squashed baseline (the baseline has "
-                    "no down migration). Choose a target at or after the re-baseline "
-                    "cutover, or fix-forward."
-                )
-            for name in sorted(to_roll, reverse=True):
-                apply_down(conn, name)
-                rolled.append(name)
-    return rolled

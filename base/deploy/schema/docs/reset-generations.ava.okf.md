@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Schema reset generations
-description: Frozen migration inventories guard partial restores, atomically replace tracking history, and enforce the current rollback floor.
+description: Frozen migration inventories guard partial restores and atomically replace tracking history at the current reset anchor.
 tags:
 - base
 - database
@@ -19,28 +19,21 @@ restores. Fresh databases stamp the new anchor directly. The upgrade inserts
 the anchor and deletes folded tracking rows in one transaction, so an
 interruption preserves a retryable generation.
 
-The reset anchor is also a rollback floor, enforced before any down in a batch.
 An older release cannot safely replay the folded strict DDL. Restore a matching
 pre-reset backup or fix forward when recovery would cross this boundary.
 
-## Reversibility
+## Discipline
 
-The baseline is the **rollback floor**, so everything above it must be
-reversible: every post-baseline migration ships a paired `.down.sql`.
+There are no down migrations: a mistake is fixed forward by a new migration.
 `scripts/content_lint/lint_migrations.py` statically enforces the filename format, name
-uniqueness, up/down pairing, and that `db/schema.sql` stamps the sentinel. There
-is deliberately **no** continuity / next-number / cross-branch-collision check —
-timestamp names make those checks meaningless.
+uniqueness, that no migration already on main is modified, deleted or renamed, and
+that `db/schema.sql` stamps the sentinel. There is deliberately **no** continuity /
+next-number / cross-branch-collision check — timestamp names make those checks
+meaningless.
 
 A lossy operation (drop column/table, destructive transform) goes
 **expand-contract**: the drop is its own later migration, decoupled from the
-commit that stopped using the data, so any single upgrade's migration set stays
-reversible.
-
-A rollback that would cross the baseline cannot be performed — resetting code
-under a newer schema would put every daemon in `CodeBehindSchema`, so the
-recovery path leaves code and schema consistent on the new revision for
-fix-forward and alerts loudly instead.
+commit that stopped using the data.
 
 ## Key dependencies
 

@@ -43,6 +43,6 @@ For the isolated logical restore commands and acceptance checks, follow
 For recovery from the WAL-G physical backup (to a time or LSN), follow
 [`walg-restore.md`](../.agents/skills/operating-ava-cluster/references/walg-restore.md)
 and the "WAL-G archiving" section of the runbook.
-Migration rollback is the paired `.down.sql` applied through `rollback_to`;
-the retired mutable-checkout updater drill is not a supported recovery
+There is no migration rollback (no down migrations): a bad migration is
+fixed forward with a new one, or recovered from the WAL-G chain; the retired mutable-checkout updater drill is not a supported recovery
 entrypoint.

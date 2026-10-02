@@ -164,9 +164,9 @@ dev-host inventory + secret paths: [`conventions/dev-setup.md`](conventions/dev-
 
 **Migrations:** `migrations/YYYYMMDDTHHMMSS_<kebab-name>.sql` (second-precision UTC),
 tracked as an applied SET keyed by name; `db/schema.sql` is the squashed baseline.
-Every migration ships a paired `.down.sql`, and lossy operations go
-**expand-contract** so any one upgrade stays reversible (`scripts/content_lint/lint_migrations.py`
-enforces format + pairing). **Adding a migration:** `.agents/skills/add-a-migration/SKILL.md`.
+There are no down migrations: a mistake is fixed forward, lossy operations go
+**expand-contract**, and a migration already on main is never edited, deleted or renamed
+(`scripts/content_lint/lint_migrations.py` enforces it). **Adding a migration:** `.agents/skills/add-a-migration/SKILL.md`.
 
 ## Agent instruction files
 
