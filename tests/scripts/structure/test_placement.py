@@ -8,7 +8,7 @@ import pathlib
 import pytest
 
 from scripts.structure import locality, placement
-from tests.scripts.structure.patch_repo import make_repo, write
+from scripts.structure.tests.patch_repo import make_repo, write
 
 
 @pytest.fixture

@@ -99,7 +99,7 @@ def _runtime_for_runner() -> Runtime[AvaContext]:
     """Runtime for tests that drive a real make_hook_runner — its node_lifecycle
     wrapper publishes a timeline snapshot through ops_pool, so a DB-shaped fake
     pool (not a bare MagicMock) is needed."""
-    from tests.agent._fakes import make_fake_ops_pool
+    from agent.tests._fakes import make_fake_ops_pool
 
     ctx = AvaContext(ops_pool=make_fake_ops_pool(), llm=MagicMock(), event_publisher=MagicMock())
     return Runtime(context=ctx)

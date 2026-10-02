@@ -20,7 +20,7 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 
 from agent.graph.llm.node import llm_node
-from tests.agent._fakes import make_fake_ops_pool
+from agent.tests._fakes import make_fake_ops_pool
 
 
 def _runtime_with_redis():

@@ -13,7 +13,7 @@ import pathlib
 import pytest
 
 from scripts.structure import import_cache, locality, placement
-from tests.scripts.structure.patch_repo import make_repo, write
+from scripts.structure.tests.patch_repo import make_repo, write
 
 RUN = "cli/commands/run.py"
 ARGS = "cli/parsers/args.py"
