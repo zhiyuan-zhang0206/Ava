@@ -125,7 +125,6 @@ REPO = Path(
 )
 sys.path.insert(0, str(REPO))
 from base.host.env.dotenv_boot import enter_scratch_home  # noqa: E402
-from base.packages.docs.okf_graph import WIKILINK_RE, resolve_wikilink  # noqa: E402
 
 if __name__ == "__main__":
     enter_scratch_home()
@@ -406,6 +405,10 @@ def check_wikilinks(doc: Path, line: str, *, allow_planned: bool = False) -> lis
     `resolve_wikilink` the node graph uses. `lint_ava_okf.py` reports a miss in a
     node as a warning, which no hook prints; this makes it block, and reaches the
     non-node docs that linter never opens."""
+    # Imported here: a module-level import of application code would run before
+    # `enter_scratch_home()` below.
+    from base.packages.docs.okf_graph import WIKILINK_RE, resolve_wikilink
+
     missing: list[str] = []
     try:
         cur = doc.relative_to(REPO).as_posix()
