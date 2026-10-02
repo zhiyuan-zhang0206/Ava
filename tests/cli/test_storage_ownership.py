@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -23,6 +24,15 @@ from cli.commands.data_plane import pgbouncer as pooler
 from tests._containers import redis_server
 
 _UNUSED_ADMIN = "unused-admin-credential"
+
+
+@pytest.fixture(autouse=True)
+def _release_receipt_slot(tmp_path: Path) -> Iterator[None]:
+    """A data directory that is `tmp_path` keeps its custody receipt beside the
+    session's shared base temp directory; a test that leaves it there hands the
+    next test reading custody the receipt of another data directory."""
+    yield
+    pg.receipt_path(tmp_path).unlink(missing_ok=True)
 
 
 def test_foreign_redis_keeps_acl_and_config(
