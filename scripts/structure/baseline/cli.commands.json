@@ -9,6 +9,8 @@
     "cli/commands/agents/impersonation_relay.py::relay_inbox": 22,
     "cli/commands/agents/notices.py::cmd_notices_clear": 20,
     "cli/commands/agents/notices.py::cmd_notices_list": 21,
+    "cli/commands/agents/tests/test_delivery.py::test_real_relay_uses_snapshotted_config_across_restart": 17,
+    "cli/commands/agents/tests/test_delivery.py::test_two_attempts_each_get_a_full_window_then_native_observes_expiry": 16,
     "cli/commands/data_plane/pgbouncer.py::ensure_pgbouncer_step": 16,
     "cli/commands/extensions/_claude_code_plugin.py::materialize": 22,
     "cli/commands/extensions/_external_skill_cleanup.py::_cleanup_garbage_item": 15,
