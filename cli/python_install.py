@@ -166,6 +166,8 @@ def install(
     env = {key: value for key, value in configured.items() if key not in _IGNORED_ENV}
     flags = (["--no-dev"] if no_dev else []) + (["--verbose"] if verbose else [])
     python_args = ["--python", interpreter] if interpreter else []
+    # `--compile-bytecode` is explicit on every install step: `--no-config` makes uv ignore
+    # `[tool.uv]`, and an uncompiled venv makes each service pay the compile on first import.
     # Only steps that can create the environment carry the pin; the universal
     # offline export must not need the pinned interpreter before uv can fetch it.
     request = _python_request(repo, interpreter)
@@ -205,6 +207,7 @@ def install(
                     "--locked",
                     "--inexact",
                     "--no-config",
+                    "--compile-bytecode",
                     *flags,
                     *pinned,
                     *reinstall,
@@ -217,7 +220,16 @@ def install(
         if result:
             return result
         env["UV_DEFAULT_INDEX"] = index
-        common = ["uv", "pip", "install", "--no-config", "--python", str(target), "--no-deps"]
+        common = [
+            "uv",
+            "pip",
+            "install",
+            "--no-config",
+            "--compile-bytecode",
+            "--python",
+            str(target),
+            "--no-deps",
+        ]
         if verbose:
             common.append("--verbose")
         reinstall = ["--reinstall-package", reinstall_package] if reinstall_package else []

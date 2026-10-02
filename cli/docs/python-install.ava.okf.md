@@ -40,6 +40,14 @@ steps; neither branch mutates `uv.lock` or commits a derived requirements file.
 This preflight preserves the environment on a stale lock; it is not an atomic
 rollback of later network, build, or installation failures.
 
+Every installing step (native sync, both mirror `uv pip install` steps) also passes
+`--compile-bytecode`: `--no-config` hides `[tool.uv] compile-bytecode`, so the flag
+is explicit, and the `.pyc` files of the packages it installs exist before the first
+service imports them. uv compiles only what it installs into site-packages: the
+checkout's editable source gets its `.pyc` from the first import, and a package
+already installed uncompiled is not recompiled. `cli/fleet_update.py` passes the
+same flag to its `uv sync`; a developer's plain `uv sync` stays uncompiled.
+
 Every uv step runs with `--no-config`, which also makes uv ignore
 `.python-version` and accept any interpreter meeting `requires-python`. The steps
 that can create the environment (native sync, mirror `uv venv`) therefore pass

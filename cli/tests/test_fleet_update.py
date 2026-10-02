@@ -67,6 +67,7 @@ class Cluster:
         elif kind == "switch":
             assert not host["up"] and self.new in command
             assert fleet_update._CLEAN in shlex.split(command)[2]
+            assert "uv sync --frozen --compile-bytecode" in command
             host["head"] = self.new
         elif kind in ("start", "oneshot"):
             assert (kind == "oneshot") == (host["os"] == "Darwin")
