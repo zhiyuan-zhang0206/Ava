@@ -5,7 +5,7 @@ description: >
   own), and on some runner VMs its azure.archive.ubuntu.com downloads crawl at
   tens of KB/s for more than ten minutes — that is where every 2026-10-02/03
   "Install Playwright chromium" step timeout sat. Bounded attempts, the .deb
-  closure restored from /tmp/apt-archives via `Dir::Cache::archives` (a warm
+  closure restored from /tmp/playwright-apt-archives via `Dir::Cache::archives` (a warm
   cache makes the pass local work), and a dpkg fallback over that cache keep a
   degraded mirror from eating the job's rerun eligibility.
 runs:
@@ -22,7 +22,7 @@ runs:
       id: apt-archives
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: /tmp/apt-archives
+        path: /tmp/playwright-apt-archives
         key: playwright-deps-${{ runner.os }}-v1
 
     - name: Install system deps (bounded attempts, cached archives, dpkg fallback)
@@ -33,9 +33,20 @@ runs:
         # Downloads land in the restorable dir; a warm cache satisfies
         # `apt-get install` without touching the network. Package names are
         # resolved by the image's apt index, which playwright's own pass keeps
-        # current.
-        sudo mkdir -p /tmp/apt-archives
-        echo 'Dir::Cache::archives "/tmp/apt-archives";' \
+        # current. The dir is playwright's own, not install-pg-redis's shared
+        # /tmp/apt-archives: each action's closure stays self-contained, so a
+        # dpkg fallback here can never install the other action's packages.
+        sudo mkdir -p /tmp/playwright-apt-archives
+        # playwright's inner apt takes no `-o` flags, so this conf file is the
+        # only injection point. The three Acquire options mirror the `net`
+        # array install-pg-redis passes per call: a stalled connection fails in
+        # seconds instead of eating a whole attempt, so the retries sample
+        # separate moments instead of one outage window.
+        printf '%s\n' \
+          'Dir::Cache::archives "/tmp/playwright-apt-archives";' \
+          'Acquire::http::Timeout "15";' \
+          'Acquire::https::Timeout "15";' \
+          'Acquire::Retries "3";' \
           | sudo tee /etc/apt/apt.conf.d/99-ava-playwright-archives >/dev/null
 
         # One bounded attempt per retry: a stalled apt fails in seconds-to-
@@ -56,7 +67,7 @@ runs:
           # cached is on disk as .debs. dpkg needs neither an index nor the
           # network; an incomplete closure fails the step loudly.
           shopt -s nullglob
-          debs=(/tmp/apt-archives/*.deb)
+          debs=(/tmp/playwright-apt-archives/*.deb)
           shopt -u nullglob
           if [ "${#debs[@]}" -eq 0 ]; then
             echo "::error::playwright install-deps failed and the archive cache is empty — no offline fallback available" >&2
@@ -71,11 +82,11 @@ runs:
 
         # The cache save step reads the dir as the runner user: `X` grants the
         # traverse bit on directories only, leaving file modes alone.
-        sudo chmod -R a+rX /tmp/apt-archives
+        sudo chmod -R a+rX /tmp/playwright-apt-archives
 
     - name: Save apt archive cache
       if: success() && steps.apt-archives.outputs.cache-hit != 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: /tmp/apt-archives
+        path: /tmp/playwright-apt-archives
         key: playwright-deps-${{ runner.os }}-v1
