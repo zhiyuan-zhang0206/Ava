@@ -1,0 +1,16 @@
+{
+  "models": "Models",
+  "hiddenModels": "{count} hidden — manage in Control > Display",
+  "effortDefault": "Effort: default",
+  "presets": "Presets",
+  "noPreset": "No preset",
+  "spawnOn": "Spawn on",
+  "spawn": "Spawn",
+  "model": "Model",
+  "reasoningEffort": "Thinking effort",
+  "preset": "Preset",
+  "spawnAgent": "Spawn agent",
+  "hostUnavailable": "Agent host unavailable",
+  "hostUnknown": "Agent host status unknown",
+  "noReadyRunner": "No agent runner with an available host"
+}

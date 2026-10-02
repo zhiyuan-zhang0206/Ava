@@ -1,0 +1,6 @@
+{
+  "context": "Context: {used} / {max} tokens",
+  "contextWindDown": "Context: {used} / {max} tokens; wind-down at {soft}, auto-compact at {hard}",
+  "contextUsed": "Context: {used} tokens",
+  "soft": " · soft {soft} · hard {hard}"
+}

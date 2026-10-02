@@ -5,7 +5,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import zh from "../../messages/zh.json";
+import zh from "../../messages/zh";
 import { MIN_W_0 } from "@/lib/layout";
 import { useStore } from "@/lib/store";
 import type { OpenTasksHint } from "@/lib/types";

@@ -1,0 +1,7 @@
+{
+  "describeTask": "描述一个运维任务——例如“在 gateway 机器上安装 linear MCP 服务器”",
+  "created": "Ava Guide #{id} 已创建——在对话中查看进度",
+  "failed": "Guide 失败：{error}",
+  "intro": "让 Ava 来运维集群——运行或更新、切换频道、管理 MCP 服务器、安装技能或插件、调整本页未列出的任何配置。",
+  "ask": "询问 Ava"
+}

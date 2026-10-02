@@ -1,0 +1,12 @@
+{
+  "username": "Username",
+  "password": "Password",
+  "clusterSecret": "Cluster secret",
+  "signIn": "Sign in",
+  "signingIn": "Signing in…",
+  "invalidPassword": "Invalid password",
+  "tooManyAttempts": "Too many failed attempts — try again in a few minutes",
+  "connectionFailed": "Connection failed — is the gateway running?",
+  "checkingSession": "Checking session…",
+  "enterPassword": "Enter the cluster password to continue"
+}
