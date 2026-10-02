@@ -38,7 +38,9 @@ def _h_backup_walg_drill(_args: argparse.Namespace) -> int:
 def _h_backup_walg_restore(args: argparse.Namespace) -> int:
     from cli.commands.data_plane.walg import cmd_walg_restore
 
-    return cmd_walg_restore(directory=args.dir, backup=args.backup, time=args.time, lsn=args.lsn)
+    return cmd_walg_restore(
+        directory=args.dir, backup=args.backup, time=args.time, lsn=args.lsn, user=args.user
+    )
 
 
 def _h_backup_walg_status(_args: argparse.Namespace) -> int:
@@ -104,6 +106,11 @@ def _add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         "--backup",
         default="LATEST",
         help="backup name (an increment resolves its chain); default LATEST",
+    )
+    walg_restore.add_argument(
+        "--user",
+        help="the restored cluster's superuser: the OS user that ran initdb on the source "
+        "(default: the current OS user)",
     )
     target = walg_restore.add_mutually_exclusive_group()
     target.add_argument("--time", help="recover to this time (UTC), e.g. '2026-10-01 12:04:57+00'")

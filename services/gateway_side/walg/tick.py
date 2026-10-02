@@ -178,8 +178,8 @@ def _weekly_drill(
         _drill(target, backups, report, now)
 
 
-def _verify(report: Report, now: Callable[[], datetime]) -> str:
-    verdict = verify_chain()
+def _verify(target: PgTarget, report: Report, now: Callable[[], datetime]) -> str:
+    verdict = verify_chain(target.admin_url)
     state.update_state(
         verify=VerifyRecord(at=now(), integrity=verdict.integrity, timeline=verdict.timeline)
     )
@@ -208,7 +208,7 @@ def _run_steps(target: PgTarget, report: Report, now: Callable[[], datetime]) ->
         current = STEP_BACKUP
         after = _backup(target, before, report, now)
         current = STEP_VERIFY
-        chain = _verify(report, now)
+        chain = _verify(target, report, now)
         current = STEP_RETENTION
         deleted = _retention(after, report, now)
     except StepFailedError:

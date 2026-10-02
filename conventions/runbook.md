@@ -1389,15 +1389,17 @@ no restore yet, so it is not a recovery path.
     "WALG_OSS_PREFIX": "oss://<bucket>/ava-walg/<home label>/pg17/gen1/",
     "OSS_ACCESS_KEY_ID": "...",
     "OSS_ACCESS_KEY_SECRET": "...",
-    "OSS_ENDPOINT": "https://oss-<region>.aliyuncs.com",
-    "OSS_REGION": "<region>",
+    "OSS_ENDPOINT": "https://oss-cn-shanghai.aliyuncs.com",
+    "OSS_REGION": "cn-shanghai",
     "WALG_LIBSODIUM_KEY_PATH": "<path of the key file>",
     "WALG_LIBSODIUM_KEY_TRANSFORM": "hex",
     "WALG_PREVENT_WAL_OVERWRITE": "true"
   }
   ```
 
-  The prefix names a path (the PG major and a generation number belong in it) and
+  `OSS_REGION` is the bare region id (`cn-shanghai`), not the endpoint's `oss-` form:
+  OSS rejects the signature with "Invalid signing region" otherwise, and the
+  configuration check refuses an `oss-` value. The prefix names a path (the PG major and a generation number belong in it) and
   cannot sit under `ava-logical/` (the daily dump), `ava-pitr-scratch/` or
   `ava-wsl-cutover-*`. Use a dedicated storage account whose policy is limited to that
   prefix with Get, Put, List and Delete (plus AbortMultipartUpload and ListParts):
@@ -1478,7 +1480,7 @@ a base-backup fetch (an estimate, not measured on this bucket): schedule hand ru
 accordingly.
 
 **Restoring** (`ava backup walg restore --dir <empty directory> [--backup NAME]
-[--time 'YYYY-MM-DD HH:MM:SS+00' | --lsn X/X]`). It never touches this home's data
+[--user <superuser>] [--time 'YYYY-MM-DD HH:MM:SS+00' | --lsn X/X]`). It never touches this home's data
 directory (a `--dir` that is or contains `$AVA_HOME/pg` is refused) or its ports. Steps:
 
 1. Pick the backup. `LATEST` is the default; to recover to a time or LSN, name the newest
@@ -1493,6 +1495,8 @@ directory (a `--dir` that is or contains `$AVA_HOME/pg` is refused) or its ports
    `pg_controldata` records, `restore_command` = `wal-g wal-fetch %f %p`) until it is
    promoted, then shuts it down cleanly. The directory is left as a promoted database on a
    new timeline; it is not started.
+   `--user` names the restored cluster's superuser, the OS user that ran initdb on the
+   source (default: the current OS user); a role Postgres refuses ends the restore at once.
 3. A missing segment, a wrong key or an unreachable target ends in Postgres' FATAL, printed
    with the end of its log; the directory is left for inspection, and must be emptied
    before a retry.

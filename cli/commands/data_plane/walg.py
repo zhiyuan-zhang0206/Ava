@@ -44,11 +44,14 @@ def cmd_walg_drill() -> int:
     return tick.run_drill_now(_stamped)
 
 
-def cmd_walg_restore(*, directory: str, backup: str, time: str | None, lsn: str | None) -> int:
+def cmd_walg_restore(
+    *, directory: str, backup: str, time: str | None, lsn: str | None, user: str | None = None
+) -> int:
     """Restore a backup into an empty directory and recover it to the target.
 
     The directory ends as a promoted database, its scratch Postgres shut down: it is
-    not started, and it is never this home's live data directory.
+    not started, and it is never this home's live data directory. `user` is the restored
+    cluster's superuser (the OS user that ran initdb on the source; default: this OS user).
     """
     if not walg_config.enabled():
         print("WAL-G is off (AVA_WALG_CONFIG_FILE is not set); nothing to restore from")
@@ -65,7 +68,12 @@ def cmd_walg_restore(*, directory: str, backup: str, time: str | None, lsn: str 
         return 1
     try:
         with restored_instance(
-            Path(directory).resolve(), backup=backup, target=target, report=_stamped, keep_data=True
+            Path(directory).resolve(),
+            backup=backup,
+            target=target,
+            report=_stamped,
+            user=user,
+            keep_data=True,
         ):
             pass
     except RestoreError as exc:

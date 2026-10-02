@@ -58,7 +58,16 @@ def parse_verdict(text: str) -> ChainVerdict:
     return ChainVerdict(integrity=statuses[0], timeline=statuses[1])
 
 
-def verify_chain() -> ChainVerdict:
-    """Run the check against the bucket (it lists every archived segment)."""
-    text = run_walg(["wal-verify", "integrity", "timeline", "--json"], timeout_s=QUERY_TIMEOUT_S)
+def verify_chain(pg_admin_url: str) -> ChainVerdict:
+    """Run the check against the bucket (it lists every archived segment).
+
+    `wal-verify` also asks Postgres for its current segment and timeline, so like
+    `backup-push` it is handed the owner-only admin socket (`pg_admin_url`); without it
+    WAL-G dials libpq's default socket, which is not where this home's Postgres listens.
+    """
+    text = run_walg(
+        ["wal-verify", "integrity", "timeline", "--json"],
+        timeout_s=QUERY_TIMEOUT_S,
+        pg_admin_url=pg_admin_url,
+    )
     return parse_verdict(text)

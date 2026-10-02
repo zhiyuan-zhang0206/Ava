@@ -11,6 +11,7 @@
 #                     `wal-fetch SEGMENT DEST` copies store/SEGMENT, exit 74 when it is missing
 #   <dir>/calls.log   one line per call: the arguments after --config
 #   <dir>/env.log     `backup-push` only: the environment the tick handed it
+#   <dir>/verify-env.log  `wal-verify` only: the Postgres connection variables it was handed
 #   <dir>/fail-commands  space-separated command names (backup-list, backup-push,
 #                     wal-verify, delete) that exit 1; every other command works
 #   <dir>/backups.json   what `backup-list` prints (default: one backup, name only);
@@ -73,6 +74,7 @@ case "$command" in
         fi
         ;;
     wal-verify)
+        echo "PGHOST=${PGHOST:-} PGPORT=${PGPORT:-} PGUSER=${PGUSER:-}" >> "$dir/verify-env.log"
         cat "$dir/wal-verify.json"
         exit "$(cat "$dir/wal-verify.rc" 2>/dev/null || echo 0)"
         ;;
