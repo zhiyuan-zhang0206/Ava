@@ -21,7 +21,7 @@ from base.db import create_agent
 from gateway.app import app
 from services.labeler.labeler import _normalize as _normalize_to
 from services.labeler.labeler import generate_label_async
-from services.labeler.tests.slices import labeler_config
+from services.labeler.tests.slices import labeler_config, labeler_db
 
 
 def _normalize(raw: str) -> str:
@@ -148,7 +148,9 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
     monkeypatch.setattr("base.lm.usage.log_usage_from_message", _emit)
 
     assert (
-        await generate_label_async(1, "prompt", labeler_config(labeler_model="deepseek-v4-pro"))
+        await generate_label_async(
+            1, "prompt", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db()
+        )
         is False
     )
     assert emitted == [
@@ -188,6 +190,7 @@ class TestGenerateLabelAsync:
             tid,
             "\u67e5\u4e00\u4e0b X \u6a21\u5757\u600e\u4e48\u8c03",
             labeler_config(labeler_model="deepseek-v4-pro"),
+            labeler_db(),
         )
         assert _label_of(db_conn, tid) == "\u67e5 X \u6a21\u5757"
         # LLM write does not flip sticky bit — user can still PATCH rename (LLM-written label counts as "not yet user-touched")
@@ -223,7 +226,10 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
         await generate_label_async(
-            tid, "\u539f\u59cb prompt", labeler_config(labeler_model="deepseek-v4-pro")
+            tid,
+            "\u539f\u59cb prompt",
+            labeler_config(labeler_model="deepseek-v4-pro"),
+            labeler_db(),
         )
         assert _label_of(db_conn, tid) == "\u7528\u6237\u6539\u7684"
         # CAS miss → do not publish
@@ -258,7 +264,10 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
         await generate_label_async(
-            tid, "\u539f\u59cb prompt", labeler_config(labeler_model="deepseek-v4-pro")
+            tid,
+            "\u539f\u59cb prompt",
+            labeler_config(labeler_model="deepseek-v4-pro"),
+            labeler_db(),
         )
         assert _label_of(db_conn, tid) is None
         assert published == []
@@ -283,7 +292,9 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
         # fail-soft: does not raise
-        await generate_label_async(tid, "p", labeler_config(labeler_model="deepseek-v4-pro"))
+        await generate_label_async(
+            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db()
+        )
         assert _label_of(db_conn, tid) is None
         assert published == []
 
@@ -302,7 +313,9 @@ class TestGenerateLabelAsync:
 
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
-        await generate_label_async(tid, "p", labeler_config(labeler_model="deepseek-v4-pro"))
+        await generate_label_async(
+            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db()
+        )
         assert _label_of(db_conn, tid) is None
         assert published == []
 
@@ -326,7 +339,10 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
         await generate_label_async(
-            tid, "migrate database schema", labeler_config(labeler_model="deepseek-v4-pro")
+            tid,
+            "migrate database schema",
+            labeler_config(labeler_model="deepseek-v4-pro"),
+            labeler_db(),
         )
         assert _label_of(db_conn, tid) == "migrate data"
         assert '"label":"migrate data"' in published[0]
@@ -364,7 +380,9 @@ class TestGenerateLabelAsync:
 
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
-        await generate_label_async(tid, "p", labeler_config(labeler_model="deepseek-v4-pro"))
+        await generate_label_async(
+            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db()
+        )
         assert _label_of(db_conn, tid) is None
         assert published == []
 
@@ -398,7 +416,9 @@ class TestGenerateLabelAsync:
 
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
-        await generate_label_async(tid, "p", labeler_config(labeler_model="deepseek-v4-pro"))
+        await generate_label_async(
+            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db()
+        )
         assert _label_of(db_conn, tid) == "migrate data"
 
 

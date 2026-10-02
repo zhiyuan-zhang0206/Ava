@@ -200,7 +200,9 @@ SLICED_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "settings
 # ambient_state/dbhandle.py). A package joins when it is migrated and the same change deletes
 # nothing else: its entry is the lock. A listed package or root that no longer exists fails
 # as stale.
-DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = {}
+DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = {
+    "services/labeler": frozenset({"services/labeler/daemon.py"}),
+}
 
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 

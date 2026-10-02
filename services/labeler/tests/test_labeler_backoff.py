@@ -16,6 +16,7 @@ from base.config import settings
 from base.daemon.health import Liveness
 from base.db import create_agent, pool
 from services.labeler import daemon
+from services.labeler.tests.slices import labeler_db
 
 
 @pytest.fixture(autouse=True)
@@ -162,7 +163,7 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
 
     captured: list[str] = []
 
-    async def _capture(_tid: int, _prompt: str, cfg: Any) -> None:
+    async def _capture(_tid: int, _prompt: str, cfg: Any, _db: object) -> None:
         captured.append(cfg.labeler_model)
         # Break the otherwise-infinite poll loop after the first dispatch.
         raise asyncio.CancelledError
@@ -172,7 +173,9 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
     p = pool()
     try:
         with pytest.raises(asyncio.CancelledError):
-            await daemon._dispatch_loop(p, Liveness(daemon._LIVENESS_TIMEOUT_S), config)
+            await daemon._dispatch_loop(
+                p, labeler_db(), Liveness(daemon._LIVENESS_TIMEOUT_S), config
+            )
     finally:
         p.close()
 
@@ -288,7 +291,9 @@ async def test_dispatch_loop_backs_off_on_llm_failure(
 
     p = pool()
     task = asyncio.create_task(
-        daemon._dispatch_loop(p, Liveness(daemon._LIVENESS_TIMEOUT_S), daemon.labeler_config())
+        daemon._dispatch_loop(
+            p, labeler_db(), Liveness(daemon._LIVENESS_TIMEOUT_S), daemon.labeler_config()
+        )
     )
     try:
         await asyncio.sleep(0.4)  # several poll rounds

@@ -40,7 +40,7 @@ from base.db import create_agent
 from services.labeler.labeler import _rejection_reason as _reason_for
 from services.labeler.labeler import _system_prompt as _prompt_for
 from services.labeler.labeler import generate_label_async
-from services.labeler.tests.slices import labeler_config
+from services.labeler.tests.slices import labeler_config, labeler_db
 
 
 def _rejection_reason(label: str, **config: Any) -> str | None:
@@ -288,7 +288,10 @@ class TestGenerateLabelRejectsNonLabels:
         monkeypatch.setattr(labeler_module, "build_chat_model", lambda _m, **_: _FakeLLM(raw))  # pyright: ignore[reportUnknownArgumentType]
 
         result = await generate_label_async(
-            tid, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash")
+            tid,
+            "a long agent brief",
+            labeler_config(labeler_model="deepseek-v4-flash"),
+            labeler_db(),
         )
 
         assert result is False, f"expected a generation failure for {raw!r}"
@@ -314,7 +317,10 @@ class TestGenerateLabelRejectsNonLabels:
         )
 
         result = await generate_label_async(
-            tid, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash")
+            tid,
+            "a long agent brief",
+            labeler_config(labeler_model="deepseek-v4-flash"),
+            labeler_db(),
         )
 
         assert result is True
@@ -345,7 +351,7 @@ async def test_generated_label_overwrites_stray_empty_string(
     )
 
     result = await generate_label_async(
-        tid, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash")
+        tid, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash"), labeler_db()
     )
 
     assert result is True
@@ -373,7 +379,7 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
     )
 
     result = await generate_label_async(
-        tid, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash")
+        tid, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash"), labeler_db()
     )
 
     assert result is None
@@ -409,7 +415,10 @@ async def test_label_generation_logs_batch_usage_for_the_target_agent(
 
     assert (
         await generate_label_async(
-            agent_id, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash")
+            agent_id,
+            "a long agent brief",
+            labeler_config(labeler_model="deepseek-v4-flash"),
+            labeler_db(),
         )
         is True
     )
