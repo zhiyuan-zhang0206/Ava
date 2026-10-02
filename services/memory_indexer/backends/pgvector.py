@@ -44,7 +44,7 @@ import psycopg
 from psycopg import sql as pgsql
 from psycopg_pool import ConnectionPool
 
-import base.db
+from base.db import Database
 from base.db.transaction import write_transaction
 from services.memory_indexer.backends.base import KIND_BODY, pk_of
 
@@ -261,7 +261,10 @@ class PGVectorBackend:
 
     name = "pgvector"
 
-    def __init__(self, dim: int, fingerprint: str, *, readonly: bool = False) -> None:
+    def __init__(
+        self, database: Database, dim: int, fingerprint: str, *, readonly: bool = False
+    ) -> None:
+        self._database = database
         self._dim = dim
         self._fingerprint = fingerprint
         self._pool: ConnectionPool | None = None
@@ -277,7 +280,7 @@ class PGVectorBackend:
                 yield conn
                 conn.commit()
         else:
-            with base.db.connect() as conn:
+            with self._database.connect() as conn:
                 yield conn
                 conn.commit()
 
@@ -287,7 +290,7 @@ class PGVectorBackend:
     ) -> Generator[psycopg.Connection, None, None]:
         """A connection whose transaction declares write intent before DML."""
         if self._pool is None:
-            with write_transaction() as conn:
+            with self._database.write_transaction() as conn:
                 yield conn
         else:
             with write_transaction(self._pool, timeout=timeout) as conn:
@@ -297,9 +300,9 @@ class PGVectorBackend:
         """Open the connection pool + validate the table at this dim.
 
         The pool exists so the indexer daemon's batched upserts do not pay a
-        dial per batch; `base.db.pool()` is the only sanctioned pool
+        dial per batch; `Database.pool()` is the only sanctioned pool
         constructor (keepalives + statement ceiling)."""
-        self._pool = base.db.pool()
+        self._pool = self._database.pool()
         try:
             with self._pool.connection() as conn:
                 _validate_schema(conn, self._dim)

@@ -23,6 +23,7 @@ import argparse
 import builtins
 import sys
 
+from base.db import Database
 from base.packages.docs.notes import walk_notes
 from base.paths import gateway_memory_dir
 from services.memory_indexer.backends.base import MemorySearchBackend
@@ -110,11 +111,20 @@ def main() -> int:
     print(f"{len(queries)} sample queries, k={args.k}")
 
     provider = get_provider()
+    database = Database.from_settings()
     backend_a = get_backend_named(
-        args.a, dim=provider.dim, fingerprint=provider.fingerprint, readonly=readonly
+        args.a,
+        database=database,
+        dim=provider.dim,
+        fingerprint=provider.fingerprint,
+        readonly=readonly,
     )
     backend_b = get_backend_named(
-        args.b, dim=provider.dim, fingerprint=provider.fingerprint, readonly=readonly
+        args.b,
+        database=database,
+        dim=provider.dim,
+        fingerprint=provider.fingerprint,
+        readonly=readonly,
     )
     if not _connect_backends(backend_a, backend_b, readonly=readonly):
         return 1

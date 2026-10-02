@@ -20,6 +20,8 @@ import psycopg
 import pytest
 from psycopg import sql as pgsql
 
+from base.db import Database
+from base.db.tests.fakes import fake_database
 from services.memory_indexer.backends.pgvector import (
     _TABLE,
     PGVectorBackend,
@@ -50,7 +52,7 @@ def _fresh_table(db_conn: psycopg.Connection) -> None:
 @pytest.fixture
 def backend(db_conn: psycopg.Connection) -> Iterator[PGVectorBackend]:
     prepare_table(db_conn, _DIM)
-    b = PGVectorBackend(dim=_DIM, fingerprint=_FP)
+    b = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
     b.connect()
     try:
         yield b
@@ -112,7 +114,7 @@ def test_prepare_table_drops_and_recreates_on_dim_mismatch(db_conn: psycopg.Conn
     prepare_table(db_conn, _DIM)
 
     assert _table_dim(db_conn) == _DIM
-    fresh = PGVectorBackend(dim=_DIM, fingerprint=_FP)
+    fresh = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
     fresh.connect()
     fresh.close()
 
@@ -136,7 +138,7 @@ def test_prepare_table_leaves_database_without_extension_alone(
 
 def test_runtime_connect_never_creates_the_table(db_conn: psycopg.Connection) -> None:
     """Runtime connections validate only: a missing table fails connect()."""
-    writable = PGVectorBackend(dim=_DIM, fingerprint=_FP)
+    writable = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
 
     with pytest.raises(RuntimeError, match="is missing"):
         writable.connect()
@@ -148,7 +150,7 @@ def test_runtime_connect_never_creates_the_table(db_conn: psycopg.Connection) ->
 def test_runtime_connect_never_rebuilds_a_stale_table(db_conn: psycopg.Connection) -> None:
     """A dim mismatch is refused at connect(), and the stale table survives."""
     _create_stale_table(db_conn, _DIM // 4)
-    writable = PGVectorBackend(dim=_DIM, fingerprint=_FP)
+    writable = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
 
     with pytest.raises(RuntimeError, match="vector dimension 2, expected 8"):
         writable.connect()
@@ -173,7 +175,9 @@ def test_readonly_connect_forwards_validation_and_closes_pool_on_mismatch(
 ) -> None:
     """connect() preserves the read-only mismatch guarantee and pool cleanup."""
     backend.upsert("/survives.md", 1.0, "hash", _vec(0))
-    readonly_backend = PGVectorBackend(dim=_DIM + 1, fingerprint=_FP, readonly=True)
+    readonly_backend = PGVectorBackend(
+        Database.from_settings(), dim=_DIM + 1, fingerprint=_FP, readonly=True
+    )
 
     with pytest.raises(RuntimeError, match="vector dimension 8, expected 9"):
         readonly_backend.connect()
@@ -238,7 +242,7 @@ def test_upsert_many_inserts_all_rows_and_overwrites(
 
 
 def test_readonly_upsert_many_raises_before_connect() -> None:
-    backend = PGVectorBackend(dim=_DIM, fingerprint=_FP, readonly=True)
+    backend = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP, readonly=True)
     with pytest.raises(RuntimeError, match="read-only"):
         backend.upsert_many([("/a.md", 1.0, "ha", _vec(0), "body", 0)])
 
@@ -304,7 +308,7 @@ def test_backend_without_connect_uses_short_lived_connections(db_conn: psycopg.C
             ).format(dim=pgsql.Literal(_DIM))
         )
     db_conn.commit()
-    backend = PGVectorBackend(dim=_DIM, fingerprint=_FP)
+    backend = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
     ones = np.ones(_DIM, dtype=np.float32)
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     assert backend.search_topk(ones, k=5) == ["/a.md"]
@@ -361,10 +365,7 @@ def test_probe_healthy_when_extension_available(monkeypatch: pytest.MonkeyPatch)
         def fetchone(self) -> tuple[int]:
             return self._rows[0]
 
-    import base.db
-
-    monkeypatch.setattr(base.db, "connect", _FakeConn)
-    result = probe.probe_backend("pgvector")
+    result = probe.probe_backend("pgvector", fake_database(_FakeConn))
     assert result.message is None
     assert result.fatal is False
 
@@ -388,10 +389,7 @@ def test_probe_fatal_with_actionable_fix_when_extension_missing(
         def fetchone(self) -> tuple[int]:
             return self._rows[0]
 
-    import base.db
-
-    monkeypatch.setattr(base.db, "connect", _FakeConn)
-    result = probe.probe_backend("pgvector")
+    result = probe.probe_backend("pgvector", fake_database(_FakeConn))
     assert result.fatal is True
     assert result.message is not None
     assert "fallback-only" in result.message
@@ -399,14 +397,12 @@ def test_probe_fatal_with_actionable_fix_when_extension_missing(
 
 
 def test_probe_transient_when_postgres_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    import base.db
     from services.memory_indexer.backends import probe
 
     def _raise(*_a: object, **_kw: object) -> None:
         raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr(base.db, "connect", _raise)
-    result = probe.probe_backend("pgvector")
+    result = probe.probe_backend("pgvector", fake_database(_raise))
     assert result.fatal is False
     assert result.message is not None
     assert "not reachable" in result.message

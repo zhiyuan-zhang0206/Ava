@@ -30,6 +30,7 @@ from dataclasses import dataclass
 import httpx
 
 from base.config import settings
+from base.db import Database
 
 _PROBE_TIMEOUT_S = 3.0
 
@@ -43,10 +44,11 @@ class ProbeResult:
     fatal: bool = False
 
 
-def _probe_milvus() -> ProbeResult:
+def _probe_milvus(database: Database) -> ProbeResult:
     """Milvus must answer a real RPC (`list_collections`) at the configured
     URI. Not reachable = transient (the session may still be booting) — the
     retry loop owns the wait; the message rides along for its terminal error."""
+    del database  # the uniform probe signature; this backend has no database
     from pymilvus import MilvusClient  # lazy — the probe runs once at daemon boot
 
     uri = settings.services.milvus_uri
@@ -71,10 +73,11 @@ def _probe_milvus() -> ProbeResult:
                 client.close()
 
 
-def _probe_numpy() -> ProbeResult:
+def _probe_numpy(database: Database) -> ProbeResult:
     """The memory_search service must answer a real GET /meta at the
     configured URI. Not reachable = transient (the session may still be
     booting) — same retry semantics as milvus."""
+    del database  # the uniform probe signature; this backend has no database
     uri = settings.services.memory_search_uri
     try:
         resp = httpx.get(f"{uri}/meta", timeout=_PROBE_TIMEOUT_S)
@@ -92,7 +95,7 @@ def _probe_numpy() -> ProbeResult:
         )
 
 
-def _probe_pgvector() -> ProbeResult:
+def _probe_pgvector(database: Database) -> ProbeResult:
     """The cluster Postgres must carry the pgvector extension binaries.
 
     Missing extension = permanent (fatal): no amount of retrying installs
@@ -113,10 +116,8 @@ def _probe_pgvector() -> ProbeResult:
     added for a 2s difference in a one-shot boot check."""
     import psycopg
 
-    import base.db
-
     try:
-        with base.db.connect() as conn:
+        with database.connect() as conn:
             row = conn.execute(
                 "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'"
             ).fetchone()
@@ -156,14 +157,14 @@ def _probe_pgvector() -> ProbeResult:
         )
 
 
-_PROBES: dict[str, Callable[[], ProbeResult]] = {
+_PROBES: dict[str, Callable[[Database], ProbeResult]] = {
     "milvus": _probe_milvus,
     "numpy": _probe_numpy,
     "pgvector": _probe_pgvector,
 }
 
 
-def probe_backend(name: str) -> ProbeResult:
+def probe_backend(name: str, database: Database) -> ProbeResult:
     """The preflight verdict for backend `name`.
 
     Unknown names are a fatal verdict too (with the fix): an unrecognized
@@ -178,4 +179,4 @@ def probe_backend(name: str) -> ProbeResult:
             ),
             fatal=True,
         )
-    return probe()
+    return probe(database)

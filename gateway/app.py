@@ -35,7 +35,7 @@ Redis (`ava:events` channel); they do not share Python process state or
 semantic payload.
 
 Concurrency:
-- DB uses one `base.db.pool()` per process; each request borrows a connection
+- DB uses one `Database.pool()` per process; each request borrows a connection
 - Publish callsites reuse one process-wide `aredis.Redis` via
   `base.events.live.redis_client.get_async_redis()`; SSE / pubsub subscribers still
   open their own connection per request (subscriber lifecycle ≠ publisher).
@@ -66,11 +66,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-import base.db
 from base.agents import AvaAgentError
 from base.agents.context import AvaContext
 from base.cluster.auth import cookie_name
 from base.config import settings
+from base.db import Database
 from base.host.system.cron import register_os_cron
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from gateway._server import main as _run_gateway
@@ -195,7 +195,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # app.state.ctx; raw db_pool / get_async_redis() keep working for
     # call sites that aren't migrated yet.
     app.state.ctx = AvaContext()
-    # Runtime consumer -> `base.db.pool()` dials the pooled URL (PgBouncer when
+    # Runtime consumer -> `Database.pool()` dials the pooled URL (PgBouncer when
     # enabled, else direct) and decides the connection kwargs in one place:
     # prepare_threshold=None keeps every borrowed connection transaction-pooling-safe,
     # and PG_KEEPALIVE_KWARGS bounds a borrow on a half-dead socket. The second
@@ -203,11 +203,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # gateway process and serves every request, so a connection idle across a host
     # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
     # the request handler on the OS TCP-retransmit timeout.
-    app.state.db_pool = base.db.pool(max_size=8)
+    app.state.db = Database.from_settings()
+    app.state.db_pool = app.state.db.pool(max_size=8)
     # The control plane must never queue behind the saturated data-plane pool.
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
     # recovery reads need their own short, small reservation.
-    app.state.control_db_pool = base.db.pool(min_size=1, max_size=2, timeout=2.0)
+    app.state.control_db_pool = app.state.db.pool(min_size=1, max_size=2, timeout=2.0)
 
     # Shared upstream client for the Grafana reverse proxy — one connection
     # pool across proxied requests instead of an AsyncClient per request.
