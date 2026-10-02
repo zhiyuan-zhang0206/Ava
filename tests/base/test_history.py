@@ -17,7 +17,7 @@ from base.agents.impersonation.events import consume_events
 from base.cluster.machine import machine_name
 from base.db import create_agent, insert_inbound_message
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from tests.impersonation_support import attested_caller, recorded_tree
+from tests.impersonation_support import attested_caller, recorded_tree, request_legacy_leases
 
 
 @pytest.fixture
@@ -156,8 +156,11 @@ def test_say_ack_and_file_preserve_all_message_bodies(
 
 
 def test_consumer_retains_sdk_facts_without_sampling_or_reinstrumentation(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    request_legacy_leases(monkeypatch)
     lease = start(owner)
     base = {
         "ts": datetime.now(UTC).isoformat(),
@@ -243,9 +246,12 @@ def test_handoff_lists_events_in_call_order_not_ingestion_order(
 
 
 def test_legacy_empty_events_never_certify_a_zero_call_claim(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A NULL protocol version is never inferred to be an empty manifest."""
+    request_legacy_leases(monkeypatch)
     lease = start(owner)
     leases.release(str(lease["id"]), attested_caller(lease), "SDK sampling was enabled")
     document = history.build_document(
@@ -295,6 +301,7 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An upgrade retry exports the v2 fields the resumption note requires."""
+    request_legacy_leases(monkeypatch)
     from psycopg.types.json import Jsonb
 
     def workspace_for_agent(_agent_id: int) -> Path:
@@ -352,6 +359,7 @@ def test_late_events_refresh_handoff_after_native_receipt_and_manifest_closes_re
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    request_legacy_leases(monkeypatch)
     import httpx
     from psycopg.types.json import Jsonb
 

@@ -7,7 +7,19 @@ tree with one provider anchor and callers that attest (or do not) against it.
 
 from typing import Any
 
+import pytest
+
+from base.agents import impersonation as leases
 from base.native_process import native_boot_id
+
+
+def request_legacy_leases(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make new automatic leases carry no event protocol (the pre-manifest, replay-read kind)."""
+
+    def no_protocol(*, automatic: bool) -> None:
+        del automatic
+
+    monkeypatch.setattr(leases, "event_protocol_for_new_lease", no_protocol)
 
 
 def native_identity(birth: float) -> dict[str, object]:

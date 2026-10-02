@@ -104,7 +104,7 @@ agent-host alone invokes the database certification procedure after the frozen
 union exactly matches tagged central rows and durable entries. Until then,
 accounting remains pending even after the native receipt. Manual and legacy
 leases never infer an empty receipt. Version-2 handoff statistics expose
-`event_delivery.state`, its manifest-only `completion_basis`, and separate
+`event_delivery.state`, its `completion_basis`, and separate
 SDK/API `coverage` plus `consumed_event_count`, with an additive
 `pending_reason`. Pending coverage is `unknown`:
 a zero consumed count is not evidence of zero calls. `complete_emitted_events`
@@ -113,8 +113,8 @@ explicitly `unknown`, so a zero SDK count is never a zero-call fact. Statistics
 never extrapolate samples.
 See the consumer module for delivery-completion semantics.
 
-Manifest authority, alert surfaces, and the post-completion integrity window
-are specified in [[manifest-certification.ava.okf.md]].
+Log-native leases (protocol v2, the default) and the v1 manifest are specified in
+[[manifest-certification.ava.okf.md]].
 
 ## CLI parameters: explicit, with four named exceptions
 
