@@ -1,6 +1,6 @@
 """Process-level checks for `scripts/worktree.sh clean` (task #3707, issue #194).
 
-The live-anchor checker itself is covered by tests/base/test_worktree_guard.py;
+The live-anchor checker itself is covered by base/deploy/git/tests/test_worktree_guard.py;
 these tests exercise the shell wrapper: that it refuses on an anchored worktree
 or when the checker cannot run at all, and that it never escalates to a forced
 removal without an explicit --force.

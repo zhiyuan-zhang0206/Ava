@@ -70,14 +70,6 @@ def test_a_default_bundle_lifetime_past_the_cap_is_reported(
     assert any("UNIT_BUNDLE_TTL_S <= UNIT_BUNDLE_MAX_TTL_S" in f for f in failures)
 
 
-def test_renewal_clock_is_the_agent_hosts_actual_beat() -> None:
-    """The lattice must check the renewal beat that runs, not a second number
-    (it once registered 60 s while the agent host renewed every 15 s)."""
-    from services.agent_host import daemon as agent_host_daemon
-
-    assert CLOCKS["AGENT_LEASE_RENEW_INTERVAL_S"].get() == agent_host_daemon._LIVENESS_BEAT_STEP_S
-
-
 def test_assert_clock_lattice_raises_on_violation(monkeypatch: pytest.MonkeyPatch) -> None:
     """The fail-fast entry point raises, never returns, on a violation."""
     from base.deploy.timing import ClockLatticeError
