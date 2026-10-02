@@ -233,6 +233,9 @@ _PER_TEST_TRUNCATE_TABLES = (
     # Plugin stat values (task #2911): no FKs, but a leaked row would render in
     # the next test's dashboard response.
     "plugin_stats",
+    # im-bridge durable cursors: no FK path; a leaked row would make the next
+    # test's bridge resume (or replay) from a stale position.
+    "im_bridge_cursors",
 )
 
 
