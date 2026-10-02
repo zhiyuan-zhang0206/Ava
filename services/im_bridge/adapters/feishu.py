@@ -355,6 +355,7 @@ class FeishuAdapter(IMAdapter):
         the healthy chats. Any fully-healthy round resets the backoff.
         """
         loaded = False
+        # quiesce-exempt: polls the Feishu API; a cursor is written only when an update arrives, and forwarding goes through the gateway, which refuses business requests in the window
         while True:
             if not loaded:
                 # before any round: an unrestored chat would seed, not replay

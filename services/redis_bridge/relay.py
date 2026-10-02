@@ -103,6 +103,7 @@ def serve_forever(
     """
 
     delay_s = _INITIAL_REBIND_DELAY_S
+    # quiesce-exempt: a TCP relay; no database
     while True:
         listener: socket.socket | None = None
         try:

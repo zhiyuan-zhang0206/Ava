@@ -260,6 +260,7 @@ class IMBridgeCore(SpawnMenuMixin):
         again before touching the gateway. Idle rounds sleep and do nothing
         (created on first enqueue and at daemon start)."""
 
+        # quiesce-exempt: replays a local file outbox through the gateway API; no database
         while True:
             await self._replay_outbox_once()
             await asyncio.sleep(sum(self.config.im_send_retry_delays) + 5)
@@ -566,6 +567,7 @@ class IMBridgeCore(SpawnMenuMixin):
         # (~1 min at the 5s retry): one drop per gateway restart is expected.
         _sse_reconnect_warn_after = 12
         failures = 0
+        # quiesce-exempt: an SSE reconnect loop against the gateway; a cursor is written only when an event arrives
         while True:
             agent_id = state.current_agent_id
             if agent_id is None:

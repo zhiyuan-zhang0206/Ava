@@ -173,6 +173,7 @@ async def _run_due_local_dump_restore(now: datetime) -> None:
 async def _backup_loop(state: _BackupState) -> None:
     """Run due dumps and retry a failed dump sooner than the next schedule."""
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
+    # quiesce-exempt: pg_dump dials the direct URL read-only, not the pool; a held pause must not stop backups
     while True:
         now = datetime.now(UTC)
         if not is_due(now):
