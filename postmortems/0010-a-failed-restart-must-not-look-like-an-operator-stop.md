@@ -3,7 +3,7 @@
 **Date:** 2026-10-01
 **Anchors:** `services/ava_root/health.py` (`_HELD_DOWN` branch),
 `services/ava_root/supervisor.py` (`revival_deferral`); fixes: #3830, #3866,
-#3909 (in flight). Host-side records (supervisor log, agent event files, the
+#3909. Host-side records (supervisor log, agent event files, the
 recovery logs) are not in this repo `(summarized)`; the drill VM and its logs
 were destroyed, and its memory telemetry is summarized from a host-side monitor.
 
@@ -122,7 +122,7 @@ reconciliation" until the process group was verified gone.
   stream and posts to the platform's existing alert store. No numeric
   thresholds anywhere in the chain (`services/ava_root/alerts.py`,
   `services/ava_root/tests/test_ava_root_alerts.py`).
-- **Custody reconciles before it refuses (#3909, in flight).** A stale custody
+- **Custody reconciles before it refuses (#3909).** A stale custody
   record whose process group is provably gone is released before a cold start
   refuses; a record that keeps an unproven fact still refuses, naming its
   reconcile steps and evidence path (`services/ava_root/custody.py`,
