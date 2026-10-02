@@ -57,5 +57,5 @@ hand-written check, and nothing made the next loop remember it.
   with a hold up sees rounds skipped.
 - The check cannot tell whether a gate guards the actual borrow, so each gated loop has a
   test that a quiesced unit leaves the pool untouched.
-- Event-driven writers (the logger's Postgres sink, the IM cursor stores) still touch the
+- Event-driven writers (audit-event writers such as `record_audit_standalone`, the IM cursor stores) still touch the
   pool when an event arrives inside the window; they are not loops and are not covered.
