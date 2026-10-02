@@ -19,11 +19,14 @@ IMAP extension; the full Gmail search syntax is supported.
 1. **Enable 2-Step Verification + generate App Password**: Google Account → Security →
    `myaccount.google.com/apppasswords` generate a 16-character App Password.
 2. **Enable IMAP**: Gmail settings → Forwarding and POP/IMAP → Enable IMAP.
-3. **Store App Password in Keychain**:
-   ```bash
-   security add-generic-password -a <you@gmail.com> -s ava-gmail-imap -w
-   ```
-   The script reads the login (acct) + password (-w) from this entry. The first Keychain access may pop up an 'Allow' dialog; click Always Allow.
+3. **Store the App Password** — two sources are read, in this order:
+   - **Plain-text file (read first)**: `~/.ava/secrets/gmail-app-password`, `chmod 600` — the setup for headless machines that cannot reach the Keychain.
+   - **Keychain entry (fallback)**:
+     ```bash
+     security add-generic-password -a <you@gmail.com> -s ava-gmail-imap -w
+     ```
+     The first Keychain access may pop up an 'Allow' dialog; click Always Allow.
+   The login (account) is the `GMAIL_ACCOUNT` env var when set, else the Keychain entry's `acct` label.
 
 ## Usage
 
@@ -88,14 +91,14 @@ $AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/gmail/scripts/feed.py draft-d
 - **Confirm with user before sending** (recipients/subject/body) — this is an irreversible external action.
 - `--body` gives the body text, or omit `--body` to read from stdin.
 - `--to`/`--cc` separate multiple addresses with commas.
-- From address is taken from the Keychain account.
+- From address is the `GMAIL_ACCOUNT` when set, else the Keychain entry's account.
 
 ## Troubleshooting
 
 | Error | Cause / Solution |
 |------|------------|
-| `could not read Keychain entry` | No `ava-gmail-imap` entry created; follow step 3 of the setup above to create one |
-| Headless agent, no Keychain access | Falls back to a plain-text app password file at `~/.ava/secrets/gmail-app-password` (machine-level, same as the Keychain entry — not per-cluster) |
+| `could not read Keychain entry` / `no Gmail app password` | No usable password source: create the file and/or the `ava-gmail-imap` entry; follow step 3 of the setup above |
+| Headless agent, no Keychain access | Use the plain-text file at `~/.ava/secrets/gmail-app-password` (read first; machine-level, same as the Keychain entry — not per-cluster); set `GMAIL_ACCOUNT` when the Keychain cannot supply the account label |
 | `IMAP login failed` | App Password expired (regenerate) or IMAP not enabled |
 | `SMTP login failed` | Same as above; the same App Password is used for SMTP |
 | `Gmail refused the search ...` | Used unsupported search operator; switch to syntax supported by X-GM-RAW |
