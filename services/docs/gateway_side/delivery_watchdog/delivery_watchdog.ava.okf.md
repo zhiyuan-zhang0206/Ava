@@ -8,7 +8,7 @@ tags: []
 # Delivery Watchdog — wake dispatcher + stale-pending alerter
 
 ## What it is
-A gateway daemon with six jobs on four resident loops under one `TaskGroup` (user-confirmed design 2026-08-02, `delivery-dispatcher-design-2026-08-02.md`): it is the cluster-wide tripwire that a `pending` inbound actually reaches its owner. Config-gated by `AVA_DELIVERY_WATCHDOG_ENABLED`. The six job families — wake dispatch, stall alerting, terminated-owner resurrect retry, stale-inbound dead-letter sweeps, stalled crash-marked recovery request, and hosted-turn liveness recovery — are specified in [[services/docs/gateway_side/delivery_watchdog/jobs.ava.okf.md]].
+A gateway daemon with six jobs on four resident loops under one `TaskGroup` (user-confirmed design 2026-08-02, `delivery-dispatcher-design-2026-08-02.md`): it is the cluster-wide tripwire that a `pending` inbound actually reaches its owner. Config-gated by `AVA_DELIVERY_WATCHDOG_ENABLED`. The six job families — wake dispatch, stall alerting, terminated-owner resurrect retry, stale-inbound dead-letter sweeps, stalled crash-marked recovery request, and hosted-turn liveness recovery — are specified in [[services/docs/gateway_side/delivery_watchdog/jobs/jobs.ava.okf.md]].
 
 **Role affiliation**: gateway side — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`, `requires_db=True` (polls `inbound_messages`). Kept alive by the root supervisor's health monitor through the roster's `/healthz` identity probe.
 

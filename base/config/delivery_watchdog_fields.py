@@ -143,6 +143,19 @@ class DeliveryWatchdogFields:
         },
     )
 
+    delivery_watchdog_host_staleness_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        alias="AVA_DELIVERY_WATCHDOG_HOST_STALENESS_SECONDS",
+        description="Host-verdict freshness window (seconds) for wake re-dispatch and poisoning: a row is dispatched or poisoned only while its owner's machine_probe row is fresh, the machine not graded offline (fewer than two consecutive probe failures), and the agent host alive — the host check is excused inside the one-failure grace window, because a failed probe necessarily nulls the host verdict. A stale, missing, offline-graded or (outside that window) host-less verdict freezes the row — no re-dispatch, no dispatch-count advance, no poison — and redelivery resumes on the next round once the verdict is fresh again (task #4872 route D: an outage must not burn a row's dispatch budget). The default covers the 60s liveness-pass cadence with its two-consecutive-failure grading, the same freshness contract the roster's availability read uses.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     delivery_watchdog_threshold_seconds: float = Field(
         default=30.0,
         alias="AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS",

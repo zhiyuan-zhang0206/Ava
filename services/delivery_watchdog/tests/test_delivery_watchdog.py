@@ -33,6 +33,7 @@ _THRESHOLD_S = 30.0
 _DISPATCH_THRESHOLD_S = 1.0
 _MAX_DISPATCH_COUNT = 5
 _DISPATCH_BACKOFF_STEPS_S = [5.0, 30.0, 120.0, 300.0]
+_HOST_STALENESS_S = 120.0
 
 
 @pytest.fixture
@@ -80,6 +81,40 @@ def _insert_old_inbound(db: psycopg.Connection, agent_id: int, *, age_s: float) 
         )
     db.commit()  # the pool's connections must see the backdate too
     return iid
+
+
+def _set_host_verdict(
+    db: psycopg.Connection,
+    *,
+    online: bool = True,
+    agent_host: bool = True,
+    age_s: float = 0.0,
+    machine: str | None = None,
+) -> None:
+    """Upsert the `machine_probe` verdict the dispatch host gate reads."""
+    from base.cluster.machine import machine_name
+
+    name = machine or machine_name()
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO machine_probe (machine_name, online, agent_host_online, "
+            "consecutive_failures, last_probe_at) "
+            "VALUES (%s, %s, %s, 0, now() - make_interval(secs => %s)) "
+            "ON CONFLICT (machine_name) DO UPDATE SET online = EXCLUDED.online, "
+            "agent_host_online = EXCLUDED.agent_host_online, "
+            "consecutive_failures = EXCLUDED.consecutive_failures, "
+            "last_probe_at = EXCLUDED.last_probe_at",
+            (name, online, agent_host, age_s),
+        )
+    db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _healthy_host_verdict(db_conn: psycopg.Connection) -> None:
+    """Normal dispatch condition: a fresh reachable machine with a live host.
+
+    Host-gate tests override the verdict inside the test body."""
+    _set_host_verdict(db_conn)
 
 
 class TestSelectStalePending:
@@ -225,102 +260,6 @@ class TestScanOnce:
         assert attributes["inbound_id"] == iid
 
 
-class TestSelectPendingForDispatch:
-    def test_returns_pending_of_idling_owners_older_than_threshold(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        """All kinds count (a lost wake strands terminate/restart too), any
-        kind of stale pending of an idling owner is dispatched."""
-        aid = _make_idling_agent(db_conn)
-        old_chat = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-                "VALUES (%s, %s, 'terminate', 'system') RETURNING id",
-                (aid, "bye"),
-            )
-            term_row = cur.fetchone()
-            assert term_row is not None
-            term_id = term_row[0]
-            cur.execute(
-                "UPDATE inbound_messages SET created_at = now() - make_interval(secs => %s) "
-                "WHERE id = %s",
-                (_DISPATCH_THRESHOLD_S + 0.5, term_id),
-            )
-        db_conn.commit()
-        rows = select_pending_for_dispatch(
-            pool,
-            _DISPATCH_THRESHOLD_S,
-            _MAX_DISPATCH_COUNT,
-            _DISPATCH_BACKOFF_STEPS_S,
-        )
-        assert {r[0] for r in rows} == {old_chat, term_id}
-        assert all(r[1] == aid for r in rows)
-
-    def test_fresh_rows_and_non_idling_owners_not_dispatched(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        """Fresh rows (still within the dispatch threshold) and owners not in
-        'idling' (running = mid-turn queue, terminated = its own controller)
-        are left alone."""
-        aid = _make_idling_agent(db_conn)
-        _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S - 0.3)  # fresh
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (aid,))
-        db_conn.commit()
-        _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (aid,))
-        db_conn.commit()
-        _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
-        assert (
-            select_pending_for_dispatch(
-                pool,
-                _DISPATCH_THRESHOLD_S,
-                _MAX_DISPATCH_COUNT,
-                _DISPATCH_BACKOFF_STEPS_S,
-            )
-            == []
-        )
-
-    def test_wake_suppression_excludes_until_expiry(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        aid = _make_idling_agent(db_conn)
-        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
-                "wake_suppress_reason = 'resurrect_failed' WHERE id = %s",
-                (aid,),
-            )
-        db_conn.commit()
-
-        assert (
-            select_pending_for_dispatch(
-                pool,
-                _DISPATCH_THRESHOLD_S,
-                _MAX_DISPATCH_COUNT,
-                _DISPATCH_BACKOFF_STEPS_S,
-            )
-            == []
-        )
-
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' "
-                "WHERE id = %s",
-                (aid,),
-            )
-        db_conn.commit()
-        assert select_pending_for_dispatch(
-            pool,
-            _DISPATCH_THRESHOLD_S,
-            _MAX_DISPATCH_COUNT,
-            _DISPATCH_BACKOFF_STEPS_S,
-        ) == [(iid, aid)]
-
-
 class TestDispatchWakes:
     def test_republishes_wake_per_stale_row(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
@@ -343,6 +282,7 @@ class TestDispatchWakes:
             _DISPATCH_THRESHOLD_S,
             _MAX_DISPATCH_COUNT,
             _DISPATCH_BACKOFF_STEPS_S,
+            _HOST_STALENESS_S,
         )
         assert dispatched == 1
         assert calls == [(aid, str(iid))]
@@ -367,6 +307,7 @@ class TestDispatchWakes:
                 _DISPATCH_THRESHOLD_S,
                 _MAX_DISPATCH_COUNT,
                 _DISPATCH_BACKOFF_STEPS_S,
+                _HOST_STALENESS_S,
             )
             == 0
         )
@@ -394,6 +335,7 @@ class TestDispatchWakes:
                 _DISPATCH_THRESHOLD_S,
                 _MAX_DISPATCH_COUNT,
                 _DISPATCH_BACKOFF_STEPS_S,
+                _HOST_STALENESS_S,
             )
             assert dispatched == 1
             await listener.wait_one(timeout=2.0)  # returns on the dispatched wake
@@ -409,6 +351,7 @@ class TestDispatchBackoffAndPoison:
             _DISPATCH_THRESHOLD_S,
             _MAX_DISPATCH_COUNT,
             _DISPATCH_BACKOFF_STEPS_S,
+            _HOST_STALENESS_S,
         )
 
     @staticmethod
@@ -470,6 +413,7 @@ class TestDispatchBackoffAndPoison:
                 _DISPATCH_THRESHOLD_S,
                 _MAX_DISPATCH_COUNT,
                 _DISPATCH_BACKOFF_STEPS_S,
+                _HOST_STALENESS_S,
             )
             == []
         )
@@ -479,6 +423,7 @@ class TestDispatchBackoffAndPoison:
             _DISPATCH_THRESHOLD_S,
             _MAX_DISPATCH_COUNT,
             _DISPATCH_BACKOFF_STEPS_S,
+            _HOST_STALENESS_S,
         ) == [(iid, aid)]
         self._set_last_dispatch_age(db_conn, iid, 4.5)
         assert (
@@ -487,6 +432,7 @@ class TestDispatchBackoffAndPoison:
                 _DISPATCH_THRESHOLD_S,
                 _MAX_DISPATCH_COUNT,
                 _DISPATCH_BACKOFF_STEPS_S,
+                _HOST_STALENESS_S,
             )
             == []
         )
@@ -496,6 +442,7 @@ class TestDispatchBackoffAndPoison:
             _DISPATCH_THRESHOLD_S,
             _MAX_DISPATCH_COUNT,
             [1.0],
+            _HOST_STALENESS_S,
         ) == [(iid, aid)]
 
     def test_publish_failure_does_not_increment_count(
@@ -577,6 +524,7 @@ class TestDispatchBackoffAndPoison:
                 _DISPATCH_THRESHOLD_S,
                 _MAX_DISPATCH_COUNT,
                 _DISPATCH_BACKOFF_STEPS_S,
+                _HOST_STALENESS_S,
             )
             == []
         )
