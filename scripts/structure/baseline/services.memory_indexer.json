@@ -1,7 +1,4 @@
 {
-  "ambient_state": {
-    "services/memory_indexer/daemon.py::import-time-read:_PIDFILE": 1
-  },
   "complexity": {
     "services/memory_indexer/backends/milvus.py::_schema_problem": 19,
     "services/memory_indexer/daemon.py::_process_paths": 25,

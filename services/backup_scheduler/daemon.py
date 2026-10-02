@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from datetime import time as clock_time
+from pathlib import Path
 
 from base import telemetry
 from base.config import settings
@@ -25,6 +26,7 @@ from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
+from base.paths import pid_path
 from services.backup import _cluster_tz, is_due
 from services.backup_scheduler.operation.custody import OperationBusyError
 from services.backup_scheduler.recovery_drill import (
@@ -40,7 +42,10 @@ _log = logging.getLogger("services.backup_scheduler.daemon")
 BACKUP_RETRY_INTERVAL_S = 1800
 BACKUP_STALE_AFTER_S = 26 * 3600
 _SLEEP_CHUNK_S = 60
-_PIDFILE = settings.services.pg_backup_pidfile
+
+
+def _pidfile() -> Path:
+    return pid_path("pg_backup")
 
 
 @dataclass
@@ -68,18 +73,18 @@ class _BackupState:
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.backup_scheduler.daemon"):
-        _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.backup_scheduler.daemon"):
+        _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
     """Whether this daemon already owns its pidfile."""
-    return pidfile_holds_daemon(_PIDFILE, "services.backup_scheduler.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.backup_scheduler.daemon")
 
 
 def _backup_components(state: _BackupState) -> list[dict[str, object]]:
@@ -193,7 +198,7 @@ async def _backup_loop(state: _BackupState) -> None:
 async def run() -> None:
     """Own the pidfile and health server for the backup scheduler."""
     if _is_running():
-        _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
     _write_pidfile()

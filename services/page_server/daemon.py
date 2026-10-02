@@ -40,7 +40,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
 from base.log import init_gateway_process
-from base.paths import ava_home
+from base.paths import ava_home, pid_path
 from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
 from base.sessions.page_session import page_session_name
 from base.sessions.record import SessionRecord
@@ -57,7 +57,11 @@ _log = logging.getLogger("services.page_server.daemon")
 
 _POLL_INTERVAL_S = settings.daemon.page_server_poll_interval_seconds
 _LIVENESS_TIMEOUT_S = 60.0
-_PIDFILE = settings.services.page_server_pidfile
+
+
+def _pidfile() -> Path:
+    return pid_path("page_server")
+
 
 # A new PTY host needs a short window to finish its interactive-shell startup
 # and receive its initial command before a health probe can make a decision.
@@ -81,18 +85,18 @@ class _ServerHandle:
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.page_server.daemon"):
-        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.page_server.daemon"):
+        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
     """Whether a daemon is already running (via its pidfile)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.page_server.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.page_server.daemon")
 
 
 def _open_rows(pool: ConnectionPool, host: str) -> list[_PageRow]:
@@ -643,7 +647,7 @@ async def _reconcile_loop(pool: ConnectionPool, liveness: Liveness) -> None:
 async def run() -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
     if _is_running():
-        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
     _write_pidfile()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)

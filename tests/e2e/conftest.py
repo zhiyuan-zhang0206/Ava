@@ -616,8 +616,6 @@ def agent_host_proc(gateway_proc: str) -> Iterator[None]:
     # runner login, the class login the root launcher delivers to agent hosts.
     env["AVA_PROCESS_PROFILE"] = "agent"
     env["AVA_DB_URL"] = runner_projection()
-    # pidfile placed in e2e tmp dir, avoids conflict with dev daemon / cross-test residue
-    env["AVA_AGENT_HOST_PIDFILE"] = str(_AVA_HOME / "agent_host.pid")
     # Kernel-assigned per worker, avoiding a shared health port across tests.
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -652,7 +650,6 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
     """
     env = os.environ.copy()
     env["AVA_PROCESS_PROFILE"] = "runner"
-    env["AVA_OPS_PIDFILE"] = str(_AVA_HOME / "ops.pid")
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         ops_port = s.getsockname()[1]

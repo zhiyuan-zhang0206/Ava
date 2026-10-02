@@ -5,7 +5,6 @@
     "services/delivery_watchdog/daemon.py::ambient-container:_resurrect_suppressions": 1,
     "services/delivery_watchdog/daemon.py::ambient-container:_resurrect_tasks": 1,
     "services/delivery_watchdog/daemon.py::asyncio-task:_maybe_spawn_resurrects": 1,
-    "services/delivery_watchdog/daemon.py::import-time-read:_PIDFILE": 1,
     "services/delivery_watchdog/stall_recovery.py::ambient-container:_harvest_tasks": 1,
     "services/delivery_watchdog/stall_recovery.py::ambient-container:_last_harvest_attempt": 1,
     "services/delivery_watchdog/stall_recovery.py::asyncio-task:maybe_request_stall_recovery": 1,

@@ -6,7 +6,6 @@
     "services/agent_ops/daemon.py::global-rebind:_db_pool": 1,
     "services/agent_ops/daemon.py::global-rebind:_dispatch_sem": 1,
     "services/agent_ops/daemon.py::global-rebind:_op_executor": 2,
-    "services/agent_ops/daemon.py::import-time-read:_PIDFILE": 1,
     "services/agent_ops/maintenance.py::ambient-container:_requests": 1,
     "services/agent_ops/maintenance.py::ambient-container:_workers": 1,
     "services/agent_ops/outbox_flusher.py::asyncio-task:start": 1,

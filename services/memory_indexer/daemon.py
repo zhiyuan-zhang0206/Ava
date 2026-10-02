@@ -63,7 +63,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
 from base.native_process.os_platform import CREATE_NO_WINDOW
-from base.paths import gateway_memory_dir
+from base.paths import gateway_memory_dir, pid_path
 from services.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.memory_indexer.backends.factory import get_backend
 from services.memory_indexer.backends.probe import probe_backend
@@ -93,7 +93,10 @@ def _memory_root() -> Path:
     return gateway_memory_dir()
 
 
-_PIDFILE = settings.services.memory_indexer_pidfile
+def _pidfile() -> Path:
+    return pid_path("memory_indexer")
+
+
 _LOOP_INTERVAL_S = 1.0
 # Derive the ceiling from one provider batch's full retry budget: a single
 # legitimate call can exceed 180s, and several shorter calls can compound.
@@ -163,13 +166,13 @@ class _MarkdownEventHandler(FileSystemEventHandler):
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.memory_indexer.daemon"):
-        _log.info("[memory_indexer] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.memory_indexer.daemon"):
+        _log.info("[memory_indexer] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -177,7 +180,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.memory_indexer.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.memory_indexer.daemon")
 
 
 def _scan_disk(root: Path) -> dict[Path, float]:
@@ -616,11 +619,11 @@ async def run() -> None:
     Publish the pidfile before binding healthz so identity-aware probes can verify it.
     """
     if _is_running():
-        _log.info("[indexer] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[indexer] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
     _write_pidfile()
-    _log.info("[indexer] pidfile written: %s", _PIDFILE)
+    _log.info("[indexer] pidfile written: %s", _pidfile())
 
     # Fail fast before deriving liveness or binding healthz: an unknown
     # AVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.

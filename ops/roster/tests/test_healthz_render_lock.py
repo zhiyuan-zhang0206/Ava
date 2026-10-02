@@ -24,8 +24,8 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineRole
-from base.config import settings
 from base.daemon.health import DaemonProbe, probe_daemon
+from base.paths import pid_path
 from ops import roster
 from ops.roster import _bind_owned_probe
 from ops.roster.healthz import healthz_url
@@ -45,7 +45,6 @@ class _Legacy:
     module: str
     capabilities: frozenset[MachineRole]
     requires_db: bool
-    pidfile_setting: str
     profile: str | None = None
     no_profile_marker: bool = False
     db_access: str | None = None
@@ -53,47 +52,42 @@ class _Legacy:
 
 
 _LEGACY = (
-    _Legacy("im-bridge", "services.im_bridge.daemon", _GATEWAY, True, "im_bridge_pidfile"),
+    _Legacy("im-bridge", "services.im_bridge.daemon", _GATEWAY, True),
     _Legacy(
         "labeler",
         "services.labeler.daemon",
         _GATEWAY,
         True,
-        "labeler_pidfile",
         no_profile_marker=True,
     ),
-    _Legacy("heartbeat", "services.heartbeat.daemon", _GATEWAY, True, "heartbeat_pidfile"),
+    _Legacy("heartbeat", "services.heartbeat.daemon", _GATEWAY, True),
     _Legacy(
         "delivery-watchdog",
         "services.delivery_watchdog.daemon",
         _GATEWAY,
         True,
-        "delivery_watchdog_pidfile",
     ),
     _Legacy(
         "events-maintenance",
         "services.events_maintenance.daemon",
         _GATEWAY,
         True,
-        "events_maintenance_pidfile",
     ),
-    _Legacy("pg-backup", "services.backup_scheduler.daemon", _GATEWAY, True, "pg_backup_pidfile"),
-    _Legacy("page-server", "services.page_server.daemon", _RUNNER, True, "page_server_pidfile"),
+    _Legacy("pg-backup", "services.backup_scheduler.daemon", _GATEWAY, True),
+    _Legacy("page-server", "services.page_server.daemon", _RUNNER, True),
     _Legacy(
         "agent-host",
         "services.agent_host.daemon",
         _RUNNER,
         True,
-        "agent_host_pidfile",
         profile="agent",
     ),
-    _Legacy("ops", "services.agent_ops.daemon", _RUNNER, True, "ops_pidfile"),
+    _Legacy("ops", "services.agent_ops.daemon", _RUNNER, True),
     _Legacy(
         "task-maintenance",
         "ava_builtins.plugins.ava_fleet.task_maintenance.daemon",
         _GATEWAY,
         True,
-        "task_maintenance_pidfile",
         gated=True,
     ),
     _Legacy(
@@ -101,7 +95,6 @@ _LEGACY = (
         "services.memory_indexer.daemon",
         _GATEWAY,
         False,
-        "memory_indexer_pidfile",
         db_access="gateway",
         gated=True,
     ),
@@ -111,14 +104,13 @@ _LEGACY = (
 def _legacy_spec(row: _Legacy) -> ServiceSpec:
     """The definition as it was written: every derived field spelled out by hand."""
     name = row.session.replace("-", "_")
-    pidfile: Path = getattr(settings.services, row.pidfile_setting)
     return ServiceSpec(
         session=row.session,
         cmd=f".venv/bin/python -m {row.module}",
         capabilities=row.capabilities,
         requires_db=row.requires_db,
         curl_url=healthz_url(name),
-        identity_probe=partial(probe_daemon, name, healthz_url(name), pidfile=pidfile),
+        identity_probe=partial(probe_daemon, name, healthz_url(name), pidfile=pid_path(name)),
         profile=row.profile,
         no_profile_marker=row.no_profile_marker,
         db_access=cast("DbAccess | None", row.db_access),

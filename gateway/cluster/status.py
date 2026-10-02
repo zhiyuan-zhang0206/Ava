@@ -31,9 +31,9 @@ from base.cluster.machine import (
     is_observability_station,
     machine_name,
 )
-from base.config import settings
 from base.deploy.git.cluster_drift import prod_source_head_sha
 from base.host.resource_sample import ResourceSample
+from base.paths import pid_path
 from base.telemetry.observability import cluster_label
 from gateway.cluster import _loki_shards, _roster_rows, _stats_dashboard, roster_probe
 from gateway.cluster._health import get_health
@@ -261,8 +261,8 @@ def _get_services_status() -> ServicesStatus:
     daemons that only run on the gateway."""
     items: list[ServiceItem] = []
     for name, label, pidfile in (
-        ("labeler", "Labeler Daemon", settings.services.labeler_pidfile),
-        ("memory_indexer", "Memory Indexer", settings.services.memory_indexer_pidfile),
+        ("labeler", "Labeler Daemon", pid_path("labeler")),
+        ("memory_indexer", "Memory Indexer", pid_path("memory_indexer")),
     ):
         alive, pid = _check_pidfile(str(pidfile))
         items.append(

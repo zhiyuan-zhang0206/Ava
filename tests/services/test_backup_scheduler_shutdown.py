@@ -31,7 +31,7 @@ from unittest.mock import AsyncMock, patch
 import psutil
 import pytest
 
-from base.config import settings
+from base.config import ensure_eager, settings
 from base.native_process.exec_domain import ExecProcessDomain
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from services.backup_scheduler import daemon, worker
@@ -151,6 +151,8 @@ def _launch_harness(root: Path, mode: str, postgres_base: Path):
 
 
 def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
+    # This child is not pytest: patching a settings attribute needs the eager chain.
+    ensure_eager()
     state = daemon._BackupState()
     pidfile = root / "daemon.pid"
     restore_mode = mode.startswith("restore")
