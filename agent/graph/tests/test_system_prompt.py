@@ -70,10 +70,10 @@ def skill_writes(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     attribution row takes — for the "records nothing" assertions."""
     writes: list[dict[str, Any]] = []
 
-    def _record(**kwargs: Any) -> None:
-        writes.append(kwargs)
+    def _record(events: list[Any]) -> None:
+        writes.append({"events": events})
 
-    monkeypatch.setattr(audit_events, "insert_event_log_many", _record)
+    monkeypatch.setattr(audit_events, "record_audit_standalone_many", _record)
     return writes
 
 

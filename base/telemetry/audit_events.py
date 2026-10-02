@@ -22,9 +22,9 @@ The primitives that record an event, one of which every audit emit site must use
   for the few producers that must not fail their caller (an agent-facing tool
   call that already succeeded): a failed write is reported loudly instead.
 
-`insert_event_log*` below is the enqueue-only API that predates the table. It
-records nothing in Postgres; the call sites still on it are frozen in the lint's
-``_BASELINE`` and move to the primitives above.
+An event is built with :func:`prepare_event_log`. The one audit event not recorded
+here is the `.env` write audit, whose record is the per-home JSONL
+(decisions/2026-10-02-env-write-audit-stays-local.md).
 
 Payload tiering
 ---------------
@@ -43,6 +43,7 @@ branching on a payload's fields; do not model display-only events.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any, Literal
 
 import psycopg
@@ -71,57 +72,6 @@ class SkillInvokedPayload(BaseModel):
     invocation_depth: Literal["loaded", "prompt_injected"]
 
 
-def insert_event_log(
-    *,
-    event_type: str,
-    agent_id: int | None,
-    source: str,
-    target_agent_id: int | None = None,
-    payload: dict[str, Any] | None = None,
-) -> None:
-    """Record one audit event (category=audit) through the unified emitter.
-
-    The emitter enqueues immediately (non-blocking; a broken sink never
-    raises into the caller) and the drain thread appends the batch to the
-    day-stamped JSONL mirror and exports it to the OTLP backend. The one
-    exception is a contract violation: an event_type with no EventSpec in the
-    registry raises ValueError (fail-fast, R2-C), so callers must keep
-    event_type inside the registry. Dangling target references are recorded
-    as-is: readers join events against the live agents set and drop unknown
-    target_agent_id values (tests and just-terminated agents produce such
-    references; the event is still valid, the source string carries the origin).
-
-    Args:
-        event_type: one of 'spawn', 'send_message', 'terminate', 'resurrect',
-            'restart', 'restart_completed', 'fork', 'cancel', 'compact',
-            'report_activity', 'report_breached', 'status_change', 'exit',
-            'label_change', 'skill_invoked', 'task_create', 'task_update',
-            'computer_action', 'mcp_tool_call'.
-        agent_id: the primary agent this event is about; None for a
-            service-level event with no agent (e.g. an MCP tool call from an
-            external client — service-level events carry a NULL agent_id).
-        source: who triggered the event — 'agent:<N>', 'user',
-            'system', 'self', etc.
-        target_agent_id: for directed operations — the other agent (for
-            send_message the recipient, for spawn the spawner, for fork the
-            FORK SOURCE — the lineage parent, never the executor; the
-            executor who triggered the operation is `source`, see the
-            fork-lineage ruling 2026-08-28).
-        payload: optional JSON-serializable dict with operation-specific data.
-            Left untyped here on purpose; see the module docstring's payload
-            tiering rule for when an event's payload gets a model instead.
-    """
-    telemetry.emit_prepared(
-        prepare_event_log(
-            event_type=event_type,
-            agent_id=agent_id,
-            source=source,
-            target_agent_id=target_agent_id,
-            payload=payload,
-        )
-    )
-
-
 def prepare_event_log(
     *,
     event_type: str,
@@ -130,12 +80,28 @@ def prepare_event_log(
     target_agent_id: int | None = None,
     payload: dict[str, Any] | None = None,
 ) -> telemetry.Event:
-    """Construct an audit event for a caller-owned database transaction.
+    """Construct one audit event (category=audit) without recording or emitting it.
 
-    Central manifest producers pass this exact event to their ledger before
-    committing, then enqueue the returned tagged instance with
-    :func:`telemetry.emit_prepared`. Ordinary audit roots retain the convenient
-    immediate :func:`insert_event_log` wrapper above.
+    Pass it, after any session tagging, to one of the `record_audit*` primitives,
+    which write it to `audit_events` and emit the same bytes to the unified
+    stream after the commit. An event_type with no EventSpec in the registry
+    raises ValueError (fail-fast, R2-C).
+
+    Args:
+        event_type: a registered category=audit event name.
+        agent_id: the primary agent this event is about; None for a
+            service-level event with no agent (e.g. an MCP tool call from an
+            external client).
+        source: who triggered the event — 'agent:<N>', 'user', 'system', 'self'.
+        target_agent_id: for directed operations — the other agent (for
+            send_message the recipient, for spawn the spawner, for fork the
+            FORK SOURCE — the lineage parent, never the executor; the executor
+            is `source`, see the fork-lineage ruling 2026-08-28). A dangling
+            reference is recorded as-is; readers join against the live agents
+            set and drop unknown ids.
+        payload: optional JSON-serializable dict with operation-specific data.
+            Left untyped on purpose; see the module docstring's payload tiering
+            rule for when an event's payload gets a model instead.
     """
     from base.agents.messages.caller_identity import caller_payload
 
@@ -147,53 +113,6 @@ def prepare_event_log(
         source=source,
         target_agent_id=target_agent_id,
         attributes=caller_payload(source, payload),
-    )
-
-
-def insert_event_log_many(
-    *,
-    event_type: str,
-    agent_id: int,
-    source: str,
-    payloads: list[dict[str, Any]],
-) -> None:
-    """Record one audit event per entry in `payloads`.
-
-    All entries enqueue in one call (the enqueue is a bounded-queue put, so a
-    dozen or a hundred payloads cost the caller the same). No
-    `target_agent_id` on this path, matching the legacy batch writer.
-    `ava.skills` writes per-skill invocation rows through this (one row per
-    skill per agent run, dedup'd on the producer side).
-    """
-    for payload in payloads:
-        insert_event_log(
-            event_type=event_type,
-            agent_id=agent_id,
-            source=source,
-            payload=payload,
-        )
-
-
-async def insert_event_log_async(
-    *,
-    event_type: str,
-    agent_id: int,
-    source: str,
-    target_agent_id: int | None = None,
-    payload: dict[str, Any] | None = None,
-) -> None:
-    """Async-code-path alias of `insert_event_log`.
-
-    Enqueueing is synchronous and non-blocking, so there is nothing async
-    left; the name is kept so agent-side (async) call sites read the same as
-    before. Same contract: never raises, drain thread owns the write.
-    """
-    insert_event_log(
-        event_type=event_type,
-        agent_id=agent_id,
-        source=source,
-        target_agent_id=target_agent_id,
-        payload=payload,
     )
 
 
@@ -270,6 +189,20 @@ async def record_audit_async(
     """:func:`record_audit` for an async connection inside the caller's transaction."""
     await conn.execute(_INSERT_AUDIT_EVENT, _audit_row(event))
     return event
+
+
+def record_audit_standalone_many(events: Sequence[telemetry.Event]) -> None:
+    """Record several audit events in one write transaction, then emit them all.
+
+    All rows commit together or none does; nothing is emitted unless they commit.
+    """
+    from base.db.transaction import write_transaction
+
+    with write_transaction() as conn:
+        for event in events:
+            record_audit(conn, event)
+    for event in events:
+        telemetry.emit_prepared(event)
 
 
 def record_audit_standalone(event: telemetry.Event) -> None:

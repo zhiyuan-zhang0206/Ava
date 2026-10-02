@@ -690,45 +690,45 @@ def clear_recorded_skill_invocations() -> None:
 
 
 def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
-    """Enqueue one `skill_invoked` audit event per skill; return whether the
-    enqueue happened. Callers key their dedup on that return, so a swallowed
-    failure is retried rather than remembered as done.
+    """Record one `skill_invoked` audit event per skill; return whether the write
+    landed. Callers key their dedup on that return, so a failed write is retried
+    rather than remembered as done.
 
     The single write path, so the per-skill call and any future batch caller
-    cannot drift in what they record. The unified emitter (`base.telemetry`)
-    owns persistence: the batch lands in the unified event stream, and the
-    emitter's JSONL mirror is the durable fallback
-    — the enqueue is a bounded-queue put, not a DB round-trip per skill.
+    cannot drift in what they record. The batch is one `audit_events`
+    transaction (`record_audit_standalone_many`); the events reach the unified
+    stream after the commit.
 
-    Best-effort: emit never raises (attribution is telemetry; it must never
-    take an agent down).
-
-    Honest contract: `True` means "enqueued", not "persisted" — the write is
-    async (drain thread), drained at process exit via the emitter's atexit
-    hook (exec subprocesses included); a SIGKILL still loses the undrained
-    batch (JSONL mirror + file sinks hold the line). Dedup marks "enqueued".
+    Attribution must never take an agent down: a failed write is logged with its
+    traceback and returns False instead of raising, and the dedup retries it.
     """
     if not skills:
         return True
     try:
-        from base.telemetry.audit_events import SkillInvokedPayload, insert_event_log_many
+        from base.telemetry.audit_events import (
+            SkillInvokedPayload,
+            prepare_event_log,
+            record_audit_standalone_many,
+        )
 
-        insert_event_log_many(
-            event_type="skill_invoked",
-            agent_id=agent,
-            source="self",
-            payloads=[
-                SkillInvokedPayload(
-                    skill=skill["name"],
-                    identifier=identifier(skill),
-                    invocation_depth="loaded",
-                ).model_dump()
+        record_audit_standalone_many(
+            [
+                prepare_event_log(
+                    event_type="skill_invoked",
+                    agent_id=agent,
+                    source="self",
+                    payload=SkillInvokedPayload(
+                        skill=skill["name"],
+                        identifier=identifier(skill),
+                        invocation_depth="loaded",
+                    ).model_dump(),
+                )
                 for skill in skills
-            ],
+            ]
         )
     except Exception as e:
         names = ", ".join(s["name"] for s in skills)
-        logger.warning("skill_invoked event write failed for {}: {}", names, e)
+        logger.exception("skill_invoked event write failed for {}: {}", names, e)
         return False
     return True
 
