@@ -26,7 +26,6 @@ work that is hash-idempotent anyway.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -37,10 +36,10 @@ import psycopg
 from psycopg import Connection
 
 from base import telemetry
-from base.config import settings
 from base.db import connect
 from base.db.transaction import write_transaction
-from base.log import init_gateway_process, logger
+from base.log import logger
+from services.hierarchy_worker.config import HierarchyWorkerConfig
 from services.hierarchy_worker.scan import KIND_COMPACT, SILENT_BASELINE_MARKER, first_build, scan
 
 # The deployed source root: base/ sits at the repo root in prod and in a
@@ -63,33 +62,14 @@ class ClaimedJob:
     include_tail: bool
 
 
-def prepare() -> None:
-    """One-time host start: open the process sinks, verify the schema, announce.
-
-    Called by the schedule host before its first tick. The process-boot seam
-    runs first — the schedule runner is otherwise sink-less, so the start /
-    scan / claim lines and a drifted-schema crash would all be dropped
-    records — then a drifted schema raises, so the manager's crash path
-    (backoff + breaker + last_error) exposes it instead of every tick failing
-    on its own.
-    """
-    from base.deploy.schema.migrations import assert_schema_current
-
-    init_gateway_process(name="schedule-hierarchy-worker")
-    assert_schema_current(settings.data_plane.db_url)
-    logger.info("hierarchy worker started (pid {pid})", pid=os.getpid())
-
-
-def _fallback_scan_due(now: datetime) -> bool:
+def _fallback_scan_due(now: datetime, config: HierarchyWorkerConfig) -> bool:
     """Whether the low-frequency reconcile pass is due (task #4674 B3)."""
     if _fallback_scanned_at is None:
         return True
-    return now - _fallback_scanned_at >= timedelta(
-        seconds=settings.daemon.hierarchy_fallback_scan_seconds
-    )
+    return now - _fallback_scanned_at >= timedelta(seconds=config.hierarchy_fallback_scan_seconds)
 
 
-def _regen_budget_check(conn: Connection) -> bool:
+def _regen_budget_check(conn: Connection, config: HierarchyWorkerConfig) -> bool:
     """The fleet's 24h rolling regeneration budget (task #4674 §4).
 
     Returns True when a trip is active — the tick must stop claiming. Crossing
@@ -101,7 +81,7 @@ def _regen_budget_check(conn: Connection) -> bool:
     reading at or below budget sets `rearmed_at`, and only then — an armed,
     reset row — may a new excursion trip again.
     """
-    budget = settings.daemon.hierarchy_regen_daily_budget_nodes
+    budget = config.hierarchy_regen_daily_budget_nodes
     row = conn.execute(
         "SELECT coalesce(sum(generated), 0) FROM hierarchy_jobs"
         " WHERE finished_at >= now() - interval '24 hours'"
@@ -225,9 +205,9 @@ def claim_next(conn: Connection) -> ClaimedJob | None:
             return ClaimedJob(id=job_id, agent_id=agent_id, include_tail=include_tail)
 
 
-def run_child(job: ClaimedJob) -> None:
+def run_child(job: ClaimedJob, config: HierarchyWorkerConfig) -> None:
     """Run one claimed job under its hard deadline; recover what it cannot write."""
-    deadline_s = settings.daemon.hierarchy_job_deadline_seconds
+    deadline_s = config.hierarchy_job_deadline_seconds
     child = subprocess.Popen(  # noqa: S603 — fixed argv: our own interpreter, a static module path, and an int id
         [sys.executable, "-m", "services.hierarchy_worker.job", "--job-id", str(job.id)],
         cwd=_REPO_ROOT,
@@ -242,7 +222,7 @@ def run_child(job: ClaimedJob) -> None:
         )
         child.terminate()
         try:
-            child.wait(timeout=settings.daemon.hierarchy_child_kill_grace_seconds)
+            child.wait(timeout=config.hierarchy_child_kill_grace_seconds)
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait()
@@ -267,7 +247,7 @@ def _recover(job_id: int, error: str) -> None:
         )
 
 
-def run_tick() -> None:
+def run_tick(config: HierarchyWorkerConfig) -> None:
     """One schedule tick: claim and run due jobs back-to-back — drain, not scan.
 
     The event trigger enqueues each compact boundary's job, so a tick
@@ -282,16 +262,16 @@ def run_tick() -> None:
     after a fix; no retry self-heals it.
     """
     global _fallback_scanned_at  # noqa: PLW0603 — process-local scan cadence
-    if not settings.daemon.hierarchy_worker_enabled:
+    if not config.hierarchy_worker_enabled:
         return
     while True:
         try:
             with connect(autocommit=True) as conn:
-                if _regen_budget_check(conn):
+                if _regen_budget_check(conn, config):
                     return
                 now = datetime.now(UTC)
-                if _fallback_scan_due(now):
-                    outcome = scan(conn)
+                if _fallback_scan_due(now, config):
+                    outcome = scan(conn, config)
                     _fallback_scanned_at = now
                     if (
                         outcome.baselined
@@ -329,4 +309,4 @@ def run_tick() -> None:
             agent=job.agent_id,
             tail=job.include_tail,
         )
-        run_child(job)
+        run_child(job, config)
