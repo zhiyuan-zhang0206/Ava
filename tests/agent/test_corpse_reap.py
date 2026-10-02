@@ -93,7 +93,7 @@ def reap_spies(monkeypatch: pytest.MonkeyPatch) -> tuple[list[dict[str, object]]
             events.append(event.attributes)
         return event
 
-    async def _publish(agent_id: int) -> None:
+    async def _publish(_bus: object, agent_id: int) -> None:
         published.append(agent_id)
 
     monkeypatch.setattr("agent.ownership.corpse_reap.record_audit_async", _event)
@@ -106,7 +106,7 @@ async def test_the_reap_records_its_audit_fact_in_the_reaping_transaction(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _publish(_agent_id: int) -> None:
+    async def _publish(_bus: object, _agent_id: int) -> None:
         return None
 
     monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)

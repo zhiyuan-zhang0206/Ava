@@ -52,6 +52,7 @@ from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
 from base.events.live.redis_client import publish_best_effort_sync
 from ops import lifecycle
@@ -106,7 +107,7 @@ def _reap_expired_notices_blocking(pool: ConnectionPool) -> list[tuple[int, int]
             reaped.append((agent_id, nid))
     for aid in updated_agents:
         with suppress(Exception):
-            publish_agent_updated_sync(aid)
+            publish_agent_updated_sync(EventBus.from_settings(), aid)
     return reaped
 
 

@@ -319,9 +319,9 @@ def create(
         _notify_owner_change(task.id, title, None, owner, actor, description=description)
 
     # Live-refresh every open task board (fleet-wide invalidate + refetch).
-    from base.events.live.announce import publish_task_created_sync  # deferred (task #3816)
+    from base.events.live import announce, bus  # deferred (task #3816)
 
-    publish_task_created_sync(actor, task.id)
+    announce.publish_task_created_sync(bus.EventBus.from_settings(), actor, task.id)
     return task
 
 
@@ -508,9 +508,9 @@ def update(
             changes,
             parent_only,
         )
-        from base.events.live.announce import publish_task_updated_sync  # deferred (task #3816)
+        from base.events.live import announce, bus  # deferred (task #3816)
 
-        publish_task_updated_sync(actor, task_id)
+        announce.publish_task_updated_sync(bus.EventBus.from_settings(), actor, task_id)
 
 
 def _should_notify_previous_owner(old_owner: int | None, actor: int) -> TypeGuard[int]:

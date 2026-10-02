@@ -26,6 +26,7 @@ from base.config import field_alias, get_field, settings
 from base.db import fetch_one, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry.audit_events import prepare_event_log, record_audit
@@ -294,7 +295,7 @@ def _prepare_resurrect_attempt(
             billing_recovery=billing_recovery,
         )
         conn.commit()
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     publish_inbound_wake(agent_id, "0")
     return prepared_event
 

@@ -353,7 +353,7 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     monkeypatch.setattr("agent.ownership.corpse_reap.record_audit_async", _event)
     published: list[int] = []
 
-    async def _publish(agent_id: int) -> None:
+    async def _publish(_bus: object, agent_id: int) -> None:
         published.append(agent_id)
 
     monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)

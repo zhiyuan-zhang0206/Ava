@@ -49,6 +49,7 @@ from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
 )
+from base.events.live.bus import EventBus
 from base.events.live.projection import Cancelled
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -62,9 +63,9 @@ def _ttl(value: int) -> int:
 
 def _wake(agent_id: int, *, roster_changed: bool = False) -> None:
     publish_inbound_wake(agent_id, "impersonation")
-    publish_impersonation_changed_sync(agent_id)
+    publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
     if roster_changed:
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
 
 
 def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:

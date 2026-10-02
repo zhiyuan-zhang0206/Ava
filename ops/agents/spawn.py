@@ -36,6 +36,7 @@ from base.agents.impersonation_manifest import record_central_event
 from base.agents.labels import spawn_prompt_with_label
 from base.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
 from base.events.live.announce import publish_agent_spawned_sync
+from base.events.live.bus import EventBus
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
@@ -147,7 +148,7 @@ def _announce_created_agent(
         except Exception:
             logger.exception("agent {} prompt announcement failed", agent_id)
     try:
-        publish_agent_spawned_sync(agent_id)
+        publish_agent_spawned_sync(EventBus.from_settings(), agent_id)
     except Exception:
         logger.exception("agent {} roster announcement failed", agent_id)
 

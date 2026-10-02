@@ -17,6 +17,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from base.agents import AgentStatus
 from base.config import settings
 from base.db import create_agent
+from base.events.live import bus as bus_module
 from base.events.live import redis_client
 from gateway.agents.delivery import deliver_chat_inbound
 
@@ -72,6 +73,11 @@ async def test_deliver_survives_publish_failure(
         lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
+        bus_module,
+        "open_sync_redis",
+        lambda *_a, **_k: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
         redis_client, "get_async_redis", lambda: _BoomAsyncClient(RedisConnectionError("down"))
     )
 
@@ -96,7 +102,7 @@ async def test_deliver_degrades_when_badge_step_raises(
     InboundArrived + resurrect tail still runs (proven by the returned status)."""
     tid = _seed_idling_agent(db_conn)
 
-    def _boom_badge(_agent_id: int) -> None:
+    def _boom_badge(_bus: object, _agent_id: int) -> None:
         raise RuntimeError("lifecycle hint failed")
 
     monkeypatch.setattr("gateway.agents.delivery.publish_agent_updated_sync", _boom_badge)
@@ -372,7 +378,7 @@ async def test_badge_publish_happens_after_commit(
 
     observed: dict[str, bool] = {}
 
-    def _spy_publish(agent_id: int) -> None:
+    def _spy_publish(_bus: object, agent_id: int) -> None:
         # A DISTINCT connection: it sees the marker only if the delivery txn has
         # already committed by the time the badge publish is invoked.
         probe = psycopg.connect(settings.data_plane.db_url)

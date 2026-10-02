@@ -317,7 +317,7 @@ class TestLivenessPass:
         aid = _make_agent(db_conn, status="idling")
         announced: list[int] = []
 
-        def capture_announcement(agent_id: int) -> None:
+        def capture_announcement(_bus: object, agent_id: int) -> None:
             announced.append(agent_id)
 
         monkeypatch.setattr(
