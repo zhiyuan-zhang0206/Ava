@@ -27,6 +27,7 @@ from base.config import settings
 from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.paths import pid_path
@@ -245,10 +246,9 @@ async def run() -> None:
     # The notice bridge reads agent_notices directly (R3 door ④ — decoupled
     # from gateway availability, so a paused cluster cannot stall notice
     # delivery); the pool is created here and owned by the daemon.
-    import base.db as _db
     from services.im_bridge.core import IMBridgeCore
 
-    db_pool = _db.pool()
+    db_pool = Database.from_settings().pool()
     config = im_bridge_config()
     core = IMBridgeCore(config, gateway_client(config), db_pool=db_pool)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
