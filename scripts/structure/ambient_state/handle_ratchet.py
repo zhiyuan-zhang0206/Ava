@@ -1,4 +1,4 @@
-"""Ratchet on the library layer's self-built database handles.
+"""Ratchet on the library layer's self-built database and event-bus handles.
 
 Run: `.venv/bin/python scripts/structure/ambient_state/handle_ratchet.py [--write]`. Whole-repo; also runs via pre-commit.
 
@@ -6,7 +6,8 @@ A package in `DB_HANDLE_PACKAGES` takes its `Database` from a composition root a
 policed site by site (structure Rule 9, `ambient-db`). The library packages are not
 governed yet: they still dial through the process-default shim (`connect` / `pool` /
 `async_pool` / `direct_db_url` / a pool-less `write_transaction`) or build their own
-`Database.from_settings()`. This lint counts those sites per package, freezes the counts in
+`Database.from_settings()`; the same holds for an `EventBus.from_settings()` built outside
+`BUS_PACKAGES`. This lint counts those sites per package, freezes the counts in
 `handle_ratchet_baseline.json`, and lets them only fall:
 
 - a package above its frozen count fails, listing the sites — new code takes a handle;
@@ -16,7 +17,7 @@ governed yet: they still dial through the process-default shim (`connect` / `poo
   cannot be used to smuggle growth in.
 
 Threading a handle into a library package (one package per commit) drops its count; a package
-at zero leaves the baseline and, when it is ready, joins `DB_HANDLE_PACKAGES`.
+at zero leaves the baseline and, when it is ready, joins `DB_HANDLE_PACKAGES` / `BUS_PACKAGES`.
 
 Error format `path:line: <reason>` + non-zero exit.
 """
@@ -33,11 +34,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import ambient_state, lint_common  # noqa: E402 - standalone script
-from scripts.structure.ambient_state import dbhandle  # noqa: E402 - standalone script
+from scripts.structure.ambient_state import busrule, dbhandle  # noqa: E402 - standalone script
 
 BASELINE = "scripts/structure/ambient_state/handle_ratchet_baseline.json"
 SHIM = "shim"
 SELF_BUILT = "self-built"
+BUS_BUILT = "bus-built"
 Counts = dict[str, dict[str, int]]
 Sites = dict[tuple[str, str], list[str]]
 
@@ -58,11 +60,16 @@ def scan(repo_root: Path) -> Sites:
     for rel in lint_common.tracked_files(repo_root):
         if not rel.endswith(".py") or not ambient_state.in_scope(rel):
             continue
-        if dbhandle.package_of(rel) is not None:
-            continue
         tree = ast.parse((repo_root / rel).read_text(encoding="utf-8"), filename=rel)
-        for hit in dbhandle.dials(tree):
-            found.setdefault((package_of(rel), kind_of(hit.name)), []).append(f"{rel}:{hit.line}")
+        library = [
+            (kind_of(hit.name), hit)
+            for hit in (dbhandle.dials(tree) if dbhandle.package_of(rel) is None else [])
+        ] + [
+            (BUS_BUILT, hit)
+            for hit in (busrule.builds(tree) if busrule.package_of(rel) is None else [])
+        ]
+        for kind, hit in library:
+            found.setdefault((package_of(rel), kind), []).append(f"{rel}:{hit.line}")
     return found
 
 
@@ -92,18 +99,18 @@ def errors(sites: Sites, frozen: Counts, base: Counts | None) -> list[str]:
     out: list[str] = []
     current = counts(sites)
     for package in sorted({*current, *frozen}):
-        for kind in (SHIM, SELF_BUILT):
+        for kind in (SHIM, SELF_BUILT, BUS_BUILT):
             have = current.get(package, {}).get(kind, 0)
             cap = frozen.get(package, {}).get(kind, 0)
             if have > cap:
                 out += [
-                    f"{where}: `{package}` has {have} {kind} database dial(s), {cap} frozen — "
+                    f"{where}: `{package}` has {have} {kind} site(s), {cap} frozen — "
                     "take a `Database` from the composition root instead"
                     for where in sites[(package, kind)]
                 ]
             elif have < cap:
                 out.append(
-                    f"{BASELINE}:1: `{package}` is down to {have} {kind} dial(s) from {cap} frozen "
+                    f"{BASELINE}:1: `{package}` is down to {have} {kind} site(s) from {cap} frozen "
                     "— lower the baseline (`handle_ratchet.py --write`)"
                 )
             if base is not None and cap > base.get(package, {}).get(kind, 0):
