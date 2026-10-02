@@ -62,6 +62,7 @@ from agent.messages import (
 from agent.nodes import CLAIM, INIT_CONTEXT
 from agent.state import AgentState, CompactState, ContextReset
 from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context.slices import AgentSlices
 from base.agents.history.checkpoint_cleanup import mark_compact_boundary
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.events.live.projection import Cancelled, CompactDone
@@ -203,7 +204,7 @@ def emit_compaction_monitoring(
 async def generate_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
-    llm_model: str,
+    slices: AgentSlices,
 ) -> str:
     """Run the Compaction LLM over the whole conversation; returns the summary text.
 
@@ -241,8 +242,10 @@ async def generate_summary(
     # Same request shape as the llm node via prepare_invocation: when a
     # Gemini explicit cache is live the summary call rides it too (and its
     # stale-retry recovers a lapsed TTL), otherwise plain bind_tools.
-    response, used_explicit_cache = await ainvoke_with_cache_retry(llm, compaction_input)
-    model = getattr(llm, "model_name", None) or llm_model
+    response, used_explicit_cache = await ainvoke_with_cache_retry(
+        llm, compaction_input, slices.llm_policy
+    )
+    model = getattr(llm, "model_name", None) or slices.brain.llm_model
     if isinstance(model, str) and model:
         from base.lm.usage import (
             CACHE_MECHANISM_MIXED,
@@ -325,7 +328,7 @@ def _emergency_fallback_summary(messages: list[AnyMessage]) -> str:
 
 
 async def emergency_compact_summary(
-    messages: list[AnyMessage], llm: BaseChatModel, llm_model: str
+    messages: list[AnyMessage], llm: BaseChatModel, slices: AgentSlices
 ) -> str:
     """The circuit-breaker compaction summary: a real compaction first, then the
     no-LLM fallback — used by the overflow self-rescue path (claim decide).
@@ -352,7 +355,7 @@ async def emergency_compact_summary(
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(messages, llm, llm_model)
+            summary = await generate_summary(messages, llm, slices)
         except Exception as e:
             last_error = e
             if _is_permanent_provider_failure(e):
@@ -462,14 +465,14 @@ async def _auto_compact_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
     content_count: int,
-    llm_model: str,
+    slices: AgentSlices,
 ) -> str:
     """Generate and validate a summary without committing any context change."""
     summary: str = ""
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(messages, llm, llm_model)
+            summary = await generate_summary(messages, llm, slices)
         except Exception as e:
             last_error = e
             logger.warning(
@@ -557,7 +560,9 @@ async def auto_compact_for_llm(
     try:
         async with subscribe_interrupt(runtime.context.ops_pool, agent_id) as interrupted:
             summary = await interruptible_model(
-                _auto_compact_summary(list(state.messages), llm, len(content_msgs), llm_model),
+                _auto_compact_summary(
+                    list(state.messages), llm, len(content_msgs), runtime.context.require_agent()
+                ),
                 interrupted,
             )
     except ModelInterruptedError:

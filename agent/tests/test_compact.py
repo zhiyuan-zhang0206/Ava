@@ -146,9 +146,8 @@ async def test_generate_summary_returns_summary():
     """generate_summary returns summary text (from LLM), no longer returns tail."""
     msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
 
-    summary = await generate_summary(
-        msgs, _fake_llm(summary_text="a synthetic summary"), "deepseek-flash"
-    )
+    llm = _fake_llm(summary_text="a synthetic summary")
+    summary = await generate_summary(msgs, llm, AgentSlices.resolve())
 
     assert summary == "a synthetic summary"
 
@@ -210,7 +209,7 @@ async def test_generate_summary_emits_agent_billing_span(
     llm.model_name = "deepseek-v4-pro"
 
     assert (
-        await generate_summary([HumanMessage(content="conversation")], llm, "deepseek-flash")
+        await generate_summary([HumanMessage(content="conversation")], llm, AgentSlices.resolve())
         == "a complete summary"
     )
 
@@ -241,7 +240,7 @@ async def test_generate_summary_includes_whole_conversation():
     ]
 
     llm = _fake_llm()
-    await generate_summary(convo, llm, "deepseek-flash")
+    await generate_summary(convo, llm, AgentSlices.resolve())
 
     [call] = _compaction_ainvoke(llm).call_args_list
     [llm_input] = call.args
@@ -256,7 +255,7 @@ async def test_generate_summary_reuses_conversation_prefix_for_cache():
     content: list[AnyMessage] = [HumanMessage(content=f"m-{i}") for i in range(5)]
 
     llm = _fake_llm()
-    await generate_summary([sys_msg, *content], llm, "deepseek-flash")
+    await generate_summary([sys_msg, *content], llm, AgentSlices.resolve())
 
     llm.bind_tools.assert_called_once_with([execute_code])
     [call] = _compaction_ainvoke(llm).call_args_list
@@ -272,7 +271,7 @@ async def test_generate_summary_raises_on_empty_llm_text():
     msgs: list[AnyMessage] = [HumanMessage(content=f"m{i}") for i in range(3)]
 
     with pytest.raises(RuntimeError, match="no text"):
-        await generate_summary(msgs, _fake_llm(summary_text=""), "deepseek-flash")
+        await generate_summary(msgs, _fake_llm(summary_text=""), AgentSlices.resolve())
 
 
 async def test_generate_summary_extracts_text_from_block_content():
@@ -286,7 +285,8 @@ async def test_generate_summary_extracts_text_from_block_content():
         ]
     )
 
-    summary = await generate_summary(msgs, _fake_llm(response=block_response), "deepseek-flash")
+    llm = _fake_llm(response=block_response)
+    summary = await generate_summary(msgs, llm, AgentSlices.resolve())
     assert summary == "the real summary"
 
 
@@ -299,13 +299,13 @@ async def test_generate_summary_raises_on_tool_use_only_block_content():
     )
 
     with pytest.raises(RuntimeError, match="no text"):
-        await generate_summary(msgs, _fake_llm(response=tool_only), "deepseek-flash")
+        await generate_summary(msgs, _fake_llm(response=tool_only), AgentSlices.resolve())
 
 
 async def test_generate_summary_raises_on_empty_conversation():
     """Only SystemMessage (no conversation) → ValueError — nothing to summarize."""
     with pytest.raises(ValueError, match="empty"):
-        await generate_summary([SystemMessage(content="<sys>")], _fake_llm(), "deepseek-flash")
+        await generate_summary([SystemMessage(content="<sys>")], _fake_llm(), AgentSlices.resolve())
 
 
 # --- auto_compact_for_llm hook tests ---
