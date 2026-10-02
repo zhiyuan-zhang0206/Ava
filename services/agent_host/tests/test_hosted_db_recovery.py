@@ -34,6 +34,7 @@ from base.config import settings
 from base.db import insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops.agents.spawn import create_agent_row
@@ -116,7 +117,13 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
             return {"halted": True, "turn_idle": True, "messages": [AIMessage(content="Resumed")]}
 
         graph, saver = await _graph(aops_pool, agent, work)
-        host = AgentHost(pool=aops_pool, control_pool=control, checkpointer=saver, graph=graph)
+        host = AgentHost(
+            pool=aops_pool,
+            control_pool=control,
+            checkpointer=saver,
+            graph=graph,
+            bus=EventBus.from_settings(),
+        )
         with bind_turn_identity(agent, incarnation=incarnation):
             async with control.connection():
                 original = asyncio.create_task(host._invoke_until_done(agent, AvaContext()))

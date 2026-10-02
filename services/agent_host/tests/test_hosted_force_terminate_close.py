@@ -25,6 +25,7 @@ from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.agents.impersonation import ImpersonationError
 from base.agents.incarnation.hosted_force import install_hosted_force
+from base.events.live.bus import EventBus
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host.host import AgentHost
 from services.agent_host.settlement import close_hosted_turn
@@ -33,7 +34,13 @@ _FORCE_ERROR = "Native runtime no longer owns this agent"
 
 
 def _host(graph: Mock, pool: AsyncConnectionPool) -> AgentHost:
-    return AgentHost(pool=pool, checkpointer=Mock(), graph=graph, machine="claim-test")
+    return AgentHost(
+        pool=pool,
+        checkpointer=Mock(),
+        graph=graph,
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
 
 
 def _raising_graph(exc: BaseException | None = None) -> Mock:

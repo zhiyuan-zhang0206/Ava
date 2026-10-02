@@ -28,6 +28,7 @@ from base.agents.incarnation.resources import (
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.cohort import _classify, _RuntimeRow
 from base.deploy.maintenance.state import MaintenanceHold
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_host import dispatcher
 from services.agent_host import host as host_module
@@ -161,10 +162,13 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
     config: RunnableConfig = {"configurable": {"thread_id": str(agent)}}
     messages = [HumanMessage(content="Existing question"), AIMessage(content="Already answered")]
     await graph.aupdate_state(config, {"messages": messages, "halted": True})
-    host = AgentHost(pool=aops_pool, graph=graph, checkpointer=saver)
+    host = AgentHost(pool=aops_pool, graph=graph, checkpointer=saver, bus=EventBus.from_settings())
     scheduler = TurnScheduler(host.run_turn)
     dispatcher = InboundWakeDispatcher(
-        "redis://unused", scheduler, pending_scan=host.pending_inbound_wakes, stale_after_s=60
+        EventBus.from_settings(),
+        scheduler,
+        pending_scan=host.pending_inbound_wakes,
+        stale_after_s=60,
     )
     try:
         await _assert_recovered_without_a_model_call(
@@ -188,7 +192,9 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
         (agent,),
     )
     db_conn.commit()
-    host = AgentHost(pool=aops_pool, graph=AsyncMock(), checkpointer=AsyncMock())
+    host = AgentHost(
+        pool=aops_pool, graph=AsyncMock(), checkpointer=AsyncMock(), bus=EventBus.from_settings()
+    )
     assert [wake.agent_id for wake in await host.pending_inbound_wakes(60)] == [agent]
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
@@ -242,7 +248,7 @@ class TestReapedSuccessorMarker:
 
         scheduler = TurnScheduler(run_turn)
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=pending, stale_after_s=180.0
         )
         try:
             await disp.scan_once()
@@ -281,7 +287,7 @@ class TestReapedSuccessorMarker:
             return
 
         scheduler = TurnScheduler(run_turn)
-        disp = InboundWakeDispatcher("redis://unused", scheduler)
+        disp = InboundWakeDispatcher(EventBus.from_settings(), scheduler)
         try:
             original = scheduler.wake(1)
             assert original is not None

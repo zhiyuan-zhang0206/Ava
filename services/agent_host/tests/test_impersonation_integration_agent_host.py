@@ -14,6 +14,7 @@ from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.db import create_agent
+from base.events.live.bus import EventBus
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -58,7 +59,13 @@ async def test_replacement_host_adopts_held_agent_without_model(
     monkeypatch.setattr("base.config.settings.agent.impersonation_reprovision_window_seconds", 1e9)
     impersonation._relay_children.clear()
     graph = MagicMock()
-    host = AgentHost(pool=aops_pool, checkpointer=MagicMock(), graph=graph, machine=machine)
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=MagicMock(),
+        graph=graph,
+        machine=machine,
+        bus=EventBus.from_settings(),
+    )
     assert agent_id in {wake.agent_id for wake in await host.pending_inbound_wakes(180)}
     # Original host has stopped renewing; admission still uses its ordinary
     # ownership fence, while the longer external decision lease remains live.

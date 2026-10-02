@@ -29,6 +29,7 @@ from base.agents.incarnation.hosted_force import (
     recover_orphaned_hosted_forces,
 )
 from base.config import settings
+from base.events.live.bus import EventBus
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -66,7 +67,13 @@ def _blocking_work(entered: threading.Event, release: threading.Event) -> None:
 def _observed_host(
     pool: AsyncConnectionPool, graph: Mock, patch: pytest.MonkeyPatch
 ) -> tuple[AgentHost, list[str]]:
-    host = AgentHost(pool=pool, checkpointer=Mock(), graph=graph, machine="claim-test")
+    host = AgentHost(
+        pool=pool,
+        checkpointer=Mock(),
+        graph=graph,
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
     patch.setattr(host, "_runtime_for", AsyncMock(return_value=Mock(llm=None)))
     original = host._run_turn
     errors: list[str] = []
@@ -133,7 +140,13 @@ async def _prove_successor_ignores_old_cancel(
     # Simulate explicit resurrection's allocation, not a claim of RPC coverage.
     conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent_id,))
     conn.commit()
-    replacement = AgentHost(pool=pool, checkpointer=Mock(), graph=graph, machine="claim-test")
+    replacement = AgentHost(
+        pool=pool,
+        checkpointer=Mock(),
+        graph=graph,
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
     patch.setattr(replacement, "_runtime_for", AsyncMock(return_value=Mock()))
     scheduler = TurnScheduler(replacement.run_turn)
     scheduler.wake(agent_id)
@@ -244,7 +257,13 @@ async def test_idle_force_only_original_live_host_can_observe(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     agent_id = _agent(db_conn)
-    host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", host._owner, expected_from="idling"
@@ -273,7 +292,13 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
 ) -> None:
     """A dead host owner must not strand a force when no exec domain survived."""
     agent_id = _agent(db_conn)
-    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    old_host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
@@ -309,7 +334,13 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
     """A command torn into `done` with the pointer alive (task #3678) is blind to
     the claimed-only boot recovery; the widened candidate predicate settles it."""
     agent_id = _agent(db_conn)
-    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    old_host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
@@ -364,7 +395,13 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
 ) -> None:
     """A request envelope survives its parent and forbids guessed quiescence."""
     agent_id = _agent(db_conn)
-    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    old_host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
@@ -426,7 +463,13 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
 ) -> None:
     """Old-owner evidence is preserved, not deleted, and stops fencing the force."""
     agent_id = _agent(db_conn)
-    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    old_host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
@@ -495,7 +538,13 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
     """The 6285 shape: a zero-byte remnant no longer defers boot recovery."""
 
     agent_id = _agent(db_conn)
-    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    old_host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
@@ -544,7 +593,13 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
     """A fresh remnant may still settle: the bound is not a cleanup timer."""
 
     agent_id = _agent(db_conn)
-    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    old_host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
@@ -582,7 +637,13 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
 ) -> None:
     """A live matching child defers; the same evidence recovers on the next boot."""
     agent_id = _agent(db_conn)
-    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    old_host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+    )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"

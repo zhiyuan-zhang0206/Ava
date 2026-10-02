@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.db import create_agent
+from base.events.live.bus import EventBus
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -66,6 +67,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
         checkpointer=Mock(),
         graph=Mock(),
         machine="host-test",
+        bus=EventBus.from_settings(),
     )
     # Exercise the owned work task itself. ``run_turn`` deliberately shields
     # this inner task from scheduler cancellation; injecting cancellation at
@@ -108,7 +110,13 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
     assert original is not None
     if status == "idling":
         assert await settle_hosted_runtime(aops_pool, original)
-    host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="host-test")
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="host-test",
+        bus=EventBus.from_settings(),
+    )
 
     async def forbidden_runtime(_agent_id: int, _fingerprint: str) -> None:
         raise AssertionError("a live other owner must prevent all runtime work")
