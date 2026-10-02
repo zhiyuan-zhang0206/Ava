@@ -111,3 +111,13 @@ Two migrations, each with a paired `.down.sql`, so each rolls back on its own.
   `AgentStatus.RESTARTING` fails on attribute access.
 - The runner role no longer holds grants on `agent_watchers`, and the
   group-grant list no longer names the table or the function.
+
+Forward: the down-migration plan in this record is superseded — migrations are
+forward-only since 2026-10-02 ("No down migrations. A mistake is fixed forward
+by a new migration"; merged migration files are immutable — see
+[`migrations/README.md`](../migrations/README.md), commit 16e35c44e). Neither
+migration below carries a `.down.sql` and none is planned, so the rollback
+steps stated above (a rollback restores shape; rolling back past these
+migrations needs the down files first) are void: recovery from these migrations
+is fix-forward. The expand-contract ordering the Context describes still
+stands.
