@@ -138,6 +138,13 @@ built; agent- and turn-level values reach them through the runtime context.
   child awaited before the next round, and cancelling the loop at stop cancels the
   children. The lint does not report this. A free-floating `create_task` or thread
   remains a violation.
+- **The delivery watchdog's three duties** (resurrecting terminated agents with pending
+  chat, reaping crashed corpses that hold stuck chat, recovering stuck hosted turns) are
+  one service with three resident sequential loops (ruling A'). Each loop is sequential,
+  so single-flight holds by construction. One `TaskGroup` in the service's main function
+  owns the three loops; if any loop crashes, the group cancels the others and the process
+  exits for `ava-root` to restart it. Cool-down and failure counts live in the database.
+  Every other background duty stays its own service.
 - A side effect on a request path, such as the notification the gateway sends after
   a database commit, does not start a free-floating task. It is awaited in the
   request, or recorded durably (an outbox row) for a service's loop to consume.
@@ -241,10 +248,9 @@ process-global `settings`, with a per-module shrink-only baseline.
   private memory on the order of 50 MiB today (measured with a warmed bytecode
   cache; the full measurement is in progress). Most of it is the import of
   third-party libraries, not this repository's code. A finer split therefore
-  presupposes lowering per-process memory. Pre-importing the shared libraries once
-  and forking so that children share those pages is the common industry practice;
-  no design is committed here. A read-only service-memory audit is in progress, and
-  this page makes no reduction plan until it reports.
+  presupposes lowering per-process memory. No design is committed here. A read-only
+  service-memory audit is in progress, and this page makes no reduction plan until it
+  reports.
 - **Cost of splitting into services: onboarding.** Adding a service today means
   editing `ops/roster/__init__.py`, `base/host/env/port_table.py` and
   `base/cluster/ports.py`, plus a health-check module under `services/healthchecks/`

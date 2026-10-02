@@ -105,6 +105,15 @@ Rulings that fix the boundary of the rule:
      cancels the children. This is allowed and the lint does not report it. A
      free-floating `asyncio.create_task` and a free-floating thread remain
      violations.
+   - The delivery watchdog's three duties (resurrection, reaping, hosted-turn
+     recovery) are decided as ruling A': one service with three resident sequential
+     loops, so single-flight holds by construction. One `TaskGroup` in the service's
+     main function owns the loops; a crash in any loop exits the process and
+     `ava-root` restarts it. Cool-down and failure counts live in the database.
+     Rejected: one phased loop (the slowest RPC delays all three duties) and three
+     services (three more processes of private memory, health checks and
+     onboarding boilerplate). Every other
+     background duty stays its own service.
    - A side effect on a request path (for example the notification the gateway
      sends after a database commit) does not start a free-floating task. It is
      awaited in the request, or written as a durable record (an outbox row) that a
