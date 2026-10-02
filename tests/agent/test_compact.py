@@ -796,7 +796,7 @@ def test_compact_triggers_point_at_the_contract(_ava_compact_loaded):
 # claim node compact edge case tests
 # ============================================================
 # The following tests claim_node's boundary handling of compact_summary / compact_request.
-# Testing style same as tests/agent/test_claim.py — directly call claim_node to test dispatch.
+# Testing style same as agent/tests/test_claim.py — directly call claim_node to test dispatch.
 
 
 async def test_compact_summary_preserves_agent_continuity(
