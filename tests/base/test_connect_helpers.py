@@ -489,7 +489,7 @@ def test_direct_dials_are_not_gated_and_carry_no_process_name(
     monkeypatch: pytest.MonkeyPatch, stored_minimum: int, _gated_process: list[int]
 ) -> None:
     _set_minimum(_VERSION + 1)
-    monkeypatch.setattr(connections, "direct_db_url", lambda: settings.data_plane.db_url)
+    monkeypatch.setattr(connections, "direct_db_url", lambda *_: settings.data_plane.db_url)
     with db.connect(direct=True) as conn:
         params = conn.info.get_parameters()
         assert not params.get("application_name", "").startswith("ava:")
