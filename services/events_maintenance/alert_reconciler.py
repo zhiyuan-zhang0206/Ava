@@ -28,6 +28,7 @@ from psycopg_pool import ConnectionPool
 
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.events.live.bus import EventBus
 from base.telemetry.alerts import AlertKey, parse_ts
 from gateway.alerts.publish import publish_alert_rows
 from services.events_maintenance.config import EventsMaintenanceConfig
@@ -206,7 +207,7 @@ async def reconciliation_round(
 
 
 async def reconciliation_loop(
-    db_pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig
+    db_pool: ConnectionPool, bus: EventBus, progress: LoopProgress, config: EventsMaintenanceConfig
 ) -> None:
     """Reconcile immediately at start, then every five minutes, as a resident
     sequential loop. Owns its Grafana client: one connection pool for the loop's
@@ -215,7 +216,9 @@ async def reconciliation_loop(
     async with httpx.AsyncClient(trust_env=False, timeout=_GRAFANA_API_TIMEOUT) as client:
 
         async def one_round() -> None:
-            await reconciliation_round(db_pool, client, publish_alert_rows, progress, config)
+            await reconciliation_round(
+                db_pool, client, lambda rows: publish_alert_rows(bus, rows), progress, config
+            )
 
         await round_loop.run_rounds(
             "alert-reconciliation", progress, RECONCILE_INTERVAL_S, one_round

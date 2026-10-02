@@ -9,3 +9,6 @@ db = ["daemon.py"]
 # The only modules here that may call `ServiceEndpoints.from_settings()`; the rest takes its
 # daemon's `ServiceEndpoint` (or the table) from them.
 endpoints = ["daemon.py"]
+
+# The only modules here that may call `EventBus.from_settings()`; the rest takes the bus from them.
+bus = ["daemon.py"]

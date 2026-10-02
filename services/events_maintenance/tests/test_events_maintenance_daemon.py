@@ -482,7 +482,9 @@ def _run_with_alert_loop(monkeypatch: pytest.MonkeyPatch, *, configured: bool) -
     async def parked(*_args: object) -> None:
         return None
 
-    async def alert_loop(_pool: object, progress: LoopProgress, _config: object) -> None:
+    async def alert_loop(
+        _pool: object, _bus: object, progress: LoopProgress, _config: object
+    ) -> None:
         seen["alert_loop"] = True
 
     async def fake_start(
