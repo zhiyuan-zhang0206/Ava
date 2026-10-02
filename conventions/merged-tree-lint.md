@@ -17,7 +17,7 @@ tree. `lint-code-structure` enforces an 800-line hard ceiling
 
 The PR head passed its own checks because it was tested against a stale main.
 The red result appeared only after queue admission, which wasted a combined-tree
-round, bisection, and QA re-review. This job makes that kind of violation visible
+round, bisection, and re-review. This job makes that kind of violation visible
 while the PR is still being reviewed.
 
 ## How it works

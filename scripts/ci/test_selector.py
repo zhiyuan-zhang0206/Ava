@@ -80,8 +80,6 @@ _TREE_SCAN_TESTS = frozenset(
         "tests/test_ci_utils.py",
         "tests/test_db_check_enum_sync.py",
         "tests/test_pool_keepalives.py",
-        "tests/test_qa_approved_gate_workflow.py",
-        "scripts/ci/tests/test_qa_gate.py",
         "tests/test_env_guard_canary.py",
     }
 )

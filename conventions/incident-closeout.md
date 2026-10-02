@@ -24,10 +24,10 @@ incident/defect work (a feature task that merely produces a report is not one);
 when in doubt about the class, treat it as an incident. An incident
 already proved human rules do not hold; a repro is an intermediate artifact, not
 a terminal state there. A missing or wrong-form line on an incident = BLOCK (no
-QA PASS; the incident is not closed and no closeout report ships).
+sign-off; the incident is not closed and no closeout report ships).
 
 Non-incident closeouts fail softer: a behavior-changing PR without a valid line
-and without an applicable exception does not get a QA PASS.
+and without an applicable exception does not get sign-off.
 
 ## What counts as a guard
 
@@ -94,7 +94,7 @@ A minimal **runnable** case that failed before the fix:
 - No coverage metrics (they breed number-chasing).
 - No human-signature ceremony (incidents already proved human rules fail;
   incidents must go machine).
-- No task-kernel enforcement (deliberate): the gate is the QA verdict + the 405
+- No task-kernel enforcement (deliberate): the gate is the reviewer verdict + the 405
   closeout check; the task registry does not hard-block a closeout that omits
   the line.
 - Repro artifacts do not enter the repo; they become guards or stay in task
@@ -103,17 +103,13 @@ A minimal **runnable** case that failed before the fix:
 ## Where it lands
 
 1. **PR surface**: behavior-changing PR descriptions carry a "Recurrence
-   evidence" section reachable from the `closing-gate:` line; QA adds the
-   `closing-gate:` verdict line to its **narrative review comment** — or inside
-   the receipt JSON's `note` field if it rides with the receipt — and never as
-   extra text in the receipt comment, which stays a single fenced JSON block
-   (`conventions/qa-approval-receipt.md`). QA validates the red battery /
-   red-green pair. An incident PR without a valid guard line does not get a QA
-   PASS. The receipt schema is untouched — trust stays in
-   `conventions/qa-approval-receipt.md`.
+   evidence" section reachable from the `closing-gate:` line; the reviewer adds
+   the `closing-gate:` verdict line to its **narrative review comment** and
+   validates the red battery / red-green pair. An incident PR without a valid
+   guard line does not get sign-off.
 2. **Task surface**: the closeout note's owner writes the same line; incidents —
    405 verifies it before closing (guard only); non-incidents — spot-checked by
-   QA/405, not verified per item.
+   the reviewer/405, not verified per item.
 3. **Report surface**: incident closeout reports include a "Recurrence evidence"
    section quoting the line.
 

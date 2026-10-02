@@ -18,7 +18,6 @@ import yaml
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github/workflows"
 EXEMPTIONS = {
     ("ci.yml", "pull_request"): "Required checks report on every PR; jobs classify paths.",
-    ("qa-approved-gate.yml", "pull_request"): "Required QA gate follows every PR head and label.",
     ("release-app.yml", "push"): "Version-tag releases; GitHub ignores paths for tags.",
     ("release.yml", "push"): "Version-tag releases; GitHub ignores paths for tags.",
 }

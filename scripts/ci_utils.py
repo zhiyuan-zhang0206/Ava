@@ -55,12 +55,12 @@ Usage as CLI:
     `--evict` cancels a submitted PR from the queue and `--queue-status` prints the queue state
     with its enqueued PRs. Trunk's public API has no reorder or priority-update operation —
     priority is fixed at submit time and queue order follows it — so mid-queue reshuffles cannot be
-    scripted (verified against Trunk's API spec, 2026-09-06). Trunk refuses submission unless the
-    PR has the `qa-approved` label, and `.trunk/trunk.yaml` requires its `qa-approved-gate` status.
-    Submission waits at least five minutes after a head update. The all-green predicate excludes
-    the "Trunk Merge Queue" queue-state check and "qa-approved-gate". This is the canonical CI
-    watcher: launch it with ava.shell.run_background, and the completion notice delivers the exit
-    code + verdict to the agent automatically.
+    scripted (verified against Trunk's API spec, 2026-09-06). Submission waits at least five
+    minutes after a head update. The all-green predicate excludes the "Trunk Merge Queue"
+    queue-state check and the retired `qa-approved-gate` / `evaluate-qa-evidence` checks that
+    older PR heads still carry. This is the canonical CI watcher: launch it with
+    ava.shell.run_background, and the completion notice delivers the exit code + verdict to the
+    agent automatically.
 """
 
 from __future__ import annotations
@@ -237,8 +237,9 @@ class CIResult:
     # Trunk's queue-state check is likewise not a CI result and must not turn
     # an otherwise green PR into a perpetual PENDING verdict.
     trunk_checks: list[dict] = field(default_factory=list)
-    # The QA gate and evidence evaluator are required by Trunk and checked before its submission,
-    # not by this CI verdict. Keep them separate so they cannot enter the verdict buckets.
+    # The retired QA gate and evidence evaluator checks, still reported on heads pushed before the
+    # gate was removed, are not CI conclusions. Keep them separate so they cannot enter the
+    # verdict buckets.
     gate_checks: list[dict] = field(default_factory=list)
     # Runs stuck in GitHub limbo (task #3275): `queued`, zero jobs, aged past
     # `_LIMBO_AGE_SECONDS`. Detail on a PENDING verdict — never a basis for
@@ -298,8 +299,8 @@ def _repo_has_workflows() -> bool:
 TRUNK_MERGE_QUEUE_CHECK_NAME = "Trunk Merge Queue"
 QA_APPROVED_GATE_CHECK_NAME = "qa-approved-gate"
 QA_EVIDENCE_CHECK_NAME = "evaluate-qa-evidence"
-# Both are QA evidence produced by the qa-approved-gate workflow and enforced by the queue before
-# submission — never CI conclusions, so they never enter the verdict buckets.
+# Retired merge-gate checks that heads pushed before the gate was removed still carry — never CI
+# conclusions, so they never enter the verdict buckets.
 QA_GATE_CHECK_NAMES = frozenset({QA_APPROVED_GATE_CHECK_NAME, QA_EVIDENCE_CHECK_NAME})
 
 # The repo's main CI workflow (`.github/workflows/ci.yml`, `name: CI`) — the suite a green verdict
@@ -384,13 +385,13 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
     Only COMPLETED checks are judged: a QUEUED / IN_PROGRESS one is pending, and so is a COMPLETED
     one whose conclusion is unrecognized — guessing there is how a false "all green" gets reported.
 
-    Trunk checks report queue state rather than CI results, while the `qa-approved-gate` and
-    `evaluate-qa-evidence` checks are required by Trunk and checked before submission. All are
-    routed to dedicated buckets so they never enter the verdict fields.
+    Trunk checks report queue state rather than CI results, and the retired `qa-approved-gate` and
+    `evaluate-qa-evidence` checks are not CI conclusions. All are routed to dedicated buckets so
+    they never enter the verdict fields.
     """
     for c in checks:
         if c.get("__typename") == "StatusContext":
-            # Commit statuses (qa_gate.py publishes qa-approved-gate this way) have `context` +
+            # Commit statuses (the retired qa-approved-gate was published this way) have `context` +
             # `state`, not `name` + `status` + `conclusion`. Without this branch they read as a
             # nameless "?" entry with a null status — an eternal PENDING that froze every --wait
             # watcher (2026-09-04: five PRs stalled with all real checks green).
@@ -882,28 +883,6 @@ def _trunk_pr_payload(pr: str, repo: str) -> dict[str, object]:
     return payload
 
 
-def _trunk_qa_approved(pr: str, repo: str) -> tuple[bool, str | None]:
-    """Return whether a PR has the required QA label, or its read error."""
-    result = subprocess.run(  # noqa: S603
-        ["gh", "pr", "view", pr, "--repo", repo, "--json", "labels"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return False, f"gh labels error: {result.stderr.strip()}"
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError as error:
-        return False, f"labels JSON error: {error}"
-    labels = data.get("labels") if isinstance(data, dict) else None
-    if not isinstance(labels, list):
-        return False, "labels response was not a list"
-    return any(
-        isinstance(label, dict) and label.get("name") == "qa-approved" for label in labels
-    ), None
-
-
 _SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -1392,7 +1371,7 @@ def _diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
         "synthetic_test_prs": [],
         "flaky_db_available": token is not None,
     }
-    view = _pr_view(pr, repo, "mergeable,labels,headRefOid,state,statusCheckRollup")
+    view = _pr_view(pr, repo, "mergeable,headRefOid,state,statusCheckRollup")
     if view is None:
         diag["gh_error"] = "gh pr view failed"
         return diag
@@ -1407,17 +1386,6 @@ def _diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
                 "kind": "merge_conflict",
                 "detail": f"mergeable={mergeable}",
                 "action": "rebase on origin/main, resubmit",
-            }
-        )
-    raw_labels = view.get("labels", [])
-    label_rows = raw_labels if isinstance(raw_labels, list) else []
-    labels = [str(lab.get("name")) for lab in label_rows if isinstance(lab, dict)]
-    if "qa-approved" not in labels:
-        diag["issues"].append(
-            {
-                "kind": "missing_qa_label",
-                "detail": "qa-approved label absent",
-                "action": "attach the qa-approved label (a receipt alone is not enough)",
             }
         )
     stale = None
@@ -1636,22 +1604,6 @@ def _trunk_merge_flow(
         return 3
     if result.verdict is not CIStatus.ALL_PASSED:
         print(f"PR #{pr} CI no longer green: {result.summary()}", file=sys.stderr, flush=True)
-        return 1
-
-    qa_approved, label_error = _trunk_qa_approved(pr, repo)
-    if label_error is not None:
-        print(
-            f"PR #{pr} could not verify qa-approved label: {label_error}",
-            file=sys.stderr,
-            flush=True,
-        )
-        return 3
-    if not qa_approved:
-        print(
-            f"PR #{pr} lacks the qa-approved label — not submitting to Trunk",
-            file=sys.stderr,
-            flush=True,
-        )
         return 1
 
     stale, unreadable = _base_freshness(pr, repo)

@@ -270,10 +270,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "tests the session OS-job leak guard, tests/_os_jobs.py",
     ),
-    "tests/test_qa_approved_gate_workflow.py": (
-        "contract",
-        "runs the shell of .github/workflows/qa-approved-gate.yml against a mock GitHub API",
-    ),
     "tests/test_visual_snapshot.py": (
         "contract",
         "tests the visual snapshot helper, tests/e2e/_visual_snapshot.py",
