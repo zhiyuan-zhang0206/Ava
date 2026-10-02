@@ -1,22 +1,8 @@
 {
   "patch_targets": {
-    "tests/ava/sdk_surface/test_metering.py::ava.sdk_surface.metering._instrument_targets": 2,
-    "tests/ava/sdk_surface/test_validation.py::ava.self._publish_self_inbound_wake": 1,
-    "tests/ava/sdk_surface/test_validation.py::ava.ui._register_page": 2,
-    "tests/ava/sdk_surface/test_validation.py::ava.ui._reject_foreign_port_occupant": 1,
-    "tests/ava/sdk_surface/test_validation.py::ava.ui._wait_until_serving": 1,
-    "tests/ava/sdk_surface/test_validation.py::ava.understand._understand_one": 1,
-    "tests/ava/sdk_surface/test_validation.py::ava.watcher._spawn": 2,
-    "tests/ava/sdk_surface/test_validation.py::ava.web._fetch_one": 1,
-    "tests/ava/sdk_surface/test_validation.py::ava.web._search_one": 1,
-    "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._entry_path": 2,
-    "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._upsert_index": 1,
-    "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._write_atomically": 1,
     "tests/ava/test_external_integration.py::ava.gateway_client.transport._client": 2
   },
   "tests_location": {
-    "tests/ava/sdk_surface/test_metering.py::top-level": 1,
-    "tests/ava/sdk_surface/test_validation.py::top-level": 1,
     "tests/ava/test_external_integration.py::top-level": 1
   }
 }
