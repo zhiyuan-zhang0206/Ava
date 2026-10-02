@@ -1,6 +1,7 @@
-"""The fleet SDK writes record their audit fact in the transaction that makes the change.
+"""The fleet task writes record their audit fact in the transaction that makes the change.
 
-A task create / update and a label change are agent-facing tool calls: the row and its
+(The label change is covered beside the plugin-loading fixture in test_ava_fleet_plugin.py.)
+A task create / update is an agent-facing tool call: the row and its
 `audit_events` fact commit together, so a failed audit write leaves no change behind
 (and the agent's retry cannot repeat a side effect that already happened).
 """
@@ -15,7 +16,7 @@ import pytest
 
 import ava
 import ava.agent_identity
-from ava_builtins.plugins.ava_fleet import plugin, task_registry
+from ava_builtins.plugins.ava_fleet import task_registry
 from base.telemetry import Event
 
 
@@ -104,24 +105,3 @@ def test_a_task_update_is_recorded_with_its_change(
 
     [recorded] = _audit(db_conn, agent_id, "task_update")
     assert recorded["task_id"] == task.id
-
-
-def test_a_label_change_is_recorded_with_the_label(
-    db_conn: psycopg.Connection, agent_id: int
-) -> None:
-    plugin.set_label("auth-refactor lead")
-
-    assert _audit(db_conn, agent_id, "label_change") == [{"new_label": "auth-refactor lead"}]
-
-
-def test_a_label_whose_audit_fact_cannot_be_recorded_is_not_set(
-    db_conn: psycopg.Connection, agent_id: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit", _refuse)
-
-    with pytest.raises(RuntimeError, match="audit write failed"):
-        plugin.set_label("never set")
-
-    row = db_conn.execute("SELECT label FROM agents WHERE id=%s", (agent_id,)).fetchone()
-    db_conn.commit()
-    assert row == (None,)
