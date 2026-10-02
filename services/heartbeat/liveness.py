@@ -370,7 +370,9 @@ async def _record_snapshot(pool: ConnectionPool, name: str, outcome: ProbeOutcom
 
 
 async def run_liveness_pass(
-    pool: ConnectionPool, probe: Callable[..., Awaitable[object]] = cluster_rpc.dispatch_to_machine
+    pool: ConnectionPool,
+    bus: EventBus,
+    probe: Callable[..., Awaitable[object]] = cluster_rpc.dispatch_to_machine,
 ) -> None:
     """One liveness pass: probe every roster-visible agent-runner once, record the
     outcome of the rollout targets as agent-liveness state, snapshot every probed
@@ -394,7 +396,7 @@ async def run_liveness_pass(
     changed_agent_ids = _merge_liveness(pool)
     # `_merge_liveness` committed before these best-effort invalidation hints.
     for agent_id in changed_agent_ids:
-        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
+        publish_agent_updated_sync(bus, agent_id)
     _log.info(
         "[heartbeat] liveness pass: %d machines probed (%d reachable), agents_meta merged",
         len(machines),

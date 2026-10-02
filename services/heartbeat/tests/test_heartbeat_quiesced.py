@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 
 from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from services.heartbeat import completion_digest, daemon
 
 
@@ -53,11 +54,17 @@ async def test_a_quiesced_unit_runs_no_liveness_pass(
 ) -> None:
     passes: list[object] = []
 
-    async def record_pass(pool: object) -> None:
+    async def record_pass(pool: object, _bus: object) -> None:
         passes.append(pool)
 
     monkeypatch.setattr(daemon, "run_liveness_pass", record_pass)
-    await _run_briefly(monkeypatch, daemon._liveness_loop, MagicMock(), quiesced=quiesced)
+    bus = cast("EventBus", MagicMock())
+    await _run_briefly(
+        monkeypatch,
+        lambda pool, liveness: daemon._liveness_loop(pool, bus, liveness),
+        MagicMock(),
+        quiesced=quiesced,
+    )
     assert bool(passes) is (not quiesced)
 
 
