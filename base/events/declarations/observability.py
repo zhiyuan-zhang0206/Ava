@@ -148,34 +148,12 @@ class LokiQueryFailed(TypedDict):
     query: str
 
 
-class PromQueryFailed(TypedDict):
-    """`prom_query_failed` payload — gateway/lgtm/prom_metrics.py transport failure."""
-
-    endpoint: str
-    duration_s: float
-    error: str
-    query: str
-
-
 class LokiQueryBudget(TypedDict):
     """One local Loki-admission transition and its post-transition state.
 
     Float state/wait fields become OTLP histograms; integer outcome fields are
     0/1 deltas and become counters. `outcome` is the bounded reason dimension.
     """
-
-    outcome: Literal["queued", "acquired", "released", "queue_full", "wait_timeout", "cancelled"]
-    active: float
-    queued: float
-    high_water: float
-    wait_ms: float
-    acquired: int
-    queue_full: int
-    wait_timeout: int
-
-
-class PromQueryBudget(TypedDict):
-    """One local Prometheus-admission transition and post-transition state."""
 
     outcome: Literal["queued", "acquired", "released", "queue_full", "wait_timeout", "cancelled"]
     active: float
@@ -278,13 +256,6 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
         site="gateway/lgtm/loki_query_budget.py:_emit_observation",
     ),
-    "prom_query_budget": telemetry_event(
-        "prom_query_budget",
-        "local Prometheus query-admission transition and capacity metrics",
-        payload=PromQueryBudget,
-        tier="noise",
-        site="gateway/lgtm/prom_metrics.py:_emit_budget_observation",
-    ),
     # Immutable Loki lines cannot be updated with a `resolved_by` attribute.
     # These markers record class-state transitions while `event_dismissals`
     # remains the active-resolution source of truth (task #1468).
@@ -374,12 +345,5 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         payload=LokiQueryFailed,
         doc="a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape",
-    ),
-    "prom_query_failed": EventSpec(
-        name="prom_query_failed",
-        category="log",
-        payload=PromQueryFailed,
-        tier="anomaly",
-        doc="a Prometheus HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape",
     ),
 }

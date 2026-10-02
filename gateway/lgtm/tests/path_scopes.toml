@@ -2,7 +2,6 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.gateway_tests" = [
     "test_loki_events.py",
-    "test_prom_metrics.py",
     "test_telemetry_staleness.py",
 ]
 "tests.path_scoped.integration_tests" = [

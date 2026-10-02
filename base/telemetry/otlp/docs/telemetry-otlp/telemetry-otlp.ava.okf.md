@@ -71,9 +71,9 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
 
 ## Read side
 
-The LGTM consumers are documented separately:
-[[gateway/lgtm/docs/loki-events.ava.okf.md|Loki event history]] and
-[[gateway/lgtm/docs/prom-metrics.ava.okf.md|Prometheus telemetry aggregates]].
+The only gateway-side consumer of the Loki copy is documented separately:
+[[gateway/lgtm/docs/loki-events.ava.okf.md|Loki live event read]]; every other reader
+uses `telemetry_events`.
 
 **Flag semantics** — `AVA_TELEMETRY_OTLP_ENABLED` /
 `AVA_TELEMETRY_OTLP_ENDPOINT` (default `http://127.0.0.1:4318` — the standard

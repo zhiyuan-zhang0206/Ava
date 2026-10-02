@@ -119,14 +119,11 @@ class MemorySearchStats(TypedDict):
 
 # The closed reason vocabulary of `fleet_graph_stale` (task #3925): every
 # stale-serving fallback on GET /api/fleet/graph names WHY it degraded — a
-# failed upstream read, a refused query admission, or a phase crossing the
-# route budget. Keep the set closed: the alert rule and dashboards rely on
+# canceled database read or a phase crossing the route budget. Keep the set closed: the alert rule and dashboards rely on
 # it.
 FleetGraphStaleReason = Literal[
     "pg_timeout",
     "pg_budget",
-    "prom_budget",
-    "prom_failed",
 ]
 
 
