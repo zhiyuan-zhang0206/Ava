@@ -5,9 +5,10 @@ dynamic weight that sums per-event recency decay over a time window.
 
 Data sources (task #1197 LGTM cutover):
 - `agents_meta` + `agents` (Postgres): node identity, liveness, labels.
-- `telemetry_events` (Postgres): the llm_usage token sums — retained-window (7d)
-  totals + selected-window scores — from the `in_total` / `out_total` payload
-  fields, read in the same connection as the nodes.
+- Postgres: the llm_usage token sums — retained-window (7d) totals + selected-window
+  scores — from `telemetry_events`, the day-grain ledger and the folded
+  `agent_model_tokens_total` (`gateway/routers/_fleet_tokens.py`), read in the same
+  connection as the nodes.
 - Edge events (audit category, spawn/send_message/fork/resurrect): aggregated
   in Postgres from `audit_events`, the permanent audit record
   (gateway/events/audit_rows.py), in the same phase as the nodes.
@@ -25,7 +26,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated, Any, LiteralString, NamedTuple
 
 from fastapi import APIRouter, Query, Request
@@ -33,13 +34,12 @@ from psycopg import errors as pg_errors
 
 from base import telemetry
 from base.config import settings
-from base.events.contract import LLM_USAGE_KEYS
 from base.events.declarations.gateway import FleetGraphStaleReason
 from base.events.live.redis_client import sync_redis
 from base.log import logger
-from base.telemetry.event_sql import numeric
 from gateway.events import audit_rows
 from gateway.lgtm import telemetry_staleness
+from gateway.routers._fleet_tokens import AgentTokens, agent_tokens
 from gateway.schemas.fleet_graph import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
 from gateway.schemas.stats import StatsWindowHours, window_delta
 
@@ -54,7 +54,6 @@ _CACHE_TTL_SECONDS = 60
 _LAST_GOOD_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 
 _ROUTE_TIMEOUT_S = 10.0
-_RETAINED_WINDOW = timedelta(days=7)
 
 # The fixed `route` value of every `fleet_graph_stale` event (task #3925): a
 # closed constant, never a request-derived path; reasons live in the contract.
@@ -185,21 +184,12 @@ def _emit_stale(reason: FleetGraphStaleReason) -> None:
     )
 
 
-class _AgentTokens(NamedTuple):
-    """One agent's llm_usage token sums: retained window (7d) and selected window."""
-
-    in_retained: float
-    out_retained: float
-    in_window: float
-    out_window: float
-
-
 class _PgGraphData(NamedTuple):
     """The DB-bound graph phase, kept separate from upstream telemetry work."""
 
     node_rows: list[tuple[Any, ...]]
     edges: list[FleetGraphEdge]
-    tokens: dict[int, _AgentTokens]
+    tokens: dict[int, AgentTokens]
 
 
 def _edges_from(
@@ -262,43 +252,16 @@ def _fetch_pg_graph(
         edge_rows = audit_rows.edge_weights(
             conn, live_ids=live_ids, win_start=win_start, now=now, decay_lambda=decay_lambda
         )
-        tokens = _agent_tokens(conn, now=now, win_start=win_start)
+        tokens = agent_tokens(conn, now=now, win_start=win_start)
     return _PgGraphData(node_rows, _edges_from(edge_rows), tokens)
 
 
-def _agent_tokens(
-    conn: Any, *, now: datetime, win_start: datetime | None
-) -> dict[int, _AgentTokens]:
-    """Per-agent token sums of the `llm_usage` rows: the retained window and the selected one.
-
-    `win_start` None is the all-time window. One scan from the older of the two bounds.
-    """
-    in_total = numeric(LLM_USAGE_KEYS["in_total"])
-    out_total = numeric(LLM_USAGE_KEYS["out_total"])
-    win_cond: LiteralString = "TRUE" if win_start is None else "ts > %(window)s"
-    floor: LiteralString = "TRUE" if win_start is None else "ts > least(%(retained)s, %(window)s)"
-    query = f"""
-        SELECT agent_id,
-               COALESCE(sum({in_total}) FILTER (WHERE ts > %(retained)s), 0),
-               COALESCE(sum({out_total}) FILTER (WHERE ts > %(retained)s), 0),
-               COALESCE(sum({in_total}) FILTER (WHERE {win_cond}), 0),
-               COALESCE(sum({out_total}) FILTER (WHERE {win_cond}), 0)
-        FROM telemetry_events
-        WHERE event_name = 'llm_usage' AND category = 'telemetry' AND agent_id IS NOT NULL
-          AND ts <= %(now)s AND {floor}
-        GROUP BY agent_id
-    """  # noqa: S608 — keys come from the registered payload constants
-    params = {"now": now, "retained": now - _RETAINED_WINDOW, "window": win_start}
-    rows = conn.execute(query, params).fetchall()
-    return {int(agent): _AgentTokens(*(float(v) for v in sums)) for agent, *sums in rows}
-
-
 def _build_nodes(
-    node_rows: list[tuple[Any, ...]], tokens: dict[int, _AgentTokens] | None = None
+    node_rows: list[tuple[Any, ...]], tokens: dict[int, AgentTokens] | None = None
 ) -> list[FleetGraphNode]:
     """Build graph nodes, retaining PG identity when the token sums are unavailable."""
     tokens = tokens or {}
-    none = _AgentTokens(0.0, 0.0, 0.0, 0.0)
+    none = AgentTokens(0.0, 0.0, 0.0, 0.0)
     return [
         FleetGraphNode(
             agent_id=r[0],
@@ -358,9 +321,11 @@ def get_fleet_graph(
 
     Node score (windowed, drives node size):
         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
-    over the agent's `llm_usage` rows in the window, summed from
-    `telemetry_events`. `total_tokens` is the sum of the same two fields over
-    the retained 7d window.
+    over the agent's `llm_usage` rows in the window. `total_tokens` is the sum of
+    the same two fields over the retained 7d window. Both are read in parts
+    (`gateway/routers/_fleet_tokens.py`): raw rows of the newest two days, the
+    day-grain ledger before them, and for the all-time score the folded
+    `agent_model_tokens_total`, so the read does not scan history.
 
     Edge weight:
         lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,

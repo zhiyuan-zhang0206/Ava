@@ -192,6 +192,8 @@ _PER_TEST_TRUNCATE_TABLES = (
     # audit_events / telemetry_events tables, which tests read in time windows of their own.
     "event_dismissals",
     "rollup_day_state",
+    "agent_model_tokens_total",
+    "agent_model_tokens_total_through",
     "llm_usage_hourly",
     "agent_metric_scans",
     "agent_metric_file_cursors",
