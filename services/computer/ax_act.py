@@ -52,6 +52,34 @@ def _args(args: dict[str, Any]) -> tuple[int, str, str | None]:
     return int(match.group(1)), action, value
 
 
+_VISUAL_ID_RE = re.compile(r"^px:(\d+)$")
+
+
+def _press_visual(args: dict[str, Any], session: AxSession) -> dict[str, Any]:
+    """`px:N` (a visual-only text from `ax_tree(include_ocr_gap)`): the only
+    thing that can be done with it is a click at its center."""
+    match = _VISUAL_ID_RE.match(str(args["id"]))
+    if match is None:
+        raise ComputerUseError(f"id must look like 'px:3', got {args['id']!r}")
+    if args.get("action") != "press" or args.get("value") is not None:
+        raise ComputerUseError("px: elements only support action=press (a click at the text)")
+    number = int(match.group(1))
+    if number not in session.visual:
+        raise ComputerUseError(
+            f"unknown visual element px:{number}: call ax_tree with include_ocr_gap first"
+        )
+    x, y, text = session.visual[number]
+    helper.click(x / session.visual_scale, y / session.visual_scale)
+    return {
+        "element": f"px:{number}",
+        "action": "press",
+        "completed": True,
+        "label": text[:80],
+        "x": x,
+        "y": y,
+    }
+
+
 def _attempt(table: AxIdTable, sid: int, action: str, value: str | None) -> AxActResult | None:
     """One try through the element's current raw id; None when it has none."""
     raw = table.entry(sid).raw
@@ -74,6 +102,8 @@ def ax_act_tool(
     args: dict[str, Any], _agent_id: int, scale: float | None, session: AxSession
 ) -> dict[str, Any]:
     """`ax_act`: press / show_menu / focus / set_value on an `ax_tree` element."""
+    if str(args.get("id", "")).startswith("px:"):
+        return _press_visual(args, session)
     sid, action, value = _args(args)
     table = session.current()
     table.entry(sid)  # unknown ids fail before any helper round trip
@@ -114,7 +144,8 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
             "editable field; needs value, which is never echoed or logged), focus, "
             "show_menu. If the tree changed since ax_tree it re-finds the element by "
             "its place in the tree and acts once; if it is gone or changed you get an "
-            "error — call ax_tree again, never guess an id. Returns the element's "
+            "error — call ax_tree again, never guess an id. A px:N id (visual-only text from "
+            "ax_tree include_ocr_gap) accepts only action=press, a click at its center. Returns the element's "
             "center (x, y in physical pixels) and completed; completed=false with a "
             "note means the app did not answer in time and the action may still have "
             "run, so re-read the tree. A UI change after an action can renumber nearby "

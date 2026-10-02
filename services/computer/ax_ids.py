@@ -104,6 +104,11 @@ class AxSession:
     """The daemon's current table (one app process at a time)."""
 
     table: AxIdTable | None = None
+    # The latest `include_ocr_gap` boxes, numbered px:N: physical-pixel centers
+    # and (centre, label), plus the scale they were measured at. Replaced by
+    # every ax_tree call; only `ax_act` press (a click) can use them.
+    visual: dict[int, tuple[int, int, str]] = field(default_factory=dict[int, tuple[int, int, str]])
+    visual_scale: float = 1.0
 
     def table_for(self, app: str, pid: int) -> AxIdTable:
         """The live table for this process; a different app or a restarted
