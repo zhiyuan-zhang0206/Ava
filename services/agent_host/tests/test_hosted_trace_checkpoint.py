@@ -20,6 +20,7 @@ from agent.tests.test_inbound_ownership import _agent
 from base.agents.context import AvaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from base.config import settings
+from base.events.live.bus import EventBus
 from services.agent_host import host as host_module
 
 
@@ -62,7 +63,11 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
         )
         await flush_checkpoint(saver, agent_id)
         host = host_module.AgentHost(
-            pool=aops_pool, checkpointer=saver, graph=graph, machine="test"
+            pool=aops_pool,
+            checkpointer=saver,
+            graph=graph,
+            machine="test",
+            bus=EventBus.from_settings(),
         )
         assert not (await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))).exited
 

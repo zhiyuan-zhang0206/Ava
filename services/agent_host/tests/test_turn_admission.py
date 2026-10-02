@@ -27,6 +27,7 @@ from typing import cast
 import pytest
 
 from agent.turn import progress
+from base.events.live.bus import EventBus
 from services.agent_host.admission import TurnAdmission
 from services.agent_host.dispatcher import (
     InboundWakeDispatcher,
@@ -315,7 +316,7 @@ class TestSchedulerIntegration:
             ]
 
         disp = InboundWakeDispatcher(
-            "redis://unused", fresh, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), fresh, pending_scan=_pending, stale_after_s=180.0
         )
         try:
             await disp.scan_once()

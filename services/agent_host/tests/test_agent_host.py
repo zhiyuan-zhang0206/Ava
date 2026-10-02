@@ -42,6 +42,8 @@ from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import AvaContext
 from base.config import settings
 from base.config.turn_view import turn_settings
+from base.events.live.bus import EventBus
+from base.events.live.tests.fakes import patch_async_redis
 from base.lm.factory import validate_model_config
 from base.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
 from base.packages.plugins.config_view import turn_plugin_config
@@ -369,11 +371,8 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
 
     monkeypatch.setattr(runtime_mod, "validate_model_config", _allow_model_config)
 
-    def _fake_redis() -> object:
-        """The publisher below never touches it; the host only passes it through."""
-        return object()
-
-    monkeypatch.setattr(host_mod, "get_async_redis", _fake_redis)
+    # The publisher below never touches the client; the host only passes it through.
+    patch_async_redis(monkeypatch, object)
 
     monkeypatch.setattr(host_mod, "AgentEventPublisher", _Publisher)
 
@@ -407,6 +406,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
             checkpointer=object(),  # pyright: ignore[reportArgumentType]
             graph=graph,  # pyright: ignore[reportArgumentType]
             machine="this-box",
+            bus=EventBus.from_settings(),
         )
         return host, graph, pool
 
@@ -427,6 +427,7 @@ class TestPendingInboundBackstop:
             checkpointer=object(),  # pyright: ignore[reportArgumentType]
             graph=object(),  # pyright: ignore[reportArgumentType]
             machine="this-box",
+            bus=EventBus.from_settings(),
         )
 
         candidates = await host.pending_inbound_wakes(180.0)
@@ -466,6 +467,7 @@ class TestPendingInboundBackstop:
             checkpointer=object(),  # pyright: ignore[reportArgumentType]
             graph=object(),  # pyright: ignore[reportArgumentType]
             machine="this-box",
+            bus=EventBus.from_settings(),
         )
 
         candidates = await host.pending_inbound_wakes(180.0)
@@ -542,6 +544,7 @@ class TestPoolIsolation:
             checkpointer=original._checkpointer,
             graph=graph,  # pyright: ignore[reportArgumentType]
             machine="this-box",
+            bus=EventBus.from_settings(),
         )
 
         await host.run_turn(11)

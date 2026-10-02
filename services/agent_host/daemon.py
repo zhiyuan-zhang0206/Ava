@@ -56,7 +56,6 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-import base.events.live.redis_client
 from agent.ownership.hosted import settle_stale_running_rows
 from agent.turn.progress import turn_progress_age_s, turn_progress_snapshot
 from base import paths
@@ -76,6 +75,7 @@ from base.db import Database
 from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
+from base.events.live.bus import EventBus
 from base.log import init_gateway_process, logger
 from base.sessions.helper_chain_guard import parent_chain_intact
 from services.agent_host import boot_defer
@@ -169,6 +169,7 @@ async def _watch_plugins_for_restart() -> None:
 
 
 async def _publish_turn_progress_heartbeat(
+    bus: EventBus,
     machine: str,
     active_agents: Collection[int],
 ) -> None:
@@ -186,7 +187,7 @@ async def _publish_turn_progress_heartbeat(
             }
     try:
         async with asyncio.timeout(_TURN_PROGRESS_PUBLISH_TIMEOUT_S):
-            await base.events.live.redis_client.get_async_redis().set(
+            await bus.async_redis().set(
                 f"host_turn_progress:{machine}",
                 json.dumps(snapshots, separators=(",", ":")),
                 ex=_TURN_PROGRESS_HEARTBEAT_TTL_S,
@@ -229,6 +230,7 @@ async def _beat_forever(
     host: AgentHost,
     scheduler: TurnScheduler,
     machine: str,
+    bus: EventBus,
 ) -> None:
     """Liveness and ownership renewal, independent of the idle dispatcher.
     beat() precedes DB renewal — process health must not depend on the DB."""
@@ -247,7 +249,7 @@ async def _beat_forever(
                 _log.warning("[agent-host] ownership renewal timed out")
             except Exception:
                 _log.exception("[agent-host] ownership renewal failed — retrying next beat")
-        await _publish_turn_progress_heartbeat(machine, scheduler.active_agents)
+        await _publish_turn_progress_heartbeat(bus, machine, scheduler.active_agents)
         _report_long_admission_waits(host)
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 
@@ -403,13 +405,14 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), _MODULE)
 
 
-def _build_pools(
-    db: Database,
-) -> tuple[
-    AsyncConnectionPool[psycopg.AsyncConnection], AsyncConnectionPool[psycopg.AsyncConnection]
+def _boot_handles() -> tuple[
+    AsyncConnectionPool[psycopg.AsyncConnection],
+    AsyncConnectionPool[psycopg.AsyncConnection],
+    EventBus,
 ]:
-    """The turn/checkpoint pool and the reserved control pool of one host."""
-    return build_shared_pool(db), build_control_pool(db)
+    """The turn/checkpoint pool, the reserved control pool and the event bus of one host."""
+    db = Database.from_settings()
+    return build_shared_pool(db), build_control_pool(db), EventBus.from_settings()
 
 
 async def run() -> None:
@@ -437,7 +440,7 @@ async def run() -> None:
     land_cluster_extensions()
     load_process_extensions()
 
-    workload_pool, control_pool = _build_pools(Database.from_settings())
+    workload_pool, control_pool, bus = _boot_handles()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[None] | None = None
     health = None
@@ -455,12 +458,13 @@ async def run() -> None:
             checkpointer=checkpointer,
             graph=graph,
             machine=local_machine,
+            bus=bus,
         )
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long
         # a stuck agent has really been silent.
         scheduler = TurnScheduler(host.run_turn, activity_clock=host.last_active_at)
-        beat = asyncio.create_task(_beat_forever(liveness, host, scheduler, local_machine))
+        beat = asyncio.create_task(_beat_forever(liveness, host, scheduler, local_machine, bus))
         settled = await settle_stale_running_rows(control_pool, local_machine)
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
 
@@ -492,7 +496,7 @@ async def run() -> None:
                 for name, loop in _background_loops().items():
                     background.create_task(loop, name=name)
                 await InboundWakeDispatcher(
-                    settings.data_plane.redis_url,
+                    bus,
                     scheduler,
                     pending_scan=host.pending_inbound_wakes,
                     stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
