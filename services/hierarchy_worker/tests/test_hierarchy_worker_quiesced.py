@@ -5,13 +5,12 @@ from __future__ import annotations
 
 import pytest
 
-from base.config import settings
 from base.deploy.maintenance import admission
 from services.hierarchy_worker import runner
+from services.hierarchy_worker.tests.slices import hierarchy_config
 
 
 def test_a_quiesced_unit_ticks_without_a_connection(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
     monkeypatch.setattr(admission, "quiesced", lambda: True)
     dialed: list[object] = []
 
@@ -20,14 +19,13 @@ def test_a_quiesced_unit_ticks_without_a_connection(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(runner, "connect", record_dial)
 
-    runner.run_tick()
+    runner.run_tick(hierarchy_config(hierarchy_worker_enabled=True))
 
     assert dialed == []
 
 
 def test_an_unquiesced_unit_ticks_through_a_connection(monkeypatch: pytest.MonkeyPatch) -> None:
     """The control: the same tick does dial when the unit is not quiesced."""
-    monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
     monkeypatch.setattr(admission, "quiesced", lambda: False)
     dialed: list[object] = []
 
@@ -37,6 +35,8 @@ def test_an_unquiesced_unit_ticks_through_a_connection(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(runner, "connect", dial)
 
-    runner.run_tick()  # the transient failure ends the tick
+    runner.run_tick(
+        hierarchy_config(hierarchy_worker_enabled=True)
+    )  # the transient failure ends the tick
 
     assert dialed

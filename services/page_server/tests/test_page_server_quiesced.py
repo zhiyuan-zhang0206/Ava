@@ -13,6 +13,7 @@ from psycopg_pool import ConnectionPool
 from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
 from services.page_server import daemon
+from services.page_server.tests.slices import page_server_config
 
 
 @pytest.mark.parametrize("quiesced", [True, False])
@@ -36,7 +37,9 @@ async def test_a_quiesced_unit_runs_no_reconcile_pass(
     monkeypatch.setattr(daemon.asyncio, "sleep", short_sleep)
     pool = MagicMock()
     task = asyncio.create_task(
-        daemon._reconcile_loop(cast("ConnectionPool", pool), LoopProgress("t", 60.0))
+        daemon._reconcile_loop(
+            cast("ConnectionPool", pool), LoopProgress("t", 60.0), page_server_config()
+        )
     )
     try:
         await real_sleep(0.2)
