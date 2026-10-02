@@ -8,6 +8,7 @@ joins by adding its own file, and a moved or deleted package carries its declara
     settings = ["daemon.py"]   # the only modules here that may read the global `settings`
     db = ["daemon.py"]         # the only modules here that may call `Database.from_settings()`
     endpoints = ["daemon.py"]  # the only modules here that may call `ServiceEndpoints.from_settings()`
+    bus = ["daemon.py"]        # the only modules here that may call `EventBus.from_settings()`
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import cast
 
 ROOTS_FILE = "ambient_roots.toml"
-KINDS = frozenset({"settings", "db", "endpoints"})
+KINDS = frozenset({"settings", "db", "endpoints", "bus"})
 _SKIPPED_DIRS = frozenset({"node_modules", "__pycache__"})
 
 
