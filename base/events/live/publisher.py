@@ -215,7 +215,7 @@ class AgentEventPublisher:
         # local backpressure (queue full) without a debugger. The line is
         # also a structured `sse_drop` agent_event: the ops monitor panel
         # counts queue backlog over time from these rows (see
-        # gateway/cluster/ops_series_lgtm.py). Rate-limited to _WARN_INTERVAL_S, so a
+        # gateway/cluster/ops_series.py). Rate-limited to _WARN_INTERVAL_S, so a
         # sustained burst reports once per interval with the delta n.
         logger.warning(
             "[event-publisher] dropped {n} SSE event(s) (agent_id={aid}, "

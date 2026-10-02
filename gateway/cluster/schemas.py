@@ -6,7 +6,7 @@ the `GET /api/ops/monitor` series (the Insights Ops panel).
 `base.api_contracts.status` so `cli` can decode the roster without importing
 up into `gateway`; the models below are the gateway-only status surface.
 
-The ops-monitor shapes mirror `gateway.cluster.ops_series_lgtm.fetch_ops_series`
+The ops-monitor shapes mirror `gateway.cluster.ops_series.fetch_ops_series`
 output one-for-one (the router builds the report dict there, then validates it
 here). Every series array is positionally aligned with `meta.bucket_starts` via
 its `bucket` index; missing buckets are zero-filled by the query core, so a
