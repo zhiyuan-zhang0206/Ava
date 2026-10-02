@@ -180,6 +180,7 @@ def ops_quiescent(timeout: float) -> None:
     if not get_backend().has_session(session_name("ops")) and not _root_unit_running("ops"):
         return
     deadline = time.monotonic() + timeout
+    # quiesce-exempt: the stop's own bounded wait for ops to go idle, not a background loop
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:

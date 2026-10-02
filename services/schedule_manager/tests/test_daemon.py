@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 from collections.abc import Iterator
+from unittest.mock import MagicMock
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -13,6 +14,7 @@ from psycopg_pool import ConnectionPool
 import base.db
 import gateway.app
 from base.daemon.loop_health import LivenessGroup
+from base.deploy.maintenance import admission
 from services.schedule_manager import daemon
 
 
@@ -153,3 +155,23 @@ async def test_a_foreign_checkout_refuses_to_supervise_schedules(
 
     with pytest.raises(RuntimeError, match="foreign checkout"):
         await daemon.run()
+
+
+@pytest.mark.parametrize("quiesced", [True, False])
+async def test_a_quiesced_unit_polls_the_request_table_through_no_connection(
+    monkeypatch: pytest.MonkeyPatch, quiesced: bool
+) -> None:
+    """The request consumer reads the table every second even while holds are up
+    (so a request stays queued); inside the stop window it must not borrow."""
+    monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
+    monkeypatch.setattr(daemon.ScheduleManager, "reconcile", lambda _self: None)
+    pool = MagicMock()
+    pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchall.return_value = []
+
+    task = asyncio.create_task(daemon._run_loops(pool, LivenessGroup()))
+    try:
+        await asyncio.sleep(0.3)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert bool(pool.connection.called) is (not quiesced)

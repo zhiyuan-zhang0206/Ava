@@ -41,6 +41,7 @@ from base.daemon.health import Liveness, health_port, start_health_server, stop_
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
+from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.paths import pid_path
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
@@ -527,6 +528,8 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     while True:
         try:
             await _sleep_with_liveness(liveness, step)
+            if admission.quiesced():
+                continue
             _sweep_backoff_resets(pool)
             _reconcile_checkin_outcomes(
                 pool,
@@ -572,7 +575,8 @@ async def _liveness_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     populated at once; a failed pass is retried on the next interval."""
     while True:
         try:
-            await run_liveness_pass(pool)
+            if not admission.quiesced():
+                await run_liveness_pass(pool)
         except asyncio.CancelledError:
             raise
         except Exception:

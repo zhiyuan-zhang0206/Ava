@@ -301,6 +301,7 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
     def _guard() -> None:
         last_sig: tuple[str, int, str] | None = None
         stalled_since: float | None = None
+        # quiesce-exempt: a watchdog thread inside one schedule runner process; it reads frames, not the database
         while not stop.is_set():
             time.sleep(_stall_check_interval_s())
             try:

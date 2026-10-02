@@ -99,6 +99,7 @@ from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
+from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.paths import pid_path
 from services.delivery_watchdog import (
@@ -416,6 +417,8 @@ async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     while True:
         try:
             await round_loop.sleep_with_progress(progress, interval)
+            if admission.quiesced():
+                continue
             # Reload the alerted set from the table — it is the single truth;
             # `alerted` below is a per-tick working copy. An unreadable table
             # skips the whole tick (defer rather than re-alert): the loop

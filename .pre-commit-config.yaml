@@ -445,6 +445,18 @@ repos:
         entry: .venv/bin/python scripts/lint/termination_source.py --only
         files: \.py$
 
+      # The stop window is database-quiet (decisions/2026-09-12-stop-window-contract.md):
+      # a resident periodic loop that borrows the pool every tick keeps a paused
+      # runner's idle clients alive and blocks PgBouncer's stop. Every such loop
+      # in services/, gateway/ and ops/ gates on `admission.quiesced()` or says
+      # why not with `# quiesce-exempt: <reason>`. The shared round loop gates
+      # centrally. See scripts/content_lint/lint_quiesced_loops.py header.
+      - id: lint-quiesced-loops
+        name: lint quiesced loops (every resident periodic loop gates on the stop window or says why not)
+        language: system
+        entry: .venv/bin/python scripts/content_lint/lint_quiesced_loops.py --only
+        files: \.py$
+
       # Postgres (`audit_events`) is the system of record for category=audit
       # events; Loki is a projection that sheds and expires. An emit site that
       # builds or enqueues an audit event without record_audit /

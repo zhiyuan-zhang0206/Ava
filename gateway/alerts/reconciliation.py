@@ -23,6 +23,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.deploy.maintenance import admission
 from base.telemetry.alerts import AlertKey, parse_ts
 
 _log = logging.getLogger(__name__)
@@ -193,12 +194,13 @@ async def reconciliation_loop(
     """
 
     while not stop.is_set():
-        try:
-            resolved = await _reconcile_once(db_pool, grafana_client, publish_rows)
-            if resolved:
-                _log.info("alerts: reconciled %d alert(s) against Grafana", resolved)
-        except Exception:
-            _log.warning("alerts: Grafana reconciliation failed", exc_info=True)
+        if not admission.quiesced():
+            try:
+                resolved = await _reconcile_once(db_pool, grafana_client, publish_rows)
+                if resolved:
+                    _log.info("alerts: reconciled %d alert(s) against Grafana", resolved)
+            except Exception:
+                _log.warning("alerts: Grafana reconciliation failed", exc_info=True)
         try:
             await asyncio.wait_for(stop.wait(), timeout=_RECONCILE_INTERVAL_S)
         except TimeoutError:
