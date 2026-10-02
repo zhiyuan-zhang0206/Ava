@@ -26,7 +26,6 @@
     "tests/base/test_no_secrets_on_argv.py::ava.shell.sessions._shell_prefix": 1,
     "tests/base/test_no_secrets_on_argv.py::services.schedule_manager.manager.ScheduleManager._close_null_runs": 1,
     "tests/base/test_no_secrets_on_argv.py::services.schedule_manager.manager.ScheduleManager._set_status": 1,
-    "tests/base/test_pg_runtime.py::base.cluster.dataplane.pg_runtime._installed_server": 1,
     "tests/base/test_runner_role.py::base.cluster.provision._checkpoint_schema_versions": 1,
     "tests/base/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 5,
     "tests/base/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._build_providers": 3

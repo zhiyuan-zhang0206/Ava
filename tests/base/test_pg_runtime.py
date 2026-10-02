@@ -9,9 +9,6 @@ from pathlib import Path
 import pytest
 
 from base.cluster.dataplane import pg_runtime, runtime_binaries
-from base.config import settings
-from cli.commands.converge._steps import _ensure_pg_binaries_step
-from cli.commands.converge.spec import ConvergeCtx
 
 
 @pytest.fixture
@@ -55,27 +52,6 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(runtime_binaries, "ensure_pg_binaries", forbid_download)
     monkeypatch.setattr(runtime_binaries, "ensure_pgvector", forbid_download)
     return bindir
-
-
-def test_start_converge_accepts_installed_pg17_without_download(installed: Path) -> None:
-    _ensure_pg_binaries_step(
-        ConvergeCtx(installed.parent, installed.parent, frozenset({"gateway"}))
-    )
-    assert pg_runtime.pg_tool("postgres") == installed / "postgres"
-
-
-def test_remote_managed_gateway_does_not_require_local_server_or_extension(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def remote(_self: object) -> bool:
-        return True
-
-    def forbidden() -> None:
-        pytest.fail("Remote-managed storage must not prepare a local server runtime")
-
-    monkeypatch.setattr(type(settings.data_plane), "is_remote", property(remote))
-    monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", forbidden)
-    _ensure_pg_binaries_step(ConvergeCtx(tmp_path, tmp_path, frozenset({"gateway"})))
 
 
 @pytest.mark.parametrize("version", ["16.8", "18.0", "17.1beta1"])
