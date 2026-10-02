@@ -238,7 +238,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # inventory snapshot) lowers the current total by one, to 219. The root unit
     # alert pair (task #4872 B route: root_unit_alert_fired — a unit entered an
     # alertable failure state — and root_unit_alert_resolved) raises the
-    # current total to 221.
+    # current total to 221. The custody reconcile audit (task #4872 C route:
+    # custody_reconcile — every examined record reports released|retained with
+    # its evidence) raises the current total to 222.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
     assert "agent_reopened" not in _TELEMETRY_KINDS
     for retired in (
@@ -250,7 +252,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
         assert retired not in _TELEMETRY_KINDS
     # The suffix diagnostic adds one; retiring tool-call concatenation removes one.
     assert "multiple_tool_calls_merged" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 221
+    assert len(_TELEMETRY_KINDS) == 222
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",
@@ -264,6 +266,18 @@ def test_root_restart_payloads_name_the_evidence() -> None:
 
     assert payload_keys("root_restart_failed") == ("unit", "stage", "detail")
     assert payload_keys("root_restart_cleared") == ("unit", "failed_for_s")
+
+
+def test_custody_reconcile_payload_names_the_evidence() -> None:
+    from base.events.contract import payload_keys
+
+    assert payload_keys("custody_reconcile") == (
+        "unit",
+        "checked",
+        "found",
+        "decision",
+        "evidence",
+    )
 
 
 def test_root_unit_alert_payloads_name_the_evidence() -> None:

@@ -185,27 +185,6 @@ async def exited(owner: Supervisor) -> None:
     raise AssertionError("unit did not exit on its own")
 
 
-async def test_unexpected_exit_cannot_authorize_cold_duplicate(tmp_path: Path) -> None:
-    trigger = tmp_path / "go"
-    owner = root(tmp_path, exits_on(trigger))
-    await owner.start()
-    trigger.touch()
-    await exited(owner)
-    status = await row(owner)
-    assert "custody" in status["last_error"]
-    other = root(tmp_path, "raise AssertionError('must not spawn')")
-    with pytest.raises(RuntimeError, match="custody requires reconciliation"):
-        await other.start()
-    assert (tmp_path / "custody/worker.json").exists()
-    # The owner reaped that exact birth and its group was empty: stop settles it.
-    await owner.down("worker")
-    released = await row(owner)
-    assert released["state"] == "stopped"
-    assert released["last_error"] is None, "the settled record still asks for reconciliation"
-    assert not list((tmp_path / "custody").iterdir())
-    await owner.shutdown()
-
-
 async def test_stop_after_unexpected_exit_closes_surviving_descendants(tmp_path: Path) -> None:
     child_file, trigger = tmp_path / "child", tmp_path / "go"
     spawn = f"import subprocess; child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path({str(child_file)!r}).write_text(str(child.pid))"
@@ -304,7 +283,7 @@ async def test_exited_birth_at_a_reused_pid_never_signals_the_stranger(tmp_path:
         # the group that now carries that number.
         generation.identity = OwnedProcess(stranger.pid, dead.birth, dead.starttime)
         generation.tracked = {generation.identity}
-        generation.custody.retain(generation.tracked)
+        generation.custody.retain(generation.tracked, generation.proc.pid)
         generation.scope_closed_at_exit = False
         await owner.down("worker")
         assert stranger.poll() is None

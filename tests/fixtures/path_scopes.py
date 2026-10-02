@@ -313,6 +313,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/agent_ops/tests",
             "services/ava_root/tests/test_ava_root_health.py",
             "services/ava_root/tests/test_ava_root_probes.py",
+            "services/ava_root/tests/test_ava_root_reconcile.py",
             "services/ava_root/tests/test_ava_root_selfcheck.py",
             "services/ava_root/tests/test_ava_root_stop_window.py",
             "services/ava_root/tests/test_ava_root_wiring.py",
@@ -347,7 +348,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/redis_bridge/tests",
             "services/tests",
         ),
-        127,
+        128,
     ),
     "tests.path_scoped.structure_tests": Scope(
         (

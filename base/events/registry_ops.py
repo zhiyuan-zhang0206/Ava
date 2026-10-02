@@ -17,6 +17,7 @@ from base.events.system import (
     BackupOperationCustody,
     CheckpointTableSizes,
     ConvergeFilePreserved,
+    CustodyReconcile,
     DeltaMessageSuffix,
     EventClassReopened,
     EventSpec,
@@ -219,6 +220,13 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "root unit replacement succeeded — the recorded failure state was cleared (task #4872)",
         payload=RootRestartCleared,
         tier="noise",
+    ),
+    "custody_reconcile": _telemetry(
+        "custody_reconcile",
+        "custody record reconcile pass — every examined record reports released|retained with "
+        "its birth and process-group evidence (task #4872)",
+        payload=CustodyReconcile,
+        tier="observation",
     ),
     "root_unit_alert_fired": _telemetry(
         "root_unit_alert_fired",
