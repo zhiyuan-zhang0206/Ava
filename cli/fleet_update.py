@@ -216,7 +216,7 @@ def down(s: Session, args: argparse.Namespace) -> None:
         s.run(
             alias,
             f"{_HOME}; git checkout -q --detach {new} && {_VENV_DIRS} && "
-            f"env -u VIRTUAL_ENV uv sync --frozen && {_CLEAN}",
+            f"env -u VIRTUAL_ENV uv sync --frozen --compile-bytecode && {_CLEAN}",
         )
     s.say(f"down complete: every host is stopped on {new[:12]}; run `up` when ready")
 

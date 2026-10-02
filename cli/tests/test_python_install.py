@@ -116,6 +116,14 @@ def test_fresh_mirror_install_preserves_graph_hashes_markers_and_editable(
     assert (python_mirror.repo / "uv.lock").read_bytes() == python_mirror.lock
 
 
+def _assert_installs_precompile(calls: list[list[str]], *, expected: int) -> None:
+    """`--no-config` hides `[tool.uv] compile-bytecode`, so every installing step carries the flag."""
+    installing = [argv for argv in calls if argv[1] == "sync" or argv[1:3] == ["pip", "install"]]
+    assert len(installing) == expected
+    assert all("--compile-bytecode" in argv for argv in installing)
+    assert not any("--compile-bytecode" in argv for argv in calls if argv not in installing)
+
+
 @pytest.mark.parametrize("mirror_host", [True, False])
 def test_environment_creation_names_the_checkout_python_pin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mirror_host: bool
@@ -157,6 +165,7 @@ def test_environment_creation_names_the_checkout_python_pin(
     # The offline export needs no interpreter; the pin must not block a later fetch.
     assert calls[0][1] == "export"
     assert "--python" not in calls[0]
+    _assert_installs_precompile(calls, expected=1 + int(mirror_host))
 
 
 def _declare_host_mirror_python(python_mirror: PythonMirror, tmp_path: Path) -> str:
