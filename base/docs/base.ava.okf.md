@@ -52,6 +52,7 @@ The base-layer public entry points: [[base/docs/entry-points.ava.okf.md]].
   audit, status renderer, and rootless-first reconciliation with bounded
   `sudo -n` / manual-command fallback; see
   [[base/sessions/docs/session-backend.ava.okf.md|session backend]].
-- Layer constraints are enforced by `import-linter`: base < ava < agent < gateway < cli
-- There is no internal layer restriction within base; services must not import agent kernel
+- `base` is the bottom import layer; which package may import which is in
+  [`conventions/import-layering.md`](../../conventions/import-layering.md). There is no
+  internal layer restriction within base.
 - File line budget: soft limit 600 / hard limit 800 (enforced by lint)
