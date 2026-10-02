@@ -249,7 +249,7 @@ verified mean — invalid replays are reported separately.
 ## Data source
 
 Events come from the gateway `/api/events` endpoint — telemetry and log rows from
-**Loki**, audit rows from `audit_events` in Postgres (the permanent audit record);
+`telemetry_events` and audit rows from `audit_events`, both in Postgres and permanent;
 `collect.py` is the read path, and a 0-run dataset is an ALERT (exit 2), never
 "nothing to act on" — except a TEST- only window (QA review of PR #698), which exits 0.
 
