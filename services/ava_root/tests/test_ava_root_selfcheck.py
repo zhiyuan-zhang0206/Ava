@@ -1,9 +1,11 @@
 """services.ava_root.selfcheck: the tree self-check (G2 / B7).
 
 Stub-host tests drive the episode semantics (one event per broken episode,
-gauges + cumulative counts, unverifiable separation, metric slots); one
-integration test drives it against a real Supervisor whose watch is disarmed
-so the death stays observable.
+gauges + cumulative counts, unverifiable separation, metric slots); two
+integration tests drive it against a real Supervisor whose watch is disarmed
+so the death stays observable: route C reconcile releases a record whose every
+fact is proven gone (the duplicate starts), and a fact the group keeps unproven
+still refuses one.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import cast
@@ -38,6 +41,9 @@ class _Recorder:
         self.calls: list[dict[str, object]] = []
 
     def warning(self, message: str, **extra: object) -> None:
+        self.calls.append({"message": message, **extra})
+
+    def info(self, message: str, **extra: object) -> None:
         self.calls.append({"message": message, **extra})
 
     def events(self, name: str) -> list[dict[str, object]]:
@@ -263,7 +269,7 @@ async def started(short_tmp: Path) -> AsyncIterator[StartFactory]:
             await supervisor.shutdown()
 
 
-async def test_integration_detects_a_disarmed_death_and_refuses_a_duplicate(
+async def test_integration_detects_a_disarmed_death_and_reconciles_the_record(
     started: StartFactory, recorder: _Recorder
 ) -> None:
     supervisor = await started([_unit("svc")])
@@ -288,14 +294,54 @@ async def test_integration_detects_a_disarmed_death_and_refuses_a_duplicate(
     assert chain["broken_units"] == ["svc"]
     assert len(recorder.events("root_chain_broken")) == 1
 
-    # An unexplained death requires reconciliation, never a duplicate: the
-    # dead generation's custody blocks `up()` (no new pid; the unit reports
-    # down with the refusal), and without its own reap observation shutdown
-    # refuses to call the uncaptured scope stopped.
+    # Every recorded fact is proven gone, so reconcile clears the record first
+    # and the fresh generation starts — never a duplicate of a live
+    # predecessor (task #4872, route C).
     result = cast("list[dict[str, object]]", (await supervisor.up("svc"))["units"])
-    assert result[0]["action"] == "failed"
-    assert result[0]["pid"] is None
-    assert "custody" in str(result[0]["error"])
-    with pytest.raises(ExceptionGroup) as refused:
-        await supervisor.shutdown()
-    assert refused.group_contains(RuntimeError, match="never observed its reap; custody retained")
+    assert result[0]["action"] == "started"
+    new_pid = cast(int, result[0]["pid"])
+    assert new_pid != pid
+    released = recorder.events("custody_reconcile")
+    assert [event["decision"] for event in released] == ["released"]
+
+
+async def test_integration_refuses_a_duplicate_while_the_group_is_unproven(
+    started: StartFactory, recorder: _Recorder
+) -> None:
+    supervisor = await started([_unit("svc")])
+    units = cast("list[dict[str, object]]", supervisor.tree_view()["units"])
+    pid = cast(int, units[0]["pid"])
+
+    # A member outlives the leader, keeping the unit's process group occupied:
+    # the recorded birth dies, but the record keeps an unproven fact.
+    deadline = time.monotonic() + 5
+    while os.getpgid(pid) != pid:
+        if time.monotonic() > deadline:
+            raise AssertionError("unit did not create its process group")
+        await asyncio.sleep(0.01)
+    member = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], process_group=pid
+    )
+    try:
+        runtime = supervisor._units["svc"]
+        assert runtime.watch_task is not None
+        runtime.watch_task.cancel()
+        os.kill(pid, signal.SIGKILL)
+        await asyncio.sleep(0.15)
+
+        # The unproven group keeps custody: `up()` refuses (no new pid), and
+        # shutdown refuses to call the uncaptured scope stopped.
+        result = cast("list[dict[str, object]]", (await supervisor.up("svc"))["units"])
+        assert result[0]["action"] == "failed"
+        assert result[0]["pid"] is None
+        assert "custody" in str(result[0]["error"])
+        retained = recorder.events("custody_reconcile")
+        assert [event["decision"] for event in retained] == ["retained"]
+        with pytest.raises(ExceptionGroup) as refused:
+            await supervisor.shutdown()
+        assert refused.group_contains(
+            RuntimeError, match="never observed its reap; custody retained"
+        )
+    finally:
+        member.kill()
+        member.wait(timeout=10)
