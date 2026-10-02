@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any
 
 import ava
+from base.db import Database
 
 # `audit`/`collect`/`rubric` are siblings in this skill's own scripts/ dir,
 # not an importable package (PYTHONSAFEPATH=1 keeps a script's own directory
@@ -51,7 +52,6 @@ from audit import LeakPaths
 from collect import collect_one
 from rubric import scores
 
-from base.db import connect
 from base.paths import ava_home, workspace_dir
 
 # Tool-call prefixes that make a run unsafe to re-run: fleet/user-facing side
@@ -155,7 +155,7 @@ def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None)
 def _status_of(agent_ids: list[int]) -> dict[int, str]:
     if not agent_ids:
         return {}
-    with connect() as conn, conn.cursor() as cur:
+    with Database.from_settings().connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT id, status FROM agents_meta WHERE id = ANY(%s)", [agent_ids])
         return {r[0]: r[1] for r in cur.fetchall()}
 
