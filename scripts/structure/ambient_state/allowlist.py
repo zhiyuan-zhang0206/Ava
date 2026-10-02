@@ -69,6 +69,10 @@ SINK_FACADES: dict[str, str] = {
         "the OTLP export backend: the meter facade over the global meter provider, the backend "
         "handle and the once-per-process export gate; write-only for callers"
     ),
+    "base/telemetry/event_store.py": (
+        "the telemetry_events writer: its pool handle, backoff clock and failure counter are "
+        "written by the emitter's drain thread and read only by the writer itself"
+    ),
     "base/telemetry/metrics/observed_metrics.py": (
         "the observed-metrics writer: its pool handle and failure counter are written by "
         "emitters and read only by the writer itself"
