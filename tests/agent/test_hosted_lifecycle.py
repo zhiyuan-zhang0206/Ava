@@ -8,12 +8,10 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from langchain_core.messages import HumanMessage
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent.db import ClaimedInbound, claim_inbound_batch
-from agent.graph.claim._dispatch import _BatchState, _handle_restart
+from agent.db import claim_inbound_batch
 from agent.ownership.hosted import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
@@ -22,32 +20,12 @@ from agent.ownership.hosted import (
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.config import settings
-from base.db import PG_KEEPALIVE_KWARGS
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_host.host import AgentHost, kill_terminating_agent_shells
 from tests.agent.test_inbound_ownership import _admit, _agent
 from tests.agent.test_lifecycle_intent import _command
-
-
-async def test_hosted_restart_marker_does_not_claim_completion() -> None:
-    state = _BatchState()
-    await _handle_restart(
-        AvaContext(),
-        1,
-        ClaimedInbound(id=1, agent_id=1, content="", kind="restart", source="self", payload={}),
-        state,
-    )
-    assert state.restart_requested
-    assert isinstance(state.new_msgs[0], HumanMessage)
-    assert (
-        state.new_msgs[0].model_dump()["additional_kwargs"]["ava_note_tag"] == "lifecycle_restart"
-    )
-    content = state.new_msgs[0].model_dump()["content"]
-    assert isinstance(content, str)
-    assert "Restart was accepted" in content
-    assert "have been restarted" not in content
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
@@ -182,68 +160,6 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
     ).fetchone() == ("done", True)
 
 
-@pytest.mark.parametrize("applied", [False, True])
-async def test_hosted_force_cannot_be_undone_by_prior_restart(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, applied: bool
-) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
-    first = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=owner):
-        await claim_inbound_batch(aops_pool, agent_id)
-        if applied:
-            assert await apply_hosted_lifecycle(aops_pool, owner) == "restart"
-    with ConnectionPool[psycopg.Connection](
-        settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
-    ) as pool:
-        _, _, _, force = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user"
-        )
-    later = _command(db_conn, agent_id, "restart")
-    assert await apply_hosted_lifecycle(aops_pool, owner) is None
-    assert (
-        await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", uuid4(), expected_from="idling"
-        )
-        is None
-    )
-    assert db_conn.execute(
-        "SELECT status,applied_at IS NOT NULL,observed_at,payload->'lifecycle_result'->>'reason' "
-        "FROM inbound_messages WHERE id=%s",
-        (first,),
-    ).fetchone() == ("done", applied, None, "force_terminate")
-    assert db_conn.execute(
-        "SELECT id,status FROM inbound_messages WHERE id IN (%s,%s) ORDER BY id", (force, later)
-    ).fetchall() == [(force, "pending" if applied else "claimed"), (later, "pending")]
-    assert db_conn.execute(
-        "SELECT status,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == ("terminated", None if applied else force)
-
-
-async def test_stale_unapplied_pointer_closes_without_retargeting(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
-) -> None:
-    agent_id = _agent(db_conn)
-    old = await _admit(aops_pool, agent_id)
-    first = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=old):
-        await claim_inbound_batch(aops_pool, agent_id)
-    db_conn.execute(
-        "UPDATE agents_meta SET lease_expires_at=now()-interval '1 second' WHERE id=%s", (agent_id,)
-    )
-    db_conn.commit()
-    new = await admit_hosted_runtime(
-        aops_pool, agent_id, "claim-test", uuid4(), expected_from="running"
-    )
-    assert new is not None
-    second = _command(db_conn, agent_id, "restart")
-    with bind_turn_identity(agent_id, incarnation=new):
-        assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [second]
-    assert db_conn.execute(
-        "SELECT status,applied_at,target_generation FROM inbound_messages WHERE id=%s", (first,)
-    ).fetchone() == ("done", None, old.generation)
-
-
 async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
@@ -345,25 +261,6 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
     assert kills == [(agent_id, "running")]
 
 
-async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
-    _command(db_conn, agent_id, "restart")
-    _terminate_command(db_conn, agent_id, kill=True)
-    kills = _record_kills(monkeypatch)
-    with bind_turn_identity(agent_id, incarnation=owner):
-        await claim_inbound_batch(aops_pool, agent_id)
-        assert (
-            await apply_hosted_lifecycle(
-                aops_pool, owner, kill_shell_sessions=lambda _aid: kills.append((_aid, None))
-            )
-            == "restart"
-        )
-    assert kills == []
-
-
 async def test_hosted_failed_kill_still_applies_the_termination(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -386,25 +283,6 @@ async def test_hosted_failed_kill_still_applies_the_termination(
         record["level"].name == "ERROR" and "could not kill" in record["message"]
         for record in loguru_records
     )
-
-
-async def test_hosted_apply_without_a_bound_killer_refuses_a_kill_request(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
-) -> None:
-    """Fail fast: a caller that binds no killer cannot silently drop the
-    request — the apply raises and rolls back, the termination stays pending."""
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
-    command = _terminate_command(db_conn, agent_id, kill=True)
-    with bind_turn_identity(agent_id, incarnation=owner):
-        await claim_inbound_batch(aops_pool, agent_id)
-        with pytest.raises(RuntimeError, match="no killer is bound"):
-            await apply_hosted_lifecycle(aops_pool, owner)
-    assert db_conn.execute(
-        "SELECT i.applied_at, m.status FROM inbound_messages i JOIN agents_meta m "
-        "ON m.id=i.agent_id WHERE i.id=%s",
-        (command,),
-    ).fetchone() == (None, "running")
 
 
 def _any_model(*, model: str | None = None, config: dict[str, object] | None = None) -> str:

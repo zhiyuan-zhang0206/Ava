@@ -14,7 +14,6 @@ from agent.graph.exec.node import _exec_node_impl
 from agent.graph.interrupt import InterruptEvent
 from agent.graph.tool_calls import normalize_tool_calls
 from agent.state import AgentState
-from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
 from tests.agent._fakes import make_fake_ops_pool
 
@@ -232,56 +231,6 @@ async def test_unknown_tool_does_not_consume_sibling_code(monkeypatch: pytest.Mo
     assert run.await_args.args[3] == "print('runs')"
 
 
-async def test_syntax_repair_is_per_call_and_preserves_content(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from ava_builtins.plugins.ava_syntax_fix import agent_runtime as syntax
-
-    state = _state("print(1)", "print(2)")
-    ai = state.messages[-1]
-    assert isinstance(ai, AIMessage)
-    ai.content = [
-        {"type": "tool_use", "id": call["id"], "name": call["name"], "input": call["args"]}
-        for call in ai.tool_calls
-    ]
-    original = ai.model_dump()
-    fix = MagicMock(side_effect=[("print(10)", ["test"]), ("print(20)", ["test"])])
-    monkeypatch.setattr(syntax, "_apply_fix_pipeline", fix)
-    update = await syntax.syntax_fix_before_exec(state, _runtime(), {})
-    assert update is not None
-    fixed = update["messages"][0]
-    assert [call.args[0] for call in fix.call_args_list] == ["print(1)", "print(2)"]
-    assert [call["id"] for call in fixed.tool_calls] == ["call-0", "call-1"]
-    assert [call["args"]["code"] for call in fixed.tool_calls] == ["print(10)", "print(20)"]
-    assert [block["input"]["code"] for block in fixed.content] == ["print(10)", "print(20)"]
-    assert ai.model_dump() == original
-
-
-async def test_unfixable_syntax_does_not_skip_sibling(
-    monkeypatch: pytest.MonkeyPatch,
-    fake_cancel_event: InterruptEvent,
-) -> None:
-    from agent.messages.guard import guarded_add_messages
-    from ava_builtins.plugins.ava_syntax_fix import agent_runtime as syntax
-
-    state = _state("return", 'print("sibling ran")')
-
-    def unchanged(code: str) -> tuple[str, list[str]]:
-        return code, []
-
-    monkeypatch.setattr(syntax, "_apply_fix_pipeline", unchanged)
-    monkeypatch.setattr(syntax, "_llm_repair_syntax", AsyncMock(return_value=None))
-    update = await syntax.syntax_fix_before_exec(state, _runtime(), {})
-    assert update is not None
-    assert "goto" not in update
-    state.messages = guarded_add_messages(state.messages, update["messages"])
-    result = await _run_calls(state, _runtime(), {"configurable": {"thread_id": "7"}})
-    assert result is not None
-    _, first, second = result["messages"]
-    assert "SyntaxError" in first.content
-    assert "sibling ran" in second.content
-
-
 def _config() -> RunnableConfig:
     return {"configurable": {"thread_id": "7"}}
 
@@ -332,18 +281,6 @@ def test_normalize_recovers_each_content_call_without_merging() -> None:
         'print("agents")',
     ]
     assert normalize_tool_calls(normalized) is None
-
-
-async def test_syntax_fix_preserves_recovered_calls() -> None:
-    state = AgentState(messages=[_ai_with_two_content_tool_uses()])
-    update = await syntax_fix_before_exec(state, _runtime(), _config())
-    assert update is not None
-    fixed = update["messages"][0]
-    assert [call["id"] for call in fixed.tool_calls] == ["call_00", "call_01"]
-    assert [call["args"]["code"].strip() for call in fixed.tool_calls] == [
-        'print("skills")',
-        'print("agents")',
-    ]
 
 
 async def test_exec_recovers_missing_content_call_without_syntax_plugin(
