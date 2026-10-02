@@ -152,6 +152,7 @@ async def _watch_plugins_for_restart() -> None:
     the drains run, then the supervisor restarts the host fresh.
     """
     baseline = _plugins_fingerprint()
+    # quiesce-exempt: watches plugin file fingerprints; no database
     while True:
         await asyncio.sleep(_PLUGINS_POLL_INTERVAL_S)
         now = _plugins_fingerprint()

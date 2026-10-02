@@ -40,6 +40,7 @@ from base import telemetry
 from base.config import settings
 from base.db import connect
 from base.db.transaction import write_transaction
+from base.deploy.maintenance import admission
 from base.log import init_gateway_process, logger
 from services.hierarchy_worker.scan import KIND_COMPACT, SILENT_BASELINE_MARKER, first_build, scan
 
@@ -276,8 +277,8 @@ def run_tick() -> None:
     first tick after boot always scans). A tripped 24h budget stops the tick
     before any claim.
 
-    Returns when the queue is dry, the breaker is tripped, or after a
-    transient failure — the next tick retries and nothing is lost. A
+    Returns when the queue is dry, the breaker is tripped, the unit is quiesced
+    (the stop window), or after a transient failure — the next tick retries and nothing is lost. A
     code<->DB drift raises so the manager's crash path restarts the worker
     after a fix; no retry self-heals it.
     """
@@ -285,6 +286,8 @@ def run_tick() -> None:
     if not settings.daemon.hierarchy_worker_enabled:
         return
     while True:
+        if admission.quiesced():
+            return  # the stop window: no database work until `ava start` releases the hold
         try:
             with connect(autocommit=True) as conn:
                 if _regen_budget_check(conn):

@@ -112,6 +112,7 @@ class StoppingMixin:
         await self._await_reap(runtime, generation, pgid, custody)
         window = self._stop_window(runtime)
         deadline = monotonic() + window
+        # quiesce-exempt: a bounded wait for a stopping generation to exit; no database
         while True:
             # Judged as each poll begins, so a refusal rests on reads taken after the deadline.
             expired = monotonic() >= deadline
@@ -205,6 +206,7 @@ class StoppingMixin:
         self._signal_owned(identity, force=False)
         window = self._stop_window(runtime)
         deadline = monotonic() + window
+        # quiesce-exempt: a bounded wait for a stopping generation to exit; no database
         while True:
             living = {item for item in generation.tracked if item.live()}
             if not living:

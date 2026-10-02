@@ -585,6 +585,7 @@ def check_screen_capture(
     a guess, and the fix is a launchd one, not a System Settings one.
     """
     deadline = time.monotonic() + settle_s
+    # quiesce-exempt: a bounded permission-grant wait; no database
     while True:
         try:
             result = ping(sock_path=sock_path)
@@ -622,6 +623,7 @@ def check_accessibility(
     repair is its launchd job, not System Settings.
     """
     deadline = time.monotonic() + settle_s
+    # quiesce-exempt: a bounded permission-grant wait; no database
     while True:
         try:
             result = ping(sock_path=sock_path)

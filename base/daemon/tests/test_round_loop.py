@@ -10,6 +10,7 @@ import pytest
 
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.deploy.maintenance import admission
 
 
 def _progress() -> LoopProgress:
@@ -142,3 +143,28 @@ async def test_an_interval_that_raises_ends_the_loop() -> None:
 
     with pytest.raises(RuntimeError):
         await round_loop.run_rounds("t", _progress(), interval, one_round)
+
+
+async def test_a_quiesced_unit_skips_every_round_and_resumes_when_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quiesced = True
+    monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
+    rounds = 0
+
+    async def one_round() -> None:
+        nonlocal rounds
+        rounds += 1
+
+    progress = _progress()
+    task = asyncio.create_task(round_loop.run_rounds("t", progress, 0.001, one_round))
+    try:
+        await asyncio.sleep(0.1)
+        assert rounds == 0, "a quiesced unit borrows nothing: the round never ran"
+        assert progress.snapshot()["last_success_at"] is None
+        quiesced = False
+        await asyncio.sleep(0.1)
+        assert rounds >= 2
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

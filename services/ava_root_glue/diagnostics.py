@@ -177,6 +177,7 @@ class RootHealthRounds:
         self._task = asyncio.create_task(self._loop())
 
     async def _loop(self) -> None:
+        # quiesce-exempt: samples process diagnostics; no database
         while True:
             try:
                 await self.run_round()

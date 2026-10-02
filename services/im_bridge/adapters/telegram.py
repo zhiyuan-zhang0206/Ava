@@ -184,6 +184,7 @@ class TelegramAdapter(IMAdapter):
 
     async def _poll_loop(self) -> None:
         delay = self._config.telegram_reconnect_base_delay_seconds
+        # quiesce-exempt: long-polls the Telegram API; an offset is written only when an update arrives, and forwarding goes through the gateway, which refuses business requests in the window
         while not self._stop_event.is_set():
             try:
                 updates = await self._get_updates()

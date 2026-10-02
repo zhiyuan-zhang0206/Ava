@@ -39,6 +39,7 @@ from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
+from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.paths import ava_home, pid_path
 from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
@@ -630,6 +631,8 @@ async def _reconcile_loop(pool: ConnectionPool, liveness: Liveness) -> None:
         liveness.beat()
         try:
             await asyncio.sleep(settings.daemon.page_server_poll_interval_seconds)
+            if admission.quiesced():
+                continue
             await asyncio.to_thread(_reconcile_once, pool, managed, backoff, degraded, host)
         except asyncio.CancelledError:
             raise

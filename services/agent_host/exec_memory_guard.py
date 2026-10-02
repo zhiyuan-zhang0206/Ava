@@ -160,6 +160,7 @@ class ExecMemoryGuard:
 
     async def run_forever(self) -> None:
         """One tick per interval; a failed tick is logged and the loop continues."""
+        # quiesce-exempt: reads OS memory pressure and kills an exec domain; no database
         while True:
             try:
                 await asyncio.to_thread(self.check_once)
