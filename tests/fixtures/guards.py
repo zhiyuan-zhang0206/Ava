@@ -365,7 +365,7 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     so only the bootstrap egress is touched — the ~30 other `base.host.net.http_dial`
     call sites are untouched. Every test that legitimately drives the fetch
     already substitutes its own transport at exactly this seam
-    (`tests/base/test_bootstrap_fetch.py` routes it through an in-process
+    (`base/host/env/tests/test_bootstrap_fetch.py` routes it through an in-process
     TestClient; the retry tests hand it a fake), and those patches win by LIFO.
     """
     import base.host.env.bootstrap
@@ -375,7 +375,7 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
             f"a real GET {url} would leave the test process — this is the call that "
             "reaches a live gateway and, on an enrolled runner, rewrites the operator's "
             "~/.ava/.env. Stub the caller, or patch base.host.env.bootstrap.dial_get in the test "
-            "body with a fake transport (see tests/base/test_bootstrap_fetch.py)."
+            "body with a fake transport (see base/host/env/tests/test_bootstrap_fetch.py)."
         )
 
     monkeypatch.setattr(base.host.env.bootstrap, "dial_get", _boom)
