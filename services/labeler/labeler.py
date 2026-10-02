@@ -11,10 +11,10 @@ from loguru import logger
 
 from base.agents.labels import publish_label_updated
 from base.agents.messages.kwargs import message_content
-from base.config import settings
 from base.db.transaction import write_transaction
 from base.lm.content import content_blocks
 from base.lm.factory import build_chat_model
+from services.labeler.config import LabelerConfig
 
 _LABEL_SYSTEM_PROMPT_TEMPLATE = (
     "Summarize the user request delimited by <user_request> tags below "
@@ -27,21 +27,20 @@ _LABEL_SYSTEM_PROMPT_TEMPLATE = (
 )
 
 
-def _system_prompt() -> str:
+def _system_prompt(max_chars: int) -> str:
     """The system prompt with the configured ceiling filled in.
 
-    Resolved per call, not at import: `services.labeler_max_chars` (default 64)
-    is cluster config, and the prompt and the truncation in `_normalize` must
-    read the same number (task #3696).
+    `services.labeler_max_chars` (default 64) is cluster config, and the prompt
+    and the truncation in `_normalize` must read the same number (task #3696).
     """
-    return _LABEL_SYSTEM_PROMPT_TEMPLATE.format(max_chars=settings.services.labeler_max_chars)
+    return _LABEL_SYSTEM_PROMPT_TEMPLATE.format(max_chars=max_chars)
 
 
 # CJK corner/angle brackets stripped from labels (escaped; repo rule: no raw CJK).
 _CJK_BRACKETS = "\u300c\u300d\u300e\u300f\u300a\u300b"
 
 
-def _normalize(raw: str) -> str:
+def _normalize(raw: str, max_chars: int) -> str:
     """Finish the LLM output: take the first line -> strip leading/trailing
     whitespace / common quote wrappers -> truncate to services.labeler_max_chars.
 
@@ -57,7 +56,7 @@ def _normalize(raw: str) -> str:
     """
     first_line = raw.strip().splitlines()[0] if raw.strip() else ""
     stripped = first_line.strip().strip('"').strip("'").strip(_CJK_BRACKETS).strip()
-    return stripped[: settings.services.labeler_max_chars]
+    return stripped[:max_chars]
 
 
 # Shortest output treated as an echo of the instruction rather than a
@@ -81,7 +80,7 @@ _ASSISTANT_VOICE_RE = re.compile(
 )
 
 
-def _rejection_reason(label: str) -> str | None:
+def _rejection_reason(label: str, max_chars: int) -> str | None:
     """Classify a normalized output that is not a label at all, returning a
     short reason for the log (None = it looks like a label).
 
@@ -140,12 +139,12 @@ def _rejection_reason(label: str) -> str | None:
         return "markup"
     if _ASSISTANT_VOICE_RE.match(label):
         return "assistant_voice"
-    if len(label) >= _ECHO_MIN_CHARS and _system_prompt().startswith(label):
+    if len(label) >= _ECHO_MIN_CHARS and _system_prompt(max_chars).startswith(label):
         return "instruction_echo"
     return None
 
 
-async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool | None:
+async def generate_label_async(agent_id: int, prompt: str, config: LabelerConfig) -> bool | None:
     """Generate a label via the LLM, CAS-write to DB, publish the event.
 
     Returns True when a label was written; False when generation failed
@@ -165,10 +164,10 @@ async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool |
         # parsing complexity (PR #69 hit a thinking block signature
         # leaking into the label). Disable at the source so the consumer
         # typically only needs to handle str content.
-        llm = build_chat_model(model, thinking={"type": "disabled"})
+        llm = build_chat_model(config.labeler_model, thinking={"type": "disabled"})
         response = await llm.ainvoke(
             [
-                SystemMessage(content=_system_prompt()),
+                SystemMessage(content=_system_prompt(config.labeler_max_chars)),
                 HumanMessage(content=f"<user_request>{prompt}</user_request>"),
             ]
         )
@@ -176,7 +175,7 @@ async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool |
 
         log_usage_from_message(
             response,
-            model=model,
+            model=config.labeler_model,
             usage_kind="batch",
             for_agent_id=agent_id,
         )
@@ -196,7 +195,7 @@ async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool |
             raw = " ".join(text_parts)
         else:
             raw = str(content)
-        label = _normalize(raw)
+        label = _normalize(raw, config.labeler_max_chars)
         if not label:
             logger.error(
                 "label generate produced empty string for agent {agent_id} (raw={raw!r})",
@@ -205,7 +204,7 @@ async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool |
                 raw=raw,
             )
             return False
-        reason = _rejection_reason(label)
+        reason = _rejection_reason(label, config.labeler_max_chars)
         if reason:
             # Not a label — a failed generation. Returning False hands it to the
             # daemon's existing backoff-and-retry path instead of writing the

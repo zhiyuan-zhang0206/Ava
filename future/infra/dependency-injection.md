@@ -224,7 +224,12 @@ finish in one change freezes what is left; a finished one has none.
    environment readers shrinks to the roots, and the boot-lite layer is removed if
    the hypothesis below holds. Completed items are deleted from this page.
 
-## Config slices, first batch (done)
+## Config slices (done)
+
+Batches so far: the IM bridge daemon, then the events-maintenance and labeler daemons
+(below). Each package is listed in `SLICED_PACKAGES` with its daemon as the root.
+
+### IM bridge
 
 The IM bridge daemon: three slices, 21 fields read across eight modules, all in one
 process (the gateway-side `services.im_bridge.daemon`), none read by another package.
@@ -247,9 +252,31 @@ process (the gateway-side `services.im_bridge.daemon`), none read by another pac
   `dataclasses.replace`) instead of patching `settings`; `test_im_bridge_daemon.py` pins
   that each slice field equals the live flat field of the same name and that `run()` and
   `_load_adapters` hand the slices down.
-- Not in this batch: `telegram-send-file` still reads the bot token from the environment
-  (it needs its own change), and the gateway profile still lists the `telegram` and
-  `feishu` domains, because the root reads them.
+- The gateway profile still lists the `telegram` and `feishu` domains, because the root
+  reads them. `telegram-send-file` keeps reading the bot token from the environment: exec
+  is fully trusted and shares the runner's OS user, so moving the token out of the skill
+  isolates nothing.
+
+### Events maintenance and labeler
+
+Two more gateway-side daemons, one root each, no reader outside the package.
+
+- `EventsMaintenanceConfig` (`services/events_maintenance/config.py`): the nine
+  `events_*` daemon fields, plus `telemetry_loki_url` and `timezone`, which other
+  components read too and so appear in this slice as well. `LabelerConfig`
+  (`services/labeler/config.py`): `labeler_model`, `labeler_max_chars`.
+- Each `daemon.py` builds its slice (`events_maintenance_config()`, `labeler_config()`)
+  and passes it down: loops, `compute_rollup`, `recover_observations`/`replay_loki`,
+  `run_resolution_slice`, `run_blob_vacuum(timezone=)`, `generate_label_async`. The
+  Loki readers and the I/O seams take the slice instead of reading `settings`. The
+  operator CLI `observed_metrics.main()` gets its slice from the daemon's builder, so
+  the daemon stays the package's only root.
+- Tests use `tests/slices.py` of each package; a `test_*_config.py` per package pins
+  that every slice field equals the live flat field and that `run()` hands the same
+  slice to the loops.
+- Left for later: `services/backup_scheduler` (`backup_hour` is also read by
+  `services/backup.py` and `base/host/system/walg_job.py`), `memory_indexer` (read by ops and the CLI) and
+  `milvus` (only import-time constants).
 
 ## Open questions
 

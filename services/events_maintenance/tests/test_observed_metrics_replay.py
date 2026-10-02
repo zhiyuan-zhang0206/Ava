@@ -11,6 +11,7 @@ import pytest
 
 from base.telemetry.metrics.observed_metrics import observe_row, write_observations
 from services.events_maintenance import observed_metrics as replay
+from services.events_maintenance.tests.slices import events_maintenance_config
 
 
 def _source(db: psycopg.Connection, event_id: int = 1) -> dict[str, Any]:
@@ -100,12 +101,19 @@ def test_full_loki_page_bisects_without_silently_losing_rows(
     del row["id"]
     data = [(10, json.dumps(row)), (15, json.dumps(row)), (20, json.dumps(row))]
 
-    def fetch(_query: str, lo: int, hi: int, _deadline: float) -> list[tuple[int, str]]:
+    def fetch(
+        _query: str, lo: int, hi: int, _deadline: float, _config: object
+    ) -> list[tuple[int, str]]:
         return [(ts, line) for ts, line in data if lo <= ts < hi][:2]
 
     monkeypatch.setattr(replay, "_PAGE_LIMIT", 2)
     monkeypatch.setattr(replay, "_fetch", fetch)
-    assert replay._recover_range(db_conn, "query", 10, 21, time.monotonic() + 5) == 3
+    assert (
+        replay._recover_range(
+            db_conn, "query", 10, 21, time.monotonic() + 5, events_maintenance_config()
+        )
+        == 3
+    )
     assert _calls(db_conn) == 3
 
 
@@ -120,7 +128,9 @@ def test_loki_timestamp_overflow_is_explicit_failure(
 
     monkeypatch.setattr(replay, "_fetch", full_page)
     with pytest.raises(RuntimeError, match="scan incomplete"):
-        replay._recover_range(db_conn, "query", 10, 11, time.monotonic() + 5)
+        replay._recover_range(
+            db_conn, "query", 10, 11, time.monotonic() + 5, events_maintenance_config()
+        )
 
 
 def test_deadline_stops_replay_without_restarting_completed_batches(
@@ -146,18 +156,29 @@ def test_archive_replay_preserves_unlabeled_cluster_and_last_row(
     monkeypatch.setattr(replay, "ARCHIVE_FLOOR_AT", freeze - timedelta(minutes=1))
     queries: list[tuple[str, int, int]] = []
 
-    def recover(_conn: Any, query: str, lo: int, hi: int, _deadline: float) -> int:
+    def recover(_conn: Any, query: str, lo: int, hi: int, _deadline: float, _config: object) -> int:
         queries.append((query, lo, hi))
         return 0
 
     monkeypatch.setattr(replay, "_recover_range", recover)
-    replay.replay_loki(db_conn, now=datetime.now(UTC), deadline=time.monotonic() + 5, archive=True)
+    replay.replay_loki(
+        db_conn,
+        now=datetime.now(UTC),
+        deadline=time.monotonic() + 5,
+        config=events_maintenance_config(),
+        archive=True,
+    )
     assert queries
     assert queries[-1][2] > int(freeze.timestamp() * 1e9)
     assert all(query.startswith(archive_stream_selector()) for query, _, _ in queries)
     assert all('or metric_cluster=""' in query for query, _, _ in queries)
     queries.clear()
-    replay.replay_loki(db_conn, now=freeze + timedelta(minutes=1), deadline=time.monotonic() + 5)
+    replay.replay_loki(
+        db_conn,
+        now=freeze + timedelta(minutes=1),
+        deadline=time.monotonic() + 5,
+        config=events_maintenance_config(),
+    )
     assert queries[0][1] > int(freeze.timestamp() * 1e9)
 
 
@@ -173,7 +194,7 @@ def test_loki_failure_does_not_block_jsonl_repair(
 
     monkeypatch.setattr(replay, "replay_loki", unavailable)
     with pytest.raises(ExceptionGroup, match="incomplete"):
-        replay.recover_observations(db_conn)
+        replay.recover_observations(db_conn, events_maintenance_config())
     assert _calls(db_conn) == 1
 
 
@@ -224,7 +245,7 @@ def test_repair_reserves_time_for_independent_jsonl_source(
     deadlines: dict[str, float] = {}
     monkeypatch.setattr(replay, "logs_dir", lambda: tmp_path)
 
-    def loki(_conn: Any, *, now: datetime, deadline: float) -> int:
+    def loki(_conn: Any, *, now: datetime, deadline: float, config: object) -> int:
         deadlines["loki"] = deadline
         return 0
 
@@ -234,5 +255,5 @@ def test_repair_reserves_time_for_independent_jsonl_source(
 
     monkeypatch.setattr(replay, "replay_loki", loki)
     monkeypatch.setattr(replay, "replay_jsonl", jsonl)
-    replay.recover_observations(db_conn)
+    replay.recover_observations(db_conn, events_maintenance_config())
     assert deadlines["jsonl"] - deadlines["loki"] == replay._PASS_SECONDS / 2

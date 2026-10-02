@@ -10,6 +10,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from services.events_maintenance import resolution
+from services.events_maintenance.tests.slices import events_maintenance_config
 
 
 class _Pool:
@@ -119,13 +120,17 @@ def test_unresolved_math_excludes_active_classes(
         remaining_critical: 4,
     }
 
-    def query_class_counts(window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+    def query_class_counts(
+        window: str, _at: datetime, _config: object
+    ) -> dict[resolution.EventClass, int]:
         return counts if window == "6h" else {}
 
     monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
     emitted = _capture_events(monkeypatch)
 
-    result = resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn)))
+    result = resolution.run_resolution_slice(
+        cast(ConnectionPool, _Pool(db_conn)), events_maintenance_config()
+    )
 
     assert result == resolution.ResolutionResult(2, 4, reopened=0, auto_dismissed=0)
     assert emitted == [
@@ -152,14 +157,18 @@ def test_burst_reopens_only_above_the_configured_threshold(
     _insert_dismissal(db_conn, below)
     counts = {hit: 6, below: 5}
 
-    def query_class_counts(_window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+    def query_class_counts(
+        _window: str, _at: datetime, _config: object
+    ) -> dict[resolution.EventClass, int]:
         return counts
 
     monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
-    monkeypatch.setattr(resolution.settings.daemon, "events_resolution_burst_threshold", 5)
     emitted = _capture_events(monkeypatch)
 
-    result = resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn)))
+    result = resolution.run_resolution_slice(
+        cast(ConnectionPool, _Pool(db_conn)),
+        events_maintenance_config(events_resolution_burst_threshold=5),
+    )
 
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
     assert emitted[0] == (
@@ -191,19 +200,31 @@ def test_empty_or_failed_loki_read_never_emits_a_stale_zero(
 ) -> None:
     emitted = _capture_events(monkeypatch)
 
-    def no_class_counts(_window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+    def no_class_counts(
+        _window: str, _at: datetime, _config: object
+    ) -> dict[resolution.EventClass, int]:
         return {}
 
     monkeypatch.setattr(resolution, "_query_class_counts", no_class_counts)
 
-    assert resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn))) is None
+    assert (
+        resolution.run_resolution_slice(
+            cast(ConnectionPool, _Pool(db_conn)), events_maintenance_config()
+        )
+        is None
+    )
     assert emitted == []
 
-    def boom(_window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+    def boom(_window: str, _at: datetime, _config: object) -> dict[resolution.EventClass, int]:
         raise RuntimeError("Loki unavailable")
 
     monkeypatch.setattr(resolution, "_query_class_counts", boom)
-    assert resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn))) is None
+    assert (
+        resolution.run_resolution_slice(
+            cast(ConnectionPool, _Pool(db_conn)), events_maintenance_config()
+        )
+        is None
+    )
     assert emitted == []
 
 
@@ -211,15 +232,19 @@ def test_auto_dismiss_is_off_by_default(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stable = _event_class(event_name="stable-warning")
-    monkeypatch.setattr(resolution.settings.daemon, "events_auto_dismiss_enabled", False)
 
-    def stable_class_counts(_window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+    def stable_class_counts(
+        _window: str, _at: datetime, _config: object
+    ) -> dict[resolution.EventClass, int]:
         return {stable: 1}
 
     monkeypatch.setattr(resolution, "_query_class_counts", stable_class_counts)
     emitted = _capture_events(monkeypatch)
 
-    result = resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn)))
+    result = resolution.run_resolution_slice(
+        cast(ConnectionPool, _Pool(db_conn)),
+        events_maintenance_config(events_auto_dismiss_enabled=False),
+    )
 
     assert result == resolution.ResolutionResult(1, 0, reopened=0, auto_dismissed=0)
     with db_conn.cursor() as cur:
@@ -271,13 +296,17 @@ def test_daemon_emits_dismissed_gauges_alongside_unresolved(
     _insert_dismissal(db_conn, dismissed)
     counts = {dismissed: 4, _event_class(event_name="kept"): 1}
 
-    def query_class_counts(window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+    def query_class_counts(
+        window: str, _at: datetime, _config: object
+    ) -> dict[resolution.EventClass, int]:
         return counts if window == "6h" else {}
 
     monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
     emitted = _capture_events(monkeypatch)
 
-    result = resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn)))
+    result = resolution.run_resolution_slice(
+        cast(ConnectionPool, _Pool(db_conn)), events_maintenance_config()
+    )
 
     assert result == resolution.ResolutionResult(1, 0, reopened=0, auto_dismissed=0)
     status_event = next(
@@ -321,14 +350,18 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
     _insert_dismissal(db_conn, bridge_class)
     counts = {host_class: 6, bridge_class: 2}
 
-    def query_class_counts(_window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+    def query_class_counts(
+        _window: str, _at: datetime, _config: object
+    ) -> dict[resolution.EventClass, int]:
         return counts
 
     monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
-    monkeypatch.setattr(resolution.settings.daemon, "events_resolution_burst_threshold", 5)
     emitted = _capture_events(monkeypatch)
 
-    result = resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn)))
+    result = resolution.run_resolution_slice(
+        cast(ConnectionPool, _Pool(db_conn)),
+        events_maintenance_config(events_resolution_burst_threshold=5),
+    )
 
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
     assert emitted[0][1] == "warning_reopened"
@@ -350,14 +383,18 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
     _insert_dismissal(db_conn, _event_class())  # process="" wildcard
     counts = {_event_class(process="agent_host"): 4, _event_class(process="im_bridge"): 2}
 
-    def query_class_counts(_window: str, _at: datetime) -> dict[resolution.EventClass, int]:
+    def query_class_counts(
+        _window: str, _at: datetime, _config: object
+    ) -> dict[resolution.EventClass, int]:
         return counts
 
     monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
-    monkeypatch.setattr(resolution.settings.daemon, "events_resolution_burst_threshold", 5)
     emitted = _capture_events(monkeypatch)
 
-    result = resolution.run_resolution_slice(cast(ConnectionPool, _Pool(db_conn)))
+    result = resolution.run_resolution_slice(
+        cast(ConnectionPool, _Pool(db_conn)),
+        events_maintenance_config(events_resolution_burst_threshold=5),
+    )
 
     # 4 + 2 = 6 > 5: the base-wide burst trips the wildcard row's safety valve.
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
