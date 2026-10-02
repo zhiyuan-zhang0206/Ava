@@ -24,6 +24,7 @@ from base.events.payloads import (
     ExecChildBoot,
     ExecEnvelope,
     ExecFailed,
+    ExecMemoryGuardKilled,
     ExecPayload,
     ExecRequestQuarantine,
     ExecSubprocessKilled,
@@ -305,6 +306,13 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "exec_subprocess_killed",
         "exec child survived the signal grace period and was SIGKILLed",
         payload=ExecSubprocessKilled,
+        tier="anomaly",
+    ),
+    "exec_memory_guard_killed": _telemetry(
+        "exec_memory_guard_killed",
+        "the host memory guard killed the largest exec process domain at critical "
+        "system memory pressure",
+        payload=ExecMemoryGuardKilled,
         tier="anomaly",
     ),
     # Hosted runner dispatcher and turns (future/infra/agent-runner-as-server.md).

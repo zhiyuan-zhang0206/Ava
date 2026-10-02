@@ -132,6 +132,7 @@ consumers: see the comments at each emit point.
 | `exec_timeout` | execute_code timed out | anomaly | — | — | events |
 | `exec_node_timeout` | node-level timeout | anomaly | — | — | events |
 | `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | anomaly | pid, grace | — | events |
+| `exec_memory_guard_killed` | the host memory guard killed the largest exec process domain at critical system memory pressure | anomaly | agent_id, pid, footprint_bytes, running, pressure | — | events |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events |
 | `host_recovery_wake_started` | hosted recovery wake started a turn and occupied an in-flight pacing slot | noise | — | — | events |

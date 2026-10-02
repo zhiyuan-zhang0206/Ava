@@ -337,8 +337,24 @@ async def _page_reconcile_forever(pool: AsyncConnectionPool) -> None:
         await asyncio.sleep(interval_s)
 
 
+async def _exec_memory_guard_forever() -> None:
+    """Relieve critical memory pressure by killing the largest exec domain.
+
+    Where the OS reports no pressure state (Linux), the guard does not run.
+    """
+    from base.host.memory_pressure import host_memory_source
+    from services.agent_host.exec_memory_guard import ExecMemoryGuard, find_exec_domains
+
+    source = host_memory_source()
+    if source is None:
+        _log.info("[agent-host] exec memory guard idle — this OS reports no memory pressure state")
+        return
+    host_pid = os.getpid()
+    await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever()
+
+
 def _spawn_background_tasks(pool: AsyncConnectionPool) -> dict[str, asyncio.Task[object]]:
-    """Create the daemon's background tasks for plugins, pages, event replay and logs.
+    """Create the daemon's background tasks for plugins, pages, event replay, logs and exec memory.
 
     Split out of `run()` so the wiring is testable without booting the
     dispatcher: the reconciler's existence is what closes the
@@ -349,12 +365,14 @@ def _spawn_background_tasks(pool: AsyncConnectionPool) -> dict[str, asyncio.Task
     """
     from services.agent_host.impersonation_events import reconcile_forever
 
-    return {
-        "impersonation_events": asyncio.create_task(reconcile_forever()),
-        "plugins_watch": asyncio.create_task(_watch_plugins_for_restart()),
-        "page_reconciler": asyncio.create_task(_page_reconcile_forever(pool)),
-        "stdout_log_rotate": asyncio.create_task(_rotate_stdout_log_forever()),
+    loops = {
+        "impersonation_events": reconcile_forever(),
+        "plugins_watch": _watch_plugins_for_restart(),
+        "page_reconciler": _page_reconcile_forever(pool),
+        "stdout_log_rotate": _rotate_stdout_log_forever(),
+        "exec_memory_guard": _exec_memory_guard_forever(),
     }
+    return {name: asyncio.create_task(loop) for name, loop in loops.items()}
 
 
 async def _build_checkpointer(
