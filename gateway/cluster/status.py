@@ -15,6 +15,7 @@ import asyncio
 import logging
 import threading
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -24,6 +25,7 @@ from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from base.agents.observation.evidence import MACHINE_OFFLINE_AFTER_FAILURES
 from base.api_contracts.status import MachineStatus
 from base.cluster.machine import (
     is_agent_runner,
@@ -45,6 +47,7 @@ from gateway.cluster.schemas import (
     StatsTokens,
     SystemStatus,
 )
+from gateway.cluster.snapshots import Snapshot, read_all
 from gateway.lgtm import loki_events, loki_query_budget
 from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.schemas.stats import StatsWindowHours, applied_window
@@ -282,25 +285,16 @@ def _get_services_status() -> ServicesStatus:
 # Per-machine status_probe timeout — `settings.gateway.status_probe_timeout_seconds`
 # (default 8s). Raised from a 3.0s hardcode (task #1200): a slow-but-healthy WSL
 # runner's status_snapshot measured 3.07-3.27s on 2026-08-12, and a budget
-# shorter than the handler's own wall time flipped it offline (probe timeout ->
-# 2 consecutive failures -> machine_probe offline) while /healthz answered in
-# ~15ms. This is the budget of FIRST contact — the anti-jitter margin a
-# slow-but-healthy host needs. A machine that already carries reachability
-# failures is not dialed on this path at all: its row serves from the cached
-# offline state and its recovery check runs detached under the fast-fail
-# budget (`roster_probe._maybe_kick_recovery_dial`, task #3507), so no re-dial
-# can drag the whole-table read past the CLI/UI read budget. The heartbeat
-# liveness pass reads this setting
-# (services/heartbeat/liveness.py), so its probes stay aligned with the
-# roster's first-contact ones.
-
-# The per-machine probe backoff (failure state, window schedule), the detached
-# recovery dial and the per-machine probe budget all live in `roster_probe`,
-# beside the dispatch they bound — split out under the file-line budget
-# (task #3507).
+# shorter than the handler's own wall time flipped it offline while /healthz
+# answered in ~15ms. The budget of a dial the gateway makes itself (a fresh read,
+# or a machine the snapshot does not cover). The default read dials nothing: it
+# renders the heartbeat liveness pass's snapshot (`gateway/cluster/snapshots.py`),
+# which reads this same setting (services/heartbeat/liveness.py), so the pass's
+# probes stay aligned with a fresh read's.
 
 
-async def _probe_agent_runner(
+def _machine_status_from_cluster_status(
+    status: ClusterStatus,
     name: str,
     role: list[str],
     gateway_url: str | None,
@@ -308,93 +302,19 @@ async def _probe_agent_runner(
     description: str | None,
     stopped_at: datetime | None,
     *,
-    is_staging: bool = False,
+    is_staging: bool,
+    observed_at: datetime | None,
 ) -> MachineStatus:
-    """Probe an agent-runner by POSTing a `status_probe` op to its ops server.
+    """Render one machine's validated ClusterStatus as a roster row.
 
-    The machine is reached at its ava-ops server (services/agent_ops), which
-    dispatches `status_probe` via `ops.cluster.cluster_status_op`
-    in-process and returns the snapshot. Same path the CLI `ava cluster status`
-    uses. The local machine is no special case — its ops server is dialed at
-    its registered localhost URL, keeping one uniform probe path.
-
-    Online == the ops server responded within the timeout. Paused comes from
-    the host's local `cluster_is_paused()` snapshot. A host that already carries
-    a failure record is not dialed here: it serves the cached offline row while
-    the detached recovery dial runs (task #3507).
+    Identity echo check: the ops server self-reports its machine_name in every
+    status_probe response. If the responder is NOT the host we targeted, the
+    gateway_url pointed at the wrong box (a loopback/misregistered row makes the
+    gateway dial itself and answer under its own name). Refuse to render that as
+    the target online — a loud identity-mismatch row instead. The log line
+    itself is episode-deduped and degrades to INFO for a stopped row (a stale
+    URL answering for someone else is that row's expected face — task #4143).
     """
-    if name in roster_probe._probe_failures:
-        # Known-down host: serve the cached offline row and hand the recovery
-        # check to the detached dial. This read never carries the host's dial
-        # budget — the blackholed re-dial that used to drag the whole-table
-        # read past the CLI/UI budget runs off the read path now, single-flight
-        # and paced by the failure backoff (task #3507).
-        roster_probe._maybe_kick_recovery_dial(name, gateway_url)
-        return _roster_rows.offline_status(
-            name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
-        )
-    if gateway_url is None:
-        # The roster row is the address authority for this fan-out. Do not let
-        # cluster_rpc synchronously re-read Postgres outside the async timeout.
-        roster_probe.note_probe_unreachable(name)
-        return _roster_rows.offline_status(
-            name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
-        )
-    # First contact -> the full budget (the anti-jitter margin, task #1200). A
-    # record that races in mid-read (another observer failed the host) still
-    # buys the fast-fail budget via `probe_budget_s`.
-    try:
-        result = await roster_probe.dispatch_status_probe(
-            name, gateway_url, timeout_s=roster_probe.probe_budget_s(name)
-        )
-    except _cluster_rpc.ClusterOpUnreachable:
-        # Expected when a host is genuinely offline / mid-restart — quiet. Widen
-        # this host's backoff so a persistently-down peer stops being dialed every poll.
-        roster_probe.note_probe_unreachable(name)
-        return _roster_rows.offline_status(
-            name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
-        )
-    except _cluster_rpc.ClusterOpFailed as exc:
-        # Reached the ops server, but its status_probe op itself raised (DB error,
-        # schema drift inside the op). That is NOT "offline" — surface it so the
-        # real error is not invisible behind a misleading offline marker. The host
-        # is reachable, so clear backoff (this is not the down-host case).
-        _log.warning("status_probe op failed on reachable host %s: %s", name, exc.result)
-        roster_probe.note_probe_reachable(name)
-        return _roster_rows.reachable_unknown_status(
-            name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
-        )
-    roster_probe.note_probe_reachable(name)
-    # The ops server responded 200; validate its body as the status_probe result
-    # contract (ClusterStatus) — same posture as cluster.py:get_cluster_status.
-    # A body that does not validate (a version-skewed / wrong server) must NOT be
-    # coerced into a determinate paused verdict: it lands in the documented
-    # online=True + paused=None abnormal state instead of a false green.
-    try:
-        status = ClusterStatus.model_validate(result)
-    except ValidationError:
-        _log.warning(
-            "status_probe on reachable host %r returned a body that does not match "
-            "ClusterStatus; reporting online+unknown",
-            name,
-            exc_info=True,
-        )
-        return _roster_rows.reachable_unknown_status(
-            name,
-            role,
-            gateway_url,
-            up_since_at,
-            description,
-            stopped_at,
-            is_staging=is_staging,
-        )
-    # Identity echo check: the ops server self-reports its machine_name in every
-    # status_probe response. If the responder is NOT the host we targeted, the
-    # gateway_url pointed at the wrong box (a loopback/misregistered row makes the
-    # gateway dial itself and answer under its own name). Refuse to render that as
-    # the target online — a loud identity-mismatch row instead. The log line
-    # itself is episode-deduped and degrades to INFO for a stopped row (a stale
-    # URL answering for someone else is that row's expected face — task #4143).
     if status.machine_name != name:
         roster_probe.log_identity_mismatch(
             name, gateway_url, status.machine_name, stopped=stopped_at is not None
@@ -432,6 +352,109 @@ async def _probe_agent_runner(
         session_count=status.session_count,
         agent_groups=status.agent_groups,
         resource=status.resource,
+        observed_at=observed_at,
+    )
+
+
+def _status_from_snapshot(
+    snapshot: Snapshot,
+    name: str,
+    role: list[str],
+    gateway_url: str | None,
+    up_since_at: datetime,
+    description: str | None,
+    stopped_at: datetime | None,
+    *,
+    is_staging: bool,
+) -> MachineStatus:
+    """Render a roster row from the heartbeat pass's last probe of the machine.
+
+    Two consecutive failed passes (or a failed pass with no earlier answer to
+    show) read offline; one dropped probe keeps the last status on screen, and its
+    age says so. A reachable answer that is not a ClusterStatus is the documented
+    online + paused=None abnormal state.
+    """
+    row_args = (name, role, gateway_url, up_since_at, description, stopped_at)
+    if not snapshot.reachable and (
+        snapshot.status is None or snapshot.consecutive_failures >= MACHINE_OFFLINE_AFTER_FAILURES
+    ):
+        return _roster_rows.offline_status(*row_args, is_staging=is_staging)
+    if snapshot.status is None:
+        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+    try:
+        status = ClusterStatus.model_validate(snapshot.status)
+    except ValidationError:
+        _log.warning(
+            "machine_status_snapshot for %r holds a body that does not match ClusterStatus; "
+            "reporting online+unknown",
+            name,
+            exc_info=True,
+        )
+        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+    return _machine_status_from_cluster_status(
+        status,
+        *row_args,
+        is_staging=is_staging,
+        observed_at=snapshot.status_at or snapshot.observed_at,
+    )
+
+
+async def _probe_agent_runner(
+    name: str,
+    role: list[str],
+    gateway_url: str | None,
+    up_since_at: datetime,
+    description: str | None,
+    stopped_at: datetime | None,
+    *,
+    is_staging: bool = False,
+) -> MachineStatus:
+    """Probe an agent-runner now, by POSTing a `status_probe` op to its ops server.
+
+    The machine is reached at its ava-ops server (services/agent_ops), which
+    dispatches `status_probe` via `ops.cluster.cluster_status_op` in-process and
+    returns the snapshot. Same path the heartbeat liveness pass uses. The local
+    machine is no special case — its ops server is dialed at its registered
+    localhost URL, keeping one uniform probe path.
+
+    Online == the ops server responded within the timeout. Paused comes from the
+    host's local `cluster_is_paused()` snapshot. Nothing is remembered: a down host
+    costs this dial its full budget every time, which is why the default read does
+    not come here.
+    """
+    row_args = (name, role, gateway_url, up_since_at, description, stopped_at)
+    if gateway_url is None:
+        # The roster row is the address authority for this fan-out. Do not let
+        # cluster_rpc synchronously re-read Postgres outside the async timeout.
+        return _roster_rows.offline_status(*row_args, is_staging=is_staging)
+    try:
+        result = await roster_probe.dispatch_status_probe(name, gateway_url)
+    except _cluster_rpc.ClusterOpUnreachable:
+        # Expected when a host is genuinely offline / mid-restart — quiet.
+        return _roster_rows.offline_status(*row_args, is_staging=is_staging)
+    except _cluster_rpc.ClusterOpFailed as exc:
+        # Reached the ops server, but its status_probe op itself raised (DB error,
+        # schema drift inside the op). That is NOT "offline" — surface it so the
+        # real error is not invisible behind a misleading offline marker.
+        _log.warning("status_probe op failed on reachable host %s: %s", name, exc.result)
+        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+    # The ops server responded 200; validate its body as the status_probe result
+    # contract (ClusterStatus) — same posture as cluster.py:get_cluster_status.
+    # A body that does not validate (a version-skewed / wrong server) must NOT be
+    # coerced into a determinate paused verdict: it lands in the documented
+    # online=True + paused=None abnormal state instead of a false green.
+    try:
+        status = ClusterStatus.model_validate(result)
+    except ValidationError:
+        _log.warning(
+            "status_probe on reachable host %r returned a body that does not match "
+            "ClusterStatus; reporting online+unknown",
+            name,
+            exc_info=True,
+        )
+        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+    return _machine_status_from_cluster_status(
+        status, *row_args, is_staging=is_staging, observed_at=None
     )
 
 
@@ -487,14 +510,19 @@ def _local_machine_status_blocking(
 async def gather_cluster_status(
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]],
     local_name: str,
+    *,
+    snapshots: Mapping[str, Snapshot] | None = None,
 ) -> list[MachineStatus]:
-    """Async fan-out: every machine probed in parallel via a status_probe op
-    to its ops server (the local machine included — its ops server is dialed
-    at its registered localhost URL). Total wall ≈ the largest per-probe budget
-    in play — `settings.gateway.status_probe_timeout_seconds` on first contact;
-    a machine already in the failure backoff is not dialed here (it serves the
-    cached offline row, its recovery check runs detached — task #3507), so no
-    down host can drag the read.
+    """The roster of the given machines.
+
+    With `snapshots` (the default read) each machine renders from the heartbeat
+    liveness pass's last probe (`gateway/cluster/snapshots.py`) and nothing is dialed,
+    so no down host can drag the read (task #3507); a machine with no fresh snapshot
+    is dialed here, as a degraded fallback for a heartbeat service that is down. With
+    `snapshots=None` (an explicit fresh read) every machine is probed in parallel via
+    a status_probe op to its ops server (the local machine included — its ops server
+    is dialed at its registered localhost URL); total wall ≈
+    `settings.gateway.status_probe_timeout_seconds`.
 
     The one exception is a local machine without the agent-runner capability
     (a pure gateway in a split deployment): it runs no ops server, so its row
@@ -528,6 +556,21 @@ async def gather_cluster_status(
                 )
             )
         else:
+            snapshot = None if snapshots is None else snapshots.get(name)
+            if snapshot is not None and snapshot.fresh():
+                machines.append(
+                    _status_from_snapshot(
+                        snapshot,
+                        name,
+                        role,
+                        url,
+                        up_since,
+                        description,
+                        stopped_at,
+                        is_staging=is_staging,
+                    )
+                )
+                continue
             probe_coros.append(
                 _probe_agent_runner(
                     name,
@@ -547,15 +590,11 @@ async def gather_cluster_status(
 
 
 def _get_cluster_status(cur: Cursor) -> ClusterPanel:
-    """Assemble the cluster sub-section: each machine's `status_probe` op
-    round-trip (the local machine's ops server is dialed at localhost).
-
-    SELECT machines table (paused rows excluded — the cluster panel shows
-    only active members; `ava cluster resume` brings a row back) + dispatch
-    parallel probes (agent-runner via a `status_probe` op; the host responds
-    with its local paused state). Total wall ≈ the largest per-probe budget in
-    play on first contact regardless of N machines; a known-failed machine is
-    not dialed here — cached offline row + detached recovery dial (task #3507).
+    """Assemble the cluster sub-section: SELECT the machines table (paused rows
+    excluded — the cluster panel shows only active members; `ava cluster resume`
+    brings a row back) and render each machine from the heartbeat liveness
+    pass's last `status_probe` (`gateway/cluster/snapshots.py`), so the panel
+    dials no runner (task #3507).
 
     Wrapped sync via asyncio.run because `/api/status` is a sync FastAPI
     handler (runs in threadpool); creating a fresh event loop here is safe.
@@ -574,7 +613,10 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
     )
 
     local_name = machine_name()
-    machines = asyncio.run(gather_cluster_status(rows, local_name)) if rows else []
+    snapshots = read_all(cur)
+    machines = (
+        asyncio.run(gather_cluster_status(rows, local_name, snapshots=snapshots)) if rows else []
+    )
 
     return ClusterPanel(
         current_machine=local_name,

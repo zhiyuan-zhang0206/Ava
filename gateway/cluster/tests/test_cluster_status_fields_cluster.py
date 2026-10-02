@@ -120,7 +120,6 @@ def test_identity_mismatch_logs_once_per_episode(
     not one per panel poll; a correct identity echo ends the episode, so a
     later mismatch logs anew (task #4143)."""
     monkeypatch.setattr(roster_probe, "_identity_mismatch_active", set[str]())
-    monkeypatch.setattr(roster_probe, "_probe_failures", dict[str, tuple[int, float]]())
     responder = {"name": "gateway-host"}
 
     async def _fake_dispatch(
@@ -181,7 +180,6 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
     face of the stop: the verdict stays (the row is still not that host), but
     the line degrades to INFO and is reported once per episode (task #4143)."""
     monkeypatch.setattr(roster_probe, "_identity_mismatch_active", set[str]())
-    monkeypatch.setattr(roster_probe, "_probe_failures", dict[str, tuple[int, float]]())
 
     async def _fake_dispatch(
         *,

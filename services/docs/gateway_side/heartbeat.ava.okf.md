@@ -44,5 +44,10 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
 - heartbeat message tag = `NoteTag.HEARTBEAT`, agents can distinguish heartbeats from other wake-ups by this
 
 The liveness pass retains machine reachability and agent lease observation.
+It runs once at start, then every `LIVENESS_PASS_INTERVAL_S`, and it also records
+one `machine_status_snapshot` row for every unpaused agent-runner (rollout targets
+and staging/stopped hosts alike); judging and alerting stay with the rollout targets.
+The gateway's roster read renders from those rows (`gateway/cluster/snapshots.py`)
+and dials inline only a missing or stale one (`?fresh=true` dials everything).
 It does not read or grade the retired controller's stranded-hold records, whose
 writer, alert job, and status projection have been removed.

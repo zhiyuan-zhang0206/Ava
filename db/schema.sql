@@ -1200,6 +1200,23 @@ CREATE TABLE machine_probe (
     transition_since     TIMESTAMPTZ
 );
 
+-- machine_status_snapshot — the roster's read model: the last status_probe of every
+-- roster-visible agent-runner (rollout targets, staging and intentionally stopped
+-- hosts), written by the heartbeat liveness pass. `status` is the last ClusterStatus
+-- payload (kept across one failed attempt), `status_at` when it was probed; NULL
+-- status with reachable = the host answered with a body that is not a ClusterStatus.
+CREATE TABLE machine_status_snapshot (
+    machine_name         TEXT PRIMARY KEY,
+    observed_at          TIMESTAMPTZ NOT NULL,
+    reachable            BOOLEAN NOT NULL,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    status               JSONB,
+    status_at            TIMESTAMPTZ
+);
+
+COMMENT ON TABLE machine_status_snapshot IS
+    'Roster read model: the last status_probe per roster-visible agent-runner, written by the heartbeat liveness pass. status holds the last ClusterStatus payload and status_at when it was probed.';
+
 -- machine_units: per-unit capability contributions that COMPOSE the machines row
 -- above. One row per (machine_name, home) — `home` is the unit's $AVA_HOME. Two
 -- co-located units (e.g. a gateway-only unit under ~/.ava_gateway + an

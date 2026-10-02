@@ -567,6 +567,20 @@ def list_agent_runners() -> list[tuple[str, str | None]]:
         return cur.fetchall()
 
 
+def list_roster_agent_runners() -> list[tuple[str, str | None]]:
+    """SELECT (name, gateway_url) of every agent-runner the roster shows: the
+    rollout targets of `list_agent_runners()` plus staging and intentionally stopped
+    hosts. Only the pause latch hides a host (`ava cluster pause`). The heartbeat
+    liveness pass snapshots these for the roster read model; it judges and alerts
+    on the rollout targets alone."""
+    with base.db.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT name, gateway_url FROM machines "
+            "WHERE 'agent-runner' = ANY(role) AND paused_at IS NULL ORDER BY name"
+        )
+        return cur.fetchall()
+
+
 def list_stopped_agent_runners() -> list[tuple[str, str | None]]:
     """SELECT (name, gateway_url) FROM machines WHERE role='agent-runner' AND the
     row IS marked intentionally stopped — the exact complement of

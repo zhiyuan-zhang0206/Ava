@@ -38,7 +38,6 @@
     "gateway/tests/test_presets_sdk.py::ava.gateway_client.transport._client": 1,
     "gateway/tests/test_routes.py::gateway.cluster._stats_dashboard": 3,
     "gateway/tests/test_sse.py::gateway.events.sse._HEARTBEAT_SECONDS": 1,
-    "gateway/tests/test_status_cluster.py::gateway.cluster.roster_probe._start_recovery_thread": 3,
     "gateway/tests/test_status_cluster.py::gateway.cluster.status._STATUS_CACHE_TTL_S": 1,
     "gateway/tests/test_status_cluster.py::gateway.cluster.status._probe_agent_runner": 1,
     "gateway/tests/test_terminate_forward.py::gateway.agents.lifecycle._forward_to_home_machine": 7,
