@@ -15,6 +15,7 @@ from base import telemetry
 from base.agents import impersonation as leases
 from base.agents import impersonation_manifest as capture
 from base.agents.impersonation import history as history
+from base.agents.impersonation.tests import test_history as history_cases
 from base.agents.impersonation_event_grants import grant_event_log_runner_access
 from base.agents.impersonation_manifest import (
     LocalParticipant,
@@ -36,7 +37,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from base.telemetry.audit_events import audit_event_uid, prepare_event_log
 from tests._containers import grant_runner_login
-from tests.base import test_history as history_cases
 from tests.impersonation_support import attested_caller, recorded_tree
 
 # The capability group the grants target, and the generation-shaped login that

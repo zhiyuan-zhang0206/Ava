@@ -14,12 +14,12 @@ import pytest
 
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
+from base.agents.impersonation.tests import test_history as history_cases
 from base.agents.messages import delivery_outbox as outbox
 from base.cluster.machine import machine_name
 from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.impersonation import _send
-from tests.base import test_history as history_cases
 from tests.impersonation_support import attested_caller
 
 
