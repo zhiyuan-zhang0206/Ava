@@ -383,11 +383,20 @@ async def publish_best_effort(channel: str, payload: str, *, context: str = "") 
     the claim node during a redis outage). Returns the receiver count on success
     (0 = nobody subscribed), or None when the publish failed. Failure
     classification is `_log_publish_failure`."""
+    return await publish_via(get_async_redis, channel, payload, context=context)
+
+
+async def publish_via(
+    client: Callable[[], _AuthRetryAsyncRedis], channel: str, payload: str, *, context: str = ""
+) -> int | None:
+    """`publish_best_effort` on the client `client()` returns (called inside the guarded try, so
+    a failure to open it is a failed publish, not an exception). The handle's publish
+    (`EventBus.publish_best_effort`) and the module-level shim share this one body."""
     try:
 
         async def _publish() -> int:
             # redis-py types publish()'s **kwargs as Unknown; the call itself is fully typed.
-            return await get_async_redis().publish(  # pyright: ignore[reportUnknownMemberType]
+            return await client().publish(  # pyright: ignore[reportUnknownMemberType]
                 channel, payload
             )
 
@@ -405,8 +414,18 @@ def publish_best_effort_sync(
     """Sync counterpart of `publish_best_effort` — opens a one-off client, publishes,
     closes it, and NEVER raises. Returns the receiver count on success (0 = nobody
     subscribed), or None when the publish failed."""
+    return publish_sync_via(
+        lambda: sync_redis(decode_responses=decode_responses), channel, payload, context=context
+    )
+
+
+def publish_sync_via(
+    open_client: Callable[[], _AuthRetrySyncRedis], channel: str, payload: str, *, context: str = ""
+) -> int | None:
+    """`publish_best_effort_sync` on a one-off client from `open_client()`; shared by the handle
+    (`EventBus.publish_best_effort_sync`) and the module-level shim."""
     try:
-        client = sync_redis(decode_responses=decode_responses)
+        client = open_client()
         try:
 
             def _publish() -> int:
@@ -434,10 +453,15 @@ def sync_redis(*, decode_responses: bool = False) -> _AuthRetrySyncRedis:
     host to a direct AF_INET dial (see that class's docstring); a no-op for
     a hostname host.
     """
+    return open_sync_redis(settings.data_plane.redis_url, decode_responses=decode_responses)
+
+
+def open_sync_redis(redis_url: str, *, decode_responses: bool = False) -> _AuthRetrySyncRedis:
+    """A new synchronous client on `redis_url` with the cluster's resilience settings."""
     return cast(
         _AuthRetrySyncRedis,
         _AuthRetrySyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
-            settings.data_plane.redis_url,
+            redis_url,
             decode_responses=decode_responses,
             connection_class=_PinnedIPv4Connection,
             **RESILIENCE_KWARGS,
