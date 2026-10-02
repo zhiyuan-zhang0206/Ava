@@ -2,10 +2,10 @@
 
 Bootstrap serves no database login. The gateway operator issues a sealed,
 unit-bound bundle of the ACTIVE write generation's runner login; the runner
-installs it at start and its launcher delivers it. The single-box gateway fixture (real PostgreSQL 17, PgBouncer and
-Redis) proves the end-to-end path, that a bearer-only runner receives nothing,
-and that a revoked generation's bundle never installs. The tamper, binding and
-boot-pass checks need no database.
+installs it at start and its launcher delivers it. This module holds the tamper,
+binding and issue checks, which need no database; the boot pass, the launcher and the
+end-to-end path against a real single-box gateway are in `test_unit_capability_*.py`
+beside the code they exercise.
 """
 
 from __future__ import annotations
@@ -32,10 +32,6 @@ from base.cluster.authority.tests.unit_capability_support import (
 from base.cluster.authority.tests.unit_capability_support import gateway as gateway
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
 from base.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S
-
-# The single-box gateway fixtures (real PostgreSQL, PgBouncer and Redis),
-# shared by name with this module.
-
 
 # ── sealing: tampering, keys, expiry ────────────────────────────────────────
 
