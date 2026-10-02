@@ -1265,11 +1265,15 @@ itself (its own public key in its own `authorized_keys`):
 - `up` runs `ava start` on the gateway (its cold start applies migrations),
   then on each runner; on macOS as a one-time LaunchAgent in `gui/<uid>`,
   because signing the helper needs the login keychain (the user must be
-  logged in to the GUI). Each start must release its hold; every roster
-  machine must be online with checkout and running code on one commit (`online`
-  follows the heartbeat, so the roster is re-read every 5 seconds for up to
-  `--roster-timeout`, default 90, and a failure shows the last read); then
-  the gateway smoke-tests each agent-runner with a real agent, reading its own
+  logged in to the GUI). Each start must release its hold; every machine
+  listed by `--gateway`/`--runner` must be online on the roster with checkout and
+  running code on one commit (`online` follows the heartbeat, so the roster is
+  re-read every 5 seconds for up to `--roster-timeout`, default 90, and a failure
+  shows the last read). A listed host is matched to its roster row by the machine
+  name it reports itself (`machine_name()`), not by its SSH alias; a name with no
+  row fails the half. Roster machines that are not listed (a laptop that is off) are
+  reported with their online flag and commits and never fail `up` (see the last bullet for their old processes). Then
+  the gateway smoke-tests each listed agent-runner with a real agent, reading its own
   address and bearer in place; last, each host runs `ava packages refresh`
   (skills follow their channel; `ava skill update` is retired) and its summary
   line (`applied N, conflict M`) is printed. Conflicts are only reported: the
