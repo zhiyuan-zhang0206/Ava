@@ -110,9 +110,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
     # ── gateway/alerts/router.py ───────────────────────────────────
     ("GET", "/api/alerts"): RouteContract(),
-    ("GET", "/api/alerts/impersonation-event-retention"): RouteContract(
-        note="machine-scoped retention-loss operator panel"
-    ),
     ("GET", "/api/alerts/stream"): RouteContract(
         note="SSE tail — subscribing mid-pause just idles; the UI's initial fetch covers the gap"
     ),

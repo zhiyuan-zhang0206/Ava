@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from contextlib import ExitStack, suppress
-from threading import Lock, Timer, local
+from threading import Lock, local
 from types import TracebackType
 from typing import Any, Self
 from uuid import uuid4
@@ -171,9 +171,8 @@ class Attachment:
                 _close_flush_permission.allowed = was_permitted
         finally:
             try:
-                # Receipt closure precedes the best-effort delivery flush: the
-                # receipt is the emitted-event census, while sync only reduces
-                # ordinary observation latency and cannot certify arrival.
+                # Receipt closure precedes the best-effort observation flush: the
+                # receipt seals the event log, which no longer depends on delivery.
                 self._seal_manifest_participant()
             finally:
                 try:
@@ -186,11 +185,11 @@ class Attachment:
         from base.agents.impersonation_manifest import (
             LocalParticipant,
             bind_local_participant,
-            is_event_protocol,
+            is_log_native,
             open_local_participant,
         )
 
-        if not is_event_protocol(self._lease()):
+        if not is_log_native(self._lease()):
             return
         source_key = f"attachment:{process_metadata()['pid']}:{uuid4().hex}"
         if open_local_participant(self.lease_id, agent_id=self.agent_id, source_key=source_key):
@@ -208,36 +207,20 @@ class Attachment:
         if self._manifest_participant is None:
             return
         from base.agents.impersonation_manifest import (
-            alert_if_participant_still_open,
             close_local_participant_admission,
             seal_local_participant,
         )
         from base.config import settings
 
-        # This timer is deliberately diagnostic-only. A live SDK finally may
-        # outlast the detach wait and seal later; only a real capture failure
-        # can mark its receipt failed.
-        timer = Timer(
-            settings.general.impersonation_event_manifest_seal_wait_seconds,
-            alert_if_participant_still_open,
-            args=(self._manifest_participant,),
+        drained = close_local_participant_admission(
+            self._manifest_participant,
+            timeout=settings.general.impersonation_event_seal_wait_seconds,
         )
-        timer.daemon = True
-        timer.start()
-        try:
-            drained = close_local_participant_admission(
-                self._manifest_participant,
-                timeout=settings.general.impersonation_event_manifest_seal_wait_seconds,
-            )
-            if drained:
-                seal_local_participant(self._manifest_participant)
-            else:
-                # The final admitted SDK finally seals when it drains. The
-                # timer remains a diagnostic only; a live call never becomes
-                # a synthetic failed or empty receipt at this deadline.
-                alert_if_participant_still_open(self._manifest_participant)
-        finally:
-            timer.cancel()
+        # A call still running after the wait seals its own source when it drains; the
+        # wait never turns a live source into an empty or failed receipt. An ended lease
+        # that keeps an open source is alerted by state (ImpersonationEventSealStuck).
+        if drained:
+            seal_local_participant(self._manifest_participant)
 
     def _begin_manifest_participant_close(self) -> None:
         """Atomically start close and fence new SDK admission."""

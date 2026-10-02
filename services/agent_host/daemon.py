@@ -354,7 +354,7 @@ async def _exec_memory_guard_forever() -> None:
 
 
 def _spawn_background_tasks(pool: AsyncConnectionPool) -> dict[str, asyncio.Task[object]]:
-    """Create the daemon's background tasks for plugins, pages, event replay, logs and exec memory.
+    """Create the daemon's background tasks for plugins, pages, logs and exec memory.
 
     Split out of `run()` so the wiring is testable without booting the
     dispatcher: the reconciler's existence is what closes the
@@ -363,10 +363,7 @@ def _spawn_background_tasks(pool: AsyncConnectionPool) -> dict[str, asyncio.Task
     (task #2356), and a regression that dropped either creation must turn a
     test red rather than silently reopen the gap.
     """
-    from services.agent_host.impersonation_events import reconcile_forever
-
     loops = {
-        "impersonation_events": reconcile_forever(),
         "plugins_watch": _watch_plugins_for_restart(),
         "page_reconciler": _page_reconcile_forever(pool),
         "stdout_log_rotate": _rotate_stdout_log_forever(),

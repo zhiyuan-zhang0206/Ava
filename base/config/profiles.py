@@ -78,8 +78,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "gateway",
             "services",
             "daemon",
-            # The agent-host manifest health monitor writes pending-age,
-            # slow-seal, capture-failure, and retention-loss alerts.
+            # The ttl reaper raises the impersonation event-log state alerts.
             "alerts",
             # ava/skills.py imports base.packages.extensions.install_registry, whose
             # resolved_policy() resolves per-package update defaults from
@@ -101,8 +100,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "lm",  # ops.lifecycle reads llm_model
             "sandbox",
             "observability",
-            # Runner-owned central producers and lifecycle paths share the
-            # manifest alert writer with the agent-host monitor.
+            # Runner-owned event capture raises the capture-failure alert.
             "alerts",
             # The pty CLI (base/sessions/pty/cli.py, reachable from the runner
             # closure) resolves an omitted capture window from

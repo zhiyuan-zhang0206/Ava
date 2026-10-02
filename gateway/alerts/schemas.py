@@ -33,7 +33,6 @@ __all__ = [
     "AlertWebhookPayload",
     "AlertsListMeta",
     "AlertsListResponse",
-    "ImpersonationRetentionLossRow",
     "parse_alertname",
     "parse_severity",
 ]
@@ -126,20 +125,6 @@ class AlertRow(BaseModel):
     notified_at: datetime | None
     created_at: datetime
     updated_at: datetime
-
-
-class ImpersonationRetentionLossRow(BaseModel):
-    """One incomplete manifest whose required Loki envelope has expired."""
-
-    model_config = ConfigDict(frozen=True)
-
-    lease_id: str
-    agent_id: int
-    session_id: int
-    envelope_floor_at: datetime
-    retention_horizon_at: datetime | None
-    created_at: datetime
-    missing_item_count: int
 
 
 class AlertsListMeta(BaseModel):

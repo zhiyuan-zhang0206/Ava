@@ -181,11 +181,9 @@ def _stage_termination_event(
     event = prepare_event_log(
         event_type="terminate", agent_id=agent_id, source=source, payload=payload
     )
-    from base.agents.impersonation_manifest import stage_central_expected_event
+    from base.agents.impersonation_manifest import record_central_event
 
-    return stage_central_expected_event(
-        conn, event, origin_kind="ops_terminate", origin_id=inbound_id
-    )
+    return record_central_event(conn, event)
 
 
 def _enqueue_termination_inbounds(

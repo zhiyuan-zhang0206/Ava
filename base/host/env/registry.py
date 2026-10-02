@@ -63,18 +63,6 @@ from base.host.env.config_lite_table import (
 # a new enum.
 ProcessRole = Literal["gateway", "agent", "runner"]
 
-# The certification proof is a host-local setting, but it is not a general
-# host-child capability.  The root/service launchers project it only into the
-# agent-host finalizer; model-facing sessions and agent children never receive
-# it.  Keeping the alias here makes every boundary use the Settings declaration
-# rather than a second string literal.
-MANIFEST_CERTIFICATION_SECRET_ENV = FIELD_ALIASES[
-    "impersonation_event_manifest_certification_secret"
-]
-# A targeted agent-host launch ticket, consumed before config boot. It is not a
-# Settings field and never joins a generic child projection.
-MANIFEST_CERTIFICATION_FINALIZER_ENV = "AVA_MANIFEST_CERTIFICATION_FINALIZER"
-
 # ── Passthrough rows (A1: every non-Settings env key declared exactly once) ──
 
 
@@ -331,15 +319,14 @@ def derived_env_keys() -> frozenset[str]:
 def session_forward_keys() -> frozenset[str]:
     """The daemon/session child allowlist (settings half) — the host-scope
     settings aliases (machine identity, per-unit health ports, the gateway URL
-    the fetch dials), plus AVA_HOME, except the certification proof that only the
-    agent-host finalizer receives through its targeted launcher projection. No
+    the fetch dials), plus AVA_HOME. No
     cluster-scope value, no agent-scope knob, no non-modeled AVA_* identity
     (audit F-s3-4: the old denylist forwarded AVA_AGENT_ID into daemon
     sessions). The ambient passthroughs
     (DISPLAY/WAYLAND_DISPLAY/HOME/USER/LOGNAME) and the temp-dir vars are applied by
     `child_env`, not part of this set. A new host-scope field is forwarded
-    automatically unless it is deliberately finalizer-only."""
-    return (_scope_aliases("host") | {AVA_HOME_ENV}) - {MANIFEST_CERTIFICATION_SECRET_ENV}
+    automatically."""
+    return _scope_aliases("host") | {AVA_HOME_ENV}
 
 
 @lru_cache(maxsize=1)
@@ -347,9 +334,8 @@ def launch_input_keys() -> frozenset[str]:
     """The env keys a root generation's launch digest binds, and nothing else.
 
     Declared launch inputs: the host-scope settings (AVA_HOME, machine
-    identity, health ports, the admitted service PATH, the certification
-    proof), PATH and VIRTUAL_ENV as the delivery rebuilds them from the
-    runtime, and the finalizer ticket. The ambient host facts `child_env`
+    identity, health ports, the admitted service PATH), PATH and VIRTUAL_ENV as
+    the delivery rebuilds them from the runtime. The ambient host facts `child_env`
     copies from whoever launched it (display, HOME/USER/LOGNAME, temp dirs,
     proxy) are not: a service manager injects its own —
     systemd `User=` sets USER and LOGNAME, launchd adds TMPDIR — so an observer
@@ -357,33 +343,7 @@ def launch_input_keys() -> frozenset[str]:
     for the same launch. Positive list: a key a delivery adds later stays out
     of the digest until it is declared here.
     """
-    return (
-        _scope_aliases("host")
-        | {AVA_HOME_ENV}
-        | _OS_CANONICAL_KEYS
-        | {MANIFEST_CERTIFICATION_FINALIZER_ENV}
-    )
-
-
-def manifest_certification_secret_env() -> dict[str, str]:
-    """Return the proof's one-purpose projection for the agent-host finalizer.
-
-    A non-finalizer config boot removes the proof from its ambient environment.
-    The launcher re-reads only this value from its own unit file and supplies a
-    one-use ticket, so the finalizer retains it while a child cannot obtain it
-    merely by booting against that same file.
-    """
-    from base.host.env.dotenv_boot import manifest_certification_secret_from_env_file
-
-    value = manifest_certification_secret_from_env_file()
-    return (
-        {
-            MANIFEST_CERTIFICATION_SECRET_ENV: value,
-            MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
-        }
-        if value
-        else {}
-    )
+    return _scope_aliases("host") | {AVA_HOME_ENV} | _OS_CANONICAL_KEYS
 
 
 # ── Projections ──
