@@ -29,10 +29,9 @@ below); capability/scope metadata only validates (deriving env sets from
 capability was the 2026-08-06 #1570 P0).
 
 Projections (the design's boundary currency):
-- `child_env(role)` — the parent->child forwarding view
-  (SESSION/AGENT_FORWARD/HOST_PASSTHROUGH semantics);
-  `role` reuses `AVA_PROCESS_PROFILE` (gateway/agent/runner) — daemons belong
-  to the gateway/runner profiles.
+- `child_env(role)` — the parent->child forwarding view of a daemon / session
+  child (SESSION/HOST_PASSTHROUGH semantics); `role` is the gateway or runner
+  `AVA_PROCESS_PROFILE` — daemons belong to those profiles.
 - `env_keep_set(role)` / `env_authority_drop_set(role)` — the dotenv_boot
   env-authority force/drop families (set membership queries, not env dicts).
 
@@ -163,12 +162,9 @@ REDIS_PASSWORD_ENV = "AVA_REDIS_PASSWORD"  # noqa: S105 — env key, not a crede
 # inherits, so a process tree that set it keeps every child on the same home.
 AVA_HOME_ENV = "AVA_HOME"
 
-# Non-Settings guide keys an agent that self-fetches its config still needs
-# forwarded before Settings: the TLS bundle for the fetch on corp-MITM hosts,
-# plus the two JSON carriers above, all passthrough rows. The gateway URL and
-# port it dials are host-scope fields, so the session view already forwards
-# them. The cluster secret is in no forwarded view: an agent child presents its
-# API token, never the human bearer.
+# Non-Settings guide keys an agent process needs before Settings: the TLS bundle
+# for the config fetch on corp-MITM hosts, plus the two JSON carriers above, all
+# passthrough rows.
 _GUIDE_PASSTHROUGH_KEYS = frozenset(
     {"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", AGENT_CONFIG_OVERLAY_ENV, AGENT_BIRTH_CONFIG_ENV}
 )
@@ -331,21 +327,6 @@ def derived_env_keys() -> frozenset[str]:
     )
 
 
-def _enabled_provider_key_envs() -> frozenset[str]:
-    """The key variables declared by enabled provider plugins, loaded lazily.
-
-    Provider keys deliberately have no Settings field: a provider plugin must
-    be removable without widening core configuration. The binding contract is
-    their sole declaration, and this helper is called only at env-delivery
-    boundaries that need that declaration.
-    """
-    from base.lm import provider_api
-    from base.lm.plugin_providers import ensure_provider_plugins_loaded
-
-    ensure_provider_plugins_loaded()
-    return frozenset(binding.key_env for binding in provider_api.REGISTRY.bindings.values())
-
-
 @lru_cache(maxsize=1)
 def session_forward_keys() -> frozenset[str]:
     """The daemon/session child allowlist (settings half) — the host-scope
@@ -405,15 +386,6 @@ def manifest_certification_secret_env() -> dict[str, str]:
     )
 
 
-@lru_cache(maxsize=1)
-def agent_forward_keys() -> frozenset[str]:
-    """The detached-agent child allowlist: the session set plus the agent-scope
-    aliases (per-agent knobs: AVA_LLM_OVERRIDE etc.) plus the boot-time guide
-    keys (TLS bundle, the overlay/birth JSON carriers — never argv, issue
-    #974)."""
-    return session_forward_keys() | _scope_aliases("agent") | _GUIDE_PASSTHROUGH_KEYS
-
-
 # ── Projections ──
 
 
@@ -444,14 +416,14 @@ def _ensure_validated() -> None:
     _ensure_validated._done = True  # type: ignore[attr-defined]
 
 
-def child_env(role: ProcessRole) -> dict[str, str]:
-    """The parent->child env dict a `role` child receives (forwarding view).
+def child_env(role: Literal["gateway", "runner"]) -> dict[str, str]:
+    """The parent->child env dict a daemon / session child of `role` receives.
 
     POSITIVE allowlist, not a drop list (Task #856 Phase C, audit F-s3-4): a
     non-modeled knob (AVA_AGENT_ID, ...) or agent-scope override never rides a
-    daemon session. `role` reuses AVA_PROCESS_PROFILE: `gateway` and `runner`
-    (daemon/session children — daemons belong to those profiles) get the
-    session view; `agent` adds the agent-scope knobs and boot-time guide keys.
+    daemon session. `gateway` and `runner` (daemons belong to those profiles)
+    get the same session view; an agent process has no forwarding view (it is
+    launched with the launcher's own environment).
     Host passthroughs (DISPLAY/WAYLAND_DISPLAY/HOME/USER/LOGNAME), the temp-dir vars and the
     machine's network proxy configuration (NETWORK_PROXY_KEYS — the one egress
     channel a build child needs; issue #2095) are carried non-empty only — an
@@ -460,18 +432,10 @@ def child_env(role: ProcessRole) -> dict[str, str]:
     The allow/drop decision is the DATA in this registry; the caller
     (base.sessions.env_forwarding) is the mechanism that applies it.
     """
-    _require_role(role)
+    if role not in ("gateway", "runner"):
+        raise ValueError(f"unknown daemon role {role!r} — must be gateway or runner")
     _ensure_validated()
-    keys = (
-        agent_forward_keys() if role == "agent" else session_forward_keys()
-    )  # gateway / runner — the daemon/session view
-    env = {k: os.environ[k] for k in keys if k in os.environ}
-    if role == "agent":
-        # Provider keys are non-modeled secrets. Only an agent process may need
-        # them at build time; daemon/session children retain the narrower view.
-        env.update(
-            {key: os.environ[key] for key in _enabled_provider_key_envs() if key in os.environ}
-        )
+    env = {k: os.environ[k] for k in session_forward_keys() if k in os.environ}
     for key in HOST_PASSTHROUGH_KEYS | _TEMP_DIR_KEYS | NETWORK_PROXY_KEYS:
         if os.environ.get(key):
             env[key] = os.environ[key]

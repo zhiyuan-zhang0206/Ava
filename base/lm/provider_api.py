@@ -20,8 +20,8 @@ enable switch).
 
 ``ProviderBinding.key_env`` declares the key's `.env` delivery channel: the
 gateway reads the file at spawn validation, bootstrap relays enabled bindings'
-present keys to split runners, and the single-box agent child allowlist forwards
-only those declared keys. Plugin config images do not carry provider secrets.
+present keys to split runners, and every agent process and exec child reads the key
+from its own boot of that channel. Plugin config images do not carry provider secrets.
 
 Builder contract (plain Python, documented rather than schema'd — see
 ``decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md``):
