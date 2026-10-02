@@ -3,9 +3,14 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from threading import Event
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from fastapi import Request
 
+from base.db import Database
+from base.db.tests.fakes import fake_database
 from base.native_process.turn_identity import bind_turn_identity, current_turn_agent_id
 from gateway.events import telemetry_rows
 from gateway.run_timeline import _events as reads
@@ -28,11 +33,14 @@ def test_event_reads_page_through_every_row_oldest_first(monkeypatch: pytest.Mon
         return rows[offset : offset + limit], len(rows) > offset + limit
 
     monkeypatch.setattr(reads, "_PAGE_SIZE", 2)
-    monkeypatch.setattr(reads, "connect", _no_connection)
     monkeypatch.setattr(telemetry_rows, "query_events", query)
     start = datetime(2026, 9, 22, tzinfo=UTC)
     result = reads.query_all_events(
-        405, start, start + timedelta(hours=1), event_names=("turn_end",)
+        fake_database(_no_connection),
+        405,
+        start,
+        start + timedelta(hours=1),
+        event_names=("turn_end",),
     )
     assert result == rows
     assert [call["offset"] for call in calls] == [0, 2, 4, 6, 8]
@@ -48,10 +56,17 @@ def test_small_event_window_is_one_read(monkeypatch: pytest.MonkeyPatch) -> None
         calls.append(kwargs)
         return [{"id": 1}], False
 
-    monkeypatch.setattr(reads, "connect", _no_connection)
     monkeypatch.setattr(telemetry_rows, "query_events", query)
-    assert reads.query_all_events(405, start, start, event_names=("turn_end",)) == [{"id": 1}]
+    database = fake_database(_no_connection)
+    assert reads.query_all_events(database, 405, start, start, event_names=("turn_end",)) == [
+        {"id": 1}
+    ]
     assert len(calls) == 1
+
+
+def _request() -> Request:
+    state = SimpleNamespace(db=Database.from_settings())
+    return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
 
 
 def test_strip_overlaps_events_and_joins_with_request_context(
@@ -62,7 +77,7 @@ def test_strip_overlaps_events_and_joins_with_request_context(
 
     def strip(*args: object) -> tuple[list[object], bool]:
         assert current_turn_agent_id() == 405
-        assert args == (405, start, start + timedelta(hours=1), 7)
+        assert args[1:] == (405, start, start + timedelta(hours=1), 7)
         strip_started.set()
         assert events_started.wait(2), "event read did not overlap strip"
         strip_finished.set()
@@ -85,7 +100,9 @@ def test_strip_overlaps_events_and_joins_with_request_context(
     monkeypatch.setattr(timeline, "_narrative_for_window", narrative)
     monkeypatch.setattr(timeline, "_inbounds_for_window", inbounds)
     with bind_turn_identity(405):
-        result = timeline.get_run_timeline(405, start, start + timedelta(hours=1), messages_max=7)
+        result = timeline.get_run_timeline(
+            _request(), 405, start, start + timedelta(hours=1), messages_max=7
+        )
         assert result.messages == []
         assert result.messages_truncated is True
         assert result.layers is None

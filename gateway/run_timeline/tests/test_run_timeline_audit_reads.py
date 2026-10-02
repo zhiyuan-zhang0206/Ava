@@ -11,6 +11,7 @@ from typing import LiteralString
 
 import psycopg
 
+from base.db import Database
 from gateway.run_timeline import _events as reads
 
 _INSERT_AUDIT: LiteralString = (
@@ -43,7 +44,11 @@ def test_audit_names_come_from_audit_events_and_the_rest_from_telemetry_events(
     now = datetime.now(UTC)
 
     events = reads.query_all_events(
-        405, now - timedelta(days=30), now, event_names=("compact", "spawn", "turn_end")
+        Database.from_settings(),
+        405,
+        now - timedelta(days=30),
+        now,
+        event_names=("compact", "spawn", "turn_end"),
     )
 
     assert sorted(str(event["event_name"]) for event in events) == ["compact", "spawn", "turn_end"]
@@ -55,6 +60,8 @@ def test_an_audit_only_read_never_asks_for_telemetry_rows(db_conn: psycopg.Conne
     _record(db_conn, "telemetry_events", 405, "terminate", hours_ago=1)
     now = datetime.now(UTC)
 
-    events = reads.query_all_events(405, now - timedelta(days=1), now, event_names=("terminate",))
+    events = reads.query_all_events(
+        Database.from_settings(), 405, now - timedelta(days=1), now, event_names=("terminate",)
+    )
 
     assert [event["category"] for event in events] == ["audit"]

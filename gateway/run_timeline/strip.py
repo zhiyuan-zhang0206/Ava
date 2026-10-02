@@ -15,12 +15,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import BaseMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items, needs_chat_anchors
 from base.config import settings
-from base.db import InboundRow
+from base.db import Database, InboundRow
 from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.run_timeline.schemas import (
@@ -242,13 +242,13 @@ def _message_from_group(key: str, group: list[TimelineItem]) -> RunTimelineMessa
     )
 
 
-def _chat_inbound_anchors(agent_id: int) -> list[InboundRow]:
+def _chat_inbound_anchors(database: Database, agent_id: int) -> list[InboundRow]:
     """Chat inbound rows backing legacy ts alignment — read only when the
     segment still carries legacy rows (`needs_chat_anchors`); the same source
     and bound the console timeline reads."""
-    from base.db import list_inbound_messages, pool
+    from base.db import list_inbound_messages
 
-    db_pool = pool(autocommit=True)
+    db_pool = database.pool(autocommit=True)
     with db_pool.connection() as conn:
         return [
             row
@@ -268,6 +268,7 @@ def _placed_min_ts(groups: list[tuple[str, list[TimelineItem]]]) -> datetime | N
 
 
 def _strip_messages_for_window(
+    database: Database,
     agent_id: int,
     window_start: datetime,
     window_end: datetime,
@@ -288,7 +289,7 @@ def _strip_messages_for_window(
     truncated = False
 
     current = _cached_current_messages(agent_id)
-    anchors = _chat_inbound_anchors(agent_id) if needs_chat_anchors(current) else []
+    anchors = _chat_inbound_anchors(database, agent_id) if needs_chat_anchors(current) else []
     current_items, _ = build_timeline_items(current, anchors)
     groups = _group_strip_items(current_items)
 
@@ -332,6 +333,7 @@ def _strip_messages_for_window(
 
 
 def strip_for_window_or_none(
+    database: Database,
     agent_id: int,
     window_start: datetime,
     window_end: datetime,
@@ -347,13 +349,13 @@ def strip_for_window_or_none(
     if messages_max is not None:
         budget = min(messages_max, settings.display.run_timeline_messages_max)
     try:
-        return _strip_messages_for_window(agent_id, window_start, window_end, budget)
+        return _strip_messages_for_window(database, agent_id, window_start, window_end, budget)
     except Exception:
         logger.exception("run-timeline strip read failed for agent {}", agent_id)
         return None, None
 
 
-def _strip_message_group(agent_id: int, key: str) -> list[TimelineItem]:
+def _strip_message_group(database: Database, agent_id: int, key: str) -> list[TimelineItem]:
     """Resolve one strip key to its items; 404 for unknown or malformed keys."""
 
     def not_found() -> HTTPException:
@@ -361,7 +363,7 @@ def _strip_message_group(agent_id: int, key: str) -> list[TimelineItem]:
 
     if key.startswith("c."):
         current = _cached_current_messages(agent_id)
-        anchors = _chat_inbound_anchors(agent_id) if needs_chat_anchors(current) else []
+        anchors = _chat_inbound_anchors(database, agent_id) if needs_chat_anchors(current) else []
         items, _ = build_timeline_items(current, anchors)
     elif key.startswith("s") and "." in key:
         rank, rest = key.split(".", 1)
@@ -385,6 +387,7 @@ def _strip_message_group(agent_id: int, key: str) -> list[TimelineItem]:
     dependencies=[Depends(deny_isolated_result_read)],
 )
 def get_run_timeline_message(
+    request: Request,
     agent_id: int,
     key: Annotated[str, Query()],
     full: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
@@ -396,7 +399,7 @@ def get_run_timeline_message(
     ``display.run_timeline_message_text_max`` come back clipped with
     ``content_truncated``; refetch with ``full=true`` for the uncut text.
     """
-    group = _strip_message_group(agent_id, key)
+    group = _strip_message_group(request.app.state.db, agent_id, key)
     text_max = settings.display.run_timeline_message_text_max
     parts: list[RunTimelineMessageDetailPart] = []
     content_truncated = False
