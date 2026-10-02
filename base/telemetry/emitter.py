@@ -320,7 +320,7 @@ _jsonl_failures = 0
 _NO_EMITTER = "_no_emitter"
 
 
-def report_no_pipeline(message: str, **extra: Any) -> None:
+def report_no_pipeline(message: str, *, level: str = "warning", **extra: Any) -> None:
     """Log a drain-thread diagnostic through loguru, marked `_NO_EMITTER` so
     the emitter adapter skips it. Best-effort: never raises, never blocks."""
     with contextlib.suppress(Exception):
@@ -328,18 +328,23 @@ def report_no_pipeline(message: str, **extra: Any) -> None:
 
         # **{_NO_EMITTER: True} — bind() takes literal kwargs, so the marker
         # key must be the constant's VALUE, not its name.
-        logger.bind(**{_NO_EMITTER: True}).warning(message, **extra)
+        logger.bind(**{_NO_EMITTER: True}).log(level.upper(), message, **extra)
 
 
 def _write_batch(events: list[Event]) -> None:
-    """Mirror first, then compact metric projection and OTLP export.
+    """Mirror first, then the telemetry_events record, the compact metric projection
+    and OTLP export.
 
-    Every sink is failure-isolated. The projection never restores the retired
-    Postgres event archive and cannot turn an observation into a billing proof.
+    Every sink is failure-isolated. The projection cannot turn an observation into a
+    billing proof; the telemetry_events sink reports its own failures.
     """
     if not events:
         return
     _append_jsonl(events)
+    with contextlib.suppress(Exception):
+        from base.telemetry.event_store import store_events
+
+        store_events(events)
     try:
         from base.telemetry.metrics.observed_metrics import project_events
 
@@ -730,6 +735,10 @@ def _drain_on_exit() -> None:
         from base.telemetry.metrics.observed_metrics import close_projection
 
         close_projection()
+    with contextlib.suppress(Exception):
+        from base.telemetry.event_store import close_store
+
+        close_store()
     with contextlib.suppress(Exception):
         from base.telemetry.otlp import telemetry_otlp  # deferred — heavy OTel imports
 

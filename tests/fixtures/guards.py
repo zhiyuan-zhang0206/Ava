@@ -59,6 +59,18 @@ def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _telemetry_event_store_off() -> None:
+    """Keep the emitter's telemetry_events sink off for the whole test session: the drain
+    thread would otherwise write the shared test database from every event-emitting test,
+    and a late batch could land in the next test's rows. Tests of the sink and of its
+    readers call `event_store.set_enabled(enabled=True)` themselves and switch it off again.
+    """
+    from base.telemetry import event_store
+
+    event_store.set_enabled(enabled=False)
+
+
+@pytest.fixture(autouse=True)
 def _restore_metering() -> Iterator[None]:
     """Per-test isolation for the process-global `ava` singleton's metering state:
     whatever a test wrapped, the next test sees the bare callables again.
