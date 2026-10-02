@@ -88,8 +88,9 @@ def _retired(conn: psycopg.Connection[Any]) -> int:
 
 
 def test_completed_retired_consumer_parks_without_inventing_receipts(
-    db_conn: psycopg.Connection[Any],
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _hide_machine_processes(monkeypatch)
     agent = _retired(db_conn)
     before = db_conn.execute(
         "SELECT runtime_kind,runtime_owner,runtime_generation,lease_expires_at,"
@@ -366,7 +367,10 @@ def test_young_unreadable_exec_envelope_still_refuses_cold_prepare(
     )
 
 
-def test_failed_current_lifecycle_cannot_be_parked(db_conn: psycopg.Connection[Any]) -> None:
+def test_failed_current_lifecycle_cannot_be_parked(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hide_machine_processes(monkeypatch)
     agent = _retired(db_conn)
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,status,source,content,target_generation,"
@@ -385,6 +389,7 @@ def test_checkpoint_replaced_by_real_second_connection_refuses_parking(
 ) -> None:
     from base.deploy.maintenance import cold
 
+    _hide_machine_processes(monkeypatch)
     agent = _retired(db_conn)
     original = cold.require_persisted_end
 
