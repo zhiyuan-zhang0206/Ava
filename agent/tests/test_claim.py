@@ -34,6 +34,7 @@ from agent.state import AgentState
 from agent.tests.claim_status_support import _compact_tail
 from agent.tests.claim_status_support import running_agent as running_agent
 from agent.tests.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
+from base.agents.context.slices import AgentSlices
 from tests.fixtures.units import spawn_agent
 
 # Almost all claim tests are short-path dispatch: the inbound is INSERTed before
@@ -211,10 +212,11 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(
-        "agent.graph.claim._dispatch.fork_notes",
-        lambda: [system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID)],
-    )
+
+    def fork_notes(_slices: AgentSlices) -> list[HumanMessage]:
+        return [system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID)]
+
+    monkeypatch.setattr("agent.graph.claim._dispatch.fork_notes", fork_notes)
     try:
         cmd = await claim_node(
             AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="inherited")]),
@@ -274,13 +276,14 @@ async def test_claim_fork_strips_inherited_source_notes(
     cluster_index = _tagged(NoteTag.MEMORY, "shared pool index", "note-cluster-index")
     inherited = [SystemMessage(content="sys"), old_id, old_mem, old_preload, cluster_index]
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(
-        "agent.graph.claim._dispatch.fork_notes",
-        lambda: [
+
+    def fork_notes(_slices: AgentSlices) -> list[HumanMessage]:
+        return [
             system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID),
             system_note_message(content="the new agent's memory", tag=NoteTag.AGENT_MEMORY),
-        ],
-    )
+        ]
+
+    monkeypatch.setattr("agent.graph.claim._dispatch.fork_notes", fork_notes)
     try:
         cmd = await claim_node(
             AgentState(messages=list(inherited)),
