@@ -702,7 +702,15 @@ private let axMaxStringLength = 200
 private let axTreeFrameworkMarkers: [(marker: String, name: String)] = [
     ("Electron Framework.framework", "electron"),
     ("Chromium Embedded Framework.framework", "cef"),
+    ("Google Chrome Framework.framework", "chromium"),
+    ("Microsoft Edge Framework.framework", "chromium"),
+    ("Brave Browser Framework.framework", "chromium"),
 ]
+
+/// Processes whose Chromium accessibility we already switched on during this
+/// helper's life: the switch is sticky in the target app until it quits, so a
+/// repeat walk neither sets it again nor waits for the tree to appear.
+private var axEnabledPids: Set<pid_t> = []
 
 /// A live element reference plus the signature (role, identifier, title,
 /// description) it had when it was read; `ax_act` refuses an element whose
@@ -802,7 +810,40 @@ private func axFrameworkHint(_ app: NSRunningApplication) -> String {
         let path = bundle.appendingPathComponent("Contents/Frameworks/" + entry.marker).path
         if FileManager.default.fileExists(atPath: path) { return entry.name }
     }
+    // Chromium forks under their own name (Lark's "Lark Framework.framework")
+    // keep Chromium's multi-process layout: a framework whose Helpers directory
+    // holds a "... Helper (Renderer).app".
+    let frameworks = bundle.appendingPathComponent("Contents/Frameworks")
+    for entry in (try? FileManager.default.contentsOfDirectory(atPath: frameworks.path)) ?? []
+    where entry.hasSuffix(".framework") {
+        let helpers = frameworks.appendingPathComponent(entry + "/Helpers").path
+        if let inner = try? FileManager.default.contentsOfDirectory(atPath: helpers),
+           inner.contains(where: { $0.hasSuffix("Helper (Renderer).app") }) { return "chromium" }
+    }
     return ""
+}
+
+/// Ask a Chromium-based app (Electron, CEF, Chrome family) to build its
+/// accessibility tree, which it otherwise skips unless an assistive tool is
+/// attached. `AXManualAccessibility` is the attribute built for exactly this;
+/// `AXEnhancedUserInterface` is deliberately not touched (it changes native
+/// window behavior and belongs to VoiceOver). The app builds the tree lazily,
+/// so the first time per process we wait, bounded, for its window to list
+/// children. Returns "set", "already" or "failed".
+private func axEnableChromiumAccessibility(_ axApp: AXUIElement, pid: pid_t) -> String {
+    if axEnabledPids.contains(pid) { return "already" }
+    let status = AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    guard status == .success else { return "failed" }
+    axEnabledPids.insert(pid)
+    for _ in 0..<10 {
+        if let window = axPickWindow(axApp).window {
+            var children: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window, kAXChildrenAttribute as CFString, &children) == .success,
+               let list = children as? [AnyObject], !list.isEmpty { break }
+        }
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+    return "set"
 }
 
 private func axPickWindow(_ axApp: AXUIElement) -> (window: AXUIElement?, count: Int) {
@@ -836,10 +877,19 @@ func axTree(_ req: [String: Any]) throws -> [String: Any] {
 
     let axApp = AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(axApp, messagingTimeout)
+    let framework = axFrameworkHint(app)
+    // "n/a": not a Chromium-based app; "off": the caller opted out; "set" /
+    // "already" / "failed": see axEnableChromiumAccessibility. Scoped walks
+    // read an element that exists, so they never enable anything.
+    var enable = "n/a"
+    if !framework.isEmpty && req["scope"] == nil {
+        enable = (req["enable_ax"] as? Bool ?? true)
+            ? axEnableChromiumAccessibility(axApp, pid: app.processIdentifier) : "off"
+    }
     let picked = axPickWindow(axApp)
     var meta: [String: Any] = [
         "app": appName, "pid": Int(app.processIdentifier), "windows": picked.count,
-        "framework": axFrameworkHint(app),
+        "framework": framework, "ax_enable": enable,
     ]
 
     let root: AXUIElement

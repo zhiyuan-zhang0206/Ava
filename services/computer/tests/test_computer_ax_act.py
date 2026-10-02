@@ -107,6 +107,7 @@ class FakeAxApp:
             "pid": self.pid,
             "windows": 1,
             "framework": "",
+            "ax_enable": "n/a",
             "nodes": nodes,
             "visited": len(nodes),
             "truncated": False,

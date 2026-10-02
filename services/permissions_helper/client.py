@@ -250,7 +250,10 @@ class AxTreeResult(TypedDict):
     app: str
     pid: int
     windows: int
-    framework: str  # "electron" / "cef" when the bundle ships one, else ""
+    framework: str  # "electron" / "cef" / "chromium" when the bundle ships one, else ""
+    ax_enable: NotRequired[
+        str
+    ]  # Chromium switch: n/a | off | set | already | failed (older helpers omit it)
     nodes: list[AxNode]
     visited: int
     truncated: bool  # the node or depth cap cut the walk
@@ -450,6 +453,7 @@ def ax_tree(
     max_depth: int = 14,
     budget_ms: int = 1500,
     timeout_ms: int = 400,
+    enable_ax: bool = True,
     sock_path: str | Path | None = None,
 ) -> AxTreeResult:
     """Read `app`'s focused-window accessibility tree (or the subtree under the
@@ -460,6 +464,7 @@ def ax_tree(
         "max_depth": max_depth,
         "budget_ms": budget_ms,
         "timeout_ms": timeout_ms,
+        "enable_ax": enable_ax,
     }
     if scope is not None:
         req["scope"] = scope

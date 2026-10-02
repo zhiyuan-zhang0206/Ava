@@ -48,3 +48,25 @@ timeout yields `completed=false` plus a note (the action may still have run).
 `set_value` writes text into the field and is never echoed in the result, an
 error or the `computer_action` audit row; the row carries the element center
 and the action (`x,y,action`).
+
+## Chromium-based apps and the visual gap
+Electron, CEF and the Chrome family build their accessibility tree only when an
+assistive tool is attached. For a bundle that ships one of those frameworks (or any framework with Chromium's
+`Helpers/... Helper (Renderer).app` layout, which catches renamed forks such as
+Lark) the
+helper's first unscoped walk per process sets `AXManualAccessibility` on the app
+(never `AXEnhancedUserInterface`, which VoiceOver owns and which changes native
+window behavior), then waits, bounded, for the window to list children. The
+switch is sticky in the target app until it quits and costs it some CPU;
+`enable_ax=false` leaves the app untouched. `ax_enable` in the walk says what
+happened (`n/a`, `off`, `set`, `already`, `failed`) and sharpens the quality
+reason for a thin tree: `electron_ax_disabled`, `electron_enable_failed`,
+`electron_not_exposed` (asked, still little), alongside `no_window`,
+`unresponsive` (nothing readable in time), `canvas` and `sparse`.
+
+`include_ocr_gap=true` (whole-window reads only) also OCRs the screen
+(`services/computer/ax_gap.py`) and appends the text whose center falls in no
+control or text element of the tree as `[px:N]` lines, the same fusion as UFO2's
+UIA + vision merge. `px:` ids belong to that one call; the only action is
+`ax_act(id="px:N", action="press")`, a click at the text center. An OCR failure
+is reported beside the tree (`ocr_gap_error`), never failing the read.
