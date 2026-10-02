@@ -10,7 +10,7 @@ guardrails (the 24h budget breaker, the halt marker, the done-time signals on
 the child's side).
 The scan's enqueue decisions and the child-side outcome live in
 `services/hierarchy_worker/tests/test_hierarchy_worker.py`; the enqueue SQL itself in
-`tests/test_checkpoint_cleanup.py`.
+`base/agents/history/tests/test_checkpoint_cleanup.py`.
 """
 
 from __future__ import annotations
