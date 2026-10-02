@@ -44,6 +44,7 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from base.log import init_gateway_process
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S, completion_digest
 from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
@@ -578,13 +579,13 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: LoopProgress) -> None:
             _log.exception("[heartbeat] poll iteration failed")
 
 
-async def _liveness_loop(pool: ConnectionPool, liveness: LoopProgress) -> None:
+async def _liveness_loop(pool: ConnectionPool, bus: EventBus, liveness: LoopProgress) -> None:
     """Run agent-liveness checks, the first at start so the roster read model is
     populated at once; a failed pass is retried on the next interval."""
     while True:
         try:
             if not admission.quiesced():
-                await run_liveness_pass(pool)
+                await run_liveness_pass(pool, bus)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -611,6 +612,7 @@ async def run() -> None:
     _log.info("[heartbeat] healthz listening on :%s", endpoint.health_port)
 
     pool = Database.from_settings().pool()
+    bus = EventBus.from_settings()
     try:
         # One TaskGroup owns the resident loops, each with its own progress tracker
         # so a stalled loop cannot be masked by a busy sibling. The liveness pass
@@ -620,7 +622,7 @@ async def run() -> None:
         # its siblings and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
             loops.create_task(_dispatch_loop(pool, dispatch_progress))
-            loops.create_task(_liveness_loop(pool, liveness_progress))
+            loops.create_task(_liveness_loop(pool, bus, liveness_progress))
             loops.create_task(completion_digest.completion_digest_loop(pool, digest_progress))
     finally:
         pool.close()
