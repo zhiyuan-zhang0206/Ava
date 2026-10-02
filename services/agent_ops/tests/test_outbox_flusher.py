@@ -17,7 +17,7 @@ import pytest
 
 from base.agents.messages import delivery_outbox as outbox
 from base.daemon import round_loop
-from base.daemon.health import health_port
+from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.deploy.maintenance import admission
 from services.agent_ops import daemon, outbox_flusher
@@ -233,7 +233,7 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
                 served_cancelled.set()
                 raise
 
-    async def start_health(name: str, **kw: object) -> _Server:
+    async def start_health(name: str, port: int, **kw: object) -> _Server:
         assert isinstance(kw["liveness"], LivenessGroup)
         assert set(kw["liveness"].snapshot()) == {"delivery-outbox"}  # type: ignore[union-attr]
         return _Server()
@@ -264,7 +264,9 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     monkeypatch.setattr(daemon, "_register_boot", lambda: None)
     monkeypatch.setattr(daemon.outbox_flusher, "outbox_loop", crashing_loop)
-    assert health_port("ops")  # the port table still names the ops slot
+    assert (
+        ServiceEndpoints.from_settings().of("ops").health_port
+    )  # the port table still names the ops slot
 
     with pytest.raises(ExceptionGroup) as raised:
         await daemon._main()

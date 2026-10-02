@@ -64,9 +64,9 @@ from base.agents.incarnation.exec_request_evidence import disposition_hint
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
     Liveness,
-    health_port,
     start_health_server,
     stop_health_server,
 )
@@ -76,7 +76,6 @@ from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
 from base.log import init_gateway_process, logger
-from base.paths import pid_path
 from base.sessions.helper_chain_guard import parent_chain_intact
 from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
@@ -91,8 +90,12 @@ _log = logging.getLogger("services.agent_host.daemon")
 _MODULE = "services.agent_host.daemon"
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("agent_host")
+
+
 def _pidfile() -> Path:
-    return pid_path("agent_host")
+    return _endpoint().pidfile
 
 
 # A fixed timer proves liveness even when no agent has work. The same beat
@@ -451,8 +454,10 @@ async def run() -> None:
         settled = await settle_stale_running_rows(control_pool, local_machine)
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
 
+        endpoint = _endpoint()
         health = await start_health_server(
             "agent_host",
+            endpoint.health_port,
             liveness=liveness,
             extra_routes={
                 ("GET", "/stats"): _stats_route(host, scheduler),
@@ -463,7 +468,7 @@ async def run() -> None:
             "hosted agent-runner started on :{port} "
             "(max concurrent turns {bound}, database pools {workload}/{control})",
             event="host_started",
-            port=health_port("agent_host"),
+            port=endpoint.health_port,
             bound=settings.daemon.host_max_concurrent_turns or "unlimited",
             workload=workload_pool.max_size,
             control=control_pool.max_size,

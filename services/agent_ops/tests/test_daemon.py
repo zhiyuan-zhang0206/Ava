@@ -23,6 +23,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.daemon.tests.fakes import pin_endpoints
 from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 from services.agent_ops import daemon, health
 
@@ -773,10 +774,7 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
     calls: list[str | None] = []
     monkeypatch.setattr("base.cluster.machines.register_self", lambda *, url: calls.append(url))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     set_identity(name="wsl", role="agent-runner")
     try:
         daemon._register_boot()
@@ -800,10 +798,7 @@ def test_register_boot_failure_does_not_stop_the_daemon(
 
     monkeypatch.setattr("base.cluster.machines.register_self", _boom)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     logged: list[str] = []
     monkeypatch.setattr(daemon._log, "exception", lambda msg, *_a, **_k: logged.append(msg))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -834,10 +829,7 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr("base.cluster.machines.ava_home", lambda: "~/.ava")
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.9")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("TRUNCATE machines")
         cur.execute("TRUNCATE machine_units")

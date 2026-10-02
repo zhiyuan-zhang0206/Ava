@@ -37,13 +37,13 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base import telemetry
 from base.config import settings
-from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
-from base.paths import pid_path
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -51,8 +51,12 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.heartbeat.daemon")
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("heartbeat")
+
+
 def _pidfile() -> Path:
-    return pid_path("heartbeat")
+    return _endpoint().pidfile
 
 
 # Liveness staleness ceiling. The loop sleeps a long inter-poll interval (default
@@ -595,8 +599,9 @@ async def run() -> None:
     _log.info("[heartbeat] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("heartbeat", liveness=liveness)
-    _log.info("[heartbeat] healthz listening on :%s", health_port("heartbeat"))
+    endpoint = _endpoint()
+    health = await start_health_server("heartbeat", endpoint.health_port, liveness=liveness)
+    _log.info("[heartbeat] healthz listening on :%s", endpoint.health_port)
 
     pool = base.db.pool()
     # Liveness pass (Task #1174): a slow independent task alongside the check-in
