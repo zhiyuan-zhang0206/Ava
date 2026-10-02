@@ -37,6 +37,7 @@ from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.events.live.bus import EventBus
 from base.log import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.ttl_reaper import remote, shells, sweep
@@ -65,12 +66,12 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), "services.ttl_reaper.daemon")
 
 
-async def _run_loops(pool: ConnectionPool, liveness: LivenessGroup) -> None:
+async def _run_loops(pool: ConnectionPool, bus: EventBus, liveness: LivenessGroup) -> None:
     """Own the two resident loops; one that raises ends the process."""
     sweep_progress = liveness.register("sweep", _SWEEP_LIVENESS_TIMEOUT_S)
     remote_progress = liveness.register("remote", shells.dispatch_deadline_s() + _LIVENESS_SLACK_S)
     async with asyncio.TaskGroup() as loops:
-        loops.create_task(sweep.sweep_loop(pool, sweep_progress))
+        loops.create_task(sweep.sweep_loop(pool, bus, sweep_progress))
         loops.create_task(remote.remote_loop(pool, remote_progress))
 
 
@@ -88,7 +89,7 @@ async def run() -> None:
 
     pool = Database.from_settings().pool(max_size=_POOL_MAX_SIZE)
     try:
-        await _run_loops(pool, liveness)
+        await _run_loops(pool, EventBus.from_settings(), liveness)
     finally:
         pool.close()
         await stop_health_server(health)
