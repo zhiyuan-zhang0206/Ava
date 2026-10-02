@@ -40,10 +40,9 @@ from agent.graph.claim._dispatch import (
 from agent.graph.claim.node import claim_node
 from agent.messages import NoteTag
 from agent.state import AgentState
+from agent.tests.claim_support import _config, _insert_inbound_kind, _make_runtime
 from base.paths import skills_dir
 from tests.fixtures.units import spawn_agent
-
-from .test_claim import _config, _insert_inbound_kind, _make_runtime  # reuse the claim harness
 
 
 @pytest.fixture
