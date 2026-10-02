@@ -20,7 +20,11 @@ start the gateway and verify its dependencies before starting runners.
 an invocation's preservation choice, not a permanent disabled-service setting.
 `stop` asks for confirmation unless `-y` is passed; `pause` does not. Both use
 `--timeout 300` by default. A deadline is a failed stop, not permission to kill
-surviving services. Terminals are the exception: `stop` hangs up each shell's
+surviving services. Terminals and Postgres are the exceptions: Postgres' fast
+shutdown that has not finished by the end of its share of the budget (a hung
+archive command) is ended by an immediate shutdown and the leftover descendants
+are SIGKILLed, loudly and without failing the stop
+([decision](../decisions/2026-10-02-pg-stop-escalates-to-immediate.md)); for terminals, `stop` hangs up each shell's
 whole session (its descendants and double-forked orphans included), and
 SIGKILLs what is still alive after a grace of at most 10 seconds; a busy
 session still leaves its owner the closure notice

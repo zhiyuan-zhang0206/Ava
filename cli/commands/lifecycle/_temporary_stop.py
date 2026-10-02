@@ -306,6 +306,7 @@ def _stop_initialization(
     keep_infra: bool,
     keep_browser: bool,
     teardown_extras: bool,
+    notes: list[str],
 ) -> None:
     """Close a proven pre-application attempt through the existing native owners."""
     _timed_phase(
@@ -316,7 +317,11 @@ def _stop_initialization(
     if teardown_extras:
         _timed_phase(phases, "extras", lambda: _stop_extras(deadline))
     if not keep_infra:
-        _timed_phase(phases, "data-plane", lambda: stop_data_plane(remaining(deadline), save=True))
+        _timed_phase(
+            phases,
+            "data-plane",
+            lambda: stop_data_plane(remaining(deadline), save=True, notes=notes),
+        )
 
 
 def stop(
@@ -379,6 +384,7 @@ def stop(
     phases: list[tuple[str, float]] = []
     data_plane_stopped = False
     unstarted = False
+    notes: list[str] = []  # what the report must say: a Postgres shutdown that was escalated
 
     try:
         unstarted = _require_unstarted_initialization()
@@ -389,8 +395,9 @@ def stop(
                 keep_infra=keep_infra,
                 keep_browser=keep_browser,
                 teardown_extras=teardown_extras,
+                notes=notes,
             )
-            return _finish_stop(owns_journal=owns_journal)
+            return _finish_stop(owns_journal=owns_journal, notes=notes)
         # Task #3270: an operator's own stop/pause binds the hold to this
         # command's shepherding process; daemon-driven pauses stay unbound.
         from base.deploy.maintenance.hold_driver import mint_driver
@@ -430,7 +437,9 @@ def stop(
             _timed_phase(phases, "extras", lambda: _stop_extras(deadline))
         if "gateway" in roles and not keep_infra:
             _timed_phase(
-                phases, "data-plane", lambda: stop_data_plane(remaining(deadline), save=True)
+                phases,
+                "data-plane",
+                lambda: stop_data_plane(remaining(deadline), save=True, notes=notes),
             )
             data_plane_stopped = True
         _mark_stopped(current.holder, current.acquired_at)
@@ -447,10 +456,13 @@ def stop(
             ),
         )
         return 1
-    return _finish_stop(owns_journal=owns_journal)
+    return _finish_stop(owns_journal=owns_journal, notes=notes)
 
 
-def _finish_stop(*, owns_journal: bool) -> int:
+def _finish_stop(*, owns_journal: bool, notes: list[str]) -> int:
+    """The stop is done; `notes` (an escalated Postgres shutdown) go into the report."""
+    for note in notes:
+        print(f"Stop completed with an escalation: {note}", file=sys.stderr)
     if owns_journal:
-        finish(0)
+        finish(0, extra={"escalations": notes} if notes else None)
     return 0
