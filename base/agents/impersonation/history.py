@@ -206,9 +206,8 @@ def say(
 ) -> int:
     """Commit a user-visible reply before publishing its refresh notification."""
     from base.agents.impersonation._store import lock_lease, require_active_locked
-    from base.config import settings
+    from base.events.live.bus import EventBus
     from base.events.live.projection import ImpersonationChanged
-    from base.events.live.redis_client import publish_best_effort_sync
 
     if not content.strip() or phase not in ("commentary", "final") or not message_key.strip():
         raise ValueError("A message needs nonempty content/key and commentary or final phase")
@@ -233,8 +232,7 @@ def say(
                 "UPDATE agents_meta SET last_message_text=%s,last_active_at=clock_timestamp() WHERE id=%s",
                 (content, lease["agent_id"]),
             )
-    publish_best_effort_sync(
-        settings.data_plane.events_channel,
+    EventBus.from_settings().publish_best_effort_sync(
         ImpersonationChanged(agent_id=lease["agent_id"]).model_dump_json(),
         context="impersonation_message",
     )

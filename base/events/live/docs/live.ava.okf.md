@@ -84,7 +84,7 @@ segments stay globally distinct.
 - **Deltas are never persisted.** Granularity is too fine, and the LangGraph
   checkpointer already stores the committed step. To replay code segments after
   a UI restart, read the checkpointer — not this channel.
-- Publishing goes through `base/events/live/redis_client.py:publish_best_effort` — a
+- Publishing goes through `base/events/live/bus.py:EventBus` (`publish_best_effort`) — a
   fire-and-forget primitive that never raises, so a redis hiccup degrades the
   live UI without breaking the DB write or the agent lifecycle path that
   triggered it.

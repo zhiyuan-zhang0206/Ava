@@ -3,14 +3,12 @@ share one body."""
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
 from base.config import settings
 from base.events.live import bus as bus_module
-from base.events.live import redis_client
 from base.events.live.bus import EventBus, EventBusConfig
 
 
@@ -100,13 +98,3 @@ def test_sync_publish_uses_a_one_off_client_and_closes_it(monkeypatch: pytest.Mo
     assert sent == [("ava:e", "p")]
     assert urls == ["redis://sync"]
     assert client.closed
-
-
-async def test_the_module_level_shim_still_publishes_on_the_shared_default_client(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _Client("x")
-    monkeypatch.setattr(redis_client, "get_async_redis", lambda: client)
-    assert await redis_client.publish_best_effort("ch", "p") == 2
-    assert client.published == [("ch", "p")]
-    assert asyncio.get_running_loop() is not None and cast(Any, client).url == "x"

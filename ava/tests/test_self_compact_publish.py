@@ -11,7 +11,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 import ava
 from base.agents.lifecycle import SystemHalt
-from base.events.live import redis_client
+from base.events.live.tests.fakes import patch_sync_redis
 from tests.fixtures.units import spawn_agent
 
 
@@ -33,14 +33,10 @@ def test_compact_survives_publish_failure(
     committing its compact_summary inbound and raising SystemHalt."""
     ava.agent_identity._agent_id = spawn_agent()  # self identity
 
-    # Only the CompactRequest publish (publish_best_effort_sync → sync_redis) is
+    # Only the CompactRequest publish (EventBus.publish_best_effort_sync → sync_redis) is
     # broken; the self-inbound wake uses ava.REDIS directly and is already
     # never-raise, so leave the session redis real for it.
-    monkeypatch.setattr(
-        redis_client,
-        "sync_redis",
-        lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(RedisConnectionError("down")))
 
     with pytest.raises(SystemHalt):
         ava.self.compact("Requests: (none)\nProgress: done\n")
