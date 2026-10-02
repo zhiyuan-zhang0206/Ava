@@ -68,9 +68,9 @@ marks the log version applied. Recovery skips checkpoint-receipted versions,
 so a crash between checkpoint and acknowledgement cannot apply an additive
 reducer twice. Core lifecycle fields cannot be changed by plugin deltas.
 
-Tests: `tests/agent/test_impersonation.py` covers gates, receipt recovery, the
+Tests: `agent/tests/test_impersonation.py` covers gates, receipt recovery, the
 component-death judgments and the fresh-start window;
-`tests/agent/test_impersonation_integration.py` exercises PostgreSQL, buffered
+`agent/tests/test_impersonation_integration.py` exercises PostgreSQL, buffered
 checkpoints, the compiled graph, a real exec child, peer inbox acknowledgement,
 release summary, native resumption with plugin state, and the abort→resume
 chain including the death-caused end note.

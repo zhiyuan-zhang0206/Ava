@@ -4,16 +4,8 @@
     "tests/cli/test_packages_refresh.py::test_refresh_applies_only_the_changed_package": 17,
     "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17
   },
-  "files": {
-    "tests/cli/test_impersonation_bridge.py": 965
-  },
   "patch_targets": {
     "tests/cli/test_converge_redis_bridge.py::services.redis_bridge.relay._sleep": 2,
-    "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._MIN_EMIT_INTERVAL_SECONDS": 2,
-    "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._heartbeat_loop": 2,
-    "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._loop_time": 1,
-    "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._read_inbox": 2,
-    "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._write_heartbeat": 2,
     "tests/cli/test_main_dispatch.py::base.native_process.code_version._db_gate_exempt": 1,
     "tests/cli/test_main_dispatch.py::cli.parsers.host._h_start": 1,
     "tests/cli/test_main_dispatch.py::cli.parsers.host._h_status": 2,
@@ -30,7 +22,6 @@
   "tests_location": {
     "tests/cli/test_converge_lgtm.py::top-level": 1,
     "tests/cli/test_converge_redis_bridge.py::top-level": 1,
-    "tests/cli/test_impersonation_bridge.py::top-level": 1,
     "tests/cli/test_main_dispatch.py::top-level": 1,
     "tests/cli/test_otel_bootstrap_relay.py::top-level": 1,
     "tests/cli/test_packages_refresh.py::top-level": 1,
