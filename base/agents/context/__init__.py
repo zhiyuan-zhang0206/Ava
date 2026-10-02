@@ -79,3 +79,9 @@ class AvaContext:
 
     agent: AgentSlices | None = None
     """This agent's per-turn configuration, resolved by the host when the turn starts."""
+
+    def require_agent(self) -> AgentSlices:
+        """The agent's slices; a graph run built without them fails here, not on first read."""
+        if self.agent is None:
+            raise RuntimeError("this AvaContext carries no AgentSlices (ctx.agent is None)")
+        return self.agent

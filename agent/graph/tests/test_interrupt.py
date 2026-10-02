@@ -18,6 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph.interrupt import subscribe_interrupt
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.inbound import InterruptReason
 from base.cluster.machine import machine_name
 from base.db import create_agent
@@ -424,7 +425,11 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
         halted=False,
     )
     publisher, model = MagicMock(), MagicMock()
-    runtime = Runtime(context=AvaContext(ops_pool=aops_pool, llm=model, event_publisher=publisher))
+    runtime = Runtime(
+        context=AvaContext(
+            ops_pool=aops_pool, llm=model, event_publisher=publisher, agent=AgentSlices.resolve()
+        )
+    )
     invocation = asyncio.create_task(
         llm_node(state, runtime, {"configurable": {"thread_id": str(tid)}})
     )
@@ -523,7 +528,11 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     model.astream.return_value = ordinary_generation()
     tid = spawn_agent()
     config: RunnableConfig = {"configurable": {"thread_id": str(tid)}}
-    runtime = Runtime(context=AvaContext(ops_pool=aops_pool, llm=model, event_publisher=publisher))
+    runtime = Runtime(
+        context=AvaContext(
+            ops_pool=aops_pool, llm=model, event_publisher=publisher, agent=AgentSlices.resolve()
+        )
+    )
     state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)
     compacted = await llm_node(state, runtime, config)
     assert compacted.goto == "init_context"
