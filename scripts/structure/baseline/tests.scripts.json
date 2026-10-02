@@ -10,8 +10,6 @@
     "tests/scripts/test_rotate_cluster_secret.py::services.backup._run_with_progress": 1
   },
   "tests_location": {
-    "tests/scripts/structure/test_lint_common.py::top-level": 1,
-    "tests/scripts/test_audit_branch_protection.py::top-level": 1,
     "tests/scripts/test_render_wsl_boot_task.py::top-level": 1
   }
 }
