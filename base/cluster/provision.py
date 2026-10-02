@@ -282,9 +282,9 @@ def drop_database(
         conn.execute(pgsql.SQL("DROP ROLE IF EXISTS {}").format(pgsql.Identifier(identity)))
 
 
-# Frozen at the upstream schema present when Ava adopted reversible checkpoint
+# Frozen at the upstream schema present when Ava adopted mirrored checkpoint
 # migrations. Never bump this baseline: future versions belong in the manifest
-# below and must name their paired Ava up/down migration.
+# below and must name their mirroring Ava migration.
 CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION = 9
 CHECKPOINT_SCHEMA_AVA_MIGRATIONS: dict[int, str] = {}
 
@@ -302,7 +302,7 @@ class CheckpointSchemaMismatchError(CheckpointSchemaError):
 
 
 def _expected_checkpoint_schema_versions() -> frozenset[int]:
-    """The upstream versions explicitly approved by Ava's rollback contract."""
+    """The upstream versions explicitly approved by Ava's checkpoint migration manifest."""
     from langgraph.checkpoint.postgres import PostgresSaver
 
     from base.deploy.schema import migrations as ava_migrations
@@ -331,22 +331,21 @@ def _expected_checkpoint_schema_versions() -> frozenset[int]:
     tracked = ava_migrations.required_migration_set()
     for version, name in CHECKPOINT_SCHEMA_AVA_MIGRATIONS.items():
         up = ava_migrations.MIGRATIONS_DIR / f"{name}.sql"
-        down = ava_migrations.MIGRATIONS_DIR / f"{name}.down.sql"
-        if name not in tracked or not up.is_file() or not down.is_file():
+        if name not in tracked or not up.is_file():
             raise CheckpointDependencyDriftError(
-                f"checkpoint version {version} must name a git-tracked paired Ava "
+                f"checkpoint version {version} must name a git-tracked Ava "
                 f"migration: name={name!r}, up_exists={up.is_file()}, "
-                f"down_exists={down.is_file()}, tracked={name in tracked}"
+                f"tracked={name in tracked}"
             )
 
     approved_target = CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + len(declared_versions)
     dependency_target = len(PostgresSaver.MIGRATIONS) - 1
     if dependency_target != approved_target:
         raise CheckpointDependencyDriftError(
-            "LangGraph checkpoint migrations changed without an Ava rollback migration: "
+            "LangGraph checkpoint migrations changed without an Ava migration: "
             f"dependency target={dependency_target}, "
             f"approved target={approved_target}. Mirror every new "
-            "upstream migration in a paired Ava timestamp migration (including the "
+            "upstream migration in an Ava timestamp migration (including the "
             "checkpoint_migrations row), then add it to "
             "CHECKPOINT_SCHEMA_AVA_MIGRATIONS."
         )
@@ -379,8 +378,7 @@ def assert_checkpoint_schema_current(db_url: str, *, expected_data_dir: Path | N
     Every start role calls this after Ava migrations.  A pure runner therefore
     detects behind, ahead, empty, or internally-gapped checkpoint state without
     acquiring DDL capability.  Ahead is also refused: upstream gives no old-
-    runtime/new-schema compatibility guarantee, while Ava rollback can safely
-    reverse only schema changes represented by paired Ava migrations.
+    runtime/new-schema compatibility guarantee.
     """
     expected = _expected_checkpoint_schema_versions()
     actual = _checkpoint_schema_versions(db_url, expected_data_dir=expected_data_dir)

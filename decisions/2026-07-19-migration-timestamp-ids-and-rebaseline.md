@@ -136,3 +136,5 @@ Nothing structural. Post-baseline migrations accrue under `migrations/` as norma
 if history ever grows unwieldy again, re-baselining is now a known, cheap move
 (squash into schema.sql, stamp a fresh baseline sentinel, bump the legacy-cutover
 constant — though after this PR there are no more legacy integer DBs to convert).
+
+Superseded in part: the `.down.sql` requirement and `rollback_to` are removed — see [2026-10-02-no-down-migrations](2026-10-02-no-down-migrations.md).

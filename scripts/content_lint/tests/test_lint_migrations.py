@@ -17,10 +17,12 @@ _TS2 = "20260719T143001"
 _BASELINE_INSERT = "INSERT INTO schema_migrations (name) VALUES ('00000000T000000_baseline');"
 
 
-def _lint(monkeypatch, tmp_path, *, schema_body: str = _BASELINE_INSERT):
+def _lint(monkeypatch, tmp_path, *, schema_body: str = _BASELINE_INSERT, stub_base: bool = True):
     """Point the lint module at a tmp migrations/ + db/schema.sql; return
     (lint_module, migrations_dir)."""
     lint = importlib.import_module("scripts.content_lint.lint_migrations")
+    if stub_base:
+        monkeypatch.setattr(lint, "_immutability_base", lambda _ref: None)
     migrations_dir = tmp_path / "migrations"
     migrations_dir.mkdir()
     monkeypatch.setattr(lint, "MIGRATIONS_DIR", migrations_dir)
@@ -36,30 +38,16 @@ def test_empty_migrations_passes(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_valid_pair_passes(monkeypatch, tmp_path):
+def test_valid_migration_passes(monkeypatch, tmp_path):
     lint, d = _lint(monkeypatch, tmp_path)
     (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
-    (d / f"{_TS}_add-foo.down.sql").write_text("SELECT 1;")
     assert lint.main() == 0
-
-
-def test_missing_down_fails(monkeypatch, tmp_path):
-    lint, d = _lint(monkeypatch, tmp_path)
-    (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")  # no .down.sql
-    assert lint.main() == 1
-
-
-def test_orphan_down_fails(monkeypatch, tmp_path):
-    lint, d = _lint(monkeypatch, tmp_path)
-    (d / f"{_TS}_add-foo.down.sql").write_text("SELECT 1;")  # no up
-    assert lint.main() == 1
 
 
 def test_legacy_integer_name_fails(monkeypatch, tmp_path):
     """A leftover sequential-integer name is rejected by the format check."""
     lint, d = _lint(monkeypatch, tmp_path)
     (d / "0049_event_log.sql").write_text("SELECT 1;")
-    (d / "0049_event_log.down.sql").write_text("SELECT 1;")
     assert lint.main() == 1
 
 
@@ -67,7 +55,6 @@ def test_invalid_timestamp_fails(monkeypatch, tmp_path):
     """A well-shaped but impossible datetime (month 13) is rejected."""
     lint, d = _lint(monkeypatch, tmp_path)
     (d / "20261301T143000_x.sql").write_text("SELECT 1;")
-    (d / "20261301T143000_x.down.sql").write_text("SELECT 1;")
     assert lint.main() == 1
 
 
@@ -77,9 +64,7 @@ def test_duplicate_timestamp_prefix_fails(monkeypatch, tmp_path):
     the lint guards the prefix)."""
     lint, d = _lint(monkeypatch, tmp_path)
     (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
-    (d / f"{_TS}_add-foo.down.sql").write_text("SELECT 1;")
     (d / f"{_TS}_add-bar.sql").write_text("SELECT 1;")
-    (d / f"{_TS}_add-bar.down.sql").write_text("SELECT 1;")
     assert lint.main() == 1
 
 
@@ -88,9 +73,7 @@ def test_distinct_prefixes_pass(monkeypatch, tmp_path):
     differ — the guard is about the prefix, not the second itself."""
     lint, d = _lint(monkeypatch, tmp_path)
     (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
-    (d / f"{_TS}_add-foo.down.sql").write_text("SELECT 1;")
     (d / f"{_TS2}_add-bar.sql").write_text("SELECT 1;")
-    (d / f"{_TS2}_add-bar.down.sql").write_text("SELECT 1;")
     assert lint.main() == 0
 
 
@@ -100,45 +83,15 @@ def test_readme_is_ignored(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_down_bare_drop_fails(monkeypatch, tmp_path):
-    """A top-level DROP without IF EXISTS in a down is rejected — a repeated or
-    standalone rollback would blow up on a schema that already lacks the
-    object (audit P2)."""
-    lint, d = _lint(monkeypatch, tmp_path)
-    (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
-    (d / f"{_TS}_add-foo.down.sql").write_text("DROP TABLE foo;")
-    assert lint.main() == 1
-
-
-def test_down_if_exists_passes(monkeypatch, tmp_path):
-    lint, d = _lint(monkeypatch, tmp_path)
-    (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
-    (d / f"{_TS}_add-foo.down.sql").write_text("DROP TABLE IF EXISTS foo;")
-    assert lint.main() == 0
-
-
-def test_down_guarded_do_block_drop_passes(monkeypatch, tmp_path):
-    """Drops inside a DO block (guarded by the block's own existence checks) are
-    not flagged — e.g. the monthly-partitioning down."""
-    lint, d = _lint(monkeypatch, tmp_path)
-    (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
-    (d / f"{_TS}_add-foo.down.sql").write_text(
-        "DO $$\nBEGIN\n    DROP TABLE agent_events;\nEND $$;\n"
-    )
-    assert lint.main() == 0
-
-
 def test_backfill_snapshot_requires_later_drop_plan(monkeypatch, tmp_path):
     """A backfill snapshot stays only until a later migration drops it."""
     lint, d = _lint(monkeypatch, tmp_path)
     snapshot = "agent_state_backfill_snapshot"
     (d / f"{_TS}_record-backfill.sql").write_text(f"CREATE TABLE {snapshot} (id BIGINT);")
-    (d / f"{_TS}_record-backfill.down.sql").write_text(f"DROP TABLE IF EXISTS {snapshot};")
 
     assert lint.main() == 1
 
     (d / f"{_TS2}_drop-backfill.sql").write_text(f"DROP TABLE IF EXISTS {snapshot};")
-    (d / f"{_TS2}_drop-backfill.down.sql").write_text(f"CREATE TABLE {snapshot} (id BIGINT);")
     assert lint.main() == 0
 
 
@@ -147,9 +100,7 @@ def test_backfill_snapshot_drop_plan_accepts_publicly_qualified_drop(monkeypatch
     lint, d = _lint(monkeypatch, tmp_path)
     snapshot = "agent_state_backfill_snapshot"
     (d / f"{_TS}_record-backfill.sql").write_text(f"CREATE TABLE {snapshot} (id BIGINT);")
-    (d / f"{_TS}_record-backfill.down.sql").write_text(f"DROP TABLE IF EXISTS {snapshot};")
     (d / f"{_TS2}_drop-backfill.sql").write_text(f"DROP TABLE IF EXISTS public.{snapshot};")
-    (d / f"{_TS2}_drop-backfill.down.sql").write_text(f"CREATE TABLE {snapshot} (id BIGINT);")
 
     assert lint.main() == 0
 
@@ -159,12 +110,10 @@ def test_backfill_snapshot_drop_plan_ignores_comments_and_literals(monkeypatch, 
     lint, d = _lint(monkeypatch, tmp_path)
     snapshot = "agent_state_backfill_snapshot"
     (d / f"{_TS}_record-backfill.sql").write_text(f"CREATE TABLE {snapshot} (id BIGINT);")
-    (d / f"{_TS}_record-backfill.down.sql").write_text(f"DROP TABLE IF EXISTS {snapshot};")
     fake_drop = d / f"{_TS2}_drop-backfill.sql"
     fake_drop.write_text(
         f"-- DROP TABLE IF EXISTS {snapshot};\nSELECT 'DROP TABLE IF EXISTS {snapshot}';\n"
     )
-    (d / f"{_TS2}_drop-backfill.down.sql").write_text("SELECT 1;")
 
     assert lint.main() == 1
 
@@ -179,7 +128,6 @@ def test_backfill_snapshot_check_ignores_comments_and_literals(monkeypatch, tmp_
         "-- CREATE TABLE comment_backfill_snapshot (id BIGINT);\n"
         "SELECT 'CREATE TABLE quoted_backfill_snapshot (id BIGINT)';\n"
     )
-    (d / f"{_TS}_commented.down.sql").write_text("SELECT 1;")
 
     assert lint.main() == 0
 
@@ -190,7 +138,6 @@ def test_backfill_snapshot_check_ignores_non_do_dollar_quoted_literal(monkeypatc
     (d / f"{_TS}_dollar-quoted.sql").write_text(
         "SELECT $$CREATE TABLE dollar_quoted_backfill_snapshot (id BIGINT)$$;\n"
     )
-    (d / f"{_TS}_dollar-quoted.down.sql").write_text("SELECT 1;")
 
     assert lint.main() == 0
 
@@ -236,7 +183,6 @@ CREATE TRIGGER gadgets_trg AFTER UPDATE ON gadgets
 
 def _write_migration(d, stem: str, body: str) -> None:
     (d / f"{stem}.sql").write_text(body)
-    (d / f"{stem}.down.sql").write_text("SELECT 1;")
 
 
 def test_folded_strict_add_column_without_seed_fails(monkeypatch, tmp_path):
@@ -384,7 +330,6 @@ def test_role_switch_in_migration_fails(monkeypatch, tmp_path, capsys):
     """Schema SQL runs as the admin acting as the owner: no role switching."""
     lint, d = _lint(monkeypatch, tmp_path)
     (d / f"{_TS}_escalate.sql").write_text("SET ROLE NONE;\nCREATE TABLE t (id int);")
-    (d / f"{_TS}_escalate.down.sql").write_text("DROP TABLE IF EXISTS t;")
     assert lint.main() == 1
     assert f"{_TS}_escalate.sql:1: SET ROLE" in capsys.readouterr().err
 
@@ -403,5 +348,65 @@ def test_role_words_in_comments_and_literals_pass(monkeypatch, tmp_path):
     (d / f"{_TS}_note.sql").write_text(
         "-- never SET ROLE here\nCOMMENT ON TABLE t IS 'RESET ROLE is forbidden';"
     )
-    (d / f"{_TS}_note.down.sql").write_text("SELECT 1;")
     assert lint.main() == 0
+
+
+def test_down_file_is_rejected(monkeypatch, tmp_path):
+    lint, d = _lint(monkeypatch, tmp_path)
+    (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
+    (d / f"{_TS}_add-foo.down.sql").write_text("SELECT 1;")
+    assert lint.main() == 1
+
+
+# ── merged migrations are immutable ──────────────────────────────────────────
+
+
+def _merged_repo(monkeypatch, tmp_path):
+    """A real git repo whose HEAD commit stands for main; the lint compares the
+    working tree against it. Returns (lint_module, migrations_dir)."""
+    import subprocess
+
+    lint, d = _lint(monkeypatch, tmp_path, stub_base=False)
+    monkeypatch.setattr(lint, "REPO_ROOT", tmp_path)
+    (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
+    for args in (
+        ["init", "--initial-branch=main"],
+        ["add", "-A"],
+        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "main"],
+    ):
+        subprocess.run(  # noqa: S603 — fixed git argv in a tmp repo
+            ["git", "-C", str(tmp_path), *args], check=True, capture_output=True
+        )
+    return lint, d
+
+
+def test_merged_migration_edit_fails(monkeypatch, tmp_path):
+    lint, d = _merged_repo(monkeypatch, tmp_path)
+    (d / f"{_TS}_add-foo.sql").write_text("SELECT 2;")
+    assert lint.main("HEAD") == 1
+
+
+def test_merged_migration_delete_fails(monkeypatch, tmp_path):
+    lint, d = _merged_repo(monkeypatch, tmp_path)
+    (d / f"{_TS}_add-foo.sql").unlink()
+    assert lint.main("HEAD") == 1
+
+
+def test_merged_migration_rename_fails(monkeypatch, tmp_path):
+    lint, d = _merged_repo(monkeypatch, tmp_path)
+    (d / f"{_TS}_add-foo.sql").rename(d / f"{_TS}_add-bar.sql")
+    assert lint.main("HEAD") == 1
+
+
+def test_new_migration_beside_a_merged_one_passes(monkeypatch, tmp_path):
+    lint, d = _merged_repo(monkeypatch, tmp_path)
+    (d / f"{_TS2}_add-bar.sql").write_text("SELECT 1;")
+    assert lint.main("HEAD") == 0
+
+
+def test_unresolvable_base_in_ci_fails_loudly(monkeypatch, tmp_path):
+    import pytest
+
+    lint, _ = _merged_repo(monkeypatch, tmp_path)
+    with pytest.raises(ValueError, match="cannot resolve"):
+        lint.main("no-such-revision")

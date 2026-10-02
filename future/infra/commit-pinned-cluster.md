@@ -31,11 +31,10 @@
 >   longer "build the refusal" but "does anything remain once reconcile is loud and
 >   bounded?" — settle that against the later decision first.
 >
-> The down-migration foundation this rests on (`apply_down` / `rollback_to`) landed
-> in #687; the integer down-floor was superseded by the 2026-07-19 re-baseline (the
-> squashed `db/schema.sql` is the floor, every post-baseline timestamp migration
-> ships a `.down.sql` — see
-> [`../../decisions/2026-07-19-migration-timestamp-ids-and-rebaseline.md`](../../decisions/2026-07-19-migration-timestamp-ids-and-rebaseline.md)).
+> The down-migration foundation this rests on (`apply_down` / `rollback_to`, #687)
+> was removed: it had no production caller, and schema mistakes are fixed forward
+> — see
+> [`../../decisions/2026-10-02-no-down-migrations.md`](../../decisions/2026-10-02-no-down-migrations.md).
 > The rationale for pinning at all is the
 > [`philosophy.md`](../../conventions/philosophy.md) "strong invariant over managed
 > ambiguity" thread. Triggered by the 2026-06-01 self-upgrade incident.

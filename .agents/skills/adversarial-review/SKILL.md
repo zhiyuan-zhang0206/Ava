@@ -86,8 +86,8 @@ matters + suggested fix**. Match the diff against
   retention) and match what the emitter writes; consumers read declared
   keys; retention has one source of truth.
 - Schema vs migrations: new migrations reflected in `db/schema.sql` in the
-  same PR; lossy operations expand-contract with a paired `.down.sql` whose
-  preconditions still hold (a down that silently drops live data is P0).
+  same PR; lossy operations expand-contract (the drop is its own later
+  migration); a merged migration is never edited, deleted or renamed.
 - API: changed endpoints — every consumer updated in the same PR (frontend
   types, tests, services; the main-red-after-merge class).
 - Process boundaries (R3 doorplates): idempotency declared, pause exemption
