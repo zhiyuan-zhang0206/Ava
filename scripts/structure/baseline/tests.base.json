@@ -6,7 +6,7 @@
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 30
+    "tests/base": 27
   },
   "files": {
     "tests/base/test_config.py": 1705,
@@ -31,11 +31,9 @@
     "tests/base/test_config_lite_table.py::top-level": 1,
     "tests/base/test_connect_helpers.py::top-level": 1,
     "tests/base/test_delivery.py::top-level": 1,
-    "tests/base/test_delta_read_compat.py::top-level": 1,
     "tests/base/test_editable_install.py::top-level": 1,
     "tests/base/test_evidence.py::top-level": 1,
     "tests/base/test_exec_request_evidence.py::top-level": 1,
-    "tests/base/test_history.py::top-level": 1,
     "tests/base/test_no_secrets_on_argv.py::top-level": 1,
     "tests/base/test_pg_owner_authority.py::top-level": 1,
     "tests/base/test_poll_until.py::top-level": 1,

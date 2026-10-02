@@ -340,7 +340,7 @@ class TestSpawnFork:
         """The fork checkpoint never terminates its own walk. Forking exactly at a boundary
         continues down to the next boundary below it — with no boundary below, the window is
         the full chain (the old cut-at-the-boundary window read back empty; the read-back
-        assertions live in tests/base/test_delta_read_compat.py)."""
+        assertions live in base/agents/history/tests/test_delta_read_compat.py)."""
         source = _spawn_agent()
         _insert_checkpoint(db_conn, source, "a", parent_id=None)
         _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)

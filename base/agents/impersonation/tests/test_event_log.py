@@ -15,6 +15,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import event_log
 from base.agents.impersonation import history as history
+from base.agents.impersonation.tests import test_history as history_cases
 from base.agents.impersonation_event_alerts import reconcile_seal_stuck_alerts
 from base.agents.impersonation_manifest import (
     LocalParticipant,
@@ -31,7 +32,6 @@ from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from base.telemetry.audit_events import prepare_event_log
-from tests.base import test_history as history_cases
 from tests.impersonation_support import attested_caller
 
 
