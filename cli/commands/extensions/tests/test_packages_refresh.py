@@ -50,7 +50,7 @@ def _git(cwd: Path, *args: str, check: bool = True) -> str:
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_SYSTEM": os.devnull,
     }
-    result = subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
+    result = subprocess.run(
         ["git", "-C", str(cwd), *args],
         check=check,
         capture_output=True,
@@ -86,13 +86,13 @@ def _commit_push(repo: Path, message: str) -> str:
 @pytest.fixture
 def core_repo(tmp_path: Path) -> Path:
     bare = tmp_path / "origin.git"
-    subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
+    subprocess.run(
         ["git", "init", "--bare", "-q", "--initial-branch=main", str(bare)],
         check=True,
         capture_output=True,
     )
     repo = tmp_path / "repo"
-    subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
+    subprocess.run(
         ["git", "init", "-q", "--initial-branch=main", str(repo)],
         check=True,
         capture_output=True,

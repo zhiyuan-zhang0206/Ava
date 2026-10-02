@@ -28,6 +28,7 @@
     "cli/commands/extensions/skill.py::_update_one": 20,
     "cli/commands/extensions/skill.py::cmd_skill_update": 16,
     "cli/commands/extensions/skills_sync.py::_sync_one": 23,
+    "cli/commands/extensions/tests/test_packages_refresh.py::test_refresh_applies_only_the_changed_package": 17,
     "cli/commands/lifecycle/_temporary_stop.py::stop": 22,
     "cli/commands/lifecycle/start.py::_cmd_start_body": 34,
     "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_kind_closure": 18,
