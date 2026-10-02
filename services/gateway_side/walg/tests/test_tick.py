@@ -135,6 +135,13 @@ def test_backup_push_gets_the_chain_limit_and_the_owner_only_socket(sandbox: San
     ]
 
 
+def test_wal_verify_gets_the_owner_only_socket_like_backup_push(sandbox: Sandbox) -> None:
+    """Without the connection variables WAL-G dials libpq's default socket and fails."""
+    _run()
+
+    assert sandbox.verify_env_log() == ["PGHOST=/sockets/ava-pg-home PGPORT=5433 PGUSER=tester"]
+
+
 def test_every_step_leaves_its_record_in_the_state_file(sandbox: Sandbox) -> None:
     code, lines = _run()
 
@@ -308,7 +315,7 @@ def test_a_retention_invariant_violation_never_confirms(sandbox: Sandbox) -> Non
 def test_an_unexpected_error_is_still_recorded_against_its_step(
     sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def explode() -> Any:
+    def explode(pg_admin_url: str) -> Any:
         raise ValueError("surprise")
 
     monkeypatch.setattr(tick, "verify_chain", explode)

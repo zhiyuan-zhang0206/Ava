@@ -129,6 +129,12 @@ def read_config(path: Path) -> WalgConfig:
         value = raw.get(name)
         if not isinstance(value, str) or not value.strip():
             raise WalgConfigError(f"WAL-G config {path} must set {name} to a non-empty string")
+    if str(raw["OSS_REGION"]).strip().startswith("oss-"):
+        # The endpoint host is `oss-<region>.aliyuncs.com`; the signing region is without the prefix.
+        raise WalgConfigError(
+            f"WAL-G config {path}: OSS_REGION must be the region id without the oss- prefix "
+            "(cn-shanghai, not oss-cn-shanghai); OSS rejects the signature otherwise"
+        )
     if raw.get("WALG_LIBSODIUM_KEY_TRANSFORM") != "hex":
         raise WalgConfigError(f"WAL-G config {path} must set WALG_LIBSODIUM_KEY_TRANSFORM to hex")
     if not _overwrite_guard_on(raw.get("WALG_PREVENT_WAL_OVERWRITE")):

@@ -53,7 +53,7 @@ tags:
   step). `run` is the daily tick the OS job runs: backup, verify the archived WAL chain,
   apply guarded retention (exit 1 only when a step failed; a skip or a concurrent run
   exits 0). `drill` runs the weekly recovery drill now (exit 0 only if it passed).
-  `restore --dir DIR [--backup NAME] [--time T | --lsn L]` recovers a backup into an
+  `restore --dir DIR [--backup NAME] [--user U] [--time T | --lsn L]` recovers a backup into an
   empty directory with a scratch Postgres and never touches the home's data directory.
   `status` prints the configuration, key fingerprint, archiver facts and the
   last tick and drill and never fails
