@@ -39,7 +39,7 @@
 --     mutate gateway-owned tables.
 --
 -- LangGraph PostgresSaver creates only at fresh install; later versions are
--- mirrored by paired Ava migrations so cluster rollback can reverse them:
+-- mirrored by Ava timestamp migrations:
 --   checkpoints / checkpoint_blobs / checkpoint_writes / checkpoint_migrations
 -- Here we only manage our own tables:
 --   agents            — agent identity + label (id also doubles as the LangGraph thread_id,
@@ -547,7 +547,7 @@ COMMENT ON COLUMN inbound_messages.source_assertion_match IS
 -- pointer in the same transaction. The TTL reaper's hourly torn-pointer scan
 -- (gateway/ttl_reaper.py, telemetry lifecycle_pointer_done_torn) is the detector
 -- for a bypass (a pointer later set onto an already-done row). Ships to existing
--- clusters via the paired migration.
+-- clusters via a migration.
 CREATE OR REPLACE FUNCTION reject_inbound_done_with_lifecycle_pointer() RETURNS trigger AS $$
 BEGIN
     IF EXISTS (

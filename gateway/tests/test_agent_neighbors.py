@@ -764,6 +764,3 @@ def test_live_tail_read_is_bounded_and_cached_parts_never_requery(
     # `_fetch_loki_edges`), never folded against now — only `to=now` moves. The
     # TestClient above just starts the app lifespan for `db_pool`; no request.
     assert call["from_"] == ARCHIVE_FREEZE_AT  # time-bomb-ok: constant floor, no clock fold
-
-
-# ── migration round-trip: the down migration must actually execute ────────
