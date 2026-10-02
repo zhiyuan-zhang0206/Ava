@@ -9,17 +9,17 @@ import pytest
 
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
-from tests.agent.test_maintenance import WHEN
-from tests.agent.test_maintenance import isolate as isolate
-from tests.agent.test_maintenance_receipt_grading import (
+from services.agent_host.tests.test_agent_host import _Build, _Row
+from services.agent_host.tests.test_agent_host import host_plugin as host_plugin
+from services.agent_host.tests.test_agent_host import wired as wired
+from services.agent_host.tests.test_maintenance_receipt_grading import (
     FC10_AT,
     FC10_FOREIGN,
     FC10_HOLDER,
     fc10_hold,
 )
-from tests.services.test_agent_host import _Build, _Row
-from tests.services.test_agent_host import host_plugin as host_plugin
-from tests.services.test_agent_host import wired as wired
+from tests.agent.test_maintenance import WHEN
+from tests.agent.test_maintenance import isolate as isolate
 
 
 @pytest.mark.parametrize("broken_io", ["read", "write"])

@@ -17,6 +17,8 @@ from agent.ownership.hosted import (
     apply_hosted_lifecycle,
     settle_hosted_runtime,
 )
+from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.config import settings
@@ -24,8 +26,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_host.host import AgentHost, kill_terminating_agent_shells
-from tests.agent.test_inbound_ownership import _admit, _agent
-from tests.agent.test_lifecycle_intent import _command
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])

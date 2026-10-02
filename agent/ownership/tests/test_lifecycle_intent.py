@@ -7,10 +7,10 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
+from agent.tests.test_inbound_ownership import _admit, _agent
 from base.db import insert_inbound_message
 from base.db.transaction import async_write_transaction
 from base.native_process.turn_identity import bind_turn_identity
-from tests.agent.test_inbound_ownership import _admit, _agent
 
 
 def test_request_cannot_prepopulate_reserved_result(db_conn: psycopg.Connection) -> None:

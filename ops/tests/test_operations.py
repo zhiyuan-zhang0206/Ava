@@ -246,7 +246,7 @@ class TestSpawnPrechecksBlocking:
 async def test_restart_agent_op_terminated_short_circuits(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from ops.agents.tests.test_agents_internals import _test_pool
+    from ops.tests.pool_support import make_test_pool
     from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent()
@@ -254,7 +254,7 @@ async def test_restart_agent_op_terminated_short_circuits(
     db_conn.commit()
     wake = AsyncMock()
     monkeypatch.setattr(lifecycle, "publish_inbound_arrived", wake)
-    with _test_pool() as pool:
+    with make_test_pool() as pool:
         resp = await lifecycle.restart_agent_op(agent_id, RestartAgentRequest(source="user"), pool)
     assert resp.status == "already_terminated"
     wake.assert_not_awaited()

@@ -1471,8 +1471,8 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     """Hosted restart: goto END with `restart_requested` (not `exit_requested`),
     leaves lifecycle application to the host after the acceptance checkpoint
     has been flushed."""
+    from agent.tests.test_inbound_ownership import _admit, _agent
     from base.native_process.turn_identity import bind_turn_identity
-    from tests.agent.test_inbound_ownership import _admit, _agent
 
     tid = _agent(db_conn)
     owner = await _admit(aops_pool, tid)

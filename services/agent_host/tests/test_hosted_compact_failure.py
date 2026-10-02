@@ -20,6 +20,7 @@ from agent.graph.claim.node import claim_node
 from agent.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
+from agent.tests.test_inbound_ownership import _agent
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
@@ -29,7 +30,6 @@ from base.events.live.publisher import AgentEventPublisher
 from base.events.live.redis_client import open_async_redis
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
-from tests.agent.test_inbound_ownership import _agent
 
 
 def _cold_reader(pool: AsyncConnectionPool[Any]) -> AsyncPostgresSaver:

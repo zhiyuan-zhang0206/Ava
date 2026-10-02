@@ -21,6 +21,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.db import has_pending_interrupt
 from agent.graph.exec._stream import StreamingTextIO
 from agent.ownership.hosted import admit_hosted_runtime
+from agent.tests.test_inbound_ownership import _agent, _insert
 from base.agents.incarnation import exec_request_evidence
 from base.agents.incarnation.exec_request_evidence import Verdict
 from base.agents.incarnation.hosted_force import (
@@ -34,7 +35,6 @@ from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_host.daemon import _cancel_turn_route
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
-from tests.agent.test_inbound_ownership import _agent, _insert
 
 
 def _allow_model_config(
@@ -52,7 +52,7 @@ def _host_wakes_need_no_provider_credentials(monkeypatch: pytest.MonkeyPatch) ->
     Main's reject-invalid-hosted-model-wake gate (#1494) needs a provider key
     for the cluster-default model; fake-host force-quiescence tests keep turns
     independent of installed credentials (same stance as
-    tests/services/test_agent_host.py's wired fixture).
+    services/agent_host/tests/test_agent_host.py's wired fixture).
     """
 
     monkeypatch.setattr("services.agent_host.runtime.validate_model_config", _allow_model_config)
@@ -640,8 +640,8 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     from agent.graph.exec._result import _ExecCrashed
     from agent.graph.exec._subprocess import _run_in_subprocess
     from agent.ownership.hosted import apply_hosted_lifecycle, settle_hosted_runtime
+    from agent.tests.test_inbound_ownership import _admit
     from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
-    from tests.agent.test_inbound_ownership import _admit
 
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)

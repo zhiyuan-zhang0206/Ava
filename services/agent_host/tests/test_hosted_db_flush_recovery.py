@@ -9,14 +9,14 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.ownership.inbound import RuntimeOwnershipLostError
+from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.config import settings
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host import host as host_module
 from services.agent_host.tests.test_hosted_compact_failure import _prepare_graph
-from tests.agent.test_inbound_ownership import _admit, _agent
-from tests.agent.test_lifecycle_intent import _command
 
 
 @pytest.mark.parametrize("failure_site", ["flush", "before_lifecycle", "after_lifecycle"])

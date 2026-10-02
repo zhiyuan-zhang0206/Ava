@@ -32,7 +32,7 @@ from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.spawn import create_agent_row
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.lifecycle import termination
-from tests.base.test_predecessor_closure import _closed_form, _retired
+from services.agent_host.tests.test_predecessor_closure import _closed_form, _retired
 
 
 @pytest.fixture(autouse=True)

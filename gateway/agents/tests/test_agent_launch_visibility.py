@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from tests.gateway.test_agents_endpoints import _inbound_rows
+from gateway.tests.test_agents_endpoints import _inbound_rows
 
 
 def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent_id: int) -> None:
