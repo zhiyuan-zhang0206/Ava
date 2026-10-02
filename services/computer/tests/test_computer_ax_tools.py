@@ -195,6 +195,12 @@ def test_chromium_apps_get_a_reason_that_says_what_the_enable_step_did(
     assert reason in q["suggest"] and "include_ocr_gap" in q["suggest"]
 
 
+def test_a_helper_that_predates_ax_enable_still_gets_a_quality_verdict() -> None:
+    walk = result([window(1), node(2, 1, "AXGroup", depth=1)], framework="electron")
+    del walk["ax_enable"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    assert ax.assess_quality(walk, scoped=False)["reason"] == "electron_not_exposed"
+
+
 def test_an_unreadable_or_timed_out_empty_walk_is_unresponsive_not_no_window() -> None:
     assert ax.assess_quality(result([], unreadable=1), scoped=False)["reason"] == "unresponsive"
     assert ax.assess_quality(result([], timed_out=True), scoped=False)["reason"] == "unresponsive"
