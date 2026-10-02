@@ -6,7 +6,7 @@ Three parts cover any window, and none grows with the age of the cluster:
   which the ledger may not hold yet;
 - whole UTC days before those from the day-grain ledger `agent_model_tokens_daily` (a window that
   starts mid-day also reads that first partial day from the raw rows);
-- for the all-time window, the folded whole-life sums `agent_token_totals` up to the fold watermark,
+- for the all-time window, the folded whole-life sums `agent_model_tokens_total` up to the fold watermark,
   then the ledger days after it (`services.events_maintenance.token_totals`).
 
 A row is counted in exactly one part: the ledger days end before the raw tail starts, and a partial
@@ -123,7 +123,8 @@ def agent_tokens(conn: Any, *, now: datetime, win_start: datetime | None) -> dic
 
     if win_start is None:
         for agent, tokens_in, tokens_out in conn.execute(
-            "SELECT agent_id, tokens_in, tokens_out FROM agent_token_totals"
+            "SELECT agent_id, sum(tokens_in), sum(tokens_out) FROM agent_model_tokens_total "
+            "GROUP BY agent_id"
         ).fetchall():
             add(agent, (0, 0, tokens_in, tokens_out))
     return {agent: AgentTokens(*row) for agent, row in sums.items()}

@@ -7,7 +7,7 @@ Data sources (task #1197 LGTM cutover):
 - `agents_meta` + `agents` (Postgres): node identity, liveness, labels.
 - Postgres: the llm_usage token sums — retained-window (7d) totals + selected-window
   scores — from `telemetry_events`, the day-grain ledger and the folded
-  `agent_token_totals` (`gateway/routers/_fleet_tokens.py`), read in the same
+  `agent_model_tokens_total` (`gateway/routers/_fleet_tokens.py`), read in the same
   connection as the nodes.
 - Edge events (audit category, spawn/send_message/fork/resurrect): aggregated
   in Postgres from `audit_events`, the permanent audit record
@@ -325,7 +325,7 @@ def get_fleet_graph(
     the same two fields over the retained 7d window. Both are read in parts
     (`gateway/routers/_fleet_tokens.py`): raw rows of the newest two days, the
     day-grain ledger before them, and for the all-time score the folded
-    `agent_token_totals`, so the read does not scan history.
+    `agent_model_tokens_total`, so the read does not scan history.
 
     Edge weight:
         lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,

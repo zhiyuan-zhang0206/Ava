@@ -19,7 +19,7 @@ The pass is two SQL statements per day in one short transaction; the day's rows 
 place, so there is no retention window to clamp to and no per-day watermark.
 
 Operator use, for a range of days (for example after a backfill); a range reaching back past the
-fold watermark of `token_totals` also rebuilds `agent_token_totals`:
+fold watermark of `token_totals` also rebuilds `agent_model_tokens_total`:
 
     .venv/bin/python -m services.events_maintenance.rollup --from 20260901 --to 20260930
 """
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         # A day at or before the watermark is already inside the folded totals.
         if args.first <= folded_through(conn):
             rebuild_totals(conn, today=datetime.now(UTC).date())
-            sys.stdout.write("rebuilt agent_token_totals\n")
+            sys.stdout.write("rebuilt agent_model_tokens_total\n")
     sys.stdout.write(
         f"rolled {result.start_day}..{result.end_day}: "
         f"{result.tokens_rows} token rows, {result.metrics_rows} metrics rows\n"

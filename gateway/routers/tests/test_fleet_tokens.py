@@ -23,8 +23,8 @@ _NOW = datetime(2026, 6, 30, 15, 30, tzinfo=UTC)
 @pytest.fixture
 def db(db_conn: psycopg.Connection) -> psycopg.Connection:
     db_conn.autocommit = True
-    db_conn.execute("DELETE FROM agent_token_totals")
-    db_conn.execute("DELETE FROM agent_token_totals_through")
+    db_conn.execute("DELETE FROM agent_model_tokens_total")
+    db_conn.execute("DELETE FROM agent_model_tokens_total_through")
     return db_conn
 
 
@@ -72,7 +72,9 @@ def agent(db: psycopg.Connection) -> int:
     rollup.roll_days(db, yesterday - timedelta(days=45), yesterday)
     token_totals.fold_totals(db, today=_NOW.date())
     assert token_totals.folded_through(db) < yesterday - timedelta(days=5)
-    folded = db.execute("SELECT count(*) FROM agent_token_totals WHERE agent_id = %s", (agent,))
+    folded = db.execute(
+        "SELECT count(*) FROM agent_model_tokens_total WHERE agent_id = %s", (agent,)
+    )
     assert folded.fetchone() == (1,)
     return agent
 

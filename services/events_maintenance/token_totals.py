@@ -2,8 +2,8 @@
 
 `agent_model_tokens_daily` rows of a day stay open to recomputation for `RECOMPUTE_DAYS` after the
 day closes (late writes, a backfill). Once a day is older than that it can no longer change, so each
-maintenance pass folds the newly settled days into `agent_token_totals` and moves the watermark
-(`agent_token_totals_through`) up to them. A reader of all-time tokens then adds three parts: this
+maintenance pass folds the newly settled days into `agent_model_tokens_total` and moves the watermark
+(`agent_model_tokens_total_through`) up to them. A reader of all-time tokens then adds three parts: this
 table, the ledger days after the watermark, and the raw rows of the newest two UTC days; its work
 does not grow with history.
 
@@ -28,23 +28,38 @@ _LOCK_KEY = 4_730_001  # advisory lock: one fold or rebuild at a time
 
 
 def folded_through(conn: psycopg.Connection) -> date:
-    """The last UTC day folded into `agent_token_totals` (`NOTHING_FOLDED` before any fold)."""
-    row = conn.execute("SELECT day FROM agent_token_totals_through").fetchone()
+    """The last UTC day folded into `agent_model_tokens_total` (`NOTHING_FOLDED` before any fold)."""
+    row = conn.execute("SELECT day FROM agent_model_tokens_total_through").fetchone()
     return row[0] if row is not None else NOTHING_FOLDED
 
 
+_SUMMED = (
+    "llm_calls",
+    "tokens_in",
+    "tokens_out",
+    "tokens_cached",
+    "tokens_reasoning",
+    "cost_usd",
+    "costed_calls",
+    "unpriced_calls",
+)
+
+
 def _fold(conn: psycopg.Connection, *, through: date, target: date) -> int:
+    columns = ", ".join(_SUMMED)
+    sums = ", ".join(f"sum({name})" for name in _SUMMED)
+    adds = ", ".join(
+        f"{name} = agent_model_tokens_total.{name} + EXCLUDED.{name}" for name in _SUMMED
+    )
     rows = conn.execute(
-        "INSERT INTO agent_token_totals (agent_id, tokens_in, tokens_out) "
-        "SELECT agent_id, sum(tokens_in), sum(tokens_out) FROM agent_model_tokens_daily "
-        "WHERE day > %s AND day <= %s GROUP BY agent_id "
-        "ON CONFLICT (agent_id) DO UPDATE SET "
-        "tokens_in = agent_token_totals.tokens_in + EXCLUDED.tokens_in, "
-        "tokens_out = agent_token_totals.tokens_out + EXCLUDED.tokens_out",
+        f"INSERT INTO agent_model_tokens_total (agent_id, model, {columns}) "  # noqa: S608 — fixed columns
+        f"SELECT agent_id, model, {sums} FROM agent_model_tokens_daily "
+        "WHERE day > %s AND day <= %s GROUP BY agent_id, model "
+        f"ON CONFLICT (agent_id, model) DO UPDATE SET {adds}",
         (through, target),
     ).rowcount
     conn.execute(
-        "INSERT INTO agent_token_totals_through (singleton, day) VALUES (true, %s) "
+        "INSERT INTO agent_model_tokens_total_through (singleton, day) VALUES (true, %s) "
         "ON CONFLICT (singleton) DO UPDATE SET day = EXCLUDED.day",
         (target,),
     )
@@ -52,7 +67,7 @@ def _fold(conn: psycopg.Connection, *, through: date, target: date) -> int:
 
 
 def fold_totals(conn: psycopg.Connection, *, today: date) -> int:
-    """Fold the ledger days that settled since the last fold; returns the agents updated."""
+    """Fold the ledger days that settled since the last fold; returns the rows updated."""
     target = today - timedelta(days=FOLD_AFTER_DAYS)
     with conn.transaction():
         conn.execute("SELECT pg_advisory_xact_lock(%s)", (_LOCK_KEY,))
@@ -66,5 +81,5 @@ def rebuild_totals(conn: psycopg.Connection, *, today: date) -> int:
     """Refold the whole ledger from scratch (after days at or before the watermark changed)."""
     with conn.transaction():
         conn.execute("SELECT pg_advisory_xact_lock(%s)", (_LOCK_KEY,))
-        conn.execute("DELETE FROM agent_token_totals")
+        conn.execute("DELETE FROM agent_model_tokens_total")
         return _fold(conn, through=NOTHING_FOLDED, target=today - timedelta(days=FOLD_AFTER_DAYS))

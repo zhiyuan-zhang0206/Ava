@@ -11,10 +11,10 @@ The report reads Postgres only:
 
 - a windowed request (`--since` / `--hours`) aggregates the `llm_usage` rows of
   `telemetry_events` over the window;
-- whole life reads the durable `agent_model_tokens_daily` ledger (whole UTC
-  days) + the `telemetry_events` tail from the ledger watermark (the midnight
-  after the agent's newest rolled day) to now, so a maintenance-daemon lag widens
-  the tail instead of opening a hole.
+- whole life reads the durable ledger (whole UTC days) — the folded sums of
+  `agent_model_tokens_total` plus the `agent_model_tokens_daily` days after the fold watermark —
+  and the `telemetry_events` tail from the ledger watermark (the midnight after the agent's newest
+  rolled day) to now, so a maintenance-daemon lag widens the tail instead of opening a hole.
 
 Cost is summed from usage-time `cost_usd` snapshots — never re-priced at read
 time (the pricing table is not consulted; a call without a snapshot counts in
@@ -98,17 +98,28 @@ _ACTIVE_AGENTS_SQL = """
     WHERE event_name = 'llm_usage' AND agent_id IS NOT NULL AND ts >= %s AND ts < %s
 """
 
-_LEDGER_SQL = """SELECT model,
+# The ledger's whole-life sums come in two parts: the folded totals up to the watermark of
+# `agent_model_tokens_total_through`, and the ledger days after it. Both group per (agent, model).
+_THROUGH_SQL = "SELECT day FROM agent_model_tokens_total_through"
+
+_TOTAL_SQL = """SELECT agent_id, model,
+  llm_calls, costed_calls, unpriced_calls,
+  tokens_in, tokens_out, tokens_cached, tokens_reasoning,
+  cost_usd
+FROM agent_model_tokens_total
+WHERE agent_id = ANY(%s)"""
+
+_LEDGER_SQL = """SELECT agent_id, model,
   sum(llm_calls), sum(costed_calls), sum(unpriced_calls),
   sum(tokens_in), sum(tokens_out), sum(tokens_cached), sum(tokens_reasoning),
   sum(cost_usd)
 FROM agent_model_tokens_daily
-WHERE agent_id = %s
-GROUP BY model"""
+WHERE agent_id = ANY(%s) AND day > %s
+GROUP BY agent_id, model"""
 
 _NEWEST_LEDGER_DAYS_SQL = """SELECT agent_id, max(day)
 FROM agent_model_tokens_daily
-WHERE agent_id = ANY(%s)
+WHERE agent_id = ANY(%s) AND day > %s
 GROUP BY agent_id"""
 
 _EPOCH = datetime(2000, 1, 1, tzinfo=UTC)
@@ -140,30 +151,34 @@ def _event_rows(conn: Any, tails: dict[int, datetime], until: datetime | None) -
 
 
 def _ledger_rows(conn: Any, agent_ids: list[int]) -> tuple[list[_Row], dict[int, datetime]]:
-    """Ledger rows and each agent's live-tail start (the midnight after its newest ledger day;
-    an agent with no ledger row tails from the beginning)."""
+    """Ledger rows (folded totals + the days after the watermark) and each agent's live-tail start:
+    the midnight after its newest ledger day, the midnight after the watermark for an agent whose
+    ledger is folded entirely, and the beginning for an agent with no ledger row."""
+    through_row = conn.execute(_THROUGH_SQL).fetchone()
+    through: date = through_row[0] if through_row is not None else date.min
     rows: list[_Row] = []
     tails: dict[int, datetime] = dict.fromkeys(agent_ids, _EPOCH)
-    newest: dict[int, date] = {
-        int(agent_id): day for agent_id, day in conn.execute(_NEWEST_LEDGER_DAYS_SQL, (agent_ids,))
-    }
-    for aid, day in newest.items():
-        tails[aid] = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UTC)
-    for aid in agent_ids:
-        for row in conn.execute(_LEDGER_SQL, (aid,)).fetchall():
+    folded_tail = datetime.combine(through + timedelta(days=1), time.min, tzinfo=UTC)
+    for sql, params in ((_TOTAL_SQL, (agent_ids,)), (_LEDGER_SQL, (agent_ids, through))):
+        for row in conn.execute(sql, params).fetchall():
+            aid = int(row[0])
             rows.append(
                 (
                     aid,
-                    row[0],
-                    int(row[4]),
+                    row[1],
                     int(row[5]),
                     int(row[6]),
                     int(row[7]),
-                    int(row[1]),
-                    float(row[8]),
-                    int(row[3]),
+                    int(row[8]),
+                    int(row[2]),
+                    float(row[9]),
+                    int(row[4]),
                 )
             )
+            if sql is _TOTAL_SQL:
+                tails[aid] = folded_tail
+    for agent_id, day in conn.execute(_NEWEST_LEDGER_DAYS_SQL, (agent_ids, through)):
+        tails[int(agent_id)] = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UTC)
     return rows, tails
 
 
