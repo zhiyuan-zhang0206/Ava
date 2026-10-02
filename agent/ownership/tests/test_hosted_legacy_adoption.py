@@ -139,10 +139,21 @@ def _row(db_conn: psycopg.Connection, agent_id: int) -> tuple[object, object, st
     return row
 
 
+def _audit_attributes(
+    db: psycopg.Connection, agent_id: int, event_name: str
+) -> list[dict[str, object]]:
+    """The `audit_events` rows of one name for the agent, oldest first."""
+    rows = db.execute(
+        "SELECT attributes FROM audit_events WHERE agent_id=%s AND event_name=%s ORDER BY id",
+        (agent_id, event_name),
+    ).fetchall()
+    db.commit()
+    return [row[0] for row in rows]
+
+
 async def test_legacy_null_row_admits_over_dead_local_host_without_full_ttl(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The #2156 shape admits at renewal silence, not at lease expiry.
 
@@ -151,20 +162,6 @@ async def test_legacy_null_row_admits_over_dead_local_host_without_full_ttl(
     path admits it now, because nothing on this machine can still be the
     predecessor.
     """
-    events: list[tuple[str, dict[str, object]]] = []
-
-    async def _event(
-        *,
-        event_type: str,
-        agent_id: int,
-        source: str,
-        payload: dict[str, object] | None = None,
-        **_kw: object,
-    ) -> None:
-        del agent_id, source
-        events.append((event_type, payload or {}))
-
-    monkeypatch.setattr("agent.ownership.hosted.insert_event_log_async", _event)
     agent_id, prior = _seed(db_conn, lease_s=300.0)
     successor = await _admit(aops_pool, agent_id, uuid4())
     assert successor is not None
@@ -175,33 +172,47 @@ async def test_legacy_null_row_admits_over_dead_local_host_without_full_ttl(
     assert lease_fresh is True
     # The set stays unknown: admission never mints an empty evidence set.
     assert resources is None
-    adoption = [payload for kind, payload in events if kind == "hosted_legacy_adoption"]
+    # Both audit facts commit in the admission transaction.
+    assert _audit_attributes(db_conn, agent_id, "status_change") == [
+        {"from": "idling", "to": "running"}
+    ]
+    adoption = _audit_attributes(db_conn, agent_id, "hosted_legacy_adoption")
     assert len(adoption) == 1
     assert adoption[0]["predecessor_owner"] == str(prior)
     silence = adoption[0]["lease_silence_s"]
     assert isinstance(silence, float) and silence >= 60.0
 
 
-async def test_legacy_null_row_still_waits_while_the_lease_looks_beaten(
+async def test_an_admission_whose_audit_fact_cannot_be_recorded_does_not_admit(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def refuse(_conn: object, _event: object) -> None:
+        raise RuntimeError("audit write failed")
+
+    monkeypatch.setattr("agent.ownership.hosted.record_audit_async", refuse)
+    agent_id, prior = _seed(db_conn, lease_s=300.0)
+
+    with pytest.raises(RuntimeError, match="audit write failed"):
+        await _admit(aops_pool, agent_id, uuid4())
+
+    assert _row(db_conn, agent_id) == (prior, None, "idling", True)
+
+
+async def test_legacy_null_row_still_waits_while_the_lease_looks_beaten(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
 ) -> None:
     """A lease renewed 10s ago is not silence: the fence is not shortcut.
 
     Also the evidence that no blanket lease shortening was added — the
     fresh-lease shape refuses exactly as before.
     """
-    events: list[str] = []
-
-    async def _event(*, event_type: str, **_kw: object) -> None:
-        events.append(event_type)
-
-    monkeypatch.setattr("agent.ownership.hosted.insert_event_log_async", _event)
     agent_id, prior = _seed(db_conn, lease_s=590.0)  # 10s of silence
     assert await _admit(aops_pool, agent_id, uuid4()) is None
     assert _row(db_conn, agent_id) == (prior, None, "idling", True)
-    assert "hosted_legacy_adoption" not in events
+    assert _audit_attributes(db_conn, agent_id, "hosted_legacy_adoption") == []
 
 
 async def test_legacy_null_row_refuses_while_same_home_host_daemon_lives(

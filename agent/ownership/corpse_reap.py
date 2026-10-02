@@ -35,6 +35,7 @@ from uuid import UUID
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
+from base import telemetry
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from base.config import settings
 from base.db.transaction import async_write_transaction
@@ -42,7 +43,7 @@ from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from base.events.live.announce import publish_agent_updated
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.telemetry.audit_events import insert_event_log_async
+from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
 class ReapedCorpse(NamedTuple):
@@ -123,14 +124,18 @@ async def reap_crash_corpses(
             )
         ).fetchall()
         reaped: list[ReapedCorpse] = []
+        recorded: list[telemetry.Event] = []
         for (agent_id,) in rows:
-            await insert_event_log_async(
+            event = prepare_event_log(
                 event_type="status_change",
                 agent_id=agent_id,
                 source="system",
                 payload={"from": "idling", "to": "terminated", "reason": "corpse_reaper"},
             )
+            recorded.append(await record_audit_async(conn, event))
             reaped.append(ReapedCorpse(agent_id, await _queue_wake_if_enabled(conn, agent_id)))
+    for event in recorded:
+        telemetry.emit_prepared(event)
     if reaped:
         logger.info(
             "corpse reaper: terminated {n} crash-dead row(s)",
@@ -212,8 +217,9 @@ async def reap_recrashed_corpse(
             )
         ).fetchall()
         reaped: list[ReapedCorpse] = []
+        recorded: list[telemetry.Event] = []
         for (agent_id,) in rows:
-            await insert_event_log_async(
+            event = prepare_event_log(
                 event_type="status_change",
                 agent_id=agent_id,
                 source="system",
@@ -224,7 +230,10 @@ async def reap_recrashed_corpse(
                     "crash_count": RECRASH_CONFIRMED_CRASHES,
                 },
             )
+            recorded.append(await record_audit_async(conn, event))
             reaped.append(ReapedCorpse(agent_id, await _queue_wake_if_enabled(conn, agent_id)))
+    for event in recorded:
+        telemetry.emit_prepared(event)
     if reaped:
         logger.info(
             "corpse reaper: prompt-reaped {n} re-crashed corpse(s) — the mark's grace was spent",

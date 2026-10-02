@@ -14,8 +14,10 @@ from typing import Any, LiteralString, cast
 
 import psycopg
 import pytest
+from psycopg_pool import AsyncConnectionPool
 
 from base import telemetry
+from base.db.transaction import async_write_transaction
 from base.telemetry import audit_events
 from base.telemetry.audit_events import record_audit, record_audit_standalone
 
@@ -168,3 +170,82 @@ def test_standalone_failure_raises_and_emits_nothing(
 
     assert emitted == []
     assert _rows(db_conn, marker) == []
+
+
+async def test_async_record_commits_with_the_callers_transaction(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    rolled_back, committed = _marker(), _marker()
+
+    with pytest.raises(RuntimeError, match="business write failed"):
+        async with async_write_transaction(aops_pool) as conn:
+            await audit_events.record_audit_async(conn, _event(rolled_back))
+            raise RuntimeError("business write failed")
+    async with async_write_transaction(aops_pool) as conn:
+        await audit_events.record_audit_async(conn, _event(committed))
+
+    assert _rows(db_conn, rolled_back) == []
+    assert len(_rows(db_conn, committed)) == 1
+
+
+async def test_async_standalone_commits_the_row_before_it_emits(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = _marker()
+    seen_at_emit: list[int] = []
+
+    def emit(event: telemetry.Event) -> None:
+        seen_at_emit.append(len(_rows(db_conn, event.source)))
+
+    monkeypatch.setattr(telemetry, "emit_prepared", emit)
+
+    await audit_events.record_audit_standalone_async(aops_pool, _event(marker))
+
+    assert seen_at_emit == [1]
+
+
+def test_reported_recording_does_not_raise_but_reports_and_still_projects(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = _marker()
+    emitted: list[telemetry.Event] = []
+    reports: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(telemetry, "emit_prepared", emitted.append)
+
+    def report(_category: str, name: str, **kwargs: Any) -> None:
+        reports.append((name, kwargs["attributes"]))
+
+    monkeypatch.setattr(telemetry, "emit", report)
+    bad_level = replace(_event(marker), level=cast(Any, "loud"))
+
+    audit_events.record_audit_reported(bad_level)
+
+    assert _rows(db_conn, marker) == []
+    assert emitted == [bad_level]
+    [(name, attributes)] = reports
+    assert name == "audit_write_failed"
+    assert (attributes["event_name"], attributes["error_class"]) == (
+        "send_message",
+        "CheckViolation",
+    )
+
+
+def test_reported_recording_of_a_healthy_write_reports_nothing(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = _marker()
+    reports: list[str] = []
+
+    def emit_prepared(_event: telemetry.Event) -> None:
+        return None
+
+    def emit(_category: str, name: str, **_kwargs: Any) -> None:
+        reports.append(name)
+
+    monkeypatch.setattr(telemetry, "emit_prepared", emit_prepared)
+    monkeypatch.setattr(telemetry, "emit", emit)
+
+    audit_events.record_audit_reported(_event(marker))
+
+    assert len(_rows(db_conn, marker)) == 1
+    assert reports == []

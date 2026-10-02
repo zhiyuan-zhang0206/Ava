@@ -68,7 +68,7 @@ from base.config.turn_view import turn_settings
 from base.events.live.projection import Cancelled, CompactDone
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
 from base.log import logger
-from base.telemetry.audit_events import insert_event_log_async
+from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
 
 # Compaction bookkeeping lives in the nested `compact` sub-state (CompactState)
 # on BaseAgentState — read via `state.compact.version` etc.; writers overwrite
@@ -580,23 +580,19 @@ async def auto_compact_for_llm(
     )
     pool = runtime.context.ops_pool
 
-    # Record the compact as an audit event (best-effort: a failure only loses
-    # the audit record, never the summary itself).
+    # Record the compact as an audit event. The summary exists and the window is
+    # about to be replaced; a failed audit write is reported (`audit_write_failed`)
+    # rather than aborting the compaction half-way.
     if pool is not None:
-        try:
-            await insert_event_log_async(
+        await record_audit_reported_async(
+            pool,
+            prepare_event_log(
                 event_type="compact",
                 agent_id=agent_id,
                 source="system",
                 payload={"compact_kind": "auto", "length": len(summary)},
-            )
-        except Exception as exc:
-            logger.warning(
-                "[{label}] {body}",
-                label="auto-compact",
-                event="auto_compact",
-                body=f"failed to record the compact audit event: {exc!r}",
-            )
+            ),
+        )
 
     if publisher is not None:
         publisher.emit(CompactDone(agent_id=agent_id).model_dump_json())

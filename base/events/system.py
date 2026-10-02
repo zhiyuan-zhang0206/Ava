@@ -529,6 +529,21 @@ class PromQueryBudget(TypedDict):
     wait_timeout: int
 
 
+class AuditWriteFailed(TypedDict):
+    """`audit_write_failed` payload — base/telemetry/audit_events.py.
+
+    An audit event could not be recorded in `audit_events`, from a producer that
+    must not fail its caller (an agent-facing tool call that already succeeded,
+    or a state transition whose remaining steps must still run). The record is
+    missing; the Loki projection of the same event still went out. ``event_name``
+    is the audit event that was lost, ``error`` a truncated message.
+    """
+
+    event_name: str
+    error_class: str
+    error: str
+
+
 class GateAuthProbeFailed(TypedDict):
     """`gate_auth_probe_failed` payload — services/gate/daemon.py.
 
