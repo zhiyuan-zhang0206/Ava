@@ -6,6 +6,7 @@ relative to that directory. The ambient-state rule reads them all together, so a
 joins by adding its own file, and a moved or deleted package carries its declaration along.
 
     settings = ["daemon.py"]   # the only modules here that may read the global `settings`
+    db = ["daemon.py"]         # the only modules here that may call `Database.from_settings()`
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import cast
 
 ROOTS_FILE = "ambient_roots.toml"
-KINDS = frozenset({"settings"})
+KINDS = frozenset({"settings", "db"})
 _SKIPPED_DIRS = frozenset({"node_modules", "__pycache__"})
 
 

@@ -197,16 +197,10 @@ SLICED_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "settings
 
 # Packages that take a `Database` from their composition root and dial nothing ambiently:
 # package dir -> the modules that may call `Database.from_settings()` (scripts/structure/
-# ambient_state/dbhandle.py). A package joins when it is migrated and the same change deletes
-# nothing else: its entry is the lock. A listed package or root that no longer exists fails
-# as stale.
-DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = {
-    "services/events_maintenance": frozenset({"services/events_maintenance/daemon.py"}),
-    "services/hierarchy_worker": frozenset({"services/hierarchy_worker/roots.py"}),
-    "services/im_bridge": frozenset({"services/im_bridge/daemon.py"}),
-    "services/labeler": frozenset({"services/labeler/daemon.py"}),
-    "services/page_server": frozenset({"services/page_server/daemon.py"}),
-}
+# ambient_state/dbhandle.py). A package declares `db = [...]` in its own `ambient_roots.toml`
+# (see roots.py) in the change that migrates its last ambient dial; the declaration is the lock.
+# A declared root that no longer exists fails as stale.
+DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "db")
 
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 
