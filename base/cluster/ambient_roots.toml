@@ -1,0 +1,3 @@
+# The only modules here that may call `ServiceEndpoints.from_settings()`; the rest takes its
+# daemon's `ServiceEndpoint` (or the table) from them.
+endpoints = ["machines.py"]
