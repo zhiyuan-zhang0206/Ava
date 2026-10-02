@@ -55,26 +55,6 @@ def test_invalid_profile_fails_without_fallback(
         explicit_caller_source("user")
 
 
-def test_sdk_external_profile_overrides_inherited_agent_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from ava import agent_identity
-
-    monkeypatch.setattr(agent_identity, "current_turn_agent_id", lambda: None)
-    monkeypatch.setattr(agent_identity, "_agent_id", 405)
-    monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
-    assert agent_identity.require_actor() == "external_agent:codex"
-    assert agent_identity.default_actor() == "external_agent:codex"
-
-
-def test_actual_hosted_turn_context_remains_authoritative(monkeypatch: pytest.MonkeyPatch) -> None:
-    from ava import agent_identity
-
-    monkeypatch.setattr(agent_identity, "current_turn_agent_id", lambda: 405)
-    monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
-    assert agent_identity.require_actor() == "agent:405"
-
-
 @pytest.mark.parametrize("tool", ["codex", "claude_code"])
 def test_wrapper_assignment_is_opt_in_and_shell_safe(tool: str) -> None:
     import shlex

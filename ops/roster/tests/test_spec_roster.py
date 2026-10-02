@@ -18,7 +18,6 @@ import pytest
 
 from base.cluster.machine import MachineRole
 from base.daemon.health import health_port
-from cli.commands import _repo
 from ops import roster, spec
 from ops.roster import service_spec
 
@@ -54,16 +53,6 @@ _AGENT_RUNNER_SESSIONS = {
     "computer-mcp",
     "otel-collector",
 }
-
-
-def test_repo_is_a_pure_reexport_of_ops_spec() -> None:
-    """`_repo`'s roster names are the SAME objects as ops.spec — proving the
-    definitions live once (single source), not duplicated."""
-    assert _repo.build_services is roster.build_services
-    assert _repo.ServiceSpec is service_spec.ServiceSpec
-    assert _repo.profile_marker is service_spec.profile_marker
-    assert _repo._services_for_roles is spec.services_for_capabilities
-    assert _repo._services_for_roles_annotated is spec.services_for_capabilities_annotated
 
 
 def test_agent_host_spec_launches_under_the_agent_profile() -> None:

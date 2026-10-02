@@ -9,7 +9,7 @@
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 46
+    "tests/base": 40
   },
   "files": {
     "tests/base/test_config.py": 1705,
@@ -39,9 +39,7 @@
   "tests_location": {
     "tests/base/test_bare_ava.py::top-level": 1,
     "tests/base/test_bootstrap_fetch.py::top-level": 1,
-    "tests/base/test_builtin_schedules.py::top-level": 1,
     "tests/base/test_config.py::top-level": 1,
-    "tests/base/test_config_boot_lite.py::top-level": 1,
     "tests/base/test_config_lite_table.py::top-level": 1,
     "tests/base/test_config_refresh.py::top-level": 1,
     "tests/base/test_connect_helpers.py::top-level": 1,
@@ -52,10 +50,8 @@
     "tests/base/test_event_contract.py::top-level": 1,
     "tests/base/test_evidence.py::top-level": 1,
     "tests/base/test_exec_request_evidence.py::top-level": 1,
-    "tests/base/test_external_caller.py::top-level": 1,
     "tests/base/test_history.py::top-level": 1,
     "tests/base/test_impersonation_review.py::top-level": 1,
-    "tests/base/test_kwargs.py::top-level": 1,
     "tests/base/test_no_secrets_on_argv.py::top-level": 1,
     "tests/base/test_pg_owner_authority.py::top-level": 1,
     "tests/base/test_pg_runtime.py::top-level": 1,
@@ -69,10 +65,8 @@
     "tests/base/test_tags.py::top-level": 1,
     "tests/base/test_telemetry_otlp.py::top-level": 1,
     "tests/base/test_telemetry_otlp_exit_delivery.py::top-level": 1,
-    "tests/base/test_timing_topology.py::top-level": 1,
     "tests/base/test_turn_identity.py::top-level": 1,
     "tests/base/test_ui_contributions.py::top-level": 1,
-    "tests/base/test_uvicorn_stdlib_intercept.py::top-level": 1,
-    "tests/base/test_worktree_guard.py::top-level": 1
+    "tests/base/test_uvicorn_stdlib_intercept.py::top-level": 1
   }
 }

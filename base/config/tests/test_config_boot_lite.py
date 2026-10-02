@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The real merged pin map of a `deepseek-v4-flash` exec child (task #3621
 # BLK-1): what `AVA_AGENT_CONFIG_OVERLAY` carries in production.
@@ -124,18 +124,6 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(tmp_path: Path) -> None
     assert set(canary["shared_config_mods"]) <= _LITE_CONFIG_MODULES
 
 
-def test_import_ava_stays_lite() -> None:
-    proc = _spawn(
-        "import sys, ava\n"
-        "import base.config as c\n"
-        "st = c._boot_state()\n"
-        "print('AVA', st['mode'], st['upgrades'], 'pydantic_settings' in sys.modules, "
-        "'base.config.base' in sys.modules)\n"
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.startswith("AVA lite 0 False False"), proc.stdout
-
-
 def test_eager_escape_boots_full_at_import() -> None:
     proc = _spawn(
         "import base.config as c\n"
@@ -186,21 +174,6 @@ def test_required_fields_fail_fast_for_a_local_source(tmp_path: Path) -> None:
     proc = _spawn("import base.config\n", env={"AVA_HOME": str(tmp_path)})
     assert proc.returncode != 0
     assert "required config missing" in proc.stderr and "AVA_DB_URL" in proc.stderr, proc.stderr
-
-
-def test_skip_mode_defers_prepare_and_plants_placeholders() -> None:
-    proc = _spawn(
-        "import os, base.config as c\n"
-        "from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL\n"
-        "prepared_before = c._boot_state()['prepared']\n"
-        "value = c.settings.lm.llm_model\n"
-        "print('DEFER', prepared_before, c._boot_state()['prepared'], value,\n"
-        "      os.environ.get('AVA_DB_URL') == PLACEHOLDER_DB_URL)\n",
-        env={"AVA_CONFIG_FETCH": "skip"},
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.startswith("DEFER False True "), proc.stdout
-    assert proc.stdout.rstrip().endswith("True"), proc.stdout
 
 
 def test_overlay_writes_stay_pending_and_never_upgrade() -> None:

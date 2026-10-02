@@ -144,7 +144,7 @@ os.environ.pop("AVA_PROCESS_PROFILE", None)
 # anything else. The suite's fixtures and assertions (Settings construction,
 # `model_fields_set` probes, the metadata walks) assume the eager chain from
 # import time, so pin it here; the lite paths are exercised in their own
-# subprocess tests (tests/base/test_config_boot_lite.py). Read at
+# subprocess tests (base/config/tests/test_config_boot_lite.py). Read at
 # `base.config` import, hence inside this block.
 os.environ.setdefault("AVA_CONFIG_BOOT", "eager")
 
