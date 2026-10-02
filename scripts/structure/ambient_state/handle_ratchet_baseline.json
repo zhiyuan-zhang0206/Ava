@@ -65,9 +65,6 @@
   "services": {
     "shim": 2
   },
-  "services/agent_host": {
-    "turn-settings-read": 1
-  },
   "services/ava_root_glue": {
     "self-built": 1
   },

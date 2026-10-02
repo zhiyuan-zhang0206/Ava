@@ -647,7 +647,9 @@ class AgentHost:
         """
         tags = ["ava", f"agent-{agent_id}", "hosted"]
         metadata: dict[str, object] = {"agent_id": agent_id, "hosted": True}
-        config: RunnableConfig = graph_config(agent_id, tags, metadata)
+        config: RunnableConfig = graph_config(
+            agent_id, tags, metadata, ctx.require_agent().kernel.checkpoint_interval
+        )
         turn = 0
         pending_failure: PendingTurnFailure | None = None
         while True:

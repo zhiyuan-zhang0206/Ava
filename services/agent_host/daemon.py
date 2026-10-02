@@ -328,15 +328,11 @@ async def _build_checkpointer(
     )
     from agent.state import build_checkpoint_serde
     from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-    from base.config.turn_view import turn_settings
 
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
     checkpointer = PooledPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
     wrap_saver_writes_with_loud_failure(checkpointer)
-    wrap_saver_writes_with_nstep_interval(
-        checkpointer,
-        lambda: turn_settings.agent.checkpoint_interval,
-    )
+    wrap_saver_writes_with_nstep_interval(checkpointer, lambda: settings.agent.checkpoint_interval)
     # Transition layer (tasks #3180/#3181): vanilla-era readers must see
     # delta-written threads' messages. Inert on vanilla-written data.
     wrap_saver_reads_with_delta_reconstruction(checkpointer)
