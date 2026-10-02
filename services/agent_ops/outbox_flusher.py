@@ -9,7 +9,7 @@ spent. It outlives every sender process by construction, which is the whole poin
 The loop is one of the ops server's resident loops (`services/agent_ops/daemon.py`
 owns it in a `TaskGroup` beside the server): one round per configured tick, each
 round one `asyncio.to_thread`; a quiesced unit (an `ava stop` draining) skips rounds
-and keeps its records. The state of every record (attempts, flush attempts, the
+(`run_rounds` gates them) and keeps its records. The state of every record (attempts, flush attempts, the
 backoff position, the abandonment) is the record's own file, not process memory and
 not the database: a failed send is usually a failure to reach the data plane, so the
 journal must be readable without it. A restart therefore resumes every cooldown.
@@ -29,7 +29,6 @@ from psycopg_pool import ConnectionPool
 from base.agents.messages import delivery_outbox
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
-from base.deploy.maintenance import admission
 
 _log = logging.getLogger("services.agent_ops.outbox_flusher")
 
@@ -49,7 +48,8 @@ def liveness_timeout_s(flush_interval_seconds: float) -> float:
 
 
 async def outbox_round(pool: ConnectionPool, progress: LoopProgress, cadence: list[float]) -> None:
-    """One redelivery round: read the live knobs, then flush unless quiesced.
+    """One redelivery round: read the live knobs, then flush. A quiesced unit never
+    gets here: `run_rounds` skips the round.
 
     `cadence` is the one-slot cell the loop reads its next wait from: the interval
     in force when the round started.
@@ -57,8 +57,6 @@ async def outbox_round(pool: ConnectionPool, progress: LoopProgress, cadence: li
     knobs = await asyncio.to_thread(delivery_outbox.limits)
     cadence[:] = [knobs.flush_interval_seconds]
     progress.timeout_s = liveness_timeout_s(knobs.flush_interval_seconds)
-    if admission.quiesced():
-        return
     report = await asyncio.to_thread(delivery_outbox.flush, pool, on_record=progress.beat)
     if report.touched or report.expired:
         _log.info(
@@ -81,4 +79,8 @@ async def outbox_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     async def one_round() -> None:
         await outbox_round(pool, progress, cadence)
 
-    await round_loop.run_rounds("delivery-outbox", progress, lambda: cadence[0], one_round)
+    def next_wait_s() -> float:
+        # A quiesced unit skips its rounds, so the first wait can precede the first read.
+        return cadence[0] if cadence else delivery_outbox.limits().flush_interval_seconds
+
+    await round_loop.run_rounds("delivery-outbox", progress, next_wait_s, one_round)

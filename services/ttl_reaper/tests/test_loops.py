@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-from collections.abc import Iterator
+from collections.abc import Callable, Coroutine, Iterator
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -17,6 +18,7 @@ import base.db
 import gateway.app
 from base.config import settings
 from base.daemon.loop_health import LivenessGroup, LoopProgress
+from base.deploy.maintenance import admission
 from services.ttl_reaper import cadence, daemon, remote, shells, sweep
 
 
@@ -327,3 +329,24 @@ def test_the_dispatch_deadline_covers_the_clients_full_retry_budget(
     # Four attempts at the reaper's own 5 s attempt budget, plus the client's backoff.
     assert shells.dispatch_deadline_s() >= 4 * 5.0
     assert shells.dispatch_deadline_s() < 4 * 30.0
+
+
+# --- the stop window ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("loop", [sweep.sweep_loop, remote.remote_loop])
+@pytest.mark.parametrize("quiesced", [True, False])
+async def test_a_quiesced_unit_borrows_no_connection(
+    monkeypatch: pytest.MonkeyPatch,
+    loop: Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]],
+    quiesced: bool,
+) -> None:
+    monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
+    pool = MagicMock()
+    task = asyncio.create_task(loop(cast("ConnectionPool", pool), _progress()))
+    try:
+        await asyncio.sleep(0.2)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert bool(pool.mock_calls) is (not quiesced)
