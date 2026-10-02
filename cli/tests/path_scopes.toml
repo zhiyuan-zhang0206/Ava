@@ -13,6 +13,7 @@
     "test_mcp_serve.py",
     "test_memory_cmd.py",
     "test_pause_stop.py",
+    "test_plugin_scaffold.py",
     "test_presets_cmd.py",
     "test_pty_commands.py",
     "test_python_install.py",
