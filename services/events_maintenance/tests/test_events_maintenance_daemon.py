@@ -26,6 +26,7 @@ from psycopg_pool import ConnectionPool
 from base.config.daemon import DaemonSettings
 from base.daemon.health import LivenessGroup, LoopProgress
 from services.events_maintenance import daemon
+from services.events_maintenance.tests.slices import events_maintenance_config
 
 # The pool is never touched — `_run_maintenance` / `_maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
@@ -75,6 +76,7 @@ def test_wedged_pass_fails_without_beating_in_flight(monkeypatch: pytest.MonkeyP
             daemon._maintenance_with_liveness(
                 _FAKE_POOL,
                 progress,
+                events_maintenance_config(),
                 run=lambda _pool: time.sleep(0.05),
             )
         )
@@ -100,7 +102,11 @@ def test_completed_pass_beats_once_after_worker_finishes(monkeypatch: pytest.Mon
         original_beat()
 
     monkeypatch.setattr(progress, "beat", counting_beat)
-    asyncio.run(daemon._maintenance_with_liveness(_FAKE_POOL, progress, run=run))
+    asyncio.run(
+        daemon._maintenance_with_liveness(
+            _FAKE_POOL, progress, events_maintenance_config(), run=run
+        )
+    )
 
     assert len(beat_at) == 1
     assert beat_at[0] >= finished_at
@@ -134,13 +140,14 @@ def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.MonkeyPatch)
         original_beat()
 
     monkeypatch.setattr(progress, "beat", counting_beat)
+    config = events_maintenance_config()
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._dispatch_loop(_FAKE_POOL, progress))  # pool unused
+        asyncio.run(daemon._dispatch_loop(_FAKE_POOL, progress, config))  # pool unused
 
     assert len(beat_at) == 1
     assert beat_at[0] >= failed_at
     assert progress.snapshot()["last_error"]["message"] == "transient db blip"  # pyright: ignore[reportIndexIssue]
-    assert slept == [daemon.settings.daemon.events_maintenance_interval_seconds]
+    assert slept == [config.events_maintenance_interval_seconds]
 
 
 def test_wedged_dispatch_parks_without_entering_retry_sleep(
@@ -148,7 +155,7 @@ def test_wedged_dispatch_parks_without_entering_retry_sleep(
 ) -> None:
     """A timed-out worker parks by ending its loop without entering either sleep path."""
 
-    async def wedge(_pool: object, progress: LoopProgress) -> None:
+    async def wedge(_pool: object, progress: LoopProgress, _config: object) -> None:
         progress.fail("dispatch exceeded hard deadline")
         raise daemon.WedgedPassError("dispatch exceeded hard deadline")
 
@@ -163,7 +170,7 @@ def test_wedged_dispatch_parks_without_entering_retry_sleep(
     monkeypatch.setattr(daemon, "_sleep_with_liveness", forbidden_retry_sleep)
 
     progress = LoopProgress("dispatch", timeout_s=1.0)
-    asyncio.run(daemon._dispatch_loop(_FAKE_POOL, progress))
+    asyncio.run(daemon._dispatch_loop(_FAKE_POOL, progress, events_maintenance_config()))
 
     assert not progress.is_alive()
 
@@ -226,7 +233,9 @@ def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(progress, "beat", counting_beat)
 
-    daemon._run_maintenance(cast(ConnectionPool, _FakePool()), progress)  # every slice faked
+    daemon._run_maintenance(
+        cast(ConnectionPool, _FakePool()), progress, events_maintenance_config()
+    )  # every slice faked
 
     for name in ("observed_metrics", "rollup", "replay", "vacuum", "emit_sizes"):
         assert rec[name].calls == 1, name
@@ -338,11 +347,15 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     async def fake_stop(server: object) -> None:
         assert server is health
 
-    async def dispatch(_pool: object, progress: LoopProgress) -> None:
-        received["dispatch"] = progress
+    configs: list[object] = []
 
-    async def resolution(_pool: object, progress: LoopProgress) -> None:
+    async def dispatch(_pool: object, progress: LoopProgress, config: object) -> None:
+        received["dispatch"] = progress
+        configs.append(config)
+
+    async def resolution(_pool: object, progress: LoopProgress, config: object) -> None:
         received["resolution"] = progress
+        configs.append(config)
 
     def fake_health_port(_name: str) -> int:
         return 8109
@@ -369,5 +382,8 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
         "resolution",
     ]
     assert len({id(progress) for progress in received.values()}) == 2
+    # The root builds the slice once and both loops share it.
+    assert len(configs) == 2 and configs[0] is configs[1]
+    assert configs[0] == events_maintenance_config()
     assert received["dispatch"].timeout_s == 1500.0
     assert received["resolution"].timeout_s == 600.0

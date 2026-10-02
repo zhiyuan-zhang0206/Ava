@@ -36,13 +36,20 @@ import redis.asyncio as aredis
 from langchain_core.messages import AIMessage
 
 import services.labeler.labeler as labeler_module
-from base.config import settings
 from base.db import create_agent
-from services.labeler.labeler import (
-    _rejection_reason,
-    _system_prompt,
-    generate_label_async,
-)
+from services.labeler.labeler import _rejection_reason as _reason_for
+from services.labeler.labeler import _system_prompt as _prompt_for
+from services.labeler.labeler import generate_label_async
+from services.labeler.tests.slices import labeler_config
+
+
+def _rejection_reason(label: str, **config: Any) -> str | None:
+    return _reason_for(label, labeler_config(**config).labeler_max_chars)
+
+
+def _system_prompt(**config: Any) -> str:
+    return _prompt_for(labeler_config(**config).labeler_max_chars)
+
 
 # The nine outputs #178 recorded from real runs: three observed landing in
 # `agents.label` on the preview cluster, six from replaying the stored prompts
@@ -214,15 +221,14 @@ class TestRejectionReason:
         failure. 16 of the 287 real production labels are exactly that long —
         the rule was measured and dropped, and this pins that it stays dropped."""
         exactly_max = "DRIVE_PROBE_RESULT mounted=<yes|no> writable=<yes|no> path=<abso"
-        assert len(exactly_max) == settings.services.labeler_max_chars
+        assert len(exactly_max) == labeler_config().labeler_max_chars
         assert _rejection_reason(exactly_max) is None
 
-    def test_character_limit_follows_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The ceiling is cluster config, resolved per call: a shortened limit
-        reaches both the truncation and the prompt handed to the model."""
-        monkeypatch.setattr(settings.services, "labeler_max_chars", 10)
-        assert labeler_module._normalize("x" * 50) == "x" * 10
-        assert "at most 10 characters" in _system_prompt()
+    def test_character_limit_follows_config(self) -> None:
+        """The ceiling is cluster config: a shortened limit reaches both the
+        truncation and the prompt handed to the model."""
+        assert labeler_module._normalize("x" * 50, 10) == "x" * 10
+        assert "at most 10 characters" in _system_prompt(labeler_max_chars=10)
 
     def test_rejects_a_fenced_code_block_opener(self) -> None:
         """Replaying the three real preview prompts through the old default
@@ -240,7 +246,7 @@ class TestRejectionReason:
         """Observed while measuring model candidates: the model repeated its own
         instruction instead of applying it, and `_normalize` truncated that to
         64 characters like any other output."""
-        echoed = _system_prompt()[: settings.services.labeler_max_chars]
+        echoed = _system_prompt()[: labeler_config().labeler_max_chars]
         assert _rejection_reason(echoed) == "instruction_echo"
 
     def test_a_short_label_sharing_an_opening_word_survives(self) -> None:
@@ -281,7 +287,9 @@ class TestGenerateLabelRejectsNonLabels:
         tid = create_agent(db_conn)
         monkeypatch.setattr(labeler_module, "build_chat_model", lambda _m, **_: _FakeLLM(raw))  # pyright: ignore[reportUnknownArgumentType]
 
-        result = await generate_label_async(tid, "a long agent brief", "deepseek-v4-flash")
+        result = await generate_label_async(
+            tid, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash")
+        )
 
         assert result is False, f"expected a generation failure for {raw!r}"
         assert _label_of(db_conn, tid) is None
@@ -305,7 +313,9 @@ class TestGenerateLabelRejectsNonLabels:
             ),  # pyright: ignore[reportUnknownArgumentType]
         )
 
-        result = await generate_label_async(tid, "a long agent brief", "deepseek-v4-flash")
+        result = await generate_label_async(
+            tid, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash")
+        )
 
         assert result is True
         assert (
@@ -334,7 +344,9 @@ async def test_generated_label_overwrites_stray_empty_string(
         lambda _m, **_: _FakeLLM("ui docs fix"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    result = await generate_label_async(tid, "a long agent brief", "deepseek-v4-flash")
+    result = await generate_label_async(
+        tid, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash")
+    )
 
     assert result is True
     assert _label_of(db_conn, tid) == "ui docs fix"
@@ -360,7 +372,9 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
         lambda _m, **_: _FakeLLM("ui docs fix"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    result = await generate_label_async(tid, "a long agent brief", "deepseek-v4-flash")
+    result = await generate_label_async(
+        tid, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash")
+    )
 
     assert result is None
     assert _label_of(db_conn, tid) == ""
@@ -393,7 +407,12 @@ async def test_label_generation_logs_batch_usage_for_the_target_agent(
 
     monkeypatch.setattr(labeler_module, "build_chat_model", _build_usage_llm)
 
-    assert await generate_label_async(agent_id, "a long agent brief", "deepseek-v4-flash") is True
+    assert (
+        await generate_label_async(
+            agent_id, "a long agent brief", labeler_config(labeler_model="deepseek-v4-flash")
+        )
+        is True
+    )
 
     [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
     assert record["extra"]["agent_id"] == agent_id

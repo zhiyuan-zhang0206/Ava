@@ -62,6 +62,7 @@ from base.telemetry.loki_index_labels import (
     split_index_label_window,
 )
 from base.telemetry.loki_query_budget import FairQueryBudget
+from services.events_maintenance.config import EventsMaintenanceConfig
 
 _HTTP_TIMEOUT_S = 60.0
 # Serialized by design (capacity 1): the maintenance sweep must not crowd out
@@ -239,14 +240,14 @@ def _metrics_queries(
 # ── Loki I/O ─────────────────────────────────────────────────────────────────
 
 
-def _query_instant(logql: str, at: datetime) -> list[tuple[dict[str, str], float]]:
+def _query_instant(
+    logql: str, at: datetime, config: EventsMaintenanceConfig
+) -> list[tuple[dict[str, str], float]]:
     """One Loki instant query; returns [(labels, value)]. Raises on transport
     or HTTP failure — the daemon pass reports and retries next round (a
     silently-zero day would be worse than a loud skip). The process-local
     capacity-one budget also governs resolution.py, which imports this seam."""
-    from base.config import settings
-
-    base = settings.observability.telemetry_loki_url.rstrip("/")
+    base = config.telemetry_loki_url.rstrip("/")
     params = urllib.parse.urlencode({"query": logql, "time": at.timestamp()})
     req = urllib.request.Request(f"{base}/loki/api/v1/query?{params}")  # noqa: S310 — settings-derived http(s) base
     with (
@@ -260,7 +261,7 @@ def _query_instant(logql: str, at: datetime) -> list[tuple[dict[str, str], float
     return out
 
 
-def _day_source_count(day: date) -> int | None:
+def _day_source_count(day: date, config: EventsMaintenanceConfig) -> int | None:
     """Count all event families feeding one day's rollup; None means probe failure."""
     day_start = datetime.combine(day, datetime_time.min, tzinfo=UTC)
     day_end = datetime.combine(day + timedelta(days=1), datetime_time.min, tzinfo=UTC)
@@ -275,7 +276,9 @@ def _day_source_count(day: date) -> int | None:
                 telemetry_only=False,
             )
             logql = f"sum(count_over_time(({pipeline})[{duration_s}s]))"
-            source_count += int(sum(value for _labels, value in _query_instant(logql, slice_.end)))
+            source_count += int(
+                sum(value for _labels, value in _query_instant(logql, slice_.end, config))
+            )
     except Exception as exc:
         logger.warning(
             f"[events-maintenance] source-count probe failed for {day}: {exc}; "
@@ -285,7 +288,9 @@ def _day_source_count(day: date) -> int | None:
     return source_count
 
 
-def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | None:
+def _day_aggregates(
+    day: date, config: EventsMaintenanceConfig
+) -> tuple[list[TokensRow], list[MetricsRow]] | None:
     """Aggregate one UTC day, or return None for a zero-row indexed slice."""
     day_start = datetime.combine(day, datetime_time.min, tzinfo=UTC)
     day_end = datetime.combine(day + timedelta(days=1), datetime_time.min, tzinfo=UTC)
@@ -301,7 +306,7 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
             era=slice_.era,
             duration_s=duration_s,
         ).items():
-            result_rows = _query_instant(logql, slice_.end)
+            result_rows = _query_instant(logql, slice_.end, config)
             slice_row_count += len(result_rows)
             for labels, value in result_rows:
                 key = (int(labels["agent_id"]), labels.get("model", ""))
@@ -311,7 +316,7 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
             era=slice_.era,
             duration_s=duration_s,
         ).items():
-            result_rows = _query_instant(logql, slice_.end)
+            result_rows = _query_instant(logql, slice_.end, config)
             slice_row_count += len(result_rows)
             for labels, value in result_rows:
                 agent_id = int(labels["agent_id"])
@@ -457,6 +462,7 @@ def _prepare_dirty_days(
     states: dict[date, _RollupDayState],
     candidates: list[date],
     *,
+    config: EventsMaintenanceConfig,
     yesterday: date,
     lookback_days: int,
     pass_started: float,
@@ -481,7 +487,7 @@ def _prepare_dirty_days(
         if deadline_reached():
             warn_deadline(candidates[index:])
             break
-        probe_count = _day_source_count(day)
+        probe_count = _day_source_count(day, config)
         state = states.get(day)
         dirty = (
             state is None
@@ -501,7 +507,7 @@ def _prepare_dirty_days(
             warn_deadline(candidates[index:])
             break
         attempted_days.append(day)
-        aggregates = _day_aggregates(day)
+        aggregates = _day_aggregates(day, config)
         if aggregates is None:
             error = "indexed slice returned zero rows"
             logger.warning(
@@ -590,6 +596,7 @@ def compute_rollup(
     conn: psycopg.Connection,
     *,
     now_utc: datetime,
+    config: EventsMaintenanceConfig,
     lookback_days: int | None = None,
     pass_deadline_s: float | None = None,
 ) -> RollupResult:
@@ -600,13 +607,11 @@ def compute_rollup(
     did not land. A retention gap is still unrecoverable without the JSONL
     mirror and is reported before the retained candidate scan begins.
     """
-    from base.config import settings
-
     pass_started = time.monotonic()
     if lookback_days is None:
-        lookback_days = settings.daemon.events_rollup_late_write_lookback_days
+        lookback_days = config.events_rollup_late_write_lookback_days
     if pass_deadline_s is None:
-        pass_deadline_s = settings.daemon.events_rollup_pass_deadline_s
+        pass_deadline_s = config.events_rollup_pass_deadline_s
     now = now_utc.astimezone(UTC)
     yesterday = now.date() - timedelta(days=1)
     floor_day = (now - EVENT_STREAM_RETENTION).date() + timedelta(days=1)
@@ -636,6 +641,7 @@ def compute_rollup(
     per_day, state_updates, attempted_days = _prepare_dirty_days(
         states,
         candidates,
+        config=config,
         yesterday=yesterday,
         lookback_days=lookback_days,
         pass_started=pass_started,
