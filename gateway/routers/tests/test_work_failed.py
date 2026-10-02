@@ -16,6 +16,7 @@ from pydantic import SecretStr
 
 from base.agents import AgentStatus
 from base.config import settings
+from base.events.live.bus import EventBus
 from gateway.agents.delivery import ChatDelivery
 from gateway.app import app
 from gateway.routers import work_failed as work_failed_router
@@ -267,7 +268,9 @@ def test_failed_resurrection_falls_back_to_nearest_live_delegator(
     db_conn.commit()
     delivered: list[int] = []
 
-    async def _delivery(_pool: object, agent_id: int, **kwargs: object) -> ChatDelivery:
+    async def _delivery(
+        _pool: object, _bus: object, agent_id: int, **kwargs: object
+    ) -> ChatDelivery:
         delivered.append(agent_id)
         return ChatDelivery(
             AgentStatus.TERMINATED if agent_id == author else AgentStatus.IDLING,
@@ -383,7 +386,12 @@ async def test_reconcile_delivers_stale_unfinished_event(
     monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _publish)
     monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _keep_alive)
 
-    assert await work_failed_router.reconcile_stale_work_failures(failure_pool) == 1
+    assert (
+        await work_failed_router.reconcile_stale_work_failures(
+            failure_pool, EventBus.from_settings()
+        )
+        == 1
+    )
 
     event = db_conn.execute(
         "SELECT delivered_to, delivery_kind, delivered_at IS NOT NULL, delivery_attempts "
@@ -416,7 +424,7 @@ async def test_reconcile_cuts_a_wedged_delivery_and_goes_on_with_the_batch(
     )
 
     async def _delivery(
-        _pool: object, agent_id: int, *args: object, **kwargs: object
+        _pool: object, _bus: object, agent_id: int, *args: object, **kwargs: object
     ) -> ChatDelivery:
         if agent_id == wedged_author:
             await asyncio.Event().wait()
@@ -427,7 +435,7 @@ async def test_reconcile_cuts_a_wedged_delivery_and_goes_on_with_the_batch(
     seen: list[None] = []
 
     completed = await work_failed_router.reconcile_stale_work_failures(
-        failure_pool, on_event=lambda: seen.append(None)
+        failure_pool, EventBus.from_settings(), on_event=lambda: seen.append(None)
     )
 
     assert completed == 1
@@ -468,7 +476,12 @@ async def test_reconcile_sends_attempts_over_limit_directly_to_task_alert(
 
     monkeypatch.setattr(work_failed_router, "deliver_chat_inbound", _unexpected_delivery)
 
-    assert await work_failed_router.reconcile_stale_work_failures(failure_pool) == 1
+    assert (
+        await work_failed_router.reconcile_stale_work_failures(
+            failure_pool, EventBus.from_settings()
+        )
+        == 1
+    )
     event = db_conn.execute(
         "SELECT delivered_to, delivery_kind, delivered_at IS NOT NULL, delivery_attempts "
         "FROM work_failed_events WHERE id = %s",
@@ -497,7 +510,12 @@ async def test_reconcile_leaves_events_inside_grace_window_untouched(
 
     monkeypatch.setattr(work_failed_router, "deliver_chat_inbound", _unexpected_delivery)
 
-    assert await work_failed_router.reconcile_stale_work_failures(failure_pool) == 0
+    assert (
+        await work_failed_router.reconcile_stale_work_failures(
+            failure_pool, EventBus.from_settings()
+        )
+        == 0
+    )
     assert db_conn.execute(
         "SELECT delivered_at, delivery_attempts FROM work_failed_events WHERE id = %s",
         (event_id,),
@@ -532,8 +550,12 @@ async def test_concurrent_delivery_cas_deduplicates_the_agent_inbound(
     )
 
     results = await asyncio.gather(
-        work_failed_router._deliver_failure(failure_pool, event_id, body, provenance),
-        work_failed_router._deliver_failure(failure_pool, event_id, body, provenance),
+        work_failed_router._deliver_failure(
+            failure_pool, EventBus.from_settings(), event_id, body, provenance
+        ),
+        work_failed_router._deliver_failure(
+            failure_pool, EventBus.from_settings(), event_id, body, provenance
+        ),
     )
 
     assert sorted(result.status for result in results) == ["delivered", "duplicate"]

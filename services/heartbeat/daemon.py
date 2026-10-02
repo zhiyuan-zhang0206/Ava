@@ -623,7 +623,7 @@ async def run() -> None:
         async with asyncio.TaskGroup() as loops:
             loops.create_task(_dispatch_loop(pool, dispatch_progress))
             loops.create_task(_liveness_loop(pool, bus, liveness_progress))
-            loops.create_task(completion_digest.completion_digest_loop(pool, digest_progress))
+            loops.create_task(completion_digest.completion_digest_loop(pool, bus, digest_progress))
     finally:
         pool.close()
         await stop_health_server(health)

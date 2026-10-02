@@ -83,10 +83,10 @@ _OPEN_FEED_MAX_LIMIT = 500
 _RESOLVED_PAGE_MAX_LIMIT = 100
 
 
-def _publish_response_required_hint(agent_id: int) -> None:
+def _publish_response_required_hint(bus: EventBus, agent_id: int) -> None:
     """Refresh the inspector's response-required notice projection after commit."""
     try:
-        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
+        publish_agent_updated_sync(bus, agent_id)
     except Exception:
         # The notice row is already durable. Like every live announce, an
         # unavailable projection refresh must not turn a successful SDK write
@@ -463,6 +463,7 @@ async def post_notice_resolve(
     deliver_source = "system:notice-reply" if reply is not None else "system:notice-dismiss"
     delivery = await deliver_chat_inbound(
         request.app.state.db_pool,
+        request.app.state.bus,
         agent_id,
         prepare=_resolve,
         source=deliver_source,
@@ -471,7 +472,7 @@ async def post_notice_resolve(
     )
     # Drop the row from the FYI feed (no-op by id for a require_response notice,
     # which lives on the snapshot, not the feed).
-    await _ops.publish_notice_resolved(EventBus.from_settings(), agent_id, notice_id)
+    await _ops.publish_notice_resolved(request.app.state.bus, agent_id, notice_id)
     return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
 
 
@@ -595,7 +596,7 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
             # query; a pre-commit AgentUpdated would preserve the stale view.
             conn.commit()
             if body.require_response or superseded_response_required:
-                _publish_response_required_hint(agent_id)
+                _publish_response_required_hint(request.app.state.bus, agent_id)
             return notice_global_id, notice_local_id, superseded_global, superseded_local
 
     def _pending(pool: ConnectionPool) -> list[dict[str, object]]:
@@ -623,9 +624,9 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
     # then the new posted notice. Best-effort, never raises. Events publish by
     # GLOBAL id; the SDK's return value carries LOCAL ids.
     for _gid in superseded_global:
-        await _ops.publish_notice_resolved(EventBus.from_settings(), agent_id, _gid)
+        await _ops.publish_notice_resolved(request.app.state.bus, agent_id, _gid)
     await _ops.publish_notice_posted(
-        EventBus.from_settings(),
+        request.app.state.bus,
         agent_id,
         notice_global_id,
         body.priority,
@@ -709,7 +710,7 @@ async def patch_notice_edit(agent_id: int, body: NoticeEditIn, request: Request)
             edited = _edit(conn)
             conn.commit()
             if edited is not None and edited[1]:
-                _publish_response_required_hint(agent_id)
+                _publish_response_required_hint(request.app.state.bus, agent_id)
             return edited
 
     edited = await asyncio.to_thread(_edit_wrapper, request.app.state.db_pool)
@@ -717,7 +718,7 @@ async def patch_notice_edit(agent_id: int, body: NoticeEditIn, request: Request)
         return Response(status_code=204)
     _gid, _require_response, new_priority, new_title, task_id = edited
     await _ops.publish_notice_posted(
-        EventBus.from_settings(), agent_id, _gid, new_priority, new_title, task_id
+        request.app.state.bus, agent_id, _gid, new_priority, new_title, task_id
     )
     return Response(status_code=204)
 
@@ -742,11 +743,11 @@ async def post_notice_dismiss(agent_id: int, request: Request) -> Response:
                 return None
             dismissed, require_response = int(row[0]), bool(row[1])
             if require_response:
-                _publish_response_required_hint(agent_id)
+                _publish_response_required_hint(request.app.state.bus, agent_id)
             return dismissed
 
     dismissed = await asyncio.to_thread(_dismiss, request.app.state.db_pool)
     if dismissed is None:
         return Response(status_code=204)
-    await _ops.publish_notice_resolved(EventBus.from_settings(), agent_id, dismissed)
+    await _ops.publish_notice_resolved(request.app.state.bus, agent_id, dismissed)
     return Response(status_code=204)

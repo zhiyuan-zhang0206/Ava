@@ -22,17 +22,20 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.events.live.bus import EventBus
 from gateway.routers import work_failed as work_failed_router
 from services.ttl_reaper import shells
 
 _log = logging.getLogger(__name__)
 
 
-async def remote_round(pool: ConnectionPool, progress: LoopProgress) -> None:
+async def remote_round(pool: ConnectionPool, bus: EventBus, progress: LoopProgress) -> None:
     """One pass: reclaim expired shells, then redeliver stale work failures."""
     reaped = await shells.reap_expired_shells(pool, progress)
     progress.beat()
-    failures = await work_failed_router.reconcile_stale_work_failures(pool, on_event=progress.beat)
+    failures = await work_failed_router.reconcile_stale_work_failures(
+        pool, bus, on_event=progress.beat
+    )
     if reaped or failures:
         _log.info(
             "[ttl-reaper] reclaimed %d shell(s); completed %d stale work failure(s)",
@@ -41,11 +44,11 @@ async def remote_round(pool: ConnectionPool, progress: LoopProgress) -> None:
         )
 
 
-async def remote_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
+async def remote_loop(pool: ConnectionPool, bus: EventBus, progress: LoopProgress) -> None:
     """The remote-call phases as a resident sequential loop."""
 
     async def one_round() -> None:
-        await remote_round(pool, progress)
+        await remote_round(pool, bus, progress)
 
     await round_loop.run_rounds(
         "remote", progress, settings.daemon.ttl_reaper_poll_interval_seconds, one_round

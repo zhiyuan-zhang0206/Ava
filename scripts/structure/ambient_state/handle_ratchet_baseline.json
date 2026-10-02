@@ -41,15 +41,6 @@
   "base/telemetry": {
     "shim": 6
   },
-  "gateway": {
-    "bus-built": 1
-  },
-  "gateway/agents": {
-    "bus-built": 12
-  },
-  "gateway/inspect": {
-    "bus-built": 1
-  },
   "ops": {
     "shim": 1
   },

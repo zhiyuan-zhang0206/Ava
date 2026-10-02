@@ -75,5 +75,7 @@ async def draft_package(body: PackageDraftRequest, request: Request) -> PackageD
         prompt_source="user",
         label="ava-package-installer",
     )
-    spawned = await create_and_launch_agent(body_obj, machine_name(), request.app.state.db_pool)
+    spawned = await create_and_launch_agent(
+        body_obj, machine_name(), request.app.state.db_pool, request.app.state.bus
+    )
     return PackageDraftResponse(agent_id=spawned.id)

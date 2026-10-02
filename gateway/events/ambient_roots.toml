@@ -1,2 +1,0 @@
-# This package takes the `EventBus` from the gateway app and builds none.
-bus = []

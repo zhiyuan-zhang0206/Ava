@@ -268,6 +268,7 @@ async def upload_files(
             )
         await deliver_chat_inbound(
             request.app.state.db_pool,
+            request.app.state.bus,
             agent_id,
             prepare=lambda _conn: message,
             provenance=request_inbound_provenance(request),
