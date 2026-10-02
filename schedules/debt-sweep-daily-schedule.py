@@ -24,8 +24,7 @@ import ava
 import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import catch_up, claimed_slot, fire_slot_once
-from base.config import settings
+from schedules.catchup import catch_up, claimed_slot, cluster_timezone, fire_slot_once
 from base.log import init_gateway_process
 from base.host.env.dotenv_boot import resolve_ava_home
 from base.paths import ava_home
@@ -38,7 +37,6 @@ ensure_agent_status_members(
 )
 
 CRON = "30 6 * * *"
-TZ = settings.general.timezone
 _REPO_ROOT = Path(base.__file__).resolve().parents[1]
 _LEDGER_PATH = "future/tech-debt/ledger.md"
 _PROCESS_NAME = "schedule-debt-sweep-daily"
@@ -207,7 +205,7 @@ def event_payload(*, day: str, scan: ScanReport, dispatch: WorkerDispatch) -> di
 
 
 def _slot_day(slot: datetime) -> str:
-    return slot.astimezone(ZoneInfo(TZ)).strftime("%Y-%m-%d")
+    return slot.astimezone(ZoneInfo(cluster_timezone())).strftime("%Y-%m-%d")
 
 
 def _fire(_payload: None) -> None:
@@ -270,13 +268,13 @@ def _dry_run(repo: Path) -> None:
 
 
 def _main_loop() -> None:
-    catch_up([(CRON, None)], timezone=TZ, fire=_fire)
+    catch_up([(CRON, None)], timezone=cluster_timezone(), fire=_fire)
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)
-        next_run = next_fire(CRON, after=now - timedelta(minutes=2), timezone=TZ)
+        next_run = next_fire(CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone())
         if next_run <= last_run_at:
-            next_run = next_fire(CRON, after=last_run_at, timezone=TZ)
+            next_run = next_fire(CRON, after=last_run_at, timezone=cluster_timezone())
         wait_seconds = (next_run - now).total_seconds()
         if wait_seconds > 0:
             time.sleep(min(wait_seconds, 3600))

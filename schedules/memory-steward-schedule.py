@@ -25,8 +25,7 @@ from datetime import UTC, datetime
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import catch_up, fire_slot_once
-from base.config import settings
+from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
 ensure_agent_status_members(
@@ -36,7 +35,6 @@ ensure_agent_status_members(
 )
 
 MEMORY_ARBITRATOR_LABEL = "memory-arbiter"
-TIMEZONE = settings.general.timezone
 
 TRIGGERS = [
     ("0 4 * * *", "Daily consolidation (commit + push + PR merge)"),
@@ -76,13 +74,13 @@ def fire_memory_maintenance(message: str) -> None:
 
 
 def main():
-    catch_up(TRIGGERS, timezone=TIMEZONE, fire=fire_memory_maintenance)
+    catch_up(TRIGGERS, timezone=cluster_timezone(), fire=fire_memory_maintenance)
     while True:
         # Find the next fire among all triggers
         now = datetime.now(UTC)
         next_times = []
         for cron_expr, message in TRIGGERS:
-            nxt = next_fire(cron_expr, after=now, timezone=TIMEZONE)
+            nxt = next_fire(cron_expr, after=now, timezone=cluster_timezone())
             next_times.append((nxt, cron_expr, message))
 
         # Pick the earliest
