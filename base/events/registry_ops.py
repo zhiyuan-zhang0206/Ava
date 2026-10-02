@@ -501,7 +501,7 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         name="page_ttl_expired",
         category="log",
         tier="observation",
-        doc="the gateway TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id",
+        doc="the TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id",
     ),
     "page_language_lookup_failed": EventSpec(
         name="page_language_lookup_failed",
@@ -525,7 +525,7 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         name="shell_ttl_expired",
         category="log",
         tier="observation",
-        doc="the gateway TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode",
+        doc="the TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode",
     ),
     "chrome_page_ttl_expired": EventSpec(
         name="chrome_page_ttl_expired",
@@ -542,13 +542,13 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         name="lifecycle_pointer_done_torn",
         category="log",
         tier="anomaly",
-        doc="the gateway TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples",
+        doc="the TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples",
     ),
     "lifecycle_fences_settled_absent_machine": EventSpec(
         name="lifecycle_fences_settled_absent_machine",
         category="log",
         tier="observation",
-        doc="the gateway TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples",
+        doc="the TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples",
     ),
     # hierarchy regen guardrails (task #4674): the understanding-tree build
     # queue's cost breakers — a reader fix that invalidated every input hash

@@ -132,7 +132,7 @@ def _validate_ttl(ttl: float, *, system: bool = False) -> float:
 def _record_ttl(session_id: int, ttl: float) -> None:
     """Write the session's mandatory deadline row to `agent_shell_ttls`.
 
-    The gateway TTL reaper reads this table (the runner role holds INSERT).
+    The TTL reaper reads this table (the runner role holds INSERT).
     Fail-loud: without the row the reaper can never reclaim the session, so
     the caller must abort the creation it just made. `SET TRANSACTION READ
     WRITE` leads the transaction — a pooled backend handed over with

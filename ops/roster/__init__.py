@@ -22,9 +22,9 @@ from ops.roster.healthz import healthz_daemon as healthz_daemon  # public: plugi
 from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 
 # After uvicorn's connection drain the gateway runs its lifespan cleanup and the
-# interpreter exits. That tail waits on the TTL reaper's in-flight remote dispatch
-# (each call capped at 5 s, `gateway/ttl_reaper`) plus the pool closes; this is
-# its declared bound.
+# interpreter exits. That tail waits on the lifespan teardown's in-flight work
+# (the schedule manager's stop, the flushers) plus the pool closes; this is its
+# declared bound.
 _GATEWAY_LIFESPAN_ALLOWANCE_S = 10.0
 
 # The roster body moved verbatim and still resolves these policy helpers by
@@ -205,6 +205,16 @@ def build_services() -> tuple[ServiceSpec, ...]:
             module="services.events_maintenance.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; checkpoint tables live in PG
+        ),
+        # ttl-reaper: enforces every wall-clock deadline (page / shell / browser
+        # session / notice / impersonation TTLs) plus the hourly lifecycle-pointer
+        # scans. A gateway daemon — it owns the data plane and dials the
+        # runners' ops servers for shell kills.
+        healthz_daemon(
+            "ttl-reaper",
+            module="services.ttl_reaper.daemon",
+            capabilities=_GATEWAY,
+            requires_db=True,  # assert_schema_current at boot; every phase is a DB pass
         ),
         # milvus before memory-indexer: memory-indexer cold-start connects to milvus.
         # Gated by _gate_reason to the milvus memory-search backend — numpy

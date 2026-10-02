@@ -29,4 +29,4 @@ One pass per agent per interval: `agent/startup/__init__.py:_last_reconcile_at`,
 
 ## Failure handling
 
-Best-effort everywhere: query / probe / serve failures are logged and swallowed — the page heals on the next pass. The periodic loops are self-protecting (any raise is logged, the next interval retries). PageClosed events for closed rows go through the caller's event publisher; the hosted daemon publishes best-effort on the shared Redis channel (gateway ttl_reaper pattern).
+Best-effort everywhere: query / probe / serve failures are logged and swallowed — the page heals on the next pass. The periodic loops are self-protecting (any raise is logged, the next interval retries). PageClosed events for closed rows go through the caller's event publisher; the hosted daemon publishes best-effort on the shared Redis channel (the `services/ttl_reaper` pattern).
