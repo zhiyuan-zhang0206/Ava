@@ -104,7 +104,7 @@ from gateway.extensions import plugin_ui as plugin_ui_router
 from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.inspect import router as inspect_router
-from gateway.lgtm import loki_events, loki_query_budget, prom_metrics
+from gateway.lgtm import loki_events, loki_query_budget
 from gateway.mcp_server import endpoint as mcp_server_endpoint
 from gateway.mcp_server import router as mcp_server_router
 from gateway.middleware import idempotency, latency, pause_policy, runtime_metrics
@@ -114,7 +114,6 @@ from gateway.middleware.error_handlers import (
     http_exception_handler,
     loki_query_budget_error_handler,
     observability_read_unavailable_handler,
-    prom_query_budget_error_handler,
     request_validation_error_handler,
     unhandled_exception_handler,
 )
@@ -548,10 +547,6 @@ app.add_exception_handler(
 app.add_exception_handler(
     loki_events.ObservabilityReadUnavailable,
     observability_read_unavailable_handler,  # type: ignore[arg-type]
-)
-app.add_exception_handler(
-    prom_metrics.PromQueryBudgetError,
-    prom_query_budget_error_handler,  # type: ignore[arg-type]
 )
 app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]

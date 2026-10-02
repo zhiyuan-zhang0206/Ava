@@ -2055,8 +2055,8 @@ any other `python3.12` on the box.
 
 The whole OTLP surface (exporter + trace recording + ship) is gated by
 `AVA_TELEMETRY_OTLP_ENABLED` (default **on**); off leaves the JSONL mirror only
-and freezes Loki, Prometheus, and their read surfaces at the last exported
-data. There is no Postgres fallback: the `events` archive was dropped (task #1281/#1823). This is
+and freezes Loki, Prometheus, and Grafana at the last exported data; the record
+(`telemetry_events`, `audit_events` in Postgres) and every gateway read keep working. This is
 one startup-applied kill switch, so a change requires a process restart. The
 home/role producer gate additionally prevents an unmarked gateway from using
 the default loopback endpoint; explicitly setting `AVA_TELEMETRY_OTLP_ENDPOINT`
@@ -2067,10 +2067,9 @@ Grafana run as native processes on Darwin arm64 and Linux amd64, owned by
 `ava-root` (below). Explicit host listen ports permit isolated homes; defaults
 remain 3100/9090/3003 plus Loki gRPC 9095. See [native lifecycle](../cli/commands/observability/docs/lgtm.ava.okf.md). Tempo is remote, selected by the host-scope
 `AVA_TELEMETRY_TEMPO_ENDPOINT` setting. No
-service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
-and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
-ops alerting via Grafana's embedded Alertmanager → the gateway webhook, the
-events-maintenance Loki rollup, `ava cluster health`). It is a **host
+service lifecycle depends on a container backend. The backend feeds Grafana and its alerting
+(Grafana's embedded Alertmanager → the gateway webhook) and the backfill scripts' live Loki
+read; no gateway read path or events-maintenance pass depends on it. It is a **host
 singleton** owned by the lifecycle on exactly one home per host — the
 observability station. Provider identity is either the operator-created
 `$AVA_HOME/lgtm-host` marker file (in practice prod `~/.ava`;
