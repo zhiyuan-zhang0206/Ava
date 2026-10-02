@@ -33,7 +33,7 @@ from base.agents.history.delta_read_compat import (
     recovery_reconstruction_scope,
     wrap_saver_reads_with_delta_reconstruction,
 )
-from base.db import create_agent
+from base.db import Database, create_agent
 
 
 def _saver(pool: AsyncConnectionPool) -> AsyncPostgresSaver:
@@ -270,7 +270,7 @@ async def test_count_reconstructs_snapshot_tip(
     stored = raw.checkpoint["channel_values"].get("messages")
     assert isinstance(stored, _DeltaSnapshot)
 
-    assert load_checkpoint_message_count(agent_id) == len(truth) == 18
+    assert load_checkpoint_message_count(Database.from_settings(), agent_id) == len(truth) == 18
 
 
 async def test_remove_all_rebuild_folds(aops_pool: AsyncConnectionPool) -> None:
@@ -331,9 +331,15 @@ async def test_gateway_readers_reconstruct_delta_threads(
     # The boundary is synthetic (no compaction happened), so both segments
     # carry the full prefix; the stitch appends the latest segment with its
     # leading system prompt dropped. Both reads must come back repaired.
-    assert _ids(load_checkpoint_messages_full(agent_id)) == [*truth_at_boundary, *truth[1:]]
-    assert _ids(load_checkpoint_messages_segment(agent_id, boundary)) == truth_at_boundary[1:]
-    assert load_checkpoint_message_count(agent_id) == len(truth)
+    assert _ids(load_checkpoint_messages_full(Database.from_settings(), agent_id)) == [
+        *truth_at_boundary,
+        *truth[1:],
+    ]
+    assert (
+        _ids(load_checkpoint_messages_segment(Database.from_settings(), agent_id, boundary))
+        == truth_at_boundary[1:]
+    )
+    assert load_checkpoint_message_count(Database.from_settings(), agent_id) == len(truth)
 
 
 async def test_fork_copies_the_delta_write_chain(

@@ -57,11 +57,11 @@ def _no_anchors(_messages: list[object]) -> bool:
     return False
 
 
-def _checkpoint_messages(_agent_id: int) -> list[object]:
+def _checkpoint_messages(_db: object, _agent_id: int) -> list[object]:
     return ["m"]
 
 
-def _no_boundaries(_agent_id: int) -> list[str]:
+def _no_boundaries(_db: object, _agent_id: int) -> list[str]:
     return []
 
 
@@ -175,7 +175,7 @@ def test_window_uses_current_segment_when_it_covers_the_start(
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _checkpoint_messages)
     walked: list[int] = []
 
-    def _boundaries(agent_id: int) -> list[str]:
+    def _boundaries(_db: object, agent_id: int) -> list[str]:
         walked.append(agent_id)
         return ["ck-1", "ck-2"]
 
@@ -221,10 +221,10 @@ def _history_walk_fixture(
     monkeypatch.setattr(strip, "build_timeline_items", _build)
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _checkpoint_messages)
 
-    def _boundaries(_agent_id: int) -> list[str]:
+    def _boundaries(_db: object, _agent_id: int) -> list[str]:
         return [f"ck-{i}" for i in range(1, 6)]
 
-    def _segments(_agent_id: int, boundary: str) -> list[object]:
+    def _segments(_db: object, _agent_id: int, boundary: str) -> list[object]:
         return [boundary]
 
     monkeypatch.setattr(checkpoint, "list_compact_boundary_checkpoint_ids", _boundaries)
@@ -424,7 +424,7 @@ def test_window_excludes_legacy_epoch_timestamps_and_flags_it(
 
 
 def test_strip_read_degrades_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(_agent_id: int) -> list[object]:
+    def _boom(_db: object, _agent_id: int) -> list[object]:
         raise RuntimeError("checkpoint store down")
 
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _boom)
@@ -550,7 +550,7 @@ def test_strip_and_details_reads_share_the_cached_segment(
     monkeypatch.setattr(strip, "build_timeline_items", _build)
     loads: list[int] = []
 
-    def _counting(agent_id: int) -> list[object]:
+    def _counting(_db: object, agent_id: int) -> list[object]:
         loads.append(agent_id)
         return ["m"]
 

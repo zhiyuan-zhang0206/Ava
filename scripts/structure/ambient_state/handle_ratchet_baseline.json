@@ -23,7 +23,7 @@
   },
   "base/agents": {
     "bus-built": 10,
-    "shim": 41
+    "shim": 38
   },
   "base/cluster": {
     "shim": 15

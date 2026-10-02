@@ -71,7 +71,7 @@ def _install_fakes(
 ) -> _Recorder:
     rec = _Recorder()
 
-    def fake_load(agent_id: int) -> dict[str, str]:
+    def fake_load(_db: object, agent_id: int) -> dict[str, str]:
         rec.loaded.append(agent_id)
         return dict(known or {})
 
@@ -87,6 +87,7 @@ def _install_fakes(
         return "agent-own-model"
 
     def fake_build(
+        _db: object,
         agent_id: int,
         *,
         llm: Any,
@@ -107,7 +108,9 @@ def _install_fakes(
             raise build_error
         return tree
 
-    def fake_write(agent_id: int, nodes: Sequence[MaterializedNode], *, model: str) -> int:
+    def fake_write(
+        _db: object, agent_id: int, nodes: Sequence[MaterializedNode], *, model: str
+    ) -> int:
         rec.written.append({"agent_id": agent_id, "nodes": tuple(nodes), "model": model})
         return len(nodes)
 

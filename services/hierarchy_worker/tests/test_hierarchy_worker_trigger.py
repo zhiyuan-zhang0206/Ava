@@ -466,7 +466,7 @@ def test_halted_build_records_the_marker_and_emits_the_signals(
         seen_caps.append(kwargs.get("max_generated"))
         return halted
 
-    monkeypatch.setattr(execute_module, "load_known_texts", lambda _aid: {})
+    monkeypatch.setattr(execute_module, "load_known_texts", lambda _db, _aid: {})
     monkeypatch.setattr(execute_module, "build_generation_llm", lambda _model: object())
     monkeypatch.setattr(execute_module, "close_chat_model", lambda _llm: None)
     monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)

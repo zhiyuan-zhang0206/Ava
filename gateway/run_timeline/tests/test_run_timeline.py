@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 
 from base.agents.history.hierarchy.store import StoredNode
-from base.db import ChatInboundFact
+from base.db import ChatInboundFact, Database
 from gateway.run_timeline.router import (
     _ANOMALY_EVENTS,
     _TURN_EVENTS,
@@ -15,6 +16,11 @@ from gateway.run_timeline.router import (
     _narrative_for_window,
     aggregate_turn_timeline,
 )
+
+
+def _database() -> Database:
+    """The tests stub the store reads, so no connection is ever dialed."""
+    return cast(Database, object())
 
 
 def _event(
@@ -363,12 +369,14 @@ def test_narrative_for_window_uses_the_store_and_skips_summary_on_full_coverage(
     def _nodes(*_args: object, **_kwargs: object) -> list[StoredNode]:
         return nodes
 
-    def _no_extent(_agent_id: int) -> None:
+    def _no_extent(_db: object, _agent_id: int) -> None:
         return None
 
     monkeypatch.setattr("base.agents.history.hierarchy.store.load_window_nodes", _nodes)
     monkeypatch.setattr("base.agents.history.hierarchy.store.load_coverage_extent", _no_extent)
-    layers, summary, pending = _narrative_for_window(405, start, end, activity=[(start, end)])
+    layers, summary, pending = _narrative_for_window(
+        _database(), 405, start, end, activity=[(start, end)]
+    )
     assert pending is None
     assert summary is None
     assert layers is not None
@@ -385,12 +393,13 @@ def test_narrative_for_window_degrades_to_none_without_nodes(
     def _empty(*_args: object, **_kwargs: object) -> list[StoredNode]:
         return []
 
-    def _no_extent(_agent_id: int) -> None:
+    def _no_extent(_db: object, _agent_id: int) -> None:
         return None
 
     monkeypatch.setattr("base.agents.history.hierarchy.store.load_window_nodes", _empty)
     monkeypatch.setattr("base.agents.history.hierarchy.store.load_coverage_extent", _no_extent)
     layers, summary, pending = _narrative_for_window(
+        _database(),
         424242,
         start,
         start + timedelta(hours=1),
@@ -423,16 +432,18 @@ def test_narrative_for_window_keeps_layers_and_adds_the_fallback_on_partial(
     def _nodes(*_args: object, **_kwargs: object) -> list[StoredNode]:
         return nodes
 
-    def _fallback(_agent_id: int) -> str:
+    def _fallback(_db: object, _agent_id: int) -> str:
         return "latest compact summary"
 
-    def _extent(_agent_id: int) -> tuple[datetime, datetime]:
+    def _extent(_db: object, _agent_id: int) -> tuple[datetime, datetime]:
         return (start, start + timedelta(hours=1))
 
     monkeypatch.setattr("base.agents.history.hierarchy.store.load_window_nodes", _nodes)
     monkeypatch.setattr("base.agents.history.hierarchy.store.load_coverage_extent", _extent)
     monkeypatch.setattr("gateway.run_timeline.router._latest_compact_summary", _fallback)
-    layers, summary, pending = _narrative_for_window(405, start, end, activity=[(start, end)])
+    layers, summary, pending = _narrative_for_window(
+        _database(), 405, start, end, activity=[(start, end)]
+    )
     assert layers is not None
     (layer,) = layers
     assert layer.summary == "first half"
@@ -466,16 +477,17 @@ def test_narrative_for_window_clamps_activity_to_the_window(
     def _nodes(*_args: object, **_kwargs: object) -> list[StoredNode]:
         return nodes
 
-    def _empty_summary(_agent_id: int) -> str:
+    def _empty_summary(_db: object, _agent_id: int) -> str:
         return ""
 
-    def _extent(_agent_id: int) -> tuple[datetime, datetime]:
+    def _extent(_db: object, _agent_id: int) -> tuple[datetime, datetime]:
         return (start, start + timedelta(hours=1))
 
     monkeypatch.setattr("base.agents.history.hierarchy.store.load_window_nodes", _nodes)
     monkeypatch.setattr("base.agents.history.hierarchy.store.load_coverage_extent", _extent)
     monkeypatch.setattr("gateway.run_timeline.router._latest_compact_summary", _empty_summary)
     _, _, pending = _narrative_for_window(
+        _database(),
         405,
         start,
         end,

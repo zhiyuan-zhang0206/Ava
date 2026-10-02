@@ -342,6 +342,7 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
         load_checkpoint_messages_by_trace,
     )
     from base.config import settings
+    from base.db import Database
 
     _grant_runner(runner_db)
 
@@ -361,8 +362,10 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
         )
 
     monkeypatch.setattr(settings.data_plane, "db_url", _runner_url(runner_db))
-    current = load_checkpoint_messages(73)
-    checkpoint_id, traced = load_checkpoint_messages_by_trace(73, trace_id)
+    current = load_checkpoint_messages(Database.from_settings(), 73)
+    checkpoint_id, traced = load_checkpoint_messages_by_trace(
+        Database.from_settings(), 73, trace_id
+    )
 
     assert current == [HumanMessage(content="runtime read")]
     assert checkpoint_id == saved["configurable"]["checkpoint_id"]  # pyright: ignore[reportTypedDictNotRequiredAccess]

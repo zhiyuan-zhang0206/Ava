@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 from base import config, telemetry
 from base.api_contracts.mcp_tool_contract import project_message
 from base.cluster.auth import bearer_header
+from base.db import Database
 from gateway.app import app
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
@@ -189,7 +190,7 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
 async def test_gateway_contract_matches_pre_extraction_golden() -> None:
     from gateway.mcp_server import endpoint
 
-    server = endpoint._build_server(None)
+    server = endpoint._build_server(None, cast(Database, None))
     tools = await server.list_tools()
     contract = {
         "instructions": server.instructions,

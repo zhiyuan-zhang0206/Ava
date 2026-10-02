@@ -22,7 +22,7 @@ argument values never enter the audit stream; agent_id remains NULL because
 the client is a service-level identity rather than an Ava agent.
 
 Mounting: `mcp_gateway(app)` is mounted at /mcp (an ASGI wrapper, so the
-manager can be swapped per app lifespan); `build_manager(pool)` creates the
+manager can be swapped per app lifespan); `build_manager(pool, db)` creates the
 server + session manager and is entered (`manager.run()`) by the gateway
 lifespan only when the flag is on. The manager cannot run twice, so it is
 built fresh per lifespan entry.
@@ -54,6 +54,7 @@ from base.api_contracts.mcp_tool_contract import (
     tool_description,
 )
 from base.cluster.machine import machine_name
+from base.db import Database
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 from gateway.agents import router as _agents_router
 from gateway.agents.delivery import deliver_chat_inbound
@@ -334,6 +335,7 @@ async def _mcp_deliver_send_message(
 def _register_fleet_tools(
     server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     pool: Any,
+    db: Database,
 ) -> None:
     """Fleet-mutating tools: spawn / message / terminate.
 
@@ -410,7 +412,7 @@ def _register_fleet_tools(
         if not await asyncio.to_thread(_exists):
             raise ToolError(f"agent {agent_id} does not exist")
         try:
-            messages = await asyncio.to_thread(load_checkpoint_messages, agent_id)
+            messages = await asyncio.to_thread(load_checkpoint_messages, db, agent_id)
         except CheckpointReadError as exc:
             raise ToolError(f"checkpoint read failed; retry or check store health: {exc}") from exc
         window = messages[-limit:]
@@ -438,7 +440,7 @@ def _register_fleet_tools(
         return result.model_dump(mode="json")
 
 
-def _build_server(pool: Any):  # noqa: ANN202 — inferred from the lazy import
+def _build_server(pool: Any, db: Database):  # noqa: ANN202 — inferred from the lazy import
     """Assemble the MCP server: one tool per gateway control route.
 
     Kept a builder so the manager (and its tool closures over the live
@@ -451,11 +453,11 @@ def _build_server(pool: Any):  # noqa: ANN202 — inferred from the lazy import
         "ava", instructions=server_instructions("gateway"), middleware=[_AuditMiddleware()]
     )
     _register_read_tools(server, pool)
-    _register_fleet_tools(server, pool)
+    _register_fleet_tools(server, pool, db)
     return server
 
 
-def build_manager(pool: Any):  # noqa: ANN201 — inferred from the lazy import
+def build_manager(pool: Any, db: Database):  # noqa: ANN201 — inferred from the lazy import
     """Create the /mcp session manager (server + stateless HTTP transport).
 
     Built fresh per gateway lifespan: `StreamableHTTPSessionManager.run()` can
@@ -464,7 +466,7 @@ def build_manager(pool: Any):  # noqa: ANN201 — inferred from the lazy import
     """
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-    server = _build_server(pool)
+    server = _build_server(pool, db)
     # The public path builds the manager too: streamable_http_app() constructs
     # it and stores it on the server; session_manager then hands it over. The
     # Starlette sub-app it returns is discarded — the gateway mounts the bare
