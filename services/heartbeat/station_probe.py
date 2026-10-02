@@ -37,8 +37,8 @@ import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
-from base import db
 from base.config import settings
+from base.db import Database
 from base.deploy.transition import transition_severity
 from base.log import init_gateway_process, logger
 from base.telemetry.station_endpoint import StationTarget as _StationTarget
@@ -156,7 +156,7 @@ def _station_answers(url: str) -> bool:
         return False
 
 
-def _alert_edges(target: _StationTarget, *, ok: bool, now: datetime) -> None:
+def _alert_edges(database: Database, target: _StationTarget, *, ok: bool, now: datetime) -> None:
     """Fire/resolve the 'observatory station offline' alert for this target.
 
     Direct DB write (the gateway watchdog runs with the cluster DB at hand),
@@ -183,7 +183,7 @@ def _alert_edges(target: _StationTarget, *, ok: bool, now: datetime) -> None:
             return
         identity = {"alertname": _ALERTNAME, "station": target.url}
         try:
-            with db.connect() as conn:
+            with database.connect() as conn:
                 severity = transition_severity(
                     state["transition_since"],
                     now,
@@ -236,7 +236,7 @@ def _alert_edges(target: _StationTarget, *, ok: bool, now: datetime) -> None:
     if not recovered:
         return
     try:
-        with db.connect() as conn:
+        with database.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT starts_at, fingerprint, severity FROM alerts "
@@ -274,7 +274,7 @@ def main() -> None:
     if target is None:
         return  # no remote observatory configured — nothing to probe here
     ok = _station_answers(target.url)
-    _alert_edges(target, ok=ok, now=datetime.now(UTC))
+    _alert_edges(Database.from_settings(), target, ok=ok, now=datetime.now(UTC))
     if not ok:
         logger.bind(_no_emitter=True, component="station-healthcheck").warning(
             "station probe: {} did not answer a bearer OTLP probe ({} consecutive failures) — "

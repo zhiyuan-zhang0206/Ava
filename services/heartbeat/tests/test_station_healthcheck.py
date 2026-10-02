@@ -19,6 +19,7 @@ import pytest
 import base.db
 from base.cluster.authority.api import telemetry_token
 from base.config import settings
+from base.db import Database
 from services.heartbeat import station_probe as hc
 
 
@@ -187,7 +188,7 @@ def test_alert_fires_after_two_consecutive_failures_and_resolves(
     now = datetime.now(UTC)
 
     # first failure: below the consecutive-failure threshold — no alert yet
-    hc._alert_edges(target, ok=False, now=now)
+    hc._alert_edges(Database.from_settings(), target, ok=False, now=now)
     with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT count(*) FROM alerts WHERE labels->>'alertname' = %s",
@@ -197,7 +198,7 @@ def test_alert_fires_after_two_consecutive_failures_and_resolves(
         assert row is not None and row[0] == 0
 
     # second consecutive failure: fires
-    hc._alert_edges(target, ok=False, now=now)
+    hc._alert_edges(Database.from_settings(), target, ok=False, now=now)
     with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT status, labels->>'severity' FROM alerts WHERE labels->>'alertname' = %s",
@@ -208,7 +209,7 @@ def test_alert_fires_after_two_consecutive_failures_and_resolves(
     # status is 'firing'; upsert_alert normalizes)
     assert row is not None and row[0] == "unresolved" and row[1] == "warning"
 
-    hc._alert_edges(target, ok=True, now=now)
+    hc._alert_edges(Database.from_settings(), target, ok=True, now=now)
     with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT status FROM alerts WHERE labels->>'alertname' = %s",
