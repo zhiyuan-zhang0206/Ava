@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from pathlib import Path
 
 from services.ava_root import custody
@@ -37,13 +37,21 @@ class ReconcilingMixin:
     _lock: asyncio.Lock
     _units: dict[str, _UnitRuntime]
     _is_active: Callable[[_UnitRuntime], bool]
+    _reconcile_reports: dict[str, str]
+    """Last-reported retained outcome per unit, so a repeated pass reports a
+    repeat once (task #4872, C-1); releases always report."""
 
     async def reconcile_custody(self) -> list[custody.ReconcileOutcome]:
-        """One reconcile pass, under the mutation lock; every outcome reported."""
+        """One reconcile pass, under the mutation lock.
+
+        The repeated caller is change-driven: a retained record reports on
+        first sight and on every evidence change, never once per round; a
+        release always reports (task #4872, C-1).
+        """
         async with self._lock:
             outcomes: list[custody.ReconcileOutcome] = []
             for unit in self._reconcile_candidates():
-                outcome = self._reconcile_one(unit)
+                outcome = self._reconcile_one(unit, reports=self._reconcile_reports)
                 if outcome is not None:
                     outcomes.append(outcome)
             return outcomes
@@ -58,9 +66,15 @@ class ReconcilingMixin:
             candidates.append(path.stem)
         return candidates
 
-    def _reconcile_one(self, unit: str) -> custody.ReconcileOutcome | None:
-        """Reconcile one unit's record; drop its retained dead generation on release."""
-        outcome = custody.reconcile_record(self._run_dir, unit)
+    def _reconcile_one(
+        self, unit: str, *, reports: MutableMapping[str, str] | None = None
+    ) -> custody.ReconcileOutcome | None:
+        """Reconcile one unit's record; drop its retained dead generation on release.
+
+        `reports` (a repeated pass) dedupes unchanged retained repeats; it is
+        omitted for one-shot examinations, which report every record (C-1).
+        """
+        outcome = custody.reconcile_record(self._run_dir, unit, reports=reports)
         if outcome is None or outcome.decision != "released":
             return outcome
         runtime = self._units.get(unit)
@@ -80,8 +94,12 @@ class ReconcilingMixin:
         """Open a unit's record slot; a stale record reconciles once, then retries (C-3)."""
         try:
             return custody.ServiceCustody(self._run_dir, unit)
-        except FileExistsError:
-            outcome = self._reconcile_one(unit)
+        except FileExistsError as exc:
+            outcome = self._reconcile_one(unit, reports=self._reconcile_reports)
             if outcome is not None and outcome.decision != "released":
-                raise
+                record = self._run_dir / "custody" / f"{unit}.json"
+                raise FileExistsError(
+                    f"unit {unit}: retained custody blocks the spawn — {outcome.evidence} "
+                    f"(record: {record})"
+                ) from exc
             return custody.ServiceCustody(self._run_dir, unit)

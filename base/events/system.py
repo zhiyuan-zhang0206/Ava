@@ -269,14 +269,17 @@ class CustodyReconcile(TypedDict):
     Emitted for every record a reconcile pass examines — ``released`` when the
     record was cleared (every recorded birth gone and the unit's process group
     empty) or ``retained`` when one unproven fact kept it — so the decision and
-    its evidence replay from the stream. A record an active generation owns is
-    its own bookkeeping: not examined, not emitted.
+    its evidence replay from the stream. A repeatable pass reports a release
+    always and a retained outcome on first sight and on evidence change only,
+    so the stream carries the decision rather than a per-round heartbeat. A
+    record an active generation owns is its own bookkeeping: not examined, not
+    emitted.
     """
 
     unit: str
     checked: int
     found: int
-    decision: str
+    decision: Literal["released", "retained"]
     evidence: str
 
 

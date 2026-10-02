@@ -93,7 +93,9 @@ naming another birth, a zombie, and a vanished process are all that recorded
 birth gone; a stopped (T) process still is it — and the unit's recorded process
 group must read empty (the same closure the stop path reads, zombies included).
 One unproven fact retains the record. Every examined record reports
-`custody_reconcile` with its decision and evidence. The pass runs on the cold-start
+`custody_reconcile` with its decision and evidence: a release always, a retained
+record on first sight and on evidence change only — a repeat that proves nothing
+new would make a stuck record a per-round heartbeat. The pass runs on the cold-start
 custody gate (`require_clear`), so a releasable record needs no operator force;
 before a fresh spawn reuses a unit's record slot, where a stale record reconciles
 once and the spawn retries; and once per health round, where a release also drops

@@ -239,8 +239,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # alert pair (task #4872 B route: root_unit_alert_fired — a unit entered an
     # alertable failure state — and root_unit_alert_resolved) raises the
     # current total to 221. The custody reconcile audit (task #4872 C route:
-    # custody_reconcile — every examined record reports released|retained with
-    # its evidence) raises the current total to 222.
+    # custody_reconcile — releases always report; a retained record on first
+    # sight and on evidence change, with its evidence) raises the current total
+    # to 222.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
     assert "agent_reopened" not in _TELEMETRY_KINDS
     for retired in (

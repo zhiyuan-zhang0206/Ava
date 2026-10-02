@@ -109,6 +109,7 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
         self._units: dict[str, _UnitRuntime] = {
             manifest.id: _UnitRuntime(manifest=manifest) for manifest in registry.units
         }
+        self._reconcile_reports: dict[str, str] = {}
         self._lock = asyncio.Lock()
         self._started_at: float | None = None
         self._running = False

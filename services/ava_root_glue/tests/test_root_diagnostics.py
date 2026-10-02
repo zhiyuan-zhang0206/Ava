@@ -14,6 +14,7 @@ from base.cluster.dataplane import pooler as base_pooler
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from services.ava_root.alerts import UnitAlertFacts
+from services.ava_root.custody import ReconcileOutcome
 from services.ava_root.health import HealthMonitor, ProbeRunner
 from services.ava_root.probes import ProbeRegistry
 from services.ava_root_glue import diagnostic_probes as probes
@@ -164,6 +165,9 @@ class _NoRevival:
 
     def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
         raise AssertionError(f"unexpected alert facts lookup for {unit_id}")
+
+    async def reconcile_custody(self) -> list[ReconcileOutcome]:
+        raise AssertionError("unexpected custody reconcile pass")
 
 
 class _Health(HealthMonitor):
