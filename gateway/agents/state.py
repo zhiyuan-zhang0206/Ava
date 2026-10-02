@@ -266,6 +266,7 @@ async def post_agent_message(
         try:
             existing = await reconcile_chat_delivery(
                 request.app.state.db_pool,
+                request.app.state.bus,
                 agent_id,
                 client_message_id=idempotency_key,
                 content=normalized_text,
@@ -275,10 +276,7 @@ async def post_agent_message(
         except ClientMessageConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if existing is not None:
-            return AgentMessageEnqueued(
-                status=existing.status,
-                inbound_id=existing.inbound_id,
-            )
+            return AgentMessageEnqueued(status=existing.status, inbound_id=existing.inbound_id)
     if body.completion_notice is not None:
         if not isinstance(body.content, str):
             raise RuntimeError("completion notice schema admitted non-string content")
@@ -302,6 +300,7 @@ async def post_agent_message(
     try:
         delivery = await deliver_chat_inbound(
             request.app.state.db_pool,
+            request.app.state.bus,
             agent_id,
             prepare=lambda _conn: text,
             source=body.source,
@@ -443,6 +442,7 @@ async def reconcile_agent_message(
     try:
         delivery = await reconcile_chat_delivery(
             request.app.state.db_pool,
+            request.app.state.bus,
             agent_id,
             client_message_id=idempotency_key,
             content=text,

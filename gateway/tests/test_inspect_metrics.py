@@ -296,7 +296,7 @@ def test_statistics_read_invokes_the_coverage_note(
     db_conn.commit()
     seen: list[int] = []
 
-    def _record(pool: Any, agent_id: int, metadata: Any, *, spawned_at: Any) -> None:
+    def _record(pool: Any, bus: Any, agent_id: int, metadata: Any, *, spawned_at: Any) -> None:
         assert metadata.collection == "observed"
         assert spawned_at is not None
         seen.append(agent_id)

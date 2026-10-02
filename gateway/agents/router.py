@@ -393,7 +393,7 @@ def _validate_fork_config(
 
 
 async def create_and_launch_agent(
-    body: SpawnAgentRequest, target: str, pool: ConnectionPool
+    body: SpawnAgentRequest, target: str, pool: ConnectionPool, bus: EventBus
 ) -> SpawnedAgent:
     """Gateway-side spawn (Task #1236 follow-up): preflight -> create the agent
     ROW in-process -> forward a launch-only op to the target runner.
@@ -429,13 +429,12 @@ async def create_and_launch_agent(
         prompt_source=body.prompt_source,
     )
     if prompt_inbound_id is not None and body.prompt_source is not None and body.prompt is not None:
-        from base.events.live.bus import EventBus
         from ops.lifecycle.events import publish_inbound_arrived
 
         prompt_content = spawn_prompt_with_label(body.prompt, body.label)
         try:
             await publish_inbound_arrived(
-                EventBus.from_settings(),
+                bus,
                 new_id,
                 prompt_inbound_id,
                 "chat",
@@ -453,7 +452,7 @@ async def create_and_launch_agent(
     # The endpoint response is the launch op's verdict (the launched agent id —
     # equal to new_id in production; the runner answers for the launch). A
     # withdrawal settlement travels as the spawner's receipt (task #4306).
-    spawned = await _dispatch_committed_launch(pool, target, launch)
+    spawned = await _dispatch_committed_launch(pool, bus, target, launch)
     if model_receipt is not None:
         spawned = spawned.model_copy(
             update={
@@ -478,7 +477,7 @@ async def _accepted_launch_receipt(pool: ConnectionPool, spawned: SpawnedAgent) 
 
 
 def _mark_launch_failure(
-    pool: ConnectionPool, agent_id: int, attempt_id: UUID, reason: AvailabilityReason
+    pool: ConnectionPool, bus: EventBus, agent_id: int, attempt_id: UUID, reason: AvailabilityReason
 ) -> None:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -490,10 +489,12 @@ def _mark_launch_failure(
         )
         changed = cur.rowcount > 0
     if changed:
-        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
+        publish_agent_updated_sync(bus, agent_id)
 
 
-def _clear_launch_failure(pool: ConnectionPool, agent_id: int, attempt_id: UUID) -> None:
+def _clear_launch_failure(
+    pool: ConnectionPool, bus: EventBus, agent_id: int, attempt_id: UUID
+) -> None:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET last_launch_failure_reason=NULL, last_launch_failure_at=NULL "
@@ -502,7 +503,7 @@ def _clear_launch_failure(pool: ConnectionPool, agent_id: int, attempt_id: UUID)
         )
         changed = cur.rowcount > 0
     if changed:
-        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
+        publish_agent_updated_sync(bus, agent_id)
 
 
 def _read_launch_state(pool: ConnectionPool, agent_id: int) -> tuple[dict[str, object], bool, bool]:
@@ -529,7 +530,7 @@ def _read_launch_state(pool: ConnectionPool, agent_id: int) -> tuple[dict[str, o
 
 
 async def _dispatch_committed_launch(
-    pool: ConnectionPool, target: str, launch: LaunchAgentRequest
+    pool: ConnectionPool, bus: EventBus, target: str, launch: LaunchAgentRequest
 ) -> SpawnedAgent:
     attempt_id = launch.launch_attempt_id
     if attempt_id is None:
@@ -554,7 +555,9 @@ async def _dispatch_committed_launch(
         )
         state: dict[str, object]
         try:
-            await asyncio.to_thread(_mark_launch_failure, pool, launch.agent_id, attempt_id, reason)
+            await asyncio.to_thread(
+                _mark_launch_failure, pool, bus, launch.agent_id, attempt_id, reason
+            )
             state, admitted, retry_legal = await asyncio.to_thread(
                 _read_launch_state, pool, launch.agent_id
             )
@@ -575,7 +578,7 @@ async def _dispatch_committed_launch(
             ),
         ) from exc
     try:
-        await asyncio.to_thread(_clear_launch_failure, pool, launch.agent_id, attempt_id)
+        await asyncio.to_thread(_clear_launch_failure, pool, bus, launch.agent_id, attempt_id)
     except Exception as exc:
         logger.warning(
             "agent {} accepted launch but failure clear failed: {}",
@@ -637,7 +640,9 @@ async def post_agents(body: SpawnAgentRequest, request: Request) -> SpawnedAgent
     registry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet).
     """
     target = body.machine if body.machine is not None else machine_name()
-    return await create_and_launch_agent(body, target, request.app.state.db_pool)
+    return await create_and_launch_agent(
+        body, target, request.app.state.db_pool, request.app.state.bus
+    )
 
 
 def _prepare_retry_launch(
@@ -680,7 +685,7 @@ async def retry_agent_launch(agent_id: int, request: Request) -> SpawnedAgent:
     target, launch = await asyncio.to_thread(_prepare_retry_launch, pool, agent_id)
     if launch is None:
         return await _accepted_launch_receipt(pool, SpawnedAgent(id=agent_id))
-    spawned = await _dispatch_committed_launch(pool, target, launch)
+    spawned = await _dispatch_committed_launch(pool, request.app.state.bus, target, launch)
     return await _accepted_launch_receipt(pool, spawned)
 
 

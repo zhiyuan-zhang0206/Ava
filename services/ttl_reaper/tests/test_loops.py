@@ -239,7 +239,7 @@ async def test_the_remote_round_reaps_shells_then_redelivers_work_failures(
         order.append("shells")
         return []
 
-    async def reconcile(_pool: object, on_event: Any = None) -> int:
+    async def reconcile(_pool: object, _bus: object, on_event: Any = None) -> int:
         order.append("work_failures")
         assert on_event is not None
         return 0
@@ -247,7 +247,7 @@ async def test_the_remote_round_reaps_shells_then_redelivers_work_failures(
     monkeypatch.setattr(remote.shells, "reap_expired_shells", reap)
     monkeypatch.setattr(remote.work_failed_router, "reconcile_stale_work_failures", reconcile)
 
-    await remote.remote_round(pool, _progress())
+    await remote.remote_round(pool, EventBus.from_settings(), _progress())
 
     assert order == ["shells", "work_failures"]
 
@@ -339,7 +339,11 @@ def _sweep_loop(pool: ConnectionPool, progress: LoopProgress) -> Coroutine[Any, 
     return sweep.sweep_loop(pool, EventBus.from_settings(), progress)
 
 
-@pytest.mark.parametrize("loop", [_sweep_loop, remote.remote_loop], ids=["sweep", "remote"])
+def _remote_loop(pool: ConnectionPool, progress: LoopProgress) -> Coroutine[Any, Any, None]:
+    return remote.remote_loop(pool, EventBus.from_settings(), progress)
+
+
+@pytest.mark.parametrize("loop", [_sweep_loop, _remote_loop], ids=["sweep", "remote"])
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_borrows_no_connection(
     monkeypatch: pytest.MonkeyPatch,

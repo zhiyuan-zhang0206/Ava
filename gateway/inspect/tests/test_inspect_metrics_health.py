@@ -19,6 +19,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.events.live.bus import EventBus
 from gateway.inspect import _metrics_health as imh
 from gateway.inspect.schemas import InspectMetricsMetadata, MetricEvidence
 
@@ -141,8 +142,10 @@ def test_expected_limit_logs_once_and_opens_no_instance(
     pool = _ConnPool(db_conn)
     md = _md(cost=_ev("partial", "historical_coverage_unknown"))
     note = imh.note_inspect_metrics_coverage
-    note(pool, 42, md, spawned_at=T0)  # window reaches before collection -> historical
-    note(pool, 42, md, spawned_at=T0)  # within cooldown: deduped
+    note(
+        pool, EventBus.from_settings(), 42, md, spawned_at=T0
+    )  # window reaches before collection -> historical
+    note(pool, EventBus.from_settings(), 42, md, spawned_at=T0)  # within cooldown: deduped
     records = _coverage_records(loguru_records)
     assert len(records) == 1
     extra = records[0]["extra"]
@@ -163,8 +166,8 @@ def test_cooldown_elapsed_logs_again(
     monkeypatch.setattr(imh, "_cooldown_seconds", lambda: 0.0)
     md = _md(lifecycle=_ev("partial", "historical_coverage_unknown"))
     pool = _ConnPool(db_conn)
-    imh.note_inspect_metrics_coverage(pool, 42, md, spawned_at=T0)
-    imh.note_inspect_metrics_coverage(pool, 42, md, spawned_at=T0)
+    imh.note_inspect_metrics_coverage(pool, EventBus.from_settings(), 42, md, spawned_at=T0)
+    imh.note_inspect_metrics_coverage(pool, EventBus.from_settings(), 42, md, spawned_at=T0)
     assert len(_coverage_records(loguru_records)) == 2
 
 
@@ -204,7 +207,7 @@ def test_unexpected_missing_durations_opens_episode_and_resolves(
     # Window starts inside the collection era -> the gap is live (unexpected).
     bad = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T1)
     note = imh.note_inspect_metrics_coverage
-    note(pool, 42, bad, spawned_at=T0)
+    note(pool, EventBus.from_settings(), 42, bad, spawned_at=T0)
 
     rows = _alerts_rows(db_conn)
     assert len(rows) == 1
@@ -217,12 +220,12 @@ def test_unexpected_missing_durations_opens_episode_and_resolves(
     assert "limited by missing_turn_durations" in sent[0]
 
     # Same read within cooldown: no duplicate row, no duplicate IM.
-    note(pool, 42, bad, spawned_at=T0)
+    note(pool, EventBus.from_settings(), 42, bad, spawned_at=T0)
     assert len(_alerts_rows(db_conn)) == 1
     assert len(sent) == 1
 
     # A later read without the condition resolves the episode.
-    note(pool, 42, _md(window_start=T1), spawned_at=T0)
+    note(pool, EventBus.from_settings(), 42, _md(window_start=T1), spawned_at=T0)
     rows = _alerts_rows(db_conn)
     assert len(rows) == 1 and rows[0][0] == "resolved" and rows[0][6] is not None
     assert len(sent) == 2 and "recovered from missing_turn_durations" in sent[1]
@@ -240,7 +243,7 @@ def test_restart_never_strands_or_duplicates_a_stored_episode(
     pool = _ConnPool(db_conn)
     bad = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T1)
     note = imh.note_inspect_metrics_coverage
-    note(pool, 42, bad, spawned_at=T0)
+    note(pool, EventBus.from_settings(), 42, bad, spawned_at=T0)
     starts_at = _alerts_rows(db_conn)[0][7]
 
     # A gateway restart loses every in-process trace of the episode.
@@ -249,14 +252,14 @@ def test_restart_never_strands_or_duplicates_a_stored_episode(
 
     # Re-fire (still broken): reuses the stored instance — no duplicate row,
     # no new notification, the original starts_at.
-    note(pool, 42, bad, spawned_at=T0)
+    note(pool, EventBus.from_settings(), 42, bad, spawned_at=T0)
     rows = _alerts_rows(db_conn)
     assert len(rows) == 1 and rows[0][7] == starts_at
     assert len(sent) == 1
 
     # Condition cleared on the cold process: the store-derived reconcile
     # resolves the instance the in-process map alone would have stranded.
-    note(pool, 42, _md(window_start=T1), spawned_at=T0)
+    note(pool, EventBus.from_settings(), 42, _md(window_start=T1), spawned_at=T0)
     rows = _alerts_rows(db_conn)
     assert len(rows) == 1 and rows[0][0] == "resolved" and rows[0][6] is not None
     assert len(sent) == 2 and "recovered from missing_turn_durations" in sent[1]
@@ -269,13 +272,17 @@ def test_condition_still_present_is_not_resolved_by_the_reconcile(
 ) -> None:
     pool = _ConnPool(db_conn)
     bad = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T1)
-    imh.note_inspect_metrics_coverage(pool, 42, bad, spawned_at=T0)
-    imh.note_inspect_metrics_coverage(pool, 42, bad, spawned_at=T0)  # still broken
+    imh.note_inspect_metrics_coverage(pool, EventBus.from_settings(), 42, bad, spawned_at=T0)
+    imh.note_inspect_metrics_coverage(
+        pool, EventBus.from_settings(), 42, bad, spawned_at=T0
+    )  # still broken
     rows = _alerts_rows(db_conn)
     assert len(rows) == 1 and rows[0][0] == "unresolved"
 
 
 def test_note_never_raises_into_the_read_path(loguru_records: list[dict[str, Any]]) -> None:
     bad = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T1)
-    imh.note_inspect_metrics_coverage(_SpyPool(), 42, bad, spawned_at=T0)  # DB blows up
+    imh.note_inspect_metrics_coverage(
+        _SpyPool(), EventBus.from_settings(), 42, bad, spawned_at=T0
+    )  # DB blows up
     assert any("note failed" in str(r["message"]) for r in loguru_records)

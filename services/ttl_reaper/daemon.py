@@ -72,7 +72,7 @@ async def _run_loops(pool: ConnectionPool, bus: EventBus, liveness: LivenessGrou
     remote_progress = liveness.register("remote", shells.dispatch_deadline_s() + _LIVENESS_SLACK_S)
     async with asyncio.TaskGroup() as loops:
         loops.create_task(sweep.sweep_loop(pool, bus, sweep_progress))
-        loops.create_task(remote.remote_loop(pool, remote_progress))
+        loops.create_task(remote.remote_loop(pool, bus, remote_progress))
 
 
 async def run() -> None:

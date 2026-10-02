@@ -413,7 +413,9 @@ async def draft_schedule(body: ScheduleDraftRequest, request: Request) -> Schedu
         prompt_source="user",
         label="ava-schedule-writer",
     )
-    spawned = await create_and_launch_agent(body_obj, machine_name(), request.app.state.db_pool)
+    spawned = await create_and_launch_agent(
+        body_obj, machine_name(), request.app.state.db_pool, request.app.state.bus
+    )
     return ScheduleDraftResponse(agent_id=spawned.id)
 
 

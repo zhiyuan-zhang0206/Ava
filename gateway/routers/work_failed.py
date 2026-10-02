@@ -15,6 +15,7 @@ from base.agents.messages.inbound_provenance import InboundProvenance
 from base.config import settings
 from base.db import ALIVE_STATUSES, fetch_one
 from base.db.transaction import write_transaction
+from base.events.live.bus import EventBus
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.auth.webhook import authenticate_webhook
 from gateway.schemas.work_failed import FailureDeliveryKind, WorkFailedIn, WorkFailedResult
@@ -250,6 +251,7 @@ def _create_task_alert(
 
 async def _deliver_failure(
     pool: ConnectionPool[Any],
+    bus: EventBus,
     event_id: int,
     body: WorkFailedIn,
     provenance: InboundProvenance,
@@ -258,6 +260,7 @@ async def _deliver_failure(
     message = _failure_message(body)
     await deliver_chat_inbound(
         pool,
+        bus,
         body.author_agent_id,
         prepare=lambda _conn: message,
         source="system",
@@ -290,6 +293,7 @@ async def _deliver_failure(
     for ancestor_id in ancestors:
         await deliver_chat_inbound(
             pool,
+            bus,
             ancestor_id,
             prepare=lambda _conn: message,
             source="system",
@@ -320,7 +324,7 @@ async def _deliver_failure(
 
 
 async def reconcile_stale_work_failures(
-    pool: ConnectionPool[Any], on_event: Callable[[], None] | None = None
+    pool: ConnectionPool[Any], bus: EventBus, on_event: Callable[[], None] | None = None
 ) -> int:
     """Retry stale unfinished deliveries; isolate one bad event from the batch.
 
@@ -345,6 +349,7 @@ async def reconcile_stale_work_failures(
                 async with asyncio.timeout(2 * worst_case_dispatch_seconds()):
                     result = await _deliver_failure(
                         pool,
+                        bus,
                         failure.event_id,
                         failure.body,
                         InboundProvenance(
@@ -383,6 +388,7 @@ async def post_work_failed(body: WorkFailedIn, request: Request) -> WorkFailedRe
         )
     return await _deliver_failure(
         request.app.state.db_pool,
+        request.app.state.bus,
         stored.event_id,
         body,
         InboundProvenance(
