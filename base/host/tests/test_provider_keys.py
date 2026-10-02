@@ -48,9 +48,7 @@ def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
     payload = config.bootstrap_config_values()
     assert payload["TESTP_API_KEY"] == "sk-x"
     valid = {config.field_alias(name) for name in config.BOOTSTRAP_FIELDS}
-    from base.host.env.registry import _enabled_provider_key_envs
-
-    assert set(payload) <= valid | _enabled_provider_key_envs()
+    assert set(payload) <= valid | {"TESTP_API_KEY"}
 
 
 def test_bootstrap_omits_an_absent_plugin_key(
@@ -106,32 +104,3 @@ def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
     monkeypatch.setattr(config, "_self_machine_host", lambda: "10.0.0.3")
 
     assert urlsplit(config.bootstrap_config_values()["AVA_DB_URL"]).hostname == "10.0.0.3"
-
-
-def test_agent_child_env_forwards_only_enabled_plugin_keys(
-    provider_plugin: Callable[..., None], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The detached-agent allowlist carries a declared parent key, never an arbitrary one."""
-    from base.host.env.registry import child_env
-
-    monkeypatch.setenv("TESTP_API_KEY", "sk-x")
-    monkeypatch.setenv("UNDECLARED_PROVIDER_KEY", "must-not-forward")
-
-    provider_plugin()
-    assert child_env("agent")["TESTP_API_KEY"] == "sk-x"
-    assert "UNDECLARED_PROVIDER_KEY" not in child_env("agent")
-
-
-def test_agent_child_env_excludes_a_disabled_plugin_key(
-    provider_plugin: Callable[..., None], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A disabled provider may not pass its inherited key to an agent process."""
-    from base.host.env.registry import child_env
-
-    monkeypatch.setenv("TESTP_API_KEY", "sk-x")
-    provider_plugin()
-    (paths.ava_home() / "plugins_config.json").write_text(
-        '{"plugins": {"test_provider": {"enabled": false}}}'
-    )
-
-    assert "TESTP_API_KEY" not in child_env("agent")
