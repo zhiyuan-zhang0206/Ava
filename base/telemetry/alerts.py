@@ -45,7 +45,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from base.config import cluster_tz, settings
+from base.clock import Clock
+from base.config import settings
 from base.daemon.endpoints import ServiceEndpoints
 from base.telemetry.alerts_copy import (
     ALERT_HEAD,
@@ -348,7 +349,7 @@ def format_local(ts: datetime | None) -> str:
 
     if ts is None:
         return ""
-    return ts.astimezone(cluster_tz()).strftime("%Y-%m-%d %H:%M %Z")
+    return ts.astimezone(Clock.from_settings().zone()).strftime("%Y-%m-%d %H:%M %Z")
 
 
 def frontend_base_url() -> str:

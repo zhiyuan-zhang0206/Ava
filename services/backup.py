@@ -52,6 +52,7 @@ from zoneinfo import ZoneInfo
 
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from base.clock import Clock
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
 from base.db import connect, connect_url, direct_db_url
@@ -83,7 +84,7 @@ _backup_lock_state = threading.local()
 
 def _cluster_tz() -> ZoneInfo:
     """The cluster wall clock every scheduling decision here is made in."""
-    return ZoneInfo(settings.general.timezone)
+    return Clock.from_settings().explicit_zone()
 
 
 def _require_aware(now: datetime) -> datetime:

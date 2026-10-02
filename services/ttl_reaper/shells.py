@@ -48,7 +48,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.config import cluster_tz
+from base.clock import Clock
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db.transaction import write_transaction
@@ -145,7 +145,7 @@ def _wall_clock(dt: datetime) -> str:
     Renders in the cluster timezone; ``None`` falls back to the host zone
     (``dt.astimezone(None)``) — the base/config contract that ``None`` is
     the host-zone fallback signal."""
-    tz = cluster_tz()
+    tz = Clock.from_settings().zone()
     local = dt.astimezone(tz)
     stamp = local.strftime("%H:%M")
     if local.date() != datetime.now(tz).date():

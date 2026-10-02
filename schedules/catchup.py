@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Generic, TypeVar
 
 import base.db
-from base.config import settings
+from base.clock import Clock
 from base.db.transaction import write_transaction
 from base.daemon.schedules.watcher import previous_fire
 
@@ -47,7 +47,7 @@ def cluster_timezone() -> str:
     weekly cron is the case where a host-local reading lands the run on the wrong CALENDAR
     DAY, not merely at the wrong hour. The schedule script reads it when it runs; a changed
     value reaches a schedule at its next restart (`ava schedules restart <id>`)."""
-    return settings.general.timezone
+    return Clock.from_settings().timezone
 
 
 def _schedule_id(explicit: int | None) -> int:

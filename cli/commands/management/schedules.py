@@ -434,9 +434,9 @@ def _read_schedule_rows() -> list[tuple[int, str, str]]:
 
 def _verify_sweep(*, notify: bool) -> int:
     """Run the dry-import sweep over every in-store script. Returns the exit code."""
-    from base.config import cluster_tz
+    from base.clock import Clock
 
-    stamp = datetime.now(cluster_tz()).isoformat(timespec="seconds")
+    stamp = datetime.now(Clock.from_settings().zone()).isoformat(timespec="seconds")
     try:
         rows = _read_schedule_rows()
     except Exception as exc:  # the tool-error path

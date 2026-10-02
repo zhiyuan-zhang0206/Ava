@@ -14,9 +14,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from base.clock import Clock
 from base.config import (
     apply_cluster_timezone,
-    cluster_tz,
     host_tz_name,
     settings,
 )
@@ -49,7 +49,7 @@ def _restore_process_tz() -> Generator[None, None, None]:
 def _set_cluster_tz(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     """Make ``settings.general.timezone`` authoritative for this test.
 
-    ``cluster_tz()`` treats the field as authoritative only when it was
+    ``Clock.from_settings().zone()`` treats the field as authoritative only when it was
     explicitly set at Settings build (``model_fields_set``), and pydantic's
     ``model_fields_set`` is a read-only property — so the test swaps in a
     freshly constructed ``GeneralSettings`` whose fields-set carries the
@@ -70,14 +70,14 @@ def test_cluster_tz_returns_zoneinfo_when_authoritative(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set_cluster_tz(monkeypatch, "Asia/Shanghai")
-    assert cluster_tz() == ZoneInfo("Asia/Shanghai")
+    assert Clock.from_settings().zone() == ZoneInfo("Asia/Shanghai")
 
 
 def test_cluster_tz_none_without_authoritative_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _clear_cluster_tz(monkeypatch)
-    assert cluster_tz() is None
+    assert Clock.from_settings().zone() is None
 
 
 def test_cluster_tz_none_for_invalid_name(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,7 +85,7 @@ def test_cluster_tz_none_for_invalid_name(monkeypatch: pytest.MonkeyPatch) -> No
     construction, but a display path must degrade to the host zone rather
     than crash if one ever slips through."""
     _set_cluster_tz(monkeypatch, "Not/AZone")
-    assert cluster_tz() is None
+    assert Clock.from_settings().zone() is None
 
 
 def test_apply_sets_tz_and_rezones_posix(monkeypatch: pytest.MonkeyPatch) -> None:

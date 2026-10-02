@@ -25,14 +25,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from langchain_core.messages import BaseMessage
 
 import ava
 import ava.agent_identity
 from base.agents.messages.inbound import InterruptReason
-from base.config import now_timestamp, settings
+from base.clock import Clock
+from base.config import settings
 from base.log import logger
 from base.paths import workspace_dir
 
@@ -116,7 +116,7 @@ def wrap_code_output(
         marker = f" [timeout after {timeout_seconds:.0f}s]"
     else:
         marker = ""
-    ts = f" {now_timestamp()}" if settings.general.message_timestamps else ""
+    ts = f" {Clock.from_settings().now_timestamp()}" if settings.general.message_timestamps else ""
     header = f"Code execution output{marker}{ts}:"
     if not output:
         body = "(no output)"
@@ -237,7 +237,7 @@ def _write_overflow_file(output: str, *, stream_cap: StreamCap | None = None) ->
     d.mkdir(parents=True, exist_ok=True)
     # Stamped in the configured timezone so filenames sort together with the
     # envelope timestamps the agent sees.
-    now = datetime.now(ZoneInfo(settings.general.timezone))
+    now = datetime.now(Clock.from_settings().explicit_zone())
     path = d / f"exec_{now.strftime('%Y%m%d_%H%M%S_%f')}.txt"
     if stream_cap is not None:
         output = (

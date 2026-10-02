@@ -351,11 +351,21 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   CLI health probe, and no root at all in `gateway/events`, `gateway/alerts`, `gateway/routers`).
   Library code (`base/agents`, `ops`, `agent/ownership`, the fleet plugin) builds its own bus at
   the call; threading one through those call chains is not done.
+- **Done, the clock** (`base/clock`): `ClockConfig` (the cluster timezone name, the authoritative
+  name when this process holds one, the message-timestamp weekday flag) is read once, by
+  `Clock.from_settings()`; the handle gives `timezone`, `authoritative_timezone`, `zone()` (None =
+  the host-zone fallback signal of a settings-lite process), `explicit_zone()`, the injectable
+  `now()` and the one agent-facing `format_timestamp` / `now_timestamp`. `base.config.cluster_tz`,
+  `format_timestamp` and `now_timestamp` are gone; `apply_cluster_timezone` and `host_tz_name`
+  stay in `base.config` (they act on the process or the host, not on a handle). The `ambient-clock`
+  rule fails `Clock.from_settings()` outside the roots named in `CLOCK_PACKAGES` (the schedules
+  command and the cluster-status probe); libraries build their own clock at the call. The
+  endpoint, bus and clock rules share one shape (`scripts/structure/ambient_state/rootrule.py`).
 - **Root-local bundles**: a root may gather what it wires into a frozen dataclass marked
   `base.wiring.root_bundle`. The `bundle-leak` rule fails any annotation of such a class outside
   its defining module, so the bundle stays a local variable of the root and never becomes a
   parameter type (a function handed the whole bundle can reach any member).
-- **Not yet**: the clock, and the cluster-secret
+- **Not yet**: the cluster-secret
   contraction (machine API tokens in place of the human secret outside the gateway, the operator
   CLI and the root); the agent-side per-turn slices carried in `AvaContext`.
 

@@ -14,6 +14,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.fakes import fix_zone
 from base.daemon.loop_health import LoopProgress
 from base.db import create_agent
 from ops.rpc_schemas import ShellKillResult
@@ -488,7 +489,7 @@ def test_wall_clock_renders_cluster_timezone(monkeypatch: pytest.MonkeyPatch) ->
     from zoneinfo import ZoneInfo
 
     sh = ZoneInfo("Asia/Shanghai")
-    monkeypatch.setattr(shells, "cluster_tz", lambda: sh)
+    fix_zone(monkeypatch, sh)
     now = datetime.now(sh)
 
     # A specific wall-clock moment on the cluster's today: the same instant
@@ -502,11 +503,11 @@ def test_wall_clock_renders_cluster_timezone(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_wall_clock_none_falls_back_to_host_zone(monkeypatch: pytest.MonkeyPatch) -> None:
-    """cluster_tz() None is the host-zone fallback signal: the stamp matches
+    """Clock.zone() None is the host-zone fallback signal: the stamp matches
     dt.astimezone(None) (machine-local), not UTC."""
     from datetime import UTC, datetime
 
-    monkeypatch.setattr(shells, "cluster_tz", lambda: None)
+    fix_zone(monkeypatch, None)
     # A moment on the host's today: the fallback stamp carries no date prefix.
     # (A fixed past date would cross midnight and gain the MM-DD prefix the
     # next day — a time-bomb assertion that expired 2026-08-28.)

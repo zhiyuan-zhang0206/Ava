@@ -62,8 +62,8 @@ from typing import Any, NamedTuple
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.clock import Clock
 from base.cluster import session_name
-from base.config import settings
 from base.daemon.schedules.timing import SCHEDULE_STALL_ALERT_AFTER_S
 from base.db.transaction import write_transaction
 from base.paths import ava_home
@@ -400,7 +400,7 @@ class ScheduleManager:
         # gateway's own resolved timezone into the spawn env so the fire time is
         # deterministic; dotenv_boot's authority pass still lets a declared .env
         # value override it (and never drops it — base/dotenv_boot._force_also).
-        env["AVA_TIMEZONE"] = settings.general.timezone
+        env["AVA_TIMEZONE"] = Clock.from_settings().timezone
         # `cd` first: the login shell's own profile can move the cwd the
         # daemon forked with (macOS path_helper rebuilds PATH; a profile `cd`
         # would strand the relative runner path). The `; exit $?` tail makes

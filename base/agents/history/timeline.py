@@ -28,8 +28,6 @@ from langchain_core.messages import (
     ToolCall,
 )
 
-# Re-export: TimelineItem's home is base/agents/history/timeline_item.py (file line budget);
-# callers keep importing it from here.
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.impersonation.history import ImpersonationMetadata
 from base.agents.messages.kwargs import (
@@ -41,7 +39,11 @@ from base.agents.messages.kwargs import (
     read_ava_kwargs,
 )
 from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
-from base.config import now_timestamp, settings
+
+# Re-export: TimelineItem's home is base/agents/history/timeline_item.py (file line budget);
+# callers keep importing it from here.
+from base.clock import Clock
+from base.config import settings
 from base.db import InboundRow
 
 # Items after the same inbound anchor are offset by a microsecond increment to
@@ -459,7 +461,7 @@ def _compact_item(
     """A compact summary / compact request item; payload gets a ts prefix when
     `settings.general.message_timestamps` is on. `compact_id` is the run that
     produced the summary (ava_compact_id), None for pre-anchor summaries."""
-    ts = f" {now_timestamp()}" if settings.general.message_timestamps else ""
+    ts = f" {Clock.from_settings().now_timestamp()}" if settings.general.message_timestamps else ""
     label = "Compact summary" if kind == "inbound_compact_summary" else "Compact request"
     return TimelineItem(
         item_id=f"{msg_idx}.0",
