@@ -229,7 +229,7 @@ def test_stall_exit_bounds_failure_records(tmp_path: Path, blocked_write: str) -
         "    threading.Event().wait()\n"
         "r._record_error = record_error\n"
         "r._record_run_end = record_run_end\n"
-        "r._stall_action(1, 'test stall', 1)\n"
+        "r._stall_action(None, 1, 'test stall', 1)\n"
     )
     with subprocess.Popen([sys.executable, "-c", code]) as runner:  # noqa: S603 - fixed test source
         try:
