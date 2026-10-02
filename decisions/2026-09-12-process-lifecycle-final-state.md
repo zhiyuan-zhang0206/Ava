@@ -92,3 +92,5 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
 - **Per-Mac user touchpoint**: one ~1–2 minute authorization click (System
   Settings), identical whether a transition canary lands or the final state
   lands first — never cumulative.
+
+Five-question record (added afterwards): [`2026-10-02-ava-root-five-questions.md`](2026-10-02-ava-root-five-questions.md).
