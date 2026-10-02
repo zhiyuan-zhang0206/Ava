@@ -104,7 +104,7 @@ class TestScopeDerivationRules:
             MANIFEST_CERTIFICATION_SECRET_ENV: "host-finalizer-proof",
             MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
         }
-        for role in ("gateway", "runner", "agent"):
+        for role in ("gateway", "runner"):
             assert MANIFEST_CERTIFICATION_SECRET_ENV not in child_env(role)
             assert MANIFEST_CERTIFICATION_FINALIZER_ENV not in child_env(role)
 
@@ -143,7 +143,7 @@ class TestScopeDerivationRules:
             == HOST_PASSTHROUGH_KEYS
         )
 
-    @pytest.mark.parametrize("role", ["gateway", "runner", "agent"])
+    @pytest.mark.parametrize("role", ["gateway", "runner"])
     def test_child_env_carries_the_login_identity(
         self, monkeypatch: pytest.MonkeyPatch, role: str
     ) -> None:
@@ -153,7 +153,7 @@ class TestScopeDerivationRules:
 
         monkeypatch.setenv("USER", "operator")
         monkeypatch.setenv("LOGNAME", "operator")
-        env = child_env(role)  # type: ignore[arg-type] — parametrized ProcessRole
+        env = child_env(role)  # type: ignore[arg-type] — parametrized daemon role
         assert env["USER"] == "operator"
         assert env["LOGNAME"] == "operator"
 
@@ -180,7 +180,7 @@ class TestScopeDerivationRules:
         for key in NETWORK_PROXY_KEYS:
             monkeypatch.delenv(key, raising=False)
         assert network_proxy_configured() is False
-        for role in ("gateway", "runner", "agent"):
+        for role in ("gateway", "runner"):
             assert not (NETWORK_PROXY_KEYS & set(child_env(role)))
         monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
         monkeypatch.setenv("no_proxy", "localhost,127.0.0.1")
@@ -188,46 +188,23 @@ class TestScopeDerivationRules:
         # The family's single reader (the Feishu ws handshake asks it): any
         # non-empty proxy key, either spelling.
         assert network_proxy_configured() is True
-        for role in ("gateway", "runner", "agent"):
+        for role in ("gateway", "runner"):
             env = child_env(role)
             assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
             assert env["no_proxy"] == "localhost,127.0.0.1"
             assert "ALL_PROXY" not in env
 
-    def test_agent_forward_is_session_plus_agent_scope_plus_guide(self) -> None:
-        from base.host.env.registry import agent_forward_keys, session_forward_keys
-
-        expected = (
-            session_forward_keys()
-            | _aliases_with(scope=("agent",))
-            | {
-                "AVA_HOME",
-                "SSL_CERT_FILE",
-                "REQUESTS_CA_BUNDLE",
-                "AVA_AGENT_CONFIG_OVERLAY",
-                "AVA_AGENT_BIRTH_CONFIG",
-            }
-        )
-        assert agent_forward_keys() == expected
-        # The gateway URL and port the self-fetch dials ride the session view (host scope).
-        assert {"AVA_GATEWAY_URL", "AVA_GATEWAY_PORT"} <= session_forward_keys()
-        # An agent child is a single agent — its identity is set by its launcher,
-        # never inherited from the parent env.
-        assert "AVA_AGENT_ID" not in agent_forward_keys()
-
     def test_the_cluster_secret_rides_no_forwarded_view(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The human bearer stays on the gateway: no role's child receives it, even
-        when the launcher's environment carries it (an agent child presents its API
-        token instead)."""
-        from base.host.env.registry import agent_forward_keys, child_env, session_forward_keys
+        """The human bearer stays on the gateway: no daemon / session child receives
+        it, even when the launcher's environment carries it."""
+        from base.host.env.registry import child_env, session_forward_keys
 
         # `child_env` reads the live environment, so the environment is the seam here.
         monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "human-bearer")
         assert "AVA_CLUSTER_SECRET" not in session_forward_keys()
-        assert "AVA_CLUSTER_SECRET" not in agent_forward_keys()
-        for role in ("gateway", "runner", "agent"):
+        for role in ("gateway", "runner"):
             assert "AVA_CLUSTER_SECRET" not in child_env(role)
 
     def test_agent_runner_cluster_aliases_are_capability_plus_cluster_scope(self) -> None:
@@ -242,6 +219,19 @@ class TestScopeDerivationRules:
         from base.host.env.registry import session_forward_keys
 
         assert not (agent_runner_cluster_aliases() & session_forward_keys())
+
+
+class TestDaemonChildEnv:
+    def test_child_env_refuses_the_agent_role(self) -> None:
+        from base.host.env.registry import child_env
+
+        with pytest.raises(ValueError, match="daemon role"):
+            child_env("agent")  # type: ignore[arg-type] — the removed agent view
+
+    def test_session_view_carries_the_gateway_url_and_port(self) -> None:
+        from base.host.env.registry import session_forward_keys
+
+        assert {"AVA_GATEWAY_URL", "AVA_GATEWAY_PORT"} <= session_forward_keys()
 
 
 class TestConsumptionMatrixDeclarations:
@@ -326,7 +316,7 @@ class TestRegistryInvariants:
         from base.host.env.registry import child_env
 
         # Exercises _ensure_validated(); raises RuntimeError on a collision.
-        child_env("agent")
+        child_env("gateway")
 
     def test_every_projection_key_is_registered(self) -> None:
         """A1: no orphan keys — every alias a projection emits is either a
@@ -348,14 +338,12 @@ class TestRegistryInvariants:
             "TEMP",
             "TMP",
         }
-        registered |= er._enabled_provider_key_envs()
         for proj in (
             er.cluster_scope_aliases(),
             er.agent_runner_cluster_aliases(),
             er.env_identity_keys(),
             er.derived_env_keys(),
             er.session_forward_keys(),
-            er.agent_forward_keys(),
         ):
             assert proj <= registered, f"projection carries unregistered keys: {proj - registered}"
 

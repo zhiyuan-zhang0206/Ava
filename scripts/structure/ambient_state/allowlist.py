@@ -162,7 +162,6 @@ ALLOWED: dict[str, str] = {
     "base/host/env/audit.py::hidden-singleton:_load_alias_metadata": "static alias metadata of the env registry",
     "base/host/env/config_registry.py::hidden-singleton:_build_registry": "the static config registry derived from the Settings classes",
     "base/host/env/config_registry.py::hidden-singleton:field_infos": "a static view of the config registry",
-    "base/host/env/registry.py::hidden-singleton:agent_forward_keys": "a static view of the env registry",
     "base/host/env/registry.py::hidden-singleton:agent_runner_cluster_aliases": "a static view of the env registry",
     "base/host/env/registry.py::hidden-singleton:cluster_scope_aliases": "a static view of the env registry",
     "base/host/env/registry.py::hidden-singleton:derived_env_keys": "a static view of the env registry",

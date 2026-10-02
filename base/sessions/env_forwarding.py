@@ -24,8 +24,7 @@ handoff.
 **The env POLICY lives elsewhere** (Task #856 Phase C + R2 design convergence
 point A): which keys a child receives is the `child_env(role)`
 projection of the env registry (`base/host/env/registry.py` — host-scope facts +
-AVA_HOME for daemon/session children, plus agent-scope knobs and guide keys for
-agent children, NOT "everything AVA_* minus a drop set"; the old denylist
+AVA_HOME for daemon/session children, NOT "everything AVA_* minus a drop set"; the old denylist
 forwarded AVA_AGENT_ID and every non-cluster knob into daemon sessions, a
 leak that made a prod gateway carry AVA_AGENT_ID and load the whole
 agent stack, +11MB resident). The builders here stay thin mechanisms over that
