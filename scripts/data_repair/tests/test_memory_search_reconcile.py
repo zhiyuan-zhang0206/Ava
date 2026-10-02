@@ -66,7 +66,7 @@ def _patch_reconcile_dependencies(
     monkeypatch.setattr(reconcile, "get_provider", _FakeProvider)
 
     def _get_backend_named(
-        name: str, *, dim: int, fingerprint: str, readonly: bool
+        name: str, *, database: object, dim: int, fingerprint: str, readonly: bool
     ) -> _FakeBackend:
         calls.append((name, dim, fingerprint, readonly))
         return backends.pop(0)
