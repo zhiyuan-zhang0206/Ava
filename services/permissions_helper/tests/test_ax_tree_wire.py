@@ -43,6 +43,7 @@ def test_ax_tree_request_carries_the_bounds_and_omits_an_absent_scope(
         400,
     )
     assert "scope" not in args
+    assert args["enable_ax"] is True
 
 
 def test_ax_tree_request_forwards_a_scope(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -98,3 +99,18 @@ def test_swift_fingerprints_exclude_values_and_chain_from_the_parent() -> None:
     assert "siblingCounts[ordinalKey" in walk
     discriminator = _SWIFT.split("private func axDiscriminator", 1)[1].split("private func", 1)[0]
     assert "values[4]" not in discriminator  # index 4 is the value attribute
+
+
+def test_swift_enables_chromium_accessibility_narrowly() -> None:
+    enable = _SWIFT.split("private func axEnableChromiumAccessibility", 1)[1].split(
+        "private func axPickWindow", 1
+    )[0]
+    assert '"AXManualAccessibility" as CFString' in enable
+    assert "axEnabledPids.contains(pid)" in enable  # sticky: no second set, no second wait
+    assert '"AXEnhancedUserInterface"' not in _SWIFT  # VoiceOver's switch; changes native windows
+    walk = _SWIFT.split("func axTree(", 1)[1].split("func axAct(", 1)[0]
+    assert '!framework.isEmpty && req["scope"] == nil' in walk  # only unscoped, only Chromium
+    assert 'req["enable_ax"] as? Bool ?? true' in walk and '"off"' in walk
+    for name in ('"chromium"', '"electron"', '"cef"'):
+        markers = _SWIFT.split("private let axTreeFrameworkMarkers", 1)[1].split("\n]", 1)[0]
+        assert name in markers
