@@ -20,6 +20,3 @@
     "test_stop_extras.py",
     "test_stop_terminals.py",
 ]
-"tests.path_scoped.services_tests" = [
-    "test_ava_root_custody.py",
-]
