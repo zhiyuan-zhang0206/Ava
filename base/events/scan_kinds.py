@@ -11,7 +11,7 @@ Regenerates the raw material behind base/events/registry.md:
   1. Static `event=` literals in production Python code (agent_events event names).
   2. Static `label=` literals on logger calls (label fallback -> agent_events
      event names; see base/log/__init__.py event resolution: event -> label -> "log").
-  3. `insert_event_log*` event_type values (event_log event names, category=audit).
+  3. `prepare_event_log` event_type values (category=audit event names).
   4. SSE role discriminators in base/events/live/projection.py (real-time channel,
      not persisted).
 

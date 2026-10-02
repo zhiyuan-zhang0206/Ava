@@ -249,3 +249,35 @@ def test_reported_recording_of_a_healthy_write_reports_nothing(
 
     assert len(_rows(db_conn, marker)) == 1
     assert reports == []
+
+
+def test_standalone_many_commits_every_row_together_and_emits_after(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = _marker(), _marker()
+    seen_at_emit: list[int] = []
+
+    def emit(event: telemetry.Event) -> None:
+        seen_at_emit.append(len(_rows(db_conn, event.source)))
+
+    monkeypatch.setattr(telemetry, "emit_prepared", emit)
+
+    audit_events.record_audit_standalone_many([_event(first), _event(second)])
+
+    assert seen_at_emit == [1, 1]
+
+
+def test_standalone_many_with_one_refused_event_records_and_emits_none(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    good, bad = _marker(), _marker()
+    emitted: list[telemetry.Event] = []
+    monkeypatch.setattr(telemetry, "emit_prepared", emitted.append)
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        audit_events.record_audit_standalone_many(
+            [_event(good), replace(_event(bad), level=cast(Any, "loud"))]
+        )
+
+    assert emitted == []
+    assert _rows(db_conn, good) == []

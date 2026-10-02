@@ -170,10 +170,19 @@ def _write_armed_marker(env_path: Path) -> None:
 
 
 def _emit_audit_event(event_type: str, payload: dict[str, object]) -> None:
-    """Send a best-effort JSON-safe audit payload to the unified event stream."""
-    from base.telemetry.audit_events import insert_event_log
+    """Send a best-effort, value-free audit event to the unified event stream.
 
-    insert_event_log(event_type=event_type, agent_id=None, source="system", payload=payload)
+    The record of a `.env` write is this module's per-home JSONL: its writers run
+    where no database identity exists, so the event is a projection and is
+    deliberately not recorded in `audit_events`
+    (decisions/2026-10-02-env-write-audit-stays-local.md).
+    """
+    from base import telemetry
+    from base.telemetry.audit_events import prepare_event_log
+
+    telemetry.emit_prepared(
+        prepare_event_log(event_type=event_type, agent_id=None, source="system", payload=payload)
+    )
 
 
 def _machine_name() -> str:

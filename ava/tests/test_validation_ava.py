@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 from pathlib import Path
 from typing import Any
@@ -270,6 +271,8 @@ class TestSelfEntries:
         monkeypatch.setattr(ava.agent_identity, "assert_self_action", lambda _action: None)  # pyright: ignore[reportUnknownArgumentType]
 
         class _FakeCur:
+            connection = None
+
             def execute(self, sql: str, params: tuple[object, ...]) -> None:
                 seen["params"] = params
 
@@ -282,10 +285,11 @@ class TestSelfEntries:
 
         monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
         monkeypatch.setattr(ava.DB, "cursor", _FakeCursor)
+        monkeypatch.setattr(ava.DB, "transaction", contextlib.nullcontext)
         monkeypatch.setattr(self_mod, "_publish_self_inbound_wake", lambda: None)
         import base.telemetry.audit_events as _audit
 
-        monkeypatch.setattr(_audit, "insert_event_log", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_audit, "record_audit", lambda _conn, event: event)  # pyright: ignore[reportUnknownArgumentType]
         from base.agents.lifecycle import SystemHalt
 
         with pytest.raises(SystemHalt):

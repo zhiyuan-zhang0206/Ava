@@ -52,3 +52,41 @@ def test_compact_survives_publish_failure(
         )
         row = cur.fetchone()
     assert row is not None and row[0] == "compact_summary"
+
+
+def test_compact_records_its_audit_fact_with_the_summary_inbound(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent_id = spawn_agent()
+    ava.agent_identity._agent_id = agent_id
+
+    with pytest.raises(SystemHalt):
+        ava.self.compact("Requests: (none)\nProgress: done\n")
+
+    rows = db_conn.execute(
+        "SELECT source, attributes->>'compact_kind' FROM audit_events "
+        "WHERE agent_id = %s AND event_name = 'compact'",
+        (agent_id,),
+    ).fetchall()
+    assert rows == [("self", "summary")]
+
+
+def test_compact_whose_audit_fact_cannot_be_recorded_commits_no_summary(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent_id = spawn_agent()
+    ava.agent_identity._agent_id = agent_id
+
+    def refuse(_conn: object, _event: object) -> None:
+        raise RuntimeError("audit write failed")
+
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit", refuse)
+
+    with pytest.raises(RuntimeError, match="audit write failed"):
+        ava.self.compact("Requests: (none)\nProgress: done\n")
+
+    count = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'compact_summary'",
+        (agent_id,),
+    ).fetchone()
+    assert count == (0,)
