@@ -20,6 +20,7 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from services.im_bridge.adapters.feishu import FeishuAdapter
 from services.im_bridge.cursor_store import CursorStore
+from services.im_bridge.tests.slices import feishu_config
 from services.im_bridge.types import InboundMessage
 from tests.base.poll_until import poll_until_async
 
@@ -80,7 +81,7 @@ def _listing(*newest_first: SimpleNamespace, next_page: str | None = None) -> Si
 
 
 def _adapter(rest: _Rest, store: CursorStore) -> FeishuAdapter:
-    adapter = FeishuAdapter(_Core(store))
+    adapter = FeishuAdapter(_Core(store), feishu_config())
     adapter._rest_client = rest
     return adapter
 
@@ -107,7 +108,7 @@ def _texts(adapter: FeishuAdapter) -> list[str]:
 
 
 def _window_ms() -> int:
-    return int(settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds * 1000)
+    return int(feishu_config().delivery_watchdog_stale_claimed_threshold_seconds * 1000)
 
 
 async def test_restart_replays_messages_that_arrived_during_downtime(store: CursorStore) -> None:

@@ -16,8 +16,8 @@ import uuid
 from functools import partial
 from typing import Any, Literal
 
-from base.config import settings
 from services.im_bridge import copy, notice_bridge, push_watchdog
+from services.im_bridge.config import ImBridgeConfig
 from services.im_bridge.cursor_store import CursorStore
 from services.im_bridge.gateway_client import GatewayClient
 from services.im_bridge.spawn_menu import SpawnMenuMixin
@@ -87,10 +87,11 @@ _TYPING_MAX_S = 300.0
 class IMBridgeCore(SpawnMenuMixin):
     """Owns per-channel chat state, command routing, and subscription pushes."""
 
-    def __init__(self, db_pool: Any = None) -> None:
-        self.gateway = GatewayClient()
+    def __init__(self, config: ImBridgeConfig, gateway: GatewayClient, db_pool: Any = None) -> None:
+        self.config = config
+        self.gateway = gateway
         self.cursor_store = CursorStore(db_pool)
-        self.notice_bridge = notice_bridge.NoticeBridge(self, db_pool=db_pool)
+        self.notice_bridge = notice_bridge.NoticeBridge(self, config, db_pool=db_pool)
         self.adapters: dict[str, IMAdapter] = {}
         self.chats: dict[tuple[str, str], ChatState] = {}
         self._subscriptions: dict[tuple[str, str], asyncio.Task[Any]] = {}
@@ -106,7 +107,7 @@ class IMBridgeCore(SpawnMenuMixin):
         # (`_catch_up`), not from the feed.
 
         self._switch_state = _load_switch_state()
-        self._disabled_channels: set[str] = set(settings.services.im_disabled_adapters)
+        self._disabled_channels: set[str] = set(config.im_disabled_adapters)
         self._outbox_replay_task: asyncio.Task[Any] | None = None
 
     def register(self, adapter: IMAdapter) -> None:
@@ -137,7 +138,7 @@ class IMBridgeCore(SpawnMenuMixin):
                     # partial, not a lambda: this iteration's adapter is bound
                     # now, so the retry call can never read a loop variable late.
                     await push_watchdog.retry_once_after_backoff(
-                        partial(adapter.send_to_owner, text)
+                        partial(adapter.send_to_owner, text), self.config
                     )
                     results[channel] = "ok"
                 except Exception as retry_exc:
@@ -261,7 +262,7 @@ class IMBridgeCore(SpawnMenuMixin):
 
         while True:
             await self._replay_outbox_once()
-            await asyncio.sleep(sum(settings.services.im_send_retry_delays) + 5)
+            await asyncio.sleep(sum(self.config.im_send_retry_delays) + 5)
 
     async def _replay_outbox_once(self) -> None:
         """Try every pending entry once, serially; delivered entries are
@@ -390,8 +391,8 @@ class IMBridgeCore(SpawnMenuMixin):
         # Raw timeline mixes dialog items with non-dialog ones (agent_updated,
         # task events...), so fetch a wider window and keep the most recent
         # `replay` dialog messages (user feedback: replay showed only 2).
-        window = settings.services.im_bridge_timeline_window
-        replay = settings.services.im_bridge_replay_messages
+        window = self.config.im_bridge_timeline_window
+        replay = self.config.im_bridge_replay_messages
         items = await self.gateway.get_timeline(target["agent_id"], limit=window)
         msgs = [it for it in items if _is_dialog_item(it)][-replay:]
         replies: list[Reply] = [

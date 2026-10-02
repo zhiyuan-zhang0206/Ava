@@ -10,13 +10,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from base.config import get_field, settings
 from base.daemon.health import Liveness
 from services.im_bridge import daemon
+from services.im_bridge.config import (
+    FeishuCredentialsConfig,
+    ImBridgeConfig,
+    TelegramCredentialsConfig,
+)
+from services.im_bridge.gateway_client import GatewayClient
 
 
 class _FakeServer:
@@ -73,7 +81,9 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
     created_cores: list[Any] = []
 
     class _FakeCore:
-        def __init__(self, db_pool: Any = None) -> None:
+        def __init__(self, config: ImBridgeConfig, gateway: Any, db_pool: Any = None) -> None:
+            self.config = config
+            self.gateway = gateway
             self.db_pool = db_pool
             self.outbox_replay_started = False
             created_cores.append(self)
@@ -86,7 +96,10 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("services.im_bridge.core.IMBridgeCore", _FakeCore)
 
-    def fake_load_adapters(_core: object) -> list[object]:
+    loaded_with: list[frozenset[str]] = []
+
+    def fake_load_adapters(_core: object, disabled: frozenset[str]) -> list[object]:
+        loaded_with.append(disabled)
         return []
 
     monkeypatch.setattr(daemon, "_load_adapters", fake_load_adapters)
@@ -100,6 +113,10 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
             assert captured, "run() never started the health server"
             assert captured[0].is_alive()
             assert created_cores[0].outbox_replay_started  # Task #1032: drain on startup
+            # The root builds the slice once and hands the same one to every consumer.
+            assert created_cores[0].config == daemon.im_bridge_config()
+            assert isinstance(created_cores[0].gateway, GatewayClient)
+            assert loaded_with == [frozenset(created_cores[0].config.im_disabled_adapters)]
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -111,9 +128,6 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_IM_DISABLED_ADAPTERS skips the named adapters at load; the code
     stays importable (user ruling 2026-08-06: only Telegram stays live)."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.services, "im_disabled_adapters", ["weixin", "feishu"])
     imported: list[str] = []
 
     def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
@@ -121,7 +135,7 @@ def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
         imported.append(mod)
 
         class _FakeAdapter:
-            def __init__(self, core: Any) -> None:
+            def __init__(self, core: Any, *config: Any) -> None:
                 pass
 
         return type("mod", (), {"ADAPTER_CLASS": _FakeAdapter})
@@ -136,10 +150,61 @@ def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
             self.registered.append(adapter)
 
     core = _FakeCore()
-    loaded = daemon._load_adapters(core)
+    loaded = daemon._load_adapters(core, frozenset({"weixin", "feishu"}))
     assert imported == ["telegram"]
     assert len(loaded) == 1
     assert len(core.registered) == 1
+
+
+def test_load_adapters_hands_each_adapter_its_slice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The root passes the Telegram and Feishu adapters their own slice; Weixin reads none."""
+    received: dict[str, tuple[Any, ...]] = {}
+
+    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        mod = name.rsplit(".", 1)[-1]
+
+        class _FakeAdapter:
+            def __init__(self, core: Any, *config: Any) -> None:
+                received[mod] = config
+
+        return type("mod", (), {"ADAPTER_CLASS": _FakeAdapter})
+
+    monkeypatch.setattr(daemon, "_import_adapter", fake_import)
+
+    class _FakeCore:
+        def register(self, adapter: Any) -> None:
+            pass
+
+    daemon._load_adapters(_FakeCore(), frozenset())
+    assert [type(c) for c in received["telegram"]] == [TelegramCredentialsConfig]
+    assert received["weixin"] == ()
+    assert [type(c) for c in received["feishu"]] == [FeishuCredentialsConfig]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [daemon.im_bridge_config, daemon.telegram_config, daemon.feishu_config],
+)
+def test_a_built_slice_carries_the_live_value_of_every_field(
+    build: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each slice field is the flat registry field of the same name, so an operator's
+    `.env` edit reaches the component through the root, and no field is left at a default."""
+    monkeypatch.setattr(settings.services, "im_disabled_adapters", ["weixin"])
+    monkeypatch.setattr(settings.services, "im_send_retry_delays", [0.5, 1.5])
+    monkeypatch.setattr(settings.telegram, "telegram_owner_id", 4242)
+    monkeypatch.setattr(settings.feishu, "feishu_app_id", "cli_x")
+    config = build()
+    for field in dataclasses.fields(config):
+        flat: Any = get_field(field.name)
+        expected = tuple(cast(list[Any], flat)) if isinstance(flat, list) else flat
+        assert getattr(config, field.name) == expected
+
+
+def test_the_gateway_client_gets_the_gateway_url_and_secret_from_the_root() -> None:
+    client = daemon.gateway_client(daemon.im_bridge_config())
+    assert client._base == settings.gateway.gateway_url.rstrip("/")
+    assert client._cluster_secret == settings.data_plane.cluster_secret
 
 
 def test_httpx_info_logs_gated(caplog: pytest.LogCaptureFixture) -> None:
