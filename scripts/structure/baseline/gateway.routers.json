@@ -1,4 +1,12 @@
 {
+  "ambient_state": {
+    "gateway/routers/fleet_graph.py::ambient-container:_stale_emit_at": 1,
+    "gateway/routers/frontend_telemetry.py::ambient-container:_session_windows": 1,
+    "gateway/routers/memory.py::hidden-cache:_cached_memory_graph": 1,
+    "gateway/routers/memory.py::hidden-singleton:_search_semaphore": 1,
+    "gateway/routers/pages.py::ambient-container:_page_host_cache": 1,
+    "gateway/routers/uploads.py::ambient-container:_agent_locks": 1
+  },
   "complexity": {
     "gateway/routers/config.py::put_config": 24,
     "gateway/routers/fleet_graph.py::_merge_edge_rows": 15,

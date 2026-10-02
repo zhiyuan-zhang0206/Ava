@@ -1,0 +1,6 @@
+{
+  "ambient_state": {
+    "services/backup_scheduler/daemon.py::import-time-read:_PIDFILE": 1,
+    "services/backup_scheduler/operation/custody.py::ambient-container:_HELD": 1
+  }
+}

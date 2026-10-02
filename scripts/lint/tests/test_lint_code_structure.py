@@ -410,7 +410,8 @@ def test_ast_allowlists_and_stale_role_entry_are_preserved(
 ) -> None:
     path = _write(tmp_path, "base/example.py", 0)
     path.write_text(
-        "if typing.TYPE_CHECKING:\n    import example\nmachine_role()\n", encoding="utf-8"
+        "if typing.TYPE_CHECKING:\n    import example\ndef ask():\n    machine_role()\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(lcs, "_TYPE_CHECKING_ALLOWED", frozenset({"base/example.py"}))
     monkeypatch.setattr(lcs, "_MACHINE_ROLE_ALLOWED", {"base/example.py": "Test host capability"})

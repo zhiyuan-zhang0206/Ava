@@ -353,6 +353,7 @@ PATH_SCOPES: dict[str, Scope] = {
         (
             "tests/scripts/structure",
             "scripts/audit/tests/test_audit_split_reexports.py",
+            "scripts/lint/tests/test_ambient_state_gate.py",
             "scripts/lint/tests/test_baseline_shard_validity_gate.py",
             "scripts/lint/tests/test_directory_budget_entries.py",
             "scripts/lint/tests/test_lint_code_structure.py",
@@ -363,7 +364,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "scripts/structure/tests",
             "scripts/tests/test_patch_targets.py",
         ),
-        16,
+        19,
     ),
 }
 

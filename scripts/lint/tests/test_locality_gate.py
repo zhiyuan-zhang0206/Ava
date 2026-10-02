@@ -254,18 +254,18 @@ def test_rename_carry_over_left_unmigrated_fails(
 def test_a_new_dial_in_a_governed_module_fails_the_gate(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write(_repo, "gateway/db.py", "import psycopg\npsycopg.connect('dsn')\n")
+    _write(_repo, "gateway/db.py", "import psycopg\ndef dial():\n    psycopg.connect('dsn')\n")
 
     assert lcs.main([]) == 1
     output = capsys.readouterr().out
-    assert "gateway/db.py:2:" in output
+    assert "gateway/db.py:3:" in output
     assert "bypasses the single owner of `postgres-dial`" in output
 
 
 def test_a_dial_frozen_in_the_baseline_passes(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write(_repo, "gateway/db.py", "import psycopg\npsycopg.connect('dsn')\n")
+    _write(_repo, "gateway/db.py", "import psycopg\ndef dial():\n    psycopg.connect('dsn')\n")
     _baseline(_repo, owner_bypasses={"gateway/db.py::postgres-dial": 1})
 
     assert lcs.main([]) == 0

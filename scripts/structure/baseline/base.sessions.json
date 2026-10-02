@@ -1,4 +1,14 @@
 {
+  "ambient_state": {
+    "base/sessions/backend.py::global-rebind:_backend": 1,
+    "base/sessions/backend.py::global-rebind:_shell_backend": 1,
+    "base/sessions/pty/host.py::import-time-call:sys.modules.setdefault": 1,
+    "base/sessions/pty/host.py::thread:_finish": 1,
+    "base/sessions/pty/host.py::thread:_schedule_initial_command": 1,
+    "base/sessions/pty/host.py::thread:main": 1,
+    "base/sessions/pty/launch.py::thread:_bring_up_locked": 1,
+    "base/sessions/pty/records.py::ambient-container:_retained_warning_reasons": 1
+  },
   "complexity": {
     "base/sessions/pty/cli.py::main": 17,
     "base/sessions/pty/tests/test_pty_sessions_cli.py::test_freeze_ack_has_no_later_session_start_during_concurrent_allocations": 19

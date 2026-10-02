@@ -9,7 +9,7 @@ tags:
 
 # Structure Sweeper Tools
 
-`scripts/structure/{quality_budget,locality,path_imports}.py` are the
+`scripts/structure/{quality_budget,locality,path_imports}.py` and the `scripts/structure/ambient_state/` package are the
 pre-commit `lint-code-structure` gate's own scanner modules — see
 [[scripts/lint/docs/lint.ava.okf.md]] — and
 `{placement,import_cache,patch_points,patch_targets,patch_report}.py` those of the

@@ -1,4 +1,7 @@
 {
+  "ambient_state": {
+    "services/computer/mcp_daemon.py::asyncio-task:_tracked_client": 1
+  },
   "complexity": {
     "services/computer/execute.py::_execute": 24,
     "services/computer/mcp_daemon.py::ComputerMcpDaemon._call_tool": 20

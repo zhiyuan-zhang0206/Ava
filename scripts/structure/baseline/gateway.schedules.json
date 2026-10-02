@@ -1,4 +1,8 @@
 {
+  "ambient_state": {
+    "gateway/schedules/manager.py::ambient-instance:_SCHEDULE_PREFIX": 1,
+    "gateway/schedules/manager.py::asyncio-task:ScheduleManager.start": 1
+  },
   "complexity": {
     "gateway/schedules/manager.py::ScheduleManager._reconcile_locked": 16
   }
