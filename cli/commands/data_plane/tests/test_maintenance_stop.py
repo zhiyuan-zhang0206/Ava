@@ -27,9 +27,9 @@ from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane import pgbouncer as pb
 from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle import service_stop as stop
-from tests.cli._commands_helpers import Launcher
-from tests.cli._commands_helpers import home as home
-from tests.cli._commands_helpers import launch as launch
+from cli.commands.lifecycle.tests.stop_support import Launcher
+from cli.commands.lifecycle.tests.stop_support import home as home
+from cli.commands.lifecycle.tests.stop_support import launch as launch
 
 
 def forbidden(*_args: object, **_kwargs: object) -> NoReturn:

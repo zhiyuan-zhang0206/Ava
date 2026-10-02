@@ -17,6 +17,8 @@ from base.db import create_agent
 from base.sessions.backend import PtySessionBackend
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
+from cli.commands.lifecycle.tests.stop_support import dependencies
+from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.test_stop_terminals import _TERM_OK_JOB as _TERM_OK_JOB
 from cli.commands.lifecycle.tests.test_stop_terminals import _WRITE_NOTICES as _WRITE_NOTICES
 from cli.commands.lifecycle.tests.test_stop_terminals import (
@@ -26,8 +28,6 @@ from cli.commands.lifecycle.tests.test_stop_terminals import _started_jobs as _s
 from cli.commands.lifecycle.tests.test_stop_terminals import _stop_env as _stop_env
 from cli.commands.lifecycle.tests.test_stop_terminals import written as written
 from ops import pty_close_notices
-from tests.cli._commands_helpers import dependencies
-from tests.cli._commands_helpers import home as home
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
