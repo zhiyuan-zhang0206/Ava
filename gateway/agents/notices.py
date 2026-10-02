@@ -471,7 +471,7 @@ async def post_notice_resolve(
     )
     # Drop the row from the FYI feed (no-op by id for a require_response notice,
     # which lives on the snapshot, not the feed).
-    await _ops.publish_notice_resolved(agent_id, notice_id)
+    await _ops.publish_notice_resolved(EventBus.from_settings(), agent_id, notice_id)
     return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
 
 
@@ -623,9 +623,14 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
     # then the new posted notice. Best-effort, never raises. Events publish by
     # GLOBAL id; the SDK's return value carries LOCAL ids.
     for _gid in superseded_global:
-        await _ops.publish_notice_resolved(agent_id, _gid)
+        await _ops.publish_notice_resolved(EventBus.from_settings(), agent_id, _gid)
     await _ops.publish_notice_posted(
-        agent_id, notice_global_id, body.priority, body.title, body.task_id
+        EventBus.from_settings(),
+        agent_id,
+        notice_global_id,
+        body.priority,
+        body.title,
+        body.task_id,
     )
     pending = await asyncio.to_thread(_pending, pool)
     return {
@@ -711,7 +716,9 @@ async def patch_notice_edit(agent_id: int, body: NoticeEditIn, request: Request)
     if edited is None:
         return Response(status_code=204)
     _gid, _require_response, new_priority, new_title, task_id = edited
-    await _ops.publish_notice_posted(agent_id, _gid, new_priority, new_title, task_id)
+    await _ops.publish_notice_posted(
+        EventBus.from_settings(), agent_id, _gid, new_priority, new_title, task_id
+    )
     return Response(status_code=204)
 
 
@@ -741,5 +748,5 @@ async def post_notice_dismiss(agent_id: int, request: Request) -> Response:
     dismissed = await asyncio.to_thread(_dismiss, request.app.state.db_pool)
     if dismissed is None:
         return Response(status_code=204)
-    await _ops.publish_notice_resolved(agent_id, dismissed)
+    await _ops.publish_notice_resolved(EventBus.from_settings(), agent_id, dismissed)
     return Response(status_code=204)
