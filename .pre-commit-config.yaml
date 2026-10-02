@@ -166,13 +166,12 @@ repos:
         pass_filenames: false
         require_serial: true
 
-      # A test in the top-level tests/ must stay by design (e2e, ui, shared fixtures), be
+      # A test in the top-level tests/ must stay by design (e2e, ui, shared fixtures) or be
       # registered in scripts/structure/tests_location_allowed.py (`contract` or `integration`,
-      # with a reason) or be frozen in the `tests_location` baseline section (the tests still to
-      # move): new tests belong in their package's own tests/ directory. The verdict is a path
-      # lookup (no placement rule, no import graph): `--only` judges the changed test files at a
-      # cost of a process start plus the baseline shards (~0.06 s), and a changed lint tool,
-      # registry or baseline shard (scripts/structure/) widens it to every test. `--suggest FILE`
+      # with a reason); any other is refused: new tests belong in their package's own tests/
+      # directory. The verdict is a path lookup (no placement rule, no import graph): `--only`
+      # judges the changed test files at the cost of a process start (~0.06 s), and a changed
+      # lint tool or registry (scripts/structure/) widens it to every test. `--suggest FILE`
       # names the package a test belongs in. See scripts/structure/tests_location.py header.
       - id: lint-tests-location
         name: lint tests location (a new test belongs in its package, not the top-level tests/)

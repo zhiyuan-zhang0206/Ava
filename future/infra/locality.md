@@ -77,11 +77,10 @@ lifecycle; those items wait for it to land and are then designed on its code.
    natural owner `base/native_process/ownership.py`'s `OwnedProcess`) is the next
    candidate — most of its readers sit in files #3479 rewrites.
    `base/config` as a registration hub needs a design pass first.
-5. **Tests in the top-level `tests/`** (`scripts/structure/tests_location.py`, the
-   `tests_location` section: 200 frozen tests; `tests_location_allowed.py`: 63 registered, 58
-   `contract` and 5 `integration`). The lint refuses a new top-level test that is not e2e, UI or
-   registered, by path alone; the frozen tests are the work list for moving tests into their
-   packages (`--suggest <file>` names each one's lowest legal package, the move tool's job).
+5. **Tests in the top-level `tests/`** (`scripts/structure/tests_location.py`;
+   `tests_location_allowed.py`: 120 registered, 82 `contract` and 38 `integration`; nothing is
+   frozen). The lint refuses a new top-level test that is not e2e, UI or registered, by path
+   alone (`--suggest <file>` names a test's lowest legal package).
    Still open: (a) **legality of tests inside packages** (a test whose package may not import what it
    uses, or that holds none of the code it tests): it needs `place()` and the import-linter
    contracts, so it is a separate check, not a hook; today three package tests would fail it

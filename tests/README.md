@@ -39,12 +39,12 @@ A test lives in a `tests/` directory: the top-level `tests/`, or a package's own
 A new test in the top-level `tests/` is refused unless it is e2e or UI, or is registered in
 `scripts/structure/tests_location_allowed.py` as `contract` or `integration` with a reason
 (`scripts/structure/tests_location.py`, run by the pre-commit hook; `--suggest <file>` names the
-package a test belongs in). The tests still to move are frozen in the `tests_location` baseline
-section and only come out.
+package a test belongs in). There is no list of debt to add to: a new test is registered or
+refused.
 
 Package `tests/` directories have no `__init__.py` (`--import-mode=importlib`), and
 the repo-root `conftest.py` plugins apply to them exactly as to the top-level tree.
-The top-level `tests/{module}/` directories are the tests still to move into their packages.
+The top-level `tests/{module}/` directories hold only the registered contract and integration tests.
 
 ```
 tests/
