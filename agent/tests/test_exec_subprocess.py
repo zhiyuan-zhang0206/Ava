@@ -313,6 +313,51 @@ async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
             kill_process_tree(descendant_pid, grace_s=0.0)
 
 
+@pytest.mark.parametrize(
+    ("fault", "trigger"),
+    [
+        ("sigkill", "os.kill(os.getpid(), signal.SIGKILL)"),
+        ("segfault", "ctypes.string_at(0)"),
+    ],
+)
+async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
+    tmp_path: Path, fault: str, trigger: str
+) -> None:
+    """A real child that dies of a signal (not a mocked return code) comes back as
+    a crash with its partial output; its descendant is reaped, and the next exec
+    on the same host runs normally."""
+    pid_file = tmp_path / f"{fault}.pid"
+    code = (
+        "import ctypes, os, pathlib, signal, subprocess, sys\n"
+        "descendant = subprocess.Popen(\n"
+        "    [sys.executable, '-c', 'import time; time.sleep(60)']\n"
+        ")\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(descendant.pid), encoding='utf-8')\n"
+        "print('before the fault', flush=True)\n"
+        f"{trigger}\n"
+    )
+    descendant_pid: int | None = None
+    try:
+        result = await _run(tmp_path, code)
+        assert isinstance(result, _ExecCrashed)
+        assert "without writing a result envelope" in str(result.exc)
+        assert "before the fault" in result.output
+        descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+        await _assert_tree_gone([descendant_pid])
+        assert not any(
+            thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
+        )
+
+        after = await _run(tmp_path, "print('still serving')")
+        assert isinstance(after, _ExecDone)
+        assert after.output == "still serving\n"
+    finally:
+        if descendant_pid is None and pid_file.exists():
+            descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+        if descendant_pid is not None:
+            kill_process_tree(descendant_pid, grace_s=0.0)
+
+
 async def test_subprocess_timeout(tmp_path: Path) -> None:
     # The deadline must not race child boot: `import ava` alone is ~2s on CI
     # (PR #256 round 4 went red with 1.0s — the group SIGTERM landed while the
