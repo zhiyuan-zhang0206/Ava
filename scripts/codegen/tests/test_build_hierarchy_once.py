@@ -82,7 +82,7 @@ def _install_fakes(
     def fake_close(llm: Any) -> None:
         rec.llm_closes.append(llm)
 
-    def fake_effective_model(_agent_id: int, *, fallback: str) -> str:
+    def fake_effective_model(_db: object, _agent_id: int, *, fallback: str) -> str:
         assert fallback == settings.lm.hierarchy_model
         return "agent-own-model"
 

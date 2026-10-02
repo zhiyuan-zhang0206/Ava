@@ -78,12 +78,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    db = Database.from_settings()
     model: str = args.model or agent_effective_model(
-        args.agent_id, fallback=settings.lm.hierarchy_model
+        db, args.agent_id, fallback=settings.lm.hierarchy_model
     )
     print(f"target: {_db_label()} | agent {args.agent_id} | model {model}")
 
-    db = Database.from_settings()
     known = load_known_texts(db, args.agent_id)
     llm = build_generation_llm(model)
     try:
