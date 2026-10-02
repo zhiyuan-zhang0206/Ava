@@ -20,8 +20,8 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
-import base.db
 from base.config import settings
+from base.db import Database
 
 _log = logging.getLogger("services.agent_ops.daemon")
 
@@ -120,7 +120,7 @@ def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
     connection only briefly, so the cap bounds concurrent dispatch rather than
     request rate.
 
-    Built by `base.db.pool()` so the borrows carry `prepare_threshold=None` and
+    Built by `Database.pool()` so the borrows carry `prepare_threshold=None` and
     `PG_KEEPALIVE_KWARGS` from the one place that defines them. The keepalives are
     not incidental for this daemon in particular: it is the longest-lived ava
     process on an agent-runner, which is typically a laptop-grade box that sleeps
@@ -138,7 +138,7 @@ def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
     # the first dispatch of the day dies with psycopg.OperationalError
     # 'the connection is closed' (Task #1027). The check discards the dead conn
     # and hands out a fresh one.
-    return base.db.pool(
+    return Database.from_settings().pool(
         min_size=0,  # an idle daemon holds no client connection; borrows open lazily
         max_size=max(2, settings.services.ops_concurrency + 2),
         check_connections=True,
