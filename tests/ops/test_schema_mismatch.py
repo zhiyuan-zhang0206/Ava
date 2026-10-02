@@ -121,7 +121,7 @@ def test_invalid_image_layout_is_not_a_set_divergence(monkeypatch: pytest.Monkey
         return {"base"}
 
     def invalid() -> set[str]:
-        raise MigrationLayoutError("required down migration is absent")
+        raise MigrationLayoutError("required migration file is absent")
 
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied)
     monkeypatch.setattr(schema_mismatch, "required_migration_set", invalid)

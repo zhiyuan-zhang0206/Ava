@@ -38,7 +38,8 @@ touch; the full documents are the authority — this is the quick reference.
 - **One idempotency mechanism**: two idempotency tables/implementations is
   a known open debt — do not add a third.
 - **schema.sql is the truth**: any migration must be reflected in
-  `db/schema.sql` in the same PR; the baseline is the rollback floor.
+  `db/schema.sql` in the same PR; merged migrations are immutable, mistakes
+  are fixed forward.
 - **Derived views are generated, not hand-synced**: new hand-copied
   constants that duplicate a registry (provider keys, retention days,
   resilience params) are violations.

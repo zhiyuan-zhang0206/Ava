@@ -294,7 +294,7 @@ class CheckpointSchemaError(RuntimeError):
 
 
 class CheckpointDependencyDriftError(CheckpointSchemaError):
-    """The dependency added schema migrations without a paired Ava migration."""
+    """The dependency added schema migrations without an Ava timestamp migration."""
 
 
 class CheckpointSchemaMismatchError(CheckpointSchemaError):
