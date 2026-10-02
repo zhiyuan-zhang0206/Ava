@@ -43,7 +43,6 @@ from pydantic import TypeAdapter
 
 from base.config import settings
 from base.db.transaction import write_transaction
-from base.events.live.redis_client import sync_redis
 from base.telemetry.alerts import (
     AlertKey,
     display_language,
@@ -52,6 +51,7 @@ from base.telemetry.alerts import (
     stamp_notified,
     upsert_alert,
 )
+from gateway.alerts.publish import ALERTS_CHANNEL, publish_alert_rows
 from gateway.alerts.schemas import (
     AlertIngestResult,
     AlertRow,
@@ -66,10 +66,6 @@ from gateway.events.sse import event_stream
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
-
-# The Redis pub/sub channel every ingest publishes to and the SSE stream
-# subscribes to.
-ALERTS_CHANNEL = "ava:alerts"
 
 _WINDOWS = {
     "1h": timedelta(hours=1),
@@ -156,23 +152,6 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     return AlertIngestResult(
         processed=len(body.alerts), inserted=inserted, updated=updated, notified=notified
     )
-
-
-def publish_alert_rows(rows: list[dict[str, Any]]) -> None:
-    """Publish each upserted row to the SSE channel (best-effort).
-
-    A Redis outage must not fail the ingest — the SSE stream is a live tail
-    and the UI's initial fetch carries the same rows."""
-
-    if not rows:
-        return
-    try:
-        with sync_redis() as client:
-            for row in rows:
-                frame = AlertRow(**row).model_dump_json()
-                client.publish(ALERTS_CHANNEL, frame)  # pyright: ignore[reportUnknownMemberType] — redis-py from_url kwargs typed Unknown (same pattern as base/events/live/redis_client.py)
-    except Exception:
-        _log.warning("alerts: SSE publish failed (Redis unreachable?)", exc_info=True)
 
 
 # -- SSE stream ---------------------------------------------------------------

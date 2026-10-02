@@ -194,7 +194,7 @@ def _emit_episode(pool: Any, agent_id: int, family: str, condition: str, *, firi
     # SSE publish + IM are best-effort tails — same split as the ingest funnel
     # (gateway/alerts/router.py): row first, then the live/notification side.
     try:
-        from gateway.alerts.router import publish_alert_rows
+        from gateway.alerts.publish import publish_alert_rows
 
         publish_alert_rows([row])
     except Exception:

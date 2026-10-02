@@ -1,7 +1,7 @@
 """Events-maintenance daemon — gateway-owned unified event-stream + checkpoint maintenance.
 
-Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Three
-resident loops under one `TaskGroup` (one that raises ends the process):
+Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Resident
+loops under one `TaskGroup` (one that raises ends the process):
 
 - Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): recompute
   the day-grain rollup tables (`services.events_maintenance.rollup`), replay
@@ -17,6 +17,10 @@ resident loops under one `TaskGroup` (one that raises ends the process):
 - Registry-gauge loop (every 60s): sample `max(agents.id)` and emit the
   `agent_registry` event the growth dashboard reads
   (`services.events_maintenance.registry_gauge`).
+- Alert-reconciliation loop (every 5m, only on a unit holding
+  `GRAFANA_ADMIN_PASSWORD`): resolve stored Grafana alert rows the embedded
+  Alertmanager no longer reports firing, for webhooks whose RESOLVE was lost
+  (`services.events_maintenance.alert_reconciler`).
 
 The checkpoint trim opt-in was retired on 2026-09-30 under the never-delete
 ruling. Its implementation remains in `checkpoint_reaper.py` but is not scheduled.
@@ -77,7 +81,7 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
-from services.events_maintenance import registry_gauge
+from services.events_maintenance import alert_reconciler, registry_gauge
 from services.events_maintenance.blob_vacuum import (
     emit_checkpoint_table_sizes,
     run_blob_vacuum,
@@ -107,6 +111,9 @@ def events_maintenance_config() -> EventsMaintenanceConfig:
         events_auto_dismiss_days=settings.daemon.events_auto_dismiss_days,
         telemetry_loki_url=settings.observability.telemetry_loki_url,
         timezone=settings.general.timezone,
+        grafana_host=settings.gateway.grafana_host,
+        grafana_port=settings.gateway.grafana_port,
+        grafana_admin_password=settings.alerts.grafana_admin_password,
     )
 
 
@@ -128,6 +135,8 @@ _LIVENESS_BEAT_STEP_S = 30.0
 # One registry-gauge round is a single-row read; a loop that completed nothing for this
 # long (three sample intervals) is wedged.
 _REGISTRY_GAUGE_LIVENESS_TIMEOUT_S = 180.0
+# One reconciliation is a Grafana read (10 s timeout) and one bounded statement.
+_ALERT_RECONCILIATION_LIVENESS_TIMEOUT_S = 180.0
 
 
 class WedgedPassError(RuntimeError):
@@ -407,6 +416,14 @@ async def run() -> None:
     )
     gauge_progress = liveness.register("registry_gauge", _REGISTRY_GAUGE_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint()
+    # Only a unit holding the Grafana credential reconciles alerts; one without it
+    # carries no such loop (and no tracker to read as idle).
+    reconcile_alerts = alert_reconciler.grafana_reconciliation_configured(config)
+    alert_progress = (
+        liveness.register("alert_reconciliation", _ALERT_RECONCILIATION_LIVENESS_TIMEOUT_S)
+        if reconcile_alerts
+        else None
+    )
     health = await start_health_server(
         "events_maintenance",
         endpoint.health_port,
@@ -424,6 +441,10 @@ async def run() -> None:
             loops.create_task(_dispatch_loop(pool, dispatch_progress, config, db))
             loops.create_task(_resolution_loop(pool, resolution_progress, config))
             loops.create_task(registry_gauge.registry_gauge_loop(pool, gauge_progress))
+            if alert_progress is not None:
+                loops.create_task(
+                    alert_reconciler.reconciliation_loop(pool, alert_progress, config)
+                )
     finally:
         pool.close()
         await stop_health_server(health)
