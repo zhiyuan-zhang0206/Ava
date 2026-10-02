@@ -9,7 +9,7 @@ Two cluster-wide passes, gateway-owned:
 - `_run_escalate` notifies the parent task's owner when reminder_count reaches the
   escalation threshold.
 
-Delivery is normally exercised against a stubbed `_deliver_message`; the
+Delivery is normally exercised against a stubbed `deliver_message`; the
 terminated-owner test keeps the direct write real. These tests assert digest
 recipients, message contents, counters, telemetry, and no-resurrect delivery. No
 stale sweep, no automatic cancellation. History is preserved: rows are UPDATEd,
@@ -44,7 +44,7 @@ def pool():
 
 @pytest.fixture
 def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
-    """Stub `_deliver_message`, recording (agent_id, message) per call.
+    """Stub `deliver_message`, recording (agent_id, message) per call.
 
     The real one writes an inbound row; here we only assert the daemon's own
     responsibility — digest recipients, content, and counter updates."""
@@ -53,7 +53,7 @@ def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     def _fake(pool_: ConnectionPool, agent_id: int, message: str, **_kwargs: object) -> None:
         calls.append((agent_id, message))
 
-    monkeypatch.setattr(daemon, "_deliver_message", _fake)
+    monkeypatch.setattr(daemon, "deliver_message", _fake)
     return calls
 
 
@@ -192,7 +192,7 @@ class TestRemind:
 
         monkeypatch.setattr(daemon, "publish_agent_updated_sync", _capture_publish)
 
-        daemon._deliver_message(pool, owner, "reminder")
+        daemon.deliver_message(pool, owner, "reminder")
 
         # This separate connection must already see the committed inbound
         # when its invalidation hint is published.
@@ -366,7 +366,7 @@ class TestRemind:
         def _boom(pool_: ConnectionPool, agent_id: int, message: str) -> None:
             raise RuntimeError("inbound insert failed")
 
-        monkeypatch.setattr(daemon, "_deliver_message", _boom)
+        monkeypatch.setattr(daemon, "deliver_message", _boom)
         assert _run_reminders(pool, 3600.0) == 0
         row = _task_row(db_conn, tid)
         assert row is not None

@@ -1,38 +1,21 @@
-"""Loki-side aggregate fetch for metrics — the gateway + CLI path (task #1197 A3).
+"""Aggregate fetch for metrics — the gateway + CLI path.
 
-The pre-aggregation design: the former per-row path materialized every
-telemetry/log row in the window as an EventRow — 430K+ rows/day in prod,
-measured +47MB RSS per /api/metrics call (memory:
-ava/bugs/gateway-mem-profile-2026-08-03.md; audit finding F-s1-4). The metric
-units reduced that stream to a handful of aggregates (counts, sums, pctiles,
-per-key counters, position buckets); the SQL path fetched those aggregates
-in Postgres. With the telemetry stack cutover (task #1197) `fetch_aggregate`
-now runs the same reductions over Loki via `gateway.lgtm.loki_events` — injected
-as the `loki` argument (shared code never imports gateway; tests pass a
-fake). `fetch_aggregate` runs ~20 compact Loki queries (exact counts,
-per-key grouped counts, projected payload rows for the distributions) and
-returns an `EventAggregate`; `build_report_from_aggregate` /
-`agent_rollups_from_aggregate` rebuild the report from it, reusing the same
-helper functions (`pctiles`, `third_of`, `_fix_kinds`, `cost_usd`) so the
-math cannot drift.
-
-Semantics preserved from the retired SQL path; documented deltas:
-- row ordering inside an agent: SQL broke ties by `id` (insertion order),
-  Loki by nanosecond `ts` (the writer stamps every event; ties are
-  practically impossible);
-- `sdk_fns` counter ties now resolve deterministically (count desc, fn asc)
-  instead of first-seen order;
-- code/exec `len` counts bytes (SQL counted characters) — identical for
-  ASCII, and the digest percentiles are insensitive to the difference.
+The digest's units reduce the window's telemetry and log rows to a handful of aggregates (counts,
+sums, distributions, per-key counters, position buckets). `fetch_aggregate` reads those aggregates
+from `telemetry_events` (`base.telemetry.metrics.aggregate_sql`, a few statements in one
+connection, nothing materialized per row) and returns an `EventAggregate`;
+`build_report_from_aggregate` / `agent_rollups_from_aggregate` rebuild the report from it, reusing
+the helper functions (`pctiles`, `third_of`, `_fix_kinds`, `cost_usd`) so the math cannot drift.
 """
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
+
+import psycopg
 
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from base.lm.pricing import cost_usd
@@ -48,16 +31,7 @@ from base.telemetry.metrics import (
     pctiles,
     third_of,
 )
-from base.telemetry.metrics.aggregate_loki import (
-    _MAX_WORKERS,
-    _T_BODY,
-    LokiBackend,
-    _aggregate_tasks,
-    _merge_counts,
-    _merge_groups,
-    _merge_rows,
-    _run_partitioned,
-)
+from base.telemetry.metrics.aggregate_sql import LIFECYCLE_EVENTS, read_agent_window, read_window
 
 
 @dataclass(frozen=True)
@@ -78,9 +52,9 @@ class _LlmTotals:
 class _PerAgentAgg:
     """Per-agent row aggregates — turn counts, exec outcomes, event span.
 
-    Includes the service-level group (agent_id None): the per-row units count
-    it toward `turns_per_agent` and `agent_lifetime_s` (by_agent buckets every
-    group), so the aggregate path must too; the /agents endpoint filters it.
+    Includes the service-level group (agent_id None): the units count it toward
+    `turns_per_agent` and `agent_lifetime_s`, so the aggregate must too; the /agents
+    endpoint filters it.
     """
 
     agent_id: int | None
@@ -97,12 +71,8 @@ class _PerAgentAgg:
 class EventAggregate:
     """The window reduced in SQL — compact input for the report assemblers.
 
-    Field names mirror the per-row units' reductions 1:1 so the assemblers
-    stay a mechanical transcription. Lists that only feed `pctiles` /
-    position bucketing keep their values (they are ints/floats, not EventRow
-    tuples); per-key counters keep their rows in stream order so Counter
-    insertion order — and therefore `most_common` tie order — matches the
-    per-row path exactly.
+    Distributions that only feed `pctiles` keep their values (ints/floats); per-key counters are
+    `{key: count}` mappings in descending count order.
     """
 
     total_events: int
@@ -110,20 +80,18 @@ class EventAggregate:
     # syntax_fix
     code_blocks: int
     code_blocks_per_agent: dict[int | None, int]
-    fix_events: list[tuple[int | None, int, str]]  # (agent_id, block_no, fixes) — stream order
+    fix_events: list[tuple[int | None, int, str]]  # (agent_id, block_no, fixes) — time order
     # exec
     exec_ok: int
     exec_failed: int
-    fail_rows: list[tuple[str, str | None]]  # (event_name, exc_type) — stream order
+    failure_types: dict[str, int]  # exc_type (else event name) -> count
     code_len: list[float]
     output_len: list[float]
     # llm / turns
     llm_by_model: list[
         tuple[str, int, int, int, int, int]
     ]  # (model, calls, in, out, cached, reasoning)
-    llm_position: list[
-        tuple[int | None, int, int]
-    ]  # (agent_id, cache_read, in_total) — stream order
+    llm_position: dict[str, tuple[int, int]]  # third -> (cache_read, in_total)
     turn_total: int
     turn_ok: int
     turn_durations: list[float]
@@ -132,301 +100,124 @@ class EventAggregate:
         int | None, list[tuple[str, int, int, int, int]]
     ]  # (model, calls, in, out, cached)
     # agent activity
-    spawners: list[str]  # stream order
+    spawners: dict[str, int]  # spawner -> count
     lifecycle: dict[str, int]
     idle_halts: int
     # sdk usage
-    sdk_fns: list[str]  # stream order
+    sdk_fns: dict[str, int]
     # plugin activation
-    plugin_acts: list[tuple[str, str, str, str]]  # (plugin, surface, identifier, model)
+    plugin_acts: dict[tuple[str, str, str, str], int]  # (plugin, surface, identifier, model)
+
+
+def _per_agent_aggs(
+    per_agent: dict[int | None, dict[str, Any]], fallback: datetime
+) -> dict[int | None, _PerAgentAgg]:
+    return {
+        agent: _PerAgentAgg(
+            agent,
+            int(row["events"]),
+            int(row.get("turn_total", 0)),
+            int(row.get("turn_ok", 0)),
+            int(row.get("exec_ok", 0)),
+            int(row.get("exec_failed", 0)),
+            row.get("first_ts") or fallback,
+            row.get("last_ts") or fallback,
+        )
+        for agent, row in per_agent.items()
+        if row["events"]
+    }
+
+
+def _llm_by_agent(
+    llm_per_agent: dict[int | None, dict[str, tuple[int, int, int, int, int]]],
+) -> dict[int | None, list[tuple[str, int, int, int, int]]]:
+    return {
+        agent: [(model, n, i, o, c) for model, (n, i, o, c, _r) in models.items()]
+        for agent, models in llm_per_agent.items()
+    }
+
+
+def _total(rows: list[dict[str, Any]], key: str) -> int:
+    """The sum of one per-agent counter over every group (a group without it counts 0)."""
+    return sum(int(r.get(key, 0)) for r in rows)
+
+
+def _llm_by_model(
+    llm_per_agent: dict[int | None, dict[str, tuple[int, int, int, int, int]]],
+) -> list[tuple[str, int, int, int, int, int]]:
+    """Per-model `(model, calls, in, out, cached, reasoning)` summed over the agents."""
+    by_model: dict[str, list[int]] = {}
+    for models in llm_per_agent.values():
+        for model, sums in models.items():
+            acc = by_model.setdefault(model, [0, 0, 0, 0, 0])
+            for slot, value in enumerate(sums):
+                acc[slot] += value
+    return [(m, acc[0], acc[1], acc[2], acc[3], acc[4]) for m, acc in by_model.items()]
 
 
 def fetch_aggregate(
+    conn: psycopg.Connection[Any],
     days: int,
     agent_id: int | None,
     *,
     since_compact: bool = False,
-    loki: LokiBackend,
+    now: datetime | None = None,
 ) -> EventAggregate:
-    """Windowed aggregate over the Loki event stream (task #1197 A3) — the
-    gateway + CLI entry point. Same filters/semantics as the retired SQL path:
-    category telemetry|log over [now-days, now], optional single-agent scope,
-    optional since_compact (each agent's rows narrowed to at-or-after its
-    latest compact halt; service rows always kept). `loki` is the
-    `gateway.lgtm.loki_events` module (injected: shared never imports gateway).
+    """Windowed aggregate over `telemetry_events` — the gateway + CLI entry point.
+
+    Category telemetry|log over [now-days, now], optional single-agent scope, optional
+    since_compact (each agent's rows narrowed to at-or-after its latest compact halt; service rows
+    always kept).
     """
-    to = datetime.now(UTC)
-    from_ = to - timedelta(days=days)
-    base: dict[str, Any] = {"categories": ["telemetry", "log"], "from_": from_, "to": to}
-    if agent_id is not None:
-        base["agent_id"] = agent_id
-
-    # since_compact: per-agent cutoff = latest compact halt in the window
-    cutoffs: dict[int, datetime] = {}
-    if since_compact:
-        rows = loki.query_projected_lines(
-            fields=["body"],
-            template=_T_BODY,
-            event_names=["halt"],
-            grep="compact",
-            **base,
-        )
-        for ts_ns, aid, _line in rows:  # rows ascending → last write = max
-            if aid is not None:
-                cutoffs[aid] = datetime.fromtimestamp(ts_ns / 1e9, UTC)
-
-    # partitions: one per cutoff agent ([cutoff, to]) + the rest (excludes them)
-    parts: list[dict[str, Any]] = []
-    for aid, cutoff in cutoffs.items():
-        parts.append(
-            {"agent_id": aid, "from_": cutoff, "to": to, "categories": ["telemetry", "log"]}
-        )
-    rest = dict(base)
-    if cutoffs:
-        rest["exclude_agent_ids"] = sorted(cutoffs)
-    parts.append(rest)
-
-    tasks = _aggregate_tasks(loki)
-    results = _run_partitioned(parts, tasks)
-    counts = _assemble_counts(results)
-    rows = _row_reductions(results)
-    per_agent = _per_agent_rows(
-        counts["by_agent_all"],
-        counts["by_agent_turn"],
-        counts["by_agent_turn_ok"],
-        counts["by_agent_exec"],
-        counts["by_agent_exec_fail"],
-        from_=from_,
-        to=to,
-        cutoffs=cutoffs,
-        loki=loki,
-    )
-
+    data = read_window(conn, days, agent_id, since_compact=since_compact, now=now)
+    raw: dict[int | None, dict[str, Any]] = data["per_agent"]
+    rows = list(raw.values())
+    lengths = data["lengths"]
     return EventAggregate(
-        total_events=counts["total_events"],
-        distinct_agents=counts["distinct_agents"],
-        code_blocks=counts["code_blocks"],
-        code_blocks_per_agent=counts["code_blocks_per_agent"],
-        fix_events=rows["fix_events"],
-        exec_ok=counts["exec_ok"],
-        exec_failed=rows["exec_failed"],
-        fail_rows=rows["fail_rows"],
-        code_len=rows["code_len"],
-        output_len=rows["output_len"],
-        llm_by_model=rows["llm_by_model"],
-        llm_position=rows["llm_position"],
-        turn_total=counts["turn_total"],
-        turn_ok=counts["turn_ok"],
-        turn_durations=rows["turn_durations"],
-        per_agent=per_agent,
-        per_agent_llm=rows["per_agent_llm"],
-        spawners=rows["spawners"],
-        lifecycle=counts["lifecycle"],
-        idle_halts=counts["idle_halts"],
-        sdk_fns=counts["sdk_fns"],
-        plugin_acts=rows["plugin_acts"],
+        total_events=_total(rows, "events"),
+        distinct_agents=len([a for a in raw if a is not None]),
+        code_blocks=_total(rows, "code"),
+        code_blocks_per_agent={a: int(r["code"]) for a, r in raw.items() if r.get("code")},
+        fix_events=data["fix_events"],
+        exec_ok=_total(rows, "exec_ok"),
+        exec_failed=_total(rows, "exec_failed"),
+        failure_types=data["failure_types"],
+        code_len=lengths["code_len"],
+        output_len=lengths["output_len"],
+        llm_by_model=_llm_by_model(data["llm_per_agent"]),
+        llm_position=data["llm_position"],
+        turn_total=_total(rows, "turn_total"),
+        turn_ok=_total(rows, "turn_ok"),
+        turn_durations=lengths["turn_dur"],
+        per_agent=_per_agent_aggs(raw, data["start"]),
+        per_agent_llm=_llm_by_agent(data["llm_per_agent"]),
+        spawners=data["spawners"],
+        lifecycle={
+            name: sum(r.get("lifecycle", {}).get(name, 0) for r in rows)
+            for name in LIFECYCLE_EVENTS.values()
+        },
+        idle_halts=_total(rows, "idle_halts"),
+        sdk_fns=data["sdk_fns"],
+        plugin_acts=data["plugin_acts"],
     )
 
 
-def _assemble_counts(results: dict[str, list[Any]]) -> dict[str, Any]:
-    """Merge per-partition count/grouped results into flat scalars + dicts."""
-    lifecycle = {
-        {
-            "agent_spawned": "spawned",
-            "agent_terminated": "terminated",
-            "agent_restarted": "restarted",
-            "agent_resurrected": "resurrected",
-        }[k]: n
-        for k, n in _merge_groups(results["lifecycle"]).items()
-    }
-    by_agent_all = _merge_groups(results["by_agent_all"])
-    by_agent_code = _merge_groups(results["by_agent_code"])
-    by_agent_turn = _merge_groups(results["by_agent_turn"])
-    by_agent_turn_ok = _merge_groups(results["by_agent_turn_ok"])
-    by_agent_exec = _merge_groups(results["by_agent_exec"])
-    by_agent_exec_fail = _merge_groups(results["by_agent_exec_fail"])
-
-    def _key(aid: str) -> int | None:
-        return int(aid) if aid else None
-
-    return {
-        "total_events": _merge_counts(results["total"]),
-        "code_blocks": _merge_counts(results["code_blocks"]),
-        "exec_ok": _merge_counts(results["exec_ok"]),
-        "turn_total": _merge_counts(results["turn_total"]),
-        "turn_ok": _merge_counts(results["turn_ok"]),
-        "idle_halts": _merge_counts(results["idle_halts"]),
-        "lifecycle": lifecycle,
-        "by_agent_all": by_agent_all,
-        "by_agent_code": by_agent_code,
-        "by_agent_turn": by_agent_turn,
-        "by_agent_turn_ok": by_agent_turn_ok,
-        "by_agent_exec": by_agent_exec,
-        "by_agent_exec_fail": by_agent_exec_fail,
-        "distinct_agents": len([k for k in by_agent_all if k]),
-        "code_blocks_per_agent": {_key(k): v for k, v in by_agent_code.items()},
-        "sdk_fns": [
-            fn
-            for fn, cnt in sorted(
-                _merge_groups(results["sdk_fns"]).items(), key=lambda kv: (-kv[1], kv[0])
-            )
-            for _ in range(cnt)
-        ],
-    }
-
-
-def _row_reductions(results: dict[str, list[Any]]) -> dict[str, Any]:
-    """Client-side reductions over projected rows (stream order preserved)."""
-
-    def _sort_rows(rows: list[tuple[int, int | None, str]]) -> list[tuple[int, int | None, str]]:
-        return sorted(rows, key=lambda r: (r[1] if r[1] is not None else 10**9, r[0]))
-
-    def _num(line: str) -> float:
-        try:
-            return float(line)
-        except ValueError:
-            return 0.0
-
-    fail_rows: list[tuple[str, str | None]] = []
-    for _ts_ns, _aid, line in _sort_rows(_merge_rows(results["fail_rows"])):
-        ev, sep, exc = line.partition("\x1f")
-        fail_rows.append((ev, exc if sep else None))
-
-    llm_rows = _sort_rows(_merge_rows(results["llm"]))
-    llm_by_model: dict[str, list[int]] = {}  # model -> [calls, in, out, cached, reason]
-    llm_position: list[tuple[int | None, int, int]] = []
-    per_agent_llm: dict[int | None, list[tuple[str, int, int, int, int]]] = {}
-    for _ts_ns, aid, line in llm_rows:
-        parts_l = line.split("\x1f")
-        if len(parts_l) != 5:
-            continue
-        model, i_s, o_s, c_s, r_s = parts_l
-        try:
-            tin, tout, tcached, treason = int(i_s or 0), int(o_s or 0), int(c_s or 0), int(r_s or 0)
-        except ValueError:
-            continue
-        model = model or ""
-        acc = llm_by_model.setdefault(model, [0, 0, 0, 0, 0])
-        acc[0] += 1
-        acc[1] += tin
-        acc[2] += tout
-        acc[3] += tcached
-        acc[4] += treason
-        llm_position.append((aid, tcached, tin))
-        per_agent_llm.setdefault(aid, []).append((model, 1, tin, tout, tcached))
-
-    # syntax_fix: running code-block index per agent (window-function replica)
-    fix_events: list[tuple[int | None, int, str]] = []
-    blk: dict[int | None, int] = {}
-    for _ts_ns, aid, line in _sort_rows(_merge_rows(results["fix"])):
-        ev, sep, fixes = line.partition("\x1f")
-        if ev == "code":
-            blk[aid] = blk.get(aid, 0) + 1
-        elif ev == "syntax_fix":
-            fix_events.append((aid, blk.get(aid, 0), fixes if sep else ""))
-
-    # plugin activations: (plugin, surface, identifier, model) per firing, in
-    # stream order. Kept as rows rather than pre-counted so the section can
-    # slice the same stream by plugin, by contribution, and by plugin x model —
-    # the last one being philosophy §6's obsolescence gauge.
-    plugin_acts: list[tuple[str, str, str, str]] = []
-    for _ts_ns, _aid, line in _sort_rows(_merge_rows(results["plugin_act"])):
-        parts_p = line.split("\x1f")
-        if len(parts_p) != 4 or not parts_p[0]:
-            continue
-        plugin, surface, identifier, model = parts_p
-        plugin_acts.append((plugin, surface, identifier, model))
-
-    return {
-        "fail_rows": fail_rows,
-        "exec_failed": len(fail_rows),
-        "plugin_acts": plugin_acts,
-        "code_len": [_num(line) for _t, _a, line in _merge_rows(results["code_len"])],
-        "output_len": [_num(line) for _t, _a, line in _merge_rows(results["output_len"])],
-        "turn_durations": [_num(line) for _t, _a, line in _merge_rows(results["turn_dur"])],
-        "llm_by_model": [
-            (m, acc[0], acc[1], acc[2], acc[3], acc[4]) for m, acc in llm_by_model.items()
-        ],
-        "llm_position": llm_position,
-        "per_agent_llm": per_agent_llm,
-        "spawners": [
-            (line if line else "?") for _t, _a, line in _sort_rows(_merge_rows(results["spawners"]))
-        ],
-        "fix_events": fix_events,
-    }
-
-
-def _per_agent_rows(
-    by_agent_all: dict[str, int],
-    by_agent_turn: dict[str, int],
-    by_agent_turn_ok: dict[str, int],
-    by_agent_exec: dict[str, int],
-    by_agent_exec_fail: dict[str, int],
+def fetch_agent_rollups(
+    conn: psycopg.Connection[Any],
+    days: int,
     *,
-    from_: datetime,
-    to: datetime,
-    cutoffs: dict[int, datetime],
-    loki: LokiBackend,
-) -> dict[int | None, _PerAgentAgg]:
-    """Per-agent aggregates; first/last ts are fetched only for agents with
-    >= 2 events (the only rows `agent_lifetime_s` uses)."""
+    since_compact: bool = False,
+    now: datetime | None = None,
+) -> tuple[int, dict[int, dict[str, Any]]]:
+    """`(total_events, per-agent headline counters)` of the window, for `/api/metrics/agents`.
 
-    def _key(aid: str) -> int | None:
-        return int(aid) if aid else None
-
-    per_agent: dict[int | None, _PerAgentAgg] = {}
-    for aid_str, events_n in by_agent_all.items():
-        aid = _key(aid_str)
-        per_agent[aid] = _PerAgentAgg(
-            aid,
-            events_n,
-            by_agent_turn.get(aid_str, 0),
-            by_agent_turn_ok.get(aid_str, 0),
-            by_agent_exec.get(aid_str, 0),
-            by_agent_exec_fail.get(aid_str, 0),
-            from_,
-            from_,  # placeholder; spans only use events>=2 rows
-        )
-
-    def first_last(aid: int | None) -> tuple[datetime, datetime]:
-        kw: dict[str, Any] = {
-            "categories": ["telemetry", "log"],
-            "from_": from_,
-            "to": to,
-            "limit": 1,
-        }
-        if aid is None:
-            kw["service_only"] = True
-        else:
-            kw["agent_id"] = aid
-            if aid in cutoffs:
-                kw["from_"] = cutoffs[aid]
-        last_rows, _ = loki.query_events(direction="backward", **kw)
-        first_rows, _ = loki.query_events(direction="forward", **kw)
-
-        def _ts(rows: list[dict[str, Any]]) -> datetime:
-            return rows[0]["ts"] if rows else from_
-
-        return _ts(first_rows), _ts(last_rows)
-
-    need = [aid for aid, row in per_agent.items() if row.events >= 2]
-    if need:
-        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
-            futs = {aid: ex.submit(first_last, aid) for aid in need}
-            for aid, fut in futs.items():
-                first, last = fut.result()
-                row = per_agent[aid]
-                per_agent[aid] = _PerAgentAgg(
-                    row.agent_id,
-                    row.events,
-                    row.turn_total,
-                    row.turn_ok,
-                    row.exec_ok,
-                    row.exec_failed,
-                    first,
-                    last,
-                )
-    return per_agent
+    Runs only the statements that endpoint needs: the per-agent counters and the `llm_usage` sums.
+    """
+    data = read_agent_window(conn, days, since_compact=since_compact, now=now)
+    raw: dict[int | None, dict[str, Any]] = data["per_agent"]
+    per_agent = _per_agent_aggs(raw, datetime.now(UTC))
+    total = sum(int(r["events"]) for r in raw.values())
+    return total, agent_rollups(per_agent, _llm_by_agent(data["llm_per_agent"]))
 
 
 def _llm_totals_from_models(rows: list[tuple[str, int, int, int, int, int]]) -> _LlmTotals:
@@ -486,41 +277,23 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
 
     # exec
     total_exec = agg.exec_ok + agg.exec_failed
-    # The per-row unit extends fail rows event-bucket by event-bucket (by_event
-    # dict order = event first-appearance in the stream), so the Counter's
-    # insertion order — and most_common's tie order — is event-major, not raw
-    # stream order. Stable-sort the stream-ordered rows to reproduce it.
-    first_seen: dict[str, int] = {}
-    for _i, (event_name, _exc) in enumerate(agg.fail_rows):
-        first_seen.setdefault(event_name, _i)
-    fail_rows = sorted(agg.fail_rows, key=lambda r: first_seen[r[0]])
-    exc_types: Counter[str] = Counter()
-    for event_name, exc_type in fail_rows:
-        exc_types[exc_type or event_name] += 1
     data_exec = {
         "exec_total": total_exec,
         "exec_ok": agg.exec_ok,
         "exec_failed": agg.exec_failed,
         "success_rate_pct": round(agg.exec_ok / total_exec * 100, 1) if total_exec else 0.0,
-        "failure_types": dict(exc_types),
+        "failure_types": dict(agg.failure_types),
         "code_len_chars": pctiles(agg.code_len),
         "output_len_chars": pctiles(agg.output_len),
     }
 
     # llm_turns
     totals = _llm_totals_from_models(agg.llm_by_model)
-    # position thirds over per-agent llm_usage rows: (cache_read, in_total).
-    pos: dict[str, list[int]] = {"early": [0, 0], "mid": [0, 0], "late": [0, 0]}
-    by_agent: dict[int | None, list[tuple[int, int]]] = defaultdict(list)
-    for aid, cache, tin in agg.llm_position:
-        by_agent[aid].append((cache, tin))
-    for rows in by_agent.values():
-        n = len(rows)
-        for i, (cache, tin) in enumerate(rows):
-            bucket = pos[third_of(i, n)]
-            bucket[0] += cache
-            bucket[1] += tin
-    pos_hit = {b: round(c / i * 100, 1) if i else 0.0 for b, (c, i) in pos.items()}
+    # position thirds over each agent's llm_usage rows: (cache_read, in_total) sums.
+    pos_hit = {
+        b: round(c / i * 100, 1) if i else 0.0
+        for b, (c, i) in ((b, agg.llm_position.get(b, (0, 0))) for b in ("early", "mid", "late"))
+    }
     turns_per_agent = [row.turn_total for row in agg.per_agent.values()]
     data_llm = {
         "llm_calls": totals.calls,
@@ -541,10 +314,10 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
     # agent_activity
     by_spawner: Counter[str] = Counter()
     subagents = 0
-    for sp in agg.spawners:
-        by_spawner[sp.split(":", 1)[0]] += 1
+    for sp, count in agg.spawners.items():
+        by_spawner[sp.split(":", 1)[0]] += count
         if sp.startswith("agent:"):
-            subagents += 1
+            subagents += count
     spans = [
         (row.last_ts - row.first_ts).total_seconds()
         for row in agg.per_agent.values()
@@ -552,7 +325,7 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
     ]
     data_activity = {
         "distinct_agents": agg.distinct_agents,
-        "spawns_total": len(agg.spawners),
+        "spawns_total": sum(agg.spawners.values()),
         "spawns_by_spawner": dict(by_spawner),
         "subagent_spawns": subagents,
         "lifecycle": {
@@ -584,12 +357,12 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
     act_plugin: Counter[str] = Counter()
     act_contribution: Counter[str] = Counter()
     act_plugin_model: Counter[str] = Counter()
-    for plugin, surface, identifier, model in agg.plugin_acts:
-        act_plugin[plugin] += 1
-        act_contribution[f"{plugin}/{surface}/{identifier}"] += 1
-        act_plugin_model[f"{plugin}@{model or '?'}"] += 1
+    for (plugin, surface, identifier, model), count in agg.plugin_acts.items():
+        act_plugin[plugin] += count
+        act_contribution[f"{plugin}/{surface}/{identifier}"] += count
+        act_plugin_model[f"{plugin}@{model or '?'}"] += count
     data_plugin = {
-        "total_activations": len(agg.plugin_acts),
+        "total_activations": sum(agg.plugin_acts.values()),
         "distinct_plugins": len(act_plugin),
         "by_plugin": dict(act_plugin),
         "by_contribution": [
@@ -647,22 +420,24 @@ def build_report_from_aggregate(
     return text, data
 
 
-def agent_rollups_from_aggregate(agg: EventAggregate) -> dict[int, dict[str, Any]]:
-    """Per-agent headline counters for `/api/metrics/agents` — the same shape
-    `agent_rollup` produces per agent, from the aggregate fetch."""
+def agent_rollups(
+    per_agent: dict[int | None, _PerAgentAgg],
+    per_agent_llm: dict[int | None, list[tuple[str, int, int, int, int]]],
+) -> dict[int, dict[str, Any]]:
+    """Per-agent headline counters for `/api/metrics/agents` (service rows excluded)."""
     ensure_provider_plugins_loaded()
     out: dict[int, dict[str, Any]] = {}
-    for aid, row in agg.per_agent.items():
+    for aid, row in per_agent.items():
         if aid is None:
             continue
-        usage = agg.per_agent_llm.get(aid, [])
+        usage = per_agent_llm.get(aid, [])
         calls = sum(r[1] for r in usage)
         tin = sum(r[2] for r in usage)
         tout = sum(r[3] for r in usage)
         tcached = sum(r[4] for r in usage)
         cost = 0.0
-        for _m, _n, i, o, c in usage:
-            price = cost_usd(_m, i, o, c)
+        for model, _n, i, o, c in usage:
+            price = cost_usd(model, i, o, c)
             if price is not None:
                 cost += price
         out[aid] = {

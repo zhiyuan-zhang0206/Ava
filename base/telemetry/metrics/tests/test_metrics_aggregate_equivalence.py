@@ -1,14 +1,12 @@
-"""Loki-aggregate metrics path — golden output lock (task #1197 A3).
+"""The metrics aggregate over `telemetry_events` — golden output lock.
 
 `base.telemetry.metrics.aggregate.fetch_aggregate` + `build_report_from_aggregate` +
-`agent_rollups_from_aggregate` are the ONLY metrics path after the /api/metrics
-RSS fix (the per-row reference implementation was retired with the SQL
-aggregation — single-day materialization outgrew 430K+ rows). These tests lock
-the aggregate path's output over deterministic scenarios against the in-memory
-`FakeLoki` backend (same filter/window semantics as `gateway.lgtm.loki_events`):
-the text digest, the JSON `data` dict, and the per-agent rollups must stay
-exactly as pinned, so a regression in the Loki aggregation (counts, pctiles,
-position thirds, tie order, cost sums, since-compact cutoffs) fails here.
+`agent_rollups` are the ONLY metrics path: the window is reduced in SQL and nothing materializes
+per row. These tests lock the output over deterministic scenarios written into the real table: the
+text digest, the JSON `data` dict, and the per-agent rollups must stay exactly as pinned, so a
+regression in the aggregation (counts, pctiles, position thirds, tie order, cost sums,
+since-compact cutoffs) fails here. Every test writes into its own stretch of time (`TelemetryStream.now`),
+so the rows of other tests never fall into its window.
 
 The render math is locked by the pure unit tests in base/telemetry/metrics/tests/test_metrics.py;
 keep both green together.
@@ -17,35 +15,42 @@ keep both green together.
 from __future__ import annotations
 
 import random
+import re
 from typing import Any
 
+import psycopg
+import pytest
+
 from base.telemetry.metrics.aggregate import (
-    agent_rollups_from_aggregate,
     build_report_from_aggregate,
+    fetch_agent_rollups,
     fetch_aggregate,
 )
-from tests.gateway.loki_fake import FakeLoki
+from tests.gateway.telemetry_stream import TelemetryStream
+
+
+@pytest.fixture
+def fake(db_conn: psycopg.Connection) -> TelemetryStream:
+    return TelemetryStream(db_conn)
 
 
 def _run_aggregate(
-    fake: FakeLoki, *, days: int = 1, agent: int | None = None, since_compact: bool = False
+    stream: TelemetryStream, *, days: int = 1, agent: int | None = None, since_compact: bool = False
 ) -> tuple[str, dict[str, Any], dict[int, Any]]:
-    """Run the Loki aggregate path and return (text, data, per-agent rollups)."""
-    agg = fetch_aggregate(days, agent, since_compact=since_compact, loki=fake)
+    """Run the aggregate path and return (text, data, per-agent rollups)."""
+    agg = fetch_aggregate(stream.db, days, agent, since_compact=since_compact, now=stream.now)
     text, data = build_report_from_aggregate(agg, days, agent, since_compact=since_compact)
-    roll = agent_rollups_from_aggregate(agg)
+    _total, roll = fetch_agent_rollups(stream.db, days, since_compact=since_compact, now=stream.now)
     return text, data, roll
 
 
 def _norm(t: str) -> str:
     """generated_at is wall-clock at assembly time — normalize it."""
-    import re as _re
-
-    return _re.sub(r"generated \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", "generated X", t)
+    return re.sub(r"generated \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", "generated X", t)
 
 
 def _add(
-    fake: FakeLoki,
+    fake: TelemetryStream,
     *,
     event: str,
     agent_id: int | None,
@@ -60,20 +65,18 @@ def _add(
 # ── deterministic scenario tests ────────────────────────────────────────────
 
 
-def test_equivalence_empty() -> None:
-    fake = FakeLoki()
+def test_equivalence_empty(fake: TelemetryStream) -> None:
     _run_aggregate(fake)
     _run_aggregate(fake, since_compact=True)
 
 
-def test_equivalence_full_thread() -> None:
+def test_equivalence_full_thread(fake: TelemetryStream) -> None:
     """One agent with every unit-relevant event — the router wiring scenario.
 
-    Golden lock on the Loki aggregate path's output: the text digest, the
+    Golden lock on the aggregate output: the text digest, the
     machine data fragment, and the per-agent rollup must keep these exact
     values.
     """
-    fake = FakeLoki()
     aid = 1
     _add(fake, event="code", agent_id=aid, payload={"body": "print(1)"})
     _add(fake, event="syntax_fix", agent_id=aid, payload={"fixes": "ruff,ruff_format"})
@@ -123,13 +126,12 @@ def test_equivalence_full_thread() -> None:
     assert roll2[aid]["events"] == 8
 
 
-def test_plugin_activation_section_is_the_obsolescence_gauge() -> None:
+def test_plugin_activation_section_is_the_obsolescence_gauge(fake: TelemetryStream) -> None:
     """Philosophy §6 asks a shim to measure its own obsolescence. The section
     counts activations per contribution (the `<plugin>/<surface>/<identifier>`
     key `ava plugins inspect` lists as registered) and per plugin x model, so a
     shim that fired under one model and never under another is visible as data
     rather than as an opinion."""
-    fake = FakeLoki()
 
     def _act(plugin: str, surface: str, identifier: str, model: str) -> None:
         _add(
@@ -165,10 +167,9 @@ def test_plugin_activation_section_is_the_obsolescence_gauge() -> None:
     assert "ava_syntax_fix/hooks/before_exec" in text
 
 
-def test_plugin_activation_section_empty_when_nothing_fired() -> None:
+def test_plugin_activation_section_empty_when_nothing_fired(fake: TelemetryStream) -> None:
     """A window in which no plugin surface fired renders the zero state — the
     other half of the gauge: silence is the removal evidence."""
-    fake = FakeLoki()
     _add(fake, event="code", agent_id=1, payload={"body": "print(1)"})
 
     text, data, _roll = _run_aggregate(fake)
@@ -182,10 +183,9 @@ def test_plugin_activation_section_empty_when_nothing_fired() -> None:
     assert "no plugin hook, wrap, or prompt section fired" in text
 
 
-def test_equivalence_multi_agent_service_and_ties() -> None:
+def test_equivalence_multi_agent_service_and_ties(fake: TelemetryStream) -> None:
     """Two agents + service-level rows (agent_id None) — the NULL group feeds
     turns_per_agent / agent_lifetime_s in both paths."""
-    fake = FakeLoki()
     a1, a2 = 1, 2
     for aid, body, off in ((a1, "x=1", 0), (a2, "y=2", 0), (a1, "z=3", 0.5)):
         _add(fake, event="code", agent_id=aid, payload={"body": body}, ts_offset_days=off)
@@ -197,21 +197,29 @@ def test_equivalence_multi_agent_service_and_ties() -> None:
     _run_aggregate(fake, since_compact=True)
 
 
-def test_equivalence_exec_failure_variants() -> None:
-    fake = FakeLoki()
+def test_equivalence_exec_failure_variants(fake: TelemetryStream) -> None:
     aid = 1
     _add(fake, event="exec", agent_id=aid, payload={"body": "ok"})
     _add(fake, event="exec_failed", agent_id=aid, payload={"body": "t", "exc_type": "ValueError"})
     _add(fake, event="exec_failed", agent_id=aid, payload={"body": "t"})  # no exc_type
     _add(fake, event="exec_timeout", agent_id=aid, payload={"body": "t"})
     _add(fake, event="exec_cancelled", agent_id=aid, payload={"body": "t"})
-    _run_aggregate(fake)
+    _add(fake, event="exec(failed)", agent_id=aid, payload={"body": "t", "exc_type": "ValueError"})
+    _text, data, roll = _run_aggregate(fake)
+    ex = data["metrics"]["exec"]
+    assert (ex["exec_ok"], ex["exec_failed"]) == (1, 5)
+    assert ex["failure_types"] == {
+        "ValueError": 2,
+        "exec_cancelled": 1,
+        "exec_failed": 1,
+        "exec_timeout": 1,
+    }
+    assert roll[aid]["exec_failed"] == 5
 
 
-def test_equivalence_since_compact_cutoffs() -> None:
+def test_equivalence_since_compact_cutoffs(fake: TelemetryStream) -> None:
     """Pre-compact rows dropped for the compacted agent, everything kept for
     the other; the compact halt row itself is kept (ts >= cutoff)."""
-    fake = FakeLoki()
     a1, a2 = 1, 2
     _add(fake, event="code", agent_id=a1, payload={"body": "old"}, ts_offset_days=0.8)
     _add(
@@ -248,9 +256,8 @@ def test_equivalence_since_compact_cutoffs() -> None:
     assert roll2[a2]["events"] == 1
 
 
-def test_equivalence_sdk_ties_and_namespaces() -> None:
+def test_equivalence_sdk_ties_and_namespaces(fake: TelemetryStream) -> None:
     """Equal call counts — ties resolve deterministically (count desc, fn asc)."""
-    fake = FakeLoki()
     aid = 1
     fns = ["files.read", "shell.run", "files.read", "shell.run", "agents.spawn", "files.write"]
     for i, fn in enumerate(fns):
@@ -264,10 +271,9 @@ def test_equivalence_sdk_ties_and_namespaces() -> None:
     _run_aggregate(fake)
 
 
-def test_equivalence_syntax_fix_block_edges() -> None:
+def test_equivalence_syntax_fix_block_edges(fake: TelemetryStream) -> None:
     """fixes before any code (dropped), none sentinel, (n) suffixes, multi-kind
     events, blocks with no attached fix, two agents with different block counts."""
-    fake = FakeLoki()
     a1, a2 = 1, 2
     _add(fake, event="syntax_fix", agent_id=a1, payload={"fixes": "ruff"})  # before any code
     _add(fake, event="code", agent_id=a1, payload={"body": "a"})
@@ -281,8 +287,7 @@ def test_equivalence_syntax_fix_block_edges() -> None:
     _run_aggregate(fake)
 
 
-def test_equivalence_agent_filter() -> None:
-    fake = FakeLoki()
+def test_equivalence_agent_filter(fake: TelemetryStream) -> None:
     a1, a2 = 1, 2
     for aid in (a1, a2):
         _add(fake, event="code", agent_id=aid, payload={"body": "x"})
@@ -295,8 +300,7 @@ def test_equivalence_agent_filter() -> None:
     _run_aggregate(fake, agent=a1)
 
 
-def test_equivalence_window_respects_days() -> None:
-    fake = FakeLoki()
+def test_equivalence_window_respects_days(fake: TelemetryStream) -> None:
     aid = 1
     _add(fake, event="code", agent_id=aid, payload={"body": "old"}, ts_offset_days=5)
     _add(fake, event="code", agent_id=aid, payload={"body": "new"})
@@ -361,11 +365,10 @@ def _random_payload(rng: random.Random, event_name: str) -> dict[str, Any]:
     return {}
 
 
-def test_equivalence_randomized() -> None:
+def test_equivalence_randomized(fake: TelemetryStream) -> None:
     """Seeded pseudo-random stream — hundreds of rows across every event, all
     agents (incl. service rows), ts ties, windows of 1/3/7 days."""
     rng = random.Random(20260806)  # noqa: S311 — seeded, deterministic test data
-    fake = FakeLoki()
     agents = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     pool = [
         *[
@@ -413,8 +416,7 @@ def test_equivalence_randomized() -> None:
     assert str(agents[0]) in text or "1 agents" in _norm(text)
 
 
-def test_sdk_counts_weight_each_historical_sampling_policy() -> None:
-    fake = FakeLoki()
+def test_sdk_counts_weight_each_historical_sampling_policy(fake: TelemetryStream) -> None:
     for rate in (10, 1, 3, 1):
         _add(fake, event="sdk_call", agent_id=1, payload={"fn": "files.read", "sample_rate": rate})
     _, data, _ = _run_aggregate(fake)

@@ -2,21 +2,24 @@
 
 The per-unit aggregation math is unit-tested in base/telemetry/metrics/tests/test_metrics.py
 (pure functions over hand-built EventRow). This file locks the *endpoint
-contract*: the windowed Loki fetch wires `attributes.X` keys to the real emit
+contract*: the windowed fetch wires `attributes.X` keys to the real emit
 field names, the `{meta, metrics}` envelope shape holds, and the `days` / `agent`
-query params behave. The Loki backend is the in-memory `FakeLoki`
-(monkeypatched onto `gateway.lgtm.loki_events`); the `agents` table stays real SQL
-(`/api/metrics/agents` reads labels from it).
+query params behave. The events are real `telemetry_events` rows in a stretch of time of the
+test's own (`TelemetryStream`; the router's reads are pinned to that instant); the `agents`
+table is real SQL too (`/api/metrics/agents` reads labels from it).
 """
 
 from __future__ import annotations
+
+import functools
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from tests.gateway.loki_fake import FakeLoki
+from gateway.events import metrics as metrics_router
+from tests.gateway.telemetry_stream import TelemetryStream
 
 _UNITS = {
     "syntax_fix",
@@ -29,15 +32,12 @@ _UNITS = {
 
 
 @pytest.fixture
-def loki_fake(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
-    fake = FakeLoki()
-    monkeypatch.setattr("gateway.lgtm.loki_events.count_events", fake.count_events)
-    monkeypatch.setattr("gateway.lgtm.loki_events.count_grouped", fake.count_grouped)
-    monkeypatch.setattr("gateway.lgtm.loki_events.query_events", fake.query_events)
-    monkeypatch.setattr(
-        "gateway.lgtm.loki_events.query_projected_lines", fake.query_projected_lines
-    )
-    return fake
+def stream(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> TelemetryStream:
+    stream = TelemetryStream(db_conn)
+    for name in ("fetch_aggregate", "fetch_agent_rollups"):
+        original = getattr(metrics_router, name)
+        monkeypatch.setattr(metrics_router, name, functools.partial(original, now=stream.now))
+    return stream
 
 
 def _insert_agent(db: psycopg.Connection, *, spawner: str = "user") -> int:
@@ -49,7 +49,7 @@ def _insert_agent(db: psycopg.Connection, *, spawner: str = "user") -> int:
 
 
 def _insert_event(
-    fake: FakeLoki,
+    fake: TelemetryStream,
     *,
     event: str,
     agent_id: int | None = None,
@@ -65,7 +65,7 @@ def _insert_event(
 
 
 def test_metrics_empty_db_returns_envelope_with_all_units(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki
+    db_conn: psycopg.Connection, stream: TelemetryStream
 ) -> None:
     """Empty event stream -> meta zeros, all four metric units present."""
     db_conn.commit()
@@ -81,31 +81,29 @@ def test_metrics_empty_db_returns_envelope_with_all_units(
 
 
 def test_metrics_wires_payload_field_names(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki
+    db_conn: psycopg.Connection, stream: TelemetryStream
 ) -> None:
     """A code+syntax_fix+exec+llm_usage thread aggregates through the right keys.
 
-    Locks the Loki fetch -> unit-payload field-name contract end to end: if any
+    Locks the fetch -> unit-payload field-name contract end to end: if any
     emit site renames `fixes` / `body` / `in_total` / `cache_read` / `spawner`,
     or the idle-halt `body` sentinel, this reds.
     """
     aid = _insert_agent(db_conn)
-    _insert_event(loki_fake, event="code", agent_id=aid, payload={"body": "print(1)"})
+    _insert_event(stream, event="code", agent_id=aid, payload={"body": "print(1)"})
+    _insert_event(stream, event="syntax_fix", agent_id=aid, payload={"fixes": "ruff,ruff_format"})
+    _insert_event(stream, event="exec", agent_id=aid, payload={"body": "1\n", "ok": True})
     _insert_event(
-        loki_fake, event="syntax_fix", agent_id=aid, payload={"fixes": "ruff,ruff_format"}
-    )
-    _insert_event(loki_fake, event="exec", agent_id=aid, payload={"body": "1\n", "ok": True})
-    _insert_event(
-        loki_fake,
+        stream,
         event="llm_usage",
         agent_id=aid,
         payload={"in_total": 1000, "out_total": 200, "cache_read": 800, "model": "deepseek-v4-pro"},
     )
     # agent_activity reads `spawner` (split on ":") and the exact idle-halt body
     # sentinel — both are emit-site string contracts a unit test can't lock.
-    _insert_event(loki_fake, event="agent_spawned", agent_id=aid, payload={"spawner": "agent:1"})
-    _insert_event(loki_fake, event="halt", agent_id=aid, payload={"body": "no tool_call (idle)"})
-    _insert_event(loki_fake, event="halt", agent_id=aid, payload={"body": "system_halt (compact)"})
+    _insert_event(stream, event="agent_spawned", agent_id=aid, payload={"spawner": "agent:1"})
+    _insert_event(stream, event="halt", agent_id=aid, payload={"body": "no tool_call (idle)"})
+    _insert_event(stream, event="halt", agent_id=aid, payload={"body": "system_halt (compact)"})
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/metrics").json()
@@ -125,13 +123,13 @@ def test_metrics_wires_payload_field_names(
 
 
 def test_metrics_agent_filter_scopes_to_one(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki
+    db_conn: psycopg.Connection, stream: TelemetryStream
 ) -> None:
     """`?agent=` restricts the fetch to a single agent_id."""
     a1 = _insert_agent(db_conn, spawner="one")
     a2 = _insert_agent(db_conn, spawner="two")
-    _insert_event(loki_fake, event="code", agent_id=a1, payload={"body": "x"})
-    _insert_event(loki_fake, event="code", agent_id=a2, payload={"body": "y"})
+    _insert_event(stream, event="code", agent_id=a1, payload={"body": "x"})
+    _insert_event(stream, event="code", agent_id=a2, payload={"body": "y"})
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get(f"/api/metrics?agent={a1}").json()
@@ -141,13 +139,13 @@ def test_metrics_agent_filter_scopes_to_one(
 
 
 def test_metrics_null_agent_events_not_counted(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki
+    db_conn: psycopg.Connection, stream: TelemetryStream
 ) -> None:
     """Service-level events (agent_id None) count toward total_events but not
     distinct_agents (which filters None), and don't crash the per-agent grouping."""
     aid = _insert_agent(db_conn)
-    _insert_event(loki_fake, event="code", agent_id=aid, payload={"body": "x"})
-    _insert_event(loki_fake, event="log", agent_id=None, payload={})
+    _insert_event(stream, event="code", agent_id=aid, payload={"body": "x"})
+    _insert_event(stream, event="log", agent_id=None, payload={})
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/metrics").json()
@@ -155,11 +153,13 @@ def test_metrics_null_agent_events_not_counted(
     assert body["meta"]["distinct_agents"] == 1
 
 
-def test_metrics_window_filters_old_rows(db_conn: psycopg.Connection, loki_fake: FakeLoki) -> None:
+def test_metrics_window_filters_old_rows(
+    db_conn: psycopg.Connection, stream: TelemetryStream
+) -> None:
     """`days=1` drops events older than the window; `days=7` keeps them."""
     aid = _insert_agent(db_conn)
-    _insert_event(loki_fake, event="code", agent_id=aid, payload={"body": "old"}, ts_offset_days=3)
-    _insert_event(loki_fake, event="code", agent_id=aid, payload={"body": "new"}, ts_offset_days=0)
+    _insert_event(stream, event="code", agent_id=aid, payload={"body": "old"}, ts_offset_days=3)
+    _insert_event(stream, event="code", agent_id=aid, payload={"body": "new"}, ts_offset_days=0)
     db_conn.commit()
     with TestClient(app) as client:
         one_day = client.get("/api/metrics?days=1").json()
@@ -177,7 +177,7 @@ def test_metrics_days_out_of_range_rejected(db_conn: psycopg.Connection) -> None
 
 
 def test_metrics_default_window_comes_from_display_config(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, stream: TelemetryStream, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Omitted `days` is settings.display.metrics_default_window_days
     (``AVA_METRICS_DEFAULT_WINDOW_DAYS``); the literal 1 is only that field's
@@ -195,27 +195,27 @@ def test_metrics_default_window_comes_from_display_config(
     assert agents_resp.json()["meta"]["window_days"] == 3
 
 
-def test_metrics_since_compact_param(db_conn: psycopg.Connection, loki_fake: FakeLoki) -> None:
+def test_metrics_since_compact_param(db_conn: psycopg.Connection, stream: TelemetryStream) -> None:
     """`?since_compact=true` drops each agent's pre-compact events (the compact
     halt row itself is kept — `ts >=` cutoff); default counts everything and
     echoes since_compact=false in meta."""
     aid = _insert_agent(db_conn)
     _insert_event(
-        loki_fake,
+        stream,
         event="llm_usage",
         agent_id=aid,
         payload={"in_total": 1000, "out_total": 100, "cache_read": 0, "model": "deepseek-v4-pro"},
         ts_offset_days=0.5,
     )
     _insert_event(
-        loki_fake,
+        stream,
         event="halt",
         agent_id=aid,
         payload={"body": "system_halt (compact)"},
         ts_offset_days=0.3,
     )
     _insert_event(
-        loki_fake,
+        stream,
         event="llm_usage",
         agent_id=aid,
         payload={"in_total": 200, "out_total": 20, "cache_read": 0, "model": "deepseek-v4-pro"},
@@ -238,7 +238,7 @@ def test_metrics_since_compact_param(db_conn: psycopg.Connection, loki_fake: Fak
 # ── /api/metrics/agents ─────────────────────────────────────────────────────
 
 
-def test_metrics_agents_empty(db_conn: psycopg.Connection, loki_fake: FakeLoki) -> None:
+def test_metrics_agents_empty(db_conn: psycopg.Connection, stream: TelemetryStream) -> None:
     """Empty event stream -> empty agents list, meta zeros."""
     db_conn.commit()
     with TestClient(app) as client:
@@ -250,7 +250,7 @@ def test_metrics_agents_empty(db_conn: psycopg.Connection, loki_fake: FakeLoki) 
     assert body["meta"]["since_compact"] is False
 
 
-def test_metrics_agents_multi_agent(db_conn: psycopg.Connection, loki_fake: FakeLoki) -> None:
+def test_metrics_agents_multi_agent(db_conn: psycopg.Connection, stream: TelemetryStream) -> None:
     """One row per agent with its own aggregates + label from the agents table,
     sorted by cost descending. Service-level (agent_id None) events count in
     meta.total_events but produce no row."""
@@ -258,18 +258,18 @@ def test_metrics_agents_multi_agent(db_conn: psycopg.Connection, loki_fake: Fake
     a2 = _insert_agent(db_conn, spawner="two")
     # a1: cheap — unpriced model, one ok turn, one failed exec
     _insert_event(
-        loki_fake,
+        stream,
         event="llm_usage",
         agent_id=a1,
         payload={"in_total": 1000, "out_total": 100, "cache_read": 800, "model": "no-such-model"},
     )
     _insert_event(
-        loki_fake, event="turn_end", agent_id=a1, payload={"duration_seconds": 1, "ok": True}
+        stream, event="turn_end", agent_id=a1, payload={"duration_seconds": 1, "ok": True}
     )
-    _insert_event(loki_fake, event="exec_failed", agent_id=a1, payload={"exc_type": "ValueError"})
+    _insert_event(stream, event="exec_failed", agent_id=a1, payload={"exc_type": "ValueError"})
     # a2: expensive — claude-opus-4-8 (5, 5, 25) USD/M: 1M in + 1M out = 30.0
     _insert_event(
-        loki_fake,
+        stream,
         event="llm_usage",
         agent_id=a2,
         payload={
@@ -279,8 +279,8 @@ def test_metrics_agents_multi_agent(db_conn: psycopg.Connection, loki_fake: Fake
             "model": "claude-opus-4-8",
         },
     )
-    _insert_event(loki_fake, event="exec", agent_id=a2, payload={"body": "ok"})
-    _insert_event(loki_fake, event="log", agent_id=None, payload={})
+    _insert_event(stream, event="exec", agent_id=a2, payload={"body": "ok"})
+    _insert_event(stream, event="log", agent_id=None, payload={})
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/metrics/agents?days=1").json()
@@ -303,34 +303,34 @@ def test_metrics_agents_multi_agent(db_conn: psycopg.Connection, loki_fake: Fake
     assert cheap["exec_failed"] == 1
 
 
-def test_metrics_agents_since_compact(db_conn: psycopg.Connection, loki_fake: FakeLoki) -> None:
+def test_metrics_agents_since_compact(db_conn: psycopg.Connection, stream: TelemetryStream) -> None:
     """`?since_compact=true` counts only each agent's events at or after its
     latest compact halt; an agent that never compacted keeps everything."""
     compacted = _insert_agent(db_conn, spawner="compacted")
     plain = _insert_agent(db_conn, spawner="plain")
     _insert_event(
-        loki_fake,
+        stream,
         event="llm_usage",
         agent_id=compacted,
         payload={"in_total": 1000, "out_total": 100, "cache_read": 0, "model": "deepseek-v4-pro"},
         ts_offset_days=0.5,
     )
     _insert_event(
-        loki_fake,
+        stream,
         event="halt",
         agent_id=compacted,
         payload={"body": "system_halt (compact)"},
         ts_offset_days=0.3,
     )
     _insert_event(
-        loki_fake,
+        stream,
         event="llm_usage",
         agent_id=compacted,
         payload={"in_total": 200, "out_total": 20, "cache_read": 0, "model": "deepseek-v4-pro"},
         ts_offset_days=0.1,
     )
     _insert_event(
-        loki_fake,
+        stream,
         event="llm_usage",
         agent_id=plain,
         payload={"in_total": 500, "out_total": 50, "cache_read": 0, "model": "deepseek-v4-pro"},

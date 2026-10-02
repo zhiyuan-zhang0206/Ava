@@ -1,5 +1,5 @@
-"""Metrics: report types and rendering helpers (re-exported here), Loki
-aggregates, LogQL validation, Grafana dashboard supply, the core metric
+"""Metrics: report types and rendering helpers (re-exported here), the
+`telemetry_events` aggregate (`aggregate`, `aggregate_sql`), LogQL validation, Grafana dashboard supply, the core metric
 families (`core/`), and plugin metric registration (`plugin_metrics`)."""
 
 from base.telemetry.metrics import core as core

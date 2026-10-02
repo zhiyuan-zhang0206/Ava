@@ -2319,7 +2319,6 @@ CREATE TABLE telemetry_events (
     PRIMARY KEY (event_uid, ts)
 ) PARTITION BY RANGE (ts);
 
-CREATE INDEX telemetry_events_ts ON telemetry_events (ts);
 CREATE INDEX telemetry_events_agent_ts ON telemetry_events (agent_id, ts);
 CREATE INDEX telemetry_events_name_ts ON telemetry_events (event_name, ts);
 CREATE INDEX telemetry_events_trace ON telemetry_events (trace_id) WHERE trace_id IS NOT NULL;
@@ -2331,6 +2330,12 @@ CREATE INDEX IF NOT EXISTS telemetry_events_anomaly_ts
     ON telemetry_events (ts)
     INCLUDE (cluster, category, level, event_name, source, process)
     WHERE level IN ('warning', 'error', 'critical');
+
+-- A window's rows counted per agent and per event name come from the index alone (migration
+-- 20261003T010000_telemetry-events-metrics-index); it also serves every plain ts range scan.
+CREATE INDEX IF NOT EXISTS telemetry_events_ts_agent_name
+    ON telemetry_events (ts)
+    INCLUDE (agent_id, event_name);
 
 COMMENT ON TABLE telemetry_events IS
     'Append-only record of category=telemetry and category=log events, partitioned by month on ts; Loki holds only an observation copy. No UPDATE, DELETE or TRUNCATE; old months leave by dropping a partition.';
