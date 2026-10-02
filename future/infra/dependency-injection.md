@@ -337,11 +337,25 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   entry points of the commands and probes that read a daemon's row (agent pause, cluster pause,
   lifecycle, cluster status, roster, IM alert delivery, machine registration). Those entry points
   are their own roots; threading the table through them is not done.
+- **Done, the event bus** (`base/events/live/bus.py`): `EventBusConfig` (Redis URL, events
+  channel) is read once, by `EventBus.from_settings()`; the handle gives `async_redis()` (one
+  shared client per event loop), `open_async_redis()`, `sync_redis()` and the never-raise
+  `publish_best_effort` / `publish_best_effort_sync` on the events channel (or a named one). The
+  transport (resilience kwargs, auth retry, publish discipline) stays in `redis_client`, which
+  no longer reads the settings; `get_async_redis`, `sync_redis` and the module-level publishes
+  are gone. The announce hints (`announce.publish_*`) and the ops lifecycle event publishes take
+  the bus as their first argument. A daemon root builds one bus and passes it down; the gateway
+  builds `app.state.bus` in the lifespan and its handlers read it from `request`. The
+  `ambient-bus` rule fails `EventBus.from_settings()` outside the modules named in `BUS_PACKAGES`
+  (the daemon roots of agent host, delivery watchdog, heartbeat, page server and TTL reaper, the
+  CLI health probe, and no root at all in `gateway/events`, `gateway/alerts`, `gateway/routers`).
+  Library code (`base/agents`, `ops`, `agent/ownership`, the fleet plugin) builds its own bus at
+  the call; threading one through those call chains is not done.
 - **Root-local bundles**: a root may gather what it wires into a frozen dataclass marked
   `base.wiring.root_bundle`. The `bundle-leak` rule fails any annotation of such a class outside
   its defining module, so the bundle stays a local variable of the root and never becomes a
   parameter type (a function handed the whole bundle can reach any member).
-- **Not yet**: the event bus handle, the clock, and the cluster-secret
+- **Not yet**: the clock, and the cluster-secret
   contraction (machine API tokens in place of the human secret outside the gateway, the operator
   CLI and the root); the agent-side per-turn slices carried in `AvaContext`.
 

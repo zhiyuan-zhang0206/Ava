@@ -12,8 +12,8 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.config import settings
 from base.db import create_agent, insert_inbound_message
+from base.events.live.bus import EventBus
 from base.events.live.projection import Cancelled
 from base.events.live.tests.fakes import patch_announcements
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -284,8 +284,7 @@ def test_cancel_ack_publishes_committed_completion_once(
     published: list[Cancelled] = []
     wakes: list[int] = []
 
-    def publish(channel: str, payload: str, *, context: str = "") -> int:
-        assert channel == settings.data_plane.events_channel
+    def publish(_bus: object, payload: str, *, context: str = "") -> int:
         # A separate connection must see both writes before the UI is told
         # the external actor completed cancellation.
         assert db_conn.execute(
@@ -298,7 +297,7 @@ def test_cancel_ack_publishes_committed_completion_once(
         published.append(Cancelled.model_validate_json(payload))
         return 1
 
-    monkeypatch.setattr("base.events.live.redis_client.publish_best_effort_sync", publish)
+    monkeypatch.setattr(EventBus, "publish_best_effort_sync", publish)
     monkeypatch.setattr(leases, "_wake", wakes.append)
     with pytest.raises(leases.ImpersonationError, match="not read"):
         leases.ack(lease["id"], attested_caller(lease), [cancel, unread])

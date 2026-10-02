@@ -18,6 +18,7 @@ import services.labeler.labeler as labels_module
 from base.agents.labels import publish_label_updated
 from base.config import settings
 from base.db import create_agent
+from base.events.live.bus import EventBus
 from gateway.app import app
 from services.labeler.labeler import _normalize as _normalize_to
 from services.labeler.labeler import generate_label_async
@@ -549,7 +550,7 @@ class TestPublishLabelUpdated:
 
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
-        await publish_label_updated(42, "\u77ed\u540d")
+        await publish_label_updated(EventBus.from_settings(), 42, "\u77ed\u540d")
         assert captured["channel"] == settings.data_plane.events_channel
         assert '"agent_id":42' in captured["payload"]
         assert '"label":"\u77ed\u540d"' in captured["payload"]

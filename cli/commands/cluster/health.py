@@ -91,7 +91,7 @@ def _gateway_liveness_with_retry() -> bool:
 def _data_plane_abnormal() -> bool:
     """True when either dependency behind the gateway is currently unreachable."""
     from base.db import Database
-    from base.events.live.redis_client import sync_redis
+    from base.events.live.bus import EventBus
 
     try:
         with Database.from_settings().connect(autocommit=True):
@@ -99,7 +99,7 @@ def _data_plane_abnormal() -> bool:
     except Exception:
         return True
     try:
-        client = sync_redis()
+        client = EventBus.from_settings().sync_redis()
         try:
             client.ping()  # pyright: ignore[reportUnknownMemberType] — redis-py types ping's optional argument as Unknown.
         finally:

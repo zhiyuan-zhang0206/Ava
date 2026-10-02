@@ -213,10 +213,10 @@ ENDPOINT_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "endpoi
 
 # ── 7. event-bus packages ───────────────────────────────────────────────────
 
-# Packages that take an `EventBus` handle from their composition root and reach Redis through
-# no ambient entry: package dir -> the modules that may call `EventBus.from_settings()`
-# (scripts/structure/ambient_state/busrule.py). A package declares `bus = [...]` in its own
-# `ambient_roots.toml` (see roots.py); a declared root that no longer exists fails as stale.
+# Packages that take an `EventBus` handle from their composition root: package dir -> the
+# modules that may call `EventBus.from_settings()` (scripts/structure/ambient_state/busrule.py).
+# A package declares `bus = [...]` in its own `ambient_roots.toml` (see roots.py); a declared
+# root that no longer exists fails as stale.
 BUS_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "bus")
 
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
