@@ -50,23 +50,10 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", Mock(return_value=0))
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", Mock(return_value=[]))
 
-    def private_pty_cli(_self: PtySessionBackend, *tokens: str) -> subprocess.CompletedProcess[str]:
-        # Stop intentionally consumes the ambient override. Every independent
-        # test CLI still needs its explicit private binding when the checkout
-        # currently points at an isolated native-proof home.
-        return subprocess.run(  # noqa: S603 — fixed module and fixture-owned home
-            [sys.executable, "-m", "base.sessions.pty.cli", *tokens],
-            capture_output=True,
-            text=True,
-            check=False,
-            env={
-                **os.environ,
-                "AVA_HOME": str(tmp_path),
-                "HOME": str(tmp_path),
-            },
-        )
-
-    monkeypatch.setattr(PtySessionBackend, "_cli", private_pty_cli)
+    # Stop intentionally consumes the ambient override. Every independent test
+    # CLI still needs its explicit private binding when the checkout currently
+    # points at an isolated native-proof home: the PTY CLI children inherit it.
+    monkeypatch.setenv("HOME", str(tmp_path))
     return tmp_path
 
 

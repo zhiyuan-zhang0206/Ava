@@ -19,7 +19,6 @@
     "tests/cli/test_main_dispatch.py::cli.parsers.host._h_start": 1,
     "tests/cli/test_main_dispatch.py::cli.parsers.host._h_status": 2,
     "tests/cli/test_maintenance.py::ops.agent_pause._wake": 1,
-    "tests/cli/test_maintenance_stop.py::base.sessions.backend.PtySessionBackend._cli": 1,
     "tests/cli/test_maintenance_stop.py::cli.commands.lifecycle.root_driver._root_tree_plan": 1,
     "tests/cli/test_maintenance_stop.py::cli.commands.lifecycle.root_driver._root_tree_selection": 4,
     "tests/cli/test_maintenance_stop.py::cli.commands.lifecycle.root_driver._stop_root_service_tree": 5,
