@@ -12,11 +12,6 @@
     "tests/gateway/test_runtime_metrics.py::gateway.middleware.runtime_metrics._sse_active_connections": 2
   },
   "tests_location": {
-    "tests/gateway/test_alerts_api.py::top-level": 1,
-    "tests/gateway/test_caller_protocol_path.py::top-level": 1,
-    "tests/gateway/test_cluster_endpoints.py::top-level": 1,
-    "tests/gateway/test_delivery_publish.py::top-level": 1,
-    "tests/gateway/test_labels.py::top-level": 1,
     "tests/gateway/test_okf_graph.py::top-level": 1,
     "tests/gateway/test_runtime_metrics.py::top-level": 1
   }

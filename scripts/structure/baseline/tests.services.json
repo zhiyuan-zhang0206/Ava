@@ -32,16 +32,11 @@
   "tests_location": {
     "tests/services/test_ava_root_custody.py::top-level": 1,
     "tests/services/test_ava_root_daemon.py::top-level": 1,
-    "tests/services/test_ava_root_glue_manifests.py::top-level": 1,
     "tests/services/test_ava_root_ipc.py::top-level": 1,
     "tests/services/test_ava_root_manifest.py::top-level": 1,
     "tests/services/test_ava_root_supervisor.py::top-level": 1,
     "tests/services/test_backup.py::top-level": 1,
     "tests/services/test_backup_recovery_contract.py::top-level": 1,
-    "tests/services/test_backup_scheduler_daemon.py::top-level": 1,
-    "tests/services/test_backup_scheduler_shutdown.py::top-level": 1,
-    "tests/services/test_gate_root.py::top-level": 1,
-    "tests/services/test_hosted_db_wait_liveness.py::top-level": 1,
-    "tests/services/test_maintenance_readiness.py::top-level": 1
+    "tests/services/test_backup_scheduler_daemon.py::top-level": 1
   }
 }

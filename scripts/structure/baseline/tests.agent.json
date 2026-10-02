@@ -24,12 +24,7 @@
   "tests_location": {
     "tests/agent/test_claim.py::top-level": 1,
     "tests/agent/test_compact.py::top-level": 1,
-    "tests/agent/test_corpse_reap.py::top-level": 1,
     "tests/agent/test_exec_domain_confirmation.py::top-level": 1,
-    "tests/agent/test_fork_notes.py::top-level": 1,
-    "tests/agent/test_lifecycle_finalizers.py::top-level": 1,
-    "tests/agent/test_maintenance.py::top-level": 1,
-    "tests/agent/test_maintenance_legacy_cold.py::top-level": 1,
-    "tests/agent/test_maintenance_lifecycle_wait.py::top-level": 1
+    "tests/agent/test_fork_notes.py::top-level": 1
   }
 }

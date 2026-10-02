@@ -1,6 +1,3 @@
 {
-  "tests_location": {
-    "tests/lifecycle/db_authority/test_api_tokens.py::top-level": 1,
-    "tests/lifecycle/db_authority/test_backup_owner.py::top-level": 1
-  }
+  "tests_location": {}
 }
