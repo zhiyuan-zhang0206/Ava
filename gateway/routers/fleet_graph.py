@@ -5,18 +5,17 @@ dynamic weight that sums per-event recency decay over a time window.
 
 Data sources (task #1197 LGTM cutover):
 - `agents_meta` + `agents` (Postgres): node identity, liveness, labels.
-- Prometheus (`gateway/lgtm/prom_metrics.py`): the llm_usage token aggregates —
-  retained-window (7d) totals + selected-window scores — from the OTLP-mapped
-  counters `ava_llm_usage_in_total` / `ava_llm_usage_out_total`. The retained
-  total uses `increase()` so exporter restarts do not reset the reported value.
+- `telemetry_events` (Postgres): the llm_usage token sums — retained-window (7d)
+  totals + selected-window scores — from the `in_total` / `out_total` payload
+  fields, read in the same connection as the nodes.
 - Edge events (audit category, spawn/send_message/fork/resurrect): aggregated
   in Postgres from `audit_events`, the permanent audit record
   (gateway/events/audit_rows.py), in the same phase as the nodes.
 
-Successful Prometheus reads also pass through the gateway-latency heartbeat
-guard. Old or missing heartbeat samples retain and cache the fetched graph,
-marked separately as telemetry-degraded; only fallback data uses the graph's
-stale flag.
+A successful graph also passes through the gateway-latency heartbeat guard
+(`telemetry_staleness`, over `telemetry_events`). An old or missing heartbeat
+retains and caches the fetched graph, marked separately as telemetry-degraded;
+only fallback data uses the graph's stale flag.
 
 Each stale-serving fallback emits one `fleet_graph_stale` event per episode
 via `_emit_stale`, watched by the ops rule `ava-ops-fleet-graph-stale` (#3925).
@@ -26,21 +25,21 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, LiteralString, NamedTuple
 
-import httpx
 from fastapi import APIRouter, Query, Request
 from psycopg import errors as pg_errors
 
 from base import telemetry
 from base.config import settings
+from base.events.contract import LLM_USAGE_KEYS
 from base.events.declarations.gateway import FleetGraphStaleReason
 from base.events.live.redis_client import sync_redis
 from base.log import logger
+from base.telemetry.event_sql import numeric
 from gateway.events import audit_rows
-from gateway.lgtm import prom_metrics, telemetry_staleness
+from gateway.lgtm import telemetry_staleness
 from gateway.schemas.fleet_graph import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
 from gateway.schemas.stats import StatsWindowHours, window_delta
 
@@ -54,18 +53,12 @@ router = APIRouter()
 _CACHE_TTL_SECONDS = 60
 _LAST_GOOD_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 
-_TELEMETRY_READ_TIMEOUT_S = 8.0
 _ROUTE_TIMEOUT_S = 10.0
+_RETAINED_WINDOW = timedelta(days=7)
 
 # The fixed `route` value of every `fleet_graph_stale` event (task #3925): a
 # closed constant, never a request-derived path; reasons live in the contract.
 _STALE_ROUTE = "fleet_graph"
-
-# The OTLP-mapped llm_usage counters (base/telemetry/otlp/telemetry_otlp._record_metrics:
-# int payload field -> Counter named ava_<event>_<field>, Prometheus appends
-# `_total`). The token totals are the sum of the two counters.
-_IN_METRIC = "ava_llm_usage_in_total"
-_OUT_METRIC = "ava_llm_usage_out_total"
 
 
 def _monotonic() -> float:
@@ -124,6 +117,7 @@ def _stale_graph(key: str, nodes: list[FleetGraphNode]) -> FleetGraphResponse:
 
 
 def _finalize_graph_response(
+    pool: Any,
     *,
     key: str,
     nodes: list[FleetGraphNode],
@@ -131,7 +125,7 @@ def _finalize_graph_response(
 ) -> FleetGraphResponse:
     """Cache a successful graph while reporting heartbeat health separately."""
     try:
-        telemetry_stale = telemetry_staleness.check_and_report(timeout_s=3.0)
+        telemetry_stale = telemetry_staleness.check_and_report(pool)
     except Exception as exc:
         logger.debug("fleet_graph telemetry staleness guard failed open: {}", exc)
         telemetry_stale = False
@@ -191,11 +185,21 @@ def _emit_stale(reason: FleetGraphStaleReason) -> None:
     )
 
 
+class _AgentTokens(NamedTuple):
+    """One agent's llm_usage token sums: retained window (7d) and selected window."""
+
+    in_retained: float
+    out_retained: float
+    in_window: float
+    out_window: float
+
+
 class _PgGraphData(NamedTuple):
     """The DB-bound graph phase, kept separate from upstream telemetry work."""
 
     node_rows: list[tuple[Any, ...]]
     edges: list[FleetGraphEdge]
+    tokens: dict[int, _AgentTokens]
 
 
 def _edges_from(
@@ -231,7 +235,7 @@ def _fetch_pg_graph(
     now: datetime,
     decay_lambda: float,
 ) -> _PgGraphData:
-    """Fetch nodes and edges under the route's PG budget.
+    """Fetch nodes, edges and token sums under the route's PG budget.
 
     Edges connect two live endpoints unless terminated agents are included; the
     live set is the node set just read.
@@ -258,68 +262,43 @@ def _fetch_pg_graph(
         edge_rows = audit_rows.edge_weights(
             conn, live_ids=live_ids, win_start=win_start, now=now, decay_lambda=decay_lambda
         )
-    return _PgGraphData(node_rows, _edges_from(edge_rows))
+        tokens = _agent_tokens(conn, now=now, win_start=win_start)
+    return _PgGraphData(node_rows, _edges_from(edge_rows), tokens)
 
 
-def _fetch_prom_tokens(
-    hours: StatsWindowHours | None,
-) -> tuple[dict[str, float], dict[str, float], dict[str, float], dict[str, float]]:
-    """Fetch independent retained and selected-window token aggregates in parallel."""
-    # All four counter reads are independent, including the retained and
-    # selected-window pairs, so issue them together instead of adding four
-    # 8-second waits to the route's sync worker occupancy.
-    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="fleet-prom") as executor:
-        futures = {
-            "in_retained": executor.submit(
-                prom_metrics.sum_by,
-                _IN_METRIC,
-                "agent_id",
-                window=timedelta(days=7),
-                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
-            ),
-            "out_retained": executor.submit(
-                prom_metrics.sum_by,
-                _OUT_METRIC,
-                "agent_id",
-                window=timedelta(days=7),
-                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
-            ),
-            "in_window": executor.submit(
-                prom_metrics.sum_by,
-                _IN_METRIC,
-                "agent_id",
-                window=window_delta(hours) if hours is not None else None,
-                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
-            ),
-            "out_window": executor.submit(
-                prom_metrics.sum_by,
-                _OUT_METRIC,
-                "agent_id",
-                window=window_delta(hours) if hours is not None else None,
-                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
-            ),
-        }
-        return (
-            futures["in_retained"].result(),
-            futures["out_retained"].result(),
-            futures["in_window"].result(),
-            futures["out_window"].result(),
-        )
+def _agent_tokens(
+    conn: Any, *, now: datetime, win_start: datetime | None
+) -> dict[int, _AgentTokens]:
+    """Per-agent token sums of the `llm_usage` rows: the retained window and the selected one.
+
+    `win_start` None is the all-time window. One scan from the older of the two bounds.
+    """
+    in_total = numeric(LLM_USAGE_KEYS["in_total"])
+    out_total = numeric(LLM_USAGE_KEYS["out_total"])
+    win_cond: LiteralString = "TRUE" if win_start is None else "ts > %(window)s"
+    floor: LiteralString = "TRUE" if win_start is None else "ts > least(%(retained)s, %(window)s)"
+    query = f"""
+        SELECT agent_id,
+               COALESCE(sum({in_total}) FILTER (WHERE ts > %(retained)s), 0),
+               COALESCE(sum({out_total}) FILTER (WHERE ts > %(retained)s), 0),
+               COALESCE(sum({in_total}) FILTER (WHERE {win_cond}), 0),
+               COALESCE(sum({out_total}) FILTER (WHERE {win_cond}), 0)
+        FROM telemetry_events
+        WHERE event_name = 'llm_usage' AND category = 'telemetry' AND agent_id IS NOT NULL
+          AND ts <= %(now)s AND {floor}
+        GROUP BY agent_id
+    """  # noqa: S608 — keys come from the registered payload constants
+    params = {"now": now, "retained": now - _RETAINED_WINDOW, "window": win_start}
+    rows = conn.execute(query, params).fetchall()
+    return {int(agent): _AgentTokens(*(float(v) for v in sums)) for agent, *sums in rows}
 
 
 def _build_nodes(
-    node_rows: list[tuple[Any, ...]],
-    *,
-    in_retained: dict[str, float] | None = None,
-    out_retained: dict[str, float] | None = None,
-    in_win: dict[str, float] | None = None,
-    out_win: dict[str, float] | None = None,
+    node_rows: list[tuple[Any, ...]], tokens: dict[int, _AgentTokens] | None = None
 ) -> list[FleetGraphNode]:
-    """Build graph nodes, retaining PG identity when metrics are unavailable."""
-    in_retained = in_retained or {}
-    out_retained = out_retained or {}
-    in_win = in_win or {}
-    out_win = out_win or {}
+    """Build graph nodes, retaining PG identity when the token sums are unavailable."""
+    tokens = tokens or {}
+    none = _AgentTokens(0.0, 0.0, 0.0, 0.0)
     return [
         FleetGraphNode(
             agent_id=r[0],
@@ -328,8 +307,12 @@ def _build_nodes(
             liveness_state=r[3],
             spawner=r[4],
             machine=r[5],
-            total_tokens=round(in_retained.get(str(r[0]), 0.0) + out_retained.get(str(r[0]), 0.0)),
-            node_score=round(in_win.get(str(r[0]), 0.0) * 0.1 + out_win.get(str(r[0]), 0.0), 2),
+            total_tokens=round(
+                tokens.get(r[0], none).in_retained + tokens.get(r[0], none).out_retained
+            ),
+            node_score=round(
+                tokens.get(r[0], none).in_window * 0.1 + tokens.get(r[0], none).out_window, 2
+            ),
         )
         for r in node_rows
     ]
@@ -351,7 +334,7 @@ def get_fleet_graph(
     """Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).
 
     Nodes carry status, label, a windowed recent-work `node_score`, and
-    restart-proof `total_tokens` consumed in the retained window (7d). Edges
+    `total_tokens` consumed in the retained window (7d). Edges
     split into two families: lineage
     (spawn/fork/resurrect) is structural and permanent; messages (send_message)
     decay with recency. Terminated agents — and edges touching a terminated
@@ -375,11 +358,9 @@ def get_fleet_graph(
 
     Node score (windowed, drives node size):
         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
-    over the agent's `llm_usage` counters in the window — read from
-    Prometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,
-    windowed via `increase(...)`). `total_tokens` is the sum of the same two
-    counters over the retained 7d window, also using `increase(...)` so
-    exporter process restarts do not reset it.
+    over the agent's `llm_usage` rows in the window, summed from
+    `telemetry_events`. `total_tokens` is the sum of the same two fields over
+    the retained 7d window.
 
     Edge weight:
         lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,
@@ -427,37 +408,10 @@ def get_fleet_graph(
         _emit_stale("pg_budget")
         return _stale_graph(key, _build_nodes(node_rows))
 
-    # --- Token aggregates from Prometheus (the llm_usage counters) ---
-    # total_tokens is the restart-proof retained-window sum; node_score is the
-    # selected-window weighted score (node size). Both read the OTLP-mapped
-    # counters via gateway/lgtm/prom_metrics; configured windows become PromQL
-    # range selectors (increase over [Nh]) instead of SQL fragments.
-    try:
-        in_retained, out_retained, in_win, out_win = _fetch_prom_tokens(hours)
-    except prom_metrics.PromQueryBudgetError as exc:
-        logger.warning("fleet_graph Prometheus query budget refused — serving stale graph: {}", exc)
-        _emit_stale("prom_budget")
-        return _stale_graph(key, _build_nodes(node_rows))
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("fleet_graph Prometheus query failed — serving stale graph: {}", exc)
-        _emit_stale("prom_failed")
-        return _stale_graph(key, _build_nodes(node_rows))
-
-    nodes = _build_nodes(
-        node_rows,
-        in_retained=in_retained,
-        out_retained=out_retained,
-        in_win=in_win,
-        out_win=out_win,
-    )
-
-    if _monotonic() > deadline:
-        # Both over-budget shapes (deadline crossed / admission refused) share prom_budget.
-        logger.warning("fleet_graph Prometheus phase exceeded route budget — serving stale graph")
-        _emit_stale("prom_budget")
-        return _stale_graph(key, nodes)
+    nodes = _build_nodes(node_rows, pg_data.tokens)
 
     return _finalize_graph_response(
+        request.app.state.db_pool,
         key=key,
         nodes=nodes,
         edges=pg_data.edges,
