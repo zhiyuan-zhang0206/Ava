@@ -33,6 +33,9 @@
   "files": {
     "base/telemetry/tests/test_tracing.py": 1724
   },
+  "nesting": {
+    "base/telemetry/tests/test_telemetry_otlp_exit_delivery.py::_sent_pairs": 6
+  },
   "patch_targets": {
     "base/telemetry/tests/test_observed_metrics.py::base.telemetry.metrics.observed_metrics._failures": 1
   }

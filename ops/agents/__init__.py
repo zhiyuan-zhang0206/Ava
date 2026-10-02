@@ -25,9 +25,6 @@ from ops.agents.spawn import (
     _SPAWNER_AGENT_RE as _SPAWNER_AGENT_RE,
 )
 from ops.agents.spawn import (
-    _copy_checkpoint_chain as _copy_checkpoint_chain,
-)
-from ops.agents.spawn import (
     _spawner_agent_id_malformed as _spawner_agent_id_malformed,
 )
 from ops.agents.spawn import (

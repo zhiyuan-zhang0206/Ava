@@ -39,6 +39,7 @@ from base.agents.history.checkpoint import (
     load_checkpoint_messages_full,
     load_checkpoint_messages_segment,
 )
+from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.history.delta_read_compat import (
     _fold_messages,
     areconstruct_delta_messages,
@@ -46,7 +47,6 @@ from base.agents.history.delta_read_compat import (
     wrap_saver_reads_with_delta_reconstruction,
 )
 from base.db import create_agent
-from ops.agents.spawn import _copy_checkpoint_chain
 
 
 def _saver(pool: AsyncConnectionPool) -> AsyncPostgresSaver:
@@ -625,7 +625,7 @@ async def test_fork_copies_the_delta_write_chain(
     tip = (await _checkpoint_ids(aops_pool, str(source)))[-1]
 
     with db_conn.cursor() as cur:
-        _copy_checkpoint_chain(cur, source, tip, target)
+        copy_checkpoint_chain(cur, source, tip, target)
     db_conn.commit()
 
     forked_cfg = _config(str(target))
@@ -703,8 +703,8 @@ async def test_fork_at_a_boundary_replicates_the_source_state(
     assert src_b2 == ["sum0", "tail0", "u2", "a2", "u3", "a3"]
 
     with db_conn.cursor() as cur:
-        _copy_checkpoint_chain(cur, source, b1, t_b1)
-        _copy_checkpoint_chain(cur, source, b2, t_b2)
+        copy_checkpoint_chain(cur, source, b1, t_b1)
+        copy_checkpoint_chain(cur, source, b2, t_b2)
     db_conn.commit()
 
     # Native delta read: fork@B1's window is the whole chain (no boundary

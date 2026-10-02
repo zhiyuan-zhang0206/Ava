@@ -234,7 +234,7 @@ rewritten and stop being duplicated.
 - Reaper: two added rules — refs die with their blob versions (same trim statement family);
   CAS rows are GC'd when unreferenced, batched like blob deletes. Compact boundaries and
   keep-K semantics unchanged.
-- Fork: today's `_copy_checkpoint_chain` copies chain + all blobs; refs copy with blobs and
+- Fork: today's `copy_checkpoint_chain` (`base.agents.history.checkpoint_copy`) copies chain + all blobs; refs copy with blobs and
   payloads are shared (same DB) — no new copy semantics.
 - Impersonation: unchanged (flush still writes full state, just slimmer); reads expand.
 - Trace/timeline: read paths expand transparently once they use the aware saver; the
@@ -283,7 +283,7 @@ Failure modes and interactions (required evidence for a go/no-go):
    becomes the in-flight super-step — strictly better. **Landed (PR #2322):** the wrapper
    retires entirely for delta threads; its `_versions_with_current_blobs` merge is a no-op
    there (delta channels have no value in `channel_values` outside snapshots).
-3. **Fork.** `_copy_checkpoint_chain` historically copied the checkpoint chain and all
+3. **Fork.** `copy_checkpoint_chain` (`base.agents.history.checkpoint_copy`) historically copied the checkpoint chain and all
    blobs but NOT `checkpoint_writes`; a delta thread's reconstruction needs the writes since
    the last snapshot. **Landed (PR #2321):** the copy now carries the writes chain as well
    (same `task_id` / `idx` / namespace), so a forked delta thread reconstructs directly.
@@ -369,7 +369,7 @@ throughout):
    saver-level injection fold delta threads at read time. Coverage: pool saver
    `get_tuple`/`aget_tuple` (folded values injected); `base/agents/history/checkpoint.py` readers
    (messages / count with reconstruct fallback / segment / full / by-trace);
-   `ava/external/state.py:load_snapshot`; fork chain copy (`_copy_checkpoint_chain`, writes
+   `ava/external/state.py:load_snapshot`; fork chain copy (`copy_checkpoint_chain` (`base.agents.history.checkpoint_copy`), writes
    chain included); `agent/startup/__init__.py` inbound reconciliation; `scripts/data_plane_ops/restore_drill.py`;
    the self-evolution recorder. Vanilla data passes through unchanged — verified inert on
    real production read paths (production-clone subset, wrapped == native x5). Deployed to
