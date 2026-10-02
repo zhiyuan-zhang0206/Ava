@@ -271,7 +271,7 @@ def test_sent_summary_real() -> None:
     assert summary["sent"] is True
 
 
-# ── _app_password fallback is machine-level, not cluster-scoped ────────────
+# ── credential sources are machine-level, not cluster-scoped ───────────────
 
 
 def _no_keychain(*_args: str) -> str:
@@ -281,11 +281,11 @@ def _no_keychain(*_args: str) -> str:
 def test_app_password_fallback_ignores_ava_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The Keychain-fallback secrets file is deliberately machine-level (like
+    """The secrets file (read before the Keychain) is deliberately machine-level, like
     the Keychain entry it substitutes for): it resolves via HOME, not via
     resolve_ava_home()/AVA_HOME (see imap.py::_app_password). This process's
     real AVA_HOME (a worktree cluster home, never this fake HOME) is left
-    untouched -- if the fallback ever started routing through it instead, the
+    untouched -- if this lookup ever started routing through it instead, the
     file lookup below would miss and raise rather than silently pass."""
     home = tmp_path / "home"
     (home / ".ava" / "secrets").mkdir(parents=True)
@@ -293,6 +293,43 @@ def test_app_password_fallback_ignores_ava_home(
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(gmail_imap, "_keychain", _no_keychain)
     assert gmail_imap._app_password() == "abcdefgh"
+
+
+def test_app_password_prefers_file_over_keychain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When the file and the Keychain both hold a password, the file wins
+    (user ruling 2026-08-26: automation must not depend on the Keychain)."""
+    home = tmp_path / "home"
+    (home / ".ava" / "secrets").mkdir(parents=True)
+    (home / ".ava" / "secrets" / "gmail-app-password").write_text("file-pass")
+    monkeypatch.setenv("HOME", str(home))
+
+    def _keychain_password(*_args: str) -> str:
+        return "keychain-pass"
+
+    monkeypatch.setattr(gmail_imap, "_keychain", _keychain_password)
+    assert gmail_imap._app_password() == "file-pass"
+
+
+def test_account_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GMAIL_ACCOUNT supplies the login without touching the Keychain."""
+    gmail_imap._account.cache_clear()
+    monkeypatch.setenv("GMAIL_ACCOUNT", "env@example.com")
+    monkeypatch.setattr(gmail_imap, "_keychain", _no_keychain)
+    assert gmail_imap._account() == "env@example.com"
+
+
+def test_keychain_timeout_is_a_clean_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hanging `security` call becomes a GmailError after the 15s cap,
+    not an unhandled TimeoutExpired."""
+
+    def _timeout(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired("security", 15)
+
+    monkeypatch.setattr(gmail_imap.subprocess, "run", _timeout)
+    with pytest.raises(gmail_imap.GmailError, match="timed out after 15s"):
+        gmail_imap._keychain()
 
 
 # ── CLI dry-run integration ─────────────────────────────────────────────────
