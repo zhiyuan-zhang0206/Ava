@@ -101,9 +101,9 @@ class RepoCollection:
 
 def cluster_tz() -> ZoneInfo:
     """Return the configured cluster clock used for every date label."""
-    from base.config import settings
+    from base.clock import Clock
 
-    return ZoneInfo(settings.general.timezone)
+    return Clock.from_settings().explicit_zone()
 
 
 def complete_days(now: datetime, days: int, tz: ZoneInfo) -> list[date]:

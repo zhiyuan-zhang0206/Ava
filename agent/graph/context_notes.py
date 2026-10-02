@@ -33,11 +33,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
+from base.clock import Clock
 from base.config import settings
 from base.config.turn_view import turn_settings
 from base.log import logger
@@ -236,9 +236,10 @@ def timezone_note() -> HumanMessage | None:
     Returns ``None`` when this process has no established agent identity."""
     if _established_agent_id("timezone") is None:
         return None
-    now = datetime.now(ZoneInfo(settings.general.timezone))
+    clock = Clock.from_settings()
+    now = datetime.now(clock.explicit_zone())
     return system_note_message(
-        content=_TIMEZONE_FRAMING.format(name=settings.general.timezone, offset=_utc_offset(now)),
+        content=_TIMEZONE_FRAMING.format(name=clock.timezone, offset=_utc_offset(now)),
         tag=NoteTag.TIMEZONE,
         created_at=datetime.now(UTC),
     )

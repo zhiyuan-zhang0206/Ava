@@ -27,13 +27,13 @@ import base.cluster
 import base.db
 import base.deploy.state.host_deploy_state
 from base.api_contracts.status import PausedReason, SchemaMismatchStatus
+from base.clock import Clock
 from base.cluster.machine import (
     is_agent_runner,
     is_gateway,
     is_observability_station,
     machine_name,
 )
-from base.config import cluster_tz
 from base.daemon.endpoints import ServiceEndpoints
 from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
@@ -375,7 +375,8 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
     from base.sessions.backend import get_backend, get_shell_backend
 
     rows: dict[str, SessionInfo] = {}
-    now = datetime.now().astimezone(cluster_tz())
+    zone = Clock.from_settings().zone()
+    now = datetime.now().astimezone(zone)
     for backend in (get_backend(), get_shell_backend()):
         try:
             names = backend.list_sessions(_CLUSTER_SESSION_PREFIX)
@@ -396,7 +397,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
             epoch = epochs.get(name)
             if epoch is not None:
                 try:
-                    created = datetime.fromtimestamp(epoch).astimezone(cluster_tz())
+                    created = datetime.fromtimestamp(epoch).astimezone(zone)
                 except (OSError, OverflowError, ValueError):
                     created = None
             uptime = int((now - created).total_seconds()) if created else 0
