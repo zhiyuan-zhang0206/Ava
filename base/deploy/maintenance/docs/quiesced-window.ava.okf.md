@@ -12,7 +12,7 @@ read by every resident background loop that touches the database. The shared
 round runner (`base/daemon/round_loop.py:run_rounds`) skips a round while it
 holds, so the TTL reaper, the schedule manager, the ops delivery-outbox
 redelivery and the delivery watchdog's recovery loops are gated by construction;
-the hand-written loops (host daemon renewal and page reconciliation, the watchdog
+the hand-written loops (host daemon ownership renewal, the watchdog
 scan, heartbeat, events-maintenance, labeler, page-server, the IM bridge's
 notice poll, the memory indexer, the hierarchy tick, the gateway flushers)
 check it themselves, and `scripts/content_lint/lint_quiesced_loops.py` requires
