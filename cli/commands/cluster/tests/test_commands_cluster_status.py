@@ -291,7 +291,7 @@ def test_cmd_cluster_status_empty_roster_prints_hint(
     calls = _patch_roster_get(monkeypatch, [])
     rc = cluster_control.cmd_cluster_status()
     assert rc == 0
-    assert calls == ["http://gw:8000/api/cluster/roster"]
+    assert calls == ["http://gw:8000/api/cluster/roster?fresh=true"]
     assert "machines table empty" in capsys.readouterr().out
 
 
