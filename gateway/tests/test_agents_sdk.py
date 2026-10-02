@@ -1,7 +1,7 @@
 """`ava.agents.spawn` / `.send_message` SDK entry point tests.
 
 Low-level lifecycle (spawn_agent / resurrect_agent / respawn_agent) covered by
-`tests/gateway/test_agents_internals.py`; here only test SDK wrapper:
+`ops/agents/tests/test_agents_internals.py`; here only test SDK wrapper:
   - Automatically set spawner=f"agent:{ava.self.AGENT_ID}" into new agent
   - Call underlying gateway HTTP routes (via in-process TestClient going through real endpoint
     + real DB, exercising full link wire protocol)
