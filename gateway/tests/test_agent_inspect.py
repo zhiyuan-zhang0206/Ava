@@ -748,7 +748,7 @@ def test_inspect_live_reads_committed_pause_when_all_log_reads_fail(
     def unavailable(*_args: Any, **_kwargs: Any) -> Any:
         raise AssertionError("live inspector must not query telemetry")
 
-    for name in ("query_events", "query_projected_lines", "attribute_aggregate"):
+    for name in ("query_events",):
         monkeypatch.setattr(loki_events, name, unavailable)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")

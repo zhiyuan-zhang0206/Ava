@@ -1,7 +1,7 @@
-"""Compatibility facade for Loki-backed event-history reads.
+"""Compatibility facade for the live Loki event read.
 
-The public gateway.lgtm.loki_events module remains stable while focused private
-siblings own transport, LogQL construction, event rows, and aggregates.
+Only the backfill scripts read Loki (`query_events`); every gateway reader uses `telemetry_events`.
+The private siblings own transport, LogQL construction and event rows.
 """
 
 from __future__ import annotations
@@ -10,13 +10,7 @@ import sys
 from types import ModuleType
 from typing import ClassVar
 
-from gateway.lgtm import (
-    _loki_aggregates,
-    _loki_class_counts,
-    _loki_event_rows,
-    _loki_logql,
-    _loki_transport,
-)
+from gateway.lgtm import _loki_event_rows, _loki_logql, _loki_transport
 
 # Compatibility test seams retained while their owners live in private modules.
 telemetry = _loki_transport.telemetry
@@ -27,7 +21,6 @@ ObservabilityReadUnavailable = _loki_transport.ObservabilityReadUnavailable
 _read_gate = _loki_transport._read_gate
 _log_loki_failure = _loki_transport._log_loki_failure
 _get_json = _loki_transport._get_json
-_result_value = _loki_transport._result_value
 _client = _loki_transport._client
 
 _escape_label = _loki_logql._escape_label
@@ -36,25 +29,9 @@ _event_name_regex = _loki_logql._event_name_regex
 _tier_predicate = _loki_logql._tier_predicate
 _build_logql = _loki_logql._build_logql
 _window = _loki_logql._window
-_slice_duration_s = _loki_logql._slice_duration_s
-_agg_pipeline = _loki_logql._agg_pipeline
-_agg_pipelines = _loki_logql._agg_pipelines
-_weighted_quantile = _loki_logql._weighted_quantile
 
 _parse_line = _loki_event_rows._parse_line
 query_events = _loki_event_rows.query_events
-count_events = _loki_event_rows.count_events
-metric_range = _loki_event_rows.metric_range
-query_projected_lines = _loki_event_rows.query_projected_lines
-
-attribute_aggregate = _loki_aggregates.attribute_aggregate
-count_by_event_name = _loki_aggregates.count_by_event_name
-attribute_distribution = _loki_aggregates.attribute_distribution
-count_grouped = _loki_aggregates.count_grouped
-count_events_series = _loki_aggregates.count_events_series
-attribute_max_series = _loki_aggregates.attribute_max_series
-
-count_event_classes = _loki_class_counts.count_event_classes
 
 
 class _LokiEventsFacade(ModuleType):
