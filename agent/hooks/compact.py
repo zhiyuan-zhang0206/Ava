@@ -619,7 +619,7 @@ async def auto_compact_for_llm(
     # REMOVE_ALL, and a note between an AIMessage and its ToolMessage would be
     # rejected by the provider. Best-effort: a dump failure must never abort
     # the compaction itself.
-    dump_path = dump_history(state.messages, agent_id)
+    dump_path = dump_history(state.messages, agent_id, runtime.context.require_agent().history_dump)
     summary_kwargs: dict[str, Any] = {
         "additional_kwargs": {
             "ava_msg_type": AvaMsgType.COMPACT_SUMMARY.value,

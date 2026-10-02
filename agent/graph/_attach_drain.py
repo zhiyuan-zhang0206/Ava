@@ -21,7 +21,6 @@ from langchain_core.messages import HumanMessage
 from agent.messages import attach_message
 from agent.state import AttachState, BaseAgentState
 from base.agents.context import AvaContext
-from base.config.turn_view import turn_settings
 from base.lm.attach import AttachEntry, pack_attachments
 
 
@@ -48,7 +47,7 @@ def build_attach_drain(state: BaseAgentState, ctx: AvaContext) -> dict[str, Any]
     update (see module docstring); this survives edge paths where the exec
     update never ran (compact halt / crashed exec).
     """
-    model = getattr(ctx.llm, "model_name", None) or turn_settings.lm.llm_model
+    model = getattr(ctx.llm, "model_name", None) or ctx.require_agent().brain.llm_model
     message = build_attach_message(state.attach, model)
     if message is None:
         return None
