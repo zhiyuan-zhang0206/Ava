@@ -139,7 +139,7 @@ def record_survivors(
     try:
         retain_processes(tracked, group_births(pgid))
         if custody is not None:
-            custody.retain(tracked)
+            custody.retain(tracked, pgid)
     except (OSError, RuntimeError, psutil.Error) as exc:
         _log.error("unit %s: group %s survivors not fully recorded at reap: %s", unit_id, pgid, exc)
 

@@ -263,6 +263,26 @@ class RootRestartCleared(TypedDict):
     failed_for_s: float
 
 
+class CustodyReconcile(TypedDict):
+    """One custody record's reconcile outcome (task #4872, route C audit).
+
+    Emitted for every record a reconcile pass examines — ``released`` when the
+    record was cleared (every recorded birth gone and the unit's process group
+    empty) or ``retained`` when one unproven fact kept it — so the decision and
+    its evidence replay from the stream. A repeatable pass reports a release
+    always and a retained outcome on first sight and on evidence change only,
+    so the stream carries the decision rather than a per-round heartbeat. A
+    record an active generation owns is its own bookkeeping: not examined, not
+    emitted.
+    """
+
+    unit: str
+    checked: int
+    found: int
+    decision: Literal["released", "retained"]
+    evidence: str
+
+
 class RootUnitAlertFired(TypedDict):
     """One root unit entered an alertable failure state (task #4872, B route).
 

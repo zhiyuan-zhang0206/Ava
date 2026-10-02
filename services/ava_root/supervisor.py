@@ -35,7 +35,7 @@ from base.native_process.root_control.ipc import (
 )
 from services.ava_root import intent_store
 from services.ava_root.alerts import UnitAlertFacts
-from services.ava_root.custody import ServiceCustody, require_clear
+from services.ava_root.custody import require_clear
 from services.ava_root.group_scope import group_closed, record_survivors
 from services.ava_root.intent_store import (
     IntentRecord,
@@ -51,6 +51,7 @@ from services.ava_root.manifest import (
     UnitState,
     UnknownUnitError,
 )
+from services.ava_root.reconciling import ReconcilingMixin
 from services.ava_root.stopping import StoppingMixin, SupervisorConfig
 from services.ava_root.unit_records import _Generation, _UnitRuntime
 
@@ -86,7 +87,7 @@ class MetricsSource(Protocol):
         ...
 
 
-class Supervisor(StoppingMixin):
+class Supervisor(StoppingMixin, ReconcilingMixin):
     """Owns the lifecycle of every unit in one registry.
 
     All mutating verbs serialize on one lock, so overlapping commands are
@@ -108,6 +109,7 @@ class Supervisor(StoppingMixin):
         self._units: dict[str, _UnitRuntime] = {
             manifest.id: _UnitRuntime(manifest=manifest) for manifest in registry.units
         }
+        self._reconcile_reports: dict[str, str] = {}
         self._lock = asyncio.Lock()
         self._started_at: float | None = None
         self._running = False
@@ -119,9 +121,12 @@ class Supervisor(StoppingMixin):
     # ── lifecycle ────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start one clean root generation; unfinished custody requires recovery.
+        """Start one clean root generation; unresolved custody reconciles first.
 
-        Each unit's stored record is merged first (conservative, see
+        The custody gate clears every record it can prove gone and refuses only
+        on one that keeps an unproven fact, naming its steps and evidence (see
+        `custody.require_clear`). Each unit's stored record is merged first
+        (conservative, see
         `intent_store.merge_record_for_boot`): a recorded operator stop holds
         its unit down; a stop the root gave itself is superseded; a recorded
         replacement failure is carried until a fresh generation proves it gone.
@@ -550,7 +555,7 @@ class Supervisor(StoppingMixin):
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
         try:
-            custody = ServiceCustody(self._run_dir, manifest.id)
+            custody = self._new_custody(manifest.id)
             env = _unit_env(manifest.id) | dict(manifest.env)
             proc = await asyncio.create_subprocess_exec(
                 *manifest.exec,
@@ -575,7 +580,7 @@ class Supervisor(StoppingMixin):
             tracked={identity} if identity else set(),
         )
         if identity is not None:
-            custody.retain(generation.tracked)
+            custody.retain(generation.tracked, proc.pid)
         runtime.generation = generation
         runtime.state = UnitState.RUNNING
         runtime.last_error = None

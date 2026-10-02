@@ -22,6 +22,7 @@ from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from services.ava_root import health as health_mod
 from services.ava_root.alerts import UnitAlertFacts
+from services.ava_root.custody import ReconcileOutcome
 from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.inputs import InputSeal
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry, UnknownUnitError
@@ -96,6 +97,9 @@ class StubSupervisor:
         if unit_id in self.unknown_units:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
         return self.alert_facts
+
+    async def reconcile_custody(self) -> list[ReconcileOutcome]:
+        return []
 
 
 class CellProbe:

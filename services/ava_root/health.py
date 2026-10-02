@@ -22,6 +22,7 @@ from typing import Protocol
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from services.ava_root.alerts import AlertRouter, UnitAlertFacts, UnitAlertView
+from services.ava_root.custody import ReconcileOutcome
 from services.ava_root.manifest import UnknownUnitError
 from services.ava_root.probes import Probe, ProbeError, ProbeRegistry
 
@@ -50,6 +51,10 @@ class RevivalHost(Protocol):
 
     def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
         """The alert-relevant facts of one unit; unknown units raise UnknownUnitError."""
+        ...
+
+    async def reconcile_custody(self) -> list[ReconcileOutcome]:
+        """One custody reconcile pass: release proven-gone records, report each."""
         ...
 
 
@@ -234,7 +239,13 @@ class HealthMonitor:
         self._alerts = alerts
 
     async def run_round(self) -> None:
-        """Probe every registered unit once, in registration order, then alert."""
+        """Reconcile custody, then probe every unit once, in registration order, alert."""
+        try:
+            await self._supervisor.reconcile_custody()
+        except Exception:
+            # A defective pass must not cost the round its probes: log loudly
+            # and keep observing. The next round retries the reconcile.
+            _log.exception("[health] unit custody reconcile pass raised; continuing")
         for unit_id in self._registry.unit_ids():
             try:
                 await self._check_unit(unit_id)

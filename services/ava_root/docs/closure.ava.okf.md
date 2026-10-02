@@ -45,8 +45,9 @@ ownership contracts and are not renamed application service sessions.
 Linux `KillMode=process` deliberately signals root alone so independently owned
 Postgres, Redis, and PgBouncer siblings can survive application-root shutdown.
 Root must close its own application tree. An abrupt root death can leave children;
-retained custody blocks cold duplicate launch, but automatic orphan recovery and
-proof of independently detached execution-domain closure remain unimplemented.
+retained custody blocks cold duplicate launch, and a reconcile pass clears a
+record it can prove gone (below), while proof of independently detached
+execution-domain closure remains unimplemented.
 The native Linux CI test exercises actual manager adoption, root TERM closure,
 and retention of a data-process stand-in. It does not prove database durability.
 Mac permission grants require real signed-helper proof.
@@ -86,6 +87,23 @@ ever signalled. A group still occupied in root's session, or in one root
 cannot read, with no recorded birth alive may hold unrecorded processes of the
 unit: custody stays and the stop refuses, naming the group, its PIDs and the
 record.
+Reconciliation (task #4872, route C) proves a record gone without a stop: each
+recorded birth is re-verified against its captured native identity — a PID now
+naming another birth, a zombie, and a vanished process are all that recorded
+birth gone; a stopped (T) process still is it — and the unit's recorded process
+group must read empty (the same closure the stop path reads, zombies included).
+One unproven fact retains the record. Every examined record reports
+`custody_reconcile` with its decision and evidence: a release always, a retained
+record on first sight and on evidence change only — a repeat that proves nothing
+new would make a stuck record a per-round heartbeat. The pass runs on the cold-start
+custody gate (`require_clear`), so a releasable record needs no operator force;
+before a fresh spawn reuses a unit's record slot, where a stale record reconciles
+once and the spawn retries; and once per health round, where a release also drops
+the retained dead generation so the monitor can revive the unit again. The record
+carries its group number (`version` 2) for that proof; a pre-upgrade record
+without one is retained, never guessed. A retained record refuses a cold start by
+naming its reconcile steps, the force path (move the record aside once no process
+of the unit remains) and the record's path. Nothing in a reconcile pass signals.
 Moving that record aside is the operator's word that no process of the unit
 remains: with no recorded birth alive, the next stop, or root's own TERM, drops
 the generation without a signal; a live recorded birth keeps the refusal.
