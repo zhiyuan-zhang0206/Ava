@@ -8,23 +8,107 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
+import cli.commands._setup as _setup_commands
+import cli.commands.converge.host as converge_host
 import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_preflight_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
 from base.deploy.lifecycle.start_serving import RootBirth
 from cli.commands.lifecycle.stop import _force_stop
-from tests.cli._commands_helpers import (
+from cli.tests._commands_helpers import (
     _FakeResponse,
     _FakeResult,
     _git_aware,
     _patch_gateway_http,
 )
-from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
-from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_prechecks
+from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 
 _real_reap_cluster_chrome = _stop_commands._reap_cluster_chrome
+
+
+@pytest.fixture(autouse=True)
+def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch) -> None:
+    """cmd_start's multi-machine setup collection + converge_host + register_self
+    are all noop in an importing module — here we test session / docker / stop / status call shapes,
+    orthogonal to setup. Setup behavior itself is left to base/test_machine.py + the setup-ergonomics tests in `test_commands_start.py`.
+
+    Default role="gateway" (full service set). To test secondary, explicitly override:
+        monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+        monkeypatch.setattr(_cli, "_collect_setup_values", lambda: (..., []))"""
+    from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+
+    def fixture_runtime(_self: object) -> LoadedRuntimeIdentity:
+        return serving_root.runtime
+
+    monkeypatch.setattr("cli.start_runtime.StartRuntime.identity", fixture_runtime)
+
+    def _fake_collect() -> tuple[dict[str, str], list]:
+        return {
+            "machine_name": "test-machine",
+            "machine_role": "gateway",
+            "memory_remote": "git@github.com:test/AvaMemory.git",
+            "gateway_url": "http://test-gateway:8000",
+        }, []
+
+    monkeypatch.setattr(_setup_commands, "_collect_setup_values", _fake_collect)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_root_driver_commands, "admit_live_start", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    monkeypatch.setattr(converge_host, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    # The per-cluster pg/redis bring-up (`_ensure_gateway_data_plane`) starts a real
+    # native instance under $AVA_HOME. These tests assert session/stop/status call
+    # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
+    # the dev host's pg/redis.
+    from cli.commands.lifecycle import start as _start_mod
+
+    monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
+    monkeypatch.setattr("cli.commands.data_plane.bringup.prepare_gateway_schema", lambda: None)
+    monkeypatch.setattr(
+        "cli.commands.data_plane.bringup.complete_gateway_data_plane",
+        lambda **_kw: None,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )
+    from cli.commands.lifecycle.root_driver import LaunchOutcome
+
+    monkeypatch.setattr(
+        _root_driver_commands,
+        "_launch_service_tree",
+        lambda roster, *_a, **_kw: LaunchOutcome(roster, ()),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )
+    monkeypatch.setattr(
+        _root_driver_commands,
+        "wait_for_service_tree",
+        lambda *_a, **_kw: _probe_commands.ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )
+
+    # _roles_or_none (stop/status/converge) + machine_role (cmd_start service
+    # resolution) both read the AVA_MACHINE_SERVE_* settings; the test env sets only
+    # the agent-runner flag. Pin both to gateway so the default path is the
+    # full-service gateway box, deterministic regardless of the dev host's
+    # environment. Agent-runner tests override machine_role explicitly.
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
+    # register_self goes to central DB UPSERT; test does not need real writes. cmd_start goes
+    # through _register_machine_or_die which internally imports register_self, directly patch the helper to return 0.
+    monkeypatch.setattr(_repo_commands, "_register_machine_or_die", lambda _resolved, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
+    # secondary path will run _probe_gateway_or_die; primary does not call it, adding here
+    # ensures secondary tests can also reuse the default noop.
+    monkeypatch.setattr(_repo_commands, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
+    # _assert_schema_current_or_die truly calls DB; tests don't need real schema query, directly patch.
+    monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 0)
+    # Root service preparation must not install frontend dependencies in unit tests.
+    from cli.commands import _repo
+    from cli.commands.lifecycle import root_driver
+
+    monkeypatch.setattr(_repo, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    # These call-shape tests use the suite's owner DB URL, not an enrolled
+    # runner's bootstrap projection. Credential forwarding has its own tests
+    # in test_agent_profile_launch_env.py.
+    def _fixture_runner_url() -> str:
+        return "postgresql://ava_runner:test-runner@127.0.0.1:1/ava_citest"
+
+    monkeypatch.setattr(root_driver, "runner_db_url_projection", _fixture_runner_url)
 
 
 @pytest.fixture(autouse=True)

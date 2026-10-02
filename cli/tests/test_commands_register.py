@@ -10,10 +10,10 @@ import pytest
 import cli.commands._probe as _probe_commands
 import ops.roster as _roster
 import ops.roster.service_spec as _service_spec
+from cli.commands._repo import _register_machine_or_die
 from cli.commands._setup import SetupValues
-from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
-from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
-from tests.cli._commands_helpers import _real_register_machine_or_die
+from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
+from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 
 # ─── probe gateway via HTTP, not relying on pidfile ───────────────────────────────────
 
@@ -120,10 +120,7 @@ def test_register_gateway_advertises_without_gateway_url(monkeypatch: pytest.Mon
     (a loopback gateway_url advertisement was what made the page proxy refuse
     the host's page servers, the 2026-08-30 serve 400). The port falls back to
     the gateway bind-port setting.
-
-    The real `_register_machine_or_die` is used (autouse fixture replaces the
-    module attribute with a noop; `_real_register_machine_or_die` captures the
-    original at import time)."""
+    """
     from base.config import settings
 
     calls: list[str | None] = []
@@ -136,7 +133,7 @@ def test_register_gateway_advertises_without_gateway_url(monkeypatch: pytest.Mon
     monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
 
-    rc = _real_register_machine_or_die(
+    rc = _register_machine_or_die(
         cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
     )
     assert rc == 0
@@ -158,7 +155,7 @@ def test_register_gateway_only_advertises_reachable_host(monkeypatch: pytest.Mon
     monkeypatch.setattr(settings.gateway, "gateway_url", "https://ava.example:8000")
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
 
-    rc = _real_register_machine_or_die(
+    rc = _register_machine_or_die(
         cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
     )
     assert rc == 0
@@ -180,7 +177,7 @@ def test_register_agent_runner_advertises_ops_url(monkeypatch: pytest.MonkeyPatc
         lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _real_register_machine_or_die(
+    rc = _register_machine_or_die(
         cast(SetupValues, {"machine_name": "wsl"}), frozenset({"agent-runner"})
     )
     assert rc == 0
@@ -206,7 +203,7 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
         lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _real_register_machine_or_die(
+    rc = _register_machine_or_die(
         cast(SetupValues, {"machine_name": "wsl"}), frozenset({"agent-runner"})
     )
     assert rc == 1
@@ -243,9 +240,7 @@ def test_register_schema_behind_hint_names_working_commands(
     monkeypatch.setattr("base.cluster.machines.register_self", _missing_table)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
 
-    rc = _real_register_machine_or_die(
-        cast(SetupValues, {"machine_name": "gw"}), frozenset({"gateway"})
-    )
+    rc = _register_machine_or_die(cast(SetupValues, {"machine_name": "gw"}), frozenset({"gateway"}))
 
     assert rc == 1
     err = capsys.readouterr().err

@@ -15,7 +15,7 @@ from cli.commands._setup import _collect_setup_values as _real_collect_setup_val
 from cli.commands.lifecycle.tests.test_start_readiness_gate import (
     _hermetic_start as _hermetic_start,
 )
-from tests.cli._commands_helpers import _FakeResult, _git_aware
+from cli.tests._commands_helpers import _FakeResult, _git_aware
 
 
 def test_cmd_start_needs_no_tty(monkeypatch: pytest.MonkeyPatch) -> None:
