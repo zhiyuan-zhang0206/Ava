@@ -135,3 +135,4 @@ thing; the unified model states their relationship.**
   per the `decisions/README.md` rules and add a forward link here.
 
 <!-- Narrowed by: decisions/2026-10-02-audit-events-in-postgres.md (audit-category events are recorded in Postgres; Loki is a projection) -->
+<!-- Narrowed by: decisions/2026-10-02-impersonation-event-log-in-postgres.md (impersonation hand-off events are also written to Postgres at the source) -->
