@@ -38,6 +38,7 @@ from base.config import settings
 from base.db import NOTICE_FYI_TTL_DAYS
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.schemas import (
@@ -85,7 +86,7 @@ _RESOLVED_PAGE_MAX_LIMIT = 100
 def _publish_response_required_hint(agent_id: int) -> None:
     """Refresh the inspector's response-required notice projection after commit."""
     try:
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     except Exception:
         # The notice row is already durable. Like every live announce, an
         # unavailable projection refresh must not turn a successful SDK write

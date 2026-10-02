@@ -181,7 +181,7 @@ class TestRemind:
         owner = _make_agent(db_conn)
         published: list[tuple[int, int]] = []
 
-        def _capture_publish(agent_id: int) -> None:
+        def _capture_publish(_bus: object, agent_id: int) -> None:
             with db_conn.cursor() as cur:
                 cur.execute(
                     "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,)

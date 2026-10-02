@@ -1177,7 +1177,7 @@ def test_create_publishes_task_created(
         task = task_registry.create("title", "detail", parent=root_task_id)
     finally:
         ava.agent_identity._agent_id = original
-    assert calls == [(agent_id, task.id)]
+    assert [call[1:] for call in calls] == [(agent_id, task.id)]
 
 
 def test_update_publishes_task_updated(
@@ -1193,7 +1193,7 @@ def test_update_publishes_task_updated(
         task_registry.update(task.id, status="in_progress")
     finally:
         ava.agent_identity._agent_id = original
-    assert calls == [(agent_id, task.id)]
+    assert [call[1:] for call in calls] == [(agent_id, task.id)]
 
 
 # ── create_and_assign() ──────────────────────────────────────────────────

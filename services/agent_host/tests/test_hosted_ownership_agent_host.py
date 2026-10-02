@@ -42,7 +42,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
     announce_release = asyncio.Event()
     publish_calls = 0
 
-    async def half_open_publish(published_agent_id: int) -> None:
+    async def half_open_publish(_bus: object, published_agent_id: int) -> None:
         nonlocal publish_calls
         assert published_agent_id == agent_id
         publish_calls += 1
