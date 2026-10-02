@@ -13,14 +13,12 @@ import ava
 import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import claimed_slot
+from schedules.catchup import claimed_slot, cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
-from base.config import settings
 
 ensure_agent_status_members(S, {"IDLING", "RUNNING", "TERMINATED"}, schedule_name="dev-ci-metrics")
 
 CRON = "20 6 * * *"
-TZ = settings.general.timezone
 _REPORT_AGENT_ENV = "AVA_CI_METRICS_REPORT_AGENT"
 _REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
 _REPO_ROOT = Path(base.__file__).resolve().parents[1]
@@ -79,7 +77,9 @@ def _fire(_payload: None) -> None:
         exporter = _load_exporter()
         repo = exporter.DEFAULT_REPO
         _run_exporter(exporter, repo)
-        day = (slot_end.astimezone(ZoneInfo(TZ)).date() - timedelta(days=1)).isoformat()
+        day = (
+            slot_end.astimezone(ZoneInfo(cluster_timezone())).date() - timedelta(days=1)
+        ).isoformat()
         runs, failed = _day_counts(_snapshot(exporter), day, repo)
         print(
             f"[{datetime.now(UTC).isoformat()}] dev-ci-metrics: {day} — {runs} runs, {failed} failed"
@@ -90,7 +90,7 @@ def _fire(_payload: None) -> None:
 
 
 def _main_loop() -> None:
-    run_daily_loop(CRON, TZ, _fire)
+    run_daily_loop(CRON, cluster_timezone(), _fire)
 
 
 if __name__ == "__main__":

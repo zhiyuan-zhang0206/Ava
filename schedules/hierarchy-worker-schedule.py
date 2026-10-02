@@ -23,16 +23,14 @@
 import time
 from datetime import UTC, datetime
 
-from schedules.catchup import catch_up, fire_slot_once
+from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from services.hierarchy_worker.runner import prepare, run_tick
-from base.config import settings
 from base.daemon.schedules.watcher import next_fire
 
 # One tick a minute: the scan is one aggregated query over `checkpoints`, so
 # a compact reaches its build within a minute; while jobs are pending the
 # tick drains them back-to-back, so the cadence paces only the idle wait.
 CRON = "* * * * *"
-TZ = settings.general.timezone
 
 
 def _fire_tick(_trigger: None) -> None:
@@ -41,9 +39,9 @@ def _fire_tick(_trigger: None) -> None:
 
 def main() -> None:
     prepare()
-    catch_up([(CRON, None)], timezone=TZ, fire=_fire_tick)
+    catch_up([(CRON, None)], timezone=cluster_timezone(), fire=_fire_tick)
     while True:
-        nxt = next_fire(CRON, after=datetime.now(UTC), timezone=TZ)
+        nxt = next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone())
         while datetime.now(UTC) < nxt:
             time.sleep(30)
         fire_slot_once(nxt, None, fire=_fire_tick)
