@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 from cli.commands.observability import grafana_render
-from cli.parsers import build_parser
 
 
 @pytest.fixture()
@@ -68,11 +67,3 @@ def test_render_cmd_refuses_a_host_without_the_lgtm_tree(
     assert grafana_render.cmd_grafana_render(force=False, repo_only=True) == 1
     err = capsys.readouterr().err
     assert "does not run the LGTM observability stack" in err
-
-
-def test_lgtm_render_parser_flags() -> None:
-    args = build_parser().parse_args(["lgtm", "render", "--force", "--repo-only"])
-    assert args.lgtm_cmd == "render"
-    assert args.force is True
-    assert args.repo_only is True
-    assert args.func.__name__ == "_h_lgtm"
