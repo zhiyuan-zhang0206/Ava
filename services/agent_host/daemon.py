@@ -66,14 +66,12 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.daemon.health import (
     Liveness,
-    RouteHandler,
     health_port,
     start_health_server,
     stop_health_server,
 )
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
-from base.db import pool_release
 from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
@@ -459,7 +457,6 @@ async def run() -> None:
             extra_routes={
                 ("GET", "/stats"): _stats_route(host, scheduler),
                 ("POST", "/cancel-turn"): _cancel_turn_route(scheduler, host),
-                ("POST", "/release-db-pools"): _release_pools_route(workload_pool, control_pool),
             },
         )
         logger.info(
@@ -554,35 +551,6 @@ def _cancel_turn_route(scheduler: TurnScheduler, host: AgentHost):  # noqa: ANN2
             return 400, b'{"error":"positive integer identifiers required"}', "application/json"
         cancelled = await scheduler.cancel_exact_force(agent_id, command_id, host.accepts_force)
         return 200, json.dumps({"cancelled": cancelled}).encode(), "application/json"
-
-    return handler
-
-
-def _release_pools_route(
-    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-) -> RouteHandler:
-    """A `POST /release-db-pools` handler — the pre-stop pool release.
-
-    Called by the ops stop path once this unit's agents are drained: closes
-    every idle connection in both pools and answers `{"released": {"workload":
-    n, "control": m}}`. Nothing reconnects during the quiesced window (the
-    beat loop is gated; the turn scan only through the stop leg)
-    and the first borrow after resume opens a fresh connection lazily.
-    Loopback-only and unauthenticated, like `/cancel-turn`.
-    """
-    import json
-
-    async def handler(_body: bytes) -> tuple[int, bytes, str]:
-        released = {
-            "workload": await pool_release.release_idle_async(workload_pool),
-            "control": await pool_release.release_idle_async(control_pool),
-        }
-        logger.info(
-            "[agent-host] released idle db-pool connections on request: {released}",
-            released=released,
-        )
-        return 200, json.dumps({"released": released}).encode(), "application/json"
 
     return handler
 

@@ -9,12 +9,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 from uuid import uuid4
 
 import psycopg
 import pytest
-from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import machine_name
 from base.db import create_agent, insert_inbound_message
@@ -267,62 +265,3 @@ def test_unpause_refuses_a_held_unit_whose_services_stopped(
         cluster_pause.unpause_local_cluster()
     assert str(raised.value) == "services have stopped; ava start must pass readiness before resume"
     assert posture == []
-
-
-def test_release_local_db_pools_dials_the_host_and_releases_the_ops_pool(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The stop's last step: host pools over loopback, then this daemon's own."""
-    from types import SimpleNamespace
-
-    from base.db import pool_release
-
-    posted: list[str] = []
-
-    def _post(url: str, **_kwargs: object) -> SimpleNamespace:
-        posted.append(url)
-        return SimpleNamespace(
-            raise_for_status=lambda: None,
-            json=lambda: {"released": {"workload": 2, "control": 1}},
-        )
-
-    released_pools: list[object] = []
-
-    def _release_idle_sync(pool: object) -> int:
-        released_pools.append(pool)
-        return 3
-
-    fake_pool = cast(ConnectionPool, object())
-    monkeypatch.setattr(cluster_pause, "http_dial", SimpleNamespace(post=_post))
-    monkeypatch.setattr(cluster_pause, "health_port", lambda _name: 1234)
-    monkeypatch.setattr(pool_release, "release_idle_sync", _release_idle_sync)
-
-    released = cluster_pause.release_local_db_pools(fake_pool)
-
-    assert posted == ["http://127.0.0.1:1234/release-db-pools"]
-    assert released == {"host": {"workload": 2, "control": 1}, "ops": 3}
-    assert released_pools == [fake_pool]
-
-
-def test_release_local_db_pools_reports_failures_without_raising(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Both arms are best-effort: the stop must complete on either failure."""
-    from types import SimpleNamespace
-
-    from base.db import pool_release
-
-    def _refused(_url: str, **_kwargs: object) -> object:
-        raise RuntimeError("connection refused")
-
-    def _boom(_pool: object) -> int:
-        raise RuntimeError("pool release exploded")
-
-    monkeypatch.setattr(cluster_pause, "http_dial", SimpleNamespace(post=_refused))
-    monkeypatch.setattr(cluster_pause, "health_port", lambda _name: 1234)
-    monkeypatch.setattr(pool_release, "release_idle_sync", _boom)
-
-    released = cluster_pause.release_local_db_pools(cast(ConnectionPool, object()))
-
-    assert released["host_error"] == "connection refused"
-    assert released["ops_error"] == "pool release exploded"

@@ -18,9 +18,7 @@ def build_shared_pool() -> AsyncConnectionPool[psycopg.AsyncConnection]:
     The transport posture (autocommit for the saver, no prepared statements
     across PgBouncer backends, the per-borrow session scrub) is
     `base.db.async_pool`'s. `min_size=0` keeps no warm idle connection: the
-    pool opens connections on demand, so the pre-stop release
-    (`/release-db-pools`) drains it to zero and the first borrow after resume
-    reconnects lazily.
+    pool opens connections on demand and an idle one ages out.
     """
     return async_pool(
         LoggingConnectionPool[psycopg.AsyncConnection],
