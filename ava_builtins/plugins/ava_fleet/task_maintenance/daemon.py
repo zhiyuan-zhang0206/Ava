@@ -59,8 +59,10 @@ from base.daemon.health import (
     stop_health_server,
 )
 from base.daemon.shutdown import install_graceful_shutdown
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from base.log import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -113,7 +115,7 @@ def deliver_message(
                 "UPDATE agent_tasks SET escalated_at = now() WHERE id = ANY(%s)",
                 (escalate_task_ids,),
             )
-    publish_agent_updated_sync(agent_id)
+    publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     # The connection context commits before the best-effort wake. A missing
     # subscriber is expected for a terminated agent and does not resurrect it.
     base.db.publish_inbound_wake(agent_id, str(inbound_id))
@@ -344,7 +346,7 @@ def _escalate_to_user_queue(
             ),
         )
     # Reconcile the notice queue only after the escalation has committed.
-    publish_agent_updated_sync(owner)
+    publish_agent_updated_sync(EventBus.from_settings(), owner)
     return True
 
 
@@ -540,7 +542,7 @@ async def run() -> None:
     health = await start_health_server("task_maintenance", endpoint.health_port, liveness=liveness)
     _log.info("[task-maintenance] healthz listening on :%s", endpoint.health_port)
 
-    pool = base.db.pool()
+    pool = Database.from_settings().pool()
     try:
         await _dispatch_loop(pool, liveness)
     finally:

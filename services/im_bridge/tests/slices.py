@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -26,7 +27,11 @@ def feishu_config(**overrides: Any) -> FeishuCredentialsConfig:
     return replace(daemon.feishu_config(), **overrides)
 
 
-def gateway_client(config: ImBridgeConfig | None = None) -> GatewayClient:
+def gateway_client(
+    config: ImBridgeConfig | None = None, auth_headers: Mapping[str, str] | None = None
+) -> GatewayClient:
     return GatewayClient(
-        config or im_bridge_config(), gateway_url="http://localhost:8000", cluster_secret=""
+        config or im_bridge_config(),
+        gateway_url="http://localhost:8000",
+        auth_headers=auth_headers or {},
     )

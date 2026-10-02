@@ -14,6 +14,12 @@ from datetime import UTC, datetime
 from base.agents.history.hierarchy.generate import input_hash, text_hash
 from base.agents.history.hierarchy.pipeline import MaterializedNode
 from base.agents.history.hierarchy.store import load_known_texts, load_window_nodes, write_tree
+from base.db import Database
+
+
+def _db() -> Database:
+    return Database.from_settings()
+
 
 AGENT_A = 990_128_901  # round-trip test
 AGENT_B = 990_128_902  # idempotence test
@@ -69,9 +75,9 @@ def test_write_tree_round_trip_and_parent_link() -> None:
         children=("L1#1",),
         children_spans=((0, 4),),
     )
-    assert write_tree(AGENT_A, [leaf, parent], model="deepseek-v4-flash") == 2
+    assert write_tree(_db(), AGENT_A, [leaf, parent], model="deepseek-v4-flash") == 2
 
-    rows = load_window_nodes(AGENT_A, T0, T1)
+    rows = load_window_nodes(_db(), AGENT_A, T0, T1)
     by_depth = {r.depth: r for r in rows}
     assert set(by_depth) == {1, 2}
     assert (by_depth[1].span_start, by_depth[1].span_end) == (0, 4)
@@ -84,22 +90,22 @@ def test_write_tree_round_trip_and_parent_link() -> None:
 
 def test_write_tree_is_idempotent_and_regenerates_in_place() -> None:
     first = node("L1#1", span=(0, 4), text="v1", input_text="m1")
-    write_tree(AGENT_B, [first], model="m")
-    write_tree(AGENT_B, [first], model="m")  # identical rewrite: no new row
-    rows = load_window_nodes(AGENT_B, T0, T1)
+    write_tree(_db(), AGENT_B, [first], model="m")
+    write_tree(_db(), AGENT_B, [first], model="m")  # identical rewrite: no new row
+    rows = load_window_nodes(_db(), AGENT_B, T0, T1)
     assert len(rows) == 1 and rows[0].text == "v1"
 
     regenerated = node("L1#1", span=(0, 4), text="v2", input_text="m2")
-    write_tree(AGENT_B, [regenerated], model="m")
-    rows = load_window_nodes(AGENT_B, T0, T1)
+    write_tree(_db(), AGENT_B, [regenerated], model="m")
+    rows = load_window_nodes(_db(), AGENT_B, T0, T1)
     assert len(rows) == 1 and rows[0].text == "v2"
 
 
 def test_load_known_texts_feeds_the_reuse_cache() -> None:
     a = node("L1#1", span=(0, 4), text="alpha", input_text="input-a")
     b = node("L1#2", span=(5, 9), text="beta", input_text="input-b")
-    write_tree(AGENT_C, [a, b], model="m")
-    known = load_known_texts(AGENT_C)
+    write_tree(_db(), AGENT_C, [a, b], model="m")
+    known = load_known_texts(_db(), AGENT_C)
     assert known[a.input_hash] == "alpha"
     assert known[b.input_hash] == "beta"
 
@@ -113,10 +119,10 @@ def test_window_filter_returns_only_intersecting_nodes() -> None:
         text="late",
         input_text="l",
     )
-    write_tree(AGENT_D, [early, late], model="m")
-    window = load_window_nodes(AGENT_D, T0, datetime(2026, 9, 12, 4, 30, tzinfo=UTC))
+    write_tree(_db(), AGENT_D, [early, late], model="m")
+    window = load_window_nodes(_db(), AGENT_D, T0, datetime(2026, 9, 12, 4, 30, tzinfo=UTC))
     assert [r.text for r in window] == ["early"]
-    wide = load_window_nodes(AGENT_D, T0, T1)
+    wide = load_window_nodes(_db(), AGENT_D, T0, T1)
     assert {r.text for r in wide} == {"early", "late"}
 
 
@@ -125,12 +131,12 @@ def test_recut_tail_replaces_the_superseded_cut() -> None:
     reconciled away instead of standing beside the new one."""
     stable = node("L1#0", span=(0, 30), text="stable", input_text="blocks 0..30")
     first_cut = node("L1#1", span=(31, 40), text="tail v1", input_text="stretch 31..40")
-    write_tree(AGENT_E, [stable, first_cut], model="m")
+    write_tree(_db(), AGENT_E, [stable, first_cut], model="m")
 
     recut = node("L1#1", span=(31, 47), text="tail v2", input_text="stretch 31..47")
-    write_tree(AGENT_E, [stable, recut], model="m")
+    write_tree(_db(), AGENT_E, [stable, recut], model="m")
 
-    spans = {(r.depth, r.span_start, r.span_end) for r in load_window_nodes(AGENT_E, T0, T1)}
+    spans = {(r.depth, r.span_start, r.span_end) for r in load_window_nodes(_db(), AGENT_E, T0, T1)}
     assert spans == {(1, 0, 30), (1, 31, 47)}
 
 
@@ -139,11 +145,11 @@ def test_unreproduced_rows_outside_the_recut_survive() -> None:
     they are still that region's best coverage."""
     stable = node("L1#0", span=(0, 30), text="stable", input_text="blocks 0..30")
     pending = node("L1#1", span=(31, 40), text="tail", input_text="stretch 31..40")
-    write_tree(AGENT_F, [stable, pending], model="m")
+    write_tree(_db(), AGENT_F, [stable, pending], model="m")
 
-    write_tree(AGENT_F, [stable], model="m")
+    write_tree(_db(), AGENT_F, [stable], model="m")
 
-    spans = {(r.depth, r.span_start, r.span_end) for r in load_window_nodes(AGENT_F, T0, T1)}
+    spans = {(r.depth, r.span_start, r.span_end) for r in load_window_nodes(_db(), AGENT_F, T0, T1)}
     assert spans == {(1, 0, 30), (1, 31, 40)}
 
 
@@ -154,16 +160,16 @@ def test_same_version_replay_reproduces_sealed_rows_identically() -> None:
         node("L1#0", span=(0, 30), text="a", input_text="i0"),
         node("L1#1", span=(31, 40), text="b", input_text="i1"),
     ]
-    write_tree(AGENT_G, nodes, model="m")
+    write_tree(_db(), AGENT_G, nodes, model="m")
     first = {
         (r.id, r.depth, r.span_start, r.span_end, r.text, r.parent_id)
-        for r in load_window_nodes(AGENT_G, T0, T1)
+        for r in load_window_nodes(_db(), AGENT_G, T0, T1)
     }
 
-    write_tree(AGENT_G, nodes, model="m")
+    write_tree(_db(), AGENT_G, nodes, model="m")
     second = {
         (r.id, r.depth, r.span_start, r.span_end, r.text, r.parent_id)
-        for r in load_window_nodes(AGENT_G, T0, T1)
+        for r in load_window_nodes(_db(), AGENT_G, T0, T1)
     }
 
     assert second == first

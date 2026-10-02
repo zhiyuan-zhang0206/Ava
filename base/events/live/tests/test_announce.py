@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import cast
 
 import pytest
 
 from base.agents.observation import snapshot
-from base.config import settings
 from base.events.live import announce
+from base.events.live.bus import EventBus
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +21,23 @@ def _forbid_snapshot_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(snapshot, "select_one", forbidden)
 
 
+class _RecordingBus:
+    """An `EventBus` stand-in recording what is published and on which channel."""
+
+    channel = "ava:test-events"
+
+    def __init__(self) -> None:
+        self.published: list[tuple[str, str]] = []
+
+    def publish_best_effort_sync(self, payload: str, *, context: str) -> int:
+        self.published.append((payload, context))
+        return 0
+
+    async def publish_best_effort(self, payload: str, *, context: str) -> int:
+        self.published.append((payload, context))
+        return 0
+
+
 @pytest.mark.parametrize(
     ("publisher", "role"),
     [
@@ -28,38 +46,20 @@ def _forbid_snapshot_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     ],
 )
 def test_sync_lifecycle_hint_has_no_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
-    publisher: Callable[[int], None],
-    role: str,
+    publisher: Callable[[EventBus, int], None], role: str
 ) -> None:
-    published: list[tuple[str, str, str]] = []
-
-    def capture(channel: str, payload: str, *, context: str) -> int:
-        published.append((channel, payload, context))
-        return 0
-
-    monkeypatch.setattr(announce, "publish_best_effort_sync", capture)
-    publisher(7)
-    assert len(published) == 1
-    channel, payload, context = published[0]
-    assert channel == settings.data_plane.events_channel
+    bus = _RecordingBus()
+    publisher(cast(EventBus, bus), 7)
+    assert len(bus.published) == 1
+    payload, context = bus.published[0]
     assert context == role
     assert json.loads(payload) == {"role": role, "agent_id": 7}
 
 
-async def test_async_lifecycle_hint_needs_no_connection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    published: list[tuple[str, str, str]] = []
-
-    async def capture(channel: str, payload: str, *, context: str) -> int:
-        published.append((channel, payload, context))
-        return 0
-
-    monkeypatch.setattr(announce, "publish_best_effort", capture)
-    await announce.publish_agent_updated(7)
-    assert len(published) == 1
-    channel, payload, context = published[0]
-    assert channel == settings.data_plane.events_channel
+async def test_async_lifecycle_hint_needs_no_connection() -> None:
+    bus = _RecordingBus()
+    await announce.publish_agent_updated(cast(EventBus, bus), 7)
+    assert len(bus.published) == 1
+    payload, context = bus.published[0]
     assert context == "agent_updated"
     assert json.loads(payload) == {"role": "agent_updated", "agent_id": 7}

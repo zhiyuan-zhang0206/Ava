@@ -34,7 +34,8 @@ from ava.security import SecurityFindingEntry, scan_inbound_content
 from base.agents.context import AvaContext
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from base.config import now_timestamp, settings
+from base.clock import Clock
+from base.config import settings
 from base.events.live.projection import Cancelled
 from base.log import logger
 
@@ -103,7 +104,9 @@ def _by_who(source: str) -> str:
 def _ts_prefix() -> str:
     """Leading `[ts] ` for lifecycle markers, or `` when agent-facing message
     timestamps are off (`settings.general.message_timestamps`)."""
-    return f"{now_timestamp()} " if settings.general.message_timestamps else ""
+    return (
+        f"{Clock.from_settings().now_timestamp()} " if settings.general.message_timestamps else ""
+    )
 
 
 # Overlay keys that may carry credentials — their values are never rendered

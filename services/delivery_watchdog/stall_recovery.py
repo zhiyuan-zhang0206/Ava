@@ -30,6 +30,7 @@ from base import telemetry
 from base.config import settings
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.db import Database
 from services.delivery_watchdog import attempts, rounds
 
 _log = logging.getLogger("services.delivery_watchdog.stall_recovery")
@@ -72,7 +73,9 @@ def select_stalled_crash_marked(
         return [(r[0], r[1], r[2], float(r[3])) for r in cur.fetchall()]
 
 
-async def _request_harvest(pool: ConnectionPool, agent_id: int, inbound_id: int) -> None:
+async def _request_harvest(
+    pool: ConnectionPool, db: Database, agent_id: int, inbound_id: int
+) -> None:
     """Ask the owner's home runner for one harvest decision under the RPC
     deadline; emit it (the recovery-decision-rate metric)."""
     from ops.lifecycle import recover_crash_marked_if_stalled
@@ -81,7 +84,7 @@ async def _request_harvest(pool: ConnectionPool, agent_id: int, inbound_id: int)
         try:
             async with asyncio.timeout(rounds.rpc_deadline_s()):
                 decision, reason = await recover_crash_marked_if_stalled(
-                    agent_id, stalled_inbound_id=inbound_id
+                    db, agent_id, stalled_inbound_id=inbound_id
                 )
         except Exception:
             _log.info(
@@ -115,7 +118,7 @@ async def _request_harvest(pool: ConnectionPool, agent_id: int, inbound_id: int)
 
 
 async def stall_recovery_round(
-    pool: ConnectionPool, progress: LoopProgress, threshold_s: float
+    pool: ConnectionPool, db: Database, progress: LoopProgress, threshold_s: float
 ) -> None:
     """For every stalled chat of a crash-marked idling corpse, request one
     harvest decision from its home runner, then return. Per-owner cooldown (the
@@ -135,18 +138,22 @@ async def stall_recovery_round(
         _HARVEST_RETRY_MIN_INTERVAL_S,
     )
     await round_loop.fan_out(
-        [functools.partial(_request_harvest, pool, a, oldest_inbound[a]) for a in claimed],
+        [functools.partial(_request_harvest, pool, db, a, oldest_inbound[a]) for a in claimed],
         concurrency=_HARVEST_MAX_CONCURRENCY,
         progress=progress,
     )
 
 
 async def stall_recovery_loop(
-    pool: ConnectionPool, progress: LoopProgress, interval_s: float, threshold_s: float
+    pool: ConnectionPool,
+    db: Database,
+    progress: LoopProgress,
+    interval_s: float,
+    threshold_s: float,
 ) -> None:
     """The stalled crash-marked harvest as a resident sequential loop."""
 
     async def one_round() -> None:
-        await stall_recovery_round(pool, progress, threshold_s)
+        await stall_recovery_round(pool, db, progress, threshold_s)
 
     await round_loop.run_rounds("stalled crash-marked recovery", progress, interval_s, one_round)

@@ -12,7 +12,12 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
+from base.db import Database
 from base.deploy.state import host_deploy_state as hds
+
+
+def _db() -> Database:
+    return Database.from_settings()
 
 
 @pytest.fixture(autouse=True)
@@ -77,5 +82,5 @@ def test_posture_round_trips_and_stamps_the_database_clock() -> None:
 
 def test_read_all_returns_every_machines_row() -> None:
     hds.set_posture("paused")
-    rows = hds.read_all()
+    rows = hds.read_all(_db())
     assert rows[_machine()].posture == "paused"

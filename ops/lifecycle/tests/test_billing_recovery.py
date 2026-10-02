@@ -22,7 +22,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents import ResurrectRefused
 from base.agents.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
-from base.db import create_agent
+from base.db import Database, create_agent
 from base.telemetry import Event
 from ops import cluster_rpc
 from ops.agents import wake
@@ -153,7 +153,7 @@ def _capture_events(
 def _dispatch_through_the_op(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     dispatched: list[int] = []
 
-    async def _dispatch(**kwargs: Any) -> dict[str, Any]:
+    async def _dispatch(_db: object, **kwargs: Any) -> dict[str, Any]:
         agent_id = int(str(kwargs["payload"]["path"]).split("/")[3])
         dispatched.append(agent_id)
         response = await billing_recovery.resurrect_billing_agent_op(agent_id)
@@ -225,7 +225,7 @@ async def test_dry_run_previews_without_writing(
     audits, _ = _capture_events(monkeypatch)
     monkeypatch.setattr(billing_recovery, "fetch_provider_balance", lambda: _balance(True))
 
-    resp = await run_billing_recovery(execute=False, pool=pool)
+    resp = await run_billing_recovery(execute=False, pool=pool, db=Database.from_settings())
 
     assert resp.mode == "dry_run" and resp.outcome == "preview"
     assert aid in [o.agent_id for o in resp.agents]
@@ -247,12 +247,12 @@ async def test_execute_refused_when_balance_gate_fails(
         billing_recovery, "fetch_provider_balance", lambda: _balance(False, "still exhausted")
     )
 
-    async def _must_not_dispatch(**kwargs: Any) -> dict[str, Any]:
+    async def _must_not_dispatch(_db: object, **kwargs: Any) -> dict[str, Any]:
         raise AssertionError("dispatch reached while the balance gate refused")
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _must_not_dispatch)
 
-    resp = await run_billing_recovery(execute=True, pool=pool)
+    resp = await run_billing_recovery(execute=True, pool=pool, db=Database.from_settings())
 
     assert resp.outcome == "refused"
     assert resp.refusal_reason is not None and "balance gate" in resp.refusal_reason
@@ -270,7 +270,7 @@ async def test_execute_resurrects_the_cohort(
     dispatched = _dispatch_through_the_op(monkeypatch)
     audits, telemetry = _capture_events(monkeypatch)
 
-    resp = await run_billing_recovery(execute=True, pool=pool)
+    resp = await run_billing_recovery(execute=True, pool=pool, db=Database.from_settings())
 
     assert resp.outcome == "executed"
     assert next(o for o in resp.agents if o.agent_id == aid).status == "resurrected"
@@ -299,8 +299,8 @@ async def test_second_execute_is_an_audited_noop(
     _dispatch_through_the_op(monkeypatch)
     _capture_events(monkeypatch)
 
-    first = await run_billing_recovery(execute=True, pool=pool)
-    second = await run_billing_recovery(execute=True, pool=pool)
+    first = await run_billing_recovery(execute=True, pool=pool, db=Database.from_settings())
+    second = await run_billing_recovery(execute=True, pool=pool, db=Database.from_settings())
 
     assert first.outcome == "executed" and second.outcome == "executed"
     assert [o for o in second.agents if o.agent_id == aid] == []
@@ -317,12 +317,12 @@ async def test_concurrent_run_is_refused_by_the_single_flight_lock(
 
     monkeypatch.setattr(billing_recovery, "_try_run_lock", _refuse_lock)
 
-    async def _must_not_dispatch(**kwargs: Any) -> dict[str, Any]:
+    async def _must_not_dispatch(_db: object, **kwargs: Any) -> dict[str, Any]:
         raise AssertionError("dispatch reached while another run held the lock")
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _must_not_dispatch)
 
-    resp = await run_billing_recovery(execute=True, pool=pool)
+    resp = await run_billing_recovery(execute=True, pool=pool, db=Database.from_settings())
 
     assert resp.outcome == "refused"
     assert resp.refusal_reason is not None and "in progress" in resp.refusal_reason

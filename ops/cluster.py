@@ -18,6 +18,7 @@ from typing import Any, cast
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.cluster.machines import mark_stopping
 from base.config.turn_view import resolve_agent_config_pins
+from base.db import Database
 from base.log import logger
 from ops.cluster_status import (
     ClusterStatus,
@@ -35,7 +36,7 @@ from ops.rpc_schemas import (
 )
 
 
-def cluster_stopping_op(machine: str, home: str) -> dict[str, str]:
+def cluster_stopping_op(db: Database, machine: str, home: str) -> dict[str, str]:
     """Record an intentional shutdown announced by the (machine, home) unit.
 
     `ava stop` calls this (best-effort) just before tearing the local stack
@@ -45,7 +46,7 @@ def cluster_stopping_op(machine: str, home: str) -> dict[str, str]:
     clears it. `home` is the stopping unit's $AVA_HOME, sent on the wire so a
     co-located peer's caps are not retracted along with this unit's.
     """
-    mark_stopping(machine, home)
+    mark_stopping(db, machine, home)
     return {"machine": machine}
 
 

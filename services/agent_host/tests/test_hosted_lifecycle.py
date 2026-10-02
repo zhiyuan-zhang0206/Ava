@@ -22,6 +22,8 @@ from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -48,7 +50,14 @@ async def test_hosted_applies_only_after_continuation_returns(
 
     graph = Mock()
     graph.ainvoke = AsyncMock(side_effect=graph_return)
-    host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=graph, machine="claim-test")
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=graph,
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     host._runtimes[agent_id] = Mock()
     with bind_turn_identity(agent_id, incarnation=old):
         assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
@@ -107,7 +116,14 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
     graph.ainvoke = AsyncMock(
         return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
     )
-    host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=graph, machine="claim-test")
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=graph,
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     host._runtimes[agent_id] = Mock()
     original_execute = psycopg.AsyncConnection.execute
     original_drop = host.drop_agent
@@ -169,7 +185,14 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
     with bind_turn_identity(agent_id, incarnation=owner):
         assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
     assert await settle_hosted_runtime(aops_pool, owner)
-    host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     wakes = await host.pending_inbound_wakes(stale_after_s=60)
     assert agent_id in [wake.agent_id for wake in wakes]
     assert db_conn.execute(
@@ -219,7 +242,14 @@ async def _run_terminating_turn(aops_pool: AsyncConnectionPool, agent_id: int) -
     graph.ainvoke = AsyncMock(
         return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
     )
-    host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=graph, machine="claim-test")
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=graph,
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     host._runtimes[agent_id] = Mock()
     assert await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
 
@@ -319,7 +349,14 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     the observation (decisions/2026-09-27-terminate-has-no-closed-state.md)."""
     monkeypatch.setattr("services.agent_host.runtime.validate_model_config", _any_model)
     agent_id = _agent(db_conn)
-    host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     await admit_hosted_runtime(
         aops_pool, agent_id, "claim-test", host._owner, expected_from="idling"
     )
@@ -346,7 +383,14 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
     tmp_path: Path,
 ) -> None:
     agent_id = _agent(db_conn)
-    old = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    old = AgentHost(
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     await admit_hosted_runtime(
         aops_pool, agent_id, "claim-test", old._owner, expected_from="idling"
     )

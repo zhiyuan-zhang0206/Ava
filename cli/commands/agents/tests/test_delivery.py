@@ -13,6 +13,7 @@ from base.agents.impersonation import delivery as delivery
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.db import create_agent, insert_inbound_message
+from base.events.live.tests.fakes import recording
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 
@@ -124,8 +125,8 @@ def test_delivery_reservation_that_expires_lease_refreshes_roster(
         wakes.append(agent_id)
 
     monkeypatch.setattr(delivery, "publish_inbound_wake", record_wake)
-    monkeypatch.setattr(delivery, "publish_impersonation_changed_sync", timelines.append)
-    monkeypatch.setattr(delivery, "publish_agent_updated_sync", rosters.append)
+    monkeypatch.setattr(delivery, "publish_impersonation_changed_sync", recording(timelines))
+    monkeypatch.setattr(delivery, "publish_agent_updated_sync", recording(rosters))
     assert reserve(lease, message_id) == frozenset()
     assert wakes == timelines == rosters == [owner.agent_id]
     assert reserve(lease, message_id) == frozenset()

@@ -14,8 +14,9 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.fakes import fix_zone
 from base.daemon.loop_health import LoopProgress
-from base.db import create_agent
+from base.db import Database, create_agent
 from ops.rpc_schemas import ShellKillResult
 from services.ttl_reaper import shells
 from services.ttl_reaper.shells import _claim_shell_row_still_expired, reap_expired_shells
@@ -26,7 +27,7 @@ def _progress() -> LoopProgress:
 
 
 async def _reap(pool: ConnectionPool) -> list[tuple[int, int]]:
-    return await reap_expired_shells(pool, _progress())
+    return await reap_expired_shells(pool, Database.from_settings(), _progress())
 
 
 @pytest.fixture()
@@ -90,7 +91,7 @@ async def test_reap_expired_shells_deletes_on_killed(
     db_conn.commit()
 
     async def _dispatch(
-        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         assert machine == "macmini"
         assert kind == "shell_kill"
@@ -130,7 +131,7 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
     db_conn.commit()
 
     async def _dispatch(
-        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         raise shells.cluster_rpc.ClusterOpUnreachable("boom")
 
@@ -165,7 +166,7 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
     db_conn.commit()
 
     async def _dispatch(
-        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         raise shells.cluster_rpc.ClusterOpTargetAbsent(
             "machine 'ghost' is absent from the machines registry"
@@ -234,7 +235,7 @@ async def test_reap_expired_shells_idle_reaping_is_silent(
     db_conn.commit()
 
     async def _dispatch(
-        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return ShellKillResult(mode="killed", interrupted=False).model_dump()
 
@@ -270,7 +271,7 @@ async def test_reap_expired_shells_absent_reaping_is_silent(
     db_conn.commit()
 
     async def _dispatch(
-        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return ShellKillResult(mode="absent").model_dump()
 
@@ -306,7 +307,7 @@ async def test_reap_expired_shells_missing_interrupted_field_notifies(
     db_conn.commit()
 
     async def _dispatch(
-        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {"mode": "killed"}  # old runner: no interrupted field
 
@@ -343,7 +344,7 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
     db_conn.commit()
 
     async def _dispatch(
-        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         # A watcher's session always has a running job (its generated script,
         # sleeping toward its next fire) — the runner reports it as such.
@@ -397,7 +398,7 @@ async def test_reap_expired_shells_skips_row_renewed_after_select(
     dispatched: list[tuple[str, object]] = []
 
     async def _dispatch(
-        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         dispatched.append((kind, payload))
         return ShellKillResult(mode="killed", interrupted=True, name="x").model_dump()
@@ -488,7 +489,7 @@ def test_wall_clock_renders_cluster_timezone(monkeypatch: pytest.MonkeyPatch) ->
     from zoneinfo import ZoneInfo
 
     sh = ZoneInfo("Asia/Shanghai")
-    monkeypatch.setattr(shells, "cluster_tz", lambda: sh)
+    fix_zone(monkeypatch, sh)
     now = datetime.now(sh)
 
     # A specific wall-clock moment on the cluster's today: the same instant
@@ -502,11 +503,11 @@ def test_wall_clock_renders_cluster_timezone(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_wall_clock_none_falls_back_to_host_zone(monkeypatch: pytest.MonkeyPatch) -> None:
-    """cluster_tz() None is the host-zone fallback signal: the stamp matches
+    """Clock.zone() None is the host-zone fallback signal: the stamp matches
     dt.astimezone(None) (machine-local), not UTC."""
     from datetime import UTC, datetime
 
-    monkeypatch.setattr(shells, "cluster_tz", lambda: None)
+    fix_zone(monkeypatch, None)
     # A moment on the host's today: the fallback stamp carries no date prefix.
     # (A fixed past date would cross midnight and gain the MM-DD prefix the
     # next day — a time-bomb assertion that expired 2026-08-28.)

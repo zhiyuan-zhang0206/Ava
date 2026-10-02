@@ -15,6 +15,8 @@ from psycopg import sql
 from base.agents.observation import snapshot
 from base.agents.observation.roster import _LIVE_SQL, AgentCard, list_directory, select_roster
 from base.config import settings
+from base.db import Database
+from base.db.tests.fakes import fake_database
 
 
 def seed(conn: psycopg.Connection, rows: list[tuple[int, str, str]]) -> None:
@@ -233,42 +235,37 @@ class _FakeConn:
         return None
 
 
-def _install_conn(monkeypatch: pytest.MonkeyPatch, row: tuple[Any, ...] | None) -> _FakeConn:
+def _install_conn(row: tuple[Any, ...] | None) -> tuple[Database, _FakeConn]:
     conn = _FakeConn(row)
 
     def _connect(**_kwargs: object) -> _FakeConn:
         return conn
 
-    monkeypatch.setattr(snapshot, "connect", _connect)
-    return conn
+    return fake_database(_connect), conn
 
 
-def test_effective_model_overlay_wins(monkeypatch: pytest.MonkeyPatch) -> None:
-    conn = _install_conn(monkeypatch, ({"llm_model": "deepseek-v4-pro"},))
-    assert snapshot.agent_effective_model(42, fallback="fallback-x") == "deepseek-v4-pro"
+def test_effective_model_overlay_wins() -> None:
+    db, conn = _install_conn(({"llm_model": "deepseek-v4-pro"},))
+    assert snapshot.agent_effective_model(db, 42, fallback="fallback-x") == "deepseek-v4-pro"
     ((sql, params),) = conn.queries
     assert "agents_meta" in sql and params == (42,)
 
 
-def test_effective_model_defaults_to_the_fleet_model_without_an_overlay(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_conn(monkeypatch, ({},))
-    assert snapshot.agent_effective_model(42, fallback="fallback-x") == settings.lm.llm_model
+def test_effective_model_defaults_to_the_fleet_model_without_an_overlay() -> None:
+    db, _ = _install_conn(({},))
+    assert snapshot.agent_effective_model(db, 42, fallback="fallback-x") == settings.lm.llm_model
 
 
-def test_effective_model_defaults_to_the_fleet_model_when_the_row_vanished(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_conn(monkeypatch, None)
-    assert snapshot.agent_effective_model(42, fallback="fallback-x") == settings.lm.llm_model
+def test_effective_model_defaults_to_the_fleet_model_when_the_row_vanished() -> None:
+    db, _ = _install_conn(None)
+    assert snapshot.agent_effective_model(db, 42, fallback="fallback-x") == settings.lm.llm_model
 
 
-def test_effective_model_read_failure_returns_the_callers_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_effective_model_read_failure_returns_the_callers_fallback() -> None:
     def boom(**_kw: object) -> None:
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(snapshot, "connect", boom)
-    assert snapshot.agent_effective_model(42, fallback="fallback-x") == "fallback-x"
+    assert (
+        snapshot.agent_effective_model(fake_database(boom), 42, fallback="fallback-x")
+        == "fallback-x"
+    )

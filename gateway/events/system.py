@@ -35,10 +35,9 @@ async def get_system_broadcast(request: Request) -> StreamingResponse:
     """
     return StreamingResponse(
         event_stream(
-            settings.data_plane.redis_url,
+            request.app.state.bus,
             0,  # agent_id is ignored in broadcast mode
             request,
-            channel=settings.data_plane.events_channel,
             role_filter=GLOBAL_ROLES,
             broadcast=True,
         ),
@@ -60,10 +59,9 @@ async def get_system_events(agent_id: int, request: Request) -> StreamingRespons
     """
     return StreamingResponse(
         event_stream(
-            settings.data_plane.redis_url,
+            request.app.state.bus,
             agent_id,
             request,
-            channel=settings.data_plane.events_channel,
             role_filter=SYSTEM_ROLES,
         ),
         media_type="text/event-stream",
@@ -98,9 +96,8 @@ async def get_all_events(request: Request, agents: str | None = None) -> Streami
 
     return StreamingResponse(
         throttled_event_stream(
-            settings.data_plane.redis_url,
+            request.app.state.bus,
             request,
-            channel=settings.data_plane.events_channel,
             throttle_rate=settings.gateway.sse_throttle_rate,
             agent_filter=agent_filter,
         ),

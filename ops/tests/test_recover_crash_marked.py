@@ -16,6 +16,7 @@ import pytest
 
 from base.agents import AgentNotFound
 from base.cluster.machine import machine_name
+from base.db import Database
 from base.telemetry import Event
 from ops import cluster_rpc, lifecycle
 from ops.agents.spawn import create_agent_row
@@ -105,7 +106,7 @@ def stubs(monkeypatch: pytest.MonkeyPatch) -> _Stubs:
             payload=payload,
         )
 
-    def _record_publish(agent_id: int) -> None:
+    def _record_publish(_bus: object, agent_id: int) -> None:
         published.append(agent_id)
 
     monkeypatch.setattr(lifecycle, "prepare_event_log", _record_event)
@@ -254,7 +255,9 @@ class TestRecoverCrashMarkedRequester:
             raise AssertionError("a suppressed requester must not read or contact the home")
 
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
-        decision, reason = await lifecycle.recover_crash_marked_if_stalled(7, stalled_inbound_id=88)
+        decision, reason = await lifecycle.recover_crash_marked_if_stalled(
+            Database.from_settings(), 7, stalled_inbound_id=88
+        )
         assert (decision, reason) == ("refused", "permanent_provider_reject")
 
     @pytest.mark.asyncio
@@ -266,13 +269,15 @@ class TestRecoverCrashMarkedRequester:
         seen: list[dict[str, object]] = []
 
         async def _dispatch(
-            *, target_machine: str, kind: str, payload: dict[str, object]
+            _db: object, *, target_machine: str, kind: str, payload: dict[str, object]
         ) -> dict[str, object]:
             seen.append({"target_machine": target_machine, "kind": kind, "payload": payload})
             return {"status": "harvested", "reason": None}
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _dispatch)
-        decision, reason = await lifecycle.recover_crash_marked_if_stalled(7, stalled_inbound_id=88)
+        decision, reason = await lifecycle.recover_crash_marked_if_stalled(
+            Database.from_settings(), 7, stalled_inbound_id=88
+        )
         assert (decision, reason) == ("harvested", None)
         assert seen == [
             {
@@ -295,11 +300,13 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(lifecycle, "recover_crash_marked_op", _local_op)
 
-        async def _unreachable(**_kwargs: object) -> dict[str, object]:
+        async def _unreachable(_db: object, **_kwargs: object) -> dict[str, object]:
             raise lifecycle._cluster_rpc.ClusterOpUnreachable("no ops server")
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
-        decision, reason = await lifecycle.recover_crash_marked_if_stalled(7, stalled_inbound_id=88)
+        decision, reason = await lifecycle.recover_crash_marked_if_stalled(
+            Database.from_settings(), 7, stalled_inbound_id=88
+        )
         assert (decision, reason) == ("refused", "not_settled:running")
         assert calls == [7]
 
@@ -311,11 +318,13 @@ class TestRecoverCrashMarkedRequester:
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
         monkeypatch.setattr(lifecycle, "machine_name", _gateway_box)
 
-        async def _unreachable(**_kwargs: object) -> dict[str, object]:
+        async def _unreachable(_db: object, **_kwargs: object) -> dict[str, object]:
             raise lifecycle._cluster_rpc.ClusterOpUnreachable("connect timeout")
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
-        decision, reason = await lifecycle.recover_crash_marked_if_stalled(7, stalled_inbound_id=88)
+        decision, reason = await lifecycle.recover_crash_marked_if_stalled(
+            Database.from_settings(), 7, stalled_inbound_id=88
+        )
         assert decision == "unreachable"
         assert reason == "connect timeout"
 
@@ -324,11 +333,13 @@ class TestRecoverCrashMarkedRequester:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _no_halt)
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
 
-        async def _explode(**_kwargs: object) -> dict[str, object]:
+        async def _explode(_db: object, **_kwargs: object) -> dict[str, object]:
             raise RuntimeError("kaput")
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _explode)
-        decision, reason = await lifecycle.recover_crash_marked_if_stalled(7, stalled_inbound_id=88)
+        decision, reason = await lifecycle.recover_crash_marked_if_stalled(
+            Database.from_settings(), 7, stalled_inbound_id=88
+        )
         assert (decision, reason) == ("error", "harvest request failed")
 
 

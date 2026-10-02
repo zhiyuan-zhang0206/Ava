@@ -27,6 +27,8 @@ from agent.turn.runloop import PendingTurnFailure, settle_turn_failure
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host.host import AgentHost
@@ -102,7 +104,13 @@ async def test_abort_survives_database_loss_before_halted_state_write(
         return await original_update(*args, **kwargs)
 
     monkeypatch.setattr(graph, "aupdate_state", interrupted_update)
-    host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph)
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=saver,
+        graph=graph,
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     publisher = MagicMock()
     ctx = AvaContext(ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock())
     with bind_turn_identity(agent, incarnation=owner):

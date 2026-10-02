@@ -40,15 +40,14 @@ from base.agents.impersonation.event_log import LOG_PROTOCOL_VERSION
 from base.agents.impersonation.history import append, capture_pending, set_actor
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.config import settings
 from base.config.service_read import current_field_values
 from base.db import connect, publish_inbound_wake
 from base.db.transaction import write_transaction
-from base.events.live import redis_client
 from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
 )
+from base.events.live.bus import EventBus
 from base.events.live.projection import Cancelled
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -62,9 +61,9 @@ def _ttl(value: int) -> int:
 
 def _wake(agent_id: int, *, roster_changed: bool = False) -> None:
     publish_inbound_wake(agent_id, "impersonation")
-    publish_impersonation_changed_sync(agent_id)
+    publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
     if roster_changed:
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
 
 
 def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
@@ -520,8 +519,7 @@ def ack(lease_id: str, caller: object, message_ids: list[int]) -> None:
                 event_key="ack:" + ",".join(map(str, sorted(set(message_ids)))),
             )
     if any(row[0] == "cancel" for row in acknowledged):
-        redis_client.publish_best_effort_sync(
-            settings.data_plane.events_channel,
+        EventBus.from_settings().publish_best_effort_sync(
             Cancelled(agent_id=lease["agent_id"]).model_dump_json(),
             context="impersonation_cancel_ack",
         )

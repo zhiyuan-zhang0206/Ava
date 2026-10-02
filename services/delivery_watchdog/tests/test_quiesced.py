@@ -13,7 +13,9 @@ from psycopg_pool import ConnectionPool
 
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.db import Database
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from services.delivery_watchdog import daemon, resurrect_retry, stall_recovery, turn_liveness
 
 _Loop = Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]]
@@ -21,13 +23,13 @@ _Loop = Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]]
 _LOOPS: dict[str, _Loop] = {
     "scan": daemon._scan_loop,
     "resurrect": lambda pool, progress: resurrect_retry.resurrect_loop(
-        pool, progress, 0.01, 10, 60.0
+        pool, Database.from_settings(), progress, 0.01, 10, 60.0
     ),
     "harvest": lambda pool, progress: stall_recovery.stall_recovery_loop(
-        pool, progress, 0.01, 60.0
+        pool, Database.from_settings(), progress, 0.01, 60.0
     ),
     "hosted_turn": lambda pool, progress: turn_liveness.hosted_turn_recovery_loop(
-        pool, progress, 0.01, 60.0
+        pool, Database.from_settings(), cast("EventBus", MagicMock()), progress, 0.01, 60.0
     ),
 }
 

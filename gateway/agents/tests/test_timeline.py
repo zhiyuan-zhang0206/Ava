@@ -2226,7 +2226,7 @@ class TestTimelineCompactHistory:
         )
         requested_limits: list[int | None] = []
 
-        def boundary_ids(_agent_id: int, *, limit: int | None = None) -> list[str]:
+        def boundary_ids(_db: object, _agent_id: int, *, limit: int | None = None) -> list[str]:
             requested_limits.append(limit)
             return []
 
@@ -2326,7 +2326,7 @@ class TestTimelineCompactHistory:
         )
         monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
 
-        def fail_current_read(_agent_id: int) -> list[BaseMessage]:
+        def fail_current_read(_db: object, _agent_id: int) -> list[BaseMessage]:
             raise AssertionError("historical paging must not deserialize the live segment")
 
         monkeypatch.setattr(timeline_router, "load_checkpoint_messages", fail_current_read)
@@ -2393,11 +2393,11 @@ class TestTimelineCompactHistory:
         )
         monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
 
-        def boundary_ids(_agent_id: int, *, limit: int | None = None) -> list[str]:
+        def boundary_ids(_db: object, _agent_id: int, *, limit: int | None = None) -> list[str]:
             del limit
             return ["missing-newer", "still-older"]
 
-        def missing_segment(_agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
+        def missing_segment(_db: object, _agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
             return []
 
         monkeypatch.setattr(timeline_router, "list_compact_boundary_checkpoint_ids", boundary_ids)
@@ -2477,14 +2477,14 @@ class TestTimelineCompactHistory:
         checkpoint_id = "1f0b9b12-0000-6000-8000-000000000000"
         monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
 
-        def boundary_ids(_agent_id: int, *, limit: int | None = None) -> list[str]:
+        def boundary_ids(_db: object, _agent_id: int, *, limit: int | None = None) -> list[str]:
             del limit
             return [checkpoint_id]
 
         monkeypatch.setattr(timeline_router, "list_compact_boundary_checkpoint_ids", boundary_ids)
         if damage == "missing":
 
-            def missing_segment(_agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
+            def missing_segment(*_args: object) -> list[BaseMessage]:
                 return []
 
             monkeypatch.setattr(
@@ -2494,13 +2494,13 @@ class TestTimelineCompactHistory:
             )
         elif damage == "read_error":
 
-            def fail_read(_agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
+            def fail_read(_db: object, _agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
                 raise CheckpointReadError("damaged boundary")
 
             monkeypatch.setattr(timeline_router, "load_checkpoint_messages_segment", fail_read)
         else:
 
-            def malformed_segment(_agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
+            def malformed_segment(*_args: object) -> list[BaseMessage]:
                 return [
                     HumanMessage(
                         content="damaged inbound",

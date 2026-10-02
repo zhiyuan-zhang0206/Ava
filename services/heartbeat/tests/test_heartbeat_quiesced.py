@@ -13,7 +13,9 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.daemon.loop_health import LoopProgress
+from base.db import Database
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from services.heartbeat import completion_digest, daemon
 
 
@@ -53,11 +55,17 @@ async def test_a_quiesced_unit_runs_no_liveness_pass(
 ) -> None:
     passes: list[object] = []
 
-    async def record_pass(pool: object) -> None:
+    async def record_pass(_db: object, pool: object, _bus: object) -> None:
         passes.append(pool)
 
     monkeypatch.setattr(daemon, "run_liveness_pass", record_pass)
-    await _run_briefly(monkeypatch, daemon._liveness_loop, MagicMock(), quiesced=quiesced)
+    bus = cast("EventBus", MagicMock())
+    await _run_briefly(
+        monkeypatch,
+        lambda pool, liveness: daemon._liveness_loop(Database.from_settings(), pool, bus, liveness),
+        MagicMock(),
+        quiesced=quiesced,
+    )
     assert bool(passes) is (not quiesced)
 
 
@@ -67,13 +75,19 @@ async def test_a_quiesced_unit_flushes_no_completion_digest(
 ) -> None:
     flushes: list[object] = []
 
-    async def record_flush(pool: object) -> int:
+    async def record_flush(pool: object, _db: object, _bus: object) -> int:
         flushes.append(pool)
         return 0
 
     monkeypatch.setattr(completion_digest, "flush_once", record_flush)
     monkeypatch.setattr(completion_digest, "FLUSH_INTERVAL_S", 0.01)
+    bus = cast(EventBus, MagicMock())
     await _run_briefly(
-        monkeypatch, completion_digest.completion_digest_loop, MagicMock(), quiesced=quiesced
+        monkeypatch,
+        lambda pool, progress: completion_digest.completion_digest_loop(
+            pool, Database.from_settings(), bus, progress
+        ),
+        MagicMock(),
+        quiesced=quiesced,
     )
     assert bool(flushes) is (not quiesced)

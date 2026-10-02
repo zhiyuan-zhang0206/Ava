@@ -16,8 +16,9 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from base.agents import AgentStatus
 from base.config import settings
-from base.db import create_agent
-from base.events.live import redis_client
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
+from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 from gateway.agents.delivery import deliver_chat_inbound
 
 
@@ -66,18 +67,19 @@ async def test_deliver_survives_publish_failure(
     not stop the inbound INSERT from committing, and nothing may escape."""
     tid = _seed_idling_agent(db_conn)
 
-    monkeypatch.setattr(
-        redis_client,
-        "sync_redis",
-        lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(
-        redis_client, "get_async_redis", lambda: _BoomAsyncClient(RedisConnectionError("down"))
-    )
+    patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(RedisConnectionError("down")))
+    patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(RedisConnectionError("down")))
 
     with _sync_pool() as pool:
         # Must NOT raise despite every publish on the path throwing.
-        await deliver_chat_inbound(pool, tid, prepare=lambda _c: "hello there", refresh_badge=True)
+        await deliver_chat_inbound(
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            tid,
+            prepare=lambda _c: "hello there",
+            refresh_badge=True,
+        )
         await asyncio.sleep(0.05)  # let the fire-and-forget InboundArrived task settle
 
     # The user's inbound is durably committed.
@@ -96,14 +98,19 @@ async def test_deliver_degrades_when_badge_step_raises(
     InboundArrived + resurrect tail still runs (proven by the returned status)."""
     tid = _seed_idling_agent(db_conn)
 
-    def _boom_badge(_agent_id: int) -> None:
+    def _boom_badge(_bus: object, _agent_id: int) -> None:
         raise RuntimeError("lifecycle hint failed")
 
     monkeypatch.setattr("gateway.agents.delivery.publish_agent_updated_sync", _boom_badge)
 
     with _sync_pool() as pool:
         delivery = await deliver_chat_inbound(
-            pool, tid, prepare=lambda _c: "hi", refresh_badge=True
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            tid,
+            prepare=lambda _c: "hi",
+            refresh_badge=True,
         )
         await asyncio.sleep(0.05)
 
@@ -126,6 +133,7 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
     calls: list[tuple[int, int | None, str | None]] = []
 
     async def _resurrect(
+        _db: object,
         agent_id: int,
         *,
         trigger_inbound_id: int | None = None,
@@ -137,7 +145,13 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
     monkeypatch.setattr(delivery._ops, "resurrect_if_terminated", _resurrect)
 
     with _sync_pool() as pool:
-        delivery = await deliver_chat_inbound(pool, tid, prepare=lambda _c: "guard me")
+        delivery = await deliver_chat_inbound(
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            tid,
+            prepare=lambda _c: "guard me",
+        )
 
     with db_conn.cursor() as cur:
         cur.execute(
@@ -167,6 +181,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     db_conn.commit()
 
     async def _resurrect_once(
+        _db: object,
         agent_id: int,
         *,
         trigger_inbound_id: int,
@@ -195,12 +210,16 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     with _sync_pool() as pool:
         first = await deliver_chat_inbound(
             pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
             tid,
             prepare=lambda _c: "wake once",
             client_message_id="client-wake-once",
         )
         second = await deliver_chat_inbound(
             pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
             tid,
             prepare=lambda _c: "wake once",
             client_message_id="client-wake-once",
@@ -245,6 +264,8 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
     with _sync_pool() as pool:
         delivery = await deliver_chat_inbound(
             pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
             tid,
             prepare=lambda _conn: "peer work",
             source="agent:42",
@@ -299,6 +320,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
     observed_status = AgentStatus.TERMINATED
 
     async def _real_guard(
+        _db: object,
         agent_id: int,
         *,
         trigger_inbound_id: int,
@@ -337,12 +359,16 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
         first, second = await asyncio.gather(
             deliver_chat_inbound(
                 pool,
+                Database.from_settings(),
+                EventBus.from_settings(),
                 tid,
                 prepare=lambda _c: "concurrent wake",
                 client_message_id="client-concurrent-wake",
             ),
             deliver_chat_inbound(
                 pool,
+                Database.from_settings(),
+                EventBus.from_settings(),
                 tid,
                 prepare=lambda _c: "concurrent wake",
                 client_message_id="client-concurrent-wake",
@@ -372,7 +398,7 @@ async def test_badge_publish_happens_after_commit(
 
     observed: dict[str, bool] = {}
 
-    def _spy_publish(agent_id: int) -> None:
+    def _spy_publish(_bus: object, agent_id: int) -> None:
         # A DISTINCT connection: it sees the marker only if the delivery txn has
         # already committed by the time the badge publish is invoked.
         probe = psycopg.connect(settings.data_plane.db_url)
@@ -393,7 +419,14 @@ async def test_badge_publish_happens_after_commit(
             cur.execute("UPDATE agents SET label = 'ordering-marker' WHERE id = %s", (tid,))
 
     with _sync_pool() as pool:
-        await deliver_chat_inbound(pool, tid, prepare=_prepare, refresh_badge=True)
+        await deliver_chat_inbound(
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            tid,
+            prepare=_prepare,
+            refresh_badge=True,
+        )
 
     assert observed.get("committed") is True, (
         "badge publish saw uncommitted state — it ran before the delivery commit"

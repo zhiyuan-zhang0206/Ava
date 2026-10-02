@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from base.cluster.dataplane import walg_binary
+from base.db import Database
 from services.gateway_side.walg import check, probe, state, tick
 from services.gateway_side.walg import config as walg_config
 from services.gateway_side.walg.archive import expected_archive
@@ -32,7 +33,7 @@ def cmd_walg_run() -> int:
     The OS job runs exactly this, and so can an operator: concurrent runs stand down
     and a skipped or repeated run is harmless.
     """
-    return tick.run_tick(_stamped)
+    return tick.run_tick(Database.from_settings(), _stamped)
 
 
 def cmd_walg_drill() -> int:

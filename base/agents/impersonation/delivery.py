@@ -19,6 +19,7 @@ from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
 )
+from base.events.live.bus import EventBus
 
 
 def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) -> frozenset[int]:
@@ -57,6 +58,6 @@ def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) ->
             ).fetchall()
     if was_open and lease["status"] == "expired":
         publish_inbound_wake(lease["agent_id"], "impersonation-expired")
-        publish_impersonation_changed_sync(lease["agent_id"])
-        publish_agent_updated_sync(lease["agent_id"])
+        publish_impersonation_changed_sync(EventBus.from_settings(), lease["agent_id"])
+        publish_agent_updated_sync(EventBus.from_settings(), lease["agent_id"])
     return frozenset(row[0] for row in rows)

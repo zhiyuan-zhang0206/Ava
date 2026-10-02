@@ -12,6 +12,7 @@ cluster.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import shutil
 import subprocess
 import tempfile
@@ -25,7 +26,8 @@ from base.agents.history import checkpoint as checkpoint_reader
 from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP
 from base.cluster.dataplane.pg_throwaway_base import format_bytes, select_throwaway_base
 from base.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
-from base.config import settings
+from base.db import Database
+from base.db.config import db_config_from_settings
 from base.log import logger
 from services import backup
 
@@ -143,12 +145,8 @@ def verify_restored_database(db_url: str) -> RestoreReport:
         raise RuntimeError("restored checkpoints contain no readable agent conversation")
 
     sample_agent_id = int(sample[0])
-    original_url = settings.data_plane.db_url
-    settings.data_plane.db_url = db_url
-    try:
-        messages = checkpoint_reader.load_checkpoint_messages_full(sample_agent_id)
-    finally:
-        settings.data_plane.db_url = original_url
+    restored = Database(dataclasses.replace(db_config_from_settings(), db_url=db_url))
+    messages = checkpoint_reader.load_checkpoint_messages_full(restored, sample_agent_id)
     if not messages:
         raise RuntimeError("restored checkpoint conversation has no messages")
 

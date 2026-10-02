@@ -71,7 +71,7 @@ def no_dial(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         dialed.append(target_machine)
         return _status(target_machine)
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
     return dialed
 
 
@@ -185,7 +185,7 @@ def test_the_gateway_remembers_no_failure_between_reads(monkeypatch: pytest.Monk
         calls.append(target_machine)
         raise cluster_rpc.ClusterOpUnreachable("blackhole")
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
 
     first = _gather([_row()], None)
     second = _gather([_row()], None)
@@ -206,7 +206,7 @@ def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
 
     started = time.monotonic()
     machines = _gather([_row(f"h{i}") for i in range(5)], None)
@@ -249,7 +249,7 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
         dialed.append(target_machine)
         return _status(target_machine, running_sha="from-a-dial")
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
     with TestClient(app) as client:
         default = client.get("/api/cluster/roster").json()
         assert dialed == []
@@ -274,7 +274,7 @@ def test_the_machines_endpoint_follows_the_same_two_modes(
         dialed.append(target_machine)
         return _status(target_machine)
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
     with TestClient(app) as client:
         assert client.get("/api/cluster/machines").json()[0]["live"] is True
         assert dialed == []

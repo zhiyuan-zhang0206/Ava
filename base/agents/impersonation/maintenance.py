@@ -13,6 +13,7 @@ from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
 )
+from base.events.live.bus import EventBus
 
 # One reaper pass handles at most this many leases per list — expired-lease
 # reconciliation and the approaching-expiry reminder scan each take one page.
@@ -40,8 +41,8 @@ def reap_impersonations(pool: ConnectionPool, *, limit: int = _PASS_BATCH) -> in
                 expired_agents.append(lease["agent_id"])
     for agent_id in expired_agents:
         publish_inbound_wake(agent_id, "impersonation-expired")
-        publish_impersonation_changed_sync(agent_id)
-        publish_agent_updated_sync(agent_id)
+        publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     return len(expired_agents)
 
 
@@ -121,8 +122,8 @@ def force_expire_impersonation(
         actor=actor,
     )
     publish_inbound_wake(agent_id, "impersonation-expired")
-    publish_impersonation_changed_sync(agent_id)
-    publish_agent_updated_sync(agent_id)
+    publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
+    publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     return "expired"
 
 

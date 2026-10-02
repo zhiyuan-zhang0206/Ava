@@ -20,7 +20,8 @@ from agent.state import AgentState
 from agent.turn import progress
 from base.agents.incarnation import resources as resource_codec
 from base.cluster.machine import machine_name
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from services.agent_host import dispatcher
 from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
@@ -56,7 +57,13 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent,))
     lifecycle = insert_inbound_message(db_conn, agent, "", "system:test", kind="restart")
     db_conn.commit()
-    host = AgentHost(pool=aops_pool, checkpointer=AsyncMock(), graph=AsyncMock())
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=AsyncMock(),
+        graph=AsyncMock(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
 
     assert [(wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(60)] == [
         (agent, True)
@@ -108,11 +115,20 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
         return {"turn_idle": True, "halted": True, "messages": [AIMessage(content="Completed")]}
 
     graph, saver = await _graph(aops_pool, agent, work)
-    host = AgentHost(pool=aops_pool, graph=graph, checkpointer=saver)
+    host = AgentHost(
+        pool=aops_pool,
+        graph=graph,
+        checkpointer=saver,
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     host._owner = incarnation.owner
     scheduler = TurnScheduler(host.run_turn)
     dispatcher = InboundWakeDispatcher(
-        "redis://unused", scheduler, pending_scan=host.pending_inbound_wakes, stale_after_s=60
+        EventBus.from_settings(),
+        scheduler,
+        pending_scan=host.pending_inbound_wakes,
+        stale_after_s=60,
     )
     try:
         scheduler.wake(agent)
@@ -178,7 +194,13 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
         },
         as_node="work",
     )
-    host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph)
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=saver,
+        graph=graph,
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     # A host boot while the dead predecessor still has a fresh lease cannot settle it.
     assert await settle_stale_running_rows(aops_pool, machine_name()) == []
     assert await host.pending_inbound_wakes(60) == []
@@ -196,7 +218,10 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
     )
     scheduler = TurnScheduler(host.run_turn)
     dispatcher = InboundWakeDispatcher(
-        "redis://unused", scheduler, pending_scan=host.pending_inbound_wakes, stale_after_s=60
+        EventBus.from_settings(),
+        scheduler,
+        pending_scan=host.pending_inbound_wakes,
+        stale_after_s=60,
     )
     try:
         await dispatcher.scan_once()
@@ -229,7 +254,13 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
-    host = AgentHost(pool=aops_pool, checkpointer=AsyncMock(), graph=AsyncMock())
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=AsyncMock(),
+        graph=AsyncMock(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     if boundary == "same_owner":
         host._owner = incarnation.owner
     db_conn.execute(
@@ -259,7 +290,13 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
-    host = AgentHost(pool=aops_pool, checkpointer=AsyncMock(), graph=AsyncMock())
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=AsyncMock(),
+        graph=AsyncMock(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     with subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE
     ) as predecessor:
@@ -336,7 +373,7 @@ class TestHostedWakePacing:
 
         scheduler = TurnScheduler(run_turn)
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -375,7 +412,7 @@ class TestHostedWakePacing:
 
         scheduler = TurnScheduler(run_turn)
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
         try:
             direct = scheduler.wake(3)
@@ -416,7 +453,7 @@ class TestHostedWakePacing:
 
         scheduler = TurnScheduler(run_turn)
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -473,7 +510,7 @@ class TestHostedWakePacing:
             return pending
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -516,7 +553,7 @@ class TestHostedWakePacing:
             ] + [dispatcher.PendingInboundWake(agent_id=99, stale=False)]
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -553,7 +590,7 @@ class TestHostedWakePacing:
             return pending
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -581,7 +618,7 @@ class TestHostedWakePacing:
             return [dispatcher.PendingInboundWake(1, False, True)]
 
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
         await disp.scan_once()
         await disp.scan_once()
@@ -603,7 +640,7 @@ class TestHostedWakePacing:
             return pending
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -632,7 +669,7 @@ class TestHostedWakePacing:
             ] + [dispatcher.PendingInboundWake(agent_id=99, stale=False)]
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -665,7 +702,7 @@ class TestHostedWakePacing:
             ]
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -688,7 +725,7 @@ class TestHostedWakePacing:
             ]
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -708,7 +745,7 @@ class TestHostedWakePacing:
             ]
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -726,6 +763,8 @@ class TestHostedHostWakePacing:
             checkpointer=object(),  # pyright: ignore[reportArgumentType]
             graph=object(),  # pyright: ignore[reportArgumentType]
             machine="this-box",
+            bus=EventBus.from_settings(),
+            db=Database.from_settings(),
         )
 
         def held_wakes(_fences: object) -> list[dispatcher.PendingInboundWake]:
@@ -747,7 +786,7 @@ class TestHostedHostWakePacing:
         ]
         scheduler = _ScanScheduler()
         wake_dispatcher = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=host.pending_inbound_wakes,
             stale_after_s=30,

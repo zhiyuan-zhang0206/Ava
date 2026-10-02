@@ -34,7 +34,7 @@ from base.agents.history.timeline import (
 )
 from base.agents.impersonation.timeline import hydrate
 from base.config import settings
-from base.db import agent_exists, list_inbound_messages
+from base.db import Database, agent_exists, list_inbound_messages
 from gateway.agents.eval_guard import deny_isolated_result_read
 
 router = APIRouter()
@@ -230,6 +230,7 @@ def _item_sort_key(item_id: str) -> tuple[int, int]:
 
 
 def _load_history_tail(
+    db: Database,
     agent_id: int,
     boundary_ids: list[str],
     rank: int,
@@ -239,7 +240,7 @@ def _load_history_tail(
     """Load and window one exact older segment, tolerating bad blobs."""
     if rank > len(boundary_ids) or not _depth_allows(rank, depth):
         return [], False
-    items = _load_history_segment(agent_id, boundary_ids[rank - 1], rank, limit=limit)
+    items = _load_history_segment(db, agent_id, boundary_ids[rank - 1], rank, limit=limit)
     if not items:
         return [], False
     window, segment_has_more = tail_window(items, limit)
@@ -247,6 +248,7 @@ def _load_history_tail(
 
 
 def _load_history_segment(
+    db: Database,
     agent_id: int,
     checkpoint_id: str,
     rank: int,
@@ -258,7 +260,7 @@ def _load_history_segment(
     if limit is None:
         limit = timeline_default_limit()
     try:
-        messages = load_checkpoint_messages_segment(agent_id, checkpoint_id)
+        messages = load_checkpoint_messages_segment(db, agent_id, checkpoint_id)
     except CheckpointReadError as exc:
         _log.warning(
             "timeline compact history: checkpoint read failed for agent %s boundary %s: %r",
@@ -283,11 +285,12 @@ def _load_history_segment(
     return hydrate(items, agent_id, limit=limit, before=before)
 
 
-def _load_boundary_ids(agent_id: int, depth: int) -> list[str]:
+def _load_boundary_ids(db: Database, agent_id: int, depth: int) -> list[str]:
     if depth == 0:
         return []
     try:
         return list_compact_boundary_checkpoint_ids(
+            db,
             agent_id,
             limit=depth + 1 if depth > 0 else None,
         )
@@ -300,9 +303,9 @@ def _load_boundary_ids(agent_id: int, depth: int) -> list[str]:
         return []
 
 
-def _load_current_message_count(agent_id: int) -> int:
+def _load_current_message_count(db: Database, agent_id: int) -> int:
     try:
-        return load_checkpoint_message_count(agent_id)
+        return load_checkpoint_message_count(db, agent_id)
     except CheckpointReadError as exc:
         _log.warning(
             "timeline current message count read failed for agent %s: %r",
@@ -313,6 +316,7 @@ def _load_current_message_count(agent_id: int) -> int:
 
 
 def _historical_window(
+    db: Database,
     agent_id: int,
     cursor: _TimelineCursor,
     limit: int,
@@ -330,7 +334,7 @@ def _historical_window(
     if not _depth_allows(rank, depth):
         return [], False
     segment_items = _load_history_segment(
-        agent_id, checkpoint_id, rank, limit=limit, before=cursor.item_id()
+        db, agent_id, checkpoint_id, rank, limit=limit, before=cursor.item_id()
     )
     if not segment_items:
         return [], False
@@ -353,6 +357,7 @@ def _historical_window(
     del segment_items
     older_rank = rank + 1
     older_window, older_has_more = _load_history_tail(
+        db,
         agent_id,
         boundary_ids,
         older_rank,
@@ -460,18 +465,20 @@ def get_timeline(
             ]
         )
     depth = settings.gateway.timeline_compact_history
-    boundary_ids = _load_boundary_ids(agent_id, depth)
+    db: Database = request.app.state.db
+    boundary_ids = _load_boundary_ids(db, agent_id, depth)
 
     # Historical pages do not deserialize the live checkpoint. Its exact
     # message count comes from the five-byte channel header instead.
     if before is not None and cursor is None:
         return TimelineResponse(
             items=[],
-            msg_count=_load_current_message_count(agent_id),
+            msg_count=_load_current_message_count(db, agent_id),
             has_more=False,
         )
     if historical_request and cursor is not None:
         window, has_more = _historical_window(
+            db,
             agent_id,
             cursor,
             limit,
@@ -480,12 +487,12 @@ def get_timeline(
         )
         return TimelineResponse(
             items=window,
-            msg_count=_load_current_message_count(agent_id),
+            msg_count=_load_current_message_count(db, agent_id),
             has_more=has_more,
         )
 
     try:
-        messages = load_checkpoint_messages(agent_id)
+        messages = load_checkpoint_messages(db, agent_id)
     except CheckpointReadError as exc:
         _log.warning("timeline cold load: checkpoint read failed for agent %s: %r", agent_id, exc)
         messages = []
@@ -520,6 +527,7 @@ def get_timeline(
                 return TimelineResponse(items=head, msg_count=msg_count, has_more=False)
             del messages, items
             older_window, has_more = _load_history_tail(
+                db,
                 agent_id,
                 boundary_ids,
                 1,

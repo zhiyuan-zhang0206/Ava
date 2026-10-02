@@ -20,8 +20,9 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
-import base.db
+from base.cluster.machine import daemon_acceptance
 from base.config import settings
+from base.db import Database
 
 _log = logging.getLogger("services.agent_ops.daemon")
 
@@ -54,7 +55,7 @@ def _register_boot() -> None:
 
     try:
         url = unit_dial_url(machine_role())
-        register_self(url=url)
+        register_self(Database.from_settings(), url=url)
     except Exception:
         _log.exception(
             "boot registration failed — this unit's machines row keeps its previous "
@@ -83,34 +84,10 @@ def _ops_bind_host(acceptance: frozenset[str] | None) -> str:
 
 
 def _ops_acceptance() -> frozenset[str] | None:
-    """SHA-256 digests of the bearers /ops accepts, or None for the open posture.
-
-    The gateway dials /ops with its gateway-class machine API token
-    (`ops.cluster_rpc`), and a runner-class process of the unit (the
-    agent-host's crash recovery) dials it with its runner token, so /ops
-    accepts exactly its write generation's two tokens. A remote unit takes the
-    gateway token digest its installed capability carries plus its own runner
-    token's (none when its cluster's API is open): it never holds the gateway
-    token or the human secret. The gateway home takes the active generation's
-    two tokens while the cluster secret is set (none while no generation is
-    active: fail closed). A remote-managed plane keeps no write generations and
-    accepts the human secret its gateway presents instead.
-    """
-    from base.cluster.authority.api import acceptance, token_digest
-    from base.cluster.authority.unit import load_unit_capability
-    from base.paths import ava_home
-
-    home = ava_home().resolve()
-    capability = load_unit_capability(home)
-    if capability is not None:
-        api = capability.api
-        return None if api is None else frozenset({api.gateway, token_digest(api.token)})
-    secret = settings.data_plane.cluster_secret
-    if not secret:
-        return None
-    if settings.data_plane.is_remote:
-        return frozenset({token_digest(secret)})
-    return frozenset(acceptance(home).values())
+    """SHA-256 digests of the bearers /ops accepts, or None for the open posture: the
+    daemon acceptance of `base.cluster.machine.daemon_acceptance` (the gateway dials /ops with its
+    gateway-class machine API token, a runner-class process of the unit with its runner token)."""
+    return daemon_acceptance()
 
 
 def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
@@ -120,7 +97,7 @@ def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
     connection only briefly, so the cap bounds concurrent dispatch rather than
     request rate.
 
-    Built by `base.db.pool()` so the borrows carry `prepare_threshold=None` and
+    Built by `Database.pool()` so the borrows carry `prepare_threshold=None` and
     `PG_KEEPALIVE_KWARGS` from the one place that defines them. The keepalives are
     not incidental for this daemon in particular: it is the longest-lived ava
     process on an agent-runner, which is typically a laptop-grade box that sleeps
@@ -138,7 +115,7 @@ def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
     # the first dispatch of the day dies with psycopg.OperationalError
     # 'the connection is closed' (Task #1027). The check discards the dead conn
     # and hands out a fresh one.
-    return base.db.pool(
+    return Database.from_settings().pool(
         min_size=0,  # an idle daemon holds no client connection; borrows open lazily
         max_size=max(2, settings.services.ops_concurrency + 2),
         check_connections=True,

@@ -29,6 +29,8 @@ from base.daemon.schedules.completion_notices import (
     pending_digests,
     prune_delivered_notices,
 )
+from base.db import Database
+from base.events.live.bus import EventBus
 from gateway.agents.delivery import deliver_chat_inbound
 
 _log = logging.getLogger(__name__)
@@ -61,7 +63,9 @@ def _digest_key(digest: CompletionDigest) -> str:
     return f"completion-digest:{digest.agent_id}:{digest.window_start.astimezone(UTC).isoformat()}"
 
 
-async def flush_once(pool: ConnectionPool, *, now: datetime | None = None) -> int:
+async def flush_once(
+    pool: ConnectionPool, db: Database, bus: EventBus, *, now: datetime | None = None
+) -> int:
     """Deliver each completed hour, then mark its persisted event rows.
 
     A crash after delivery but before the mark repeats the same idempotency key,
@@ -74,6 +78,8 @@ async def flush_once(pool: ConnectionPool, *, now: datetime | None = None) -> in
         try:
             delivery = await deliver_chat_inbound(
                 pool,
+                db,
+                bus,
                 digest.agent_id,
                 prepare=lambda _conn, digest=digest: format_digest(
                     agent_id=digest.agent_id,
@@ -105,11 +111,13 @@ async def flush_once(pool: ConnectionPool, *, now: datetime | None = None) -> in
     return delivered
 
 
-async def completion_digest_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
+async def completion_digest_loop(
+    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+) -> None:
     """The completion-digest flush as a resident sequential loop: one pass at
     start, then every `FLUSH_INTERVAL_S`."""
 
     async def one_round() -> None:
-        await flush_once(pool)
+        await flush_once(pool, db, bus)
 
     await round_loop.run_rounds("completion-digest", progress, FLUSH_INTERVAL_S, one_round)

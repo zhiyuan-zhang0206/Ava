@@ -105,7 +105,6 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -303,25 +302,6 @@ def host_tz_name() -> str:
     return "UTC"
 
 
-def cluster_tz() -> ZoneInfo | None:
-    """The cluster's timezone as a ``ZoneInfo``, or ``None`` when this process
-    holds no authoritative ``AVA_TIMEZONE`` (settings-lite / bare checkout).
-
-    ``None`` is the *host-zone fallback signal*: ``dt.astimezone(None)`` is
-    machine-local, which is the documented degradation of a maintenance verb
-    running while the gateway is down. A value that fails to parse as IANA
-    (belt and braces — Settings already fails fast on it at construction)
-    also yields ``None`` rather than crashing a display path.
-    """
-    name = cluster_tz_name()
-    if name is None:
-        return None
-    try:
-        return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        return None
-
-
 def _tzset() -> None:
     """Re-read the process TZ from ``os.environ["TZ"]`` where supported.
 
@@ -353,7 +333,7 @@ def apply_cluster_timezone() -> None:
     would be wrong.
 
     No-op on Windows beyond exporting ``TZ`` for children: ``tzset`` does not
-    exist there, and the explicit ``cluster_tz()`` reads cover the display
+    exist there, and the explicit ``Clock.zone()`` reads cover the display
     paths instead.
     """
     name = cluster_tz_name()
@@ -365,40 +345,6 @@ def apply_cluster_timezone() -> None:
         return
     os.environ["TZ"] = name
     _tzset()
-
-
-def format_timestamp(dt: datetime) -> str:
-    """Render a TZ-aware datetime as the agent-facing timestamp string.
-
-    Format: ``[YYYY-MM-DD HH:MM:SS]``, e.g. ``[2026-05-06 14:32:05]``. When
-    ``settings.general.message_timestamp_weekday`` is enabled the weekday
-    abbreviated name is included between date and time. `dt` is converted to
-    ``settings.general.timezone`` (default ``America/Los_Angeles``) first, so
-    values read back from the database (TIMESTAMPTZ / UTC) render in the same
-    wall clock as current-time stamps.
-
-    No timezone suffix: ``settings.general.timezone`` is cluster-pinned, so the
-    suffix was a constant string repeated on every timestamp — and an ambiguous
-    one (``%Z`` gives ``PDT``/``PST`` across a DST boundary, and ``CST`` names
-    two different zones). The agent is told the timezone once instead, by the
-    standing context note in `agent/graph/context_notes.py`.
-
-    This is the single agent-facing timestamp representation: every producer
-    goes through here, so a format change can never apply to some of an agent's
-    timestamps and not others.
-    """
-    local = dt.astimezone(ZoneInfo(settings.general.timezone))
-    if settings.general.message_timestamp_weekday:
-        return local.strftime("[%Y-%m-%d %a %H:%M:%S]")
-    return local.strftime("[%Y-%m-%d %H:%M:%S]")
-
-
-def now_timestamp() -> str:
-    """Return the current time as an agent-facing timestamp string.
-
-    Thin wrapper over `format_timestamp`; see there for the format.
-    """
-    return format_timestamp(datetime.now(UTC))
 
 
 # ── The stable `settings` object ──

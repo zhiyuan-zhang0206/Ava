@@ -66,9 +66,9 @@ def _pg_datasource_host_port(*, remote_observatory: bool) -> str:
     """
     from psycopg.conninfo import conninfo_to_dict
 
-    from base.db import direct_db_url
+    from base.db import Database
 
-    connection = conninfo_to_dict(direct_db_url())
+    connection = conninfo_to_dict(Database.from_settings().direct_url())
     host = str(connection.get("host") or "127.0.0.1")
     if host.startswith("/"):
         host = "127.0.0.1"

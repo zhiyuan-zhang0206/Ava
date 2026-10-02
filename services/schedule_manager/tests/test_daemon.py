@@ -120,7 +120,7 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     def remove(_path: object) -> None:
         released.append("pidfile")
 
-    def make_pool(**_kw: object) -> _Pool:
+    def make_pool(_self: object, **_kw: object) -> _Pool:
         return _Pool()
 
     def own_checkout(_repo: object) -> None:
@@ -131,7 +131,7 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch.setattr(daemon, "remove_pidfile", remove)
     monkeypatch.setattr(daemon, "start_health_server", start_health)
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
-    monkeypatch.setattr(daemon.base.db, "pool", make_pool)
+    monkeypatch.setattr(daemon.Database, "pool", make_pool)
     monkeypatch.setattr(daemon, "provision_builtins", no_provision)
     monkeypatch.setattr(daemon, "_run_loops", crashing_loops)
 

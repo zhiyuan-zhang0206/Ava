@@ -9,6 +9,7 @@ from psycopg import errors as pg_errors
 
 from base import telemetry
 from base.agents import AgentStatus
+from base.events.live.tests.fakes import patch_sync_redis
 from gateway.app import app
 from gateway.lgtm import telemetry_staleness
 from gateway.schemas.fleet_graph import FleetGraphNode, FleetGraphResponse
@@ -99,7 +100,7 @@ def test_success_writes_short_cache_and_last_good_graph(
 
     import gateway.routers.fleet_graph as fg
 
-    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    patch_sync_redis(monkeypatch, _RedisFactory(redis))
     with TestClient(app) as client:
         resp = client.get("/api/fleet/graph")
 
@@ -123,7 +124,7 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
 
     import gateway.routers.fleet_graph as fg
 
-    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    patch_sync_redis(monkeypatch, _RedisFactory(redis))
 
     def missing_heartbeat(pool: object, *, now: datetime) -> None:
         del pool, now
@@ -171,7 +172,7 @@ def test_pg_phase_exceeding_route_budget_serves_stale_before_telemetry(
     import gateway.routers.fleet_graph as fg
 
     monotonic = iter((0.0, fg._ROUTE_TIMEOUT_S + 0.1))
-    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    patch_sync_redis(monkeypatch, _RedisFactory(redis))
     monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
     with TestClient(app) as client:
         response = client.get("/api/fleet/graph")
@@ -191,7 +192,7 @@ def test_pg_cancellation_serves_last_good_graph(
 
     key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
     redis.values[f"fleet_graph:last_good:{key}"] = last_good.model_dump_json()
-    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    patch_sync_redis(monkeypatch, _RedisFactory(redis))
 
     class _CanceledPool:
         def connection(self) -> object:

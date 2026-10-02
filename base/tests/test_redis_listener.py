@@ -29,9 +29,9 @@ from base.events.live.redis_listener import RedisInboundListener, WakeFailure, W
 
 async def _publish_inbound(agent_id: int, inbound_id: int = 42) -> None:
     """Publish a wake-up to the agent's (cluster-scoped) Redis channel."""
-    from base.events.live.redis_client import sync_redis
+    from base.events.live.bus import EventBus
 
-    r = sync_redis()
+    r = EventBus.from_settings().sync_redis()
     try:
         r.publish(inbound_channel(agent_id), str(inbound_id))  # pyright: ignore[reportUnknownMemberType]
     finally:
@@ -315,9 +315,9 @@ class TestWakeHealth:
 
     async def _set_wake_key(self, agent_id: int, payload: str = "42") -> None:
         from base.cluster import WAKE_KEY_TTL_S, wake_key
-        from base.events.live.redis_client import sync_redis
+        from base.events.live.bus import EventBus
 
-        r = sync_redis()
+        r = EventBus.from_settings().sync_redis()
         try:
             r.set(wake_key(agent_id), payload, ex=WAKE_KEY_TTL_S)
         finally:
@@ -486,9 +486,9 @@ def _make_scoped_user(user: str, channel_grant: str) -> None:
     full key + command access, password == username. `resetchannels` clears the
     default channel grant first, so the user reaches ONLY the granted pattern,
     modelling `ensure_cluster_redis_acl`'s `resetchannels &<prefix>:*`."""
-    from base.events.live.redis_client import sync_redis
+    from base.events.live.bus import EventBus
 
-    r = sync_redis()
+    r = EventBus.from_settings().sync_redis()
     try:
         r.execute_command(
             "ACL",
@@ -597,9 +597,9 @@ class TestWakeKeyBreadcrumb:
 
     async def _set_wake_key(self, agent_id: int, payload: str = "42") -> None:
         from base.cluster import WAKE_KEY_TTL_S, wake_key
-        from base.events.live.redis_client import sync_redis
+        from base.events.live.bus import EventBus
 
-        r = sync_redis()
+        r = EventBus.from_settings().sync_redis()
         try:
             r.set(wake_key(agent_id), payload, ex=WAKE_KEY_TTL_S)
         finally:
@@ -607,9 +607,9 @@ class TestWakeKeyBreadcrumb:
 
     async def _get_wake_key(self, agent_id: int) -> str | None:
         from base.cluster import wake_key
-        from base.events.live.redis_client import sync_redis
+        from base.events.live.bus import EventBus
 
-        r = sync_redis(decode_responses=True)
+        r = EventBus.from_settings().sync_redis(decode_responses=True)
         try:
             val = r.get(wake_key(agent_id))
             return val.decode() if isinstance(val, bytes) else val
@@ -682,9 +682,9 @@ class TestWakeKeyBreadcrumb:
         )
         # cleanup
         from base.cluster import wake_key
-        from base.events.live.redis_client import sync_redis
+        from base.events.live.bus import EventBus
 
-        r = sync_redis()
+        r = EventBus.from_settings().sync_redis()
         try:
             r.delete(wake_key(agent_id))
         finally:

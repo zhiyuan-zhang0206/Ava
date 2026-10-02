@@ -15,6 +15,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.db.tests.fakes import patch_database
+
 
 def _seed_checkpoint_versions(conn: psycopg.Connection) -> None:
     conn.execute(
@@ -64,7 +66,6 @@ class _FakeAdminConnection:
 
 @pytest.fixture
 def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    import base.db
     import base.deploy.schema.migrations
     from base import cluster
     from base.cluster import ownership
@@ -106,8 +107,8 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append("ownership")
 
     monkeypatch.setattr(ownership, "require_postgres_connection", record_ownership)
-    monkeypatch.setattr(base.db, "connect", fake_connect)
-    monkeypatch.setattr(base.db, "direct_db_url", lambda: "postgresql://direct/ava")
+    patch_database(monkeypatch, connect=fake_connect)
+    patch_database(monkeypatch, direct_url=lambda: "postgresql://direct/ava")
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
     monkeypatch.setattr(pg_admin.psycopg, "connect", fake_admin_connect)
     monkeypatch.setattr(

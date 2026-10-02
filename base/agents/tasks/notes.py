@@ -12,7 +12,7 @@ column of text an agent reads top to bottom.
 
 Kept here so the two writers cannot drift apart, and so the stamp is the same
 agent-facing representation as every other timestamp an agent sees:
-`base.config.format_timestamp`, in the cluster timezone the agent is told
+`base.clock.Clock.format_timestamp`, in the cluster timezone the agent is told
 about once by its standing context note.
 """
 
@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from base.config import format_timestamp
+from base.clock import Clock
 
 
 def task_note_line(note: str) -> str:
     """`note` as one stamped, newline-terminated line for `agent_tasks.results`."""
-    return f"{format_timestamp(datetime.now(UTC))} {note}\n"
+    return f"{Clock.from_settings().format_timestamp(datetime.now(UTC))} {note}\n"

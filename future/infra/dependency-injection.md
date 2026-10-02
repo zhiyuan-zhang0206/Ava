@@ -337,13 +337,42 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   entry points of the commands and probes that read a daemon's row (agent pause, cluster pause,
   lifecycle, cluster status, roster, IM alert delivery, machine registration). Those entry points
   are their own roots; threading the table through them is not done.
+- **Done, the event bus** (`base/events/live/bus.py`): `EventBusConfig` (Redis URL, events
+  channel) is read once, by `EventBus.from_settings()`; the handle gives `async_redis()` (one
+  shared client per event loop), `open_async_redis()`, `sync_redis()` and the never-raise
+  `publish_best_effort` / `publish_best_effort_sync` on the events channel (or a named one). The
+  transport (resilience kwargs, auth retry, publish discipline) stays in `redis_client`, which
+  no longer reads the settings; `get_async_redis`, `sync_redis` and the module-level publishes
+  are gone. The announce hints (`announce.publish_*`) and the ops lifecycle event publishes take
+  the bus as their first argument. A daemon root builds one bus and passes it down; the gateway
+  builds `app.state.bus` in the lifespan and its handlers read it from `request`. The
+  `ambient-bus` rule fails `EventBus.from_settings()` outside the modules named in `BUS_PACKAGES`
+  (the daemon roots of agent host, delivery watchdog, heartbeat, page server and TTL reaper, the
+  CLI health probe, and no root at all in `gateway/events`, `gateway/alerts`, `gateway/routers`).
+  Library code (`base/agents`, `ops`, `agent/ownership`, the fleet plugin) builds its own bus at
+  the call; threading one through those call chains is not done.
+- **Done, the clock** (`base/clock`): `ClockConfig` (the cluster timezone name, the authoritative
+  name when this process holds one, the message-timestamp weekday flag) is read once, by
+  `Clock.from_settings()`; the handle gives `timezone`, `authoritative_timezone`, `zone()` (None =
+  the host-zone fallback signal of a settings-lite process), `explicit_zone()`, the injectable
+  `now()` and the one agent-facing `format_timestamp` / `now_timestamp`. `base.config.cluster_tz`,
+  `format_timestamp` and `now_timestamp` are gone; `apply_cluster_timezone` and `host_tz_name`
+  stay in `base.config` (they act on the process or the host, not on a handle). The `ambient-clock`
+  rule fails `Clock.from_settings()` outside the roots named in `CLOCK_PACKAGES` (the schedules
+  command and the cluster-status probe); libraries build their own clock at the call. The
+  endpoint, bus and clock rules share one shape (`scripts/structure/ambient_state/rootrule.py`).
+- **Done, the cluster secret** (behavior change, `decisions/2026-10-03-cluster-secret-contraction.md`):
+  outside the gateway, the CLI and the root, no component holds the human secret. im_bridge
+  presents its machine API token and accepts the write generation's tokens on `/send`
+  (`base.cluster.machine.daemon_acceptance`, shared with the ops server); the callers of `/send`
+  send `gateway_auth_headers()`; the heartbeat's station probe reads the telemetry token from a
+  private file the gateway home's start writes. A remote-managed data plane keeps the human secret
+  (it issues no token), in `daemon_acceptance` and `gateway_bearer` only.
 - **Root-local bundles**: a root may gather what it wires into a frozen dataclass marked
   `base.wiring.root_bundle`. The `bundle-leak` rule fails any annotation of such a class outside
   its defining module, so the bundle stays a local variable of the root and never becomes a
   parameter type (a function handed the whole bundle can reach any member).
-- **Not yet**: the event bus handle, the clock, and the cluster-secret
-  contraction (machine API tokens in place of the human secret outside the gateway, the operator
-  CLI and the root); the agent-side per-turn slices carried in `AvaContext`.
+- **Not yet**: the agent-side per-turn slices carried in `AvaContext`.
 
 ## Open questions
 

@@ -35,7 +35,8 @@ from datetime import datetime
 
 from base.agents.messages.caller_identity import PREFIXES as _CALLER_PREFIXES
 from base.agents.messages.caller_identity import CallerIdentity
-from base.config import format_timestamp, now_timestamp, settings
+from base.clock import Clock
+from base.config import settings
 
 _AGENT_PREFIX = "agent:"
 _PAGE_PREFIX = "ui:page:"
@@ -129,7 +130,10 @@ def wrap_inbound(content: str, source: str, *, created_at: datetime | None = Non
     # `ts` carries its own leading space so the off-state leaves no stray
     # space before the colon (gated by settings.general.message_timestamps).
     if settings.general.message_timestamps:
-        formatted = format_timestamp(created_at) if created_at is not None else now_timestamp()
+        clock = Clock.from_settings()
+        formatted = (
+            clock.format_timestamp(created_at) if created_at is not None else clock.now_timestamp()
+        )
         ts = f" {formatted}"
     else:
         formatted = ""

@@ -211,6 +211,22 @@ DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "db")
 # that no longer exists fails as stale.
 ENDPOINT_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "endpoints")
 
+# ── 7. event-bus packages ───────────────────────────────────────────────────
+
+# Packages that take an `EventBus` handle from their composition root: package dir -> the
+# modules that may call `EventBus.from_settings()` (scripts/structure/ambient_state/busrule.py).
+# A package declares `bus = [...]` in its own `ambient_roots.toml` (see roots.py); a declared
+# root that no longer exists fails as stale.
+BUS_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "bus")
+
+# ── 8. clock packages ────────────────────────────────────────────────────────
+
+# Packages that take a `Clock` from their composition root: package dir -> the modules that may
+# call `Clock.from_settings()` (scripts/structure/ambient_state/clockrule.py). A package declares
+# `clock = [...]` in its own `ambient_roots.toml` (see roots.py); a declared root that no longer
+# exists fails as stale.
+CLOCK_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "clock")
+
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 
 DEFERRED_WARNING_REDESIGN = "deferred: warning/alert redesign"

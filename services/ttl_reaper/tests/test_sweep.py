@@ -18,6 +18,7 @@ from psycopg_pool import ConnectionPool
 
 from base.daemon.loop_health import LoopProgress
 from base.db import create_agent
+from base.events.live.bus import EventBus
 from services.ttl_reaper import lifecycle_fences, sweep
 from services.ttl_reaper.sweep import (
     _reap_expired_notices_blocking,
@@ -203,7 +204,7 @@ def test_reap_expired_pages_terminalizes_only_past_deadlines(
         cur.execute("UPDATE agent_pages SET closed_at = now() WHERE id = %s", (closed_id,))
     db_conn.commit()
 
-    reaped = _reap_expired_pages_blocking(reaper_pool)
+    reaped = _reap_expired_pages_blocking(reaper_pool, EventBus.from_settings())
 
     assert [(aid, "expired")] == [(a, n) for a, n, _i in reaped]
     expired_closed, expired_marked = _page_state(db_conn, aid, "expired")
@@ -226,7 +227,7 @@ def test_reap_expired_pages_skips_already_terminal(
         )
     db_conn.commit()
 
-    assert _reap_expired_pages_blocking(reaper_pool) == []
+    assert _reap_expired_pages_blocking(reaper_pool, EventBus.from_settings()) == []
 
 
 def test_reap_expired_pages_notifies_only_live_agents(
@@ -243,7 +244,7 @@ def test_reap_expired_pages_notifies_only_live_agents(
     _open_page(db_conn, live, "live-page", expires_at=datetime.now(UTC) - timedelta(seconds=5))
     _open_page(db_conn, dead, "dead-page", expires_at=datetime.now(UTC) - timedelta(seconds=5))
 
-    _reap_expired_pages_blocking(reaper_pool)
+    _reap_expired_pages_blocking(reaper_pool, EventBus.from_settings())
 
     live_msgs = _system_inbounds(db_conn, live)
     assert len(live_msgs) == 1
@@ -451,7 +452,7 @@ def test_reap_expired_notices_resolves_and_notifies_live_agent(
         )
     db_conn.commit()
 
-    reaped = _reap_expired_notices_blocking(reaper_pool)
+    reaped = _reap_expired_notices_blocking(reaper_pool, EventBus.from_settings())
     assert reaped == [(aid, nid)]
 
     # Check notice state in DB
@@ -502,7 +503,7 @@ def test_reap_expired_notices_does_not_resurrect_terminated_agent(
 
     observed: list[tuple[int, str | None]] = []
 
-    def capture_hint(agent_id: int) -> None:
+    def capture_hint(_bus: object, agent_id: int) -> None:
         # A different connection must see the expiry before its hint can fire.
         with db_conn.cursor() as cur:
             cur.execute("SELECT resolution FROM agent_notices WHERE id = %s", (nid,))
@@ -511,7 +512,7 @@ def test_reap_expired_notices_does_not_resurrect_terminated_agent(
         observed.append((agent_id, row[0]))
 
     monkeypatch.setattr(sweep, "publish_agent_updated_sync", capture_hint)
-    reaped = _reap_expired_notices_blocking(reaper_pool)
+    reaped = _reap_expired_notices_blocking(reaper_pool, EventBus.from_settings())
     assert reaped == [(aid, nid)]
     assert observed == ([(aid, "expired")] if require_response else [])
 
@@ -547,7 +548,7 @@ async def test_a_sweep_round_runs_every_database_phase(
     db_conn.commit()
     progress = LoopProgress("test", 60.0)
 
-    await sweep.sweep_round(reaper_pool, progress)
+    await sweep.sweep_round(reaper_pool, EventBus.from_settings(), progress)
 
     assert _page_state(db_conn, aid, "expired")[1] is not None
     with db_conn.cursor() as cur:
@@ -574,6 +575,6 @@ async def test_a_sweep_round_runs_the_impersonation_seal_stuck_alert_pass(
     monkeypatch.setattr(sweep, "reap_impersonations", reap)
     monkeypatch.setattr(sweep, "alert_stuck_event_logs", alert)
 
-    await sweep.sweep_round(reaper_pool, LoopProgress("test", 60.0))
+    await sweep.sweep_round(reaper_pool, EventBus.from_settings(), LoopProgress("test", 60.0))
 
     assert order == ["reap", "alert"]

@@ -212,7 +212,7 @@ async def pause_cluster_machine(
         raise HTTPException(status_code=404, detail=f"no machine named {name!r}")
 
     if paused_at is None:
-        machines.pause(name, reason=req.reason)
+        machines.pause(request.app.state.db, name, reason=req.reason)
         exists, paused_at, pause_reason = await asyncio.to_thread(_read_machine_row, pool, name)
 
     reassigned = await asyncio.to_thread(_drain_tasks_blocking, pool, name)
@@ -227,6 +227,7 @@ async def pause_cluster_machine(
         # departing host anyway, so force-mark its row terminated in the DB.
         try:
             await forward.enqueue_lifecycle(  # pyright: ignore[reportUnknownMemberType]
+                request.app.state.db,
                 name,
                 f"/api/agents/{agent_id}/terminate",
                 {"force": True, "source": "machine-pause"},
@@ -271,5 +272,5 @@ def resume_cluster_machine(name: str, request: Request) -> MachineResumeResponse
     exists, _paused_at, _pause_reason = _read_machine_row(pool, name)
     if not exists:
         raise HTTPException(status_code=404, detail=f"no machine named {name!r}")
-    resumed = machines.resume(name)
+    resumed = machines.resume(request.app.state.db, name)
     return MachineResumeResponse(name=name, resumed=resumed)

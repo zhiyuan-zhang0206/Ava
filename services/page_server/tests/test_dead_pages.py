@@ -17,6 +17,7 @@ import base.db
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from services.page_server import daemon, dead_pages
 from services.page_server.tests.slices import page_server_config
 from tests.fixtures.units import spawn_agent
@@ -38,13 +39,13 @@ def published(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Record the PageClosed frames and the wakes the pass publishes."""
     seen: dict[str, list[Any]] = {"events": [], "wakes": []}
 
-    async def publish(_channel: str, payload: str, *, context: str) -> None:
+    async def publish(_bus: object, payload: str, *, context: str) -> None:
         seen["events"].append(payload)
 
     def wake(agent_id: int, inbound_id: str) -> None:
         seen["wakes"].append((agent_id, inbound_id))
 
-    monkeypatch.setattr(dead_pages, "publish_best_effort", publish)
+    monkeypatch.setattr(EventBus, "publish_best_effort", publish)
     monkeypatch.setattr(dead_pages, "publish_inbound_wake", wake)
     monkeypatch.setattr(admission, "quiesced", lambda: False)
     return seen
@@ -95,7 +96,7 @@ def _progress() -> LoopProgress:
 
 
 async def _round(pool: ConnectionPool) -> None:
-    await dead_pages.dead_pages_round(pool, _HOST, _progress(), page_server_config())
+    await dead_pages.dead_pages_round(pool, _HOST, _progress(), EventBus.from_settings())
 
 
 def test_only_open_show_pages_of_this_host_are_selected(
@@ -213,13 +214,17 @@ async def test_a_failed_close_rolls_back_the_close_and_the_notice(
 async def test_the_loop_scans_at_once_then_paces(monkeypatch: pytest.MonkeyPatch) -> None:
     rounds: list[object] = []
 
-    async def fake_round(_pool: object, host: str, _progress: object, _config: object) -> None:
+    async def fake_round(_pool: object, host: str, _progress: object, _bus: object) -> None:
         rounds.append(host)
 
     monkeypatch.setattr(dead_pages, "dead_pages_round", fake_round)
     task = asyncio.create_task(
         dead_pages.dead_pages_loop(
-            cast(ConnectionPool, object()), _HOST, _progress(), page_server_config()
+            cast(ConnectionPool, object()),
+            _HOST,
+            _progress(),
+            page_server_config(),
+            EventBus.from_settings(),
         )
     )
     try:
@@ -275,10 +280,14 @@ def _patch_run(
 def test_each_loop_gets_its_own_progress_tracker(monkeypatch: pytest.MonkeyPatch) -> None:
     received: dict[str, LoopProgress] = {}
 
-    async def reconcile(_pool: object, progress: LoopProgress, _config: object) -> None:
+    async def reconcile(
+        _pool: object, progress: LoopProgress, _config: object, _bus: object
+    ) -> None:
         received["reconcile"] = progress
 
-    async def dead(_pool: object, _host: str, progress: LoopProgress, _config: object) -> None:
+    async def dead(
+        _pool: object, _host: str, progress: LoopProgress, _config: object, _bus: object
+    ) -> None:
         received["dead"] = progress
 
     seen = _patch_run(monkeypatch, {"reconcile": reconcile, "dead": dead}, [])

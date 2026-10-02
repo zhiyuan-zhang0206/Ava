@@ -45,7 +45,9 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from base.config import cluster_tz, settings
+from base.clock import Clock
+from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
+from base.config import settings
 from base.daemon.endpoints import ServiceEndpoints
 from base.telemetry.alerts_copy import (
     ALERT_HEAD,
@@ -321,13 +323,13 @@ def notify_im(text: str) -> bool:
         resp = httpx.post(
             f"{base}/send",
             json={"text": text, "type": "alert"},
-            headers={"Authorization": f"Bearer {settings.data_plane.cluster_secret}"},
+            headers=gateway_auth_headers(),
             timeout=10.0,
         )
         if resp.status_code == 200:
             return True
         _log.warning("alerts: im_bridge /send returned HTTP %s", resp.status_code)
-    except httpx.HTTPError:
+    except (httpx.HTTPError, GatewayApiTokenMissing):
         _log.warning("alerts: im_bridge /send failed", exc_info=True)
     return False
 
@@ -348,7 +350,7 @@ def format_local(ts: datetime | None) -> str:
 
     if ts is None:
         return ""
-    return ts.astimezone(cluster_tz()).strftime("%Y-%m-%d %H:%M %Z")
+    return ts.astimezone(Clock.from_settings().zone()).strftime("%Y-%m-%d %H:%M %Z")
 
 
 def frontend_base_url() -> str:

@@ -18,7 +18,9 @@ import base.db
 import gateway.app
 from base.config import settings
 from base.daemon.loop_health import LivenessGroup, LoopProgress
+from base.db import Database
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from services.ttl_reaper import cadence, daemon, remote, shells, sweep
 
 
@@ -83,7 +85,9 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     _park_or_crash(monkeypatch, crashing=crashing, cancelled=cancelled)
 
     with pytest.raises(ExceptionGroup) as raised:
-        await daemon._run_loops(pool, LivenessGroup())
+        await daemon._run_loops(
+            pool, Database.from_settings(), EventBus.from_settings(), LivenessGroup()
+        )
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} loop crashed"]
     assert cancelled == [({"sweep", "remote"} - {crashing}).pop()]
@@ -96,7 +100,7 @@ async def test_each_loop_reports_its_own_progress(
     _park_or_crash(monkeypatch, crashing="sweep", cancelled=[])
 
     with pytest.raises(ExceptionGroup):
-        await daemon._run_loops(pool, liveness)
+        await daemon._run_loops(pool, Database.from_settings(), EventBus.from_settings(), liveness)
 
     assert set(liveness.snapshot()) == {"sweep", "remote"}
 
@@ -118,7 +122,7 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     async def stop_health(_server: object) -> None:
         released.append("health")
 
-    async def crashing_loops(_pool: object, _liveness: object) -> None:
+    async def crashing_loops(_pool: object, _db: object, _bus: object, _liveness: object) -> None:
         raise ExceptionGroup("loops", [RuntimeError("sweep loop crashed")])
 
     def acquire(_path: object, _module: str) -> bool:
@@ -127,14 +131,14 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     def remove(_path: object) -> None:
         released.append("pidfile")
 
-    def make_pool(**_kw: object) -> _Pool:
+    def make_pool(_self: object, **_kw: object) -> _Pool:
         return _Pool()
 
     monkeypatch.setattr(daemon, "acquire_pidfile", acquire)
     monkeypatch.setattr(daemon, "remove_pidfile", remove)
     monkeypatch.setattr(daemon, "start_health_server", start_health)
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
-    monkeypatch.setattr(daemon.base.db, "pool", make_pool)
+    monkeypatch.setattr(daemon.Database, "pool", make_pool)
     monkeypatch.setattr(daemon, "_run_loops", crashing_loops)
 
     with pytest.raises(ExceptionGroup):
@@ -202,15 +206,15 @@ async def test_slow_phases_run_once_per_cadence_not_once_per_round(
     monkeypatch.setattr(settings.daemon, "schedule_fire_log_cleanup_interval_seconds", 86400.0)
     calls = _count_slow_phases(monkeypatch)
 
-    await sweep.sweep_round(pool, _progress())
-    await sweep.sweep_round(pool, _progress())
+    await sweep.sweep_round(pool, EventBus.from_settings(), _progress())
+    await sweep.sweep_round(pool, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "torn": 1, "settle": 1}
 
     # Two hours on: the hourly phases are due again, the daily prune is not.
     _backdate(db_conn, cadence.TORN_POINTER_SCAN, 7200.0)
     _backdate(db_conn, cadence.ABSENT_FENCE_SETTLE, 7200.0)
     _backdate(db_conn, cadence.FIRE_LOG_PRUNE, 7200.0)
-    await sweep.sweep_round(pool, _progress())
+    await sweep.sweep_round(pool, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "torn": 2, "settle": 2}
 
 
@@ -218,11 +222,11 @@ async def test_a_restarted_sweep_does_not_rerun_phases_it_already_ran(
     pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls = _count_slow_phases(monkeypatch)
-    await sweep.sweep_round(pool, _progress())
+    await sweep.sweep_round(pool, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "torn": 1, "settle": 1}
 
     # A new process: nothing in memory, the clocks are the table's.
-    await sweep.sweep_round(pool, _progress())
+    await sweep.sweep_round(pool, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "torn": 1, "settle": 1}
 
 
@@ -234,11 +238,11 @@ async def test_the_remote_round_reaps_shells_then_redelivers_work_failures(
 ) -> None:
     order: list[str] = []
 
-    async def reap(_pool: object, _progress: object) -> list[tuple[int, int]]:
+    async def reap(_pool: object, _db: object, _progress: object) -> list[tuple[int, int]]:
         order.append("shells")
         return []
 
-    async def reconcile(_pool: object, on_event: Any = None) -> int:
+    async def reconcile(_pool: object, _db: object, _bus: object, on_event: Any = None) -> int:
         order.append("work_failures")
         assert on_event is not None
         return 0
@@ -246,7 +250,7 @@ async def test_the_remote_round_reaps_shells_then_redelivers_work_failures(
     monkeypatch.setattr(remote.shells, "reap_expired_shells", reap)
     monkeypatch.setattr(remote.work_failed_router, "reconcile_stale_work_failures", reconcile)
 
-    await remote.remote_round(pool, _progress())
+    await remote.remote_round(pool, Database.from_settings(), EventBus.from_settings(), _progress())
 
     assert order == ["shells", "work_failures"]
 
@@ -276,7 +280,9 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
     started: list[tuple[str, int]] = []
     finished: list[tuple[str, int]] = []
 
-    async def reclaim(_pool: object, machine: str, row: dict[str, Any]) -> tuple[int, int] | None:
+    async def reclaim(
+        _pool: object, _db: object, machine: str, row: dict[str, Any]
+    ) -> tuple[int, int] | None:
         started.append((machine, row["session_id"]))
         if machine == "slow":
             await release.wait()
@@ -290,7 +296,9 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
     monkeypatch.setattr(shells, "_reclaim_row", reclaim)
 
     faked_pool = cast(ConnectionPool, None)  # every pool consumer above is faked
-    task = asyncio.create_task(shells.reap_expired_shells(faked_pool, _progress()))
+    task = asyncio.create_task(
+        shells.reap_expired_shells(faked_pool, Database.from_settings(), _progress())
+    )
     for _ in range(100):
         if [m for m, _ in finished].count("fast") == 2:
             break
@@ -317,7 +325,7 @@ async def test_a_dispatch_past_its_deadline_defers_the_row(
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", hang)
     monkeypatch.setattr(shells, "dispatch_deadline_s", lambda: 0.05)
 
-    assert await shells._dispatch_shell_kill("macmini", 1, 2) is None
+    assert await shells._dispatch_shell_kill(Database.from_settings(), "macmini", 1, 2) is None
 
 
 def test_the_dispatch_deadline_covers_the_clients_full_retry_budget(
@@ -334,7 +342,15 @@ def test_the_dispatch_deadline_covers_the_clients_full_retry_budget(
 # --- the stop window ---------------------------------------------------------
 
 
-@pytest.mark.parametrize("loop", [sweep.sweep_loop, remote.remote_loop])
+def _sweep_loop(pool: ConnectionPool, progress: LoopProgress) -> Coroutine[Any, Any, None]:
+    return sweep.sweep_loop(pool, EventBus.from_settings(), progress)
+
+
+def _remote_loop(pool: ConnectionPool, progress: LoopProgress) -> Coroutine[Any, Any, None]:
+    return remote.remote_loop(pool, Database.from_settings(), EventBus.from_settings(), progress)
+
+
+@pytest.mark.parametrize("loop", [_sweep_loop, _remote_loop], ids=["sweep", "remote"])
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_borrows_no_connection(
     monkeypatch: pytest.MonkeyPatch,

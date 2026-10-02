@@ -19,6 +19,8 @@ from base.agents.history.delta_read_compat import (
 )
 from base.agents.incarnation.resources import ResourceBirth
 from base.cluster.machine import machine_name
+from base.db import Database
+from base.events.live.bus import EventBus
 from ops.agents.spawn import create_agent_row
 from services.agent_host import host as host_module
 from services.agent_host.host import AgentHost
@@ -83,7 +85,13 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
     monkeypatch.setattr(host_module, "publish_agent_updated", AsyncMock())
     monkeypatch.setattr(host_module, "boot_agent_scope", AsyncMock(return_value=object()))
     monkeypatch.setattr(host_module, "close_hosted_turn", AsyncMock())
-    host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph)
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=saver,
+        graph=graph,
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
 
     async def drive(_agent: int, _runtime: Any) -> TurnOutcome:
         # Recovery can nest inside this turn without dropping or duplicating its cache.

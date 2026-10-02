@@ -38,8 +38,9 @@ from base.agents import (
     ResurrectAlreadyAlive,
 )
 from base.cluster.machine import machine_name
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from base.lm.registry import normalize_overlay_llm_model
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops import cluster_rpc as _cluster_rpc
@@ -142,7 +143,7 @@ async def cancel_agent_op(agent_id: int, db_pool: ConnectionPool) -> CancelReque
     iid = await asyncio.to_thread(_cancel_blocking, agent_id, db_pool)
     if iid is None:
         return CancelRequested(status="already_terminated")
-    await publish_inbound_arrived(agent_id, iid, "cancel", "user", "")
+    await publish_inbound_arrived(EventBus.from_settings(), agent_id, iid, "cancel", "user", "")
     return CancelRequested(status="enqueued")
 
 
@@ -176,7 +177,7 @@ async def terminate_agent_op(
         )
         await _cancel_hosted_turn_best_effort(agent_id, command_id)
         for page_name in killed_page_names:
-            await publish_page_closed(agent_id, page_name)
+            await publish_page_closed(EventBus.from_settings(), agent_id, page_name)
         _log.info(
             "[gateway] agent %s force requested by %s (pid=%s)",
             agent_id,
@@ -207,7 +208,9 @@ async def terminate_agent_op(
             status="already_terminated",
             shell_sessions=await _kill_shell_sessions_now(agent_id, kill=True),
         )
-    await publish_inbound_arrived(agent_id, iid, "terminate", body.source, "")
+    await publish_inbound_arrived(
+        EventBus.from_settings(), agent_id, iid, "terminate", body.source, ""
+    )
     return TerminateAgentResponse(
         status="enqueued",
         shell_sessions=ShellSessionsKill(when="at_exit") if body.kill_all_shell_sessions else None,
@@ -277,7 +280,7 @@ def _terminate_force_blocking(
         recovery_wake=recovery_wake,
     )
     _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
-    publish_agent_updated_sync(agent_id)
+    publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     return old_status, pid, killed_page_names, inbound_id
 
 
@@ -327,6 +330,7 @@ async def resurrect_agent_op(
 
 
 async def resurrect_if_terminated(
+    db: Database,
     agent_id: int,
     *,
     trigger_inbound_id: int,
@@ -420,6 +424,7 @@ async def resurrect_if_terminated(
                 "trigger_inbound_kind": trigger_inbound_kind,
             }
             forwarded = await _cluster_rpc.dispatch_to_machine(
+                db,
                 target_machine=home,
                 kind="lifecycle",
                 payload=lifecycle_payload,
@@ -516,7 +521,9 @@ async def restart_agent_op(
     iid = await asyncio.to_thread(_restart_blocking, agent_id, body, db_pool)
     if iid is None:
         return RestartAgentResponse(status="already_terminated")
-    await publish_inbound_arrived(agent_id, iid, "restart", body.source, "")
+    await publish_inbound_arrived(
+        EventBus.from_settings(), agent_id, iid, "restart", body.source, ""
+    )
     return RestartAgentResponse(status="enqueued")
 
 
@@ -614,7 +621,7 @@ def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
         agent_id,
     )
     try:
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     except Exception:
         _log.exception(
             "recover-crash-marked-v2: lifecycle hint publish failed for agent %s", agent_id
@@ -630,7 +637,7 @@ async def recover_crash_marked_op(agent_id: int) -> RecoverCrashMarkedResponse:
 
 
 async def recover_crash_marked_if_stalled(
-    agent_id: int, *, stalled_inbound_id: int
+    db: Database, agent_id: int, *, stalled_inbound_id: int
 ) -> tuple[str, str | None]:
     """Ask `agent_id`'s home machine to adjudicate harvesting its crash-marked
     corpse, so the stalled chat `stalled_inbound_id` stops waiting on a dead
@@ -663,6 +670,7 @@ async def recover_crash_marked_if_stalled(
                 "body": {},
             }
             forwarded = await _cluster_rpc.dispatch_to_machine(
+                db,
                 target_machine=home,
                 kind="lifecycle",
                 payload=payload,

@@ -54,7 +54,7 @@ async def get_events_stream(agent_id: int, request: Request) -> StreamingRespons
     visibility lag would 404.
     """
     return StreamingResponse(
-        event_stream(settings.data_plane.redis_url, agent_id, request),
+        event_stream(request.app.state.bus, agent_id, request),
         media_type="text/event-stream",
         headers={
             # Reverse proxies like nginx / cloudflare buffer text responses

@@ -58,6 +58,7 @@ from base.agents.history.hierarchy.seal import (
     seal_cascade,
 )
 from base.agents.history.timeline import TimelineItem, build_timeline_items
+from base.db import Database
 from base.log import logger
 
 
@@ -539,6 +540,7 @@ def _materialized(
 
 
 def build_agent_tree(
+    db: Database,
     agent_id: int,
     *,
     llm: Any,
@@ -567,7 +569,7 @@ def build_agent_tree(
     is threaded through to `materialize` as the regen halt (task #4674); its
     stop also lands in `skipped`, marked by `halted`.
     """
-    msgs = load_checkpoint_messages_full(agent_id)
+    msgs = load_checkpoint_messages_full(db, agent_id)
     items, _ = build_timeline_items(msgs, [])
     blocks = fold_blocks(items)
     units, table = build_units(msgs, blocks, render_params)

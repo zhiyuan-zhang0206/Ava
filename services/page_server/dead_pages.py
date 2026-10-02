@@ -34,8 +34,8 @@ from base.daemon.loop_health import LoopProgress
 from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
-from base.events.live.redis_client import publish_best_effort
 from services.page_server.config import PageServerConfig
 
 _log = logging.getLogger("services.page_server.dead_pages")
@@ -105,7 +105,7 @@ def close_dead_show_pages(pool: ConnectionPool, agent_id: int, names: list[str])
 
 
 async def dead_pages_round(
-    pool: ConnectionPool, host: str, progress: LoopProgress, config: PageServerConfig
+    pool: ConnectionPool, host: str, progress: LoopProgress, bus: EventBus
 ) -> None:
     """Probe every open show page of this host and close the dead ones."""
     if admission.quiesced():
@@ -126,8 +126,7 @@ async def dead_pages_round(
         names = [page.name for page in dead_pages]
         notified = await asyncio.to_thread(close_dead_show_pages, pool, agent_id, names)
         for name in names:
-            await publish_best_effort(
-                config.events_channel,
+            await bus.publish_best_effort(
                 PageClosed(agent_id=agent_id, name=name).model_dump_json(),
                 context="page_server_dead_show",
             )
@@ -145,13 +144,17 @@ async def dead_pages_round(
 
 
 async def dead_pages_loop(
-    pool: ConnectionPool, host: str, progress: LoopProgress, config: PageServerConfig
+    pool: ConnectionPool,
+    host: str,
+    progress: LoopProgress,
+    config: PageServerConfig,
+    bus: EventBus,
 ) -> None:
     """The dead-show-page scan as a resident sequential loop: one round at start,
     then every heartbeat interval."""
     interval_s = float(config.heartbeat_interval_seconds)
 
     async def one_round() -> None:
-        await dead_pages_round(pool, host, progress, config)
+        await dead_pages_round(pool, host, progress, bus)
 
     await round_loop.run_rounds("dead-show-pages", progress, interval_s, one_round)

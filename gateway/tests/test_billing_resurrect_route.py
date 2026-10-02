@@ -11,7 +11,7 @@ from gateway.app import app
 
 
 def _stub_run(captured: dict[str, Any]) -> Any:
-    async def _run(*, execute: bool, pool: object) -> dict[str, Any]:
+    async def _run(*, execute: bool, pool: object, db: object) -> dict[str, Any]:
         captured["execute"] = execute
         return {
             "mode": "execute" if execute else "dry_run",

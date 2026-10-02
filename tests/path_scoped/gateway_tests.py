@@ -28,6 +28,7 @@ import pytest
 
 from base.cluster import machines as _machines
 from base.cluster.machine import machine_name
+from base.db import Database
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from gateway.agents import forward as _agents_forward_router
 from gateway.agents import router as _agents_router
@@ -57,7 +58,9 @@ def _provider_plugins_loaded() -> None:
 @pytest.fixture(autouse=True)
 def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     # The integration tests take this fixture from here (imported into their module).
-    async def _in_process_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+    async def _in_process_forward(
+        _db: object, target: str, body: LaunchAgentRequest
+    ) -> SpawnedAgent:
         # The gateway creates the agent row in-process (create_agent_row, real
         # DB); the runner's ops daemon dispatches launch_agent_op in-process —
         # mirror that here so a forwarded local launch produces a real child.
@@ -75,10 +78,10 @@ def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     # monkeypatches lookup_role itself (runs after this, wins).
     real_lookup_role = _machines.lookup_role
 
-    def _lookup_role(name: str) -> list[str]:
+    def _lookup_role(_db: Database, name: str) -> list[str]:
         if name == machine_name():
             return ["gateway", "agent-runner"]
-        return real_lookup_role(name)
+        return real_lookup_role(_db, name)
 
     monkeypatch.setattr(_machines, "lookup_role", _lookup_role)
 
@@ -88,17 +91,17 @@ def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     # role; remote names fall through to the real registry read.
     real_is_paused = _machines.is_paused
 
-    def _is_paused(name: str) -> bool:
+    def _is_paused(_db: Database, name: str) -> bool:
         if name == machine_name():
             return False
-        return real_is_paused(name)
+        return real_is_paused(_db, name)
 
     monkeypatch.setattr(_machines, "is_paused", _is_paused)
 
 
 @pytest.fixture(autouse=True)
 def _local_lifecycle_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _in_process_lifecycle(target: str, path: str, json_body: dict) -> dict:
+    async def _in_process_lifecycle(_db: object, target: str, path: str, json_body: dict) -> dict:
         # The runner's ops daemon dispatches lifecycle_op in-process; mirror
         # that here so a forwarded local terminate/resurrect/restart executes
         # against the test DB. AvaAgentError raises propagate directly — the
@@ -123,12 +126,12 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     real_dispatch = cluster_rpc.dispatch_to_machine
 
     async def _in_process_config(
+        db: Database,
         target_machine: str,
         kind: str,
         payload: dict[str, object],
         *,
         timeout_s: float | None = None,
-        ops_url: str | None = None,
         retries: int | None = None,
         idempotency_key: str | None = None,
     ) -> dict:
@@ -149,11 +152,11 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
         # Not a config op — fall through to the real dispatch (other routers
         # share this module object and must keep their own behavior).
         return await real_dispatch(
+            db,
             target_machine,
             cast("OpKind", kind),
             payload,
             timeout_s=timeout_s,
-            ops_url=ops_url,
             retries=retries,
             idempotency_key=idempotency_key,
         )

@@ -20,6 +20,11 @@ from base.agents.history.checkpoint import (
     load_checkpoint_messages_by_trace,
 )
 from base.config import settings
+from base.db import Database
+
+
+def _db() -> Database:
+    return Database.from_settings()
 
 
 def _put_checkpoint(
@@ -61,7 +66,7 @@ def test_load_by_trace_resolves_checkpoint(db_conn) -> None:
     ckpt_id = _put_checkpoint(thread, msgs)
 
     # No stamp yet -> pruned shape.
-    cid, loaded = load_checkpoint_messages_by_trace(42, "a" * 32)
+    cid, loaded = load_checkpoint_messages_by_trace(_db(), 42, "a" * 32)
     assert cid is None
     assert loaded == []
 
@@ -78,7 +83,7 @@ def test_load_by_trace_resolves_checkpoint(db_conn) -> None:
             " WHERE thread_id = %s AND checkpoint_id = %s",
             ("b" * 32, thread, ckpt_id),
         )
-    cid, loaded = load_checkpoint_messages_by_trace(42, "b" * 32)
+    cid, loaded = load_checkpoint_messages_by_trace(_db(), 42, "b" * 32)
     assert cid == ckpt_id
     assert [m.type for m in loaded] == ["human", "ai"]
     assert loaded[0].content == "system prompt"  # pyright: ignore[reportUnknownMemberType]
@@ -123,7 +128,7 @@ def test_load_by_trace_picks_newest_when_multiple(db_conn) -> None:
     newer = _put_checkpoint(
         thread, [HumanMessage(content="v2")], metadata={"trace_id": "e" * 32}, version="2"
     )
-    cid, loaded = load_checkpoint_messages_by_trace(9, "e" * 32)
+    cid, loaded = load_checkpoint_messages_by_trace(_db(), 9, "e" * 32)
     assert cid == newer
     assert cid != older
     assert loaded[0].content == "v2"  # pyright: ignore[reportUnknownMemberType]

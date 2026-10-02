@@ -1,23 +1,11 @@
-"""Shared async Redis client (one per event loop).
+"""The Redis transport: client classes with the cluster's resilience settings, ACL-transition
+auth retry, and the best-effort publish discipline.
 
-Every publish call site (gateway endpoints, agent loop, label updates) used
-to `aredis.Redis.from_url(settings.data_plane.redis_url, decode_responses=True)` per
-call and `aclose()` immediately. The reconnect + handshake overhead added
-up under publish-heavy load (frontend live events, inbound fan-out, label
-updates). This module hands out one shared client per event loop so all
-callers in the same loop reuse the same connection pool.
-
-Why per-loop rather than process-singleton: `aredis.Redis` binds its
-internal connections to the running event loop at first use; reusing one
-across loops raises "Event loop is closed" on the second use. In
-production every long-running daemon has exactly one event loop, so this
-behaves as a process-singleton there. In pytest each async test has its
-own loop, so each test transparently gets its own client (and the previous
-loop's client is garbage-collected with it).
-
-Callers must **not** `aclose()` the returned client — closing the shared
-client would break every other caller in the same loop. The OS reclaims
-the underlying socket when the loop / process exits.
+Nothing here reads the settings: a caller names the URL (`open_async_redis`, `open_sync_redis`)
+or goes through `EventBus` (`base.events.live.bus`), which holds the cluster URL and events
+channel and hands out one shared async client per event loop. `aredis.Redis` binds its
+connections to the running loop at first use, so the shared client is per loop; callers must
+not `aclose()` it.
 """
 
 from __future__ import annotations
@@ -34,7 +22,6 @@ import redis as _redis_sync
 import redis.asyncio as aredis
 from redis.exceptions import AuthenticationError, NoPermissionError
 
-from base.config import settings
 from base.events.live.redis_resilience import (
     _HEALTH_CHECK_INTERVAL_S,
     _SOCKET_CONNECT_TIMEOUT_S,
@@ -302,19 +289,6 @@ def open_async_redis(redis_url: str, *, decode_responses: bool = True) -> _AuthR
     )
 
 
-_clients: dict[asyncio.AbstractEventLoop, _AuthRetryAsyncRedis] = {}
-
-
-def get_async_redis() -> _AuthRetryAsyncRedis:
-    """Return the shared async Redis client for the current event loop."""
-    loop = asyncio.get_running_loop()
-    client = _clients.get(loop)
-    if client is None:
-        client = open_async_redis(settings.data_plane.redis_url)
-        _clients[loop] = client
-    return client
-
-
 # Rate-limit the NOPERM WARNING per (channel, error-type): a persistent ACL
 # outage funnels every event through here, so warning on each one would flood the
 # log. First occurrence — and then at most once per `_WARN_THROTTLE_S` — logs
@@ -374,20 +348,17 @@ def _log_publish_failure(exc: BaseException, *, channel: str, context: str) -> N
         )
 
 
-async def publish_best_effort(channel: str, payload: str, *, context: str = "") -> int | None:
-    """Publish `payload` on the shared async client, best-effort — NEVER raises.
-
-    The async entry point for every fire-and-forget live-UI / lifecycle event. A
-    publish failure must never propagate into the caller's DB-write or
-    agent-lifecycle path (a raise at the tail of `mark_agent_status` used to kill
-    the claim node during a redis outage). Returns the receiver count on success
-    (0 = nobody subscribed), or None when the publish failed. Failure
-    classification is `_log_publish_failure`."""
+async def publish_via(
+    client: Callable[[], _AuthRetryAsyncRedis], channel: str, payload: str, *, context: str = ""
+) -> int | None:
+    """`publish_best_effort` on the client `client()` returns (called inside the guarded try, so
+    a failure to open it is a failed publish, not an exception). The handle's publish
+    (`EventBus.publish_best_effort`) and the module-level shim share this one body."""
     try:
 
         async def _publish() -> int:
             # redis-py types publish()'s **kwargs as Unknown; the call itself is fully typed.
-            return await get_async_redis().publish(  # pyright: ignore[reportUnknownMemberType]
+            return await client().publish(  # pyright: ignore[reportUnknownMemberType]
                 channel, payload
             )
 
@@ -399,14 +370,13 @@ async def publish_best_effort(channel: str, payload: str, *, context: str = "") 
         return None
 
 
-def publish_best_effort_sync(
-    channel: str, payload: str, *, decode_responses: bool = True, context: str = ""
+def publish_sync_via(
+    open_client: Callable[[], _AuthRetrySyncRedis], channel: str, payload: str, *, context: str = ""
 ) -> int | None:
-    """Sync counterpart of `publish_best_effort` — opens a one-off client, publishes,
-    closes it, and NEVER raises. Returns the receiver count on success (0 = nobody
-    subscribed), or None when the publish failed."""
+    """`publish_best_effort_sync` on a one-off client from `open_client()`; shared by the handle
+    (`EventBus.publish_best_effort_sync`) and the module-level shim."""
     try:
-        client = sync_redis(decode_responses=decode_responses)
+        client = open_client()
         try:
 
             def _publish() -> int:
@@ -421,23 +391,12 @@ def publish_best_effort_sync(
         return None
 
 
-def sync_redis(*, decode_responses: bool = False) -> _AuthRetrySyncRedis:
-    """Open a new synchronous Redis client on the cluster Redis.
-
-    The single entry point for the non-async call sites (auth, agent cache,
-    one-off publishes) so they stop reading `settings.data_plane.redis_url` by hand. Unlike
-    `get_async_redis`, this is not pooled/shared — the caller owns the returned
-    client and should `close()` it (or use it as a context manager). `decode_responses`
-    is passed through (some callers want str, some want bytes).
-
-    `connection_class=_PinnedIPv4Connection` pins an IPv4-literal redis_url
-    host to a direct AF_INET dial (see that class's docstring); a no-op for
-    a hostname host.
-    """
+def open_sync_redis(redis_url: str, *, decode_responses: bool = False) -> _AuthRetrySyncRedis:
+    """A new synchronous client on `redis_url` with the cluster's resilience settings."""
     return cast(
         _AuthRetrySyncRedis,
         _AuthRetrySyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
-            settings.data_plane.redis_url,
+            redis_url,
             decode_responses=decode_responses,
             connection_class=_PinnedIPv4Connection,
             **RESILIENCE_KWARGS,

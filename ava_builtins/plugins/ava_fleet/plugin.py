@@ -76,8 +76,9 @@ def set_label(text: str) -> None:
     telemetry.emit_prepared(label_event)
     # Per-call import: plugin autoload stays off the redis/live-events stack (task #3816).
     from base.events.live.announce import publish_agent_updated_sync
+    from base.events.live.bus import EventBus
 
-    publish_agent_updated_sync(agent_id)
+    publish_agent_updated_sync(EventBus.from_settings(), agent_id)
 
 
 # Sentinel for edit_notice: distinguishes "argument not passed" from an explicit

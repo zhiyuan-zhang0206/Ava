@@ -77,6 +77,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from base.log import init_gateway_process
 from services.events_maintenance import alert_reconciler, registry_gauge
 from services.events_maintenance.blob_vacuum import (
@@ -428,8 +429,9 @@ async def run() -> None:
             loops.create_task(_resolution_loop(pool, resolution_progress, config))
             loops.create_task(registry_gauge.registry_gauge_loop(pool, gauge_progress))
             if alert_progress is not None:
+                bus = EventBus.from_settings()
                 loops.create_task(
-                    alert_reconciler.reconciliation_loop(pool, alert_progress, config)
+                    alert_reconciler.reconciliation_loop(pool, bus, alert_progress, config)
                 )
     finally:
         pool.close()

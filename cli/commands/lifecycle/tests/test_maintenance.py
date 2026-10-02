@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 
+from base.db.tests.fakes import patch_database
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
@@ -27,7 +28,7 @@ def cli_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         command, "host_identity_or_none", lambda: HostIdentity(uuid4(), frozenset())
     )
-    monkeypatch.setattr(command, "connect", MagicMock())
+    patch_database(monkeypatch, connect=MagicMock())
     monkeypatch.setattr(command.cohort, "verify_drained", MagicMock())
     monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
     monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
@@ -110,7 +111,7 @@ def test_failed_dependency_resume_never_releases_hold(monkeypatch: pytest.Monkey
     def unavailable() -> None:
         raise ConnectionError("dependencies unavailable")
 
-    monkeypatch.setattr(command, "connect", unavailable)
+    patch_database(monkeypatch, connect=unavailable)
     with pytest.raises(ConnectionError):
         command.resume("local", WHEN, cancel=True)
     assert command._hold("local", WHEN).phase == "preparing"

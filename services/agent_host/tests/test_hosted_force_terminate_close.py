@@ -25,6 +25,8 @@ from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.agents.impersonation import ImpersonationError
 from base.agents.incarnation.hosted_force import install_hosted_force
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host.host import AgentHost
 from services.agent_host.settlement import close_hosted_turn
@@ -33,7 +35,14 @@ _FORCE_ERROR = "Native runtime no longer owns this agent"
 
 
 def _host(graph: Mock, pool: AsyncConnectionPool) -> AgentHost:
-    return AgentHost(pool=pool, checkpointer=Mock(), graph=graph, machine="claim-test")
+    return AgentHost(
+        pool=pool,
+        checkpointer=Mock(),
+        graph=graph,
+        machine="claim-test",
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
 
 
 def _raising_graph(exc: BaseException | None = None) -> Mock:
@@ -103,7 +112,9 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
 
     # The classify does NOT consume the command: the pump's own boundary
     # observes it, and the settle boundary leaves the row as the force left it.
-    await close_hosted_turn(aops_pool, aops_pool, Mock(), incarnation, outcome)
+    await close_hosted_turn(
+        aops_pool, aops_pool, Database.from_settings(), Mock(), incarnation, outcome
+    )
     assert db_conn.execute(
         "SELECT status, last_turn_fatal_at FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("terminated", None)

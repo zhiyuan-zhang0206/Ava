@@ -11,7 +11,9 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from base.cluster.machine import machine_name
+from base.db import Database
 from base.deploy.maintenance import admission, cohort, pause_owner
+from base.events.live.bus import EventBus
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
@@ -24,7 +26,12 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
 ) -> None:
     agent = _agent(db_conn)
     old = AgentHost(
-        pool=aops_pool, checkpointer=MagicMock(), graph=MagicMock(), machine=machine_name()
+        pool=aops_pool,
+        checkpointer=MagicMock(),
+        graph=MagicMock(),
+        machine=machine_name(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     incarnation = await admit_hosted_runtime(
         aops_pool, agent, machine_name(), old._owner, expected_from="idling"
@@ -39,7 +46,12 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         assert [item.id for item in batch] == [hold.commands[agent]]
         assert await apply_hosted_lifecycle(aops_pool, incarnation) == "restart"
     successor = AgentHost(
-        pool=aops_pool, checkpointer=MagicMock(), graph=MagicMock(), machine=machine_name()
+        pool=aops_pool,
+        checkpointer=MagicMock(),
+        graph=MagicMock(),
+        machine=machine_name(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     await successor.run_turn(agent)
     current = admission.snapshot()
@@ -146,7 +158,14 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     await graph.aupdate_state(
         config, {"messages": [HumanMessage(content="Already finished")], "halted": True}
     )
-    original = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine=machine_name())
+    original = AgentHost(
+        pool=aops_pool,
+        checkpointer=saver,
+        graph=graph,
+        machine=machine_name(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent, machine_name(), original._owner, expected_from="idling"
@@ -168,6 +187,8 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         checkpointer=AsyncPostgresSaver(aops_pool),
         graph=builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
         machine=machine_name(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), llm=MagicMock())
     monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
@@ -194,7 +215,12 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
 ) -> None:
     agent = _agent(db_conn)
     host = AgentHost(
-        pool=aops_pool, checkpointer=MagicMock(), graph=MagicMock(), machine=machine_name()
+        pool=aops_pool,
+        checkpointer=MagicMock(),
+        graph=MagicMock(),
+        machine=machine_name(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     incarnation = await admit_hosted_runtime(
         aops_pool, agent, machine_name(), host._owner, expected_from="idling"

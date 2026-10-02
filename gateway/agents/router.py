@@ -35,8 +35,10 @@ from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from base.log import logger
 from gateway.agents import forward
 from gateway.agents.forward import _forward_spawn_to_remote
@@ -72,7 +74,7 @@ async def patch_agent(agent_id: int, body: LabelPatchRequest, request: Request) 
     """
     new_label: str | None = body.label if body.label else None
     await asyncio.to_thread(_patch_label_blocking, request.app.state.db_pool, agent_id, new_label)
-    await publish_label_updated(agent_id, new_label)
+    await publish_label_updated(request.app.state.bus, agent_id, new_label)
     return Response(status_code=204)
 
 
@@ -175,7 +177,7 @@ def _patch_label_blocking(pool: ConnectionPool, agent_id: int, new_label: str | 
 
 
 def _spawn_preflight_blocking(
-    target: str, body: SpawnAgentRequest, pool: ConnectionPool
+    db: Database, target: str, body: SpawnAgentRequest, pool: ConnectionPool
 ) -> tuple[str | None, list[str] | None, tuple[str, str] | None]:
     """Sync spawn preflight — via to_thread: registry capability check, preset
     fold, fork config rule + tail-skills delta, model-config settlement and
@@ -193,7 +195,7 @@ def _spawn_preflight_blocking(
     # role, so a co-located runner is just a registry entry whose ops URL happens
     # to be localhost. An unregistered target raises MachineNotRegistered (404 +
     # reason via the app's AvaAgentError handler) straight out of lookup_role.
-    if "agent-runner" not in lookup_role(target):
+    if "agent-runner" not in lookup_role(db, target):
         # A proper wire error (carries `reason`) — not a bare HTTPException, whose
         # reason-less body trips the SDK's `raise_from_response` into a confusing
         # `KeyError: 'reason'` that masks this message.
@@ -208,7 +210,7 @@ def _spawn_preflight_blocking(
     # is the one enforcement point every spawn goes through, so schedules /
     # watcher respawns / peer spawns targeting a paused machine all fail with
     # the same clear reason instead of a transport error.
-    if is_paused(target):
+    if is_paused(db, target):
         raise MachinePaused(
             f"spawn target {target!r} is paused (temporarily removed from the "
             "cluster); resume it first with `ava cluster resume <name>` on the "
@@ -392,7 +394,7 @@ def _validate_fork_config(
 
 
 async def create_and_launch_agent(
-    body: SpawnAgentRequest, target: str, pool: ConnectionPool
+    body: SpawnAgentRequest, target: str, pool: ConnectionPool, db: Database, bus: EventBus
 ) -> SpawnedAgent:
     """Gateway-side spawn (Task #1236 follow-up): preflight -> create the agent
     ROW in-process -> forward a launch-only op to the target runner.
@@ -408,7 +410,7 @@ async def create_and_launch_agent(
     preflight, row creation, and launch stay uniform across entry points.
     """
     preset_name, tail_skills, model_receipt = await asyncio.to_thread(
-        _spawn_preflight_blocking, target, body, pool
+        _spawn_preflight_blocking, db, target, body, pool
     )
     # fork_checkpoint resolution stays gateway-side: LangGraph checkpoints are
     # append-only and "latest" drifts under concurrent writes, so the gateway
@@ -433,7 +435,12 @@ async def create_and_launch_agent(
         prompt_content = spawn_prompt_with_label(body.prompt, body.label)
         try:
             await publish_inbound_arrived(
-                new_id, prompt_inbound_id, "chat", body.prompt_source, prompt_content
+                bus,
+                new_id,
+                prompt_inbound_id,
+                "chat",
+                body.prompt_source,
+                prompt_content,
             )
         except Exception as exc:
             logger.warning("created agent {} inbound hint failed: {}", new_id, type(exc).__name__)
@@ -446,7 +453,7 @@ async def create_and_launch_agent(
     # The endpoint response is the launch op's verdict (the launched agent id —
     # equal to new_id in production; the runner answers for the launch). A
     # withdrawal settlement travels as the spawner's receipt (task #4306).
-    spawned = await _dispatch_committed_launch(pool, target, launch)
+    spawned = await _dispatch_committed_launch(pool, db, bus, target, launch)
     if model_receipt is not None:
         spawned = spawned.model_copy(
             update={
@@ -471,7 +478,7 @@ async def _accepted_launch_receipt(pool: ConnectionPool, spawned: SpawnedAgent) 
 
 
 def _mark_launch_failure(
-    pool: ConnectionPool, agent_id: int, attempt_id: UUID, reason: AvailabilityReason
+    pool: ConnectionPool, bus: EventBus, agent_id: int, attempt_id: UUID, reason: AvailabilityReason
 ) -> None:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -483,10 +490,12 @@ def _mark_launch_failure(
         )
         changed = cur.rowcount > 0
     if changed:
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(bus, agent_id)
 
 
-def _clear_launch_failure(pool: ConnectionPool, agent_id: int, attempt_id: UUID) -> None:
+def _clear_launch_failure(
+    pool: ConnectionPool, bus: EventBus, agent_id: int, attempt_id: UUID
+) -> None:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET last_launch_failure_reason=NULL, last_launch_failure_at=NULL "
@@ -495,7 +504,7 @@ def _clear_launch_failure(pool: ConnectionPool, agent_id: int, attempt_id: UUID)
         )
         changed = cur.rowcount > 0
     if changed:
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(bus, agent_id)
 
 
 def _read_launch_state(pool: ConnectionPool, agent_id: int) -> tuple[dict[str, object], bool, bool]:
@@ -522,13 +531,13 @@ def _read_launch_state(pool: ConnectionPool, agent_id: int) -> tuple[dict[str, o
 
 
 async def _dispatch_committed_launch(
-    pool: ConnectionPool, target: str, launch: LaunchAgentRequest
+    pool: ConnectionPool, db: Database, bus: EventBus, target: str, launch: LaunchAgentRequest
 ) -> SpawnedAgent:
     attempt_id = launch.launch_attempt_id
     if attempt_id is None:
         raise RuntimeError("committed launch is missing its attempt ID")
     try:
-        spawned = await _forward_spawn_to_remote(target, launch)
+        spawned = await _forward_spawn_to_remote(db, target, launch)
         _require_matching_launch_receipt(spawned, launch.agent_id, target)
     except Exception as exc:
         reason = (
@@ -547,7 +556,9 @@ async def _dispatch_committed_launch(
         )
         state: dict[str, object]
         try:
-            await asyncio.to_thread(_mark_launch_failure, pool, launch.agent_id, attempt_id, reason)
+            await asyncio.to_thread(
+                _mark_launch_failure, pool, bus, launch.agent_id, attempt_id, reason
+            )
             state, admitted, retry_legal = await asyncio.to_thread(
                 _read_launch_state, pool, launch.agent_id
             )
@@ -568,7 +579,7 @@ async def _dispatch_committed_launch(
             ),
         ) from exc
     try:
-        await asyncio.to_thread(_clear_launch_failure, pool, launch.agent_id, attempt_id)
+        await asyncio.to_thread(_clear_launch_failure, pool, bus, launch.agent_id, attempt_id)
     except Exception as exc:
         logger.warning(
             "agent {} accepted launch but failure clear failed: {}",
@@ -630,7 +641,9 @@ async def post_agents(body: SpawnAgentRequest, request: Request) -> SpawnedAgent
     registry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet).
     """
     target = body.machine if body.machine is not None else machine_name()
-    return await create_and_launch_agent(body, target, request.app.state.db_pool)
+    return await create_and_launch_agent(
+        body, target, request.app.state.db_pool, request.app.state.db, request.app.state.bus
+    )
 
 
 def _prepare_retry_launch(
@@ -673,7 +686,9 @@ async def retry_agent_launch(agent_id: int, request: Request) -> SpawnedAgent:
     target, launch = await asyncio.to_thread(_prepare_retry_launch, pool, agent_id)
     if launch is None:
         return await _accepted_launch_receipt(pool, SpawnedAgent(id=agent_id))
-    spawned = await _dispatch_committed_launch(pool, target, launch)
+    spawned = await _dispatch_committed_launch(
+        pool, request.app.state.db, request.app.state.bus, target, launch
+    )
     return await _accepted_launch_receipt(pool, spawned)
 
 

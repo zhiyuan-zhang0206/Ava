@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Literal
+from typing import Literal, cast
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from base.agents.history import checkpoint
 from base.agents.history.timeline import TimelineItem
+from base.db import Database
 from gateway.run_timeline import strip
 
 _ItemKind = Literal[
@@ -56,11 +57,11 @@ def _no_anchors(_messages: list[object]) -> bool:
     return False
 
 
-def _checkpoint_messages(_agent_id: int) -> list[object]:
+def _checkpoint_messages(_db: object, _agent_id: int) -> list[object]:
     return ["m"]
 
 
-def _no_boundaries(_agent_id: int) -> list[str]:
+def _no_boundaries(_db: object, _agent_id: int) -> list[str]:
     return []
 
 
@@ -174,14 +175,14 @@ def test_window_uses_current_segment_when_it_covers_the_start(
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _checkpoint_messages)
     walked: list[int] = []
 
-    def _boundaries(agent_id: int) -> list[str]:
+    def _boundaries(_db: object, agent_id: int) -> list[str]:
         walked.append(agent_id)
         return ["ck-1", "ck-2"]
 
     monkeypatch.setattr(checkpoint, "list_compact_boundary_checkpoint_ids", _boundaries)
 
     messages, truncated = strip._strip_messages_for_window(
-        7, window_start, window_start.replace(hour=1)
+        Database.from_settings(), 7, window_start, window_start.replace(hour=1)
     )
 
     assert walked == []
@@ -220,10 +221,10 @@ def _history_walk_fixture(
     monkeypatch.setattr(strip, "build_timeline_items", _build)
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _checkpoint_messages)
 
-    def _boundaries(_agent_id: int) -> list[str]:
+    def _boundaries(_db: object, _agent_id: int) -> list[str]:
         return [f"ck-{i}" for i in range(1, 6)]
 
-    def _segments(_agent_id: int, boundary: str) -> list[object]:
+    def _segments(_db: object, _agent_id: int, boundary: str) -> list[object]:
         return [boundary]
 
     monkeypatch.setattr(checkpoint, "list_compact_boundary_checkpoint_ids", _boundaries)
@@ -248,7 +249,9 @@ def test_window_stops_walking_once_a_segment_covers_the_start(
         ],
     )
 
-    messages, truncated = strip._strip_messages_for_window(7, window_start, window_end)
+    messages, truncated = strip._strip_messages_for_window(
+        Database.from_settings(), 7, window_start, window_end
+    )
 
     # Coverage stopped the walk after two segments; the three further
     # boundaries only hold older history, so nothing is truncated. The
@@ -277,7 +280,9 @@ def test_window_flags_the_walk_cap_when_coverage_is_unreached(
         ],
     )
 
-    messages, truncated = strip._strip_messages_for_window(7, window_start, window_end)
+    messages, truncated = strip._strip_messages_for_window(
+        Database.from_settings(), 7, window_start, window_end
+    )
 
     assert seen_segments == ["s1.ck-1", "s2.ck-2", "s3.ck-3"]
     assert [message.key for message in messages] == ["s3.ck-3.1", "s2.ck-2.1", "s1.ck-1.1", "c.1"]
@@ -307,7 +312,9 @@ def test_window_caps_the_message_budget_and_flags_it(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _checkpoint_messages)
     monkeypatch.setattr(checkpoint, "list_compact_boundary_checkpoint_ids", _no_boundaries)
 
-    messages, truncated = strip._strip_messages_for_window(7, window_start, window_end)
+    messages, truncated = strip._strip_messages_for_window(
+        Database.from_settings(), 7, window_start, window_end
+    )
 
     assert [message.key for message in messages] == ["c.3", "c.4"]
     assert truncated is True
@@ -336,7 +343,9 @@ def test_window_budget_parameter_overrides_the_setting(monkeypatch: pytest.Monke
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _checkpoint_messages)
     monkeypatch.setattr(checkpoint, "list_compact_boundary_checkpoint_ids", _no_boundaries)
 
-    messages, truncated = strip._strip_messages_for_window(7, window_start, window_end, 2)
+    messages, truncated = strip._strip_messages_for_window(
+        Database.from_settings(), 7, window_start, window_end, 2
+    )
 
     assert [message.key for message in messages] == ["c.3", "c.4"]
     assert truncated is True
@@ -346,7 +355,7 @@ def test_strip_read_forwards_the_budget(monkeypatch: pytest.MonkeyPatch) -> None
     seen: list[int | None] = []
 
     def _capture(
-        _agent_id: int, _start: datetime, _end: datetime, budget: int | None = None
+        _db: object, _agent_id: int, _start: datetime, _end: datetime, budget: int | None = None
     ) -> tuple[list[object], bool]:
         seen.append(budget)
         return [], False
@@ -354,8 +363,8 @@ def test_strip_read_forwards_the_budget(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(strip, "_strip_messages_for_window", _capture)
     now = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)  # time-bomb-ok: explicit fixture window input
 
-    strip.strip_for_window_or_none(7, now, now, 120)
-    strip.strip_for_window_or_none(7, now, now)
+    strip.strip_for_window_or_none(Database.from_settings(), 7, now, now, 120)
+    strip.strip_for_window_or_none(Database.from_settings(), 7, now, now)
 
     assert seen == [120, None]
 
@@ -366,7 +375,7 @@ def test_strip_read_clamps_the_requested_budget_to_the_setting_ceiling(
     seen: list[int | None] = []
 
     def _capture(
-        _agent_id: int, _start: datetime, _end: datetime, budget: int | None = None
+        _db: object, _agent_id: int, _start: datetime, _end: datetime, budget: int | None = None
     ) -> tuple[list[object], bool]:
         seen.append(budget)
         return [], False
@@ -375,8 +384,8 @@ def test_strip_read_clamps_the_requested_budget_to_the_setting_ceiling(
     monkeypatch.setattr(strip, "settings", _strip_settings(600, 20000))
     now = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)  # time-bomb-ok: explicit fixture window input
 
-    strip.strip_for_window_or_none(7, now, now, 9999)
-    strip.strip_for_window_or_none(7, now, now, 600)
+    strip.strip_for_window_or_none(Database.from_settings(), 7, now, now, 9999)
+    strip.strip_for_window_or_none(Database.from_settings(), 7, now, now, 600)
 
     assert seen == [600, 600]
 
@@ -406,20 +415,25 @@ def test_window_excludes_legacy_epoch_timestamps_and_flags_it(
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _checkpoint_messages)
     monkeypatch.setattr(checkpoint, "list_compact_boundary_checkpoint_ids", _no_boundaries)
 
-    messages, truncated = strip._strip_messages_for_window(7, window_start, window_end)
+    messages, truncated = strip._strip_messages_for_window(
+        Database.from_settings(), 7, window_start, window_end
+    )
 
     assert [message.key for message in messages] == ["c.2"]
     assert truncated is True
 
 
 def test_strip_read_degrades_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(_agent_id: int) -> list[object]:
+    def _boom(_db: object, _agent_id: int) -> list[object]:
         raise RuntimeError("checkpoint store down")
 
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _boom)
 
     assert strip.strip_for_window_or_none(
-        7, datetime(2026, 9, 1, tzinfo=UTC), datetime(2026, 9, 1, 1, tzinfo=UTC)
+        Database.from_settings(),
+        7,
+        datetime(2026, 9, 1, tzinfo=UTC),
+        datetime(2026, 9, 1, 1, tzinfo=UTC),
     ) == (None, None)
 
 
@@ -434,33 +448,38 @@ def test_message_group_resolution_and_404(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(strip, "build_timeline_items", _build)
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _checkpoint_messages)
 
-    group = strip._strip_message_group(7, "c.5")
+    group = strip._strip_message_group(Database.from_settings(), 7, "c.5")
     assert [item.item_id for item in group] == ["5.0"]
 
     with pytest.raises(HTTPException) as excinfo:
-        strip._strip_message_group(7, "c.99")
+        strip._strip_message_group(Database.from_settings(), 7, "c.99")
     assert excinfo.value.status_code == 404
 
     with pytest.raises(HTTPException):
-        strip._strip_message_group(7, "bogus")
+        strip._strip_message_group(Database.from_settings(), 7, "bogus")
+
+
+def _request() -> Request:
+    state = SimpleNamespace(db=Database.from_settings())
+    return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
 
 
 def test_message_details_clip_and_full_refetch(monkeypatch: pytest.MonkeyPatch) -> None:
     group = [_item("5.0", "code_output", "y" * 40)]
     monkeypatch.setattr(strip, "settings", _strip_settings(600, 8))
 
-    def _group(_agent_id: int, _key: str) -> list[TimelineItem]:
+    def _group(_db: object, _agent_id: int, _key: str) -> list[TimelineItem]:
         return group
 
     monkeypatch.setattr(strip, "_strip_message_group", _group)
 
-    clipped = strip.get_run_timeline_message(7, "c.5", False)
+    clipped = strip.get_run_timeline_message(_request(), 7, "c.5", False)
     assert clipped.content_truncated is True
     assert clipped.parts[0].text_truncated is True
     assert clipped.parts[0].text == "y" * 8
     assert clipped.parts[0].chars == 40
 
-    uncut = strip.get_run_timeline_message(7, "c.5", True)
+    uncut = strip.get_run_timeline_message(_request(), 7, "c.5", True)
     assert uncut.content_truncated is False
     assert uncut.parts[0].text == "y" * 40
 
@@ -531,16 +550,18 @@ def test_strip_and_details_reads_share_the_cached_segment(
     monkeypatch.setattr(strip, "build_timeline_items", _build)
     loads: list[int] = []
 
-    def _counting(agent_id: int) -> list[object]:
+    def _counting(_db: object, agent_id: int) -> list[object]:
         loads.append(agent_id)
         return ["m"]
 
     monkeypatch.setattr(checkpoint, "load_checkpoint_messages", _counting)
     monkeypatch.setattr(checkpoint, "list_compact_boundary_checkpoint_ids", _no_boundaries)
 
-    messages, _ = strip._strip_messages_for_window(7, window_start, window_start.replace(hour=1))
+    messages, _ = strip._strip_messages_for_window(
+        Database.from_settings(), 7, window_start, window_start.replace(hour=1)
+    )
     # The ts-less head (c.1) stays in the strip, sorted first.
     assert [message.key for message in messages] == ["c.1", "c.2"]
-    group = strip._strip_message_group(7, "c.2")
+    group = strip._strip_message_group(Database.from_settings(), 7, "c.2")
     assert len(group) == 1
     assert loads == [7]  # one read served both the strip and the details call

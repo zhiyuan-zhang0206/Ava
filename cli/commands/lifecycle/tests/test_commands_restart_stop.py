@@ -90,7 +90,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
     # register_self goes to central DB UPSERT; test does not need real writes. cmd_start goes
     # through _register_machine_or_die which internally imports register_self, directly patch the helper to return 0.
-    monkeypatch.setattr(_repo_commands, "_register_machine_or_die", lambda _resolved, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_register_machine_or_die", lambda _db, _resolved, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
     # secondary path will run _probe_gateway_or_die; primary does not call it, adding here
     # ensures secondary tests can also reuse the default noop.
     monkeypatch.setattr(_repo_commands, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
@@ -187,7 +187,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     restart — the owns_journal guard _temporary_stop keeps (task #2898)."""
     from base.deploy.lifecycle import status_journal
 
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_readiness_preflight_commands,
         "preflight_start_readiness",
@@ -244,7 +244,11 @@ def test_cmd_restart_aborts_when_preflight_fails(monkeypatch: pytest.MonkeyPatch
     stopped: list[bool] = []
     start_called: list[bool] = []
 
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda: 1)  # simulate failure
+    monkeypatch.setattr(
+        _repo_commands,
+        "_preflight_probes",
+        lambda _db: 1,  # pyright: ignore[reportUnknownArgumentType]
+    )  # simulate failure  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_commands,
@@ -275,7 +279,7 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
         gate_calls.append(kwargs)
         return 1
 
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_start_readiness_preflight_commands, "preflight_start_readiness", _gate)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(

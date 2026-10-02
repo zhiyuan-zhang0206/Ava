@@ -10,6 +10,11 @@ from __future__ import annotations
 import psycopg
 
 from base.cluster import machine_exclusions
+from base.db import Database
+
+
+def _db() -> Database:
+    return Database.from_settings()
 
 
 def test_reports_each_latch_with_reason_and_date(db_conn: psycopg.Connection) -> None:
@@ -25,7 +30,7 @@ def test_reports_each_latch_with_reason_and_date(db_conn: psycopg.Connection) ->
     db_conn.execute("INSERT INTO machines (name, is_staging) VALUES ('stage', true)")
     db_conn.commit()
 
-    rows = machine_exclusions.list_excluded_machines()
+    rows = machine_exclusions.list_excluded_machines(_db())
     assert [(name, reason) for name, reason, _since in rows] == [
         ("away", "paused"),
         ("gone", "stopped"),
@@ -46,6 +51,6 @@ def test_the_pause_latch_outranks_a_stop_on_the_same_row(db_conn: psycopg.Connec
     )
     db_conn.commit()
 
-    assert [(name, reason) for name, reason, _s in machine_exclusions.list_excluded_machines()] == [
-        ("win", "paused")
-    ]
+    assert [
+        (name, reason) for name, reason, _s in machine_exclusions.list_excluded_machines(_db())
+    ] == [("win", "paused")]

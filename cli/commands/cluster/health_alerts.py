@@ -22,6 +22,7 @@ from typing import Any, Literal
 
 import httpx
 
+from base.db import Database
 from base.deploy.transition import transition_severity
 
 # Transition state for owner alerts: message, episode starts_at, last-fired
@@ -68,6 +69,7 @@ def notify_owner(text: str) -> None:
     The R3 migration shape is ``Policy(max_attempts=1, idempotent=False,
     on_final_failure=log)``."""
     from base.cluster import home_label
+    from base.cluster.machine import gateway_auth_headers
     from base.config import settings
     from base.daemon.endpoints import ServiceEndpoints
     from base.paths import ava_home
@@ -84,7 +86,7 @@ def notify_owner(text: str) -> None:
         resp = httpx.post(
             f"{base}/send",
             json={"text": stamped},
-            headers={"Authorization": f"Bearer {settings.data_plane.cluster_secret}"},
+            headers=gateway_auth_headers(),
             timeout=10.0,
         )
         resp.raise_for_status()
@@ -256,7 +258,7 @@ def _ingest_alert_fallback(
     database is down too, degrade to the legacy direct-IM path — the owner
     still hears, which matters more than the row when the UI is dark too.
     """
-    from base import db
+    from base.db import Database
     from base.telemetry.alerts import (
         display_language,
         notify_im,
@@ -283,7 +285,7 @@ def _ingest_alert_fallback(
         "fingerprint": fingerprint or compute_fingerprint({"alertname": OPS_RULE_NAME}),
     }
     try:
-        with db.connect() as conn:
+        with Database.from_settings().connect() as conn:
             text = notify_text(alert, display_language(conn))
             key, did_insert, should_notify, row = upsert_alert(conn, alert, source="health-probe")
             notified_at = row.get("notified_at")
@@ -364,6 +366,8 @@ def _alert_failure(
 
 def _alert_recovery(home: Path) -> None:
     """Resolve a fired episode across current and legacy marker formats."""
+    from base.db import Database
+
     marker = home / ALERT_STATE_FILE
     if not marker.exists():
         return
@@ -379,9 +383,7 @@ def _alert_recovery(home: Path) -> None:
         return
     open_rows: list[tuple[str, datetime]] | None = None
     try:
-        from base import db
-
-        with db.connect() as conn, conn.cursor() as cur:
+        with Database.from_settings().connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT fingerprint, starts_at FROM alerts "
                 "WHERE labels->>'alertname' = 'cluster health' "
@@ -416,5 +418,5 @@ def _deploy_suppression() -> str | None:
     """
     from ops.deploy_window import deploy_in_flight
 
-    window = deploy_in_flight()
+    window = deploy_in_flight(Database.from_settings())
     return window.detail if window.active else None

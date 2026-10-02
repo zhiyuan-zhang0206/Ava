@@ -266,6 +266,8 @@ async def post_agent_message(
         try:
             existing = await reconcile_chat_delivery(
                 request.app.state.db_pool,
+                request.app.state.db,
+                request.app.state.bus,
                 agent_id,
                 client_message_id=idempotency_key,
                 content=normalized_text,
@@ -275,10 +277,7 @@ async def post_agent_message(
         except ClientMessageConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if existing is not None:
-            return AgentMessageEnqueued(
-                status=existing.status,
-                inbound_id=existing.inbound_id,
-            )
+            return AgentMessageEnqueued(status=existing.status, inbound_id=existing.inbound_id)
     if body.completion_notice is not None:
         if not isinstance(body.content, str):
             raise RuntimeError("completion notice schema admitted non-string content")
@@ -302,6 +301,8 @@ async def post_agent_message(
     try:
         delivery = await deliver_chat_inbound(
             request.app.state.db_pool,
+            request.app.state.db,
+            request.app.state.bus,
             agent_id,
             prepare=lambda _conn: text,
             source=body.source,
@@ -343,15 +344,8 @@ def _system_note_blocking(
             "note_tag": note_tag,
             **({"task_id": task_id} if task_id is not None else {}),
         }
-        if provenance is None:
-            return insert_inbound_message(
-                conn,
-                agent_id,
-                content=content,
-                source=source,
-                kind=InboundKind.SYSTEM_NOTE.value,
-                payload=payload,
-            )
+        # No `provenance` keyword at all when there is none (the insert's own default applies).
+        extra = {} if provenance is None else {"provenance": provenance}
         return insert_inbound_message(
             conn,
             agent_id,
@@ -359,7 +353,7 @@ def _system_note_blocking(
             source=source,
             kind=InboundKind.SYSTEM_NOTE.value,
             payload=payload,
-            provenance=provenance,
+            **extra,
         )
 
 
@@ -406,14 +400,16 @@ async def post_agent_system_note(
         request_inbound_provenance(request),
     )
     # Announce for the live UI (frontend badge / turn active), like chat.
+    note_kind = InboundKind.SYSTEM_NOTE.value
     await _ops.publish_inbound_arrived(
-        agent_id, inbound_id, InboundKind.SYSTEM_NOTE.value, body.source, body.content
+        request.app.state.bus, agent_id, inbound_id, note_kind, body.source, body.content
     )
     if body.resurrect:
         status = await _ops.resurrect_if_terminated(
+            request.app.state.db,
             agent_id,
             trigger_inbound_id=inbound_id,
-            trigger_inbound_kind=InboundKind.SYSTEM_NOTE.value,
+            trigger_inbound_kind=note_kind,
         )
     else:
         status = await asyncio.to_thread(get_agent_status, agent_id)
@@ -442,6 +438,8 @@ async def reconcile_agent_message(
     try:
         delivery = await reconcile_chat_delivery(
             request.app.state.db_pool,
+            request.app.state.db,
+            request.app.state.bus,
             agent_id,
             client_message_id=idempotency_key,
             content=text,
@@ -493,7 +491,7 @@ def get_agent_messages(
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
     try:
-        messages = load_checkpoint_messages(agent_id)
+        messages = load_checkpoint_messages(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
         _log.warning("messages endpoint: checkpoint read failed for agent %s: %r", agent_id, exc)
         raise HTTPException(
@@ -519,9 +517,7 @@ def get_agent_messages(
     dependencies=[Depends(deny_isolated_result_read)],
 )
 def get_trace_checkpoint_messages(
-    agent_id: int,
-    trace_id: str,
-    request: Request,
+    agent_id: int, trace_id: str, request: Request
 ) -> TraceCheckpointMessagesResponse:
     """Full turn content for one OTel trace, resolved on demand from checkpoints.
 
@@ -539,11 +535,12 @@ def get_trace_checkpoint_messages(
 
     404: agent_id does not exist. 503: checkpoint store read failed.
     """
+    db = request.app.state.db
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
     try:
-        checkpoint_id, messages = load_checkpoint_messages_by_trace(agent_id, trace_id)
+        checkpoint_id, messages = load_checkpoint_messages_by_trace(db, agent_id, trace_id)
     except CheckpointReadError as exc:
         _log.warning(
             "trace messages endpoint: checkpoint read failed for agent %s trace %s: %r",
@@ -694,7 +691,7 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
         _log.warning("token-usage: config_overlay read failed for agent %s: %r", agent_id, exc)
 
     try:
-        messages = load_checkpoint_messages(agent_id)
+        messages = load_checkpoint_messages(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
         _log.warning(
             "token-usage: checkpoint read failed for agent %s, returning 0/0/0: %r",
@@ -777,7 +774,7 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
         _log.warning("context-breakdown: %s", exc)
 
     try:
-        messages = load_checkpoint_messages(agent_id)
+        messages = load_checkpoint_messages(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
         _log.warning(
             "context-breakdown: checkpoint read failed for agent %s, returning empty: %r",

@@ -1,3 +1,11 @@
 # The only modules here that may call `ServiceEndpoints.from_settings()`; the rest takes its
 # daemon's `ServiceEndpoint` (or the table) from them.
 endpoints = ["daemon.py"]
+
+# The only modules here that may build the `db` handle from the live settings; the rest takes it
+# from them.
+db = ["daemon.py"]
+
+# The only modules here that may build the `bus` handle from the live settings; the rest takes it
+# from them.
+bus = ["daemon.py"]
