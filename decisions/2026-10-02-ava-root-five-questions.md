@@ -22,15 +22,17 @@ Keep `ava-root`. No change of design or code. The five questions:
    application shutdown can keep the database.
 2. **Prior art.** Process supervision is a solved problem: systemd, launchd, and portable
    supervisors (supervisord, s6, runit, circus). Platform supervisors are rung 1; a portable
-   supervisor under the helper is rung 3; `ava-root` is rung 4. What forces a layer at all:
-   on macOS, TCC attribution follows the process chain fixed at spawn, so every process that
-   needs a permission must descend from the one signed helper, and launchd cannot carry that
-   chain per service. What does **not** force a self-written one: the 2026-09-12 attribution
+   supervisor under the helper is rung 3; `ava-root` is rung 4. The primary reason `ava-root`
+   exists, as the owner stated on 2026-10-02: **on macOS the supervised processes must inherit
+   the helper's permissions.** TCC attributes a permission to the responsible process fixed at
+   spawn, so every process that needs one must descend from the one authorized, signed helper,
+   and launchd cannot carry that chain per service. That forces a supervisor layer under the
+   helper. Whether it must be self-written is a separate question: the 2026-09-12 attribution
    probes held the helper's attribution across four fork-exec hops (27 of 27 requests) and
-   across sixteen re-parenting scenarios, so a mature supervisor started by the helper would
-   inherit the same attribution. The self-written choice therefore rests on the semantics
-   below and on the owner's preference, not on the macOS constraint. A comparison with the
-   portable supervisors was not recorded at the time and is not made here.
+   across sixteen re-parenting scenarios, which suggests a mature supervisor started by the
+   helper would inherit it too. That is an observation about the chain, not a comparison of
+   supervisors: none was ever run, and no conclusion is drawn from it. The semantics below are
+   the secondary reason for the self-written form.
 3. **Simplest option.** Linux alone: one systemd unit per service. macOS plus Linux with one
    OS-pure root: a portable supervisor under the helper, plus whatever custody and sealing
    Ava adds on top. The first is simpler per platform but gives two lifecycle models; the
@@ -43,17 +45,22 @@ Keep `ava-root`. No change of design or code. The five questions:
    digest, owner-bound native birth identity, exec replacement of the supervisor itself, and
    a tree self-check that tells "broken" from "cannot verify". Production code is about
    3,900 lines with about 2,300 lines of tests (2026-10-02 count), plus the independent
-   helper program. The tree self-check's attribution-coverage and reseeding-latency slots are
-   injected providers that read `unavailable` without one; whether the attribution-loss guard
-   is wired is not established by this entry.
+   helper program. Chain integrity is checked at runtime; attribution transfer is not
+   measured at runtime and is proven only by the CI two-section chain smoke. The self-check's
+   attribution-coverage and reseeding-latency metric slots never had a data source and were
+   removed on 2026-10-02; F12 (attribution sampling after a keepalive restart) remains a
+   measurement debt.
 5. **Limit signal and exit.** See the next section.
 
 ## Why it stays
 
-- The owner's 2026-09-12 stated motive was not the permission problem itself but that the
-  architecture looked badly coupled to operating-system-specific machinery; the design is the
-  decoupling (an OS-pure root, helper kept separate). That is a preference, not an external
-  constraint, and it is the owner's to keep.
+- **Primary (owner, 2026-10-02):** on macOS the supervised processes must inherit the
+  helper's permissions; the supervisor layer under the helper exists for that.
+- **Secondary:** the owner's 2026-09-12 stated motive was that the architecture looked badly
+  coupled to operating-system-specific machinery; the design is the decoupling (an OS-pure
+  root, helper kept separate). That is a preference, not an external constraint, and it is
+  the owner's to keep. Custody, stop proof and the sealed manifest are semantics a mature
+  supervisor does not ship, and part of why the layer is self-written.
 - The design is deliberate rather than accreted: measured attribution, an enforced lint on
   scope, a postmortem-backed guard on a supervisor replacing itself.
 - Replacing it now would be a second one-shot migration of the whole lifecycle for a cost
@@ -69,9 +76,9 @@ Qualitative triggers, none a number:
   machinery outside this tree.
 - The **platform constraint changes**: a mature supervisor or the platform itself can carry
   the helper's attribution chain, so the layer's reason shrinks to the Ava-specific semantics.
-- The **attribution-loss guard stays unwired** while the design still claims to degrade by
-  losing attribution, not service: then the claim is unmeasured and the design must be
-  re-examined.
+- **Attribution loss is observed in practice** (a process losing its permission after a
+  restart), which the CI smoke alone would not have caught: then F12 stops being a debt and
+  becomes the first thing to measure.
 
 Exit: a portable supervisor under the helper, keeping only the Ava-specific semantics
 (custody, sealing, stop proof) as a thin layer, or per-service systemd on Linux where the
@@ -89,4 +96,5 @@ platform covers it.
 ## Consequences
 
 - The lifecycle decision stays authoritative; this record adds the answers it lacked.
-- The open question about the attribution-loss guard is a debt to check, not a finding.
+- The runtime guard for attribution loss does not exist; the design relies on the CI smoke
+  and on permission errors surfacing. F12 is the recorded debt.
