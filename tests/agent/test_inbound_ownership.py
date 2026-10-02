@@ -7,7 +7,6 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent import db as agent_db
 from agent.db import (
     claim_inbound_batch,
     finalize_claimed_inbounds,
@@ -16,6 +15,7 @@ from agent.db import (
 from agent.graph.claim._batch import _defer_chats_to_pending
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
+from base.config import settings
 from base.db import create_agent
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -233,7 +233,9 @@ async def test_claim_lock_timeout_releases_connection_for_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A blocked owner row aborts promptly and returns its pool connection."""
-    monkeypatch.setattr(agent_db, "_CLAIM_DB_LOCK_TIMEOUT", "50ms")
+    monkeypatch.setattr(
+        settings.agent, "db_pool_acquire_timeout_seconds", 0.05
+    )  # lock timeout 50ms
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
     inbound = _insert(db_conn, agent_id)
