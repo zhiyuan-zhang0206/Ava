@@ -1,21 +1,8 @@
 {
-  "ambient_state": {
-    "services/delivery_watchdog/daemon.py::ambient-container:_last_resurrect_attempt": 1,
-    "services/delivery_watchdog/daemon.py::ambient-container:_resurrect_failures": 1,
-    "services/delivery_watchdog/daemon.py::ambient-container:_resurrect_suppressions": 1,
-    "services/delivery_watchdog/daemon.py::ambient-container:_resurrect_tasks": 1,
-    "services/delivery_watchdog/daemon.py::asyncio-task:_maybe_spawn_resurrects": 1,
-    "services/delivery_watchdog/stall_recovery.py::ambient-container:_harvest_tasks": 1,
-    "services/delivery_watchdog/stall_recovery.py::ambient-container:_last_harvest_attempt": 1,
-    "services/delivery_watchdog/stall_recovery.py::asyncio-task:maybe_request_stall_recovery": 1,
-    "services/delivery_watchdog/turn_liveness.py::ambient-container:_hosted_turn_recovery_tasks": 1,
-    "services/delivery_watchdog/turn_liveness.py::ambient-container:_last_hosted_turn_recovery_attempt": 1,
-    "services/delivery_watchdog/turn_liveness.py::asyncio-task:_maybe_spawn_hosted_turn_recoveries": 1
-  },
   "complexity": {
     "services/delivery_watchdog/tests/test_delivery_watchdog.py::TestDispatchBackoffAndPoison.test_dispatch_cap_poisons_once_and_emits_event": 15
   },
   "files": {
-    "services/delivery_watchdog/tests/test_delivery_watchdog.py": 2264
+    "services/delivery_watchdog/tests/test_delivery_watchdog.py": 1733
   }
 }

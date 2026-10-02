@@ -442,6 +442,18 @@ CREATE TABLE delivery_watchdog_alerted (
 COMMENT ON TABLE delivery_watchdog_alerted IS
     'Delivery watchdog stall-alert dedup: inbound ids already WARNINGed while pending. Persists the daemon''s in-memory alerted set across restarts so a restart does not re-report every still-stalled inbound (Task #945).';
 
+CREATE TABLE delivery_watchdog_attempts (
+    kind                 TEXT NOT NULL CHECK (kind IN ('resurrect', 'harvest', 'hosted_turn')),
+    agent_id             BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    last_attempt_at      TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    consecutive_failures INT NOT NULL DEFAULT 0,
+    suppress_count       INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (kind, agent_id)
+);
+
+COMMENT ON TABLE delivery_watchdog_attempts IS
+    'Delivery watchdog recovery-loop state, one row per (loop kind, agent): last_attempt_at is the cooldown clock; consecutive_failures and suppress_count (resurrect only) are the wake-suppression escalation counters. Survives watchdog restarts.';
+
 -- Full (non-partial) (agent_id, created_at DESC): select_all's LATERAL
 -- MAX(created_at) per agent is an index-only scan on it (the partial
 -- pending index below cannot serve MAX over all kinds; audit P1-1).
