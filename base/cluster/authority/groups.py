@@ -170,7 +170,7 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
     # The writer creates the next month's partition itself (SECURITY DEFINER).
     _grant(
         conn,
-        "GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(integer) TO {}",
+        "GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(integer, integer) TO {}",
         runner,
     )
     grant_event_log_runner_access(conn, runner)

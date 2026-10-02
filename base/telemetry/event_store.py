@@ -102,9 +102,14 @@ def insert_rows(conn: psycopg.Connection[Any], records: Sequence[dict[str, Any]]
     return max(cursor.rowcount, 0)
 
 
-def ensure_partitions(conn: psycopg.Connection[Any]) -> None:
-    """Create the current and coming months' partitions (idempotent, SECURITY DEFINER)."""
-    conn.execute("SELECT ensure_telemetry_event_partitions(%s)", (PARTITION_MONTHS_AHEAD,))
+def ensure_partitions(conn: psycopg.Connection[Any], *, months_back: int = 1) -> None:
+    """Create the partitions from `months_back` months ago through the coming months
+    (idempotent, SECURITY DEFINER). A backfill of older rows passes a larger `months_back`
+    first: a row outside every partition would land in the default one, and a month cannot be
+    created over rows that sit there."""
+    conn.execute(
+        "SELECT ensure_telemetry_event_partitions(%s, %s)", (PARTITION_MONTHS_AHEAD, months_back)
+    )
 
 
 _lock = threading.Lock()

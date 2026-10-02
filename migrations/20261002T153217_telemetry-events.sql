@@ -54,13 +54,14 @@ CREATE TRIGGER telemetry_events_no_truncate
     BEFORE TRUNCATE ON telemetry_events
     FOR EACH STATEMENT EXECUTE FUNCTION reject_telemetry_events_rewrite();
 
--- Monthly partitions (UTC boundaries) from the previous month through
--- p_months_ahead months ahead, created idempotently. The application logins
+-- Monthly partitions (UTC boundaries) from p_months_back months before the current
+-- month through p_months_ahead months ahead, created idempotently. The application logins
 -- have no DDL, so the writer calls this SECURITY DEFINER function when the
 -- month changes. A DEFAULT partition catches an event outside every month so a
 -- write never fails; rows left there block creating the month that covers them,
 -- so the function's failure is loud, not silent.
-CREATE FUNCTION public.ensure_telemetry_event_partitions(p_months_ahead INT DEFAULT 3)
+CREATE FUNCTION public.ensure_telemetry_event_partitions(
+    p_months_ahead INT DEFAULT 3, p_months_back INT DEFAULT 1)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $function$
 DECLARE
@@ -69,7 +70,7 @@ DECLARE
 BEGIN
     EXECUTE 'create table if not exists public.telemetry_events_default '
             'partition of public.telemetry_events default';
-    FOR offset_months IN -1..p_months_ahead LOOP
+    FOR offset_months IN -p_months_back..p_months_ahead LOOP
         month_start := (date_trunc('month', now() AT TIME ZONE 'UTC')
                         + make_interval(months => offset_months)) AT TIME ZONE 'UTC';
         EXECUTE format(
@@ -83,7 +84,7 @@ BEGIN
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.ensure_telemetry_event_partitions(INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.ensure_telemetry_event_partitions(INT, INT) FROM PUBLIC;
 SELECT public.ensure_telemetry_event_partitions(3);
 
 -- Application surface: both groups read and append, as for audit_events (see
@@ -93,7 +94,7 @@ DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
         GRANT SELECT, INSERT ON telemetry_events TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(INT) TO ava_runner;
+        GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(INT, INT) TO ava_runner;
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_gateway') THEN
         REVOKE UPDATE, DELETE ON telemetry_events FROM ava_gateway;
