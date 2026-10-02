@@ -22,10 +22,10 @@ from agent.hooks import (
     register_before_llm,
 )
 from agent.state import AgentState
+from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.packages.plugins import activation, contributions
 from base.packages.plugins.context import PluginContext
-from tests.agent._fakes import make_fake_ops_pool
 
 
 @pytest.fixture(autouse=True)

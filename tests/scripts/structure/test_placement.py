@@ -8,7 +8,7 @@ import pathlib
 import pytest
 
 from scripts.structure import locality, placement
-from tests.scripts.structure.patch_repo import make_repo, write
+from scripts.structure.tests.patch_repo import make_repo, write
 
 
 @pytest.fixture
@@ -35,6 +35,17 @@ def test_home_is_the_nearest_common_ancestor_of_the_referenced_modules(
         "from base.net import retry\nfrom base.db import pool\n\nretry.backoff()\npool.acquire()\n",
     )
     assert two.home == "base"
+
+
+def test_a_tests_package_helper_is_not_evidence_wherever_it_lives(root: pathlib.Path) -> None:
+    """A helper under `<pkg>/tests/` is test support, so importing it neither raises nor lowers the home."""
+    write(root, "base/db/tests/support.py", "def fake():\n    return None\n")
+    found = _place(
+        root,
+        "tests/test_support.py",
+        "from base.db.tests import support\nfrom base.net import retry\n\nsupport.fake()\nretry.backoff()\n",
+    )
+    assert (found.home, found.unit) == ("base/net", "base")
 
 
 def test_the_home_unit_is_the_highest_layer_and_only_its_modules_place_the_file(
