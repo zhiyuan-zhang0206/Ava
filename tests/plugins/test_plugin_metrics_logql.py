@@ -301,8 +301,6 @@ def test_pr_flow_panels_match_the_otlp_contract() -> None:
     for field in (
         "ready_to_merge_median_seconds",
         "ready_to_merge_p90_seconds",
-        "qa_rounds_mean",
-        "qa_rereview_share",
         "flake_new_quarantines",
     ):
         assert _METRIC_DISPOSITION[("pr_flow_daily", field)] == "gauge"
@@ -321,18 +319,13 @@ def test_pr_flow_panels_match_the_otlp_contract() -> None:
     assert queue.panel == "timeseries"
     assert queue.query == f"ava_pr_flow_run_{_strip_unit_suffix('queue_depth')}_ratio"
 
-    qa = specs["core_pr_flow_qa_rounds"]
-    assert qa.query == ratio_query("qa_rounds_mean")
-    assert (qa.targets or []) == [ratio_query("qa_rereview_share")]
-    assert qa.target_names == ["mean rounds", "re-review share"]
-
     flakes = specs["core_pr_flow_flakes"]
     assert flakes.query == ratio_query("flake_new_quarantines")
     assert flakes.target_names == ["new quarantines"]
 
-    for spec in (latency, queue, qa, flakes):
+    for spec in (latency, queue, flakes):
         assert by_title[render_title(spec)]["description"] == spec.description
-    for spec in (latency, qa, flakes):
+    for spec in (latency, flakes):
         joins = [
             t
             for t in by_title[render_title(spec)].get("transformations", [])
