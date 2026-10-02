@@ -34,10 +34,11 @@ async def sleep_with_progress(progress: LoopProgress, total_s: float) -> None:
 async def run_rounds(
     name: str,
     progress: LoopProgress,
-    interval_s: float,
+    interval_s: float | Callable[[], float],
     one_round: Callable[[], Awaitable[None]],
 ) -> None:
-    """Run `one_round` forever, `interval_s` apart.
+    """Run `one_round` forever, `interval_s` apart. A callable `interval_s` is
+    read after each round, for a cadence the operator can change live.
 
     An unreachable database skips the round (the next one retries). Any other
     exception ends the loop and, through the owning `TaskGroup`, the process:
@@ -52,7 +53,7 @@ async def run_rounds(
         else:
             progress.beat()
             progress.mark_success()
-        await sleep_with_progress(progress, interval_s)
+        await sleep_with_progress(progress, interval_s() if callable(interval_s) else interval_s)
 
 
 async def fan_out(
