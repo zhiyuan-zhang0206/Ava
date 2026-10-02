@@ -12,9 +12,9 @@ from langgraph.runtime import Runtime
 from agent.graph.exec.node import _exec_node_impl
 from agent.graph.interrupt import InterruptEvent
 from agent.state import AgentState
+from agent.tests._fakes import make_fake_ops_pool
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
-from tests.agent._fakes import make_fake_ops_pool
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
