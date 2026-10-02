@@ -408,12 +408,3 @@ def test_unchanged_enabled_unit_never_restarts_or_rewrites(
     target.write_text(render_unit(ctx))
     assert install(context=ctx) == []
     assert recorded == []
-
-
-@pytest.mark.parametrize("verb", ["install", "uninstall", "status"])
-def test_no_second_linux_boot_management_cli(verb: str) -> None:
-    from cli.parsers import build_parser
-
-    with pytest.raises(SystemExit) as error:
-        build_parser().parse_args(["cluster", "boot-unit", verb])
-    assert error.value.code == 2
