@@ -431,7 +431,9 @@ def stop(
             _timed_phase(
                 phases,
                 "terminals",
-                lambda: close_terminals(deadline, holder, acquired_at),
+                lambda: close_terminals(
+                    deadline, holder, acquired_at, direct_db="gateway" in roles
+                ),
             )
         if teardown_extras:
             _timed_phase(phases, "extras", lambda: _stop_extras(deadline))

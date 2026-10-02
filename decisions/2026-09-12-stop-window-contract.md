@@ -84,3 +84,7 @@ deploy lease also froze admission cluster-wide.
   future hold added to the scan must carry this record's constraint.
 
 Forward link: the "never force Postgres" part of item 1 is replaced for Postgres by [a fast shutdown that does not finish is ended by an immediate one](2026-10-02-pg-stop-escalates-to-immediate.md).
+
+Forward: [decisions/2026-10-02-close-notices-written-at-terminals.md](2026-10-02-close-notices-written-at-terminals.md)
+removes the close-notice flush named in the third decision point: the stop
+writes the notices itself in its `terminals` phase.
