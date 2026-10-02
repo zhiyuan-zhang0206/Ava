@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
 from base import telemetry
+from base.events.live.tests.fakes import patch_sync_redis
 from gateway.app import app
 from gateway.lgtm import prom_metrics, telemetry_staleness
 
@@ -100,10 +101,9 @@ def emitted(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
 
 def _install_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
-    import gateway.routers.fleet_graph as fg
 
     redis = _FakeRedis()
-    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    patch_sync_redis(monkeypatch, _RedisFactory(redis))
     return redis
 
 

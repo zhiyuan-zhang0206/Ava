@@ -12,6 +12,8 @@ import psutil
 import pytest
 from fastapi import Request
 
+from base.events.live.bus import EventBus
+from base.events.live.tests.fakes import patch_open_async_redis
 from gateway.events import sse
 from gateway.middleware import runtime_metrics
 
@@ -187,10 +189,10 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
     emitted: list[dict[str, Any]] = []
     monkeypatch.setattr(runtime_metrics, "_sse_active_connections", {})
 
-    def open_redis(_url: str) -> _RedisClient:
+    def open_redis(_url: str, **_kw: object) -> _RedisClient:
         return _RedisClient()
 
-    monkeypatch.setattr(sse, "open_async_redis", open_redis)
+    patch_open_async_redis(monkeypatch, open_redis)
 
     async def pass_through(call: Callable[[], Awaitable[Any]]) -> Any:
         return await call()
@@ -205,9 +207,11 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
     async def run_stream() -> None:
         request = cast(Request, _Request())
         if mode == "filtered":
-            stream = sse.event_stream("redis://test", 7, request)
+            stream = sse.event_stream(EventBus.from_settings(), 7, request)
         else:
-            stream = sse.throttled_event_stream("redis://test", request, throttle_rate=10.0)
+            stream = sse.throttled_event_stream(
+                EventBus.from_settings(), request, throttle_rate=10.0
+            )
         assert await anext(stream) == b": stream open\n\n"
         with pytest.raises(StopAsyncIteration):
             await anext(stream)

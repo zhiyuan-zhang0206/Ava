@@ -55,6 +55,7 @@ cluster's private network)
 """
 
 import asyncio
+import functools
 import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -223,7 +224,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.alert_reconciler = reconciliation.start_grafana_alert_reconciler(
         app.state.db_pool,
         app.state.grafana_client,
-        alerts_router.publish_alert_rows,
+        functools.partial(alerts_router.publish_alert_rows, app.state.bus),
     )
 
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab

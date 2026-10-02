@@ -48,6 +48,8 @@ import uvicorn
 from fastapi import FastAPI, Request
 from starlette.responses import PlainTextResponse, StreamingResponse
 
+from base.events.live.bus import EventBus
+from base.events.live.tests.fakes import patch_open_async_redis
 from gateway import _server
 from gateway.events import sse
 from gateway.middleware import stopping
@@ -423,10 +425,10 @@ class _ConnectedRequest:
 def cleanup(monkeypatch: pytest.MonkeyPatch) -> _Cleanup:
     record = _Cleanup()
 
-    def open_redis(_url: str) -> _RedisClient:
+    def open_redis(_url: str, **_kw: object) -> _RedisClient:
         return _RedisClient(record)
 
-    monkeypatch.setattr(sse, "open_async_redis", open_redis)
+    patch_open_async_redis(monkeypatch, open_redis)
 
     async def pass_through(call: Callable[[], Awaitable[Any]]) -> Any:
         return await call()
@@ -438,8 +440,8 @@ def cleanup(monkeypatch: pytest.MonkeyPatch) -> _Cleanup:
 def _sse_stream(mode: str) -> AsyncGenerator[bytes, None]:
     request = cast(Request, _ConnectedRequest())
     if mode == "filtered":
-        return sse.event_stream("redis://test", 7, request)
-    return sse.throttled_event_stream("redis://test", request, throttle_rate=20.0)
+        return sse.event_stream(EventBus.from_settings(), 7, request)
+    return sse.throttled_event_stream(EventBus.from_settings(), request, throttle_rate=20.0)
 
 
 @pytest.mark.parametrize("mode", ["filtered", "throttled"])

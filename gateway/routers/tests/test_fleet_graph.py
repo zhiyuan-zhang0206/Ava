@@ -23,6 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
+from base.events.live.tests.fakes import patch_sync_redis
 from gateway.app import app
 from gateway.events import audit_rows
 from gateway.lgtm import prom_metrics, telemetry_staleness
@@ -714,12 +715,10 @@ def test_cache_fail_open_when_redis_down(
         retained={_IN_METRIC: {str(source): 100.0}, _OUT_METRIC: {str(source): 50.0}},
     )
 
-    import gateway.routers.fleet_graph as fg
-
     def boom(*args: object, **kwargs: object) -> object:
         raise ConnectionError("redis down")
 
-    monkeypatch.setattr(fg, "sync_redis", boom)
+    patch_sync_redis(monkeypatch, boom)
     with TestClient(app) as client:
         response = client.get("/api/fleet/graph")
 

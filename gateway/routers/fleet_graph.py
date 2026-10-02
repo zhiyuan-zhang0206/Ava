@@ -37,7 +37,7 @@ from psycopg import errors as pg_errors
 from base import telemetry
 from base.config import settings
 from base.events.declarations.gateway import FleetGraphStaleReason
-from base.events.live.redis_client import sync_redis
+from base.events.live.bus import EventBus
 from base.log import logger
 from gateway.events import audit_rows
 from gateway.lgtm import prom_metrics, telemetry_staleness
@@ -87,10 +87,10 @@ def _last_good_cache_key(key: str) -> str:
     return f"fleet_graph:last_good:{key}"
 
 
-def _read_graph(key: str, *, cache_name: str) -> FleetGraphResponse | None:
+def _read_graph(bus: EventBus, key: str, *, cache_name: str) -> FleetGraphResponse | None:
     """Read one graph cache entry; fail-open on an unavailable Redis."""
     try:
-        with sync_redis(decode_responses=True) as redis:
+        with bus.sync_redis(decode_responses=True) as redis:
             cached = redis.get(key)
         if cached is not None:
             return FleetGraphResponse.model_validate_json(cached)
@@ -101,23 +101,23 @@ def _read_graph(key: str, *, cache_name: str) -> FleetGraphResponse | None:
     return None
 
 
-def _read_cached_graph(key: str) -> FleetGraphResponse | None:
+def _read_cached_graph(bus: EventBus, key: str) -> FleetGraphResponse | None:
     """Serve the short-lived poll cache when it exists."""
-    return _read_graph(key, cache_name="cache")
+    return _read_graph(bus, key, cache_name="cache")
 
 
-def _read_last_good_graph(key: str) -> FleetGraphResponse | None:
+def _read_last_good_graph(bus: EventBus, key: str) -> FleetGraphResponse | None:
     """Return the last successful full graph for this parameter combination."""
-    return _read_graph(_last_good_cache_key(key), cache_name="last-good cache")
+    return _read_graph(bus, _last_good_cache_key(key), cache_name="last-good cache")
 
 
-def _stale_graph(key: str, nodes: list[FleetGraphNode]) -> FleetGraphResponse:
+def _stale_graph(bus: EventBus, key: str, nodes: list[FleetGraphNode]) -> FleetGraphResponse:
     """Prefer a complete last-good graph; otherwise preserve known nodes.
 
     A degraded response intentionally bypasses the 60-second cache so the
     next poll retries the upstream read instead of extending a failure.
     """
-    last_good = _read_last_good_graph(key)
+    last_good = _read_last_good_graph(bus, key)
     if last_good is not None:
         return last_good.model_copy(update={"stale": True})
     return FleetGraphResponse(nodes=nodes, edges=[], stale=True)
@@ -125,6 +125,7 @@ def _stale_graph(key: str, nodes: list[FleetGraphNode]) -> FleetGraphResponse:
 
 def _finalize_graph_response(
     *,
+    bus: EventBus,
     key: str,
     nodes: list[FleetGraphNode],
     edges: list[FleetGraphEdge],
@@ -145,7 +146,7 @@ def _finalize_graph_response(
     # Heartbeat lag is observability health, not a reason to discard an
     # otherwise successful complete snapshot.
     try:
-        with sync_redis(decode_responses=True) as redis:
+        with bus.sync_redis(decode_responses=True) as redis:
             serialized = response.model_dump_json()
             redis.set(key, serialized, ex=_CACHE_TTL_SECONDS)
             redis.set(_last_good_cache_key(key), serialized, ex=_LAST_GOOD_CACHE_TTL_SECONDS)
@@ -396,7 +397,8 @@ def get_fleet_graph(
     win_start = now - window_delta(hours) if hours is not None else None
 
     key = _cache_key(include_terminated=include_terminated, hours=hours, decay_lambda=decay_lambda)
-    cached = _read_cached_graph(key)
+    bus: EventBus = request.app.state.bus
+    cached = _read_cached_graph(bus, key)
     if cached is not None:
         return cached
 
@@ -415,7 +417,7 @@ def get_fleet_graph(
         # prior graph is still strictly more useful than an empty fleet.
         logger.warning("fleet_graph query canceled (statement timeout) — serving stale graph")
         _emit_stale("pg_timeout")
-        return _stale_graph(key, [])
+        return _stale_graph(bus, key, [])
 
     node_rows = pg_data.node_rows
 
@@ -425,7 +427,7 @@ def get_fleet_graph(
     if _monotonic() > deadline:
         logger.warning("fleet_graph PG phase exceeded route budget — serving stale graph")
         _emit_stale("pg_budget")
-        return _stale_graph(key, _build_nodes(node_rows))
+        return _stale_graph(bus, key, _build_nodes(node_rows))
 
     # --- Token aggregates from Prometheus (the llm_usage counters) ---
     # total_tokens is the restart-proof retained-window sum; node_score is the
@@ -437,11 +439,11 @@ def get_fleet_graph(
     except prom_metrics.PromQueryBudgetError as exc:
         logger.warning("fleet_graph Prometheus query budget refused — serving stale graph: {}", exc)
         _emit_stale("prom_budget")
-        return _stale_graph(key, _build_nodes(node_rows))
+        return _stale_graph(bus, key, _build_nodes(node_rows))
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("fleet_graph Prometheus query failed — serving stale graph: {}", exc)
         _emit_stale("prom_failed")
-        return _stale_graph(key, _build_nodes(node_rows))
+        return _stale_graph(bus, key, _build_nodes(node_rows))
 
     nodes = _build_nodes(
         node_rows,
@@ -455,9 +457,10 @@ def get_fleet_graph(
         # Both over-budget shapes (deadline crossed / admission refused) share prom_budget.
         logger.warning("fleet_graph Prometheus phase exceeded route budget — serving stale graph")
         _emit_stale("prom_budget")
-        return _stale_graph(key, nodes)
+        return _stale_graph(bus, key, nodes)
 
     return _finalize_graph_response(
+        bus=bus,
         key=key,
         nodes=nodes,
         edges=pg_data.edges,
