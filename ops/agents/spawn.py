@@ -32,7 +32,7 @@ import base.db
 from base import telemetry
 from base.agents import ForkCheckpointNotFound
 from base.agents.birth_config import resolve_birth_config
-from base.agents.impersonation_manifest import stage_central_expected_event
+from base.agents.impersonation_manifest import record_central_event
 from base.agents.labels import spawn_prompt_with_label
 from base.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
 from base.db.transaction import write_transaction
@@ -284,16 +284,10 @@ def _announce_created_agent(
                 "fork_checkpoint": fork_checkpoint,
             },
         )
-        # The agent row is already durable. Its audit event gets its own
-        # durable staging transaction, so a telemetry loss remains visible to
-        # the finalizer instead of silently completing the delivery set.
+        # The agent row is already durable. Its audit event is recorded in its own
+        # transaction, so a telemetry loss cannot lose the impersonation record.
         with write_transaction() as conn:
-            prepared_event = stage_central_expected_event(
-                conn,
-                prepared_event,
-                origin_kind="agent_spawn",
-                origin_id=agent_id,
-            )
+            prepared_event = record_central_event(conn, prepared_event)
         telemetry.emit_prepared(prepared_event)
     except Exception:
         # The committed row and prompt are authoritative; the pending scan and

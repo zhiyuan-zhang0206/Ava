@@ -2,7 +2,6 @@
 
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -13,7 +12,6 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
-from base.agents.impersonation.events import consume_events
 from base.cluster.machine import machine_name
 from base.db import create_agent, insert_inbound_message
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -155,96 +153,6 @@ def test_say_ack_and_file_preserve_all_message_bodies(
         db_conn.execute("DELETE FROM agent_impersonation_entries WHERE lease_id=%s", (lease["id"],))
 
 
-def test_consumer_retains_sdk_facts_without_sampling_or_reinstrumentation(
-    db_conn: psycopg.Connection[Any],
-    owner: RuntimeIncarnation,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request_legacy_leases(monkeypatch)
-    lease = start(owner)
-    base = {
-        "ts": datetime.now(UTC).isoformat(),
-        "agent_id": owner.agent_id,
-        "source": f"agent:{owner.agent_id}",
-        "category": "telemetry",
-    }
-    events = [
-        {
-            **base,
-            "id": 10,
-            "event_name": "sdk_call",
-            "attributes": {"fn": "ava.tasks.create", "duration": 0.25},
-        },
-        {
-            **base,
-            "id": 11,
-            "event_name": "task_create",
-            "category": "audit",
-            "attributes": {"task_id": 99},
-        },
-    ]
-    assert consume_events(owner.agent_id, 0, events) == 2
-    assert consume_events(owner.agent_id, 0, events) == 0
-    with pytest.raises(ValueError, match="another agent"):
-        consume_events(owner.agent_id, 0, [{**events[0], "agent_id": owner.agent_id + 1}])
-    leases.release(str(lease["id"]), attested_caller(lease), "Created task 99")
-    result = history.build_document(
-        history.resolve(owner.agent_id, 0), history.entries(str(lease["id"]), db_conn)
-    )
-    assert result["statistics"]["sdk_calls"] == {"ava.tasks.create": 1}
-    assert result["statistics"]["sdk_duration_seconds"] == 0.25
-    assert result["statistics"]["api_operations"] == {"task_create": 1}
-    assert result["version"] == 2
-    assert "sdk_event_count" not in result["statistics"]
-    assert result["statistics"]["sdk_sampling_policy"] == "unknown"
-    assert result["statistics"]["event_delivery"] == {
-        "state": "pending",
-        "pending_reason": "legacy",
-        "completion_basis": None,
-        "sdk_calls": {
-            "coverage": "unknown",
-            "sampling_policy": "unknown",
-            "consumed_event_count": 1,
-        },
-        "api_events": {"coverage": "unknown", "consumed_event_count": 1},
-    }
-    assert result["sdk_events"][0]["payload"] == events[0]
-
-
-def test_handoff_lists_events_in_call_order_not_ingestion_order(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
-) -> None:
-    """Upstream pages arrive newest first; the handoff reader needs call order."""
-    lease = start(owner)
-    first = datetime.now(UTC)
-    calls = [
-        {
-            "ts": (first + timedelta(milliseconds=offset)).isoformat(),
-            "agent_id": owner.agent_id,
-            "source": f"agent:{owner.agent_id}",
-            "category": "telemetry",
-            "id": 20 + offset,
-            "event_name": "sdk_call",
-            "attributes": {"fn": fn, "duration": 0.01},
-        }
-        for offset, fn in (
-            (0, "agents.list_agents"),
-            (1, "agents.get_status"),
-            (2, "agents.list_machines"),
-        )
-    ]
-    assert consume_events(owner.agent_id, 0, reversed(calls)) == 3
-    leases.release(str(lease["id"]), attested_caller(lease), "Three calls in order")
-    document = history.build_document(
-        history.resolve(owner.agent_id, 0), history.entries(str(lease["id"]), db_conn)
-    )
-    assert [row["payload"]["attributes"]["fn"] for row in document["sdk_events"]] == [
-        "agents.list_agents",
-        "agents.get_status",
-        "agents.list_machines",
-    ]
-
-
 def test_legacy_empty_events_never_certify_a_zero_call_claim(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
@@ -269,29 +177,6 @@ def test_legacy_empty_events_never_certify_a_zero_call_claim(
         "api_events": {"coverage": "unknown", "consumed_event_count": 0},
     }
     assert document["statistics"]["sdk_sampling_policy"] == "unknown"
-
-
-def test_protocol_v1_empty_frozen_manifest_certifies_only_through_runner_procedure(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.agents.impersonation_manifest import certify
-    from base.config import settings
-
-    monkeypatch.setattr(settings.general, "impersonation_event_manifest_enabled", True)
-    monkeypatch.setattr(
-        settings.general,
-        "impersonation_event_manifest_certification_secret",
-        "test-manifest-certification-secret-000001",
-    )
-    lease = start(owner)
-    assert lease["event_delivery_protocol_version"] == 1
-    leases.release(str(lease["id"]), attested_caller(lease), "No eligible events emitted")
-    assert certify(str(lease["id"]))
-    document = history.build_document(
-        history.resolve(owner.agent_id, 0), history.entries(str(lease["id"]), db_conn)
-    )
-    assert document["statistics"]["event_delivery"]["state"] == "complete"
-    assert document["statistics"]["event_delivery"]["pending_reason"] is None
 
 
 def test_export_handoff_rebuilds_a_cached_v1_document(
@@ -351,87 +236,6 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     archived, _ = build_timeline_items([marker], [], segment_prefix="s2.checkpoint")
     archive_page = hydrate(archived, owner.agent_id, limit=5)
     assert archive_page[-1].item_id.startswith("s2.checkpoint.0.")
-
-
-def test_late_events_refresh_handoff_after_native_receipt_and_manifest_closes_replay(
-    db_conn: psycopg.Connection[Any],
-    owner: RuntimeIncarnation,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    request_legacy_leases(monkeypatch)
-    import httpx
-    from psycopg.types.json import Jsonb
-
-    from ava.impersonation import replay as reader
-    from services.agent_host.impersonation_events import reconcile_one
-
-    def workspace_for_agent(_agent_id: int) -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    lease = start(owner)
-    event: dict[str, Any] = {
-        "id": "late-1",
-        "ts": datetime.now(UTC).isoformat(),
-        "agent_id": owner.agent_id,
-        "event_name": "sdk_call",
-        "category": "telemetry",
-        "attributes": {"fn": "ava.files.read", "duration": 0.1},
-    }
-    leases.release(str(lease["id"]), attested_caller(lease), "Done")
-    lease = history.resolve(owner.agent_id, 0)
-    visible: list[dict[str, Any]] = []
-    reads: list[dict[str, Any]] = []
-
-    def get(path: str, *, params: dict[str, Any]) -> httpx.Response:
-        reads.append(params)
-        items = visible if params.get("event_name") == "sdk_call" else []
-        return httpx.Response(
-            200,
-            request=httpx.Request("GET", "http://test" + path),
-            json={"items": items, "meta": {"has_more": False}},
-        )
-
-    monkeypatch.setattr(reader, "get", get)
-    reader.consume_recorded_events(lease)
-    document, path = history.export_handoff(lease, db_conn)
-    assert document["statistics"]["event_delivery"]["state"] == "pending"
-    assert document["statistics"]["event_delivery"]["sdk_calls"] == {
-        "coverage": "unknown",
-        "sampling_policy": "unknown",
-        "consumed_event_count": 0,
-    }
-    db_conn.execute(
-        "UPDATE agent_impersonations SET handoff_document=%s,handoff_path=%s,"
-        "handoff_applied_at=now(),events_next_read_at=now() WHERE id=%s",
-        (Jsonb(document), path, lease["id"]),
-    )
-    db_conn.commit()
-    visible.append(event)  # Indexing completes after native resumption.
-    reconcile_one()
-    updated = json.loads(Path(path).read_text())
-    assert updated["statistics"]["event_delivery"]["sdk_calls"] == {
-        "coverage": "unknown",
-        "sampling_policy": "unknown",
-        "consumed_event_count": 1,
-    }
-    assert json.loads(Path(path).read_text())["statistics"]["event_delivery"] == {
-        "state": "pending",
-        "pending_reason": "legacy",
-        "completion_basis": None,
-        "sdk_calls": {
-            "coverage": "unknown",
-            "sampling_policy": "unknown",
-            "consumed_event_count": 1,
-        },
-        "api_events": {"coverage": "unknown", "consumed_event_count": 0},
-    }
-    count = len(reads)
-    reader.consume_recorded_events(lease)  # legacy rows remain replayable, never certified.
-    assert len(reads) == count + 2
-    assert consume_events(owner.agent_id, 0, [{**event, "id": "unexpected"}]) == 1
-    assert history.resolve(owner.agent_id, 0)["events_completed_at"] is None
 
 
 def test_message_retry_does_not_replace_newer_preview(

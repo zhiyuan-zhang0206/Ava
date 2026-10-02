@@ -41,7 +41,6 @@ from fastapi.responses import StreamingResponse
 from psycopg.rows import dict_row
 from pydantic import TypeAdapter
 
-from base.agents.impersonation_manifest import retention_loss_panel
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.events.live.redis_client import sync_redis
@@ -61,7 +60,6 @@ from gateway.alerts.schemas import (
     AlertsListResponse,
     AlertStatus,
     AlertWebhookPayload,
-    ImpersonationRetentionLossRow,
 )
 from gateway.auth.webhook import authenticate_webhook
 from gateway.events.sse import event_stream
@@ -211,21 +209,6 @@ async def get_alerts_stream(request: Request) -> StreamingResponse:
 
 
 # -- list ---------------------------------------------------------------------
-
-
-@router.get("/api/alerts/impersonation-event-retention")
-def list_impersonation_event_retention(
-    machine: str = Query(min_length=1, max_length=255),
-) -> list[ImpersonationRetentionLossRow]:
-    """Operator panel rows for frozen manifests that crossed Loki retention.
-
-    The query is machine-scoped because the runner that owns the manifest
-    detects its retention floor. The normal alerts list already exposes the
-    accompanying alert; this endpoint supplies the lease/floor/missing-count
-    evidence needed to investigate it without permitting a local mirror to
-    clear the condition.
-    """
-    return [ImpersonationRetentionLossRow(**row) for row in retention_loss_panel(machine=machine)]
 
 
 @router.get("/api/alerts")

@@ -501,33 +501,16 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         assert history.resolve(owner.agent_id, 0)["handoff_applied_at"] is not None
 
 
-async def test_handoff_leaves_replay_pending_until_runner_reconcile_completes(
+async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """The handoff never replays inline; the runner's reconcile pass completes it.
-
-    Incident 2026-09-27 (second fix): replay used to run (and be awaited) in the
-    handoff foreground for every delivery. It is now owned solely by the runner's
-    background reconcile loop, so delivery leaves `events_completed_at` NULL with
-    the documented pending semantics and `reconcile_one` certifies it later.
-    """
-    import httpx
-
+    """With every source sealed at release, the event log is complete before delivery."""
     from agent.impersonation_handoff import deliver_handoff
-    from ava.impersonation import replay as recorded
     from base.agents.impersonation import history as history
-    from base.config import settings
-    from services.agent_host.impersonation_events import reconcile_one
 
-    monkeypatch.setattr(settings.general, "impersonation_event_manifest_enabled", True)
-    monkeypatch.setattr(
-        settings.general,
-        "impersonation_event_manifest_certification_secret",
-        "platform-handoff-certification-secret-0001",
-    )
     graph, saver, ctx, config, reset, owner, requested, _calls = await _prepare_graph(
         db_conn, aops_pool, monkeypatch, automatic=True
     )
@@ -537,9 +520,6 @@ async def test_handoff_leaves_replay_pending_until_runner_reconcile_completes(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    real_consume = recorded.consume_recorded_events
-    replay_spy = Mock(side_effect=AssertionError("the handoff must not replay in the foreground"))
-    monkeypatch.setattr(recorded, "consume_recorded_events", replay_spy)
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
@@ -551,29 +531,10 @@ async def test_handoff_leaves_replay_pending_until_runner_reconcile_completes(
         landed = history.resolve(owner.agent_id, 0)
         assert landed["handoff_path"] is not None
         assert landed["handoff_applied_at"] is not None
-        assert landed["events_completed_at"] is None
-        assert landed["handoff_document"]["statistics"]["event_delivery"]["state"] == "pending"
-        assert (tmp_path / "impersonation" / "0.json").exists()
-        assert replay_spy.call_count == 0
-
-    # The runner's reconcile pass completes the accounting once the DB is healthy.
-    monkeypatch.setattr(recorded, "consume_recorded_events", real_consume)
-
-    def get(_path: str, *, params: dict[str, Any]) -> httpx.Response:
-        del params
-        return httpx.Response(
-            200,
-            request=httpx.Request("GET", "http://manifest.test/api/events"),
-            json={"items": [], "meta": {"has_more": False}},
-        )
-
-    monkeypatch.setattr(recorded, "get", get)
-    reconcile_one()
-    after = history.resolve(owner.agent_id, 0)
-    assert after["events_completed_at"] is not None
-    assert after["event_delivery_pending_reason"] is None
-    assert after["handoff_document"]["statistics"]["event_delivery"]["state"] == "complete"
-    assert '"state": "complete"' in (tmp_path / "impersonation" / "0.json").read_text()
+        assert landed["events_completed_at"] is not None
+        assert landed["event_delivery_pending_reason"] is None
+        assert landed["handoff_document"]["statistics"]["event_delivery"]["state"] == "complete"
+        assert '"state": "complete"' in (tmp_path / "impersonation" / "0.json").read_text()
 
 
 def _assert_resume_note_delivery_contract(content: str) -> None:

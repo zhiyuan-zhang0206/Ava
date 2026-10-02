@@ -104,12 +104,12 @@ def emit(fn: str, detail: Mapping[str, Any] | None = None, duration: float | Non
 
 
 @contextlib.contextmanager
-def _manifest_sdk_capture_admission() -> Generator[None, None, None]:
-    """Use the optional local manifest gate without changing SDK call behavior."""
+def _event_capture_admission() -> Generator[None, None, None]:
+    """Use the optional local capture gate without changing SDK call behavior."""
     try:
         from base.agents.impersonation_manifest import admitted_local_sdk_call
     except Exception:
-        # Manifest instrumentation is a side channel. An unavailable settings
+        # Event capture is a side channel. An unavailable settings
         # bootstrap must never turn an SDK operation into a new hard failure.
         yield
         return
@@ -127,8 +127,8 @@ def _measure(fn: str) -> Generator[None, None, None]:
         return
     # A controller may close while this call is in its body.  Admit before
     # entering it, then retain that admission through the `finally` emission
-    # so the local manifest cannot seal between the call and its sdk_call row.
-    with _manifest_sdk_capture_admission():
+    # so the local receipt cannot seal between the call and its sdk_call row.
+    with _event_capture_admission():
         frame = _CallFrame(fn)
         token = _frames.set((*frames, frame))
         t0 = time.monotonic()

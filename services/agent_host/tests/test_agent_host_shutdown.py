@@ -95,7 +95,6 @@ def _exercise_shutdown(failure: str) -> None:
             load_process_extensions=MagicMock(),
         ),
         patch.object(graph, "build_graph", return_value=MagicMock()),
-        patch("services.agent_host.impersonation_events.reconcile_forever", background),
         patch.multiple(
             daemon,
             _is_running=MagicMock(return_value=False),

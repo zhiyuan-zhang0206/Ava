@@ -1,18 +1,11 @@
 """Regressions found by independent review of permanent impersonation history."""
 
-import asyncio
-from datetime import UTC, datetime
-from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
-import httpx
 import psycopg
 import pytest
 
-from ava.impersonation import replay as recorded
-from base import telemetry
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
@@ -20,13 +13,11 @@ from base.agents.messages.chat_delivery import insert_chat_inbound_once
 from base.cluster.machine import machine_name
 from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from tests.impersonation_support import attested_caller, recorded_tree, request_legacy_leases
+from tests.impersonation_support import attested_caller, recorded_tree
 
 
 @pytest.fixture
-def session(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    # These regressions cover the replay-read consumer, so their lease has no event protocol.
-    request_legacy_leases(monkeypatch)
+def session(db_conn: psycopg.Connection) -> dict[str, Any]:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
@@ -76,28 +67,8 @@ def test_idempotent_inbound_retry_preserves_one_real_message(
 
 
 @pytest.fixture
-def peer_events(
-    db_conn: psycopg.Connection, session: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> tuple[list[dict[str, Any]], int]:
-    """Capture the real chat emitter's row shape, replacing only its event sink."""
-    events: list[dict[str, Any]] = []
-
-    def capture(event: telemetry.Event) -> None:
-        if event.category == "audit" and event.event_name == "send_message":
-            events.append(
-                {
-                    "id": len(events) + 1,
-                    "ts": datetime.now(UTC).isoformat(),
-                    "category": event.category,
-                    "event_name": event.event_name,
-                    "agent_id": event.agent_id,
-                    "source": event.source,
-                    "target_agent_id": event.target_agent_id,
-                    "attributes": event.attributes,
-                }
-            )
-
-    monkeypatch.setattr("base.telemetry.audit_events.telemetry.emit_prepared", capture)
+def peer_chats(db_conn: psycopg.Connection, session: dict[str, Any]) -> int:
+    """Send real chats through the chat emitter; return the executor's recipient."""
     recipient = create_agent(db_conn)
     incoming_sender = create_agent(db_conn)
     db_conn.commit()
@@ -114,117 +85,31 @@ def peer_events(
             payload=None,
             client_message_id=str(uuid4()),
         )
-    assert len(events) == 3
     leases.release(str(session["id"]), attested_caller(session), "Sent the peer update")
-    return events, recipient
+    return recipient
 
 
-def test_event_reader_consumes_outgoing_peer_operations(
-    db_conn: psycopg.Connection,
-    session: dict[str, Any],
-    peer_events: tuple[list[dict[str, Any]], int],
-    monkeypatch: pytest.MonkeyPatch,
+def test_only_the_executors_outgoing_peer_operations_enter_the_lease_log(
+    db_conn: psycopg.Connection, session: dict[str, Any], peer_chats: int
 ) -> None:
-    events, _ = peer_events
-
-    def get(path: str, *, params: dict[str, Any]) -> httpx.Response:
-        assert path == "/api/events"
-        # Match the existing event API's exact filters; the event sink is the
-        # only external dependency, so a backwards agent filter loses the row.
-        selected = [
-            event
-            for event in events
-            if all(
-                params.get(field) is None or event[field] == params[field]
-                for field in ("agent_id", "category", "event_name")
-            )
-        ]
-        offset, limit = params["offset"], params["limit"]
-        return httpx.Response(
-            200,
-            request=httpx.Request("GET", "http://test/api/events"),
-            json={
-                "items": selected[offset : offset + limit],
-                "meta": {"has_more": len(selected) > offset + limit},
-            },
-        )
-
-    monkeypatch.setattr(recorded, "get", get)
-    recorded.consume_recorded_events(history.resolve(session["agent_id"], session["session_id"]))
-    consumed = {
-        row["payload"]["id"]
+    api = [
+        row["payload"]
         for row in history.entries(str(session["id"]), db_conn)
         if row["kind"] == "api_event"
-    }
-    assert events[0]["id"] in consumed
-    assert events[2]["id"] not in consumed
+    ]
+    assert [(event["event_name"], event["source"]) for event in api] == [
+        ("send_message", f"agent:{session['agent_id']}")
+    ]
+    assert api[0]["agent_id"] == peer_chats
 
 
 def test_recipient_statistics_follow_real_chat_event_direction(
-    session: dict[str, Any], peer_events: tuple[list[dict[str, Any]], int]
+    db_conn: psycopg.Connection, session: dict[str, Any], peer_chats: int
 ) -> None:
-    events, recipient = peer_events
     # Both incoming and outgoing peer messages belong to the conversation;
     # only the outgoing message is evidence of a recipient of this executor.
-    rows: list[dict[str, Any]] = [
-        {
-            "seq": seq,
-            "kind": "api_event",
-            "created_at": datetime.fromisoformat(event["ts"]),
-            "payload": event,
-        }
-        for seq, event in enumerate(events[:2])
-    ]
     document = history.build_document(
-        history.resolve(session["agent_id"], session["session_id"]), rows
+        history.resolve(session["agent_id"], session["session_id"]),
+        history.entries(str(session["id"]), db_conn),
     )
-    assert document["statistics"]["message_recipients"] == {str(recipient): 1}
-
-
-def test_deliver_handoff_leaves_foreground_replay_to_the_runner(
-    session: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The handoff never replays events inline; the runner's loop owns replay.
-
-    Regression (platform incident 2026-09-27, second fix): #3519 moved the save
-    ahead of the event accounting, but `consume_recorded_events` still ran
-    (awaited) in the handoff foreground, so a large audit replay could keep
-    eating the envelope. Replay is owned solely by the runner's background
-    reconcile loop (`services.agent_host.impersonation_events.reconcile_forever`);
-    delivery itself finishes save -> read -> note -> flush -> receipt -> wake
-    without touching the replay path, leaving truthful pending semantics.
-    """
-    from agent import impersonation_handoff as handoff
-    from ava.impersonation import replay as recorded
-
-    leases.release(str(session["id"]), attested_caller(session), "Completed external work")
-    lease = history.resolve(session["agent_id"], session["session_id"])
-
-    def forbidden(_session: dict[str, Any]) -> None:
-        raise AssertionError("the handoff must not replay events in the foreground")
-
-    replay_spy = Mock(side_effect=forbidden)
-    monkeypatch.setattr(recorded, "consume_recorded_events", replay_spy)
-    save_document = Mock(return_value=("Done", "/test/0.json"))
-    receipt = Mock()
-    monkeypatch.setattr(handoff, "_save_document", save_document)
-    monkeypatch.setattr(handoff, "_receipt", receipt)
-    graph = SimpleNamespace(
-        checkpointer=object(),
-        aget_state=AsyncMock(
-            return_value=SimpleNamespace(
-                values={
-                    "impersonation_handoff_id": f"{session['agent_id']}:{session['session_id']}"
-                }
-            )
-        ),
-    )
-    owner = RuntimeIncarnation(session["agent_id"], uuid4(), uuid4())
-    asyncio.run(handoff.deliver_handoff(graph, lease, owner))
-
-    assert replay_spy.call_count == 0
-    save_document.assert_called_once_with(lease, owner)
-    receipt.assert_called_once_with(lease, owner)
-    assert (
-        history.resolve(session["agent_id"], session["session_id"])["events_completed_at"] is None
-    )
+    assert document["statistics"]["message_recipients"] == {str(peer_chats): 1}

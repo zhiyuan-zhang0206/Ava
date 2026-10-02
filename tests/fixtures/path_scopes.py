@@ -273,15 +273,13 @@ PATH_SCOPES: dict[str, Scope] = {
         (
             "tests/integration",
             "ava/tests/test_core.py",
-            "base/agents/impersonation/tests/test_impersonation_replay_content_identity.py",
             "base/cluster/dataplane/tests/test_vendored_binaries.py",
-            "cli/commands/management/tests/test_config_provisioning_surface.py",
             "gateway/agents/tests/test_agent_launch_visibility.py",
             "gateway/lgtm/tests/test_manifest_serializer_contract.py",
             "ops/lifecycle/tests/test_agent_launch_runner.py",
             "ops/tests/test_cross_machine_dispatch.py",
         ),
-        16,
+        14,
     ),
     "tests.path_scoped.services_tests": Scope(
         (

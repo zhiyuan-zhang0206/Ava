@@ -27,7 +27,7 @@ from typing import LiteralString
 from psycopg import sql
 from psycopg.errors import Diagnostic
 
-from base.agents.impersonation_manifest_grants import grant_manifest_runner_access
+from base.agents.impersonation_event_grants import grant_event_log_runner_access
 from base.cluster.authority.catalog import (
     BOOTSTRAP_SUPERUSER_OID,
     Conn,
@@ -165,7 +165,7 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
         for table in tables:
             _grant(conn, f"GRANT {privileges} ON {{}} TO {{}}", table, runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
-    grant_manifest_runner_access(conn, runner)
+    grant_event_log_runner_access(conn, runner)
 
 
 def apply_group_grants(conn: Conn, *, owner: str, database: str, groups: Groups) -> None:

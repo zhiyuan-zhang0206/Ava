@@ -1,60 +1,36 @@
-"""Protocol-v1 producer receipts for impersonation event delivery.
+"""Local producer receipts and central staging for impersonation event logs.
 
-The manifest is an upstream census, not a delivery acknowledgement.  Local
-controller events are captured before telemetry enqueue; transactional central
-audit events are staged before their transaction commits.  Only the owning
-agent-host may later certify the frozen union against central telemetry and the
-durable handoff ledger.
+A controller's SDK events are appended to the lease's log at the capture seam,
+before the telemetry queue, while its receipt is open; transactional central
+audit events are appended in their producing transaction. The receipts and the
+completeness predicate live in the database (`event_log`).
 """
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar  # noqa: TID251 -- SDK async finally needs task-local admission
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
 from threading import Condition, Lock
 from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
 
-from base.agents.impersonation import ImpersonationError, lock_lease
+from base.agents.impersonation import lock_lease
 from base.agents.impersonation.event_log import (
     CENTRAL_SOURCE,
     LOG_PROTOCOL_VERSION,
     append_source_event,
-    event_item,
     is_log_native,
     locked_receipt_state,
     refresh_completed_export,
 )
-from base.agents.impersonation_manifest_alerts import (
-    _has_slow_open_participant,
-    _is_old_pending,
-    _manifest_alert_starts_at,
-    _resolve_cleared_manifest_alerts,
-    _retention_lost,
-    _seal_stuck_leases,
-)
-from base.config import settings
+from base.agents.impersonation_event_alerts import alert_capture_failed
 from base.db.transaction import write_transaction
 from base.log import logger
 from base.telemetry import Event
-
-PROTOCOL_VERSION = 1
-_PENDING_REASONS = frozenset(
-    {
-        "awaiting_session_end",
-        "awaiting_participant_seal",
-        "capture_failed",
-        "awaiting_indexed_ids",
-        "manifest_mismatch",
-        "retention_loss",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -122,7 +98,7 @@ _active_participant: LocalParticipant | None = None
 _active_capture_gate: _CaptureGate | None = None
 _capture_gates: dict[LocalParticipant, _CaptureGate] = {}
 _sdk_capture_admission: ContextVar[_CaptureAdmission | None] = ContextVar(
-    "impersonation_manifest_sdk_capture_admission", default=None
+    "impersonation_event_sdk_capture_admission", default=None
 )
 
 
@@ -131,54 +107,30 @@ def session_tag(agent_id: int, session_id: int) -> str:
     return f"{agent_id}:{session_id}"
 
 
-def is_protocol_v1(lease: dict[str, Any]) -> bool:
-    """Whether this lease is admitted to the manifest protocol."""
-    return (
-        lease["automatic"] is True and lease["event_delivery_protocol_version"] == PROTOCOL_VERSION
-    )
-
-
-def is_event_protocol(lease: dict[str, Any]) -> bool:
-    """Whether producers must stay admitted and sealed for this lease (v1 or v2)."""
-    return is_protocol_v1(lease) or is_log_native(lease)
-
-
-def admit_certifier(conn: psycopg.Connection, lease_id: str) -> None:
-    """Bind the target native host's secret in its acceptance transaction."""
-    secret = settings.general.impersonation_event_manifest_certification_secret
-    if len(secret) < 32:
-        raise ImpersonationError("Manifest acceptance requires a certification secret")
-    conn.execute("SELECT admit_impersonation_event_certifier(%s,%s)", (lease_id, secret))
-
-
 def pending_reason(lease: dict[str, Any]) -> str | None:
     """Classify a handoff's current delivery uncertainty without inventing state."""
     if lease["events_completed_at"] is not None:
         return None
     if lease["automatic"] is not True:
         return "manual"
-    if lease["event_delivery_protocol_version"] is None:
+    if lease["event_delivery_protocol_version"] != LOG_PROTOCOL_VERSION:
         return "legacy"
     stored = lease["event_delivery_pending_reason"]
     if stored is not None:
         return str(stored)
-    if lease["ended_at"] is None:
-        return "awaiting_session_end"
-    if lease["manifest_frozen_at"] is None:
-        return "awaiting_participant_seal"
-    return "awaiting_indexed_ids"
+    return "awaiting_session_end" if lease["ended_at"] is None else "awaiting_participant_seal"
 
 
 def open_local_participant(lease_id: str, *, agent_id: int, source_key: str) -> bool:
     """Open one controller receipt before it can emit an eligible event."""
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        if not is_event_protocol(lease):
+        if not is_log_native(lease):
             return False
         if lease["agent_id"] != agent_id:
             raise RuntimeError("Local receipt belongs to another agent")
         if lease["manifest_admission_closed_at"] is not None:
-            raise RuntimeError("Impersonation event-manifest admission is closed")
+            raise RuntimeError("Impersonation event admission is closed")
         conn.execute(
             "INSERT INTO agent_impersonation_event_participants(lease_id,source_key,state) "
             "VALUES(%s,%s,'open') ON CONFLICT (lease_id,source_key) DO NOTHING",
@@ -243,7 +195,7 @@ def admitted_local_sdk_call() -> Generator[None, None, None]:
 
 
 def local_sdk_call_was_admitted() -> bool:
-    """Whether this SDK call crossed the manifest gate before close started."""
+    """Whether this SDK call crossed the capture gate before close started."""
     return _sdk_capture_admission.get() is not None
 
 
@@ -320,7 +272,7 @@ def capture_local_event(event: Event) -> Event:
     try:
         _insert_local_item(participant, tagged)
     except Exception:
-        logger.exception("Impersonation event-manifest local capture failed")
+        logger.exception("Impersonation event local capture failed")
         _mark_participant_failed(participant)
     finally:
         if transient_admission is not None:
@@ -329,42 +281,14 @@ def capture_local_event(event: Event) -> Event:
 
 
 def _insert_local_item(participant: LocalParticipant, event: Event) -> None:
-    key, digest, kind, timestamp = event_item(event)
     with write_transaction() as conn:
         lease = lock_lease(conn, participant.lease_id)
-        if not is_event_protocol(lease):
-            raise RuntimeError("Local receipt belongs to a lease outside the event protocols")
+        if not is_log_native(lease):
+            raise RuntimeError("Local receipt belongs to a lease without an event log")
         state = locked_receipt_state(conn, participant.lease_id, participant.source_key)
         if state != "open":
             raise RuntimeError("Local receipt is not open for event capture")
-        if is_log_native(lease):
-            append_source_event(conn, lease, event, source_key=participant.source_key)
-            return
-        item_count = conn.execute(
-            "SELECT count(*) FROM agent_impersonation_event_participant_items "
-            "WHERE lease_id=%s AND source_key=%s",
-            (participant.lease_id, participant.source_key),
-        ).fetchone()
-        if (
-            item_count is None
-            or int(item_count[0]) >= settings.general.impersonation_event_manifest_max_items
-        ):
-            raise RuntimeError("Impersonation event manifest reached its configured item cap")
-        inserted = conn.execute(
-            "INSERT INTO agent_impersonation_event_participant_items("
-            "lease_id,source_key,event_key,event_kind,event_at,line_sha256) "
-            "VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT (lease_id,source_key,event_key) "
-            "DO NOTHING RETURNING line_sha256",
-            (participant.lease_id, participant.source_key, key, kind, timestamp, digest),
-        ).fetchone()
-        if inserted is None:
-            existing = conn.execute(
-                "SELECT line_sha256 FROM agent_impersonation_event_participant_items "
-                "WHERE lease_id=%s AND source_key=%s AND event_key=%s",
-                (participant.lease_id, participant.source_key, key),
-            ).fetchone()
-            if existing is None or existing[0] != digest:
-                raise RuntimeError("Impersonation event id maps to conflicting event bytes")
+        append_source_event(conn, lease, event, source_key=participant.source_key)
 
 
 def _mark_participant_failed(participant: LocalParticipant) -> None:
@@ -376,7 +300,7 @@ def _mark_participant_failed(participant: LocalParticipant) -> None:
     try:
         _persist_capture_failure(participant)
     except Exception:
-        logger.exception("Could not record impersonation event-manifest capture failure")
+        logger.exception("Could not record impersonation event capture failure")
         return
     if gate is not None:
         with gate.condition:
@@ -412,21 +336,9 @@ def _alert_capture_failure(participant: LocalParticipant) -> None:
     """Best-effort alert after the failed receipt is committed independently."""
     try:
         with write_transaction() as conn:
-            lease = lock_lease(conn, participant.lease_id)
-            _upsert_manifest_alert(
-                _alerts_upsert(),
-                conn,
-                lease,
-                "ImpersonationManifestCaptureFailed",
-            )
+            alert_capture_failed(conn, lock_lease(conn, participant.lease_id))
     except Exception:
-        logger.exception("Could not alert on impersonation event-manifest capture failure")
-
-
-def _alerts_upsert() -> Any:
-    from base.telemetry.alerts import upsert_alert
-
-    return upsert_alert
+        logger.exception("Could not alert on impersonation event capture failure")
 
 
 def seal_local_participant(participant: LocalParticipant) -> None:
@@ -442,7 +354,7 @@ def seal_local_participant(participant: LocalParticipant) -> None:
                     raise RuntimeError("Local capture failure is not durably recorded")
     with write_transaction() as conn:
         lease = lock_lease(conn, participant.lease_id)
-        if not is_event_protocol(lease):
+        if not is_log_native(lease):
             return
         state = locked_receipt_state(conn, participant.lease_id, participant.source_key)
         if state is None:
@@ -451,47 +363,23 @@ def seal_local_participant(participant: LocalParticipant) -> None:
             return
         if state != "open":
             raise RuntimeError("Failed local impersonation event receipt cannot seal")
-        if is_log_native(lease):
-            # The seal procedure finishes the lease in this transaction when this
-            # was its last open source and the lease has already ended.
-            conn.execute(
-                "SELECT seal_impersonation_event_participant(%s,%s,'sealed',NULL,"
-                "(SELECT count(*) FROM agent_impersonation_entries "
-                "WHERE lease_id=%s AND source_key=%s),NULL)",
-                (participant.lease_id, participant.source_key) * 2,
-            )
-            refresh_completed_export(conn, participant.lease_id)
-            return
-        digest, count = _participant_digest(conn, participant.lease_id, participant.source_key)
+        # The seal procedure finishes the lease in this transaction when this
+        # was its last open source and the lease has already ended.
         conn.execute(
-            "SELECT seal_impersonation_event_participant(%s,%s,'sealed',NULL,%s,%s)",
-            (participant.lease_id, participant.source_key, count, digest),
+            "SELECT seal_impersonation_event_participant(%s,%s,'sealed',NULL,"
+            "(SELECT count(*) FROM agent_impersonation_entries "
+            "WHERE lease_id=%s AND source_key=%s),NULL)",
+            (participant.lease_id, participant.source_key) * 2,
         )
+        refresh_completed_export(conn, participant.lease_id)
 
 
-def _participant_digest(
-    conn: psycopg.Connection, lease_id: str, source_key: str
-) -> tuple[str, int]:
-    rows = conn.execute(
-        "SELECT event_key,line_sha256,event_kind FROM agent_impersonation_event_participant_items "
-        "WHERE lease_id=%s AND source_key=%s ORDER BY event_key",
-        (lease_id, source_key),
-    ).fetchall()
-    encoded = "\n".join(f"{key}:{digest}:{kind}" for key, digest, kind in rows).encode()
-    return hashlib.sha256(encoded).hexdigest(), len(rows)
+def record_central_event(conn: psycopg.Connection, event: Event) -> Event:
+    """Append one central audit event to its actor's open lease log, in the caller's transaction.
 
-
-def stage_central_expected_event(
-    conn: psycopg.Connection,
-    event: Event,
-    *,
-    origin_kind: str,
-    origin_id: int,
-) -> Event:
-    """Stage one central audit event in its producer transaction.
-
-    The exact prepared event is returned with its session tag.  Callers emit
-    that returned value only after their outer transaction commits.
+    Returns the event tagged with its session (or unchanged when no log is open).
+    Callers emit the returned value to the observation sink only after their
+    outer transaction commits; the record itself needs no emit to survive.
     """
     actor = _source_actor(event.source)
     if actor is None:
@@ -500,14 +388,14 @@ def stage_central_expected_event(
         cur.execute(
             "SELECT * FROM agent_impersonations WHERE agent_id=%s AND status='active' "
             "AND expires_at>clock_timestamp() AND automatic AND "
-            "event_delivery_protocol_version IN (%s,%s) FOR UPDATE",
-            (actor, PROTOCOL_VERSION, LOG_PROTOCOL_VERSION),
+            "event_delivery_protocol_version=%s FOR UPDATE",
+            (actor, LOG_PROTOCOL_VERSION),
         )
         leases = cur.fetchall()
     if not leases:
         return event
     if len(leases) != 1:
-        raise RuntimeError("Central event admission found more than one active manifest lease")
+        raise RuntimeError("Central event admission found more than one active lease")
     lease = leases[0]
     if lease["manifest_admission_closed_at"] is not None:
         return event
@@ -518,48 +406,20 @@ def stage_central_expected_event(
             "impersonation_session": session_tag(actor, lease["session_id"]),
         },
     )
-    if is_log_native(lease):
-        # The body commits with the operation, under the lock that also closes admission.
-        append_source_event(conn, lease, tagged, source_key=CENTRAL_SOURCE)
-        return tagged
-    key, digest, kind, timestamp = event_item(tagged)
-    conn.execute(
-        "INSERT INTO agent_impersonation_event_expected_receipts(lease_id,origin_kind,origin_id) "
-        "VALUES(%s,%s,%s) ON CONFLICT (lease_id,origin_kind,origin_id) DO NOTHING",
-        (lease["id"], origin_kind, origin_id),
-    )
-    existing = conn.execute(
-        "SELECT line_sha256 FROM agent_impersonation_event_expected_items "
-        "WHERE lease_id=%s AND event_key=%s",
-        (lease["id"], key),
-    ).fetchone()
-    if existing is not None:
-        if existing[0] != digest:
-            raise RuntimeError("Central expected event id maps to conflicting event bytes")
-        return tagged
-    conn.execute(
-        "INSERT INTO agent_impersonation_event_expected_items("
-        "lease_id,event_key,event_kind,event_at,line_sha256,origin_kind,origin_id) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s)",
-        (lease["id"], key, kind, timestamp, digest, origin_kind, origin_id),
-    )
+    # The body commits with the operation, under the lock that also closes admission.
+    append_source_event(conn, lease, tagged, source_key=CENTRAL_SOURCE)
     return tagged
 
 
-def emit_staged_central_event(event: Event, *, origin_kind: str, origin_id: int) -> None:
-    """Stage a service-owned audit event, commit it, then enqueue those exact bytes.
+def emit_recorded_central_event(event: Event) -> None:
+    """Record a service-owned audit event, commit it, then emit those exact bytes.
 
     Services such as the computer daemon do not own the transaction that
-    produced their operation.  They still must not enqueue a v1 audit fact
-    until the matching expected receipt is durable, so this helper gives them
-    the same stage -> commit -> emit order as transaction-owning producers.
-    ``origin_id`` is the producer's durable request/action identity and keeps
-    redelivery idempotent alongside the immutable event-key check.
+    produced their operation; this gives them the same record -> commit -> emit
+    order as transaction-owning producers.
     """
     with write_transaction() as conn:
-        tagged = stage_central_expected_event(
-            conn, event, origin_kind=origin_kind, origin_id=origin_id
-        )
+        tagged = record_central_event(conn, event)
     from base import telemetry
 
     telemetry.emit_prepared(tagged)
@@ -574,12 +434,14 @@ def _source_actor(source: str) -> int | None:
     return int(raw)
 
 
-class ManifestNotSealedError(RuntimeError):
-    """A participant is open or failed; no immutable union may be declared."""
+class EventSourceNotSealedError(RuntimeError):
+    """A participant is open or failed, so the lease cannot be released."""
 
 
 def require_participants_sealed(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
     """Refuse while any controller receipt is open or failed (release precondition)."""
+    if not is_log_native(lease):
+        return
     lease_id = lease["id"]
     source_keys = conn.execute(
         "SELECT source_key FROM agent_impersonation_event_participants WHERE lease_id=%s ORDER BY source_key",
@@ -587,212 +449,15 @@ def require_participants_sealed(conn: psycopg.Connection, lease: dict[str, Any])
     ).fetchall()
     states = {locked_receipt_state(conn, lease_id, key) for (key,) in source_keys}
     if "failed" in states:
-        raise ManifestNotSealedError("Impersonation event capture failed")
+        raise EventSourceNotSealedError("Impersonation event capture failed")
     if "open" in states:
-        raise ManifestNotSealedError("Impersonation event participants have not sealed")
+        raise EventSourceNotSealedError("Impersonation event participants have not sealed")
 
 
-def settle_event_log_at_release(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
-    """Gate release on sealed receipts; v1 also freezes its census."""
-    if is_protocol_v1(lease):
-        freeze_manifest(conn, lease)
-    elif is_log_native(lease):
-        require_participants_sealed(conn, lease)
-
-
-def freeze_manifest(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
-    """Freeze the sealed union at release or during terminal-session replay."""
-    if not is_protocol_v1(lease):
-        return
-    require_participants_sealed(conn, lease)
-    items = frozen_items(conn, str(lease["id"]))
-    digest = _aggregate_digest(items)
-    floor = lease["activated_at"]
-    if floor is None:
-        raise RuntimeError("Manifest leases require activation before release")
-    conn.execute(
-        "SELECT freeze_impersonation_event_manifest(%s,%s,%s,%s)",
-        (lease["id"], digest, len(items), floor - _skew_guard()),
-    )
-
-
-def close_manifest_admission(conn: psycopg.Connection, lease_id: str) -> bool:
-    """Close a protocol-v1 lease's admission gate through its narrow SQL door."""
+def close_event_admission(conn: psycopg.Connection, lease_id: str) -> bool:
+    """Close a log-native lease's admission gate through its narrow SQL door."""
     row = conn.execute(
         "SELECT close_impersonation_event_manifest_admission(%s)",
         (lease_id,),
     ).fetchone()
     return row is not None and row[0] is True
-
-
-def frozen_items(conn: psycopg.Connection, lease_id: str) -> dict[str, tuple[str, str]]:
-    """Return the frozen expected union, rejecting equal ids with different bytes."""
-    rows = conn.execute(
-        "SELECT event_key,line_sha256,event_kind FROM ("
-        "SELECT event_key,line_sha256,event_kind FROM agent_impersonation_event_participant_items "
-        "WHERE lease_id=%s UNION ALL "
-        "SELECT event_key,line_sha256,event_kind FROM agent_impersonation_event_expected_items "
-        "WHERE lease_id=%s) expected ORDER BY event_key",
-        (lease_id, lease_id),
-    ).fetchall()
-    items: dict[str, tuple[str, str]] = {}
-    for key, digest, kind in rows:
-        previous = items.setdefault(key, (digest, kind))
-        if previous != (digest, kind):
-            raise RuntimeError("Manifest event key has conflicting bytes or kind")
-    return items
-
-
-def _aggregate_digest(items: dict[str, tuple[str, str]]) -> str:
-    material = "\n".join(
-        f"{key}:{digest}:{kind}" for key, (digest, kind) in sorted(items.items())
-    ).encode()
-    return hashlib.sha256(material).hexdigest()
-
-
-def _skew_guard() -> timedelta:
-    return timedelta(seconds=settings.general.impersonation_event_clock_skew_guard_seconds)
-
-
-def set_pending_reason(lease_id: str, reason: str) -> None:
-    """Persist one precise retry diagnostic without adding a third state."""
-    if reason not in _PENDING_REASONS:
-        raise ValueError(f"Unknown impersonation event pending reason {reason!r}")
-    with write_transaction() as conn:
-        conn.execute(
-            "UPDATE agent_impersonations SET event_delivery_pending_reason=%s "
-            "WHERE id=%s AND events_completed_at IS NULL",
-            (reason, lease_id),
-        )
-
-
-def monitor_manifest_health(*, machine: str) -> None:
-    """Persist operator alerts for aged, slow, or retention-lost local leases.
-
-    This is diagnostic-only: it never changes a pending manifest to complete
-    and a live receipt remains open until it seals or reports a real failure.
-    """
-    from base.telemetry.alerts import upsert_alert
-    from base.telemetry.loki_index_labels import retention_floor
-
-    now = datetime.now(UTC)
-    horizon = retention_floor(now)
-    with write_transaction() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
-            "SELECT * FROM agent_impersonations WHERE machine=%s AND automatic "
-            "AND event_delivery_protocol_version=%s AND events_completed_at IS NULL",
-            (machine, PROTOCOL_VERSION),
-        )
-        rows = cur.fetchall()
-        for lease in rows:
-            _monitor_one_manifest(conn, upsert_alert, lease, now=now, horizon=horizon)
-        for lease in _seal_stuck_leases(conn, machine):
-            _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationEventSealStuck")
-        _resolve_cleared_manifest_alerts(conn, upsert_alert, machine, now, horizon)
-
-
-def _monitor_one_manifest(
-    conn: psycopg.Connection,
-    upsert_alert: Any,
-    lease: dict[str, Any],
-    *,
-    now: datetime,
-    horizon: datetime,
-) -> None:
-    if _retention_lost(lease, horizon=horizon):
-        conn.execute(
-            "SELECT record_impersonation_event_retention_loss(%s,%s)",
-            (lease["id"], horizon),
-        )
-        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationEventRetentionLoss")
-        return
-    if _has_slow_open_participant(conn, str(lease["id"]), now=now):
-        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationManifestSealSlow")
-        return
-    if _is_old_pending(lease, now=now):
-        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationEventDeliveryPending")
-
-
-def alert_if_participant_still_open(participant: LocalParticipant) -> None:
-    """Emit the detach-wait alert without changing a live participant's state.
-
-    An attachment can remain in a held SDK ``finally`` past the configured
-    detach wait.  That is evidence for an operator, not permission to call a
-    live producer failed or to freeze an empty manifest.
-    """
-    with write_transaction() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
-            "SELECT l.* FROM agent_impersonations l JOIN "
-            "agent_impersonation_event_participants p ON p.lease_id=l.id "
-            "WHERE p.lease_id=%s AND p.source_key=%s AND p.state='open'",
-            (participant.lease_id, participant.source_key),
-        )
-        lease = cur.fetchone()
-        if lease is not None:
-            _upsert_manifest_alert(_alerts_upsert(), conn, lease, "ImpersonationManifestSealSlow")
-
-
-def _upsert_manifest_alert(
-    upsert_alert: Any,
-    conn: psycopg.Connection,
-    lease: dict[str, Any],
-    alertname: str,
-) -> None:
-    upsert_alert(
-        conn,
-        {
-            "status": "firing",
-            "labels": {
-                "alertname": alertname,
-                "severity": "warning",
-                "lease_id": str(lease["id"]),
-                "machine": str(lease["machine"]),
-            },
-            "annotations": {
-                "pending_reason": str(lease["event_delivery_pending_reason"] or "unknown"),
-                "session": f"{lease['agent_id']}:{lease['session_id']}",
-            },
-            "starts_at": _manifest_alert_starts_at(conn, lease, alertname).isoformat(),
-        },
-        source="machine-probe",
-    )
-
-
-def retention_loss_panel(*, machine: str) -> list[dict[str, Any]]:
-    """Read the retention-loss panel rows for operator diagnostics."""
-    with write_transaction() as conn:
-        rows = conn.execute(
-            "SELECT l.id,l.agent_id,l.session_id,l.manifest_envelope_floor_at,"
-            "l.event_delivery_retention_horizon_at,l.created_at,"
-            "GREATEST(0,l.manifest_item_count-(SELECT count(*) FROM agent_impersonation_entries e "
-            "WHERE e.lease_id=l.id AND e.kind IN ('sdk_call','api_event'))) AS missing_item_count "
-            "FROM agent_impersonations l "
-            "WHERE l.machine=%s AND l.event_delivery_pending_reason='retention_loss' "
-            "ORDER BY l.created_at",
-            (machine,),
-        ).fetchall()
-    return [
-        {
-            "lease_id": str(row[0]),
-            "agent_id": row[1],
-            "session_id": row[2],
-            "envelope_floor_at": row[3],
-            "retention_horizon_at": row[4],
-            "created_at": row[5],
-            "missing_item_count": row[6],
-        }
-        for row in rows
-    ]
-
-
-def certify(lease_id: str) -> bool:
-    """Invoke certification with this host's non-exported runner proof."""
-    with write_transaction() as conn:
-        row = conn.execute(
-            "SELECT certify_impersonation_event_delivery(%s,%s)",
-            (lease_id, settings.general.impersonation_event_manifest_certification_secret),
-        ).fetchone()
-        if row is None or row[0] is not True:
-            return False
-        refresh_completed_export(conn, lease_id)
-    return True

@@ -321,10 +321,10 @@ def _sdk_statistics(sdk: list[dict[str, Any]]) -> dict[str, Any]:
 def _event_delivery_statistics(
     lease: dict[str, Any], sdk: list[dict[str, Any]], api: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    """Describe whether observed handoff events have a complete emitted-event manifest.
+    """Describe whether the handoff's event log is complete for the emitted events.
 
-    The runner-only certification procedure accepts the frozen upstream
-    manifest. SDK sampling policy is not certified per session, so zero
+    The database completes a log-native lease once it has ended and every source has
+    sealed. SDK sampling policy is not certified per session, so zero
     consumed SDK events is never evidence of zero SDK calls.
     """
     complete = lease["events_completed_at"] is not None
@@ -332,7 +332,7 @@ def _event_delivery_statistics(
     return {
         "state": "complete" if complete else "pending",
         "pending_reason": None if complete else _pending_delivery_reason(lease),
-        "completion_basis": _completion_basis(lease) if complete else None,
+        "completion_basis": "source_log" if complete else None,
         "sdk_calls": {
             "coverage": coverage,
             "sampling_policy": "unknown",
@@ -340,10 +340,6 @@ def _event_delivery_statistics(
         },
         "api_events": {"coverage": coverage, "consumed_event_count": len(api)},
     }
-
-
-def _completion_basis(lease: dict[str, Any]) -> str:
-    return "source_log" if lease["event_delivery_protocol_version"] == 2 else "upstream_manifest"
 
 
 def _pending_delivery_reason(lease: dict[str, Any]) -> str:

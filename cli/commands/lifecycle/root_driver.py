@@ -200,11 +200,10 @@ def _root_argv(run_dir: Path, manifests: Path, runtime: StartRuntime | None = No
 
 
 def root_child_env() -> dict[str, str]:
-    """The root env, including the proof it may pass only to agent-host."""
-    from base.host.env.registry import manifest_certification_secret_env
+    """The root env."""
     from base.sessions.env_forwarding import managed_service_env
 
-    return managed_service_env(settings.general.service_path) | manifest_certification_secret_env()
+    return managed_service_env(settings.general.service_path)
 
 
 def tree_manifest(
