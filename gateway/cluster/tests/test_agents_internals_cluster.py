@@ -2,20 +2,9 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import psycopg
-from psycopg_pool import ConnectionPool
 
-from base.config import settings
-
-
-def _test_pool() -> ConnectionPool:
-    """Return a concretely typed pool for helpers that open their own pool."""
-    return cast(
-        ConnectionPool,
-        ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2),
-    )
+from ops.tests.pool_support import make_test_pool
 
 
 def test_machine_pause_resolves_old_and_new_fingerprint_alerts(
@@ -47,7 +36,7 @@ def test_machine_pause_resolves_old_and_new_fingerprint_alerts(
         )
     db_conn.commit()
 
-    with _test_pool() as pool:
+    with make_test_pool() as pool:
         _resolve_machine_alerts_blocking(pool, "away")
 
     with db_conn.cursor() as cur:

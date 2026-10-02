@@ -7,24 +7,16 @@ from typing import Any, cast
 
 import psycopg
 import pytest
-from psycopg_pool import AsyncConnectionPool, ConnectionPool
+from psycopg_pool import AsyncConnectionPool
 
 import base.db
 from base.agents import AgentNotFound, ResurrectAlreadyAlive, ResurrectError
 from base.agents.messages.envelope import wrap_inbound
 from base.cluster.machine import machine_name
-from base.config import settings
 from ops.agents import create_agent_row, resurrect_agent, wake
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.lifecycle import _force_mark_terminated
-
-
-def _test_pool() -> ConnectionPool:
-    """Return a concretely typed pool for helpers that open their own pool."""
-    return cast(
-        ConnectionPool,
-        ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2),
-    )
+from ops.tests.pool_support import make_test_pool
 
 
 def _noop(*_args: object, **_kwargs: object) -> None:
@@ -129,7 +121,7 @@ class TestResurrectAgent:
             )
         db_conn.commit()
 
-        with _test_pool() as pool:
+        with make_test_pool() as pool:
             _force_mark_terminated(agent_id, pool)
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -193,7 +185,7 @@ class TestResurrectAgent:
         trigger_id = base.db.insert_inbound_message(
             db_conn, agent_id, "work before repeated force", source="user"
         )
-        with _test_pool() as pool:
+        with make_test_pool() as pool:
             _force_mark_terminated(agent_id, pool)
 
         await _settle_hosted_force(db_conn, aops_pool, agent_id)
@@ -398,7 +390,7 @@ class TestResurrectAgent:
             source="user",
             kind="compact_request",
         )
-        with _test_pool() as pool:
+        with make_test_pool() as pool:
             _force_mark_terminated(agent_id, pool)
 
         await _settle_hosted_force(db_conn, aops_pool, agent_id)
