@@ -77,7 +77,7 @@ from base.telemetry import audit_events
 
 # Re-export of the shared OCR module object (test compat: the suite patches
 # mcp_daemon.ocr_mod attributes, and every OCR caller sees the same object).
-from services.computer.execute import _TOOLS, _execute, _mcp_result, _priority
+from services.computer.execute import _TOOLS, _execute_tool, _mcp_result, _priority
 from services.computer.execute import ocr_mod as ocr_mod
 from services.computer.protocol import Request, Response
 from services.computer.session import ScreenSession
@@ -184,7 +184,7 @@ class ComputerMcpDaemon:
             outcome = "ok"
             error: str | None = None
             try:
-                result = _execute(
+                result = _execute_tool(
                     tool,
                     args,
                     agent_id or 0,

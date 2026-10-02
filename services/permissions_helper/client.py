@@ -157,6 +157,7 @@ class PingResult(TypedDict):
     root_seed_report_v1: NotRequired[bool]  # `root_status.seed` is reported
     preflight_screen: bool  # Screen Recording grant held
     ax_trusted: bool  # Accessibility grant held
+    ax_tree_v1: NotRequired[bool]  # the helper serves `ax_tree`
 
 
 class ScreencaptureResult(TypedDict):
@@ -200,6 +201,43 @@ class AxWindowInfo(WindowGeometry):
 
 class WindowInfo(WindowGeometry):
     owner: str
+
+
+class AxNode(TypedDict):
+    """One raw accessibility element; geometry is logical points. Absent keys
+    mean the app did not expose that attribute."""
+
+    id: int
+    depth: int
+    n: int  # children the app listed (visible ones for list-like roles)
+    parent: NotRequired[int]
+    role: NotRequired[str]
+    subrole: NotRequired[str]
+    title: NotRequired[str]
+    desc: NotRequired[str]
+    value: NotRequired[str]
+    ident: NotRequired[str]
+    x: NotRequired[float]
+    y: NotRequired[float]
+    w: NotRequired[float]
+    h: NotRequired[float]
+    enabled: NotRequired[bool]
+    focused: NotRequired[bool]
+    selected: NotRequired[bool]
+    actions: NotRequired[list[str]]
+
+
+class AxTreeResult(TypedDict):
+    app: str
+    pid: int
+    windows: int
+    framework: str  # "electron" / "cef" when the bundle ships one, else ""
+    nodes: list[AxNode]
+    visited: int
+    truncated: bool  # the node or depth cap cut the walk
+    timed_out: bool  # the time budget cut the walk
+    unreadable: int  # elements whose attributes could not be read
+    elapsed_ms: int
 
 
 class SessionInfo(TypedDict):
@@ -382,6 +420,29 @@ def scroll(x: float, y: float, dy: int, *, sock_path: str | Path | None = None) 
 def ax_window_info(app: str, *, sock_path: str | Path | None = None) -> AxWindowInfo:
     """Report the on-screen geometry of `app`'s focused window via accessibility."""
     return _call("ax_window_info", app=app, sock_path=sock_path)
+
+
+def ax_tree(
+    app: str,
+    *,
+    scope: str | None = None,
+    max_nodes: int = 600,
+    max_depth: int = 14,
+    budget_ms: int = 1500,
+    timeout_ms: int = 400,
+    sock_path: str | Path | None = None,
+) -> AxTreeResult:
+    """Read `app`'s focused-window accessibility tree (or the subtree under a
+    `scope` id from the last walk), bounded by node, depth and time limits."""
+    req: dict[str, object] = {
+        "max_nodes": max_nodes,
+        "max_depth": max_depth,
+        "budget_ms": budget_ms,
+        "timeout_ms": timeout_ms,
+    }
+    if scope is not None:
+        req["scope"] = scope
+    return _call("ax_tree", app=app, sock_path=sock_path, **req)
 
 
 def window_info(owner: str, *, sock_path: str | Path | None = None) -> WindowInfo:

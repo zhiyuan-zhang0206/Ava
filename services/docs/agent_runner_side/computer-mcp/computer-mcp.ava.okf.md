@@ -73,7 +73,8 @@ before writing remains retryable.
 
 ## Tool surface
 `snapshot` / `click` / `type_text` / `key` / `scroll` / `window_info` /
-`session_info` / `frontmost_app` / `release_control`. Coordinates are
+`session_info` / `frontmost_app` / `release_control`, plus `find_text` /
+`click_text` (OCR) and `ax_tree` (accessibility, below). Coordinates are
 **physical pixels** (the screenshot space); the daemon converts to the
 helper's logical-point space via the backing scale reported by `snapshot`
 (`screen.width/height/scale` + `pixels.width/height`). `snapshot` writes the
@@ -81,6 +82,10 @@ PNG under `$AVA_HOME/logs/computer/snapshots/` and returns its path;
 `include_ocr` adds recognized text boxes (Vision framework, built on demand
 from `services/computer/ocr.swift` into `$AVA_HOME/logs/computer/ocr-bin/`),
 `include_ax` adds the focused window geometry.
+
+## Accessibility tree (`ax_tree`)
+Element-level alternative to screenshot + OCR, read-only; the helper walks the
+window, the daemon formats it and judges `quality`: [[ax-tree.ava.okf.md]].
 
 ## Screen ownership (Phase 2)
 The desktop is one shared screen; multi-step flows must not interleave. The
@@ -116,10 +121,10 @@ task): a task that goes idle forever keeps its start + actions, which are
 complete facts for replay.
 
 ## Key Dependencies
-- [[permissions-helper/permissions-helper.ava.okf.md]] — the signed helper every action executes
+- [[../permissions-helper/permissions-helper.ava.okf.md]] — the signed helper every action executes
   through; `screen_size` / `frontmost_app` are helper methods added for the
   snapshot geometry (2026-08-09, task #1101).
-- [[browser/browser.ava.okf.md]] — browser tasks go through chrome MCP (DOM path,
+- [[../browser/browser/browser.ava.okf.md]] — browser tasks go through chrome MCP (DOM path,
   preferred); computer-mcp is the pixel-level fallback for surfaces DOM cannot
   reach (canvas, native apps, system settings).
 - [[watchdog.ava.okf.md]] — the healthcheck (`services.healthchecks.computer_mcp`)
