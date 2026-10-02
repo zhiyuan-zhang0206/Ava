@@ -8,7 +8,7 @@
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 39
+    "tests/base": 38
   },
   "files": {
     "tests/base/test_config.py": 1705,
@@ -63,7 +63,6 @@
     "tests/base/test_tags.py::top-level": 1,
     "tests/base/test_telemetry_otlp.py::top-level": 1,
     "tests/base/test_telemetry_otlp_exit_delivery.py::top-level": 1,
-    "tests/base/test_turn_identity.py::top-level": 1,
     "tests/base/test_ui_contributions.py::top-level": 1,
     "tests/base/test_uvicorn_stdlib_intercept.py::top-level": 1
   }

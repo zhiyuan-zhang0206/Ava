@@ -463,7 +463,7 @@ check-typed-exception = true
 "ava/sdk_surface/discovery.py" = ["TID251"]
 "services/agent_host/runtime.py" = ["TID251"]
 # tests may import contextvars to exercise the propagation contracts
-"tests/base/test_turn_identity.py" = ["TID251"]
+"ava/tests/test_turn_identity_ava.py" = ["TID251"]
 "agent/graph/tests/test_turn_scoped_retry.py" = ["TID251"]
 
 [tool.ruff.lint.isort]
