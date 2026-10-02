@@ -24,7 +24,8 @@ import time
 from datetime import UTC, datetime
 
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
-from services.hierarchy_worker.runner import prepare, run_tick
+from services.hierarchy_worker.roots import hierarchy_worker_config, prepare
+from services.hierarchy_worker.runner import run_tick
 from base.daemon.schedules.watcher import next_fire
 
 # One tick a minute: the scan is one aggregated query over `checkpoints`, so
@@ -34,7 +35,7 @@ CRON = "* * * * *"
 
 
 def _fire_tick(_trigger: None) -> None:
-    run_tick()
+    run_tick(hierarchy_worker_config())
 
 
 def main() -> None:

@@ -28,8 +28,9 @@ def main(argv: list[str] | None = None) -> int:
     # row doubles as the per-job start record.
     init_gateway_process(name="hierarchy-worker")
     from services.hierarchy_worker.execute import execute_job
+    from services.hierarchy_worker.roots import hierarchy_worker_config
 
-    return execute_job(args.job_id)
+    return execute_job(args.job_id, hierarchy_worker_config())
 
 
 if __name__ == "__main__":
