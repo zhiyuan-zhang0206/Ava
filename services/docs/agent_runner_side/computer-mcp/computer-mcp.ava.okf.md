@@ -74,7 +74,7 @@ before writing remains retryable.
 ## Tool surface
 `snapshot` / `click` / `type_text` / `key` / `scroll` / `window_info` /
 `session_info` / `frontmost_app` / `release_control`, plus `find_text` /
-`click_text` (OCR) and `ax_tree` (accessibility, below). Coordinates are
+`click_text` (OCR), `ax_tree` and `ax_act` (accessibility, below). Coordinates are
 **physical pixels** (the screenshot space); the daemon converts to the
 helper's logical-point space via the backing scale reported by `snapshot`
 (`screen.width/height/scale` + `pixels.width/height`). `snapshot` writes the
@@ -83,9 +83,10 @@ PNG under `$AVA_HOME/logs/computer/snapshots/` and returns its path;
 from `services/computer/ocr.swift` into `$AVA_HOME/logs/computer/ocr-bin/`),
 `include_ax` adds the focused window geometry.
 
-## Accessibility tree (`ax_tree`)
-Element-level alternative to screenshot + OCR, read-only; the helper walks the
-window, the daemon formats it and judges `quality`: [[ax-tree.ava.okf.md]].
+## Accessibility tools (`ax_tree`, `ax_act`)
+Element-level alternative to screenshot + OCR; the helper walks the window and
+acts on elements, the daemon formats the tree, judges `quality` and keeps ids
+stable across walks: [[ax-tree.ava.okf.md]].
 
 ## Screen ownership (Phase 2)
 The desktop is one shared screen; multi-step flows must not interleave. The
