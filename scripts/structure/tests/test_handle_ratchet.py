@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import textwrap
 
-from scripts.structure.ambient_state import dbhandle
+from scripts.structure.ambient_state import busrule, dbhandle
 from scripts.structure.ambient_state import handle_ratchet as ratchet
 
 
@@ -28,6 +28,13 @@ def test_a_dial_is_counted_whichever_package_it_is_in() -> None:
     names = sorted(hit.name for hit in dbhandle.dials(tree))
     assert names == ["Database.from_settings", "connect"]
     assert [ratchet.kind_of(n) for n in names] == [ratchet.SELF_BUILT, ratchet.SHIM]
+
+
+def test_a_self_built_bus_is_counted_whichever_package_it_is_in() -> None:
+    tree = ast.parse(
+        "from base.events.live.bus import EventBus\n\nbus = EventBus.from_settings()\n"
+    )
+    assert [hit.line for hit in busrule.builds(tree)] == [3]
 
 
 def test_package_is_the_first_two_components() -> None:
