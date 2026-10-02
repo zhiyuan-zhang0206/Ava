@@ -35,11 +35,10 @@ from base.agents.birth_config import resolve_birth_config
 from base.agents.impersonation_manifest import record_central_event
 from base.agents.labels import spawn_prompt_with_label
 from base.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
-from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_spawned_sync
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
-from base.telemetry.audit_events import prepare_event_log
+from base.telemetry.audit_events import prepare_event_log, record_audit
 
 
 def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
@@ -258,45 +257,48 @@ def _spawner_agent_id_malformed(spawner: str) -> bool:
     return int(m.group(1)) <= 0
 
 
-def _announce_created_agent(
+def _record_birth_event(
+    conn: psycopg.Connection,
     agent_id: int,
     spawner: str,
     fork_from: int | None,
     fork_checkpoint: str | None,
     target_machine: str,
-    prompt_inbound_id: int | None,
-    prompt_content: str | None,
-    prompt_source: str | None,
-) -> None:
-    """Publish advisory audit/live hints after the birth transaction commits."""
+) -> telemetry.Event:
+    """Record the spawn or fork audit fact in the birth transaction.
+
+    Who spawned whom cannot be derived from any later state, so the row commits
+    with the agent row or not at all. A fork's audit parent is the source agent,
+    even when a third agent executed it.
+    """
     spawner_target: int | None = None
     if spawner.startswith("agent:"):
         spawner_target = int(spawner.removeprefix("agent:"))
-    try:
-        prepared_event = prepare_event_log(
-            event_type="fork" if fork_from is not None else "spawn",
-            agent_id=agent_id,
-            source=spawner,
-            target_agent_id=fork_from if fork_from is not None else spawner_target,
-            payload={
-                "machine": target_machine,
-                "fork_from": fork_from,
-                "fork_checkpoint": fork_checkpoint,
-            },
-        )
-        # The agent row is already durable. Its audit event is recorded in its own
-        # transaction, so a telemetry loss cannot lose the impersonation record.
-        with write_transaction() as conn:
-            prepared_event = record_central_event(conn, prepared_event)
-        telemetry.emit_prepared(prepared_event)
-    except Exception:
-        # The committed row and prompt are authoritative; the pending scan and
-        # roster reads recover from a lost Redis/telemetry hint.
-        logger.exception("agent {} spawn audit announcement failed", agent_id)
-    if prompt_inbound_id is not None and prompt_content is not None:
-        assert prompt_source is not None  # noqa: S101 — paired at entry
+    event = prepare_event_log(
+        event_type="fork" if fork_from is not None else "spawn",
+        agent_id=agent_id,
+        source=spawner,
+        target_agent_id=fork_from if fork_from is not None else spawner_target,
+        payload={
+            "machine": target_machine,
+            "fork_from": fork_from,
+            "fork_checkpoint": fork_checkpoint,
+        },
+    )
+    return record_audit(conn, record_central_event(conn, event))
+
+
+def _announce_created_agent(
+    agent_id: int,
+    birth_event: telemetry.Event,
+    prompt_inbound_id: int | None,
+    prompt_event: telemetry.Event | None,
+) -> None:
+    """Emit the recorded audit events and live hints after the birth transaction commits."""
+    telemetry.emit_prepared(birth_event)
+    if prompt_inbound_id is not None:
         try:
-            announce_spawn_prompt(agent_id, prompt_inbound_id, prompt_content, prompt_source)
+            announce_spawn_prompt(agent_id, prompt_inbound_id, prompt_event)
         except Exception:
             logger.exception("agent {} prompt announcement failed", agent_id)
     try:
@@ -407,7 +409,7 @@ def create_agent_row(
 
     launch_attempt_id = uuid4()
     prompt_inbound_id: int | None = None
-    prompt_content: str | None = None
+    prompt_event: telemetry.Event | None = None
     with base.db.connect() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         # label: when the spawner assigns one, store it sticky (label_user_set=TRUE)
@@ -505,22 +507,16 @@ def create_agent_row(
         if prompt is not None:
             assert prompt_source is not None, "prompt requires prompt_source (validated above)"  # noqa: S101
             prompt_content = spawn_prompt_with_label(prompt, label)
-            prompt_inbound_id = insert_spawn_prompt_in_transaction(
+            prompt_inbound_id, prompt_event = insert_spawn_prompt_in_transaction(
                 cur, new_id, prompt_content, prompt_source
             )
-        conn.commit()
-        # Lineage/audit and live hints are emitted only after commit. A fork's
-        # audit parent is the source agent, even when a third agent executed it.
-        _announce_created_agent(
-            new_id,
-            spawner,
-            fork_from,
-            fork_checkpoint,
-            target_machine,
-            prompt_inbound_id,
-            prompt_content,
-            prompt_source,
+        birth_event = _record_birth_event(
+            conn, new_id, spawner, fork_from, fork_checkpoint, target_machine
         )
+        conn.commit()
+        # The recorded events reach the observation sink and the live hints go
+        # out only after commit.
+        _announce_created_agent(new_id, birth_event, prompt_inbound_id, prompt_event)
     # Launch is the runner's job now (the launch op) — the row is created and
     # the caller forwards it. The `agent_spawned` telemetry event keeps its
     # registered name (contract.py) — the row INSERT is still the spawn

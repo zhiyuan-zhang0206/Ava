@@ -41,7 +41,7 @@ from base.cluster.machine import machine_name
 from base.db import insert_inbound_message
 from base.events.live.announce import publish_agent_updated_sync
 from base.lm.registry import normalize_overlay_llm_model
-from base.telemetry.audit_events import prepare_event_log
+from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops import cluster_rpc as _cluster_rpc
 from ops.agents import (
     get_agent_machine,
@@ -606,7 +606,7 @@ def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
         )
         from base.agents.impersonation_manifest import record_central_event
 
-        prepared_event = record_central_event(conn, prepared_event)
+        prepared_event = record_audit(conn, record_central_event(conn, prepared_event))
     telemetry.emit_prepared(prepared_event)
     _log.info(
         "recover-crash-marked-v2: harvested crash-marked corpse for agent %s "

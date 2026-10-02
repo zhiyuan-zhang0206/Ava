@@ -24,7 +24,7 @@ nothing is read back from the telemetry store.
 - **Central audit events** are appended by `record_central_event` in the producing
   transaction, under the lease row lock that also closes admission. A rolled-back
   operation leaves no row and a committed one needs no emit to survive. Their
-  `source_key` is `central`. The audit-root census test classifies every producer.
+  `source_key` is `central`. The same transaction then records the tagged event in `audit_events` (`record_audit`), the global record every audit fact has. The audit-root census test classifies every producer.
 - **A controller's SDK events** are appended synchronously by `capture_local_event`
   at the telemetry seam, before the emit queue, while the controller's receipt is
   open. The `source_key` is the receipt's key. This is effect-then-write: a hard
