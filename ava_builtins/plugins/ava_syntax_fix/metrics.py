@@ -1,4 +1,4 @@
-"""ava_code Grafana metrics — registered at import time.
+"""ava_syntax_fix Grafana metrics — registered at import time.
 
 ``base/telemetry/metrics/grafana_dashboard_supply`` imports this module (inside a
 PluginContext) to collect the registrations below for the rendered Ava Ops
@@ -32,7 +32,7 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric
 
 register_metric(
     MetricSpec(
-        name="ava_code_syntax_fix_count",
+        name="ava_syntax_fix_count",
         title="Syntax fix count",
         time_basis="per_minute",
         description=(
@@ -53,7 +53,7 @@ register_metric(
 
 register_metric(
     MetricSpec(
-        name="ava_code_syntax_fix_total",
+        name="ava_syntax_fix_total",
         title="Syntax fixes",
         time_basis="window",
         description=(

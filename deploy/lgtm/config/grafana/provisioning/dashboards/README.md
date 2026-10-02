@@ -49,11 +49,11 @@ restored by task #3689). All sections are **expanded by default**
 4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
    delivery-stalled total, SSE backlog, and the Max Agent ID growth curve
    (the gateway's 60s `agent_registry` gauge + its deriv rate, task #2010).
-5. **`ava_code`** — the syntax-fix metric panels: fix count (per minute)
-   and fixes (window).
-6. **`ava_fleet`** — the task-completion-rate panel.
-7. **`ava_memory`** — recall-filter runs / empty ratio / error ratio /
+5. **`ava_fleet`** — the task-completion-rate panel.
+6. **`ava_memory`** — recall-filter runs / empty ratio / error ratio /
    failures plus the passive-recall search and filter latencies.
+7. **`ava_syntax_fix`** — the syntax-fix metric panels: fix count (per minute)
+   and fixes (window).
 8. **`Host & data plane`** — the former `ava-host-dataplane` panels: host
    CPU / memory / load / filesystem / disk / network throughput + Postgres
    connections / transactions / size + Redis memory / clients / throughput.
@@ -234,7 +234,7 @@ of mass-editing targets.
    `tests/plugins/test_plugin_metrics_logql.py` also locks every registered
    grafana spec against the JSON.
 
-Shipped examples: `ava_builtins/plugins/ava_code/metrics.py` (syntax_fix
+Shipped examples: `ava_builtins/plugins/ava_syntax_fix/metrics.py` (syntax_fix
 trend/stat), `ava_builtins/plugins/ava_fleet/metrics.py` (task completion
 rate), `ava_builtins/plugins/ava_memory/metrics.py` (recall-filter runs /
 empty ratio / error ratio plus passive-recall search and filter latency).
