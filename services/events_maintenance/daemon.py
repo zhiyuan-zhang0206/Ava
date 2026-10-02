@@ -78,6 +78,7 @@ from services.events_maintenance.blob_vacuum import (
     emit_checkpoint_table_sizes,
     run_blob_vacuum,
 )
+from services.events_maintenance.config import EventsMaintenanceConfig
 from services.events_maintenance.jsonl_replay import replay_gap_days
 from services.events_maintenance.observed_metrics import recover_observations
 from services.events_maintenance.resolution import run_resolution_slice
@@ -85,6 +86,23 @@ from services.events_maintenance.rollup import compute_rollup
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.events_maintenance.daemon")
+
+
+def events_maintenance_config() -> EventsMaintenanceConfig:
+    """The composition root: the one place this package reads `settings`."""
+    return EventsMaintenanceConfig(
+        events_maintenance_interval_seconds=settings.daemon.events_maintenance_interval_seconds,
+        events_maintenance_pass_deadline_s=settings.daemon.events_maintenance_pass_deadline_s,
+        events_rollup_pass_deadline_s=settings.daemon.events_rollup_pass_deadline_s,
+        events_maintenance_resolution_deadline_s=settings.daemon.events_maintenance_resolution_deadline_s,
+        events_rollup_late_write_lookback_days=settings.daemon.events_rollup_late_write_lookback_days,
+        events_resolution_burst_threshold=settings.daemon.events_resolution_burst_threshold,
+        events_resolution_interval_seconds=settings.daemon.events_resolution_interval_seconds,
+        events_auto_dismiss_enabled=settings.daemon.events_auto_dismiss_enabled,
+        events_auto_dismiss_days=settings.daemon.events_auto_dismiss_days,
+        telemetry_loki_url=settings.observability.telemetry_loki_url,
+        timezone=settings.general.timezone,
+    )
 
 
 def _pidfile() -> Path:
@@ -98,7 +116,9 @@ class WedgedPassError(RuntimeError):
     """A blocking pass exceeded its deadline and left a worker thread orphaned."""
 
 
-def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
+def _run_maintenance(
+    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig
+) -> None:
     """One hourly pass: the cost-ledger rollup (Loki → `agent_model_tokens_daily`
     — Loki only retains 84h, so skipping passes permanently loses days), the
     JSONL gap replay, the hourly checkpoint size/row-count telemetry sample,
@@ -109,14 +129,14 @@ def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
     # must not prevent the remaining maintenance work from making progress.
     try:
         with pool.connection() as conn:
-            recovered = recover_observations(conn, now=now)
+            recovered = recover_observations(conn, config, now=now)
         if recovered:
             _log.info("[events-maintenance] recovered %d metric observations", recovered)
     except Exception:
         _log.exception("[events-maintenance] observed metrics recovery incomplete")
     progress.beat()
     with pool.connection() as conn:
-        result = compute_rollup(conn, now_utc=now)
+        result = compute_rollup(conn, now_utc=now, config=config)
         replay_result = replay_gap_days(conn, now_utc=now)
     progress.beat()
     if result.start_day is not None:
@@ -146,17 +166,19 @@ def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
     # Incremental physical reclamation: a plain VACUUM (no lock) over the
     # checkpoint tables, only inside the measured agent-lowest window
     # (05:00-08:00 CLUSTER time). Logs size + dead tuples each run.
-    vacuum_result = run_blob_vacuum()
+    vacuum_result = run_blob_vacuum(timezone=config.timezone)
     progress.beat()
     if vacuum_result.ran:
         _log.info("[events-maintenance] blob vacuum: %s", vacuum_result.summary())
     progress.mark_success()
 
 
-def _run_resolution(pool: ConnectionPool, progress: LoopProgress) -> None:
+def _run_resolution(
+    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig
+) -> None:
     """Run the resolution slice while discarding its test-facing summary."""
 
-    run_resolution_slice(pool)
+    run_resolution_slice(pool, config)
     progress.beat()
     progress.mark_success()
 
@@ -230,6 +252,7 @@ async def _sleep_with_liveness(progress: LoopProgress, total_s: float) -> None:
 async def _maintenance_with_liveness(
     pool: ConnectionPool,
     progress: LoopProgress,
+    config: EventsMaintenanceConfig,
     *,
     run: Callable[[ConnectionPool], None] | None = None,
 ) -> None:
@@ -240,7 +263,7 @@ async def _maintenance_with_liveness(
     if run is None:
 
         def run_with_progress(target_pool: ConnectionPool) -> None:
-            _run_maintenance(target_pool, progress)
+            _run_maintenance(target_pool, progress, config)
 
         run = run_with_progress
     fut = asyncio.ensure_future(asyncio.to_thread(run, pool))
@@ -253,14 +276,16 @@ async def _maintenance_with_liveness(
     await fut  # propagate the completed maintenance pass's exception, if any
 
 
-async def _dispatch_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
+async def _dispatch_loop(
+    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig
+) -> None:
     """Main loop: roll immediately on start (fresh after a restart), then every
     interval. The rollup DB work is synchronous psycopg run in a thread so it does
     not block the healthz event loop. The inter-run sleep is OUTSIDE the try, so a
     transient failure waits a full interval before retrying instead of hot-looping
     against Postgres (the rollup is idempotent and self-catching-up — the next run
     re-probes dirty days — so there is no value in an immediate retry)."""
-    interval = settings.daemon.events_maintenance_interval_seconds
+    interval = config.events_maintenance_interval_seconds
     _log.info(
         "[events-maintenance] daemon started, pid=%s, interval=%.0fs",
         os.getpid(),
@@ -268,7 +293,7 @@ async def _dispatch_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     )
     while True:
         try:
-            await _maintenance_with_liveness(pool, progress)
+            await _maintenance_with_liveness(pool, progress, config)
         except asyncio.CancelledError:
             raise
         except WedgedPassError:
@@ -290,7 +315,9 @@ async def _dispatch_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
         await _sleep_with_liveness(progress, interval)
 
 
-async def _resolution_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
+async def _resolution_loop(
+    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig
+) -> None:
     """Refresh immutable-event class-resolution gauges on their own cadence.
 
     The six-hour Loki read and safety-valve write are unrelated to the frozen
@@ -299,7 +326,7 @@ async def _resolution_loop(pool: ConnectionPool, progress: LoopProgress) -> None
     configured interval; schema drift exits for watchdog recovery.
     """
 
-    interval = settings.daemon.events_resolution_interval_seconds
+    interval = config.events_resolution_interval_seconds
     _log.info(
         "[events-maintenance] resolution loop started, pid=%s, interval=%ds",
         os.getpid(),
@@ -310,7 +337,8 @@ async def _resolution_loop(pool: ConnectionPool, progress: LoopProgress) -> None
             await _maintenance_with_liveness(
                 pool,
                 progress,
-                run=lambda target_pool: _run_resolution(target_pool, progress),
+                config,
+                run=lambda target_pool: _run_resolution(target_pool, progress, config),
             )
         except asyncio.CancelledError:
             raise
@@ -346,12 +374,11 @@ async def run() -> None:
     _write_pidfile()
     _log.info("[events-maintenance] pidfile written: %s", _pidfile())
 
+    config = events_maintenance_config()
     liveness = LivenessGroup()
-    dispatch_progress = liveness.register(
-        "dispatch", settings.daemon.events_maintenance_pass_deadline_s
-    )
+    dispatch_progress = liveness.register("dispatch", config.events_maintenance_pass_deadline_s)
     resolution_progress = liveness.register(
-        "resolution", settings.daemon.events_maintenance_resolution_deadline_s
+        "resolution", config.events_maintenance_resolution_deadline_s
     )
     health = await start_health_server(
         "events_maintenance",
@@ -363,8 +390,8 @@ async def run() -> None:
     pool = base.db.pool()
     try:
         await asyncio.gather(
-            _dispatch_loop(pool, dispatch_progress),
-            _resolution_loop(pool, resolution_progress),
+            _dispatch_loop(pool, dispatch_progress, config),
+            _resolution_loop(pool, resolution_progress, config),
         )
     finally:
         pool.close()

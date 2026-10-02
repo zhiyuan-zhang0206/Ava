@@ -27,6 +27,7 @@ from base.config.daemon import DaemonSettings
 from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT, LokiReadEra
 from services.events_maintenance import rollup
 from services.events_maintenance.rollup import MetricsRow, RollupResult, TokensRow, compute_rollup
+from services.events_maintenance.tests.slices import events_maintenance_config
 
 # A fixed "now" so today = 2026-06-10 (UTC); retained days are 06-08..06-09.
 # Noon so the test does not ride on a midnight edge. The retention floor at
@@ -92,7 +93,7 @@ class _FakeLokiDays:
         self.days = days
         self.queried: list[date] = []
 
-    def __call__(self, day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
+    def __call__(self, day: date, _config: object) -> tuple[list[TokensRow], list[MetricsRow]]:
         self.queried.append(day)
         return self.days.get(day, ([], []))
 
@@ -102,7 +103,7 @@ class _FakeSourceCounts:
         self.counts = counts
         self.queried: list[date] = []
 
-    def __call__(self, day: date) -> int | None:
+    def __call__(self, day: date, _config: object) -> int | None:
         self.queried.append(day)
         return self.counts.get(day, 0)
 
@@ -158,6 +159,7 @@ def _roll(
     return compute_rollup(
         db,
         now_utc=now,
+        config=events_maintenance_config(),
         lookback_days=lookback,
         pass_deadline_s=pass_deadline_s,
     )
@@ -165,10 +167,10 @@ def _roll(
 
 def _cutover_query(
     agent_id: int, *, indexed_value: float | None
-) -> Callable[[str, datetime], list[tuple[dict[str, str], float]]]:
+) -> Callable[[str, datetime, object], list[tuple[dict[str, str], float]]]:
     """Return one row per legacy/indexed query, or no indexed rows."""
 
-    def query(logql: str, at: datetime) -> list[tuple[dict[str, str], float]]:
+    def query(logql: str, at: datetime, _config: object) -> list[tuple[dict[str, str], float]]:
         if at > INDEX_LABEL_CUTOVER_AT:
             if indexed_value is None:
                 return []
@@ -214,7 +216,12 @@ def test_query_instant_enters_the_daemon_budget(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(rollup, "_query_budget", FakeBudget())
     monkeypatch.setattr(rollup.urllib.request, "urlopen", open_response)
 
-    assert rollup._query_instant('sum(rate({service_name="test"}[1m]))', _NOW) == []
+    assert (
+        rollup._query_instant(
+            'sum(rate({service_name="test"}[1m]))', _NOW, events_maintenance_config()
+        )
+        == []
+    )
     assert transitions == ["entered", "released"]
 
 
@@ -396,8 +403,10 @@ def test_zero_row_indexed_slice_refuses_day_rewrite(
     populated_query = _cutover_query(aid, indexed_value=2.0)
     cutover_day_end = datetime.combine(next_day, datetime.min.time(), tzinfo=UTC)
 
-    def zero_indexed_slice(logql: str, at: datetime) -> list[tuple[dict[str, str], float]]:
-        return [] if at == cutover_day_end else populated_query(logql, at)
+    def zero_indexed_slice(
+        logql: str, at: datetime, config: object
+    ) -> list[tuple[dict[str, str], float]]:
+        return [] if at == cutover_day_end else populated_query(logql, at, config)
 
     def capture_warning(message: object) -> None:
         warnings.append(str(message))
@@ -408,6 +417,7 @@ def test_zero_row_indexed_slice_refuses_day_rewrite(
     result = compute_rollup(
         db,
         now_utc=INDEX_LABEL_CUTOVER_AT + timedelta(days=2, hours=1),
+        config=events_maintenance_config(),
         lookback_days=0,
     )
 
@@ -439,6 +449,7 @@ def test_nonzero_indexed_slice_rewrites_day(
     result = compute_rollup(
         db,
         now_utc=INDEX_LABEL_CUTOVER_AT + timedelta(days=1, hours=1),
+        config=events_maintenance_config(),
         lookback_days=0,
     )
 
@@ -517,7 +528,7 @@ def test_pass_deadline_stops_before_remaining_dirty_days(
     clock = [0.0]
     queried: list[date] = []
 
-    def slow_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
+    def slow_aggregates(day: date, _config: object) -> tuple[list[TokensRow], list[MetricsRow]]:
         queried.append(day)
         clock[0] = 2.0
         return [], []
@@ -532,7 +543,13 @@ def test_pass_deadline_stops_before_remaining_dirty_days(
     monkeypatch.setattr(rollup.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(rollup.logger, "warning", capture_warning)
 
-    result = compute_rollup(db, now_utc=_NOW, lookback_days=0, pass_deadline_s=1.0)
+    result = compute_rollup(
+        db,
+        now_utc=_NOW,
+        config=events_maintenance_config(),
+        lookback_days=0,
+        pass_deadline_s=1.0,
+    )
 
     assert result == RollupResult(days[0], days[0], 0, 0)
     assert queried == [days[0]]
@@ -638,12 +655,12 @@ def test_source_count_query_uses_the_union_body_truth_pipeline(
 ) -> None:
     calls: list[tuple[str, datetime]] = []
 
-    def query(logql: str, at: datetime) -> list[tuple[dict[str, str], float]]:
+    def query(logql: str, at: datetime, _config: object) -> list[tuple[dict[str, str], float]]:
         calls.append((logql, at))
         return [({}, 5.0)]
 
     monkeypatch.setattr(rollup, "_query_instant", query)
-    assert rollup._day_source_count(date(2026, 6, 9)) == 5
+    assert rollup._day_source_count(date(2026, 6, 9), events_maintenance_config()) == 5
     assert len(calls) == 1
     logql, _at = calls[0]
     assert logql.startswith("sum(count_over_time((") and logql.endswith(")[86400s]))")
