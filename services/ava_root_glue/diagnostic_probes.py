@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 from base.config import settings
 from base.daemon.health import DaemonProbe
+from base.db import Database
 from base.native_process.os_platform import IS_MACOS
 from base.native_process.ownership import OwnedProcess
 from base.telemetry.station_endpoint import StationTarget
@@ -185,7 +186,9 @@ class StationProbe:
     def report(self, result: DaemonProbe) -> None:
         if self._target is None:
             raise RuntimeError("station report has no observed target")
-        self._module._alert_edges(self._target, ok=result.alive, now=datetime.now(UTC))
+        self._module._alert_edges(
+            Database.from_settings(), self._target, ok=result.alive, now=datetime.now(UTC)
+        )
 
 
 def lgtm_write_path() -> DaemonProbe:
