@@ -238,7 +238,7 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
 # `ava.register_namespace("X", module)` (real setattr), so this fall-through is
 # only hit for genuinely unknown names — we want fail-fast there.
 # Its presence tells pyright the module supports dynamic attributes, so test
-# files that reference plugin-registered names (e.g. `ava.code` from the
+# files that reference plugin-registered names (e.g. `ava.cwd` from the
 # ava_code plugin) don't trip `reportAttributeAccessIssue`.
 #
 # DB_URL / REDIS_URL / GATEWAY_URL forward to ava._settings (which in turn

@@ -60,7 +60,7 @@ describes only itself (`base/cluster/record.py`).
   GET.
 - There is no `cluster` verb for a stranded maintenance hold: read it with
   `ava maintenance status` and end it with `ava maintenance resume --cancel` or
-  `repair` ([[conventions/graceful-maintenance.md]]).
+  `repair` ([graceful maintenance](../../conventions/graceful-maintenance.md)).
 
 ## Key dependencies
 

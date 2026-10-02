@@ -94,6 +94,12 @@ Four doc trees get exemptions, not a blanket skip:
    refs are resolved against the nearest `references/` dir up the skill tree
    (a nested skill shares its parent's library). Placeholders (`<name>.md`)
    are skipped; everything else must resolve.
+4. **Wikilinks.** Every `[[target]]` and `[[target|label]]` must resolve to an
+   OKF node through the node graph's own `resolve_wikilink` (the label is
+   display text; only the target is read). `lint_ava_okf.py` reports the same
+   miss as a warning inside a node, which no hook prints, so a dangling edge
+   stayed in the tree; here it blocks, and it covers the docs that linter never
+   opens. Code samples and `future/`'s `(planned)` marker are exempt as for links.
 
 Attribution is a token walk, not a regex. Every pattern that expressed "a
 command, then some words, then a flag" needed a quantifier next to whitespace,
@@ -103,6 +109,7 @@ and each one backtracked catastrophically on ordinary prose.
 from __future__ import annotations
 
 import argparse
+import functools
 import re
 import subprocess
 import sys
@@ -379,6 +386,64 @@ def check_links(doc: Path, line: str, *, allow_planned: bool = False) -> list[st
     return missing
 
 
+@functools.cache
+def _okf_nodes() -> frozenset[str]:
+    """Every tracked `.ava.okf.md` path — the universe a wikilink resolves in."""
+    out = subprocess.run(  # noqa: S603 — fixed argv; REPO comes from git rev-parse, not input
+        ["git", "-C", str(REPO), "ls-files", "*.ava.okf.md"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    return frozenset(out)
+
+
+def check_wikilinks(doc: Path, line: str, *, allow_planned: bool = False) -> list[str]:
+    """`[[target]]` / `[[target|label]]` targets on this line that name no OKF node.
+
+    The label is display text; only the target half resolves, through the same
+    `resolve_wikilink` the node graph uses. `lint_ava_okf.py` reports a miss in a
+    node as a warning, which no hook prints; this makes it block, and reaches the
+    non-node docs that linter never opens."""
+    # Imported here: a module-level import of application code would run before
+    # `enter_scratch_home()` below.
+    from base.packages.docs.okf_graph import WIKILINK_RE, resolve_wikilink
+
+    missing: list[str] = []
+    try:
+        cur = doc.relative_to(REPO).as_posix()
+    except ValueError:
+        cur = doc.name
+    for match in WIKILINK_RE.finditer(line):
+        target = match.group(1).strip()
+        if _in_code_span(line, match.start()):
+            continue
+        if resolve_wikilink(cur, target, set(_okf_nodes())) is not None:
+            continue
+        if allow_planned and _PLANNED.match(line, match.end()):
+            continue
+        missing.append(target)
+    return missing
+
+
+def _prose_problems(doc: Path, line: str, *, allow_planned: bool) -> list[str]:
+    """The messages for the links this prose line (not code) holds that do not resolve."""
+    out = [f"`{t}` — no such file" for t in check_links(doc, line, allow_planned=allow_planned)]
+    out += [
+        f"`[[{t}]]` — no such OKF node"
+        for t in check_wikilinks(doc, line, allow_planned=allow_planned)
+    ]
+    # Only skills carry the backtick references/ convention — a plain
+    # doc's `` `references/x.md` `` stays deliberately unchecked (it may
+    # be a runtime path or a taught sample, the axis-2 rationale).
+    if doc.name == "SKILL.md" and ".agents" in doc.parts:
+        out += [
+            f"`{t}` — no such file (skill references/)"
+            for t in check_skill_backtick_refs(doc, line)
+        ]
+    return out
+
+
 def check_doc(
     doc: Path,
     commands: dict[tuple[str, ...], set[str]],
@@ -417,14 +482,10 @@ def check_doc(
             for command, flag in found:
                 problems.append((lineno, f"`{command} {flag}` — no such flag"))
         if not (fenced or indented):
-            for target in check_links(doc, line, allow_planned=allow_planned):
-                problems.append((lineno, f"`{target}` — no such file"))
-            # Only skills carry the backtick references/ convention — a plain
-            # doc's `` `references/x.md` `` stays deliberately unchecked (it may
-            # be a runtime path or a taught sample, the axis-2 rationale).
-            if doc.name == "SKILL.md" and ".agents" in doc.parts:
-                for target in check_skill_backtick_refs(doc, line):
-                    problems.append((lineno, f"`{target}` — no such file (skill references/)"))
+            problems.extend(
+                (lineno, message)
+                for message in _prose_problems(doc, line, allow_planned=allow_planned)
+            )
         # Bare `skills/<name>/...` refs are checked in fenced code too — the
         # dead `.venv/bin/python skills/...` invocations live inside code
         # blocks, where links and flags are (deliberately) not checked.

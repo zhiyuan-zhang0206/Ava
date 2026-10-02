@@ -106,7 +106,7 @@ class MetricSpec(BaseModel):
 
     Fields:
         name: globally unique id (``^[a-z][a-z0-9_]*$``). Convention:
-            ``<plugin>_<what>`` (e.g. ``ava_code_syntax_fix_rate``).
+            ``<plugin>_<what>`` (e.g. ``ava_syntax_fix_rate``).
         title: Grafana panel title.
         description: what the metric measures / its event provenance.
         event_name: the event name the query filters on — lowercase letters,

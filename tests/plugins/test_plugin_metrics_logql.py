@@ -26,7 +26,7 @@ from base.telemetry.metrics.plugin_metrics import (
     render_title,
 )
 
-_PLUGINS = ("ava_code", "ava_fleet", "ava_memory")
+_PLUGINS = ("ava_fleet", "ava_memory", "ava_syntax_fix")
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

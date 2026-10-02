@@ -27,7 +27,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - **Dump authority** (`dump_source`): a locally owned plane dumps as the administrator acting as the schema owner over the home's owner-only socket (`base.db.pg_admin`), custody-checked first and password-free, so no write-generation login is needed and a rollout revoking one cannot kill a dump; a remote-managed plane dumps through its provider URL (password in the child environment only). The restore drill recreates the capability groups `ava_gateway`/`ava_runner` the dump's grants name.
 
 ## Key Dependencies
-- [[watchdog.ava.okf.md]] — probes and restarts the scheduler without executing the dump
+- [[ava_root.ava.okf.md]] — probes and restarts the scheduler without executing the dump
 - [[db.ava.okf.md]] — the dump target is the cluster's Postgres database
 
 ## Entry Points

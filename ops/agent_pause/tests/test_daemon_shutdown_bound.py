@@ -1,8 +1,8 @@
 """Real child-process regressions: eight daemons exit within a small bound of
 SIGTERM even with a default-executor job in flight.
 
-2026-09-18 (task #3940): the PITR base-candidate daemon's smooth stop SIGTERM'd
-it while a routine multi-minute ``asyncio.to_thread`` scan was in flight.
+2026-09-18 (task #3940): a daemon's smooth stop SIGTERM'd it while a routine
+multi-minute ``asyncio.to_thread`` scan was in flight.
 ``asyncio.run``'s close awaits ``shutdown_default_executor``, capped by CPython
 at ``THREAD_JOIN_TIMEOUT`` (300 s) — the stop flow's entire budget
 (`PAUSE_TIMEOUT_SECONDS`) — and interpreter teardown then joins a still-running
