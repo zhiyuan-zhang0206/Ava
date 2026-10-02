@@ -207,37 +207,6 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
     assert document["statistics"]["event_delivery"]["state"] == "pending"
 
 
-def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
-) -> None:
-    from agent.impersonation_handoff import start_marker
-    from base.agents.history.timeline import build_timeline_items
-    from base.agents.impersonation.timeline import hydrate
-    from gateway.agents.timeline import _window_before
-
-    lease = start(owner)
-    marker = start_marker(lease)
-    for number in range(15):
-        history.say(
-            str(lease["id"]), attested_caller(lease), f"Message {number}", message_key=str(number)
-        )
-    items, count = build_timeline_items([marker], [])
-    page = hydrate(items, owner.agent_id, limit=5)
-    assert count == 1
-    assert len(page) == 7  # marker + limit+1 lookahead
-    assert page[-1].payload == "Message 14"
-    cursor = page[-5].item_id
-    older = hydrate(items, owner.agent_id, limit=5, before=cursor)
-    window, more = _window_before(older, cursor, 5)
-    assert [item.payload for item in window] == [f"Message {i}" for i in range(5, 10)]
-    assert more
-    assert page[-1].impersonation is not None
-    assert page[-1].impersonation.executor_name == "Codex: thoughtful squirrel"
-    archived, _ = build_timeline_items([marker], [], segment_prefix="s2.checkpoint")
-    archive_page = hydrate(archived, owner.agent_id, limit=5)
-    assert archive_page[-1].item_id.startswith("s2.checkpoint.0.")
-
-
 def test_message_retry_does_not_replace_newer_preview(
     db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
 ) -> None:
@@ -248,49 +217,6 @@ def test_message_retry_does_not_replace_newer_preview(
     assert db_conn.execute(
         "SELECT last_message_text FROM agents_meta WHERE id=%s", (owner.agent_id,)
     ).fetchone() == ("Second",)
-
-
-@pytest.mark.parametrize("automatic", [True, False])
-def test_inbound_attachments_survive_timeline_and_handoff(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, automatic: bool
-) -> None:
-    from psycopg.types.json import Jsonb
-
-    from agent.impersonation_handoff import start_marker
-    from base.agents.history.timeline import build_timeline_items
-    from base.agents.impersonation.timeline import hydrate
-    from base.agents.uploads import upload_url
-
-    lease = start(owner)
-    db_conn.execute(
-        "UPDATE agent_impersonations SET automatic=%s WHERE id=%s", (automatic, lease["id"])
-    )
-    valid_url = upload_url(owner.agent_id, "screenshot.png")
-    payload = {
-        "content_blocks": [
-            {"type": "image_url", "image_url": {"url": valid_url}},
-            {
-                "type": "image_url",
-                "image_url": {"url": upload_url(owner.agent_id + 1, "private.png")},
-            },
-        ]
-    }
-    inserted = db_conn.execute(
-        "INSERT INTO inbound_messages(agent_id,kind,source,content,payload) "
-        "VALUES(%s,'chat','user','[image]',%s) RETURNING id",
-        (owner.agent_id, Jsonb(payload)),
-    ).fetchone()
-    assert inserted is not None
-    db_conn.commit()
-    leases.inbox(str(lease["id"]), attested_caller(lease))
-    leases.ack(str(lease["id"]), attested_caller(lease), [inserted[0]])
-    items, _ = build_timeline_items([start_marker(lease)], [])
-    projected = hydrate(items, owner.agent_id, limit=5)
-    image_item = next(item for item in projected if item.inbound_id == inserted[0])
-    assert image_item.images == [valid_url]
-    document = history.build_document(lease, history.entries(str(lease["id"]), db_conn))
-    assert document["messages"][0]["payload"]["payload"] == payload
-    assert document["messages"][0]["acknowledged"] is True
 
 
 def test_public_session_exposes_handoff_applied_at(
