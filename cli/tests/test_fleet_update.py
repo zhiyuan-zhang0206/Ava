@@ -3,12 +3,14 @@ production's order: no gateway stop/start while a runner runs, no runner start w
 
 from __future__ import annotations
 
+import argparse
 import ast
 import json
 import plistlib
 import re
 import shlex
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -448,3 +450,46 @@ def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
         "stopped",
         {"argv": '["sh", "-c", "\\$HOME\\n"]'},
     )
+
+
+@pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
+def test_the_machine_name_is_asked_through_the_hosts_real_shell(
+    shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The roster program ends in `python -` (the script arrives on stdin); a `-c` question
+    appended to it ran `python - -c ...`, which read an empty stdin and printed nothing, so
+    `up` died on an empty answer. The command string runs here in a real shell, against a
+    `python` that behaves as the host's does."""
+    if not Path(shell).exists():
+        pytest.skip(f"{shell} is not installed")
+    source = tmp_path / ".ava" / "source"
+    (source / "base" / "cluster").mkdir(parents=True)
+    for package in (source / "base", source / "base" / "cluster"):
+        (package / "__init__.py").write_text("")
+    (source / "base" / "cluster" / "machine.py").write_text(
+        'def machine_name() -> str:\n    return "mac-mini"\n'
+    )
+    python = source / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    def ssh(_alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
+        return _run_locally(shell, command, stdin, emit)
+
+    monkeypatch.setattr(fleet_update, "ssh", ssh)
+    args = argparse.Namespace(dry_run=False, log_dir=tmp_path / "logs", half="up")
+
+    names = fleet_update._machine_names(fleet_update.Session(args), ["mac"])
+
+    assert names == {"mac": "mac-mini"}
+
+
+def _run_locally(shell: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
+    done = subprocess.run(  # noqa: S603
+        [shell, "-c", command], input=stdin or "", capture_output=True, text=True, check=False
+    )
+    for line in done.stdout.splitlines():
+        emit(line)
+    return done.returncode
