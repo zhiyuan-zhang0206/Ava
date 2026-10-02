@@ -21,6 +21,5 @@ mounted in `gateway/app.py`: `router`, `lifecycle`, `state`, `timeline`,
                               (also used by the events, memory, run-timeline and tasks reads)
   - `context_breakdown.py` — context-window breakdown view logic over checkpoint messages
   - `completion_notice_flusher.py` — hourly completion-notice digest delivery (lifespan task)
-  - `max_id_gauge.py`      — agent-registry max-id growth gauge (lifespan task)
   - `schemas.py`           — the surface's wire models
 """

@@ -366,6 +366,9 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
         received["resolution"] = progress
         configs.append(config)
 
+    async def gauge(_pool: object, progress: LoopProgress) -> None:
+        received["registry_gauge"] = progress
+
     def fake_health_port(_name: str) -> int:
         return 8109
 
@@ -378,6 +381,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     monkeypatch.setattr(daemon.base.db, "pool", lambda: pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", dispatch)
     monkeypatch.setattr(daemon, "_resolution_loop", resolution)
+    monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", gauge)
 
     asyncio.run(asyncio.wait_for(daemon.run(), timeout=2.0))
 
@@ -389,10 +393,62 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     assert [record["name"] for record in health_components[0]()] == [
         "dispatch",
         "resolution",
+        "registry_gauge",
     ]
-    assert len({id(progress) for progress in received.values()}) == 2
+    assert len({id(progress) for progress in received.values()}) == 3
     # The root builds the slice once and both loops share it.
     assert len(configs) == 2 and configs[0] is configs[1]
     assert configs[0] == events_maintenance_config()
     assert received["dispatch"].timeout_s == 1500.0
     assert received["resolution"].timeout_s == 600.0
+    assert received["registry_gauge"].timeout_s == 180.0
+
+
+@pytest.mark.parametrize("crashing", ["dispatch", "resolution", "registry_gauge"])
+def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
+    monkeypatch: pytest.MonkeyPatch, crashing: str
+) -> None:
+    """The three loops share one TaskGroup: one that raises cancels the others and
+    `run` leaves with the error, so the supervisor restarts the service."""
+    cancelled: list[str] = []
+    closed: list[str] = []
+
+    class _RunPool:
+        def close(self) -> None:
+            closed.append("pool")
+
+    def loop(name: str) -> Callable[..., Any]:
+        async def run_loop(*_args: object) -> None:
+            if name == crashing:
+                await asyncio.sleep(0.01)
+                raise RuntimeError(f"{name} crashed")
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.append(name)
+                raise
+
+        return run_loop
+
+    async def fake_start(_name: str, **_kw: object) -> object:
+        return object()
+
+    async def fake_stop(_server: object) -> None:
+        closed.append("health")
+
+    monkeypatch.setattr(daemon, "_is_running", lambda: False)
+    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: closed.append("pidfile"))
+    monkeypatch.setattr(daemon, "start_health_server", fake_start)
+    monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
+    monkeypatch.setattr(daemon.base.db, "pool", _RunPool)
+    monkeypatch.setattr(daemon, "_dispatch_loop", loop("dispatch"))
+    monkeypatch.setattr(daemon, "_resolution_loop", loop("resolution"))
+    monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", loop("registry_gauge"))
+
+    with pytest.raises(ExceptionGroup) as raised:
+        asyncio.run(asyncio.wait_for(daemon.run(), timeout=5.0))
+
+    assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} crashed"]
+    assert sorted(cancelled) == sorted({"dispatch", "resolution", "registry_gauge"} - {crashing})
+    assert sorted(closed) == ["health", "pidfile", "pool"]
