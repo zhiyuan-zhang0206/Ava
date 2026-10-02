@@ -14,8 +14,8 @@ template for the requested agent, re-validate the rendered query (the metric
 specs are repo code, but the re-validation still defends the execution path
 end to end), substitute the Grafana time macros with a fixed recent window
 (the templates are written for Grafana's query-time injection; the inspector
-has no dashboard time range), and execute the query — LogQL against Loki,
-SQL read-only against the cluster's own Postgres. One `PluginMetricResult`
+has no dashboard time range), and execute the query — LogQL templates evaluated
+on the cluster's own Postgres (`gateway/inspect/_event_metrics.py`), SQL read-only. One `PluginMetricResult`
 per metric; a metric whose query fails at execution time carries an `error`
 field instead of failing the whole request, while registry-level problems
 (a template failing the safety re-validation -> 500, `{{agent_id}}` template
@@ -30,7 +30,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, LiteralString, cast
 
-import httpx
 import psycopg
 from fastapi import HTTPException
 from psycopg import Connection, Cursor
@@ -48,8 +47,8 @@ from base.telemetry.metrics.plugin_metrics import (
     render_title,
     validate_metric_sql,
 )
+from gateway.inspect import _event_metrics
 from gateway.inspect.schemas import MetricPoint, PluginMetricResult
-from gateway.lgtm import loki_events, loki_query_budget
 
 # The shipped-plugin metrics directory — every plugin dir with a metrics.py is
 # part of the in-process registry (the generator's import set, task #180 PR D).
@@ -84,8 +83,8 @@ _MACRO_TIMEGROUP = (
 _MACRO_TIMEFILTER = f"ts >= now() - interval '{_INSPECTOR_WINDOW_HOURS} hours'"
 _MACRO_INTERVAL = f"interval '{_INSPECTOR_BUCKET}'"
 _MACRO_INTERVAL_MS = str(3600 * 1000)  # 1 hour in ms
-# Loki range-vector window for the same bucket — Go duration syntax ("1 hour"
-# is not parseable by Loki's duration parser).
+# Range-vector window for the same bucket in LogQL duration syntax ("1 hour"
+# is not a LogQL duration).
 _MACRO_INTERVAL_LOKI = "1h"
 _MACRO_RANGE_LOKI = f"{_INSPECTOR_WINDOW_HOURS}h"
 
@@ -229,7 +228,7 @@ def _execute_metric(
         panel=spec.panel,
     )
     if spec.query_type == "logql":
-        return _execute_metric_logql(spec, query)
+        return _execute_metric_logql(conn, spec, query)
     try:
         with conn.transaction():
             # The query is the rendered + re-validated template (see
@@ -256,16 +255,17 @@ def _execute_metric(
     return base.model_copy(update={"series": series})
 
 
-def _execute_metric_logql(spec: MetricSpec, query: str) -> PluginMetricResult:
-    """Run one rendered LogQL query against Loki and fold the series into a
-    PluginMetricResult (task #1280).
+def _execute_metric_logql(
+    conn: Connection[Any], spec: MetricSpec, query: str
+) -> PluginMetricResult:
+    """Evaluate one rendered LogQL template on the event record and fold the points into a
+    PluginMetricResult.
 
-    The query's $__interval/$__range macros were already translated to the
-    inspector's fixed window, so the window here is now - 24h .. now with 1h
-    steps (the range-vector windows align with the steps, giving
-    non-overlapping hourly buckets). Loki failures (transport, status,
-    unparseable payload) land in the result's `error` field like a SQL
-    execution failure — the sibling metrics still render.
+    The query's $__interval/$__range macros were already translated to the inspector's fixed
+    window, so the window here is now - 24h .. now with 1h steps (each range-vector window
+    ends at its step). A template outside the evaluator's vocabulary or a failing statement
+    lands in the result's `error` field like a SQL execution failure — the sibling metrics
+    still render.
     """
     base = PluginMetricResult(
         name=spec.name,
@@ -275,31 +275,23 @@ def _execute_metric_logql(spec: MetricSpec, query: str) -> PluginMetricResult:
         unit=spec.unit,
         panel=spec.panel,
     )
+    stop = datetime.now(UTC)
     try:
-        points = loki_events.metric_range(
-            query,
-            from_=datetime.now(UTC) - timedelta(hours=_INSPECTOR_WINDOW_HOURS),
-            to=datetime.now(UTC),
-            step_s=3600,
-        )
-    except loki_query_budget.LokiQueryBudgetError:
-        # Local capacity saturation applies to the endpoint, not this metric;
-        # preserve the typed 503 instead of burying it in a 200 error row.
-        raise
-    except (httpx.HTTPError, ValueError) as exc:
+        with conn.transaction():
+            points = _event_metrics.points(
+                conn, query, stop - timedelta(hours=_INSPECTOR_WINDOW_HOURS), stop, 3600
+            )
+    except (_event_metrics.UnsupportedQueryError, psycopg.Error) as exc:
         return base.model_copy(update={"error": f"query failed: {exc}"})
     if spec.panel == "stat":
         return base.model_copy(update={"value": points[-1][1] if points else None})
-    series = [MetricPoint(ts=datetime.fromisoformat(ts), value=v) for ts, v in points]
-    return base.model_copy(update={"series": series})
+    return base.model_copy(update={"series": [MetricPoint(ts=ts, value=v) for ts, v in points]})
 
 
 def metrics_for_agent(pool: ConnectionPool[Any], agent_id: int) -> list[PluginMetricResult]:
     """Sync twin of the metrics endpoint — runs via asyncio.to_thread.
 
-    SQL metrics share one read-only transaction. LogQL metrics execute only
-    after that connection returns to the pool: waiting for the global Loki
-    budget or for Loki itself must never consume a scarce Postgres slot.
+    Every metric, SQL or LogQL, shares one read-only transaction.
 
     Read-only is enforced server-side per transaction (`SET TRANSACTION READ
     ONLY` as the FIRST statement — a requirement of the command), NOT via
@@ -308,22 +300,15 @@ def metrics_for_agent(pool: ConnectionPool[Any], agent_id: int) -> list[PluginMe
     inherit a read-only session and its writes would fail. The SET TRANSACTION
     form leaves nothing behind when the transaction rolls back."""
     specs = [s for s in _load_plugin_metrics() if "inspector" in s.output]
-    results: dict[int, PluginMetricResult] = {}
-    deferred_logql: list[tuple[int, MetricSpec, str]] = []
+    results: list[PluginMetricResult] = []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SET TRANSACTION READ ONLY")
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        for index, spec in enumerate(specs):
+        for spec in specs:
             query = _translate_macros(
                 _render_metric_query(spec, agent_id), logql=spec.query_type == "logql"
             )
-            if spec.query_type == "logql":
-                deferred_logql.append((index, spec, query))
-            else:
-                results[index] = _execute_metric(conn, cur, spec, query)
-
-    for index, spec, query in deferred_logql:
-        results[index] = _execute_metric_logql(spec, query)
-    return [results[index] for index in range(len(specs))]
+            results.append(_execute_metric(conn, cur, spec, query))
+    return results

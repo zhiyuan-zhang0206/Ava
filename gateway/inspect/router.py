@@ -281,11 +281,9 @@ def get_agent_neighbors(
     the immutable born_spawner chain to the top (message ties never form
     ancestors), each row's `depth` = hops up (1 = the direct birth parent).
     Terminated agents are included (each row carries `status`); `limit` caps
-    the neighbor count, strongest first. The tie graph reads the unified event
-    stream (task #180 LGTM cutover): audit edge events stitch the frozen PG
-    `events` archive with the Loki live tail and the walks run in Python
-    (gateway/inspect/neighbors.py) — the retired `agent_neighbors` SQL function died
-    with the frozen table it read.
+    the neighbor count, strongest first. The tie graph reads the audit
+    record: edge events are aggregated from `audit_events` and the walks run in
+    Python (gateway/inspect/neighbors.py).
 
     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
     """
@@ -353,8 +351,8 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
     `output` includes "inspector", renders each template for this agent
     ({{agent_id}} -> ``agent_id = <n>``), re-validates the rendered query,
     substitutes the Grafana time macros with a fixed recent window (24h in 1h
-    buckets), and executes each query — LogQL against Loki, SQL read-only
-    against the cluster's Postgres.
+    buckets), and executes each query on the cluster's Postgres — LogQL
+    templates evaluated over `telemetry_events` / `audit_events`, SQL read-only.
 
     Response: one `PluginMetricResult` per registered inspector metric, in
     registration order. `timeseries` / `barchart` metrics carry `series`

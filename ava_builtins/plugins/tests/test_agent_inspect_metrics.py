@@ -17,10 +17,11 @@ per-agent filtering, stat vs series payloads, macro translation).
 from __future__ import annotations
 
 import importlib
+import json
 import sys
-from contextlib import contextmanager
+import uuid
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import psycopg
 import pytest
@@ -335,95 +336,44 @@ def _logql_metric(
     }
 
 
-class _FakeLokiResponse:
-    """httpx.Response stand-in carrying a Loki query_range payload."""
-
-    def __init__(self, payload: dict[str, Any]) -> None:
-        self._payload = payload
-
-    def raise_for_status(self) -> None:
-        pass
-
-    def json(self) -> dict[str, Any]:
-        return self._payload
+def _usage(db: psycopg.Connection, agent_id: int, cost: float, *, minutes_ago: float) -> None:
+    db.execute(
+        "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
+        "category, event_name, level, source, attributes) "
+        "VALUES (%s, now() - (%s * interval '1 minute'), %s, 'm', 'c', 'p', 'telemetry', "
+        "'llm_usage', 'info', 'test', %s::jsonb)",
+        (uuid.uuid4().int % (1 << 62), minutes_ago, agent_id, json.dumps({"cost_usd": cost})),
+    )
 
 
-def _client_accessor(client: object) -> Any:
-    """Named (typed) stand-in for `loki_events._client` so monkeypatched
-    lambdas don't trip pyright's partially-unknown-lambda rule."""
-
-    def _get() -> Any:
-        return client
-
-    return _get
-
-
-class _FakeLokiClient:
-    """Records the query it was asked to run and returns a fixed series."""
-
-    def __init__(self, payload: dict[str, Any]) -> None:
-        self.payload = payload
-        self.last_params: dict[str, Any] | None = None
-        self.last_url: str | None = None
-
-    def get(self, url: str, params: dict[str, Any]) -> _FakeLokiResponse:
-        self.last_url = url
-        self.last_params = params
-        return _FakeLokiResponse(self.payload)
-
-
-def _loki_payload(series: list[tuple[str, str]]) -> dict[str, Any]:
-    """One-result query_range payload (values as (ts_ns str, value str))."""
-    return {"status": "success", "data": {"result": [{"metric": {}, "values": series}]}}
-
-
-def test_metrics_logql_timeseries_via_loki(
+def test_metrics_logql_timeseries_is_answered_from_telemetry_events(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A logql inspector metric executes against Loki (query_range over the
-    fixed 24h window, 1h steps) instead of Postgres, and the series folds
-    into the same PluginMetricResult shape."""
-
-    from gateway.lgtm import loki_events
-
+    """A logql inspector metric is evaluated on Postgres over the fixed 24h window in 1h
+    steps (the range-vector window ends at each step), and folds into the same
+    PluginMetricResult shape. Another agent's rows stay out."""
     aid = _insert_agent(db_conn)
+    other = _insert_agent(db_conn, "other")
     _patch_loader(monkeypatch, _logql_metric())
+    _usage(db_conn, aid, 0.25, minutes_ago=30)
+    _usage(db_conn, aid, 0.5, minutes_ago=90)
+    _usage(db_conn, other, 9.0, minutes_ago=30)
     db_conn.commit()
-    fake = _FakeLokiClient(
-        _loki_payload(
-            [
-                ("1786726800", "0.1"),
-                ("1786730400", "0.2"),
-                ("1786734000", "0.3"),
-            ]
-        )
-    )
-    monkeypatch.setattr(loki_events, "_client", _client_accessor(fake))
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
     assert resp.status_code == 200
-    body = resp.json()
-    assert len(body) == 1
-    m = body[0]
+    [m] = resp.json()
     assert m["error"] is None and m["value"] is None
-    assert len(m["series"]) == 3
-    # query_range params: the fixed window with 1h steps
-    assert fake.last_params is not None
-    assert fake.last_params["step"] == "3600"
-    assert fake.last_url is not None and fake.last_url.endswith("/loki/api/v1/query_range")
-    # the rendered query carried the agent filter and the translated window
-    sent = fake.last_params["query"]
-    assert f'agent_id="{aid}"' in sent
-    assert "[1h]" in sent
-    assert "$__" not in sent
+    values = [point["value"] for point in m["series"]]
+    assert len(values) == 25  # 24 hours of hourly steps, both ends
+    assert sum(values) == pytest.approx(0.75)
+    assert sorted(v for v in values if v)[-1] == 0.5
 
 
-def test_metrics_logql_stat_via_loki(
+def test_metrics_logql_stat_is_the_last_step_over_the_whole_range(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A stat-shaped logql metric returns the last bucket as `value`."""
-    from gateway.lgtm import loki_events
-
+    """A stat-shaped logql metric returns the last step as `value`; `$__range` is 24h."""
     aid = _insert_agent(db_conn)
     _patch_loader(
         monkeypatch,
@@ -437,120 +387,43 @@ def test_metrics_logql_stat_via_loki(
             ),
         ),
     )
+    _usage(db_conn, aid, 0.25, minutes_ago=30)
+    _usage(db_conn, aid, 0.5, minutes_ago=600)
+    _usage(db_conn, aid, 4.0, minutes_ago=60 * 30)  # outside the 24h range
     db_conn.commit()
-    fake = _FakeLokiClient(_loki_payload([("1786726800", "0.1"), ("1786730400", "0.2")]))
-    monkeypatch.setattr(loki_events, "_client", _client_accessor(fake))
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
     assert resp.status_code == 200
     m = resp.json()[0]
     assert m["panel"] == "stat"
-    assert m["value"] == 0.2
+    assert m["value"] == pytest.approx(0.75)
     assert m["series"] == []
-    # $__range translated to the 24h instant window
-    assert "[24h]" in fake.last_params["query"]  # type: ignore[index]
 
 
-def test_metrics_logql_loki_failure_is_per_metric(
+def test_metrics_logql_outside_the_evaluator_vocabulary_is_per_metric(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A Loki error lands in the metric's `error` field; sibling SQL metrics
-    still render."""
-    from gateway.lgtm import loki_events
-
+    """A template the evaluator does not understand lands in the metric's `error` field;
+    sibling metrics still render."""
     aid = _insert_agent(db_conn)
     _patch_loader(
         monkeypatch,
-        _logql_metric(),
+        _logql_metric(
+            name="rate_query",
+            query=(
+                'rate({service_name="unknown_service", event_name={event_name}} | json | '
+                "category={category} [1h])"
+            ),
+        ),
         _metric(name="still_fine"),
     )
     db_conn.commit()
-
-    class _BrokenClient:
-        def get(self, url: str, params: dict[str, Any]) -> _FakeLokiResponse:
-            import httpx
-
-            raise httpx.ConnectError("loki down", request=httpx.Request("GET", "http://loki"))
-
-    monkeypatch.setattr(loki_events, "_client", _client_accessor(_BrokenClient()))
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
     assert resp.status_code == 200
-    body = resp.json()
-    assert [m["name"] for m in body] == ["agent_llm_cost", "still_fine"]
-    names = {m["name"]: m for m in body}
-    assert "query failed" in names["agent_llm_cost"]["error"]
-    assert names["still_fine"]["error"] is None
-
-
-@pytest.mark.parametrize("reason", ["queue_full", "acquire_timeout"])
-def test_metrics_logql_local_budget_rejection_is_503(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    reason: Literal["queue_full", "acquire_timeout"],
-) -> None:
-    """A local budget refusal is endpoint saturation, not a per-metric Loki error."""
-    from gateway.lgtm import loki_events, loki_query_budget
-
-    aid = _insert_agent(db_conn)
-    _patch_loader(monkeypatch, _logql_metric())
-    db_conn.commit()
-
-    def reject(*args: Any, **kwargs: Any) -> list[tuple[str, float]]:
-        raise loki_query_budget.LokiQueryBudgetError(reason)
-
-    monkeypatch.setattr(loki_events, "metric_range", reject)
-    with TestClient(app) as client:
-        response = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert response.status_code == 503
-    assert response.json()["detail"] == f"Loki query budget unavailable ({reason}); retry"
-    assert response.headers["retry-after"] == "1"
-
-
-def test_metrics_logql_releases_db_connection_before_waiting_for_loki(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A queued Loki query must not consume a scarce Postgres pool slot."""
-    from gateway.lgtm import loki_events
-
-    class TrackingCursor:
-        def execute(self, query: str, params: tuple[int] | None = None) -> None:
-            if query == "SET TRANSACTION READ ONLY":
-                assert params is None
-                return
-            assert query == "SELECT 1 FROM agents_meta WHERE id = %s"
-            assert params == (7,)
-
-        def fetchone(self) -> tuple[int]:
-            return (1,)
-
-    class TrackingConnection:
-        @contextmanager
-        def cursor(self) -> Any:
-            yield TrackingCursor()
-
-    class TrackingPool:
-        active = False
-
-        @contextmanager
-        def connection(self) -> Any:
-            self.active = True
-            try:
-                yield TrackingConnection()
-            finally:
-                self.active = False
-
-    pool = TrackingPool()
-    _patch_loader(monkeypatch, _logql_metric())
-
-    def metric_range(*args: Any, **kwargs: Any) -> list[tuple[str, float]]:
-        assert not pool.active
-        return []
-
-    monkeypatch.setattr(loki_events, "metric_range", metric_range)
-    result = _plugin_metrics.metrics_for_agent(pool, 7)  # type: ignore[arg-type]
-    assert len(result) == 1
-    assert result[0].error is None
+    body = {m["name"]: m for m in resp.json()}
+    assert "query failed" in body["rate_query"]["error"]
+    assert body["still_fine"]["error"] is None
 
 
 def test_metrics_logql_tampered_query_500(
@@ -574,8 +447,8 @@ def test_metrics_logql_tampered_query_500(
 
 
 def test_metrics_logql_macro_translation_unit() -> None:
-    """LogQL macros translate to the fixed Loki window: $__interval -> 1h
-    (Go duration syntax — '1 hour' is not parseable), $__range -> 24h."""
+    """LogQL macros translate to the fixed window: $__interval -> 1h
+    (LogQL duration syntax — '1 hour' is not a duration), $__range -> 24h."""
     translated = _translate_macros(
         'sum(count_over_time({service_name="unknown_service"} | json | '
         'event_name="x" [$__interval])) + sum(sum_over_time({service_name="unknown_service"} | json | '
