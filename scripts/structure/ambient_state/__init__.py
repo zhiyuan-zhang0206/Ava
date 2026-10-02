@@ -21,6 +21,8 @@ scripts/structure/baseline/ shards as `path::rule:name -> site count`. The rule 
 - database and bundle wiring: `ambient-db` (a package in `allowlist.DB_HANDLE_PACKAGES` dials
   from the live settings instead of taking a `Database`, see `dbhandle.py`) and `bundle-leak` (a
   `@root_bundle` class named outside its defining module, see `bundle.py`);
+- `ambient-clock`: a package in `allowlist.CLOCK_PACKAGES` builds the cluster clock
+  (`Clock.from_settings()`) outside the roots named for it;
 - `ambient-bus`: a package in `allowlist.BUS_PACKAGES` builds the event bus
   (`EventBus.from_settings()`) outside the roots named for it;
 - `ambient-endpoint`: a package in `allowlist.ENDPOINT_PACKAGES` builds the endpoint table
@@ -53,6 +55,7 @@ from scripts.structure.ambient_state import allowlist as allow
 from scripts.structure.ambient_state import (
     bundle,
     busrule,
+    clockrule,
     dbhandle,
     endpointrule,
     scan,
@@ -91,6 +94,7 @@ _FIXES: dict[str, str] = {
     scan.CACHE: "a memoized function is state unless it is pure — a pure derivation goes in ALLOWED in scripts/structure/ambient_state/allowlist.py with a reason",
     scan.CALL: "a call that runs at import (a registry fill or side effect) — register from a composition root, not at import",
     dbhandle.AMBIENT_DB: f"an ambient database dial in a package that holds a Database handle — {dbhandle.FIX}",
+    clockrule.AMBIENT_CLOCK: f"the cluster clock built outside a root — {clockrule.FIX}",
     busrule.AMBIENT_BUS: f"the event bus built outside a root — {busrule.FIX}",
     endpointrule.AMBIENT_ENDPOINT: f"the endpoint table built outside a root — {endpointrule.FIX}",
     bundle.BUNDLE_LEAK: f"a root bundle named outside its composition root — {bundle.FIX}",
@@ -133,6 +137,7 @@ def _hits(tree: ast.Module, rel: str, repo_root: Path) -> list[scan.Hit]:
         *dbhandle.hits(tree, rel),
         *endpointrule.hits(tree, rel),
         *busrule.hits(tree, rel),
+        *clockrule.hits(tree, rel),
         *bundle.hits(tree, repo_root),
     ]
 
@@ -212,6 +217,7 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
         ("DB_HANDLE_PACKAGES", allow.DB_HANDLE_PACKAGES),
         ("ENDPOINT_PACKAGES", allow.ENDPOINT_PACKAGES),
         ("BUS_PACKAGES", allow.BUS_PACKAGES),
+        ("CLOCK_PACKAGES", allow.CLOCK_PACKAGES),
     ):
         errors += _missing_roots(repo_root, table, registry)
     for callee in sorted(allow.PURE_REPO_CALLEES):

@@ -9,6 +9,7 @@ joins by adding its own file, and a moved or deleted package carries its declara
     db = ["daemon.py"]         # the only modules here that may call `Database.from_settings()`
     endpoints = ["daemon.py"]  # the only modules here that may call `ServiceEndpoints.from_settings()`
     bus = ["daemon.py"]        # the only modules here that may call `EventBus.from_settings()`
+    clock = ["daemon.py"]      # the only modules here that may call `Clock.from_settings()`
     bus = []                   # a package that takes the handle and builds none (not for `settings`)
 """
 
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import cast
 
 ROOTS_FILE = "ambient_roots.toml"
-KINDS = frozenset({"settings", "db", "endpoints", "bus"})
+KINDS = frozenset({"settings", "db", "endpoints", "bus", "clock"})
 _SKIPPED_DIRS = frozenset({"node_modules", "__pycache__"})
 
 
