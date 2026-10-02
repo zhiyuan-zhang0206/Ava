@@ -26,6 +26,8 @@ from datetime import datetime
 
 import psutil
 
+from base import telemetry
+from base.cluster import postgres as owned_postgres
 from base.cluster.machine import machine_name
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.paths import run_dir
@@ -519,6 +521,36 @@ def stop_services(
     if not keep_terminals:
         require_no_terminals()
     return selected_names
+
+
+def report_postgres_stop_escalation(
+    escalation: owned_postgres.Escalation, notes: list[str] | None = None
+) -> None:
+    """Report a Postgres shutdown that had to be ended by an immediate one.
+
+    The owner (`base.cluster.postgres`) logs the escalation; this adds the
+    operator line and the `postgres_stop_escalated` event. `notes`, when the
+    caller owns a stop journal, collects the line for it
+    (`_temporary_stop._finish_stop`); a leg that owns no journal passes
+    nothing and still gets stderr and the event
+    (decisions/2026-10-02-pg-stop-escalates-to-immediate.md).
+    """
+    killed = ", ".join(str(pid) for pid in escalation.killed) or "none"
+    note = (
+        f"postgres {escalation.detail}; ended by an immediate shutdown "
+        f"(crash recovery at the next start; unarchived WAL stays in pg_wal), "
+        f"killed leftover processes: {killed}"
+    )
+    print(f"  ! {note}", file=sys.stderr, flush=True)
+    telemetry.emit(
+        "telemetry",
+        "postgres_stop_escalated",
+        level="error",
+        source="stop",
+        attributes={"detail": escalation.detail, "killed": list(escalation.killed)},
+    )
+    if notes is not None:
+        notes.append(note)
 
 
 def stop_data_plane(

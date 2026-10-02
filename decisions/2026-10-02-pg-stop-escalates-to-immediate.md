@@ -53,3 +53,15 @@ wal-g is killed.
   wal-g would die with it.
 - **Raise the 300 s deadline.** A hung wal-g never returns; a longer deadline only
   postpones the same failure.
+
+## Follow-up (2026-10-02): the cluster-instance legs report too
+
+The loud surfaces are the same on every leg that can end a Postgres shutdown: the
+owner's error log, a stderr line at the moment of escalation, and the
+`postgres_stop_escalated` event (level error). Which stop a leg belongs to decides
+only the journal: an `escalations` entry needs a stop that owns a lifecycle journal
+(`ava stop` through `_temporary_stop`, the maintenance stop). The two cluster-instance
+legs — `ava stop --force` and `ava cluster instance stop`, both through
+`stop_cluster_instance` — own no journal, so none is fabricated; they report through
+the same helper (`cli/commands/lifecycle/service_stop.report_postgres_stop_escalation`)
+and get stderr, the event and the owner's error log too. No leg is silent.

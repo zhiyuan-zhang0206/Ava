@@ -96,7 +96,7 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     def emit(_stream: str, kind: str, **fields: object) -> None:
         events.append((kind, fields))
 
-    monkeypatch.setattr(plane.telemetry, "emit", emit)
+    monkeypatch.setattr("base.telemetry.emit", emit)
     notes: list[str] = []
     try:
         assert instance._start_pg(port, "") == 0
