@@ -23,7 +23,7 @@ def spawn_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     calls: dict[str, object] = {}
 
     async def _fake_create_launch(
-        body: SpawnAgentRequest, target: str, pool: object, bus: object
+        body: SpawnAgentRequest, target: str, pool: object, db: object, bus: object
     ) -> SpawnedAgent:
         calls["label"] = body.label
         calls["prompt"] = body.prompt
