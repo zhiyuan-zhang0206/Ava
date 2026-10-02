@@ -110,7 +110,7 @@ class _Exited(BaseException):
         self.code = code
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _gated_process(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """A gated process at a fixed version whose `os._exit` is observable.
 
@@ -135,6 +135,10 @@ def _gated_process(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     monkeypatch.setattr(code_version, "_db_gate_exempt", False)
     monkeypatch.setattr(gate, "_last_read_at", None)
     return exits
+
+
+# every test here runs as a gated process, as the fixture was autouse
+pytestmark = pytest.mark.usefixtures("_gated_process")
 
 
 def _clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
