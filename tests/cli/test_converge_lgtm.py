@@ -184,6 +184,11 @@ def _assert_rendered_provisioning(
     assert "{{" not in contact_text
 
 
+def _assert_contains(text: str, *needles: str) -> None:
+    for needle in needles:
+        assert needle in text
+
+
 def test_native_grafana_renders_from_the_repo_and_host_setting(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -205,18 +210,23 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     run_script = (native_dir / "grafana/run.sh").read_text(encoding="utf-8")
     prometheus = yaml.safe_load((native_dir / "config/prometheus.yml").read_text(encoding="utf-8"))
 
-    assert "{{" not in grafana_ini
-    assert "{{" not in runtime_env
-    assert "{{" not in run_script
-    assert f"GRAFANA_PROVISIONING_PATH={native_dir}/config/provisioning/dashboards" in runtime_env
-    assert "AVA_TELEMETRY_TEMPO_QUERY_URL=http://tempo.test:3200" in runtime_env
-    assert "admin_password" in run_script
-    assert 'export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://localhost:3003}"' in run_script
-    assert f"{repo}/deploy/lgtm/.env" in run_script
-    assert f"{native_dir}/config/runtime.env" in run_script
-    assert str(native_dir / "grafana-home/bin/grafana") in run_script
-    assert str(native_dir / "config/grafana.ini") in run_script
-    assert str(native_dir / "grafana-home") in run_script
+    for text in (grafana_ini, runtime_env, run_script):
+        assert "{{" not in text
+    _assert_contains(
+        runtime_env,
+        f"GRAFANA_PROVISIONING_PATH={native_dir}/config/provisioning/dashboards",
+        "AVA_TELEMETRY_TEMPO_QUERY_URL=http://tempo.test:3200",
+    )
+    _assert_contains(
+        run_script,
+        "admin_password",
+        'export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://localhost:3003}"',
+        f"{repo}/deploy/lgtm/.env",
+        f"{native_dir}/config/runtime.env",
+        str(native_dir / "grafana-home/bin/grafana"),
+        str(native_dir / "config/grafana.ini"),
+        str(native_dir / "grafana-home"),
+    )
     assert {
         job["job_name"]: job["static_configs"][0]["targets"] for job in prometheus["scrape_configs"]
     }["tempo"] == ["tempo.test:3200"]
@@ -227,11 +237,13 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     template = (
         repo / "deploy/lgtm/config/grafana/provisioning/datasources/datasources.yml"
     ).read_text(encoding="utf-8")
-    assert "$__env{AVA_TELEMETRY_LOKI_URL}" in template
-    assert "$__env{AVA_TELEMETRY_PROMETHEUS_URL}" in template
-    assert "$__env{AVA_PG_URL}" in template
-    assert "$__env{AVA_TELEMETRY_TEMPO_QUERY_URL}" in template
-    assert "{{" not in template
+    _assert_contains(
+        template,
+        "$__env{AVA_TELEMETRY_LOKI_URL}",
+        "$__env{AVA_TELEMETRY_PROMETHEUS_URL}",
+        "$__env{AVA_PG_URL}",
+        "$__env{AVA_TELEMETRY_TEMPO_QUERY_URL}",
+    )
     # The rendered provisioning tree keeps the $__env{} references verbatim;
     # the two-state VALUES are baked into runtime.env (Grafana expands at
     # runtime from its process env).
@@ -239,12 +251,16 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
         native_dir / "config/provisioning/datasources/datasources.yml"
     ).read_text(encoding="utf-8")
     assert "$__env{AVA_TELEMETRY_LOKI_URL}" in rendered_datasources
-    assert "{{" not in rendered_datasources
+    for text in (template, rendered_datasources):
+        assert "{{" not in text
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
-    assert "AVA_TELEMETRY_LOKI_URL=http://127.0.0.1:3100" in rendered_runtime_env
-    assert "AVA_TELEMETRY_PROMETHEUS_URL=http://127.0.0.1:9090" in rendered_runtime_env
-    assert "AVA_PG_URL=127.0.0.1:5433" in rendered_runtime_env
-    assert "AVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts" in rendered_runtime_env
+    _assert_contains(
+        rendered_runtime_env,
+        "AVA_TELEMETRY_LOKI_URL=http://127.0.0.1:3100",
+        "AVA_TELEMETRY_PROMETHEUS_URL=http://127.0.0.1:9090",
+        "AVA_PG_URL=127.0.0.1:5433",
+        "AVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts",
+    )
     _assert_rendered_provisioning(native_dir, loki="$__env{AVA_TELEMETRY_LOKI_URL}")
 
 

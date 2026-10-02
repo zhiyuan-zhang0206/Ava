@@ -1,6 +1,5 @@
 {
   "complexity": {
-    "tests/cli/test_converge_lgtm.py::test_native_grafana_renders_from_the_repo_and_host_setting": 25,
     "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17
   },
   "patch_targets": {
