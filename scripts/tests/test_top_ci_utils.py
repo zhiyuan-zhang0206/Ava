@@ -21,7 +21,11 @@ from typing import Any, cast
 
 import pytest
 
-_MOD_PATH = Path(__file__).resolve().parents[1] / "scripts" / "ci_utils.py"
+# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
+# pyright: reportUnknownMemberType = warning
+# pyright: reportUnknownArgumentType = warning
+
+_MOD_PATH = Path(__file__).resolve().parents[2] / "scripts" / "ci_utils.py"
 _MOD_NAME = "ci_utils_under_test"
 _spec = importlib.util.spec_from_file_location(_MOD_NAME, _MOD_PATH)
 assert _spec and _spec.loader

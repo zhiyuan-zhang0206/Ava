@@ -77,7 +77,7 @@ _TREE_SCAN_TESTS = frozenset(
     {
         "scripts/ci/tests/test_ci_job_rerun.py",
         "tests/test_ci_rerun_workflow.py",
-        "tests/test_ci_utils.py",
+        "scripts/tests/test_top_ci_utils.py",
         "tests/test_db_check_enum_sync.py",
         "tests/test_pool_keepalives.py",
         "tests/test_env_guard_canary.py",

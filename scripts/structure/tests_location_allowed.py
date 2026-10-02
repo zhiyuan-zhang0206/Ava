@@ -326,6 +326,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "tests schedules/dev-ci-metrics-schedule.py",
     ),
+    "tests/scripts/structure/test_lint_common_contract.py": (
+        "contract",
+        "the framework directory list of scripts/structure/lint_common.py equals the packages pyproject.toml declares",
+    ),
     "tests/scripts/structure/test_placement_contract.py": (
         "contract",
         "scans the tests of every tool under scripts/ for the home of their sample trees",
@@ -337,6 +341,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/scripts/test_alert_rules_backup_custody.py": (
         "contract",
         "validates the backup-custody rules of deploy/lgtm/config/grafana/provisioning/alerting/rules.yml",
+    ),
+    "tests/scripts/test_audit_branch_protection_contract.py": (
+        "contract",
+        "the branch-protection audit accepts the real .trunk/trunk.yaml declaration of the full gate",
     ),
     "tests/scripts/test_ci_artifact_policy.py": (
         "contract",
@@ -473,6 +481,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/test_lint_event_kinds.py": (
         "contract",
         "scans every production module against the event registry",
+    ),
+    "tests/test_lint_fixture_scope_contract.py": (
+        "contract",
+        "the fixture-scope lint reads the real tests/e2e/conftest.py: flags it in its pre-fix shape and when its package init is deleted, and matches its fixture body's env keys",
     ),
     "tests/test_lint_marker_contract.py": (
         "contract",
