@@ -189,6 +189,7 @@ Five axes, one fact per place: `*.ava.okf.md` in each package's `docs/` = what t
 | Understand part of the codebase interactively | [`ava_builtins/skills/ava-workflow/calibrate/SKILL.md`](ava_builtins/skills/ava-workflow/calibrate/SKILL.md) |
 | Find every reference before changing or moving something | `.venv/bin/python scripts/audit/where_used.py TARGET` (`pkg.mod:name`, `pkg.mod` or a path): importers, tests, patch targets, docs, baselines in one call; after a move, `scripts/audit/module_moves.py OLD=NEW` |
 | Follow coding conventions | [`conventions/python-conventions.md`](conventions/python-conventions.md) |
+| Know which layer may import which | [`conventions/import-layering.md`](conventions/import-layering.md) |
 | Write SDK docstrings | [`conventions/sdk-docstring-discipline.md`](conventions/sdk-docstring-discipline.md) |
 | Maintain docs | [`conventions/doc-maintenance.md`](conventions/doc-maintenance.md) |
 | Know what NOT to do | [`conventions/non-goals.md`](conventions/non-goals.md) |
@@ -232,7 +233,6 @@ rule 4's ask-first loop is [workflow align](ava_builtins/skills/ava-workflow/ali
 - No `if TYPE_CHECKING:` (lint-enforced). Exceptions in `_TYPE_CHECKING_ALLOWED`.
 - Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; function cc <15 (10–14 warn), nesting ≤5; packages + tests/scripts, frozen shrink-only baseline. Locality: no `_`-private import from outside its owning package; single-owner decisions (Postgres dial → `base/db/connections.py`); no path imports under `ava_builtins/` (a within-skill `__file__` guard excepted); inject what is read to decide, write-only facades may stay global, background work is a service loop, never a free-floating `create_task` — all frozen in the same baseline.
 - No `print()` in framework code (use `base.log.logger`); no decorative emoji in core Python.
-- Import layering: `base < ava < agent < gateway < cli`.
 [Full conventions →](conventions/python-conventions.md)
 
 ## Communicating with the user
