@@ -9,7 +9,7 @@
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 49
+    "tests/base": 46
   },
   "files": {
     "tests/base/test_config.py": 1705,
@@ -38,7 +38,6 @@
   },
   "tests_location": {
     "tests/base/test_bare_ava.py::top-level": 1,
-    "tests/base/test_boot_unit.py::top-level": 1,
     "tests/base/test_bootstrap_fetch.py::top-level": 1,
     "tests/base/test_builtin_schedules.py::top-level": 1,
     "tests/base/test_config.py::top-level": 1,
@@ -57,9 +56,7 @@
     "tests/base/test_history.py::top-level": 1,
     "tests/base/test_impersonation_review.py::top-level": 1,
     "tests/base/test_kwargs.py::top-level": 1,
-    "tests/base/test_logs_job.py::top-level": 1,
     "tests/base/test_no_secrets_on_argv.py::top-level": 1,
-    "tests/base/test_packages_job.py::top-level": 1,
     "tests/base/test_pg_owner_authority.py::top-level": 1,
     "tests/base/test_pg_runtime.py::top-level": 1,
     "tests/base/test_poll_until.py::top-level": 1,
