@@ -115,6 +115,7 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 
 _log = logging.getLogger("services.delivery_watchdog.daemon")
 
+
 def _pidfile() -> Path:
     return pid_path("delivery_watchdog")
 
