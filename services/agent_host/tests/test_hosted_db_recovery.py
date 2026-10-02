@@ -31,7 +31,7 @@ from base.agents.observation import db_wait
 from base.agents.observation.db_wait import database_wait_snapshot
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
 from base.events.live.bus import EventBus
@@ -123,6 +123,7 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
             checkpointer=saver,
             graph=graph,
             bus=EventBus.from_settings(),
+            db=Database.from_settings(),
         )
         with bind_turn_identity(agent, incarnation=incarnation):
             async with control.connection():

@@ -16,6 +16,7 @@ from pydantic import SecretStr
 
 from base.agents import AgentStatus
 from base.config import settings
+from base.db import Database
 from base.events.live.bus import EventBus
 from gateway.agents.delivery import ChatDelivery
 from gateway.app import app
@@ -225,6 +226,7 @@ def test_terminated_author_successfully_resurrected_is_final_target(
     author = _seed_agent(db_conn, status=AgentStatus.TERMINATED)
 
     async def _resurrect(
+        _db: object,
         agent_id: int,
         **kwargs: object,
     ) -> AgentStatus:
@@ -269,7 +271,7 @@ def test_failed_resurrection_falls_back_to_nearest_live_delegator(
     delivered: list[int] = []
 
     async def _delivery(
-        _pool: object, _bus: object, agent_id: int, **kwargs: object
+        _pool: object, _db: object, _bus: object, agent_id: int, **kwargs: object
     ) -> ChatDelivery:
         delivered.append(agent_id)
         return ChatDelivery(
@@ -388,7 +390,7 @@ async def test_reconcile_delivers_stale_unfinished_event(
 
     assert (
         await work_failed_router.reconcile_stale_work_failures(
-            failure_pool, EventBus.from_settings()
+            failure_pool, Database.from_settings(), EventBus.from_settings()
         )
         == 1
     )
@@ -424,7 +426,7 @@ async def test_reconcile_cuts_a_wedged_delivery_and_goes_on_with_the_batch(
     )
 
     async def _delivery(
-        _pool: object, _bus: object, agent_id: int, *args: object, **kwargs: object
+        _pool: object, _db: object, _bus: object, agent_id: int, *args: object, **kwargs: object
     ) -> ChatDelivery:
         if agent_id == wedged_author:
             await asyncio.Event().wait()
@@ -435,7 +437,10 @@ async def test_reconcile_cuts_a_wedged_delivery_and_goes_on_with_the_batch(
     seen: list[None] = []
 
     completed = await work_failed_router.reconcile_stale_work_failures(
-        failure_pool, EventBus.from_settings(), on_event=lambda: seen.append(None)
+        failure_pool,
+        Database.from_settings(),
+        EventBus.from_settings(),
+        on_event=lambda: seen.append(None),
     )
 
     assert completed == 1
@@ -478,7 +483,7 @@ async def test_reconcile_sends_attempts_over_limit_directly_to_task_alert(
 
     assert (
         await work_failed_router.reconcile_stale_work_failures(
-            failure_pool, EventBus.from_settings()
+            failure_pool, Database.from_settings(), EventBus.from_settings()
         )
         == 1
     )
@@ -512,7 +517,7 @@ async def test_reconcile_leaves_events_inside_grace_window_untouched(
 
     assert (
         await work_failed_router.reconcile_stale_work_failures(
-            failure_pool, EventBus.from_settings()
+            failure_pool, Database.from_settings(), EventBus.from_settings()
         )
         == 0
     )
@@ -551,10 +556,20 @@ async def test_concurrent_delivery_cas_deduplicates_the_agent_inbound(
 
     results = await asyncio.gather(
         work_failed_router._deliver_failure(
-            failure_pool, EventBus.from_settings(), event_id, body, provenance
+            failure_pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            event_id,
+            body,
+            provenance,
         ),
         work_failed_router._deliver_failure(
-            failure_pool, EventBus.from_settings(), event_id, body, provenance
+            failure_pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            event_id,
+            body,
+            provenance,
         ),
     )
 

@@ -50,7 +50,7 @@ def test_deploy_window_tracks_episode_and_grades_after_it_ends(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _sent_alerts: list[dict[str, Any]]
 ) -> None:
     """A live deploy explains but does not erase an outage episode."""
-    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda **_k: _IN_FLIGHT)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda _db, **_k: _IN_FLIGHT)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
     monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
 
@@ -64,7 +64,7 @@ def test_deploy_window_tracks_episode_and_grades_after_it_ends(
     assert health.run_health_probe() == 1
     assert _sent_alerts == []
 
-    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda **_k: _IDLE)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda _db, **_k: _IDLE)  # pyright: ignore[reportUnknownArgumentType]
     assert health.run_health_probe() == 1
     assert [(edge["severity"], edge["starts_at"]) for edge in _sent_alerts] == [
         ("error", datetime.fromisoformat(state[-2]))
@@ -77,7 +77,7 @@ def test_an_unreadable_posture_table_does_not_suppress(
     """ "Cannot prove a deploy is running" must mean "assume none is" — a probe that
     goes quiet the moment its evidence source breaks is the failure it exists to
     catch."""
-    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda _db: [("win", "http://win:8600")])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("base.cluster.machine_exclusions.list_excluded_machines", list)
     monkeypatch.setattr(
         "base.deploy.state.host_deploy_state.read_all",

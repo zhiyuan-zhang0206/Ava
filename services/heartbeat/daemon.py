@@ -579,13 +579,15 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: LoopProgress) -> None:
             _log.exception("[heartbeat] poll iteration failed")
 
 
-async def _liveness_loop(pool: ConnectionPool, bus: EventBus, liveness: LoopProgress) -> None:
+async def _liveness_loop(
+    db: Database, pool: ConnectionPool, bus: EventBus, liveness: LoopProgress
+) -> None:
     """Run agent-liveness checks, the first at start so the roster read model is
     populated at once; a failed pass is retried on the next interval."""
     while True:
         try:
             if not admission.quiesced():
-                await run_liveness_pass(pool, bus)
+                await run_liveness_pass(db, pool, bus)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -611,7 +613,8 @@ async def run() -> None:
     health = await start_health_server("heartbeat", endpoint.health_port, liveness=liveness)
     _log.info("[heartbeat] healthz listening on :%s", endpoint.health_port)
 
-    pool = Database.from_settings().pool()
+    db = Database.from_settings()
+    pool = db.pool()
     bus = EventBus.from_settings()
     try:
         # One TaskGroup owns the resident loops, each with its own progress tracker
@@ -622,8 +625,10 @@ async def run() -> None:
         # its siblings and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
             loops.create_task(_dispatch_loop(pool, dispatch_progress))
-            loops.create_task(_liveness_loop(pool, bus, liveness_progress))
-            loops.create_task(completion_digest.completion_digest_loop(pool, bus, digest_progress))
+            loops.create_task(_liveness_loop(db, pool, bus, liveness_progress))
+            loops.create_task(
+                completion_digest.completion_digest_loop(pool, db, bus, digest_progress)
+            )
     finally:
         pool.close()
         await stop_health_server(health)

@@ -114,6 +114,7 @@ async def post_compact(
         agent_id,
     )
     await _ops.resurrect_if_terminated(
+        request.app.state.db,
         agent_id,
         trigger_inbound_id=inbound_id,
         trigger_inbound_kind="compact_request",
@@ -315,7 +316,9 @@ async def post_agents_resurrect_billing(
     """
     from ops.lifecycle.billing_recovery import run_billing_recovery
 
-    return await run_billing_recovery(execute=body.execute, pool=request.app.state.db_pool)
+    return await run_billing_recovery(
+        execute=body.execute, pool=request.app.state.db_pool, db=request.app.state.db
+    )
 
 
 @router.post("/api/agents/{agent_id}/restart")

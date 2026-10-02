@@ -38,7 +38,7 @@ def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
 
     attempts: list[LaunchAgentRequest] = []
 
-    async def _fail(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+    async def _fail(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         attempts.append(body)
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
@@ -51,7 +51,7 @@ def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
         _assert_failed_birth_visible(client, body, agent_id)
         assert _inbound_rows(db_conn, agent_id) == [("Do the task", "chat", "user")]
 
-        async def _succeed(_target: str, retry: LaunchAgentRequest) -> SpawnedAgent:
+        async def _succeed(_db: object, _target: str, retry: LaunchAgentRequest) -> SpawnedAgent:
             attempts.append(retry)
             return SpawnedAgent(id=retry.agent_id)
 
@@ -115,7 +115,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
-    async def _fail(_target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
+    async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
     def _write_outage(*_args: object) -> None:
@@ -131,7 +131,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
         assert body["state"] == {"status": "unknown", "availability": None}
         assert _inbound_rows(db_conn, body["agent_id"]) == [("Keep me", "chat", "user")]
 
-        async def _succeed(_target: str, retry: LaunchAgentRequest) -> SpawnedAgent:
+        async def _succeed(_db: object, _target: str, retry: LaunchAgentRequest) -> SpawnedAgent:
             return SpawnedAgent(id=retry.agent_id)
 
         monkeypatch.setattr(route, "_forward_spawn_to_remote", _succeed)
@@ -156,7 +156,7 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
             )
         db_conn.commit()
 
-        async def _fail(_target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
+        async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
             raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
         monkeypatch.setattr(route, "_forward_spawn_to_remote", _fail)
@@ -180,7 +180,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
-    async def _admit_then_fail(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+    async def _admit_then_fail(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET last_admission_outcome='admitted', "

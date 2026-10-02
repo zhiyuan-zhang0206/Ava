@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
+from base.db import Database
 from gateway.agents import forward as forward_module
 from gateway.agents import lifecycle as lifecycle_module
 from gateway.app import app
@@ -153,7 +154,7 @@ def test_local_home_machine_is_forwarded(
     happens to be on localhost."""
     captured: dict[str, Any] = {}
 
-    async def _capture_enqueue(target: str, path: str, json_body: dict) -> dict:
+    async def _capture_enqueue(_db: object, target: str, path: str, json_body: dict) -> dict:
         captured["target"] = target
         captured["path"] = path
         return {"status": "spawned"}
@@ -178,13 +179,15 @@ async def test_lifecycle_forward_uses_a_short_idempotent_retry_budget(
     forward = importlib.reload(forward_module)
     captured: dict[str, Any] = {}
 
-    async def _dispatch(**kwargs: Any) -> dict[str, Any]:
+    async def _dispatch(_db: object, **kwargs: Any) -> dict[str, Any]:
         captured.update(kwargs)
         return {"status": "enqueued"}
 
     monkeypatch.setattr(forward._cluster_rpc, "dispatch_to_machine", _dispatch)
 
-    result = await forward.enqueue_lifecycle("offline-runner", "/restart", {})
+    result = await forward.enqueue_lifecycle(
+        Database.from_settings(), "offline-runner", "/restart", {}
+    )
 
     assert result == {"status": "enqueued"}
     assert isinstance(captured["timeout_s"], float)
@@ -201,7 +204,7 @@ async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
     forward = importlib.reload(forward_module)
     never = asyncio.Event()
 
-    async def _never_dispatch(**_kwargs: Any) -> dict[str, Any]:
+    async def _never_dispatch(_db: object, **_kwargs: Any) -> dict[str, Any]:
         await never.wait()
         return {}
 
@@ -210,5 +213,6 @@ async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
 
     with pytest.raises(CrossMachineGatewayUnavailable, match="did not answer"):
         await asyncio.wait_for(
-            forward.enqueue_lifecycle("offline-runner", "/restart", {}), timeout=0.2
+            forward.enqueue_lifecycle(Database.from_settings(), "offline-runner", "/restart", {}),
+            timeout=0.2,
         )

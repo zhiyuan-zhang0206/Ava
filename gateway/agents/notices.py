@@ -463,6 +463,7 @@ async def post_notice_resolve(
     deliver_source = "system:notice-reply" if reply is not None else "system:notice-dismiss"
     delivery = await deliver_chat_inbound(
         request.app.state.db_pool,
+        request.app.state.db,
         request.app.state.bus,
         agent_id,
         prepare=_resolve,

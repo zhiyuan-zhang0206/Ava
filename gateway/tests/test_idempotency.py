@@ -545,16 +545,11 @@ def test_reconcile_heals_crash_after_commit_before_resurrect(
     db_conn.commit()
     calls = 0
 
-    async def _crash_then_heal(
-        aid: int,
-        *,
-        trigger_inbound_id: int,
-        trigger_inbound_kind: str,
-    ) -> AgentStatus:
+    async def _crash_then_heal(_db: object, aid: int, **kw: object) -> AgentStatus:
         nonlocal calls
         calls += 1
         assert aid == agent_id
-        assert trigger_inbound_kind == "chat"
+        assert kw["trigger_inbound_kind"] == "chat"
         if calls == 1:
             raise RuntimeError("gateway died after commit")
         with db_conn.cursor() as cur:

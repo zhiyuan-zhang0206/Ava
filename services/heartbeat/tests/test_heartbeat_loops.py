@@ -13,6 +13,9 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.daemon.loop_health import LivenessGroup, LoopProgress
+from base.db import Database
+from base.db.tests.fakes import patch_database
+from base.events.live.bus import EventBus
 from services.heartbeat import completion_digest, daemon
 
 
@@ -38,7 +41,7 @@ def _patch_run(
     monkeypatch.setattr(daemon, "_remove_pidfile", lambda: events.append("pidfile"))
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
-    monkeypatch.setattr(daemon.base.db, "pool", _Pool)
+    patch_database(monkeypatch, pool=_Pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", loops["dispatch"])
     monkeypatch.setattr(daemon, "_liveness_loop", loops["liveness"])
     monkeypatch.setattr(daemon.completion_digest, "completion_digest_loop", loops["digest"])
@@ -48,8 +51,8 @@ def test_every_loop_gets_its_own_progress_tracker(monkeypatch: pytest.MonkeyPatc
     received: dict[str, LoopProgress] = {}
 
     def loop(name: str) -> Callable[..., Any]:
-        async def run_loop(_pool: object, progress: LoopProgress) -> None:
-            received[name] = progress
+        async def run_loop(*args: object) -> None:
+            received[name] = cast(LoopProgress, args[-1])
 
         return run_loop
 
@@ -105,14 +108,18 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
 async def test_the_digest_loop_flushes_at_once_then_paces(monkeypatch: pytest.MonkeyPatch) -> None:
     flushed: list[object] = []
 
-    async def flush_once(pool: object, *, now: datetime | None = None) -> int:
+    async def flush_once(
+        pool: object, _db: object, _bus: object, *, now: datetime | None = None
+    ) -> int:
         flushed.append(pool)
         return 0
 
     monkeypatch.setattr(completion_digest, "flush_once", flush_once)
     pool = cast(ConnectionPool, object())
     task = asyncio.create_task(
-        completion_digest.completion_digest_loop(pool, LoopProgress("digest", 300.0))
+        completion_digest.completion_digest_loop(
+            pool, Database.from_settings(), EventBus.from_settings(), LoopProgress("digest", 300.0)
+        )
     )
     try:
         for _ in range(200):
@@ -128,12 +135,17 @@ async def test_the_digest_loop_flushes_at_once_then_paces(monkeypatch: pytest.Mo
 
 
 async def test_a_failing_flush_ends_the_digest_loop(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def flush_once(pool: object, *, now: datetime | None = None) -> int:
+    async def flush_once(
+        pool: object, _db: object, _bus: object, *, now: datetime | None = None
+    ) -> int:
         raise RuntimeError("digest table unreadable")
 
     monkeypatch.setattr(completion_digest, "flush_once", flush_once)
 
     with pytest.raises(RuntimeError, match="digest table unreadable"):
         await completion_digest.completion_digest_loop(
-            cast(ConnectionPool, object()), LoopProgress("digest", 300.0)
+            cast(ConnectionPool, object()),
+            Database.from_settings(),
+            EventBus.from_settings(),
+            LoopProgress("digest", 300.0),
         )

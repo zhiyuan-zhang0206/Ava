@@ -25,7 +25,7 @@ from base.agents.messages.chat_delivery import (
     reconcile_chat_inbound,
 )
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.db import publish_inbound_wake
+from base.db import Database, publish_inbound_wake
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -56,6 +56,7 @@ def _spawn_background(coro: Coroutine[Any, Any, object]) -> None:
 
 async def deliver_chat_inbound(
     pool: ConnectionPool,
+    db: Database,
     bus: EventBus,
     agent_id: int,
     *,
@@ -142,6 +143,7 @@ async def deliver_chat_inbound(
         # watcher message) implies they want the agent alive to handle it. Shared
         # with the compact path via `resurrect_if_terminated`.
         status = await _ops.resurrect_if_terminated(
+            db,
             agent_id,
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind="chat",
@@ -155,6 +157,7 @@ async def deliver_chat_inbound(
 
 async def reconcile_chat_delivery(
     pool: ConnectionPool,
+    db: Database,
     bus: EventBus,
     agent_id: int,
     *,
@@ -189,6 +192,7 @@ async def reconcile_chat_delivery(
         _ops.publish_inbound_arrived(bus, agent_id, receipt.inbound_id, "chat", source, content)
     )
     status = await _ops.resurrect_if_terminated(
+        db,
         agent_id,
         trigger_inbound_id=receipt.inbound_id,
         trigger_inbound_kind="chat",

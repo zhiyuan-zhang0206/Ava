@@ -27,6 +27,7 @@ from base.agents import (
     ErrorReason,
 )
 from base.agents.observation.evidence import AvailabilityReason
+from base.db import Database
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, OpFailure, SpawnedAgent
 
@@ -106,10 +107,10 @@ async def _forward_to_home_machine(agent_id: int, path: str, json_body: dict) ->
     from gateway.app import app
 
     target = await asyncio.to_thread(_home_machine_blocking, app, agent_id)
-    return await enqueue_lifecycle(target, path, json_body)
+    return await enqueue_lifecycle(app.state.db, target, path, json_body)
 
 
-async def enqueue_lifecycle(target: str, path: str, json_body: dict) -> dict:
+async def enqueue_lifecycle(db: Database, target: str, path: str, json_body: dict) -> dict:
     """POST a 'lifecycle' op to the target machine's ops server, return its result.
 
     Translates a 'failed' outcome (target machine's op raised an AvaAgentError)
@@ -119,6 +120,7 @@ async def enqueue_lifecycle(target: str, path: str, json_body: dict) -> dict:
     try:
         async with asyncio.timeout(_LIFECYCLE_DISPATCH_DEADLINE_S):
             return await _cluster_rpc.dispatch_to_machine(
+                db,
                 target_machine=target,
                 kind="lifecycle",
                 payload={"path": path, "body": json_body},
@@ -139,7 +141,9 @@ async def enqueue_lifecycle(target: str, path: str, json_body: dict) -> dict:
         raise  # unreachable — _raise_proxied_wire_error_from_payload must raise
 
 
-async def _forward_spawn_to_remote(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+async def _forward_spawn_to_remote(
+    db: Database, target: str, body: LaunchAgentRequest
+) -> SpawnedAgent:
     """POST a versioned launch op to the target machine's ops server.
 
     The target machine's ava-ops server dispatches in-process to
@@ -156,6 +160,7 @@ async def _forward_spawn_to_remote(target: str, body: LaunchAgentRequest) -> Spa
     forward_body = body.model_dump(mode="json", exclude_none=True)
     try:
         result = await _cluster_rpc.dispatch_to_machine(
+            db,
             target_machine=target,
             kind="spawn-launch-v2",
             payload=forward_body,

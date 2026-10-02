@@ -13,6 +13,7 @@ from psycopg_pool import ConnectionPool
 
 import base.db
 from base.daemon.loop_health import LoopProgress
+from base.db import Database
 from base.events.live.bus import EventBus
 from services.heartbeat import daemon as heartbeat_daemon
 from services.heartbeat.liveness import run_liveness_pass
@@ -92,7 +93,10 @@ def test_a_probed_machine_is_snapshotted_with_its_status(
 
     asyncio.run(
         run_liveness_pass(
-            pool, EventBus.from_settings(), probe=_Probe({"runner-1": _status("runner-1")})
+            Database.from_settings(),
+            pool,
+            EventBus.from_settings(),
+            probe=_Probe({"runner-1": _status("runner-1")}),
         )
     )
 
@@ -105,19 +109,39 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
     _machine(db_conn, "runner-1")
     asyncio.run(
         run_liveness_pass(
-            pool, EventBus.from_settings(), probe=_Probe({"runner-1": _status("runner-1")})
+            Database.from_settings(),
+            pool,
+            EventBus.from_settings(),
+            probe=_Probe({"runner-1": _status("runner-1")}),
         )
     )
 
-    asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=_Probe({"runner-1": None})))
+    asyncio.run(
+        run_liveness_pass(
+            Database.from_settings(),
+            pool,
+            EventBus.from_settings(),
+            probe=_Probe({"runner-1": None}),
+        )
+    )
     assert _snapshot(db_conn, "runner-1") == (False, 1, "sha-1", True)  # last answer kept
 
-    asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=_Probe({"runner-1": None})))
+    asyncio.run(
+        run_liveness_pass(
+            Database.from_settings(),
+            pool,
+            EventBus.from_settings(),
+            probe=_Probe({"runner-1": None}),
+        )
+    )
     assert _snapshot(db_conn, "runner-1") == (False, 2, "sha-1", True)
 
     asyncio.run(
         run_liveness_pass(
-            pool, EventBus.from_settings(), probe=_Probe({"runner-1": _status("runner-1")})
+            Database.from_settings(),
+            pool,
+            EventBus.from_settings(),
+            probe=_Probe({"runner-1": _status("runner-1")}),
         )
     )
     assert _snapshot(db_conn, "runner-1") == (True, 0, "sha-1", True)  # recovered
@@ -129,13 +153,19 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_clears_the_status(
     _machine(db_conn, "runner-1")
     asyncio.run(
         run_liveness_pass(
-            pool, EventBus.from_settings(), probe=_Probe({"runner-1": _status("runner-1")})
+            Database.from_settings(),
+            pool,
+            EventBus.from_settings(),
+            probe=_Probe({"runner-1": _status("runner-1")}),
         )
     )
 
     asyncio.run(
         run_liveness_pass(
-            pool, EventBus.from_settings(), probe=_Probe({"runner-1": {"result": "?"}})
+            Database.from_settings(),
+            pool,
+            EventBus.from_settings(),
+            probe=_Probe({"runner-1": {"result": "?"}}),
         )
     )
 
@@ -152,7 +182,9 @@ def test_staging_and_stopped_hosts_are_snapshotted_but_not_judged(
     _machine(db_conn, "retired", stopped=True)
     probe = _Probe({"target": _status("target"), "laptop": _status("laptop"), "retired": None})
 
-    asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=probe))
+    asyncio.run(
+        run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=probe)
+    )
 
     assert sorted(probe.calls) == ["laptop", "retired", "target"]  # each dialed once
     assert _snapshot(db_conn, "laptop") == (True, 0, "sha-1", True)
@@ -169,7 +201,9 @@ def test_paused_and_non_runner_machines_are_not_probed(
     _machine(db_conn, "station", role="observability-station")
     probe = _Probe({"target": _status("target")})
 
-    asyncio.run(run_liveness_pass(pool, EventBus.from_settings(), probe=probe))
+    asyncio.run(
+        run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=probe)
+    )
 
     assert probe.calls == ["target"]
     assert _snapshot(db_conn, "held") is None and _snapshot(db_conn, "station") is None
@@ -182,7 +216,7 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
     at once rather than leave the roster empty for a pass interval."""
     events: list[str] = []
 
-    async def fake_pass(_pool: object, _bus: object) -> None:
+    async def fake_pass(_db: object, _pool: object, _bus: object) -> None:
         events.append("pass")
 
     async def fake_sleep(_liveness: object, _total_s: float) -> None:
@@ -195,6 +229,7 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             heartbeat_daemon._liveness_loop(
+                Database.from_settings(),
                 cast(ConnectionPool, object()),
                 EventBus.from_settings(),
                 LoopProgress("liveness", 60.0),
@@ -209,7 +244,7 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
 ) -> None:
     events: list[str] = []
 
-    async def failing_pass(_pool: object, _bus: object) -> None:
+    async def failing_pass(_db: object, _pool: object, _bus: object) -> None:
         events.append("pass")
         raise RuntimeError("probe fan-out failed")
 
@@ -224,6 +259,7 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             heartbeat_daemon._liveness_loop(
+                Database.from_settings(),
                 cast(ConnectionPool, object()),
                 EventBus.from_settings(),
                 LoopProgress("liveness", 60.0),

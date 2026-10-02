@@ -15,6 +15,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.daemon.loop_health import LoopProgress
+from base.db import Database
 from base.events.live.bus import EventBus
 from services.delivery_watchdog import attempts, resurrect_retry, rounds
 from services.delivery_watchdog import daemon as delivery_daemon
@@ -185,7 +186,7 @@ def _stub_resurrect(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     triggers: list[int] = []
 
     async def _resurrect(
-        agent_id: int, *, trigger_inbound_id: int, trigger_inbound_kind: str
+        _db: object, agent_id: int, *, trigger_inbound_id: int, trigger_inbound_kind: str
     ) -> str:
         triggers.append(trigger_inbound_id)
         return "idling"
@@ -221,7 +222,9 @@ async def test_recovery_commits_the_marked_wake_with_the_termination(
     triggers = _stub_resurrect(monkeypatch)
 
     await watchdog._recover_hosted_turn(
-        pool, watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True)
+        pool,
+        Database.from_settings(),
+        watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True),
     )
 
     wakes = _recovery_wakes(db_conn, agent_id)
@@ -274,6 +277,7 @@ async def test_recovery_emits_evidence_then_terminates_with_its_wake_and_resurre
         return 9001
 
     async def fake_resurrect(
+        _db: object,
         agent_id: int,
         *,
         trigger_inbound_id: int,
@@ -290,7 +294,7 @@ async def test_recovery_emits_evidence_then_terminates_with_its_wake_and_resurre
     monkeypatch.setattr(lifecycle, "resurrect_if_terminated", fake_resurrect)
     wedge = watchdog._HostedTurnWedge(42, "runner-a", 2500.0, (1.0, 2.0, 3.0), False)
 
-    await watchdog._recover_hosted_turn(pool, wedge)
+    await watchdog._recover_hosted_turn(pool, Database.from_settings(), wedge)
 
     assert calls == ["event", "terminate", "trigger", "resurrect"]
 
@@ -313,7 +317,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     dispatched: list[dict[str, object]] = []
 
     async def fake_dispatch(
-        *, target_machine: str, kind: str, payload: dict[str, object]
+        _db: object, *, target_machine: str, kind: str, payload: dict[str, object]
     ) -> dict[str, str]:
         dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})
         return {"status": "spawned"}
@@ -321,7 +325,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)
 
     wedge = watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), False)
-    await watchdog._recover_hosted_turn(pool, wedge)
+    await watchdog._recover_hosted_turn(pool, Database.from_settings(), wedge)
 
     row = db_conn.execute(
         "SELECT id, payload FROM inbound_messages "
@@ -381,7 +385,9 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
 
     with contextlib.suppress(_ProcessKilled):
         await watchdog._recover_hosted_turn(
-            pool, watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True)
+            pool,
+            Database.from_settings(),
+            watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True),
         )
 
     assert _row(db_conn, "SELECT status FROM agents_meta WHERE id=%s", agent_id) == ("terminated",)
@@ -391,7 +397,11 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
     assert owners[agent_id] == wakes[0][0]
     # The watchdog's existing terminated-owner retry takes it from here.
     await resurrect_retry.resurrect_round(
-        pool, LoopProgress("resurrect", rounds.loop_liveness_timeout_s()), 5, 86400.0
+        pool,
+        Database.from_settings(),
+        LoopProgress("resurrect", rounds.loop_liveness_timeout_s()),
+        5,
+        86400.0,
     )
     assert set(triggers) == {wakes[0][0]}
 
@@ -408,7 +418,9 @@ async def test_a_committed_recovery_is_never_recovered_twice(
     _silence_recovery_side_effects(monkeypatch)
     _stub_resurrect(monkeypatch)
     await watchdog._recover_hosted_turn(
-        pool, watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True)
+        pool,
+        Database.from_settings(),
+        watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True),
     )
 
     rescan = await watchdog._detect_hosted_turn_wedges(
@@ -448,24 +460,24 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
     _wedged_runner_redis(monkeypatch)
     recovered: list[int] = []
 
-    async def fake_recover(db_pool: object, wedge: watchdog._HostedTurnWedge) -> None:
+    async def fake_recover(db_pool: object, _db: object, wedge: watchdog._HostedTurnWedge) -> None:
         recovered.append(wedge.agent_id)
 
     monkeypatch.setattr(watchdog, "_recover_hosted_turn", fake_recover)
     progress = LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s())
 
     await watchdog.hosted_turn_recovery_round(
-        pool, EventBus.from_settings(), progress, _THRESHOLD_S
+        pool, Database.from_settings(), EventBus.from_settings(), progress, _THRESHOLD_S
     )
     await watchdog.hosted_turn_recovery_round(
-        pool, EventBus.from_settings(), progress, _THRESHOLD_S
+        pool, Database.from_settings(), EventBus.from_settings(), progress, _THRESHOLD_S
     )
     assert recovered == [agent_id]
     assert watchdog.HOSTED_TURN_RECOVERY_COOLDOWN_S == 600.0
 
     _expire_recovery_cooldown(db_conn, agent_id)
     await watchdog.hosted_turn_recovery_round(
-        pool, EventBus.from_settings(), progress, _THRESHOLD_S
+        pool, Database.from_settings(), EventBus.from_settings(), progress, _THRESHOLD_S
     )
     assert recovered == [agent_id, agent_id]
 
@@ -478,7 +490,7 @@ async def test_a_hung_recovery_is_cut_at_the_deadline_and_still_enters_the_coold
     agent_id = _make_hosted_running_agent(db_conn)
     _wedged_runner_redis(monkeypatch)
 
-    async def hang(db_pool: object, wedge: object) -> None:
+    async def hang(db_pool: object, _db: object, wedge: object) -> None:
         await asyncio.Event().wait()
 
     monkeypatch.setattr(watchdog, "_recover_hosted_turn", hang)
@@ -486,6 +498,7 @@ async def test_a_hung_recovery_is_cut_at_the_deadline_and_still_enters_the_coold
 
     await watchdog.hosted_turn_recovery_round(
         pool,
+        Database.from_settings(),
         EventBus.from_settings(),
         LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()),
         _THRESHOLD_S,
@@ -507,7 +520,7 @@ async def test_a_slow_recovery_is_never_started_twice(
     release = asyncio.Event()
     recovered: list[int] = []
 
-    async def slow(db_pool: object, wedge: watchdog._HostedTurnWedge) -> None:
+    async def slow(db_pool: object, _db: object, wedge: watchdog._HostedTurnWedge) -> None:
         recovered.append(wedge.agent_id)
         await release.wait()
 
@@ -515,6 +528,7 @@ async def test_a_slow_recovery_is_never_started_twice(
     loop_task = asyncio.create_task(
         watchdog.hosted_turn_recovery_loop(
             pool,
+            Database.from_settings(),
             EventBus.from_settings(),
             LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()),
             0.01,

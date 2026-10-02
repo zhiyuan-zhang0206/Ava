@@ -16,6 +16,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.agents import AgentNotFound
 from base.config import settings
+from base.db import Database
 from base.events.live.bus import EventBus
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
@@ -86,7 +87,7 @@ def _shell_ttls_blocking(pool: ConnectionPool, agent_id: int) -> dict[int, datet
 
 
 async def _probe_agent_shells(
-    agent_id: int, machine: str, pool: ConnectionPool
+    database: Database, agent_id: int, machine: str, pool: ConnectionPool
 ) -> tuple[list[ShellInfo], bool]:
     """The agent's live persistent shells, probed on the machine it runs on.
 
@@ -107,7 +108,11 @@ async def _probe_agent_shells(
     """
     try:
         result = await _cluster_rpc.dispatch_to_machine(
-            machine, "shell_probe", {"agent_id": agent_id}, timeout_s=_SHELL_PROBE_TIMEOUT_S
+            database,
+            machine,
+            "shell_probe",
+            {"agent_id": agent_id},
+            timeout_s=_SHELL_PROBE_TIMEOUT_S,
         )
     except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed) as exc:
         _shell_probe_failures.add(1, {"reason": type(exc).__name__})
@@ -171,7 +176,7 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
     notice, shells, last_pause = await asyncio.gather(
         asyncio.to_thread(notice_blocking, pool, agent_id),
-        _probe_agent_shells(agent_id, db.machine, pool),
+        _probe_agent_shells(request.app.state.db, agent_id, db.machine, pool),
         asyncio.to_thread(_heartbeat_last_pause, pool, agent_id),
     )
     return AgentInspectLive(

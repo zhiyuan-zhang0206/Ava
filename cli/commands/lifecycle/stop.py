@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from base.db import Database
 from cli.commands._repo import _repo_root, session_name
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.start_runtime import StartRuntime
@@ -453,7 +454,7 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     # On failure the host keeps serving — abort without stopping.
     print("\n→ preflight probes (validate-before-kill)")
     with status_journal.phase("preflight"):
-        rc = _repo._preflight_probes()
+        rc = _repo._preflight_probes(Database.from_settings())
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
         _release_self_heal_pause()

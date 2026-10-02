@@ -42,6 +42,7 @@ from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import AvaContext
 from base.config import settings
 from base.config.turn_view import turn_settings
+from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
 from base.lm.factory import validate_model_config
@@ -52,6 +53,13 @@ from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome, _config_fingerprint
 from tests.base.poll_until import poll_until_async
+
+
+def _host(**kwargs: Any) -> AgentHost:
+    """An `AgentHost` on this box with the handles the tests share."""
+    return AgentHost(
+        machine="this-box", bus=EventBus.from_settings(), db=Database.from_settings(), **kwargs
+    )
 
 
 class _HostPluginConfig(BaseModel):
@@ -401,12 +409,10 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     ) -> tuple[AgentHost, _FakeGraph, _FakePool]:
         graph = _FakeGraph(results or {})
         pool = _FakePool(rows)
-        host = AgentHost(
-            pool=pool,  # pyright: ignore[reportArgumentType]
-            checkpointer=object(),  # pyright: ignore[reportArgumentType]
-            graph=graph,  # pyright: ignore[reportArgumentType]
-            machine="this-box",
-            bus=EventBus.from_settings(),
+        host = _host(
+            pool=pool,
+            checkpointer=object(),
+            graph=graph,
         )
         return host, graph, pool
 
@@ -422,12 +428,10 @@ class TestPendingInboundBackstop:
         fresh pending inbound wakes its agent; database timestamps identify backlog, while current turn progress must
         independently authorize cancellation."""
         pool = _PendingScanPool([(17, True, False), (23, False, True)])
-        host = AgentHost(
-            pool=pool,  # pyright: ignore[reportArgumentType]
-            checkpointer=object(),  # pyright: ignore[reportArgumentType]
-            graph=object(),  # pyright: ignore[reportArgumentType]
-            machine="this-box",
-            bus=EventBus.from_settings(),
+        host = _host(
+            pool=pool,
+            checkpointer=object(),
+            graph=object(),
         )
 
         candidates = await host.pending_inbound_wakes(180.0)
@@ -461,13 +465,11 @@ class TestPendingInboundBackstop:
                 raise AssertionError("pending scan borrowed from the turn pool")
 
         control_pool = _PendingScanPool([(17, True, False)])
-        host = AgentHost(
+        host = _host(
             pool=cast(AsyncConnectionPool[Any], _ForbiddenTurnPool()),
             control_pool=cast(AsyncConnectionPool[Any], control_pool),
-            checkpointer=object(),  # pyright: ignore[reportArgumentType]
-            graph=object(),  # pyright: ignore[reportArgumentType]
-            machine="this-box",
-            bus=EventBus.from_settings(),
+            checkpointer=object(),
+            graph=object(),
         )
 
         candidates = await host.pending_inbound_wakes(180.0)
@@ -538,13 +540,11 @@ class TestPoolIsolation:
         monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
         monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", force)
-        host = AgentHost(
+        host = _host(
             pool=cast(AsyncConnectionPool[Any], turn_pool),
             control_pool=cast(AsyncConnectionPool[Any], control_pool),
             checkpointer=original._checkpointer,
-            graph=graph,  # pyright: ignore[reportArgumentType]
-            machine="this-box",
-            bus=EventBus.from_settings(),
+            graph=graph,
         )
 
         await host.run_turn(11)
@@ -896,7 +896,7 @@ class TestTurnLoop:
 
         recovered: list[list[ReapedCorpse]] = []
 
-        async def _recover(reaped: list[ReapedCorpse]) -> None:
+        async def _recover(_db: object, reaped: list[ReapedCorpse]) -> None:
             calls.append("recover")
             recovered.append(list(reaped))
 

@@ -50,7 +50,7 @@ def test_endpoint_agent_view_dispatches_to_agents_machine(monkeypatch: pytest.Mo
     monkeypatch.setattr(commands_router, "_agent_machine", _runner_a)
 
     async def _dispatch(
-        machine: str, kind: str, payload: dict[str, int], *, timeout_s: float
+        _db: object, machine: str, kind: str, payload: dict[str, int], *, timeout_s: float
     ) -> dict[str, object]:
         seen["machine"] = machine
         seen["kind"] = kind

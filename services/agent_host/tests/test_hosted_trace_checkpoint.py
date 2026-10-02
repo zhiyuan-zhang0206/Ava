@@ -69,6 +69,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
             graph=graph,
             machine="test",
             bus=EventBus.from_settings(),
+            db=Database.from_settings(),
         )
         assert not (await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))).exited
 

@@ -26,6 +26,7 @@ from agent.ownership.hosted import TurnSettlement, settle_and_stamp_turn
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
 from base.config import settings
+from base.db import Database
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity, hosted_resources_settled
@@ -44,6 +45,7 @@ __all__ = [
 async def close_hosted_turn(
     pool: AsyncConnectionPool,
     control_pool: AsyncConnectionPool,
+    db: Database,
     checkpointer: AsyncPostgresSaver,
     incarnation: RuntimeIncarnation,
     outcome: TurnOutcome,
@@ -66,11 +68,12 @@ async def close_hosted_turn(
         # owns its claimed rows.
         await reconcile_inbounds_after_turn(pool, checkpointer, incarnation)
     if outcome.crashed:
-        await prompt_reap_after_recrash(control_pool, incarnation, settlement)
+        await prompt_reap_after_recrash(control_pool, db, incarnation, settlement)
 
 
 async def prompt_reap_after_recrash(
     pool: AsyncConnectionPool,
+    db: Database,
     incarnation: RuntimeIncarnation,
     settlement: TurnSettlement,
 ) -> None:
@@ -122,7 +125,7 @@ async def prompt_reap_after_recrash(
             reason="row_moved_on",
         )
         return
-    await recover_reaped_corpses(reaped)
+    await recover_reaped_corpses(db, reaped)
 
 
 async def reconcile_inbounds_after_abort(

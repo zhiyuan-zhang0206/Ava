@@ -55,7 +55,7 @@ def _register_boot() -> None:
 
     try:
         url = unit_dial_url(machine_role())
-        register_self(url=url)
+        register_self(Database.from_settings(), url=url)
     except Exception:
         _log.exception(
             "boot registration failed — this unit's machines row keeps its previous "

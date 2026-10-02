@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.agents.observation.evidence import AvailabilityReason
+from base.db import Database
 from gateway.agents import forward
 from gateway.agents import router as app_module
 from gateway.app import app
@@ -38,7 +39,9 @@ class TestRouting:
         db_conn: psycopg.Connection,
         failure: str,
     ) -> None:
-        async def _capture_forward(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+        async def _capture_forward(
+            _db: object, _target: str, body: LaunchAgentRequest
+        ) -> SpawnedAgent:
             return SpawnedAgent(id=body.agent_id)
 
         def _unreadable(_conn: psycopg.Connection, _agent_id: int) -> None:
@@ -67,7 +70,9 @@ class TestRouting:
         target == local (the co-located runner's ops server over localhost)."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+        async def _capture_forward(
+            _db: object, target: str, body: LaunchAgentRequest
+        ) -> SpawnedAgent:
             captured["target"] = target
             captured["body"] = body
             return SpawnedAgent(id=body.agent_id)
@@ -94,7 +99,9 @@ class TestRouting:
         """body.machine absent → equivalent to local; still forwarded, target == local."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+        async def _capture_forward(
+            _db: object, target: str, body: LaunchAgentRequest
+        ) -> SpawnedAgent:
             captured["target"] = target
             captured["body"] = body
             return SpawnedAgent(id=body.agent_id)
@@ -118,10 +125,12 @@ class TestRouting:
         set_machine_identity(role="gateway", name="gw-only")
         # The registry says the (local) target is gateway-only — overrides the
         # conftest autouse stub that defaults the local machine to agent-runner.
-        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _db, _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType]
         forwarded: list[str] = []
 
-        async def _should_not_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+        async def _should_not_forward(
+            _db: object, target: str, body: LaunchAgentRequest
+        ) -> SpawnedAgent:
             forwarded.append(target)
             return SpawnedAgent(id=0)
 
@@ -145,11 +154,16 @@ class TestRouting:
         ops server may be unreachable), so a spawn would fail at dial time
         anyway; the precise wire error is what schedules / peers see."""
         set_machine_identity(role="agent-runner", name="local-test")
-        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _name: True)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(
+            "base.cluster.machines.lookup_role",
+            lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
+        )  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: True)  # pyright: ignore[reportUnknownArgumentType]
         forwarded: list[str] = []
 
-        async def _should_not_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+        async def _should_not_forward(
+            _db: object, target: str, body: LaunchAgentRequest
+        ) -> SpawnedAgent:
             forwarded.append(target)
             return SpawnedAgent(id=0)
 
@@ -168,7 +182,9 @@ class TestRouting:
         """body.machine != local → _forward_spawn_to_remote is called, body passthrough."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+        async def _capture_forward(
+            _db: object, target: str, body: LaunchAgentRequest
+        ) -> SpawnedAgent:
             captured["target"] = target
             captured["body"] = body
             return SpawnedAgent(id=body.agent_id)
@@ -177,8 +193,11 @@ class TestRouting:
         # The pre-dispatch capability check resolves the target's role; stub it as
         # a runner so the forward proceeds (the lookup itself is exercised by the
         # 404 / no-capability tests).
-        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(
+            "base.cluster.machines.lookup_role",
+            lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
+        )  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = client.post(
                 "/api/agents",
@@ -207,13 +226,18 @@ class TestRouting:
         where the target's ops server is at localhost."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+        async def _capture_forward(
+            _db: object, target: str, body: LaunchAgentRequest
+        ) -> SpawnedAgent:
             captured["target"] = target
             return SpawnedAgent(id=body.agent_id)
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
-        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(
+            "base.cluster.machines.lookup_role",
+            lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
+        )  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "remote-mac"})
         assert resp.status_code == 201
@@ -247,8 +271,11 @@ class TestRouting:
             )
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _forward_raises)
-        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(
+            "base.cluster.machines.lookup_role",
+            lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
+        )  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "remote-mac"})
         assert resp.status_code == 502
@@ -259,7 +286,7 @@ class TestRouting:
     def test_mismatched_runner_receipt_cannot_replace_committed_id(
         self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def _wrong_id(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+        async def _wrong_id(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
             return SpawnedAgent(id=body.agent_id + 1)
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _wrong_id)
@@ -283,7 +310,7 @@ async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
     attempt_id = uuid4()
 
     async def _fail(
-        *, target_machine: str, kind: str, payload: dict[str, object]
+        _db: object, *, target_machine: str, kind: str, payload: dict[str, object]
     ) -> dict[str, object]:
         seen.append((kind, payload))
         raise ClusterOpUnreachable("offline")
@@ -291,7 +318,9 @@ async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
     with pytest.raises(forward.LaunchForwardError) as raised:
         await forward._forward_spawn_to_remote(
-            "runner", LaunchAgentRequest(agent_id=4, launch_attempt_id=attempt_id)
+            Database.from_settings(),
+            "runner",
+            LaunchAgentRequest(agent_id=4, launch_attempt_id=attempt_id),
         )
     assert seen == [("spawn-launch-v2", {"agent_id": 4, "launch_attempt_id": str(attempt_id)})]
     assert raised.value.reason == AvailabilityReason.LAUNCH_UNREACHABLE
@@ -303,7 +332,7 @@ async def test_spawn_forward_preserves_runner_rejection_detail(
 ) -> None:
     from ops.cluster_rpc import ClusterOpFailed
 
-    async def _fail(**_kwargs: object) -> dict[str, object]:
+    async def _fail(_db: object, **_kwargs: object) -> dict[str, object]:
         raise ClusterOpFailed(
             {
                 "error": "InvalidModelConfig: key missing",
@@ -314,6 +343,8 @@ async def test_spawn_forward_preserves_runner_rejection_detail(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
     with pytest.raises(forward.LaunchForwardError) as raised:
-        await forward._forward_spawn_to_remote("runner", LaunchAgentRequest(agent_id=4))
+        await forward._forward_spawn_to_remote(
+            Database.from_settings(), "runner", LaunchAgentRequest(agent_id=4)
+        )
     assert raised.value.reason == AvailabilityReason.LAUNCH_REJECTED
     assert "invalid_model_config: key missing" in str(raised.value)

@@ -47,6 +47,7 @@ DB merge without dialing real ops servers.
 """
 
 import asyncio
+import functools
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -62,6 +63,7 @@ from base.agents.observation.evidence import (
 )
 from base.cluster.machines import list_agent_runners, list_roster_agent_runners
 from base.config import settings
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.transition import transition_severity
 from base.events.live.announce import publish_agent_updated_sync
@@ -102,10 +104,7 @@ class ProbeOutcome:
 _UNREACHED = ProbeOutcome(reached=False, host_online=None, status=None)
 
 
-async def _probe_machine(
-    name: str,
-    probe: Callable[..., Awaitable[object]] = cluster_rpc.dispatch_to_machine,
-) -> ProbeOutcome:
+async def _probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> ProbeOutcome:
     """One status_probe round-trip.
 
     Any failure (unreachable, op failure, timeout, transport error) is a probe
@@ -370,23 +369,26 @@ async def _record_snapshot(pool: ConnectionPool, name: str, outcome: ProbeOutcom
 
 
 async def run_liveness_pass(
+    db: Database,
     pool: ConnectionPool,
     bus: EventBus,
-    probe: Callable[..., Awaitable[object]] = cluster_rpc.dispatch_to_machine,
+    probe: Callable[..., Awaitable[object]] | None = None,
 ) -> None:
     """One liveness pass: probe every roster-visible agent-runner once, record the
     outcome of the rollout targets as agent-liveness state, snapshot every probed
     machine for the roster read, then merge.
 
-    `probe` is injectable for tests (default: the real cluster RPC). Probe
+    `probe` is injectable for tests (default: the real cluster RPC resolving addresses through
+    `db`). Probe
     failures are per-machine and quiet — a down host is steady-state; the
     pass keeps running for the hosts that are up.
     """
-    targets = {name for name, _url in list_agent_runners()}
-    machines = sorted(targets | {name for name, _url in list_roster_agent_runners()})
+    probe = probe if probe is not None else functools.partial(cluster_rpc.dispatch_to_machine, db)
+    targets = {name for name, _url in list_agent_runners(db)}
+    machines = sorted(targets | {name for name, _url in list_roster_agent_runners(db)})
     if not machines:
         return
-    results = await asyncio.gather(*(_probe_machine(name, probe=probe) for name in machines))
+    results = await asyncio.gather(*(_probe_machine(name, probe) for name in machines))
     outcomes = dict(zip(machines, results, strict=True))
     for name in machines:
         outcome = outcomes[name]

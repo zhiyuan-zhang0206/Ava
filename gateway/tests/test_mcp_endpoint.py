@@ -321,7 +321,7 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
-    async def _fail(_target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
+    async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
     monkeypatch.setattr(route, "_forward_spawn_to_remote", _fail)

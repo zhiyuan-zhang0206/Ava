@@ -16,7 +16,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from base.agents import AgentStatus
 from base.config import settings
-from base.db import create_agent
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 from gateway.agents.delivery import deliver_chat_inbound
@@ -74,6 +74,7 @@ async def test_deliver_survives_publish_failure(
         # Must NOT raise despite every publish on the path throwing.
         await deliver_chat_inbound(
             pool,
+            Database.from_settings(),
             EventBus.from_settings(),
             tid,
             prepare=lambda _c: "hello there",
@@ -104,7 +105,12 @@ async def test_deliver_degrades_when_badge_step_raises(
 
     with _sync_pool() as pool:
         delivery = await deliver_chat_inbound(
-            pool, EventBus.from_settings(), tid, prepare=lambda _c: "hi", refresh_badge=True
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            tid,
+            prepare=lambda _c: "hi",
+            refresh_badge=True,
         )
         await asyncio.sleep(0.05)
 
@@ -127,6 +133,7 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
     calls: list[tuple[int, int | None, str | None]] = []
 
     async def _resurrect(
+        _db: object,
         agent_id: int,
         *,
         trigger_inbound_id: int | None = None,
@@ -139,7 +146,11 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
 
     with _sync_pool() as pool:
         delivery = await deliver_chat_inbound(
-            pool, EventBus.from_settings(), tid, prepare=lambda _c: "guard me"
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            tid,
+            prepare=lambda _c: "guard me",
         )
 
     with db_conn.cursor() as cur:
@@ -170,6 +181,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     db_conn.commit()
 
     async def _resurrect_once(
+        _db: object,
         agent_id: int,
         *,
         trigger_inbound_id: int,
@@ -198,6 +210,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     with _sync_pool() as pool:
         first = await deliver_chat_inbound(
             pool,
+            Database.from_settings(),
             EventBus.from_settings(),
             tid,
             prepare=lambda _c: "wake once",
@@ -205,6 +218,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
         )
         second = await deliver_chat_inbound(
             pool,
+            Database.from_settings(),
             EventBus.from_settings(),
             tid,
             prepare=lambda _c: "wake once",
@@ -250,6 +264,7 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
     with _sync_pool() as pool:
         delivery = await deliver_chat_inbound(
             pool,
+            Database.from_settings(),
             EventBus.from_settings(),
             tid,
             prepare=lambda _conn: "peer work",
@@ -305,6 +320,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
     observed_status = AgentStatus.TERMINATED
 
     async def _real_guard(
+        _db: object,
         agent_id: int,
         *,
         trigger_inbound_id: int,
@@ -343,6 +359,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
         first, second = await asyncio.gather(
             deliver_chat_inbound(
                 pool,
+                Database.from_settings(),
                 EventBus.from_settings(),
                 tid,
                 prepare=lambda _c: "concurrent wake",
@@ -350,6 +367,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
             ),
             deliver_chat_inbound(
                 pool,
+                Database.from_settings(),
                 EventBus.from_settings(),
                 tid,
                 prepare=lambda _c: "concurrent wake",
@@ -402,7 +420,12 @@ async def test_badge_publish_happens_after_commit(
 
     with _sync_pool() as pool:
         await deliver_chat_inbound(
-            pool, EventBus.from_settings(), tid, prepare=_prepare, refresh_badge=True
+            pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
+            tid,
+            prepare=_prepare,
+            refresh_badge=True,
         )
 
     assert observed.get("committed") is True, (

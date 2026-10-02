@@ -50,6 +50,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     """
     from base.cluster import machines as _machines
     from base.cluster.machine import machine_name
+    from base.db import Database
     from gateway.agents import forward as _agents_forward_router
     from gateway.agents import router as _agents_router
     from gateway.app import app
@@ -61,14 +62,16 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     # so stand in for the runner's ops daemon: dispatch launch_agent_op in-process
     # against the gateway's db_pool (exactly what the daemon does on receiving the
     # forwarded op), so the SDK spawn yields a real local agent row.
-    async def _in_process_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+    async def _in_process_forward(
+        _db: object, target: str, body: LaunchAgentRequest
+    ) -> SpawnedAgent:
         return await launch_agent_op(body, app.state.db_pool)
 
     # Same pattern for lifecycle ops (terminate / resurrect / restart): the
     # runner's ops daemon dispatches lifecycle_op in-process; mirror that here
     # so a forwarded local lifecycle call executes against the test DB.
     async def _in_process_lifecycle(
-        target: str, path: str, json_body: dict[str, Any]
+        _db: object, target: str, path: str, json_body: dict[str, Any]
     ) -> dict[str, Any]:
         # model_dump mirrors the daemon serializing the response model onto the wire.
         return (await lifecycle_op(path, json_body, app.state.db_pool)).model_dump(mode="json")
@@ -77,19 +80,19 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     # the local machine, so resolve it to agent-runner as register_self would.
     real_lookup_role = _machines.lookup_role
 
-    def _lookup_role(name: str) -> list[str]:
+    def _lookup_role(_db: Database, name: str) -> list[str]:
         if name == machine_name():
             return ["gateway", "agent-runner"]
-        return real_lookup_role(name)
+        return real_lookup_role(_db, name)
 
     # The spawn preflight also reads the pause latch for the same target; the
     # local machine is never paused in tests, so stub it alongside the role.
     real_is_paused = _machines.is_paused
 
-    def _is_paused(name: str) -> bool:
+    def _is_paused(_db: Database, name: str) -> bool:
         if name == machine_name():
             return False
-        return real_is_paused(name)
+        return real_is_paused(_db, name)
 
     # Mock all API keys so spawn validation passes — these tests exercise
     # the full gateway spawn path, which validates model config before forwarding.

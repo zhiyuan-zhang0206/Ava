@@ -27,6 +27,7 @@ from base.cluster.machine import (
     machine_name,
 )
 from base.config import settings
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.git.cluster_drift import prod_source_head_sha
 from gateway.cluster import snapshots
@@ -91,7 +92,7 @@ async def _roster_statuses(pool: ConnectionPool, *, fresh: bool) -> list[Machine
 
 
 async def _dispatch_op(
-    target: str, kind: _cluster_rpc.OpKind, payload: dict[str, Any]
+    db: Database, target: str, kind: _cluster_rpc.OpKind, payload: dict[str, Any]
 ) -> dict[str, Any]:
     """POST one op to `target`'s ops server, mapping transport outcomes to HTTP.
 
@@ -106,7 +107,7 @@ async def _dispatch_op(
     """
     try:
         return await _cluster_rpc.dispatch_to_machine(
-            target_machine=target, kind=kind, payload=payload
+            db, target_machine=target, kind=kind, payload=payload
         )
     except _cluster_rpc.ClusterOpUnreachable as exc:
         raise HTTPException(
@@ -121,7 +122,7 @@ async def _dispatch_op(
 
 
 @router.post("/api/cluster/stopping", status_code=200)
-async def post_cluster_stopping(machine: str, home: str) -> dict[str, str]:
+async def post_cluster_stopping(machine: str, home: str, request: Request) -> dict[str, str]:
     """Record that the (machine, home) unit is shutting down intentionally.
 
     `ava stop` POSTs this (best-effort) just before local teardown so the
@@ -135,11 +136,11 @@ async def post_cluster_stopping(machine: str, home: str) -> dict[str, str]:
     Low-stakes: stopped_at is cosmetic and a spuriously-stamped live host still
     probes online=True.
     """
-    return await asyncio.to_thread(_ops.cluster_stopping_op, machine, home)
+    return await asyncio.to_thread(_ops.cluster_stopping_op, request.app.state.db, machine, home)
 
 
 @router.get("/api/cluster/status")
-async def get_cluster_status() -> ClusterStatus:
+async def get_cluster_status(request: Request) -> ClusterStatus:
     """This host's own snapshot (name / role / paused).
 
     On an agent-runner-capable host the snapshot comes from this host's ops
@@ -153,8 +154,13 @@ async def get_cluster_status() -> ClusterStatus:
     roster use `/api/cluster/roster`. Bypasses 503 mode so status stays visible
     during pause — observability is always online.
     """
+    return await cluster_status_snapshot(request.app.state.db)
+
+
+async def cluster_status_snapshot(db: Database) -> ClusterStatus:
+    """The `/api/cluster/status` body, also read by the MCP `cluster_status` tool."""
     if is_agent_runner():
-        result = await _dispatch_op(machine_name(), "status_probe", {})
+        result = await _dispatch_op(db, machine_name(), "status_probe", {})
         return ClusterStatus.model_validate(result)
     return await asyncio.to_thread(_local_snapshot_blocking)
 
@@ -361,7 +367,9 @@ class MachineStagingRequest(BaseModel):
 
 
 @router.post("/api/cluster/machines/{name}/staging", response_model=MachineDeleteResponse)
-def set_machine_staging(name: str, req: MachineStagingRequest) -> MachineDeleteResponse:
+def set_machine_staging(
+    name: str, req: MachineStagingRequest, request: Request
+) -> MachineDeleteResponse:
     """Set or clear a machine's operator staging flag (`is_staging`).
 
     The staging latch is what keeps a registered staging host out of the
@@ -370,7 +378,7 @@ def set_machine_staging(name: str, req: MachineStagingRequest) -> MachineDeleteR
     skips is_staging rows). Backed by `base.cluster.machines.set_staging`; the CLI
     verbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.
     """
-    changed = machines.set_staging(name, is_staging=req.is_staging)
+    changed = machines.set_staging(request.app.state.db, name, is_staging=req.is_staging)
     if not changed:
         raise HTTPException(status_code=404, detail=f"no machine named {name!r}")
     return MachineDeleteResponse(deleted=True)

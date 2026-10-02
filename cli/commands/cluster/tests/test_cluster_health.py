@@ -15,6 +15,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.db.tests.fakes import patch_database
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster import health_alerts
 
@@ -245,7 +246,7 @@ def _no_deploy_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(
         "ops.deploy_window.deploy_in_flight",
-        lambda **_k: DeployWindow(active=False, detail="no deploy in flight"),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db, **_k: DeployWindow(active=False, detail="no deploy in flight"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
@@ -279,7 +280,7 @@ def test_service_probe_deploy_window_pauses_alert_grade(
 
     monkeypatch.setattr(
         "ops.deploy_window.deploy_in_flight",
-        lambda **_kw: DeployWindow(active=True, detail="rollout live"),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db, **_kw: DeployWindow(active=True, detail="rollout live"),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(cluster_health, "_service_probes", lambda: ["ava-main-frontend"])
     _write_aged_alert_state(
@@ -328,7 +329,7 @@ def test_deploy_never_explains_full_disk(
 
     monkeypatch.setattr(
         "ops.deploy_window.deploy_in_flight",
-        lambda **_kw: DeployWindow(active=True, detail="rollout live"),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db, **_kw: DeployWindow(active=True, detail="rollout live"),  # pyright: ignore[reportUnknownArgumentType]
     )
     message = "FAIL: disk usage — data volume 92.4% used (watermark 90%)"
     monkeypatch.setattr(
@@ -1027,6 +1028,6 @@ def test_crash_loop_is_healthy_when_the_database_cannot_be_read(
     def unreachable(**_kwargs: object) -> object:
         raise OSError("database unreachable")
 
-    monkeypatch.setattr("base.db.connect", unreachable)
+    patch_database(monkeypatch, connect=unreachable)
 
     assert cluster_health._crash_loop_detection(max_restarts=0, window_minutes=60) is True

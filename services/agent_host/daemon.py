@@ -409,10 +409,11 @@ def _boot_handles() -> tuple[
     AsyncConnectionPool[psycopg.AsyncConnection],
     AsyncConnectionPool[psycopg.AsyncConnection],
     EventBus,
+    Database,
 ]:
-    """The turn/checkpoint pool, the reserved control pool and the event bus of one host."""
+    """The turn/checkpoint pool, the reserved control pool, the event bus and the database of one host."""
     db = Database.from_settings()
-    return build_shared_pool(db), build_control_pool(db), EventBus.from_settings()
+    return build_shared_pool(db), build_control_pool(db), EventBus.from_settings(), db
 
 
 async def run() -> None:
@@ -440,7 +441,7 @@ async def run() -> None:
     land_cluster_extensions()
     load_process_extensions()
 
-    workload_pool, control_pool, bus = _boot_handles()
+    workload_pool, control_pool, bus, db = _boot_handles()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[None] | None = None
     health = None
@@ -459,6 +460,7 @@ async def run() -> None:
             graph=graph,
             machine=local_machine,
             bus=bus,
+            db=db,
         )
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long

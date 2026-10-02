@@ -437,7 +437,7 @@ class TestClusterEndpoints:
         monkeypatch.setattr(
             ops_mod,
             "mark_stopping",
-            lambda name, home: marked.append((name, home)),  # pyright: ignore[reportUnknownArgumentType]
+            lambda _db, name, home: marked.append((name, home)),  # pyright: ignore[reportUnknownArgumentType]
         )
         with TestClient(app) as client:
             r = client.post("/api/cluster/stopping", params={"machine": "wsl", "home": "~/.ava"})
@@ -702,7 +702,7 @@ class TestAgentMachineList:
                 "paused": False,
             }
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
@@ -1058,7 +1058,7 @@ class TestMachinePauseResume:
 
         old_chat_id = insert_inbound_message(db_conn, aid, "queued before pause", source="user")
 
-        async def _unreachable(target: str, path: str, json_body: dict) -> dict:
+        async def _unreachable(_db: object, target: str, path: str, json_body: dict) -> dict:
             raise RuntimeError("ops server unreachable")
 
         monkeypatch.setattr(_fwd, "enqueue_lifecycle", _unreachable)  # pyright: ignore[reportUnknownArgumentType]

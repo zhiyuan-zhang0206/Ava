@@ -25,15 +25,12 @@
     "bus-built": 10,
     "shim": 37
   },
-  "base/cluster": {
-    "shim": 15
-  },
   "base/db": {
     "bus-built": 1,
     "shim": 5
   },
   "base/deploy": {
-    "shim": 3
+    "shim": 2
   },
   "base/packages": {
     "shim": 1
