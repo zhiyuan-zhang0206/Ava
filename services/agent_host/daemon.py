@@ -549,6 +549,9 @@ async def run() -> None:
                         settings.agent.db_notify_wait_timeout_seconds
                     ),
                 ).run()
+                # The dispatcher runs until cancelled; a return would leave the
+                # group waiting on loops that never end, hanging the stop.
+                raise RuntimeError("wake dispatcher exited without cancellation")
         finally:
             try:
                 await _close_host_runtime(host, scheduler, beat)
