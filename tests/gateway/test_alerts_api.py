@@ -300,7 +300,7 @@ def test_ingest_notify_im_false_stores_and_publishes_without_im(
             published.append((channel, frame))
 
     monkeypatch.setattr(alerts_router, "_notify_im", _capture)
-    monkeypatch.setattr(alerts_router, "sync_redis", _FakeRedis)
+    monkeypatch.setattr("gateway.alerts.publish.sync_redis", _FakeRedis)
 
     with TestClient(app) as client:
         resp = _ingest(client, _webhook(notify_im="false"))
@@ -601,7 +601,7 @@ def test_ingest_publishes_sse_frames(
         def publish(self, channel: str, frame: str) -> None:
             published.append((channel, frame))
 
-    monkeypatch.setattr(alerts_router, "sync_redis", _FakeRedis)
+    monkeypatch.setattr("gateway.alerts.publish.sync_redis", _FakeRedis)
     with TestClient(app) as client:
         _ingest(
             client,
