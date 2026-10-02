@@ -47,7 +47,7 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Collection
+from collections.abc import Collection, Coroutine
 from pathlib import Path
 from typing import cast
 
@@ -256,31 +256,22 @@ async def _stop_ownership_beat(beat: asyncio.Task[None] | None) -> None:
             await beat
 
 
-async def _join_background_task(task: asyncio.Task[object]) -> None:
-    """Join a cancelled task while retaining any failure that preceded cancel."""
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
-
-
 async def _close_host_runtime(
     host: AgentHost,
     scheduler: TurnScheduler,
     beat: asyncio.Task[None] | None,
-    background: dict[str, asyncio.Task[object]],
 ) -> None:
-    """Drain turns and release settled ownership even if background joins fail."""
-    for task in background.values():
-        if not task.cancelling():
-            task.cancel()
-    # A failed task can retain even KeyboardInterrupt. Every cleanup stage must
-    # run before that failure propagates; closing the pools first strands
-    # ownership and active turns. Callbacks unwind in reverse.
+    """Drain turns and release settled ownership even if a stage fails.
+
+    The background loops are already joined: their `TaskGroup` in `run` exits
+    before this runs. Every cleanup stage must run before a failure propagates;
+    closing the pools first strands ownership and active turns. Callbacks unwind
+    in reverse.
+    """
     async with contextlib.AsyncExitStack() as cleanup:
         cleanup.push_async_callback(host.aclose)
         cleanup.push_async_callback(_stop_ownership_beat, beat)
         cleanup.push_async_callback(scheduler.aclose)
-        for task in background.values():
-            cleanup.push_async_callback(_join_background_task, task)
 
 
 class _PageEventPublisher:
@@ -353,23 +344,22 @@ async def _exec_memory_guard_forever() -> None:
     await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever()
 
 
-def _spawn_background_tasks(pool: AsyncConnectionPool) -> dict[str, asyncio.Task[object]]:
-    """Create the daemon's background tasks for plugins, pages, logs and exec memory.
+def _background_loops(pool: AsyncConnectionPool) -> dict[str, Coroutine[object, object, None]]:
+    """The daemon's background loops for plugins, pages, logs and exec memory.
 
     Split out of `run()` so the wiring is testable without booting the
     dispatcher: the reconciler's existence is what closes the
     busy-hosted-agent dead-page gap (task #2260), the rotator's is what keeps a
     traceback storm from filling the disk through the uncapped raw transcript
-    (task #2356), and a regression that dropped either creation must turn a
-    test red rather than silently reopen the gap.
+    (task #2356), and a regression that dropped either must turn a test red
+    rather than silently reopen the gap. `run` starts them in one `TaskGroup`.
     """
-    loops = {
+    return {
         "plugins_watch": _watch_plugins_for_restart(),
         "page_reconciler": _page_reconcile_forever(pool),
         "stdout_log_rotate": _rotate_stdout_log_forever(),
         "exec_memory_guard": _exec_memory_guard_forever(),
     }
-    return {name: asyncio.create_task(loop) for name, loop in loops.items()}
 
 
 async def _build_checkpointer(
@@ -539,21 +529,32 @@ async def run() -> None:
         # Task #2260: heartbeat-independent page-liveness scan for hosted
         # agents — busy agents get no heartbeats, and the hosted daemon runs
         # no per-agent page_reconcile_loop (loop.py:main() is process-only).
-        background = _spawn_background_tasks(workload_pool)
+        # One TaskGroup owns the loops beside the dispatcher: a loop that
+        # raises cancels the dispatcher and its siblings, and the exception
+        # leaves `run` so the process exits for `ava-root` to restart it. The
+        # group exits, every loop joined, before the runtime drains turns.
         try:
-            await InboundWakeDispatcher(
-                settings.data_plane.redis_url,
-                scheduler,
-                pending_scan=host.pending_inbound_wakes,
-                stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
-                recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
-                recovery_wake_inflight=settings.daemon.host_recovery_wake_inflight,
-                scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
-                subscription_read_timeout_s=float(settings.agent.db_notify_wait_timeout_seconds),
-            ).run()
+            async with asyncio.TaskGroup() as background:
+                for name, loop in _background_loops(workload_pool).items():
+                    background.create_task(loop, name=name)
+                await InboundWakeDispatcher(
+                    settings.data_plane.redis_url,
+                    scheduler,
+                    pending_scan=host.pending_inbound_wakes,
+                    stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
+                    recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
+                    recovery_wake_inflight=settings.daemon.host_recovery_wake_inflight,
+                    scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
+                    subscription_read_timeout_s=float(
+                        settings.agent.db_notify_wait_timeout_seconds
+                    ),
+                ).run()
+                # The dispatcher runs until cancelled; a return would leave the
+                # group waiting on loops that never end, hanging the stop.
+                raise RuntimeError("wake dispatcher exited without cancellation")
         finally:
             try:
-                await _close_host_runtime(host, scheduler, beat, background)
+                await _close_host_runtime(host, scheduler, beat)
             finally:
                 beat = None  # Runtime cleanup attempted its join even when another stage failed.
     finally:
