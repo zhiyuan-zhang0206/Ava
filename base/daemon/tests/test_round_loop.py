@@ -110,3 +110,35 @@ async def test_fan_out_failure_cancels_the_round() -> None:
         await round_loop.fan_out([failing, parked], concurrency=2, progress=_progress())
 
     assert cancelled.is_set()
+
+
+async def test_a_callable_interval_is_read_after_every_round() -> None:
+    reads = 0
+
+    def interval() -> float:
+        nonlocal reads
+        reads += 1
+        return 0.001
+
+    async def one_round() -> None:
+        return None
+
+    task = asyncio.create_task(round_loop.run_rounds("t", _progress(), interval, one_round))
+    try:
+        await asyncio.sleep(0.1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert reads >= 2
+
+
+async def test_an_interval_that_raises_ends_the_loop() -> None:
+    def interval() -> float:
+        raise RuntimeError("config unreadable")
+
+    async def one_round() -> None:
+        return None
+
+    with pytest.raises(RuntimeError):
+        await round_loop.run_rounds("t", _progress(), interval, one_round)
