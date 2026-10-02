@@ -21,14 +21,14 @@ from base.deploy.schema.migrations import (
     check_schema_version,
     required_migration_set,
 )
-from tests.ava.migration_support import (
+from base.deploy.tests.migration_support import (
     _SYN,
     _SYN2,
     _init_repo,
     _set_table_to,
     _try_lock_from_other_conn,
 )
-from tests.ava.migration_support import (
+from base.deploy.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
 )
 
