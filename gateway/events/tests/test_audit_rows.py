@@ -114,3 +114,19 @@ def test_edge_counts_group_per_agent_target_and_name_and_skip_incomplete_edges(
     counts = {(a, t, name): count for a, t, name, count, _last in audit_rows.edge_counts(db_conn)}
 
     assert counts == {(1, 2, "spawn"): 1, (1, 2, "send_message"): 2}
+
+
+def test_attribute_filters_compare_as_text_so_a_json_number_matches_its_string_form(
+    db_conn: psycopg.Connection,
+) -> None:
+    for task_id in (42, 43):
+        db_conn.execute(
+            "INSERT INTO audit_events (event_uid, ts, machine, process, event_name, level, source, "
+            "attributes) VALUES (%s, now(), 'm', 'p', 'computer_action', 'info', 'test', %s::jsonb)",
+            (uuid.uuid4().int % (1 << 62), f'{{"task_id": {task_id}, "path": null}}'),
+        )
+    db_conn.commit()
+
+    assert audit_rows.count_events(db_conn, attribute_filters={"task_id": "42"}) == 1
+    assert audit_rows.count_events(db_conn, attribute_filters={"task_id": "!=42"}) == 1
+    assert audit_rows.count_events(db_conn, attribute_filters={"nonexistent": "!="}) == 0

@@ -1,6 +1,7 @@
 """Event-driven run timeline — ``GET /api/agents/{agent_id}/run-timeline``.
 
-The timeline deliberately consumes only the unified Loki event stream.  It
+The timeline deliberately consumes only the unified event stream (`telemetry_events` and
+`audit_events` in Postgres, both permanent).  It
 therefore works for both per-turn and session-root tracing shapes: a
 ``turn_end`` row is the turn skeleton and its matching ``llm_usage.span_id``
 supplies the token/cost measurement.  Tempo remains an optional call-level
@@ -17,13 +18,11 @@ from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from typing import Annotated, Literal, cast
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from base.config import settings
 from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.run_timeline import _events
 from gateway.run_timeline.schemas import (
     RunTimelineBoundaries,
@@ -47,7 +46,9 @@ router = APIRouter()
 # and the route family stays self-contained under the run-timeline path.
 router.include_router(strip_router)
 
-_RETENTION = timedelta(days=7)
+# How far back the default window looks for the latest session start or compact. It bounds
+# one scan; the record itself has no retention.
+_LIFECYCLE_LOOKBACK = timedelta(days=365)
 _FALLBACK_WINDOW = timedelta(hours=24)
 _ASSOCIATION_TOLERANCE = timedelta(seconds=2)
 _BUCKET_PATTERN = re.compile(r"^(?P<count>[1-9][0-9]*)(?P<unit>[smhd])$")
@@ -155,7 +156,7 @@ class _TurnWindow:
 
 
 def _number(value: object) -> float:
-    """Read a Loki JSON number without letting malformed historical rows break a run."""
+    """Read a JSON number without letting malformed historical rows break a run."""
     if isinstance(value, bool) or value is None:
         return 0.0
     if isinstance(value, int | float):
@@ -180,14 +181,14 @@ def _attrs(event: dict[str, object]) -> dict[str, object]:
 def _event_ts(event: dict[str, object]) -> datetime:
     ts = event["ts"]
     if not isinstance(ts, datetime):
-        raise TypeError(f"Loki event ts must be datetime, got {type(ts)!r}")
+        raise TypeError(f"Event ts must be datetime, got {type(ts)!r}")
     return ts
 
 
 def _event_name(event: dict[str, object]) -> str:
     name = event["event_name"]
     if not isinstance(name, str):
-        raise TypeError(f"Loki event_name must be str, got {type(name)!r}")
+        raise TypeError(f"Event event_name must be str, got {type(name)!r}")
     return name
 
 
@@ -516,15 +517,14 @@ def _default_window(
 ) -> tuple[datetime, datetime]:
     """Choose the latest compact-ended or current observable session.
 
-    Loki retains seven days. ``compact`` ends at the latest compact, while
-    ``current`` runs from the latest lifecycle start to ``now``. Agents whose
-    lifecycle predates retention use a bounded last-24-hours view instead of an
-    unbounded scan.
+    ``compact`` ends at the latest compact, while ``current`` runs from the latest
+    lifecycle start to ``now``. An agent with no lifecycle start inside the
+    lookback gets a bounded last-24-hours view instead of an unbounded scan.
     """
-    retention_start = now - _RETENTION
+    lookback_start = now - _LIFECYCLE_LOOKBACK
     lifecycle_events = _query_all_events(
         agent_id,
-        retention_start,
+        lookback_start,
         now,
         event_names=tuple(_SESSION_START_EVENTS | _COMPACT_EVENTS),
     )
@@ -541,7 +541,7 @@ def _default_window(
             for event in ordered
             if _event_name(event) in _SESSION_START_EVENTS and _event_ts(event) <= end
         ]
-        return (starts[-1] if starts else max(retention_start, end - _FALLBACK_WINDOW), end)
+        return (starts[-1] if starts else max(lookback_start, end - _FALLBACK_WINDOW), end)
 
     if starts:
         return starts[-1], now
@@ -608,20 +608,17 @@ def get_run_timeline(
             window_end,
             messages_max,
         )
-        try:
-            events = _query_all_events(agent_id, window_start, window_end)
-            post_window_events = (
-                _query_all_events(
-                    agent_id,
-                    window_end,
-                    now,
-                    event_names=tuple(_SESSION_START_EVENTS | {"turn_end"}),
-                )
-                if session == "compact" and from_ is None and to is None and window_end < now
-                else []
+        events = _query_all_events(agent_id, window_start, window_end)
+        post_window_events = (
+            _query_all_events(
+                agent_id,
+                window_end,
+                now,
+                event_names=tuple(_SESSION_START_EVENTS | {"turn_end"}),
             )
-        except httpx.HTTPError as exc:
-            raise_backend_unavailable(exc)
+            if session == "compact" and from_ is None and to is None and window_end < now
+            else []
+        )
 
         aggregate = aggregate_turn_timeline(
             events,

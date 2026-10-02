@@ -3,9 +3,9 @@
 Two faces of the same observability stream:
 - `GET …/events/stream`: the live SSE tail (subscribe to Redis `ava:events`,
   filter by `agent_id`) — only carries events from the moment you subscribe.
-- `GET …/events`: the historical REST query over Loki (the LGTM read side
-  of the unified emitter; task #1197) — the past, for ops / SDK / eval
-  consumers. Was a PG `events` table read before the LGTM cutover.
+- `GET …/events`: the historical REST query over `telemetry_events` in
+  Postgres (the durable record of the agent's telemetry and log events) —
+  the past, for ops / SDK / eval consumers.
 
 Split out of the agents CRUD router (CRUD + lifecycle then; lifecycle later
 moved to `gateway/agents/lifecycle.py`) so each router stays a
@@ -15,21 +15,23 @@ inspector panel).
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-import httpx
-from fastapi import APIRouter, Depends, Query, Request
+import psycopg
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from base.config import settings
 from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow
 from gateway.events.sse import event_stream
-from gateway.lgtm import loki_events, loki_query_budget
-from gateway.lgtm.backend_failure import raise_backend_unavailable
 
 router = APIRouter()
+
+# Bound on one read, below the route's client timeouts.
+_READ_STATEMENT_TIMEOUT_MS = 10_000
 
 
 @router.get(
@@ -44,7 +46,7 @@ async def get_events_stream(agent_id: int, request: Request) -> StreamingRespons
     `events.Event` per frame. code_delta chunks pass through immediately,
     native streaming. This is the live tail; `GET /api/agents/{id}/events`
     (no `/stream`) is the historical REST query over the persisted unified
-    event stream (Loki).
+    event stream (`telemetry_events`).
 
     Does **not** check agent_exists as a precondition: subscribing to a
     non-existent agent is allowed, you just receive no messages. Otherwise
@@ -68,6 +70,7 @@ async def get_events_stream(agent_id: int, request: Request) -> StreamingRespons
 @router.get("/api/agents/{agent_id}/events", dependencies=[Depends(deny_isolated_result_read)])
 def get_agent_events(
     agent_id: int,
+    request: Request,
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: Annotated[datetime | None, Query()] = None,
     event: Annotated[str | None, Query()] = None,
@@ -102,8 +105,7 @@ def get_agent_events(
     from the log line, so `limit`/`offset` paging stays deterministic).
     `limit` returns the configured default window (``display.events_default_limit``
     — 100 out of the box), capped at 1000 (over-limit 422s); `offset`
-    pages further back and is capped at 10,000. Loki has no native offset,
-    so the cap bounds the in-memory parse of `limit + offset + 1` rows.
+    pages further back and is capped at 10,000.
 
     No agent-existence precondition (same as `…/activity` and `…/pending`):
     an unknown agent or an empty window just returns `[]`.
@@ -111,21 +113,24 @@ def get_agent_events(
     if limit is None:
         limit = settings.display.events_default_limit
 
+    if from_ is None:
+        from_ = datetime.now(UTC) - timedelta(hours=24)
     try:
-        rows, _ = loki_events.query_events(
-            agent_id=agent_id,
-            categories=["telemetry", "log"],
-            event_names=[event] if event is not None else None,
-            level=level,
-            from_=from_,
-            to=to,
-            limit=limit,
-            offset=offset,
-        )
-    except loki_query_budget.LokiQueryBudgetError:
-        raise
-    except httpx.HTTPError as exc:
-        raise_backend_unavailable(exc)
+        with request.app.state.db_pool.connection() as conn:
+            conn.execute(f"SET LOCAL statement_timeout = {_READ_STATEMENT_TIMEOUT_MS}")
+            rows, _ = telemetry_rows.query_events(
+                conn,
+                agent_id=agent_id,
+                categories=["telemetry", "log"],
+                event_names=[event] if event is not None else None,
+                level=level,
+                from_=from_,
+                to=to,
+                limit=limit,
+                offset=offset,
+            )
+    except psycopg.errors.QueryCanceled as exc:
+        raise HTTPException(status_code=503, detail="events read timed out") from exc
     return [
         AgentEventRow(
             id=row["id"],
