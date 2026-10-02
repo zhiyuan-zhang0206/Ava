@@ -68,7 +68,7 @@ def test_explicit_keep_preserves_real_idle_terminal_during_service_stop(
     monkeypatch.setattr(stop, "get_shell_backend", PtySessionBackend)
     envfile = pty.write_env_file({})
     try:
-        created = subprocess.run(  # noqa: S603 — test-owned home and repository module
+        created = subprocess.run(
             [sys.executable, "-m", "base.sessions.pty.cli", name, "new", str(home), str(envfile)],
             env={**os.environ, "AVA_HOME": str(home), "HOME": str(home)},
             capture_output=True,
@@ -236,7 +236,7 @@ def test_real_redis_stops_owned_instance_only(
 
         port = urlparse(url).port
         assert port is not None
-        restarted = subprocess.Popen(  # noqa: S603 — fixed binary and fixture-owned directory/port
+        restarted = subprocess.Popen(
             [
                 "redis-server",
                 "--port",
@@ -366,7 +366,7 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
         f"logfile={directory / 'pgbouncer.log'}\n"
         "unix_socket_dir=\n"
     )
-    subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)  # noqa: S603 — private config
+    subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)
     _wait_port(port, timeout=5)
     pid = int((directory / "pgbouncer.pid").read_text())
     identity = stop.OwnedProcess.capture(psutil.Process(pid))
@@ -413,7 +413,7 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
         f"logfile={directory / 'pgbouncer.log'}\n"
         "unix_socket_dir=\n"
     )
-    subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)  # noqa: S603 — private config
+    subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)
     _wait_port(port, timeout=5)
     pid = int((directory / "pgbouncer.pid").read_text())
     identity = stop.OwnedProcess.capture(psutil.Process(pid))
@@ -531,7 +531,7 @@ def _launch_incident_shape_pooler(
         cluster_secret=secret,
         userlist=f'"{role}" "{secret}"\n'.encode(),
     )
-    subprocess.run(  # noqa: S603 — private config, test-owned process
+    subprocess.run(
         [binary, "-d", str(base_pooler.ini_path())], check=True, capture_output=True, timeout=5
     )
     try:
