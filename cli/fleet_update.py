@@ -67,7 +67,7 @@ from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.host.net.http_dial import get, post
 base, headers = gateway_api_base(), gateway_auth_headers()
 if sys.argv[1] == "roster":
-    rows = get(f"{base}/api/cluster/roster", headers=headers, timeout=90); rows.raise_for_status()
+    rows = get(f"{base}/api/cluster/roster?fresh=true", headers=headers, timeout=90); rows.raise_for_status()
     keep = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve_agent_runner")
     print(json.dumps([{key: row[key] for key in keep} for row in rows.json()])); sys.exit(0)
 spawned = post(f"{base}/api/agents", headers=headers, json={"machine": sys.argv[2]}, timeout=60)

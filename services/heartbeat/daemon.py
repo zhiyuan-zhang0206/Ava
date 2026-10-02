@@ -568,15 +568,16 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
 
 
 async def _liveness_loop(pool: ConnectionPool, liveness: Liveness) -> None:
-    """Run agent-liveness checks; a failed pass is retried on the next interval."""
+    """Run agent-liveness checks, the first at start so the roster read model is
+    populated at once; a failed pass is retried on the next interval."""
     while True:
         try:
-            await _sleep_with_liveness(liveness, _PASS_INTERVAL_S)
             await run_liveness_pass(pool)
         except asyncio.CancelledError:
             raise
         except Exception:
             _log.exception("[heartbeat] liveness loop iteration failed")
+        await _sleep_with_liveness(liveness, _PASS_INTERVAL_S)
 
 
 async def run() -> None:

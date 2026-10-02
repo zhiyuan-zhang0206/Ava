@@ -1,7 +1,4 @@
 {
-  "patch_targets": {
-    "tests/ops/test_schema_mismatch.py::gateway.cluster.roster_probe._probe_failures": 1
-  },
   "tests_location": {
     "tests/ops/test_agent_wake_hosted.py::top-level": 1,
     "tests/ops/test_schema_mismatch.py::top-level": 1

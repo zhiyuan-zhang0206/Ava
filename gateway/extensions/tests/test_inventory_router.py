@@ -13,7 +13,7 @@ flat view; an unknown / non-agent-runner name 404s before any dispatch.
 
 from __future__ import annotations
 
-import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 
 from base.config import settings
 from gateway.app import app
-from gateway.cluster import roster_probe
+from gateway.cluster.snapshots import Snapshot
 from gateway.extensions import inventory as inventory_router
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import FieldWriteResult, InventoryReadResult, InventoryWriteOpResult
@@ -166,7 +166,7 @@ def test_aggregate_buckets_unreachable_machine(monkeypatch: pytest.MonkeyPatch) 
             return _read({"X": _plugin(enabled=True)}, {}, "A")
         raise _cluster_rpc.ClusterOpUnreachable("no ack")
 
-    monkeypatch.setattr(roster_probe, "_probe_failures", {})
+    monkeypatch.setattr(inventory_router, "_agent_runner_snapshots", dict)
     monkeypatch.setattr(inventory_router, "_dispatch_inventory_read", fake_read)
 
     with TestClient(app) as client:
@@ -179,17 +179,37 @@ def test_aggregate_buckets_unreachable_machine(monkeypatch: pytest.MonkeyPatch) 
     assert set(x["hosts"]) == {"A"}
 
 
-def test_aggregate_skips_stopped_and_backoff_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+def _snapshot(*, failures: int, age_s: float = 5.0) -> Snapshot:
+    observed = datetime.now(UTC) - timedelta(seconds=age_s)
+    return Snapshot(
+        observed_at=observed,
+        reachable=failures == 0,
+        consecutive_failures=failures,
+        status=None,
+        status_at=None,
+    )
+
+
+def test_aggregate_skips_stopped_and_known_down_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
     """A host already known down is never dialed: an intentionally stopped row
-    (`stopped_at`) and a host inside the roster probe's failure backoff land in
-    `unreachable` directly; the columns stay (task #4127)."""
+    (`stopped_at`) and a host the heartbeat liveness pass has just failed twice
+    (the roster's snapshot) land in `unreachable` directly; the columns stay
+    (task #4127). A host that failed once, or whose snapshot is stale (the pass is
+    not running), is still dialed."""
     monkeypatch.setattr(
         inventory_router,
         "_agent_runner_rows",
-        lambda: [("A", False), ("B", True), ("C", False)],
+        lambda: [("A", False), ("B", True), ("C", False), ("D", False), ("E", False)],
     )
-    monkeypatch.setattr(roster_probe, "_probe_failures", {})
-    roster_probe.note_probe_unreachable("C")  # C now sits inside its backoff window
+    monkeypatch.setattr(
+        inventory_router,
+        "_agent_runner_snapshots",
+        lambda: {
+            "C": _snapshot(failures=2),  # known down: skipped
+            "D": _snapshot(failures=1),  # one dropped probe: still dialed
+            "E": _snapshot(failures=5, age_s=3600.0),  # stale: no evidence, dialed
+        },
+    )
 
     dialed: list[str] = []
 
@@ -205,23 +225,18 @@ def test_aggregate_skips_stopped_and_backoff_hosts(monkeypatch: pytest.MonkeyPat
         resp = client.get("/api/inventory")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert dialed == ["A"]
-    assert body["machines"] == ["A", "B", "C"]
+    assert sorted(dialed) == ["A", "D", "E"]
+    assert body["machines"] == ["A", "B", "C", "D", "E"]
     assert body["unreachable"] == ["B", "C"]
 
 
-def test_aggregate_dial_outcome_feeds_shared_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A dial that comes back unreachable widens the shared roster backoff, a
-    success clears it, and a known-failed host is dialed under the fast-fail
-    budget with one fast retry — roster and aggregate keep one liveness view."""
+def test_aggregate_dials_run_under_the_aggregate_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The gateway keeps no failure memory: every dialed host gets the one bounded
+    budget and one fast retry, and a dial that comes back unreachable is only bucketed."""
     monkeypatch.setattr(
         inventory_router, "_agent_runner_rows", lambda: [("A", False), ("B", False)]
     )
-    monkeypatch.setattr(roster_probe, "_probe_failures", {})
-    # A is known-failed but its backoff window has long elapsed: still dialed,
-    # under the fast-fail budget.
-    roster_probe._probe_failures["A"] = (1, time.monotonic() - 3600.0)
-
+    monkeypatch.setattr(inventory_router, "_agent_runner_snapshots", dict)
     seen: dict[str, tuple[float, int | None]] = {}
 
     async def fake_read(
@@ -238,10 +253,8 @@ def test_aggregate_dial_outcome_feeds_shared_backoff(monkeypatch: pytest.MonkeyP
         resp = client.get("/api/inventory")
     assert resp.status_code == 200, resp.text
     assert resp.json()["unreachable"] == ["B"]
-    fast = settings.gateway.status_probe_fastfail_timeout_seconds
-    assert seen["A"] == (fast, 1)
-    assert "A" not in roster_probe._probe_failures  # a success cleared it
-    assert "B" in roster_probe._probe_failures  # an unreachable widened it
+    budget = inventory_router._AGGREGATE_READ_TIMEOUT_S
+    assert seen["A"] == (budget, 1) and seen["B"] == (budget, 1)
 
 
 # ── GET single machine ──
