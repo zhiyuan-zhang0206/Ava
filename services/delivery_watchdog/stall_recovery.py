@@ -28,6 +28,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.config import settings
+from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from services.delivery_watchdog import attempts, rounds
 
@@ -133,7 +134,7 @@ async def stall_recovery_round(
         list(oldest_inbound),
         _HARVEST_RETRY_MIN_INTERVAL_S,
     )
-    await rounds.fan_out(
+    await round_loop.fan_out(
         [functools.partial(_request_harvest, pool, a, oldest_inbound[a]) for a in claimed],
         concurrency=_HARVEST_MAX_CONCURRENCY,
         progress=progress,
@@ -148,4 +149,4 @@ async def stall_recovery_loop(
     async def one_round() -> None:
         await stall_recovery_round(pool, progress, threshold_s)
 
-    await rounds.run_rounds("stalled crash-marked recovery", progress, interval_s, one_round)
+    await round_loop.run_rounds("stalled crash-marked recovery", progress, interval_s, one_round)

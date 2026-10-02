@@ -48,24 +48,23 @@ def _row(conn: psycopg.Connection, name: str) -> Any:
 class TestProvision:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("automatic", [False, True])
-    async def test_gateway_boot_respects_seeding_without_disabling_explicit_provision(
+    async def test_service_start_respects_seeding_without_disabling_explicit_provision(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, automatic: bool
     ) -> None:
         from base.config import settings
-        from gateway.schedules.manager import ScheduleManager
+        from services.schedule_manager import daemon
 
         monkeypatch.setattr(settings.gateway, "provision_builtin_schedules", automatic)
         assert _names(db_conn) == set()
         expected = {item.name for item in load_manifest()}
         with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1) as pool:
-            manager = ScheduleManager(pool)
-            await manager.provision_builtins()
+            await daemon.provision_builtins(pool)
             assert _names(db_conn) == (expected if automatic else set())
             # Manual provisioning remains a deliberate action, even on an unseeded home.
             provision_builtin_schedules(db_conn)
             db_conn.commit()
             before = {name: _row(db_conn, name) for name in expected}
-            await manager.provision_builtins()
+            await daemon.provision_builtins(pool)
             assert {name: _row(db_conn, name) for name in expected} == before
 
     def test_creates_missing_with_manifest_defaults(

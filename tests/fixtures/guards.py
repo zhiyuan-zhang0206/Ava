@@ -185,28 +185,23 @@ def _guard_permissions_helper_native_io(
 
 
 @pytest.fixture(autouse=True)
-def _guard_schedule_manager(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Autouse safety net: the gateway lifespan's ScheduleManager touches the real
-    session backend (reconcile `list_sessions`/`new_session`; the API
-    `sync`/`capture` control paths). Under `TestClient(app)` that would hit the
-    real backend and pollute tests recording `subprocess.run`. Neutralize the
-    session-touching methods (`start` background task, plus `sync`/`capture`
-    invoked by the routes); tests that exercise the real reconcile/sync logic
-    call the manager's blocking methods on an instance directly with a faked
-    backend."""
+def _guard_schedule_session_control(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Autouse safety net: the schedule API's control paths reach the real session
+    backend (`capture`) and wait for a schedule-manager service that no test
+    runs (`request_sync` waits for its queued row to be consumed). Under
+    `TestClient(app)` that would hit the real backend and stall every start /
+    stop / restart for the wait. Neutralize both; the request row itself is still
+    written, so API tests can assert it. Tests of the real consume / sync logic
+    call the service's functions directly with a faked backend."""
 
-    async def _noop_start(self: object) -> None:
+    async def _noop_wait(pool: object, schedule_id: int) -> None:
         return None
 
-    async def _noop_sync(self: object, schedule_id: int) -> None:
+    async def _noop_capture(schedule_id: int, lines: int) -> None:
         return None
 
-    async def _noop_capture(self: object, schedule_id: int, lines: int) -> None:
-        return None
-
-    monkeypatch.setattr("gateway.schedules.manager.ScheduleManager.start", _noop_start)
-    monkeypatch.setattr("gateway.schedules.manager.ScheduleManager.sync", _noop_sync)
-    monkeypatch.setattr("gateway.schedules.manager.ScheduleManager.capture", _noop_capture)
+    monkeypatch.setattr("gateway.schedules.session_control.wait_consumed", _noop_wait)
+    monkeypatch.setattr("gateway.schedules.session_control.capture", _noop_capture)
 
 
 @pytest.fixture(autouse=True)

@@ -20,9 +20,9 @@ import logging
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from gateway.routers import work_failed as work_failed_router
-from services.delivery_watchdog import rounds
 from services.ttl_reaper import shells
 
 _log = logging.getLogger(__name__)
@@ -47,6 +47,6 @@ async def remote_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     async def one_round() -> None:
         await remote_round(pool, progress)
 
-    await rounds.run_rounds(
+    await round_loop.run_rounds(
         "remote", progress, settings.daemon.ttl_reaper_poll_interval_seconds, one_round
     )

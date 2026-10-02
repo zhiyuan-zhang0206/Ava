@@ -216,6 +216,17 @@ def build_services() -> tuple[ServiceSpec, ...]:
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; every phase is a DB pass
         ),
+        # schedule-manager: keeps one session per enabled `schedules` row alive
+        # (launch under the crash backoff and breaker, reap the unwanted, consume
+        # the API's sync requests). A gateway daemon — the sessions run from this
+        # home's own checkout on the gateway host, and the service refuses to
+        # start from any other checkout.
+        healthz_daemon(
+            "schedule-manager",
+            module="services.schedule_manager.daemon",
+            capabilities=_GATEWAY,
+            requires_db=True,  # assert_schema_current at boot; every decision is a DB read
+        ),
         # milvus before memory-indexer: memory-indexer cold-start connects to milvus.
         # Gated by _gate_reason to the milvus memory-search backend — numpy
         # (default) / pgvector hosts do not launch the ~1GB milvus-lite server.

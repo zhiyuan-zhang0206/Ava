@@ -1,4 +1,4 @@
-"""Real child-process regressions: seven daemons exit within a small bound of
+"""Real child-process regressions: eight daemons exit within a small bound of
 SIGTERM even with a default-executor job in flight.
 
 2026-09-18 (task #3940): the PITR base-candidate daemon's smooth stop SIGTERM'd
@@ -96,6 +96,10 @@ _CASES: dict[str, _DaemonCase] = {
     "ttl_reaper": _DaemonCase(
         module="services.ttl_reaper.daemon",
         interrupt_line="[ttl-reaper] interrupted, shutting down",
+    ),
+    "schedule_manager": _DaemonCase(
+        module="services.schedule_manager.daemon",
+        interrupt_line="[schedule-manager] interrupted, shutting down",
     ),
 }
 
