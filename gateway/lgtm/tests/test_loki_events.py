@@ -86,53 +86,6 @@ class _FakeClient:
         return item if isinstance(item, _FakeResponse) else _FakeResponse(item)
 
 
-class _SlowClient:
-    """Return one reusable response slowly so callers overlap in flight."""
-
-    def __init__(
-        self,
-        response: _FakeResponse,
-        *,
-        delay_s: float = 0.2,
-        release: threading.Event | None = None,
-    ) -> None:
-        self.response = response
-        self.delay_s = delay_s
-        self.release = release
-        self.calls: list[tuple[str, dict[str, Any]]] = []
-        self.entered = threading.Event()
-        self._lock = threading.Lock()
-
-    def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
-        with self._lock:
-            self.calls.append((url, params))
-        self.entered.set()
-        if self.release is None:
-            time.sleep(self.delay_s)
-        else:
-            assert self.release.wait(timeout=2)
-        return self.response
-
-
-class _SeriesLimitResponse(_FakeResponse):
-    """Loki's max_query_series rejection (400) — raise_for_status raises the
-    real exception type the gateway sees (httpx.HTTPStatusError), carrying
-    the response text the fallback inspects."""
-
-    def __init__(self) -> None:
-        super().__init__({}, status=400)
-        self.text = "maximum number of series (500) reached for a single query"
-
-    def raise_for_status(self) -> None:
-        import httpx
-
-        raise httpx.HTTPStatusError(
-            "Client error '400 Bad Request'",
-            request=httpx.Request("GET", "http://loki"),  # type: ignore[arg-type]
-            response=self,  # type: ignore[arg-type]
-        )
-
-
 def _accessor(client: object) -> Any:
     """`loki_events._client` replacement: hands back the fake."""
 
