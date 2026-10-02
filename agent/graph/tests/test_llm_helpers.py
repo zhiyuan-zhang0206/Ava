@@ -33,6 +33,7 @@ from agent.graph._base_prompt import _capture_ava_overview, _get_ava_overview
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices, LlmCallPolicy
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
@@ -176,6 +177,7 @@ def _make_runtime(
         ops_pool=make_fake_ops_pool(),
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx, execution_info=execution_info)
 
@@ -989,57 +991,40 @@ def test_parse_provider_error_type_empty_string() -> None:
     assert _parse_provider_error_type(exc) is None
 
 
+def _fatal(error_type: str | None, configured: str) -> bool:
+    """`_is_fatal_provider_error_type` for an error of `error_type` under a configured fatal set."""
+    from agent.graph.llm_errors import _is_fatal_provider_error_type
+
+    body = {"error": {"type": error_type, "message": "m"}}
+    policy = LlmCallPolicy(
+        configured, gemini_explicit_cache_enabled=False, gemini_cache_timeout_seconds=1.0
+    )
+    return _is_fatal_provider_error_type(_FakeOpenAIError(body), policy)
+
+
 def test_is_fatal_provider_error_type_matches_configured() -> None:
     """When the error type is in the configured fatal set, returns True."""
-    from agent.graph.llm_errors import _is_fatal_provider_error_type
-    from base.config import settings
-
-    original = settings.lm.llm_fatal_provider_error_types
-    try:
-        settings.lm.llm_fatal_provider_error_types = "engine_overloaded_error"
-        exc = _FakeOpenAIError(
-            {"error": {"type": "engine_overloaded_error", "message": "overloaded"}}
-        )
-        assert _is_fatal_provider_error_type(exc) is True
-    finally:
-        settings.lm.llm_fatal_provider_error_types = original
+    assert _fatal("engine_overloaded_error", "engine_overloaded_error") is True
 
 
 def test_is_fatal_provider_error_type_not_in_set() -> None:
     """Error type not in the configured set returns False."""
-    from agent.graph.llm_errors import _is_fatal_provider_error_type
-    from base.config import settings
-
-    original = settings.lm.llm_fatal_provider_error_types
-    try:
-        settings.lm.llm_fatal_provider_error_types = "engine_overloaded_error"
-        exc = _FakeOpenAIError({"error": {"type": "rate_limit_exceeded", "message": "slow down"}})
-        assert _is_fatal_provider_error_type(exc) is False
-    finally:
-        settings.lm.llm_fatal_provider_error_types = original
+    assert _fatal("rate_limit_exceeded", "engine_overloaded_error") is False
 
 
 def test_is_fatal_provider_error_type_empty_config() -> None:
     """Empty configured set is a fast no-op (always returns False)."""
-    from agent.graph.llm_errors import _is_fatal_provider_error_type
-    from base.config import settings
-
-    original = settings.lm.llm_fatal_provider_error_types
-    try:
-        settings.lm.llm_fatal_provider_error_types = ""
-        exc = _FakeOpenAIError(
-            {"error": {"type": "engine_overloaded_error", "message": "overloaded"}}
-        )
-        assert _is_fatal_provider_error_type(exc) is False
-    finally:
-        settings.lm.llm_fatal_provider_error_types = original
+    assert _fatal("engine_overloaded_error", "") is False
 
 
 def test_is_fatal_provider_error_type_no_body() -> None:
     """Exception without body (generic exception) returns False."""
     from agent.graph.llm_errors import _is_fatal_provider_error_type
 
-    assert _is_fatal_provider_error_type(ConnectionError("net")) is False
+    assert (
+        _is_fatal_provider_error_type(ConnectionError("net"), AgentSlices.resolve().llm_policy)
+        is False
+    )
 
 
 async def test_llm_usage_event_carries_latency_ms(loguru_records) -> None:

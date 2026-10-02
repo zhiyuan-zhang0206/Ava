@@ -36,6 +36,7 @@ from agent.graph.llm_errors import (
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.config import settings
 from base.lm.registry import MODELS, ModelSpec
 from base.native_process.turn_identity import bind_turn_identity
@@ -50,6 +51,7 @@ def _make_runtime(llm: MagicMock) -> Runtime[AvaContext]:
         ops_pool=make_fake_ops_pool(),
         llm=llm,
         event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx)
 
@@ -182,7 +184,9 @@ async def test_total_timeout_falls_back_while_chunks_keep_arriving(
     fake_llm.ainvoke = _fallback
     chunks: list[AIMessageChunk] = []
 
-    await _consume_llm(fake_llm, [], chunks=chunks, handler=MagicMock())
+    await _consume_llm(
+        fake_llm, [], chunks=chunks, handler=MagicMock(), agent=AgentSlices.resolve()
+    )
 
     assert fallback_called
     assert streamed_chunks <= 20
@@ -386,6 +390,7 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
             ops_pool=make_fake_ops_pool(),
             llm=llm,
             event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
         )
         info = ExecutionInfo(
             checkpoint_id="",

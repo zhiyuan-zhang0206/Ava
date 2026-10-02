@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from base.agents.context.slices import AgentSlices, LlmCallPolicy
 from base.config import settings
-from base.config.turn_view import turn_settings
 from base.lm.errors import ErrorClass, classify_error, emit_provider_error
 
 
@@ -177,7 +177,7 @@ def _parse_provider_error_type(exc: BaseException) -> str | None:
     return None
 
 
-def _is_fatal_provider_error_type(exc: BaseException) -> bool:
+def _is_fatal_provider_error_type(exc: BaseException, llm_policy: LlmCallPolicy) -> bool:
     """Check whether ``exc`` carries a provider error type configured as fatal.
 
     Returns ``True`` when ``_parse_provider_error_type`` extracts a type
@@ -185,7 +185,7 @@ def _is_fatal_provider_error_type(exc: BaseException) -> bool:
     (comma-separated string parsed into a set). On an empty config string
     the check is a fast no-op.
     """
-    fatal_csv = turn_settings.lm.llm_fatal_provider_error_types
+    fatal_csv = llm_policy.llm_fatal_provider_error_types
     if not fatal_csv:
         return False
     fatal_types = {t.strip() for t in fatal_csv.split(",") if t.strip()}
@@ -193,7 +193,9 @@ def _is_fatal_provider_error_type(exc: BaseException) -> bool:
     return error_type is not None and error_type in fatal_types
 
 
-def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | None:
+def _classify_and_log_provider_error(
+    exc: Exception, agent: AgentSlices
+) -> FatalProviderError | None:
     """Classify a provider exception, emit the structured postmortem log, and
     return a `FatalProviderError` to raise when the turn must fail fast — else None
     so the caller re-raises the original for the `RetryPolicy` to retry.
@@ -216,10 +218,10 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
     identify the same account the event does (task #3916).
     """
     classification = classify_error(exc)
-    fatal_type_hit = _is_fatal_provider_error_type(exc)
+    fatal_type_hit = _is_fatal_provider_error_type(exc, agent.llm_policy)
     fatal = classification.error_class is ErrorClass.PERMANENT or fatal_type_hit
     context_overflow = classification.context_overflow
-    model = turn_settings.lm.llm_model
+    model = agent.brain.llm_model
     emit_provider_error(exc, model=model, fatal=fatal, classification=classification)
     if not fatal:
         return None

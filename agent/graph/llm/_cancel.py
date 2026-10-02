@@ -103,7 +103,7 @@ async def _race_stream_vs_cancel(
             # instead of exhausting the full backoff budget and dying into
             # terminated. A TRANSIENT / UNKNOWN class re-raises the original so the
             # RetryPolicy retries — unknown is never guessed into fail-fast.
-            fatal = _classify_and_log_provider_error(e)
+            fatal = _classify_and_log_provider_error(e, ctx.require_agent())
             if fatal is not None:
                 raise fatal from e
             raise

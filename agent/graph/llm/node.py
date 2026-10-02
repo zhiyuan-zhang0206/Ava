@@ -77,7 +77,6 @@ from agent.turn.progress import mark_turn_progress
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.messages.kwargs import read_ava_kwargs
 from base.config import settings
-from base.config.turn_view import turn_settings
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
@@ -150,6 +149,7 @@ def _finalize_turn_observability(
     final_msg: AIMessage,
     handler: RedisStreamHandler,
     task_id: int | None,
+    model: str,
 ) -> None:
     """Post-stream metadata finalization for one completed AIMessage turn.
 
@@ -186,7 +186,7 @@ def _finalize_turn_observability(
         }
     usage_tally = log_llm_usage(
         final_msg,
-        model=turn_settings.lm.llm_model,
+        model=model,
         latency_ms=handler.llm_latency_ms,
         decode_ms=handler.llm_decode_ms,
         task_id=task_id,
@@ -287,7 +287,8 @@ async def llm_node(
                     from base.lm.registry import resolve_setting
 
                     max_attempts = resolve_setting(
-                        "llm_retry_max_attempts", model=turn_settings.lm.llm_model
+                        "llm_retry_max_attempts",
+                        model=runtime.context.require_agent().brain.llm_model,
                     )
                     if attempt >= max_attempts:
                         _log_llm_retry_duration(runtime, outcome="attempts_exhausted")
@@ -361,7 +362,9 @@ def _is_silent_idle(final_msg: AIMessage) -> bool:
     )
 
 
-def _silent_idle_command(final_msg: AIMessage, agent_id: int) -> Command[LlmGoto] | None:
+def _silent_idle_command(
+    final_msg: AIMessage, agent_id: int, model: str
+) -> Command[LlmGoto] | None:
     """Continue-loop vs guard-halt decision for a silent-idle turn.
 
     Keeps the reasoning in context and loops straight back to the LLM
@@ -383,7 +386,7 @@ def _silent_idle_command(final_msg: AIMessage, agent_id: int) -> Command[LlmGoto
     cap = settings.lm.llm_silent_idle_max_output_tokens
     from base.lm.pricing import quote
 
-    priced = quote(turn_settings.lm.llm_model, 0, output_tokens, 0)
+    priced = quote(model, 0, output_tokens, 0)
     estimated_cost_usd = priced.cost_usd if priced is not None else None
     if cap > 0 and cumulative_output_tokens >= cap:
         _silent_idle_output_tokens.pop(tid, None)
@@ -537,7 +540,9 @@ async def _llm_node_impl(
     cancelled_cmd = await _race_stream_vs_cancel(
         ctx,
         agent_id,
-        _stream_with_cache_retry(llm, list(state.messages), chunks=chunks, handler=handler),
+        _stream_with_cache_retry(
+            llm, list(state.messages), chunks=chunks, handler=handler, agent=ctx.require_agent()
+        ),
         handler,
     )
     if cancelled_cmd is not None:
@@ -564,10 +569,15 @@ async def _llm_node_impl(
         logger.info("[{label}] {body}", label="text", body=text)
     await _persist_last_active(ctx, agent_id, text)
     _finalize_turn_observability(
-        ctx.event_publisher, agent_id, final_msg, handler, state.active_task_id
+        ctx.event_publisher,
+        agent_id,
+        final_msg,
+        handler,
+        state.active_task_id,
+        ctx.require_agent().brain.llm_model,
     )
 
-    silent_idle_cmd = _silent_idle_command(final_msg, agent_id)
+    silent_idle_cmd = _silent_idle_command(final_msg, agent_id, ctx.require_agent().brain.llm_model)
     if silent_idle_cmd is not None:
         return silent_idle_cmd
 
