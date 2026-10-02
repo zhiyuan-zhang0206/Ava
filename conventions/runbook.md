@@ -11,7 +11,7 @@ gateway on the fixed port table. (The rationale — and the remaining slice 3,
 bundling the pg/redis binaries — is in
 `future/infra/embedded-per-cluster-data-plane.md`.) A data plane is **swappable**:
 URLs naming a foreign host (another machine or a SaaS provider) make the cluster
-treat it as remote-managed — `ava start` / `ava stop` / `ava status` / the watchdog
+treat it as remote-managed — `ava start` / `ava stop` / `ava status` / the root health loop
 skip local instance management and degrade to reachability probes, and the
 connection-layer knobs (TLS, pool sizing) live in config
 (`docs/history/2026-08-28/connection-layer-swappable.md`).
@@ -174,7 +174,7 @@ in the repository do not establish a cluster runtime dependency.
 frontend 3000, pg 5433, redis 6380, pgbouncer 6433, daemon healthz ports in
 8103-8116, milvus 19530). A new home records the table in its start intent at birth, and
 every later read is `rec.ports[...]` off that record; a unit whose `.env` names no
-port binds the same numbers. Watchdog probe URLs + daemon/milvus/frontend ports
+port binds the same numbers. Health probe URLs + daemon/milvus/frontend ports
 derive from settings. The table is closed: a record with more or fewer slots is
 refused at start. Tests never use these numbers (`base/cluster/tests/test_fixed_ports.py`).
 
@@ -920,19 +920,18 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   **Guardrails**: any existing profile directory is never touched, including an
   empty or partial first copy (idempotent across restarts; prod's multi-GB logged-in
   profile survives every start); non-interactive
-  paths (watchdog respawn, boot autostart, a `cli.fleet_update` start) never prompt and
+  paths (root revival, boot autostart, a `cli.fleet_update` start) never prompt and
   always take the fresh default; a host with no daily Chrome degrades silently to
   fresh.
 - **On by default with auto-detect**: `AVA_BROWSER_ENABLED` defaults to true.
   On a headless machine (no `$DISPLAY` / `$WAYLAND_DISPLAY` on Linux), the
   converge step prints a warning and skips the browser — `ava start`
   proceeds normally without it. On a headed machine (macOS / Linux with display),
-  the browser session and watchdog healthcheck engage automatically. Set
+  the browser session and its healthcheck engage automatically. Set
   `AVA_BROWSER_ENABLED=false` to explicitly opt out. The display verdict is
   computed consistently across processes: `$DISPLAY` / `$WAYLAND_DISPLAY` are
   passed through both env builders (`base/sessions/env_forwarding.py`) —
-  forwarded into every daemon service session, and carried in the detached agent's
-  inherited env dict (`agent_spawn_env_dict`) — so the watchdog and the agent see
+  forwarded into every daemon service session — so every service sees
   the same display the operator's shell does. Without this a headed Linux / WSLg
   host would strip the display and wrongly skip (and never revive) a browser it
   can actually run.
@@ -959,7 +958,7 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   revives the session. The daemon guards the collision: `main()` probes the CDP
   port first and refuses with a clear message rather than exec'ing a second
   Chrome into the lock. To (re)take service ownership, stop the squatter, then
-  `ava start` (or let the next watchdog round revive the session once the port is
+  `ava start` (or let the next root health round revive the session once the port is
   free) — and the refusal message now names that remedy itself. When the squatter
   is one of *ours* (a Chrome left outside the session by a `SingletonLock`
   handoff), `ava stop --force` sweeps it, so there is no pid hunt: it kills
@@ -1212,8 +1211,8 @@ load-bearing:
   scheduler is one namespace per OS user, so a test-scoped `$AVA_HOME` cannot
   isolate it — the pytest suite sets this and `tests/fixtures/provisioning.py` fails any run
   that leaves a job behind. Deregistration is never gated. Operators do not set
-  this: a prod cluster with it off silently loses its health probe, its watchdog
-  probes, daily log maintenance, and its ability to come back after a reboot.
+  this: a prod cluster with it off silently loses its health probe,
+  daily log maintenance, and its ability to come back after a reboot.
 
 `ava pause`, `ava stop`, restart and update use the native maintenance primitives.
 Pause retains infrastructure and persistent PTYs; default stop closes those local
@@ -1871,7 +1870,7 @@ the failure invisible.
 The observability stack (user decision 2026-08-11, architecture task #1266):
 **OTel + Tempo + Loki + Prometheus + Grafana**. The one gateway home carrying
 `$AVA_HOME/lgtm-host` and every pure runner run an **OTel Collector sidecar**
-(`ava-otel-collector`, supervised by the watchdog and installed by converge
+(`ava-otel-collector`, supervised by the root and installed by converge
 from `deploy/otel-collector/`). Producers export OTLP/HTTP to their local
 sidecar (`AVA_TELEMETRY_OTLP_ENDPOINT`, default `http://127.0.0.1:4318`; the
 ingress port is the host setting `AVA_TELEMETRY_OTLP_PORT` — source for this
@@ -1936,10 +1935,10 @@ resources. It fans out:
   receiver always authenticates with the Redis-admin password.
 - **collector delivery metrics** — every sidecar scrapes its per-unit loopback
   self-metrics endpoint every 30s into `metrics/infra`
-  (`AVA_OTELCOL_METRICS_PORT`, default 8888). The local watchdog probes the same
+  (`AVA_OTELCOL_METRICS_PORT`, default 8888). The root probes the same
   endpoint. Grafana rules alert on current queue pressure, new enqueue failures
   over 5m (counter delta, never lifetime absolute value), and a recently-seen
-  machine whose collector stopped reporting for 5m. The watchdog logs current
+  machine whose collector stopped reporting for 5m. The root logs current
   full queues but does not restart a healthy receiver for remote backpressure.
 
 **Event-label canary.** After an OTLP-emitter rollout, query a post-rollout
@@ -2165,7 +2164,7 @@ Where to look when something went wrong on a host:
 | what did the cluster do, without ssh | `GET /api/cluster/admin/events` over the private network |
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
 | what did milvus say | its log file only — it is a C++ binary with no PG sink |
-| an agent | `$AVA_HOME/logs/agent-{N}.log` (kernel + its exec subprocess, both appending) |
+| an agent's exec subprocesses | `$AVA_HOME/logs/agent-{N}.log` (every exec subprocess of the agent appends) |
 | raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 84 hours; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |
 
 ### Local log rotation and retention

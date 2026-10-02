@@ -157,7 +157,7 @@ def test_file_sink_rotates_and_expires(tmp_path: Path) -> None:
 def test_file_sink_never_enqueues(tmp_path: Path) -> None:
     """enqueue must remain False — this locks a previously exploded pitfall, don't "optimize" back.
 
-    `agent-{N}.log` is shared by kernel + exec subprocess two processes; loguru's official answer for this shared sink is enqueue=True. But that queue allocates POSIX semaphore, and force-killed processes (agent routinely SIGKILL) permanently leak it; when leak accumulates hits kern.posix.sem.max, every new agent startup dies with errno 28.
+    `agent-{N}.log` is shared by the agent's exec subprocesses; loguru's official answer for this shared sink is enqueue=True. But that queue allocates POSIX semaphore, and force-killed processes (agent routinely SIGKILL) permanently leak it; when leak accumulates hits kern.posix.sem.max, every new agent startup dies with errno 28.
     Prefer accepting rare interleaving on rotation than switching to enqueue.
     """
     with patch.object(slog.logger, "add") as mock_add:

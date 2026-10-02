@@ -17,12 +17,12 @@ a read that layers those overrides over the process-global instance.
 There is no plugin-scope birth_config: only framework fields are `frozen`, so
 `agents_meta.birth_config` never carries a plugin key (`base/agents/birth_config.py`).
 
-Mode equivalence:
+Binding:
 
-- **Process mode (today)**: nothing binds the contextvar, so every read returns
-  `_PLUGIN_CONFIGS[plugin]` — the instance boot's `apply_config_overlay`
-  already rebuilt with the overlay merged in. Byte-for-byte unchanged.
-- **Hosted mode (Phase 1)**: the host binds the agent's overrides before
+- **Outside a bound turn** (services, the exec child): nothing binds the
+  contextvar, so every read returns `_PLUGIN_CONFIGS[plugin]` — the instance
+  boot's `apply_config_overlay` already rebuilt with the overlay merged in.
+- **Inside a hosted turn**: the host binds the agent's overrides before
   creating its turn task; `asyncio.create_task` and LangGraph's node tasks copy
   the context, so one bind covers the whole turn (the empirical propagation
   result `turn_view` documents).

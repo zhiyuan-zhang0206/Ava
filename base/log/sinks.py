@@ -283,10 +283,10 @@ def _add_file_sink(path: Path) -> int:
     `kern.posix.sem.max`, after which every new agent dies at startup with
     errno 28.
 
-    `agent-{N}.log` is the one file two processes share (kernel + exec
-    subprocess — see `init_subprocess_logger`). Each holds its own handler
-    and evaluates rotation independently, so a rotation racing the other
-    process's write can land its next lines in the just-rotated file
+    `agent-{N}.log` is the one file several processes share (the exec
+    subprocesses of agent N — see `init_subprocess_logger`). Each holds its
+    own handler and evaluates rotation independently, so a rotation racing
+    another process's write can land its next lines in the just-rotated file
     instead of the fresh one. Accepted rather than fixed: the window is a
     single write, the lines are still on disk in the rotated file — whereas
     no rotation fills the disk for certain. The daily half of the rotation

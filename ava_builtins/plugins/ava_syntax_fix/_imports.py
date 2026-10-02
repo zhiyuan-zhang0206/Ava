@@ -189,7 +189,7 @@ def _ruff_executable() -> str:
     return their input unchanged, so an unresolvable binary degrades them to a
     silent no-op instead of failing loudly. A bare ``"ruff"`` makes that hinge
     on ambient ``PATH``: agent processes only work because their launcher
-    prepends the venv's ``bin`` (`ops/agent_launch.py`), an implicit contract
+    prepends the venv's ``bin``, an implicit contract
     owned by a different module, and any caller that skips it (a direct
     ``.venv/bin/python`` run, an eval harness) silently loses the whole stage.
     Anchoring on ``sys.executable`` binds ruff to the environment of the running

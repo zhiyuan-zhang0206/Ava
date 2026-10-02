@@ -39,8 +39,8 @@ def _validate_browser_enabled(value: object) -> ValidationResult:
     """Gate the ``True`` value: display + Chrome binary + npx must all be present.
 
     Uses the shared ``browser_capable()`` predicate (same gate as
-    ``_services_for_roles``, watchdog ``_checks_for_capability``, and
-    ``agent/warmup.py``). ``False`` is always ok.
+    ``_services_for_roles`` and the browser daemon's
+    ``assert_browser_capable``). ``False`` is always ok.
     """
     if not value:
         return ValidationResult(ok=True)

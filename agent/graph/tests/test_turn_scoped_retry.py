@@ -63,8 +63,8 @@ class TestPerAgentResolution:
                 assert base <= policy.initial_interval < base + _RETRY_JITTER_SPAN_S
 
     def test_unbound_reads_match_the_build_time_value(self) -> None:
-        """Process mode binds nothing, so every read must equal what the old
-        build-time call produced — the conversion is a no-op there."""
+        """An unbound read must equal the build-time value — the conversion is a
+        no-op there."""
         policy = _build_llm_retry()
         assert policy.initial_interval == settings.lm.llm_retry_initial_interval_seconds
         assert (

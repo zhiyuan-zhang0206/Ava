@@ -18,7 +18,7 @@ Three entry points, three session classes:
 
 - `get_backend()` — the **service/daemon + orchestration** backend: `ava start` launches, healthcheck respawns, pause/unpause, and the updater / rollout / cluster-restart orchestration sessions (S7 moved them onto this backend). `PosixProcSessionBackend`, with the macOS helper backend when configured.
 - `get_shell_backend()` — **agent interactive shells / watchers**: `PtySessionBackend` (per-session pty hosts). Never addresses service or orchestration sessions.
-- `native_proc()` — **agent processes** (non-interactive, no PTY needed): the posixproc module, used by `ops.agent_launch` (spawn / kill-stale) and the reap / force-terminate / status consumers.
+- `native_proc()` — **agent processes** (non-interactive, no PTY needed): the posixproc module, used by the agent launch (spawn / kill-stale) and the reap / force-terminate / status consumers.
 
 **Platform-supervisor imports are method-local** so selecting one backend does
 not import every platform implementation. Current native service custody belongs

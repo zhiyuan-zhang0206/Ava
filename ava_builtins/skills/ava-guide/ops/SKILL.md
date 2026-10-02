@@ -245,9 +245,7 @@ The session backend hands the child a built env dict (`base.sessions.env_forward
 forward_env_dict`) — host-scope env only (machine identity, paths, health
 ports, the gateway URL) for daemon/service sessions; the cluster-scope values
 are NOT forwarded — the child re-sources them at its own boot (fetch on a
-pure runner, own .env on a gateway host). Detached agent processes get
-`ops.agent_launch.agent_spawn_env_dict` — bootstrap guide keys only, cluster
-secrets dropped. Nothing secret ever rides an argv (issue #974).
+pure runner, own .env on a gateway host). Nothing secret ever rides an argv (issue #974).
 
 ### Shell sub-sessions outlive agent processes AND cluster updates
 

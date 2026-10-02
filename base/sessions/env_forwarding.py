@@ -191,8 +191,7 @@ def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
     the venv bin dir prepended to PATH — so a daemon that shells out to bare
     `python` / `ava` still resolves into the venv. The provisioned Node
     locations follow it, so the frontend's bare `npm` is found even when a
-    remote shell starts with only system PATH entries. Symmetric with the agent
-    activation in `ops.agent_launch._launch_agent_process`.
+    remote shell starts with only system PATH entries.
 
     ``VIRTUAL_ENV`` selects uv's sync target. A session whose cwd is outside
     this checkout must not receive it: its PATH remains venv-prefixed for
@@ -235,7 +234,6 @@ def venv_activation_prefix() -> str:
     shells out to bare `ava` / `python` resolves them into the venv. It also
     injects the provisioned Node locations after the venv, because the frontend
     session runs bare `npm` after that profile has had a chance to discard PATH.
-    Mirrors the child-env activation `ops.agent_launch` does for agents.
     """
     from base.deploy.release.runtime_interpreter import runtime_venv
 
