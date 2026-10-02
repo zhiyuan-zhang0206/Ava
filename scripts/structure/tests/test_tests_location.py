@@ -132,7 +132,7 @@ def test_a_new_top_level_test_is_refused_with_the_fix(
     assert out.splitlines()[0].startswith("tests/base/test_new.py:1: a top-level test that is not")
     assert "scripts/structure/tests_location.py --suggest tests/base/test_new.py" in out
     assert "git mv" in err
-    assert "tests/fixtures/path_scopes.py" in err  # the autouse fixtures do not follow a move
+    assert "path_scopes.toml" in err  # the autouse fixtures do not follow a move
     assert "scripts/structure/tests_location_allowed.py" in err  # the way out
     assert "`contract`" in err
     assert "`integration`" in err

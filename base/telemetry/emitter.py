@@ -589,7 +589,7 @@ def emit(
 ) -> None:
     """Enqueue one event into the unified stream. Never raises — except for a
     contract violation (R2-C): an `event_name` with no `EventSpec` in
-    `base/events/contract.py`, or a category that contradicts the
+    `base/events/declarations`, or a category that contradicts the
     declaration, raises `ValueError` (AGENTS.md "explode on unknown enums").
     The loguru adapter wraps its call with `catch=True`, so a logging line
     that drifts off-contract stays visible (JSONL mirror) without crashing
@@ -645,7 +645,7 @@ def prepare_event(
     if spec is None:
         raise ValueError(
             f"emit() got unregistered event_name={event_name!r} — declare an "
-            "EventSpec in base/events/contract.py EVENTS first (base/events/"
+            "EventSpec in a base/events/declarations module first (base/events/"
             "registry.md is generated from it)"
         )
     if category != spec.category and category not in spec.extra_categories:

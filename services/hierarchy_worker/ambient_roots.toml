@@ -1,0 +1,4 @@
+# Composition roots of this package (scripts/structure/ambient_state/roots.py): the only
+# modules here that may read the global `settings`; the rest takes its configuration as
+# constructor arguments.
+settings = ["roots.py"]

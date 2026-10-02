@@ -10,7 +10,7 @@ dashboard survived three consecutive rollouts unnoticed (task #3689). Mirrors
 base/packages/plugins/load_report.py: one `converge_file_preserved` telemetry event per
 preserve hit, so the drift is visible on the observability surface without
 reading the converge log. The event name is registered in
-base/events/registry_ops.py next to the dashboard render-failure guard.
+base/events/declarations/root.py next to the dashboard render-failure guard.
 """
 
 from __future__ import annotations

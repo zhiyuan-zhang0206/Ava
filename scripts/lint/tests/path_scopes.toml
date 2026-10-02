@@ -1,0 +1,12 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"tests.path_scoped.structure_tests" = [
+    "test_ambient_state_gate.py",
+    "test_baseline_shard_validity_gate.py",
+    "test_directory_budget_entries.py",
+    "test_lint_code_structure.py",
+    "test_locality_gate.py",
+    "test_patch_targets_baseline.py",
+    "test_rename_aware_baseline.py",
+    "test_tests_dir_scope.py",
+]
