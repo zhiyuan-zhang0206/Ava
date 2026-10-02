@@ -278,7 +278,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     # them into $AVA_HOME/.env would let _enforce_cluster_env_authority() (called
     # by load_ava_env at daemon startup) clobber the dynamic ports with the .env
     # values — causing "address already in use" on the production defaults.
-    # Derived from the same map `health_port()` consults, not hand-listed: the
+    # Derived from the same map the endpoint table consults, not hand-listed: the
     # hand-listed version had already drifted (events_maintenance missing), and a
     # newly registered daemon would silently re-open this hole.
     from base.daemon.health import _HEALTH_PORT_OVERRIDES

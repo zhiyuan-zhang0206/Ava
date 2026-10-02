@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from base.config import get_field, settings
+from base.daemon.endpoints import ServiceEndpoint
 from services.labeler import daemon
 
 
@@ -29,7 +31,7 @@ def test_run_hands_the_slice_to_the_dispatch_loop(monkeypatch: pytest.MonkeyPatc
     class _Health:
         pass
 
-    async def fake_start(_name: str, **_kwargs: Any) -> _Health:
+    async def fake_start(_name: str, _port: int, **_kwargs: Any) -> _Health:
         return _Health()
 
     async def fake_stop(_server: object) -> None:
@@ -51,10 +53,9 @@ def test_run_hands_the_slice_to_the_dispatch_loop(monkeypatch: pytest.MonkeyPatc
     def fake_pool(_self: object) -> _Pool:
         return _Pool()
 
-    def fake_health_port(_name: str) -> int:
-        return 1
-
-    monkeypatch.setattr(daemon, "health_port", fake_health_port)
+    monkeypatch.setattr(
+        daemon, "_endpoint", lambda: ServiceEndpoint("labeler", 1, Path("/nonexistent/labeler.pid"))
+    )
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", fake_dispatch)
 

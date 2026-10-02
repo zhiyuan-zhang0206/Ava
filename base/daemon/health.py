@@ -120,8 +120,8 @@ MAX_BODY_BYTES = 64 * 1024
 _warned_windows_8106: set[str] = set()
 
 
-def health_port(name: str) -> int:
-    """Return the healthz port for daemon `name`.
+def _health_port(name: str) -> int:
+    """Return the healthz port for daemon `name`; read by `ServiceEndpoints.from_settings` only.
 
     First reads ``settings.<name>_health_port`` (overridable by env
     ``AVA_<NAME>_HEALTH_PORT``); falls back to ``DEFAULT_PORTS``; if
@@ -230,7 +230,7 @@ def _healthz_payload(
 
 async def start_health_server(
     name: str,
-    port: int | None = None,
+    port: int,
     *,
     host: str = "127.0.0.1",
     extra_routes: Mapping[tuple[str, str], RouteHandler] | None = None,
@@ -243,7 +243,7 @@ async def start_health_server(
 
     Args:
         name: daemon name (used in ``/healthz`` response `name` field + log)
-        port: explicit port; None -> infer via ``health_port(name)``
+        port: the daemon's port, from its ``ServiceEndpoint``
         host: bind interface. Default ``127.0.0.1`` (healthcheck / local RPC
             only). The agent-runner ops server passes ``0.0.0.0`` so the
             gateway can dial it over the private network; an open port on the
@@ -272,8 +272,6 @@ async def start_health_server(
             tokens when its API is authenticated, so a LAN peer cannot drive
             /ops without one; the server compares digests only.
     """
-    if port is None:
-        port = health_port(name)
     started_at = time.time()
     pid = os.getpid()
     # Resolved once at bind time, not per request: ava_home() mkdirs on every call.

@@ -21,8 +21,8 @@ from functools import partial
 from pathlib import Path
 
 from base.cluster.machine import MachineRole
-from base.daemon.health import DEFAULT_PORTS, DaemonProbe, health_port, probe_daemon
-from base.paths import pid_path
+from base.daemon.endpoints import ServiceEndpoints
+from base.daemon.health import DEFAULT_PORTS, DaemonProbe, probe_daemon
 from ops.roster.service_spec import DbAccess, ServiceSpec
 
 # `ava-root` renders this prefix into `cd <repo> && exec <cmd>`; a command that stays
@@ -49,7 +49,7 @@ def health_name_of(session: str) -> str:
 
 def healthz_url(name: str) -> str:
     """The ``/healthz`` URL of daemon ``name`` from this unit's health port."""
-    return f"http://localhost:{health_port(name)}/healthz"
+    return f"http://localhost:{ServiceEndpoints.from_settings().of(name).health_port}/healthz"
 
 
 def daemon_identity(name: str, pidfile: Path) -> Callable[[], DaemonProbe]:
@@ -107,7 +107,7 @@ def healthz_daemon(
         capabilities=capabilities,
         requires_db=requires_db,
         curl_url=healthz_url(name),
-        identity_probe=daemon_identity(name, pid_path(name)),
+        identity_probe=daemon_identity(name, ServiceEndpoints.from_settings().of(name).pidfile),
         health_name=name,
         gate=gate,
         profile=profile,

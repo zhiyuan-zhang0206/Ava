@@ -19,8 +19,9 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineRole
-from base.daemon.health import DEFAULT_PORTS, DaemonProbe, health_port
-from base.paths import pid_path
+from base.daemon.endpoints import ServiceEndpoints
+from base.daemon.health import DEFAULT_PORTS, DaemonProbe
+from base.daemon.tests.fakes import pin_endpoints
 from ops import roster
 from ops.roster.healthz import (
     daemon_identity,
@@ -65,11 +66,16 @@ def test_the_factory_derives_command_url_probe_and_health_name() -> None:
     assert spec.session == "delivery-watchdog"
     assert spec.health_name == "delivery_watchdog"
     assert spec.cmd == ".venv/bin/python -m services.x.daemon"
-    assert spec.curl_url == f"http://localhost:{health_port('delivery_watchdog')}/healthz"
+    assert (
+        spec.curl_url
+        == f"http://localhost:{ServiceEndpoints.from_settings().of('delivery_watchdog').health_port}/healthz"
+    )
     probe = cast("partial[DaemonProbe]", spec.identity_probe)
     assert probe.func.__name__ == "probe_daemon"
     assert probe.args == ("delivery_watchdog", spec.curl_url)
-    assert probe.keywords == {"pidfile": pid_path("delivery_watchdog")}
+    assert probe.keywords == {
+        "pidfile": ServiceEndpoints.from_settings().of("delivery_watchdog").pidfile
+    }
 
 
 def test_the_factory_passes_the_optional_declarations_through() -> None:
@@ -92,13 +98,13 @@ def test_the_factory_passes_the_optional_declarations_through() -> None:
     assert (spec.db_access, spec.stop_ceiling_s, spec.requires_db) == ("gateway", 12.5, False)
 
 
-def test_the_url_follows_the_health_port_resolved_when_the_roster_is_built(
+def test_the_url_follows_the_endpoint_table_resolved_when_the_roster_is_built(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _fake_health_port(_name: str) -> int:
         return 18111
 
-    monkeypatch.setattr("ops.roster.healthz.health_port", _fake_health_port)
+    pin_endpoints(monkeypatch, port=_fake_health_port)
     assert healthz_url("im_bridge") == "http://localhost:18111/healthz"
     spec = healthz_daemon("im-bridge", module="a.b", capabilities=_GATEWAY, requires_db=True)
     assert spec.curl_url == "http://localhost:18111/healthz"

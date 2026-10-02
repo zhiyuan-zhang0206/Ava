@@ -24,13 +24,13 @@ from typing import Any
 
 from base.cluster.authority.api import token_digest
 from base.config import settings
-from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
-from base.paths import pid_path
 from services.im_bridge.config import (
     FeishuCredentialsConfig,
     ImBridgeConfig,
@@ -50,8 +50,12 @@ _LIVENESS_TIMEOUT_S = 120.0
 _LIVENESS_BEAT_INTERVAL_S = 30.0
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("im_bridge")
+
+
 def _pidfile() -> Path:
-    return pid_path("im_bridge")
+    return _endpoint().pidfile
 
 
 def _write_pidfile() -> None:
@@ -252,9 +256,11 @@ async def run() -> None:
     config = im_bridge_config()
     core = IMBridgeCore(config, gateway_client(config), db_pool=db_pool)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
+    endpoint = _endpoint()
     try:
         health = await start_health_server(
             "im_bridge",
+            endpoint.health_port,
             liveness=liveness,
             extra_routes={("POST", "/send"): await _handle_send(core)},
             # Bearer = the cluster secret (a gateway-local caller); empty-secret
@@ -267,7 +273,7 @@ async def run() -> None:
     except Exception:
         _remove_pidfile()
         raise
-    _log.info("[im_bridge] healthz listening on :%s", health_port("im_bridge"))
+    _log.info("[im_bridge] healthz listening on :%s", endpoint.health_port)
 
     adapters = _load_adapters(core, frozenset(config.im_disabled_adapters))
     if not adapters:

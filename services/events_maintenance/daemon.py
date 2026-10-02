@@ -64,10 +64,10 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
     LivenessGroup,
     LoopProgress,
-    health_port,
     start_health_server,
     stop_health_server,
 )
@@ -77,7 +77,6 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
-from base.paths import pid_path
 from services.events_maintenance import registry_gauge
 from services.events_maintenance.blob_vacuum import (
     emit_checkpoint_table_sizes,
@@ -117,8 +116,12 @@ def events_maintenance_db() -> Database:
     return Database.from_settings()
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("events_maintenance")
+
+
 def _pidfile() -> Path:
-    return pid_path("events_maintenance")
+    return _endpoint().pidfile
 
 
 _LIVENESS_BEAT_STEP_S = 30.0
@@ -403,12 +406,14 @@ async def run() -> None:
         "resolution", config.events_maintenance_resolution_deadline_s
     )
     gauge_progress = liveness.register("registry_gauge", _REGISTRY_GAUGE_LIVENESS_TIMEOUT_S)
+    endpoint = _endpoint()
     health = await start_health_server(
         "events_maintenance",
+        endpoint.health_port,
         liveness=liveness,
         components=lambda: _loop_components(liveness),
     )
-    _log.info("[events-maintenance] healthz listening on :%s", health_port("events_maintenance"))
+    _log.info("[events-maintenance] healthz listening on :%s", endpoint.health_port)
 
     db = events_maintenance_db()
     pool = db.pool()

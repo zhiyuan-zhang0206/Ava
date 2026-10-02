@@ -112,7 +112,7 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
         def close(self) -> None:
             released.append("pool")
 
-    async def start_health(_name: str, **_kw: object) -> str:
+    async def start_health(_name: str, _port: int, **_kw: object) -> str:
         return "health"
 
     async def stop_health(_server: object) -> None:

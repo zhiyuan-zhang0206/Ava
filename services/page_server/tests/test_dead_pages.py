@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import socket
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any, cast
 
 import psycopg
@@ -13,6 +14,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
+from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.deploy.maintenance import admission
 from services.page_server import daemon, dead_pages
@@ -245,7 +247,7 @@ def _patch_run(
         def close(self) -> None:
             events.append("pool")
 
-    async def fake_start(_name: str, *, liveness: LivenessGroup) -> object:
+    async def fake_start(_name: str, _port: int, *, liveness: LivenessGroup) -> object:
         seen["trackers"] = sorted(liveness.snapshot())
         return object()
 
@@ -253,6 +255,9 @@ def _patch_run(
         events.append("health")
 
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
+    monkeypatch.setattr(
+        daemon, "_endpoint", lambda: ServiceEndpoint("page_server", 1, Path("/nonexistent/ps.pid"))
+    )
     monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
     monkeypatch.setattr(daemon, "_remove_pidfile", lambda: events.append("pidfile"))
     monkeypatch.setattr(daemon, "start_health_server", fake_start)

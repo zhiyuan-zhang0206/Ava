@@ -101,7 +101,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
     """Return the canonical service roster with probe ports/URLs derived from settings.
 
     Called at use-time (not import time) so env-backed settings and monkeypatched
-    ``health_port()`` values are picked up by tests and per-cluster port overrides.
+    endpoint values are picked up by tests and per-cluster port overrides.
 
     Authored in three capability groups so which machine runs a service is visible
     at a glance. The concatenation order is gateway-group, then agent-runner-group,

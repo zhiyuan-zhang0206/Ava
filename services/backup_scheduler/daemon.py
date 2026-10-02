@@ -21,12 +21,12 @@ from pathlib import Path
 
 from base import telemetry
 from base.config import settings
-from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
-from base.paths import pid_path
 from services.backup import _cluster_tz, is_due
 from services.backup_scheduler.operation.custody import OperationBusyError
 from services.backup_scheduler.recovery_drill import (
@@ -44,8 +44,12 @@ BACKUP_STALE_AFTER_S = 26 * 3600
 _SLEEP_CHUNK_S = 60
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("pg_backup")
+
+
 def _pidfile() -> Path:
-    return pid_path("pg_backup")
+    return _endpoint().pidfile
 
 
 @dataclass
@@ -204,11 +208,13 @@ async def run() -> None:
 
     _write_pidfile()
     state = _BackupState()
+    endpoint = _endpoint()
     health = await start_health_server(
         "pg_backup",
+        endpoint.health_port,
         components=lambda: _backup_components(state),
     )
-    _log.info("[pg-backup] healthz listening on :%s", health_port("pg_backup"))
+    _log.info("[pg-backup] healthz listening on :%s", endpoint.health_port)
     try:
         await _backup_loop(state)
     finally:

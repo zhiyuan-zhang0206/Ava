@@ -15,14 +15,12 @@ from pathlib import Path
 
 import pytest
 
+from base.daemon.tests.fakes import pin_endpoints
 from ops.agent_pause import probe
 
 
 def _pin_pidfiles(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    def pid_path(name: str) -> Path:
-        return tmp_path / f"{name}.pid"
-
-    monkeypatch.setattr(probe, "pid_path", pid_path)
+    pin_endpoints(monkeypatch, pid_dir=tmp_path)
 
 
 def _pidfile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pid: int) -> None:

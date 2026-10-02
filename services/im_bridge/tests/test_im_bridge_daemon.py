@@ -62,7 +62,7 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[Liveness] = []
 
     async def fake_start_health_server(
-        _name: str, *, liveness: Liveness | None = None, **_kwargs: Any
+        _name: str, _port: int, *, liveness: Liveness | None = None, **_kwargs: Any
     ) -> _FakeServer:
         assert liveness is not None
         captured.append(liveness)

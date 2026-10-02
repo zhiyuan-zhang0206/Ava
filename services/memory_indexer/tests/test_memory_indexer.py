@@ -1417,7 +1417,7 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
     monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
     monkeypatch.setattr(daemon, "start_health_server", AsyncMock())
     monkeypatch.setattr(daemon, "stop_health_server", AsyncMock())
-    monkeypatch.setattr(daemon, "health_port", Mock(return_value=0))
+    monkeypatch.setattr(daemon, "_endpoint", lambda: Mock(health_port=0))
     monkeypatch.setattr(daemon, "get_provider", lambda: provider)
     monkeypatch.setattr(daemon, "probe_backend", Mock(return_value=ProbeResult(message=None)))
     monkeypatch.setattr(daemon, "_connect_backend_with_retry", AsyncMock(return_value=backend))

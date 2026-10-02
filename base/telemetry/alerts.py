@@ -46,7 +46,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from base.config import cluster_tz, settings
-from base.daemon.health import health_port
+from base.daemon.endpoints import ServiceEndpoints
 from base.telemetry.alerts_copy import (
     ALERT_HEAD,
     ALERT_JUMP_LINK,
@@ -315,7 +315,7 @@ def notify_im(text: str) -> bool:
     if not settings.alerts.im_notify_enabled:
         return False
     base = (settings.services.im_bridge_health_url or "").rstrip("/") or (
-        f"http://127.0.0.1:{health_port('im_bridge')}"
+        f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('im_bridge').health_port}"
     )
     try:
         resp = httpx.post(

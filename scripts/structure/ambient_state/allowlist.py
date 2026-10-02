@@ -202,6 +202,15 @@ SLICED_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "settings
 # A declared root that no longer exists fails as stale.
 DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "db")
 
+# ── 6. endpoint-table packages ─────────────────────────────────────────────
+
+# Packages that take their daemon's `ServiceEndpoint` (or the `ServiceEndpoints` table) from
+# their composition root: package dir -> the modules that may call
+# `ServiceEndpoints.from_settings()` (scripts/structure/ambient_state/endpointrule.py). A package
+# declares `endpoints = [...]` in its own `ambient_roots.toml` (see roots.py); a declared root
+# that no longer exists fails as stale.
+ENDPOINT_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "endpoints")
+
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 
 DEFERRED_WARNING_REDESIGN = "deferred: warning/alert redesign"

@@ -37,5 +37,6 @@ def _synthetic_ambient_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
         "PURE_REPO_CALLEES",
         "SLICED_PACKAGES",
         "DB_HANDLE_PACKAGES",
+        "ENDPOINT_PACKAGES",
     ):
         monkeypatch.setattr(ambient_allowlist, name, {})

@@ -32,12 +32,12 @@ from psycopg_pool import ConnectionPool
 
 import base.db
 from base.config import settings
-from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
-from base.paths import pid_path
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.ttl_reaper import remote, shells, sweep
 
@@ -52,8 +52,12 @@ _SWEEP_LIVENESS_TIMEOUT_S = 300.0
 _POOL_MAX_SIZE = 4
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("ttl_reaper")
+
+
 def _pidfile() -> Path:
-    return pid_path("ttl_reaper")
+    return _endpoint().pidfile
 
 
 def _is_running() -> bool:
@@ -78,8 +82,9 @@ async def run() -> None:
     _log.info("[ttl-reaper] pidfile written: %s", _pidfile())
 
     liveness = LivenessGroup()
-    health = await start_health_server("ttl_reaper", liveness=liveness)
-    _log.info("[ttl-reaper] healthz listening on :%s", health_port("ttl_reaper"))
+    endpoint = _endpoint()
+    health = await start_health_server("ttl_reaper", endpoint.health_port, liveness=liveness)
+    _log.info("[ttl-reaper] healthz listening on :%s", endpoint.health_port)
 
     pool = base.db.pool(max_size=_POOL_MAX_SIZE)
     try:

@@ -5,3 +5,7 @@ settings = ["daemon.py"]
 # The only modules here that may call `Database.from_settings()`; the rest takes the handle
 # (or its pool) from them.
 db = ["daemon.py"]
+
+# The only modules here that may call `ServiceEndpoints.from_settings()`; the rest takes its
+# daemon's `ServiceEndpoint` (or the table) from them.
+endpoints = ["daemon.py"]
