@@ -335,20 +335,3 @@ def test_a_clean_report_says_so_rather_than_claiming_safety(tmp_path: Path) -> N
     report = scan.render(scan.scan_package(d), package="plain")
     assert "no rule matched" in report
     assert "not a proof of safety" in report
-
-
-def test_ava_own_skills_carry_no_critical_findings() -> None:
-    """The whole first-party skill library is the standing false-positive test:
-    a rule that fires here is tuned wrong, not catching something."""
-    repo = Path(__file__).resolve().parents[2]
-    packages = [
-        d
-        for base in ("ava_builtins/skills", "ava_builtins/plugins")
-        for d in (repo / base).rglob("*")
-        if d.is_dir() and (d / "SKILL.md").is_file()
-    ]
-    assert packages, "expected first-party skill packages to scan"
-    offenders = {
-        d.relative_to(repo).as_posix(): scan.criticals(scan.scan_package(d)) for d in packages
-    }
-    assert {k: v for k, v in offenders.items() if v} == {}

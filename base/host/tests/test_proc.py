@@ -7,7 +7,6 @@ subprocess cannot leak a descendant.
 
 from __future__ import annotations
 
-import ast
 import os
 import signal
 import subprocess
@@ -509,31 +508,11 @@ def test_timeout_stderr_tail_bounds_the_number_of_lines() -> None:
 
 # --- the git-driving modules stay converted ------------------------------
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # The modules that drive git on Ava's behalf — the ones whose timeouts were
 # silently bounding a launcher stub on Windows. A `subprocess.run(timeout=)`
 # reappearing in any of them is the regression, and it is invisible on review
 # because it looks exactly like a correct bound.
-_GIT_DRIVING_MODULES = (
-    "ops/cluster.py",
-    "base/deploy/git/cluster_drift.py",
-)
-
-
-@pytest.mark.parametrize("rel", _GIT_DRIVING_MODULES)
-def test_git_driving_modules_do_not_bound_with_subprocess_run(rel: str) -> None:
-    """No `subprocess.run(..., timeout=...)` in the modules that drive git: a
-    timeout there must come from `run_bounded`, which bounds the tree."""
-    tree = ast.parse((_REPO_ROOT / rel).read_text())
-    offenders = [
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and ast.unparse(node.func) == "subprocess.run"
-        and any(kw.arg == "timeout" for kw in node.keywords)
-    ]
-    assert not offenders, f"{rel}: use base.host.proc.run_bounded at line(s) {offenders}"
 
 
 # -- child_state: the tree self-check's chain probe ----------------------------

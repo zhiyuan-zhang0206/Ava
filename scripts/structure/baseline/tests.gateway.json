@@ -9,8 +9,5 @@
   "patch_targets": {
     "tests/gateway/test_alerts_api.py::gateway.alerts.router._notify_im": 10,
     "tests/gateway/test_cluster_endpoints.py::ops.cluster_status._supervisor_online": 1
-  },
-  "tests_location": {
-    "tests/gateway/test_okf_graph.py::top-level": 1
   }
 }

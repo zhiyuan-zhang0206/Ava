@@ -14,8 +14,6 @@
   },
   "tests_location": {
     "tests/test_ci_utils.py::top-level": 1,
-    "tests/test_event_fixtures.py::top-level": 1,
-    "tests/test_goal_watch_filter.py::top-level": 1,
     "tests/test_lint_fixture_scope.py::top-level": 1
   }
 }

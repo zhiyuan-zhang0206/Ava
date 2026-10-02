@@ -308,35 +308,6 @@ def test_source_in_a_string_is_evidence_only_where_the_file_runs_it(root: pathli
     assert run.home == "base/db"
 
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-
-
-@pytest.mark.parametrize(
-    ("name", "home"),
-    [
-        ("test_path_imports.py", "scripts/structure"),
-        ("test_placement_dependencies.py", "scripts/structure"),
-        ("test_coverage_gates.py", "scripts/ci"),
-        ("test_lint_doc_roster.py", "scripts/content_lint"),
-        ("test_lint_time_bomb.py", "scripts/lint"),
-        ("test_repo_change.py", "base/deploy/git"),
-    ],
-)
-def test_tests_of_tools_that_carry_sample_paths_and_source_have_one_home(
-    name: str, home: str
-) -> None:
-    """Their sample trees and sample source named other units; the tool under test is their home."""
-    found_files = [
-        p for top in ("tests", "scripts", "base") for p in (_REPO_ROOT / top).rglob(name)
-    ]
-    assert len(found_files) == 1, found_files
-    path = found_files[0]
-    rel = path.relative_to(_REPO_ROOT).as_posix()
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    found = placement.place(rel, tree, placement.ModuleIndex(_REPO_ROOT))
-    assert (found.home, found.ambiguous) == (home, False)
-
-
 def test_a_missing_services_directory_is_a_legal_repository(root: pathlib.Path) -> None:
     assert not (root / "services").exists()
     assert "services" in placement.unit_graph(root).units

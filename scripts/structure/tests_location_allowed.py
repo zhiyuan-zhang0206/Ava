@@ -38,6 +38,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "integration",
         "agent and ops are peers: the claim node's resurrect batch is driven through ops.agents.wake.resurrect_agent",
     ),
+    "tests/agent/test_compact_contract.py": (
+        "contract",
+        "the compaction triggers point at the ava.self.compact contract in commands/compact.md",
+    ),
     "tests/agent/test_corpse_reap.py": (
         "integration",
         "the hosted corpse reaper's recrash trigger runs against real rows the ops lifecycle writes: spans agent, base, ops, no one of which may import all the others",
@@ -78,6 +82,18 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "asserts the agents_meta spawner-lineage constraints the schema enforces",
     ),
+    "tests/base/test_bare_ava_contract.py": (
+        "contract",
+        "the host converge step wires the bare ava launcher script, scripts/ava-launcher.sh",
+    ),
+    "tests/base/test_config_contract.py": (
+        "contract",
+        "the frontend config-group keys (ui/web/src/app/control/_config_groups.ts) are real backend field aliases",
+    ),
+    "tests/base/test_config_lite_table.py": (
+        "contract",
+        "drift locks of the generated config index, base/host/env/config_lite_table.json, against its generator and the live registry",
+    ),
     "tests/base/test_crash_row_writers.py": (
         "contract",
         "scans every production module for writers of the crash-row predicate fields",
@@ -85,6 +101,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/base/test_no_secrets_on_argv.py": (
         "integration",
         "one guard over every launch path (cli, schedule manager, sdk) for secrets on a command line: spans ava, base, cli, services.schedule_manager, no one of which may import all the others",
+    ),
+    "tests/base/test_proc_contract.py": (
+        "contract",
+        "scans the git-driving modules of the whole tree for subprocess.run timeouts",
     ),
     "tests/base/test_recovery_breaker.py": (
         "integration",
@@ -94,6 +114,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "asserts the ava_runner capability matrix declared in db/schema.sql",
     ),
+    "tests/base/test_scan_contract.py": (
+        "contract",
+        "scans every first-party skill of the repository for critical findings",
+    ),
     "tests/base/test_schedule_timezone.py": (
         "contract",
         "scans the schedules/ templates for the cluster wall clock",
@@ -101,6 +125,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/base/test_shutdown.py": (
         "integration",
         "signal registration proven against real supervised daemons of agent host, agent ops and ava-root: spans base, services.agent_host, services.agent_ops, services.ava_root, no one of which may import all the others",
+    ),
+    "tests/base/test_ui_contributions_contract.py": (
+        "contract",
+        "the themable token set equals ui/web/src/app/globals.css :root",
     ),
     "tests/base/test_uvicorn_stdlib_intercept.py": (
         "integration",
@@ -170,6 +198,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "integration",
         "cli converge drives the redis bridge service end to end: spans cli, services.redis_bridge, no one of which may import all the others",
     ),
+    "tests/cli/test_main_dispatch_contract.py": (
+        "contract",
+        "scans the repository root for entry points that declare the database gate exemption",
+    ),
     "tests/cli/test_maintenance_readiness.py": (
         "integration",
         "cli start against a real gateway app: cli and gateway are peers",
@@ -210,6 +242,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "integration",
         "thread-label endpoint and the labeler service share the same rows: spans base, gateway, services.labeler, no one of which may import all the others",
     ),
+    "tests/gateway/test_okf_graph_contract.py": (
+        "contract",
+        "every .ava.okf.md bundle of the repository parses identically through the adapter and the legacy parser",
+    ),
     "tests/gateway/test_schemas_wire_format.py": (
         "contract",
         "freezes the wire schemas against ui/web/openapi.json and ui/web/src/lib/types.ts",
@@ -217,6 +253,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/integration/test_hosted_lifecycle_integration.py": (
         "integration",
         "agent and ops are peers: a hosted force settles against a prior restart across both, and neither imports the other",
+    ),
+    "tests/integration/test_impersonation_audit_root_inventory.py": (
+        "contract",
+        "scans every production module for audit-construction roots against a classified inventory",
     ),
     "tests/integration/test_impersonation_notifications.py": (
         "integration",
@@ -278,6 +318,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "tests schedules/dev-ci-metrics-schedule.py",
     ),
+    "tests/scripts/structure/test_placement_contract.py": (
+        "contract",
+        "scans the tests of every tool under scripts/ for the home of their sample trees",
+    ),
     "tests/scripts/test_alert_rules.py": (
         "contract",
         "validates deploy/lgtm/config/grafana/provisioning/alerting/rules.yml",
@@ -302,13 +346,25 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "integration",
         "the rotation script keeps the backup passphrase pinned across the backup service and the gateway side: spans scripts, services.backup, services.gateway_side, no one of which may import all the others",
     ),
+    "tests/scripts/test_test_selector_contract.py": (
+        "contract",
+        "every lint-family test file on disk is pinned in the selector, and no pin is stale",
+    ),
     "tests/scripts/test_toolchain_uv_pin.py": (
         "contract",
         "keeps the workflows and scripts/provision/toolchain.sh on one uv version",
     ),
+    "tests/scripts/test_worktree_sh_clean.py": (
+        "contract",
+        "runs scripts/worktree.sh clean as a process against throwaway repositories",
+    ),
     "tests/services/test_ava_root_glue_manifests.py": (
         "integration",
         "the ava-root manifest generation from the roster across gateway, ops, browser and ava-root: spans base, gateway, ops, services.ava_root, services.ava_root_glue, services.browser, no one of which may import all the others",
+    ),
+    "tests/services/test_backup_recovery_contract.py": (
+        "contract",
+        "asserts the conversation-recovery sources named by services/backup.py, the checkpoint module and db/schema.sql are checkpoint tables, not the events archive",
     ),
     "tests/services/test_backup_scheduler_shutdown.py": (
         "integration",
@@ -373,6 +429,14 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/test_env_guard_canary.py": (
         "contract",
         "tests that the env guard of the test harness fires on a simulated e2e leak",
+    ),
+    "tests/test_event_fixtures.py": (
+        "contract",
+        "the shared wire-format fixtures, tests/fixtures/events, parse through the event adapter and cover every system role",
+    ),
+    "tests/test_goal_watch_filter.py": (
+        "contract",
+        "tests the watch_idle reference snippets of the ava-goal, ava-watcher and ava-fleet skills",
     ),
     "tests/test_helperproc.py": (
         "integration",

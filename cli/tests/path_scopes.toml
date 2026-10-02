@@ -7,6 +7,7 @@
     "test_commands_register.py",
     "test_lite_verbs.py",
     "test_logs_rotate.py",
+    "test_main_dispatch.py",
     "test_main_log_init.py",
     "test_mcp_install.py",
     "test_mcp_serve.py",

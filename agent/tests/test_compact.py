@@ -779,19 +779,6 @@ def test_compact_contract_lives_in_docstring_and_reaches_prompt(_ava_compact_loa
         assert section in system_prompt, f"section {section!r} not rendered into the system prompt"
 
 
-def test_compact_triggers_point_at_the_contract(_ava_compact_loaded):
-    """Each compaction trigger (forced/auto instruction, the reminder nudge, the
-    /compact command) is a short opener that defers to the `ava.self.compact`
-    contract rather than carrying its own copy of the template."""
-    from agent.hooks import compact as _p
-    from base.paths import repo_root
-
-    compact_md = (repo_root() / "commands" / "compact.md").read_text(encoding="utf-8")
-    assert "ava.self.compact" in COMPACTION_INSTRUCTION
-    assert "ava.self.compact" in _p.COMPACT_REMINDER_NOTE
-    assert "ava.self.compact" in compact_md
-
-
 # ============================================================
 # claim node compact edge case tests
 # ============================================================

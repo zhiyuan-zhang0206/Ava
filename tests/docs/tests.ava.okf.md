@@ -56,7 +56,7 @@ A package's own tests sit beside the code they prove (`base/packages/plugins/tes
 - `tests/plugins/` — plugin tests (`test_ava_memory_lint.py` / `test_ava_memory_notes.py` for the ava_memory plugin, `ava_fleet/` subtree)
 - `tests/fixtures/` — the suite's global fixture plugins (see "Global fixtures" below) plus event fixture data; `tests/factories/` — data factories
 
-- `tests/scripts/test_test_selector.py` — synthetic-checkout contracts for
+- `scripts/tests/test_test_selector.py` — synthetic-checkout contracts for
   the static PR test selector, including queue, blind-file, duration, and
   process-determinism escapes
 - `tests/scripts/test_ci_test_selection.py` — workflow contracts for the
