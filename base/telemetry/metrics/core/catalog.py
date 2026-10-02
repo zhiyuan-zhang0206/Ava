@@ -9,7 +9,7 @@ Two-tier metric architecture since 2026-08-06 (user ruling):
   as plugin metrics but never requires a PluginContext: core metrics are
   repo code, not plugin code.
 - **Plugin metrics** (``base/telemetry/metrics/plugin_metrics.py``): metrics contributed by
-  first-party business plugins (ava_code / ava_fleet / ava_memory) or
+  first-party business plugins (ava_fleet / ava_memory / ava_syntax_fix) or
   external plugins, registered under their plugin name.
 
 The dashboards (``deploy/lgtm/config/grafana/provisioning/dashboards/

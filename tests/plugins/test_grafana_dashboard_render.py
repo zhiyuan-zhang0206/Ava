@@ -8,7 +8,7 @@ registries instead of a hand-maintained file. This module locks the renderer
 
 1. **Fidelity vs the as-is board** — for every registered ``grafana`` spec,
    the rendered panel must equal its counterpart in the current provisioning
-   file, modulo four enumerable normalizations (below). This is the migration
+   file, modulo three enumerable normalizations (below). This is the migration
    lock: nothing the user sees may change beyond those.
 2. **The layout engine reproduces the file's full geometry** — replaying the
    fixture's 97 entries (sizes + order + the one pinned position + the
@@ -20,11 +20,8 @@ registries instead of a hand-maintained file. This module locks the renderer
 4. **The dual supplier** — checkout plugins load under their contexts; an
    installed plugin row (registry row + blob) loads through unpack + import.
 
-The four normalizations (each applied to both sides before comparison):
+The three normalizations (each applied to both sides before comparison):
 
-- **plugin block ids** shift by −1 for ids >= 1007 in the 1000-block: the
-  historical file left a gap where a deleted panel used to be; the renderer
-  allocates plugin ids densely (task #3697 decision).
 - **threshold "no rules" encodings** — a missing key, ``null``, an empty step
   list, and a bare green base all mean "no threshold rules" and compare
   equal.
@@ -81,7 +78,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DASHBOARD_FILE = (
     _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
 )
-_PLUGINS = ("ava_code", "ava_fleet", "ava_memory")
+_PLUGINS = ("ava_fleet", "ava_memory", "ava_syntax_fix")
 
 # Empty since S2 (task #3697) registered the last 18 panels — the Events
 # trio, the gateway sample count, and the host + memory-search gauges. Kept as
@@ -135,7 +132,7 @@ def _canonical_thresholds(value: Any) -> dict[str, Any] | None:
     return {"mode": "absolute", "steps": [{"color": "green", "value": None}, *colored]}
 
 
-def _canonical_panel(panel: dict[str, Any], *, from_fixture: bool) -> dict[str, Any]:
+def _canonical_panel(panel: dict[str, Any]) -> dict[str, Any]:
     """Apply the migration normalizations to one panel copy."""
     canonical: dict[str, Any] = cast("dict[str, Any]", json.loads(json.dumps(panel)))
     defaults = canonical.get("fieldConfig", {}).get("defaults")
@@ -145,9 +142,6 @@ def _canonical_panel(panel: dict[str, Any], *, from_fixture: bool) -> dict[str, 
             defaults.pop("thresholds", None)
         else:
             defaults["thresholds"] = thresholds
-    panel_id = canonical.get("id")
-    if from_fixture and panel_id is not None and 1007 <= panel_id < 2000:
-        canonical["id"] = panel_id - 1
     for index, target in enumerate(canonical.get("targets", [])):
         if "refId" in target:
             target["refId"] = chr(ord("A") + index)
@@ -188,7 +182,7 @@ def test_rendered_panels_match_the_provisioning_file(
 ) -> None:
     """Every registered grafana spec renders one panel equal to its fixture
     counterpart — the migration lock: content and geometry (gridPos) both,
-    modulo the four enumerable normalizations."""
+    modulo the three enumerable normalizations."""
     core_specs, plugin_specs, dashboard = world
     fixture = _fixture()
     fixture_by_title: dict[str, Any] = {
@@ -206,11 +200,11 @@ def test_rendered_panels_match_the_provisioning_file(
         assert rendered is not None, f"{spec.name} rendered no panel"
         fixture_panel = fixture_by_title.get(render_title(spec))
         assert fixture_panel is not None, f"{spec.name} has no fixture counterpart"
-        expected = _canonical_panel(fixture_panel, from_fixture=True)
-        actual = _canonical_panel(rendered, from_fixture=False)
+        expected = _canonical_panel(fixture_panel)
+        actual = _canonical_panel(rendered)
         if spec.custom is None:
             # The standard look profile: a fixture panel without a custom block
-            # adopts the rendered default (normalization #4). Only a real
+            # adopts the rendered default (normalization #3). Only a real
             # rendered custom is adopted — a logs panel renders no fieldConfig
             # at all, so no stub is materialized on either side.
             actual_defaults = actual.get("fieldConfig", {}).get("defaults")
