@@ -209,7 +209,7 @@ os.environ["AVA_PGBOUNCER_ENABLED"] = "false"
 # test agents (task #1201: distinct agents 1d 76 -> 131). Set in the
 # ENVIRONMENT (not only on the settings singleton) exactly because the leak
 # was in subprocesses. The OTLP-specific tests
-# (tests/base/test_telemetry_otlp.py) re-enable the flag and install
+# (base/telemetry/tests/test_telemetry_otlp.py) re-enable the flag and install
 # in-memory providers where the path is under test.
 os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
 
