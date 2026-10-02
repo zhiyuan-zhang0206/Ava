@@ -68,6 +68,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.impersonation.maintenance import (
+    alert_stuck_event_logs,
     reap_impersonations,
     remind_expiring_impersonations,
 )
@@ -588,6 +589,7 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
         try:
             reminded = await asyncio.to_thread(remind_expiring_impersonations, pool)
             impersonations = await asyncio.to_thread(reap_impersonations, pool)
+            await asyncio.to_thread(alert_stuck_event_logs, pool)
             pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool)
             shells = await _reap_expired_shells(pool, stop)
             sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)

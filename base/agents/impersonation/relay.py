@@ -208,8 +208,7 @@ def abort_lease(
     with ``rejection_reason`` recorded as ``aborted: <detail>`` — the request's
     own ``reason`` (its stated purpose) is preserved, and the resume chain
     reads the prefixed marker back via ``aborted_detail``. Like expiry, a
-    protocol-v1 lease closes manifest admission so terminal replay can freeze
-    its sealed receipts. A non-automatic
+    log-native lease closes event admission so its log can complete. A non-automatic
     active lease also gets the legacy end note (the automatic note is delivered
     by the resume chain), and pending renewal reminders are dismissed.
     Idempotent: an already-terminal lease returns None. Every writer's lease
@@ -217,7 +216,8 @@ def abort_lease(
     trigger, so an abort that loses the race is a no-op here.
     """
     from base.agents.impersonation import _wake
-    from base.agents.impersonation_manifest import close_manifest_admission, is_event_protocol
+    from base.agents.impersonation.event_log import is_log_native
+    from base.agents.impersonation_manifest import close_event_admission
 
     detail = detail.strip()
     if not detail:
@@ -230,8 +230,8 @@ def abort_lease(
             raise ImpersonationError("Lease abort requires the native-held lease")
         if lease["status"] not in OPEN:
             return None
-        if is_event_protocol(lease):
-            close_manifest_admission(conn, lease_id)
+        if is_log_native(lease):
+            close_event_admission(conn, lease_id)
         inbound_id = None
         if lease["status"] == "active" and not lease["automatic"]:
             inbound_id = insert_handoff(

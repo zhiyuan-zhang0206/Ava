@@ -44,12 +44,7 @@ from agent.graph.exec.protocol import (
     write_request,
 )
 from base.deploy.release import editable_install
-from base.host.env.registry import (
-    AGENT_BIRTH_CONFIG_ENV,
-    AGENT_CONFIG_OVERLAY_ENV,
-    MANIFEST_CERTIFICATION_FINALIZER_ENV,
-    MANIFEST_CERTIFICATION_SECRET_ENV,
-)
+from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.log import logger
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.turn_identity import current_hosted_resources
@@ -158,11 +153,6 @@ def _build_child_env(
     env = os.environ.copy()
     env.pop(AGENT_CONFIG_OVERLAY_ENV, None)
     env.pop(AGENT_BIRTH_CONFIG_ENV, None)
-    # The agent-host finalizer owns this proof, never model-executed code.  The
-    # parent can retain it to certify only after its gateway equality read;
-    # every execute_code subprocess gets a deliberately proof-free env.
-    env.pop(MANIFEST_CERTIFICATION_SECRET_ENV, None)
-    env.pop(MANIFEST_CERTIFICATION_FINALIZER_ENV, None)
     source_root = editable_install.current_interpreter_source_root()
     if source_root is not None and not _cwd_is_inside_checkout(
         Path.cwd().resolve(), source_root.resolve()

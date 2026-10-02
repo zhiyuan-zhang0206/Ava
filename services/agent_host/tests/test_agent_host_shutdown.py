@@ -95,7 +95,6 @@ def _exercise_shutdown(failure: str) -> None:
             load_process_extensions=MagicMock(),
         ),
         patch.object(graph, "build_graph", return_value=MagicMock()),
-        patch("services.agent_host.impersonation_events.reconcile_forever", background),
         patch.multiple(
             daemon,
             _is_running=MagicMock(return_value=False),
@@ -147,7 +146,7 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
     )
     assert result.returncode == 0, result.stdout + result.stderr
     events = json.loads(result.stdout.splitlines()[-1])
-    assert events.count("background_joined") == (3 if failure == "plugin" else 1)
+    assert events.count("background_joined") == (2 if failure == "plugin" else 1)
     # A process interrupt lets asyncio cancel the heartbeat immediately. Both
     # restart and background-failure paths must still drain turns and release
     # ownership before closing their DB pools.

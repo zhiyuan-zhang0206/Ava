@@ -292,7 +292,6 @@ def _prepare_resurrect_attempt(
             resurrected_by,
             prompt,
             billing_recovery=billing_recovery,
-            origin_id=int(resurrect_row[0]),
         )
         conn.commit()
         publish_agent_updated_sync(agent_id)
@@ -307,7 +306,6 @@ def _stage_resurrect_event(
     prompt: str | None,
     *,
     billing_recovery: bool,
-    origin_id: int,
 ) -> telemetry.Event:
     """Stage the exact resurrection audit fact inside the owning transaction."""
     payload: dict[str, object] = {"prompt": prompt} if prompt else {}
@@ -320,9 +318,9 @@ def _stage_resurrect_event(
         target_agent_id=_resurrect_event_target(resurrected_by),
         payload=payload,
     )
-    from base.agents.impersonation_manifest import stage_central_expected_event
+    from base.agents.impersonation_manifest import record_central_event
 
-    return stage_central_expected_event(conn, event, origin_kind="agent_wake", origin_id=origin_id)
+    return record_central_event(conn, event)
 
 
 def resurrect_agent(

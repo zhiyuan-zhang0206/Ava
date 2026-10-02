@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import json
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -12,15 +15,15 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import event_log
 from base.agents.impersonation import history as history
+from base.agents.impersonation_event_alerts import reconcile_seal_stuck_alerts
 from base.agents.impersonation_manifest import (
     LocalParticipant,
     bind_local_participant,
     capture_local_event,
-    monitor_manifest_health,
     open_local_participant,
     pending_reason,
+    record_central_event,
     seal_local_participant,
-    stage_central_expected_event,
     unbind_local_participant,
 )
 from base.cluster.machine import machine_name
@@ -127,11 +130,11 @@ def test_central_event_commits_with_its_transaction_and_survives_a_lost_emit(
 ) -> None:
     event = _central_event(db_conn, owner.agent_id)
     with db_conn.transaction(force_rollback=True):
-        stage_central_expected_event(db_conn, event, origin_kind="log_rollback", origin_id=1)
+        record_central_event(db_conn, event)
     assert _rows(db_conn, lease["id"], event_log.CENTRAL_SOURCE) == 0
 
     with db_conn.transaction():
-        tagged = stage_central_expected_event(db_conn, event, origin_kind="log_commit", origin_id=2)
+        tagged = record_central_event(db_conn, event)
     db_conn.commit()
     # The post-commit emit is never called here: the record needs no second store.
     assert tagged.attributes["impersonation_session"] == f"{owner.agent_id}:0"
@@ -158,7 +161,7 @@ def test_central_append_stops_once_admission_closes(
         leases.release(participant.lease_id, attested_caller(lease), "Held SDK finally")
     event = _central_event(db_conn, owner.agent_id)
     with db_conn.transaction():
-        untagged = stage_central_expected_event(db_conn, event, origin_kind="late", origin_id=3)
+        untagged = record_central_event(db_conn, event)
     assert untagged is event
     assert _rows(db_conn, lease["id"], event_log.CENTRAL_SOURCE) == 0
     with pytest.raises(psycopg.errors.RaiseException, match="admission is closed"):
@@ -270,7 +273,7 @@ def test_an_ended_lease_with_an_open_source_alerts_by_state_and_resolves_on_seal
     db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
 ) -> None:
     participant = _participant(owner, lease, "stuck")
-    monitor_manifest_health(machine=machine_name())
+    reconcile_seal_stuck_alerts(db_conn)
     assert (
         db_conn.execute(
             "SELECT 1 FROM alerts WHERE labels->>'lease_id'=%s "
@@ -280,14 +283,14 @@ def test_an_ended_lease_with_an_open_source_alerts_by_state_and_resolves_on_seal
         is None
     )
     _expire(db_conn, lease)
-    monitor_manifest_health(machine=machine_name())
+    reconcile_seal_stuck_alerts(db_conn)
     assert db_conn.execute(
         "SELECT status FROM alerts WHERE labels->>'lease_id'=%s "
         "AND alertname='ImpersonationEventSealStuck'",
         (participant.lease_id,),
     ).fetchone() == ("unresolved",)
     seal_local_participant(participant)
-    monitor_manifest_health(machine=machine_name())
+    reconcile_seal_stuck_alerts(db_conn)
     assert db_conn.execute(
         "SELECT status FROM alerts WHERE labels->>'lease_id'=%s "
         "AND alertname='ImpersonationEventSealStuck'",
@@ -307,3 +310,84 @@ def test_agent_termination_completes_a_fully_sealed_lease(
     ended = history.resolve(owner.agent_id, 0)
     assert ended["status"] == "expired"
     assert ended["events_completed_at"] is not None
+
+
+def test_the_handoff_lists_events_in_call_order_not_write_order(
+    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+) -> None:
+    participant = _participant(owner, lease, "call-order")
+    first = datetime.now(UTC)
+    calls = [
+        replace(_sdk_event(owner.agent_id, fn), ts=first + timedelta(milliseconds=offset))
+        for offset, fn in ((0, "agents.list_agents"), (1, "agents.get_status"), (2, "x.third"))
+    ]
+    _capture(participant, list(reversed(calls)))
+    seal_local_participant(participant)
+    leases.release(participant.lease_id, attested_caller(lease), "Three calls in order")
+    document = history.build_document(
+        history.resolve(owner.agent_id, 0), history.entries(participant.lease_id, db_conn)
+    )
+    assert [row["payload"]["attributes"]["fn"] for row in document["sdk_events"]] == [
+        "agents.list_agents",
+        "agents.get_status",
+        "x.third",
+    ]
+
+
+def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from psycopg.types.json import Jsonb
+
+    def workspace_for_agent(_agent_id: int) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+    participant = _participant(owner, lease, "late-export")
+    _expire(db_conn, lease)
+    ended = history.resolve(owner.agent_id, 0)
+    document, path = history.export_handoff(ended, db_conn)
+    assert document["statistics"]["event_delivery"]["state"] == "pending"
+    db_conn.execute(
+        "UPDATE agent_impersonations SET handoff_document=%s,handoff_path=%s,"
+        "handoff_applied_at=now() WHERE id=%s",
+        (Jsonb(document), path, lease["id"]),
+    )
+    db_conn.commit()
+
+    _capture(participant, [_sdk_event(owner.agent_id, "after-handoff")])
+    seal_local_participant(participant)
+    exported = json.loads(Path(path).read_text())
+    delivery = exported["statistics"]["event_delivery"]
+    assert delivery["state"] == "complete"
+    assert delivery["sdk_calls"]["consumed_event_count"] == 1
+
+
+def test_the_reaper_pass_alerts_on_a_stuck_source_and_resolves_it_when_it_seals(
+    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+) -> None:
+    from base.agents.impersonation import maintenance
+    from base.db import pool
+
+    participant = _participant(owner, lease, "reaper-stuck")
+    _expire(db_conn, lease)
+
+    def alert_status() -> tuple[Any, ...] | None:
+        return db_conn.execute(
+            "SELECT status FROM alerts WHERE labels->>'lease_id'=%s "
+            "AND alertname='ImpersonationEventSealStuck'",
+            (participant.lease_id,),
+        ).fetchone()
+
+    with pool(max_size=2) as reaper_pool:
+        assert maintenance.alert_stuck_event_logs(reaper_pool) == 1
+        assert alert_status() == ("unresolved",)
+        assert maintenance.alert_stuck_event_logs(reaper_pool) == 0  # one instance per episode
+        seal_local_participant(participant)
+        assert maintenance.alert_stuck_event_logs(reaper_pool) == 1
+    db_conn.rollback()
+    assert alert_status() == ("resolved",)

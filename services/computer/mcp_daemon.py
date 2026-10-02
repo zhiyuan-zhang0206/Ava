@@ -230,7 +230,7 @@ class ComputerMcpDaemon:
                             # silent either — a contract mismatch (unregistered
                             # event name, FK hiccup) must be audible.
                             logger.warning(f"[computer-mcp] task-session event failed: {e}")
-            self._emit_action(agent_id, tool, args, outcome, error, result=result, origin_id=req_id)
+            self._emit_action(agent_id, tool, args, outcome, error, result=result)
             if error is not None:
                 return {"id": req_id, "ok": False, "error": error}
             assert result is not None  # noqa: S101 — no error ⇒ execution succeeded
@@ -249,7 +249,7 @@ class ComputerMcpDaemon:
             if args.get("force") and released is not None:
                 # Operator kick: no agent identity, so no audit row — log it.
                 logger.info(f"[computer-mcp] operator forced release of agent {released}")
-            self._emit_action(agent_id, "release_control", args, outcome, error, origin_id=req_id)
+            self._emit_action(agent_id, "release_control", args, outcome, error)
             if released is None:
                 return {"id": req_id, "ok": False, "error": "not the screen holder"}
             return {
@@ -265,7 +265,6 @@ class ComputerMcpDaemon:
         args: dict[str, Any],
         outcome: str,
         error: str | None,
-        origin_id: int,
         result: dict[str, Any] | None = None,
     ) -> None:
         """One computer_action audit event per call — facts for later review."""
@@ -300,13 +299,9 @@ class ComputerMcpDaemon:
                 "task_id": args.get("task_id"),
             },
         )
-        from base.agents.impersonation_manifest import emit_staged_central_event
+        from base.agents.impersonation_manifest import emit_recorded_central_event
 
-        emit_staged_central_event(
-            event,
-            origin_kind="computer_action",
-            origin_id=origin_id,
-        )
+        emit_recorded_central_event(event)
 
     @staticmethod
     def _emit_session_event(event_type: str, agent_id: int, payload: dict[str, Any]) -> None:
@@ -318,12 +313,9 @@ class ComputerMcpDaemon:
             source=f"agent:{agent_id}",
             payload=payload,
         )
-        task_id = payload["task_id"]
-        if not isinstance(task_id, int) or isinstance(task_id, bool):
-            raise TypeError("computer task-session audit requires an integer task id")
-        from base.agents.impersonation_manifest import emit_staged_central_event
+        from base.agents.impersonation_manifest import emit_recorded_central_event
 
-        emit_staged_central_event(event, origin_kind=f"computer_{event_type}", origin_id=task_id)
+        emit_recorded_central_event(event)
 
 
 async def _socket_in_use(path: Path) -> bool:

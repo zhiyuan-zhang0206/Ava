@@ -319,7 +319,7 @@ def insert_inbound_message(
         )
         new_id = fetch_one(cur, "insert inbound message")[0]
         if event_type is not None:
-            from base.agents.impersonation_manifest import stage_central_expected_event
+            from base.agents.impersonation_manifest import record_central_event
             from base.telemetry.audit_events import prepare_event_log
 
             prepared_event = prepare_event_log(
@@ -331,12 +331,7 @@ def insert_inbound_message(
                 if content
                 else {"inbound_id": new_id},
             )
-            prepared_event = stage_central_expected_event(
-                db,
-                prepared_event,
-                origin_kind="inbound_message",
-                origin_id=new_id,
-            )
+            prepared_event = record_central_event(db, prepared_event)
     db.commit()
     _emit_prepared_event(prepared_event)
     # Publish to Redis to wake the idle agent. Agents subscribe to
@@ -375,7 +370,7 @@ def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: 
     """Emit the ordinary chat audit and wake hints after the prompt commits."""
     try:
         if source.startswith("agent:"):
-            from base.agents.impersonation_manifest import stage_central_expected_event
+            from base.agents.impersonation_manifest import record_central_event
             from base.telemetry.audit_events import prepare_event_log
 
             prepared_event = prepare_event_log(
@@ -388,12 +383,7 @@ def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: 
                 else {"inbound_id": inbound_id},
             )
             with write_transaction() as conn:
-                prepared_event = stage_central_expected_event(
-                    conn,
-                    prepared_event,
-                    origin_kind="inbound_message",
-                    origin_id=inbound_id,
-                )
+                prepared_event = record_central_event(conn, prepared_event)
             _emit_prepared_event(prepared_event)
     finally:
         publish_inbound_wake(agent_id, str(inbound_id))
@@ -449,7 +439,7 @@ def insert_restart_completed_inbound(
     restart_completed_row = cur.fetchone()
     if restart_completed_row is None:
         raise RuntimeError("restart-completed inbound INSERT returned no id")
-    from base.agents.impersonation_manifest import stage_central_expected_event
+    from base.agents.impersonation_manifest import record_central_event
     from base.telemetry.audit_events import prepare_event_log
 
     prepared_event = prepare_event_log(
@@ -458,12 +448,7 @@ def insert_restart_completed_inbound(
         source=source,
         payload={"config_overlay": config_overlay} if config_overlay else {},
     )
-    prepared_event = stage_central_expected_event(
-        cur.connection,
-        prepared_event,
-        origin_kind="restart_completed",
-        origin_id=int(restart_completed_row[0]),
-    )
+    prepared_event = record_central_event(cur.connection, prepared_event)
     post_commit_events.append(prepared_event)
     return source, content, payload
 

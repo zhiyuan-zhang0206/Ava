@@ -2069,22 +2069,13 @@ BEGIN
             accepted_generation,accepted_owner,consent_version,activated_at,ended_at,
             plugin_delta,delta_version,applied_version,relay_token_hash,relay_heartbeat_at,
             relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,
-            events_cursor,events_next_read_at,handoff_document,handoff_path,handoff_applied_at,
+            handoff_document,handoff_path,handoff_applied_at,
             next_entry,event_delivery_pending_reason,start_message
         ) ON agent_impersonations TO ava_runner;
         GRANT SELECT,INSERT ON agent_impersonation_event_participants TO ava_runner;
-        GRANT SELECT,INSERT ON agent_impersonation_event_participant_items TO ava_runner;
-        GRANT SELECT ON agent_impersonation_event_expected_receipts TO ava_runner;
-        GRANT SELECT ON agent_impersonation_event_expected_items TO ava_runner;
-        REVOKE ALL ON agent_impersonation_event_certifiers FROM ava_runner;
         GRANT EXECUTE ON FUNCTION public.close_impersonation_event_manifest_admission(UUID) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.admit_impersonation_event_certifier(UUID,TEXT) TO ava_runner;
         GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT,TEXT) TO ava_runner;
         GRANT EXECUTE ON FUNCTION public.lock_impersonation_event_participant(UUID,TEXT) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.freeze_impersonation_event_manifest(UUID,TEXT,BIGINT,TIMESTAMPTZ) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.record_impersonation_event_retention_loss(UUID,TIMESTAMPTZ) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.record_impersonation_event_integrity_alert(UUID) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.certify_impersonation_event_delivery(UUID,TEXT) TO ava_runner;
     END IF;
 END $$;
 

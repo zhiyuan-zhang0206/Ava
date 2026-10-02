@@ -530,20 +530,13 @@ def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
     declared = (
         {row.key for row in registry._PASSTHROUGH_ROWS}
         | set(registry.FIELD_ALIASES.values())
-        | {registry.MANIFEST_CERTIFICATION_FINALIZER_ENV, "PYTHONUTF8"}
+        | {"PYTHONUTF8"}
     )
     paths = {"HOME", "PATH", *registry._TEMP_DIR_KEYS}
     for key in declared:
         monkeypatch.setenv(key, str(tmp_path) if key in paths else "ambient")
     monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
 
-    def finalizer() -> dict[str, str]:
-        return {
-            registry.MANIFEST_CERTIFICATION_SECRET_ENV: "proof",
-            registry.MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
-        }
-
-    monkeypatch.setattr(registry, "manifest_certification_secret_env", finalizer)
     undeclared = set(driver.root_child_env()) - registry.launch_input_keys() - ambient
     assert not undeclared, f"declare these in launch_input_keys or as ambient: {sorted(undeclared)}"
 

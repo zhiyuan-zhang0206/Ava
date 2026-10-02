@@ -119,16 +119,15 @@ async def deliver_handoff(
     even when nothing else is queued (claim also resumes on the trailing note, so
     an empty queue is not an idle verdict).
 
-    Event accounting is handled only by the runner's background reconcile loop.
-    The handoff keeps its documented pending semantics until that loop finishes;
-    replay never delays the native checkpoint or its receipt.
+    Event accounting never delays the native checkpoint or its receipt: a log-native
+    lease is complete in the database or keeps its documented pending semantics until
+    its last open source seals.
 
     ``reason`` is the death cause of a supervisor-aborted session (task #3998);
     when present, the note names it right after the session-end sentence.
     """
     from agent.impersonation import flush_checkpoint
 
-    # Replay is owned by services.agent_host.impersonation_events.reconcile_forever.
     # Keep the truthful pending record while the durable native handoff proceeds.
     summary, path = await asyncio.to_thread(_save_document, session, incarnation)
     config = {"configurable": {"thread_id": str(incarnation.agent_id)}}
