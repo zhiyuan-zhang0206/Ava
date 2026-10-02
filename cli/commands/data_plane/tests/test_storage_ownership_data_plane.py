@@ -2,7 +2,6 @@
 
 import signal
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -23,13 +22,17 @@ from tests._containers import redis_server
 _UNUSED_ADMIN = "unused-admin-credential"
 
 
-@pytest.fixture(autouse=True)
-def _release_receipt_slot(tmp_path: Path) -> Iterator[None]:
-    """A data directory that is `tmp_path` keeps its custody receipt beside the
-    session's shared base temp directory; a test that leaves it there hands the
-    next test reading custody the receipt of another data directory."""
-    yield
-    pg.receipt_path(tmp_path).unlink(missing_ok=True)
+@pytest.fixture
+def pg_data(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A PostgreSQL data directory inside a private home.
+
+    Custody keeps its receipt in `<data>/../run`, as a home's `pgdata` sits beside its `run`.
+    A data directory directly under the session's shared base temp directory would hand every
+    other test the receipt this one writes.
+    """
+    data = tmp_path_factory.mktemp("home") / "pgdata"
+    data.mkdir()
+    return data
 
 
 def test_foreign_redis_keeps_acl_and_config(
@@ -54,14 +57,14 @@ def test_foreign_redis_keeps_acl_and_config(
 
 
 def test_foreign_postgres_listener_refuses_before_hba_or_initdb(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    pg_data: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(instance, "_pg_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(instance, "_pg_data_dir", lambda: pg_data)
     monkeypatch.setattr(ownership, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(instance, "_ensure_pg_data", lambda: pytest.fail("must not initialize"))
     with pytest.raises(RuntimeError, match="no owned data-plane process"):
         instance._start_pg(15433, "")
-    assert not (tmp_path / "pg_hba.conf").exists()
+    assert not (pg_data / "pg_hba.conf").exists()
 
 
 def test_foreign_pooler_listener_refuses_before_config_or_signal(
