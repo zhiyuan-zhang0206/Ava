@@ -1,10 +1,12 @@
-"""Read-side heartbeat guard for telemetry served from Loki and Prometheus.
+"""Read-side heartbeat guard for the telemetry served from `telemetry_events`.
 
 The heartbeat is the gateway's own ``gateway_latency`` telemetry event. Its
 60-second flusher advances whenever request traffic exists, regardless of agent
 activity, unlike ``llm_usage`` counters that legitimately idle. It also isolates
 the gateway exporter: during the 2026-08-23 incident, gateway metrics stopped
-while agent LLM metrics continued, so whole-event-stream freshness stayed green.
+while agent LLM metrics continued, so whole-event-stream freshness stayed green. The
+heartbeat's newest row in `telemetry_events` says whether the gateway's own events still reach
+the record.
 
 Five minutes is five times the heartbeat cadence. It is deliberately not three
 times the 15-second metric export interval: a 45-second deadline for a 60-second
@@ -23,14 +25,12 @@ import contextlib
 import threading
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from base.log import logger
-from gateway.lgtm import loki_events, prom_metrics
 
 HEARTBEAT_EVENT = "gateway_latency"
-HEARTBEAT_METRIC = "ava_gateway_latency_count_total"
 STALENESS_THRESHOLD_S = 300
 CHECK_INTERVAL_S = 60
 
@@ -52,37 +52,23 @@ _check_state = _CheckState()
 _state_lock = threading.Lock()
 
 
-def prometheus_heartbeat_age(timeout_s: float | None = None) -> float | None:
-    """Age in seconds of the newest Prometheus heartbeat sample, if any."""
-    rows = prom_metrics.query(
-        f"max(timestamp({HEARTBEAT_METRIC}))",
-        timeout_s=timeout_s,
-    )
-    if not rows:
-        return None
-    newest_sample_s = max(value for _labels, value in rows)
-    return time.time() - newest_sample_s
+def heartbeat_age(pool: Any, *, now: datetime) -> float | None:
+    """Age in seconds of the newest heartbeat row in `telemetry_events`, if any.
 
-
-def loki_heartbeat_age(timeout_s: float | None = None) -> float | None:
-    """Age in seconds of the newest Loki heartbeat event, if any."""
-    now_s = time.time()
-    now = datetime.fromtimestamp(now_s, UTC)
-    rows, _has_more = loki_events.query_events(
-        event_names=[HEARTBEAT_EVENT],
-        categories=["telemetry"],
-        from_=now - timedelta(seconds=3 * STALENESS_THRESHOLD_S),
-        to=now,
-        limit=1,
-        direction="backward",
-        timeout_s=timeout_s,
-    )
-    if not rows:
-        return None
-    newest_ts = rows[0]["ts"]
-    if not isinstance(newest_ts, datetime):
-        raise TypeError(f"Loki heartbeat timestamp is not a datetime: {newest_ts!r}")
-    return now_s - newest_ts.timestamp()
+    Only the last `STALENESS_THRESHOLD_S * 2` seconds are read, so the scan stays on the newest
+    rows; a heartbeat older than that is as stale as a missing one.
+    """
+    with pool.connection() as conn:
+        conn.execute("SET LOCAL statement_timeout = '3s'")
+        row = conn.execute(
+            "SELECT max(ts) FROM telemetry_events WHERE event_name = %s AND ts > %s",
+            (
+                HEARTBEAT_EVENT,
+                datetime.fromtimestamp(now.timestamp() - 2 * STALENESS_THRESHOLD_S, UTC),
+            ),
+        ).fetchone()
+    newest = row[0] if row is not None else None
+    return None if newest is None else now.timestamp() - newest.timestamp()
 
 
 def _emit(event_name: str, attributes: dict[str, Any]) -> None:
@@ -133,13 +119,12 @@ def _report_source(*, source: str, age_s: float | None, now_s: float) -> bool:
     return False
 
 
-def check_and_report(*, now: datetime | None = None, timeout_s: float = 3.0) -> bool:
+def check_and_report(pool: Any, *, now: datetime | None = None) -> bool:
     """Return whether a successful telemetry read should be marked stale.
 
-    Each source is checked independently. A heartbeat-query exception is not a
-    staleness verdict: it is logged at debug, left out of this poll's result,
-    and does not mutate transition state. The combined fail-open verdict is
-    cached on a monotonic cadence alongside successful checks.
+    A heartbeat-query exception is not a staleness verdict: it is logged at debug,
+    left out of this poll's result, and does not mutate transition state. The
+    fail-open verdict is cached on a monotonic cadence alongside successful checks.
     """
     with _state_lock:
         checked_at = time.monotonic()
@@ -148,22 +133,13 @@ def check_and_report(*, now: datetime | None = None, timeout_s: float = 3.0) -> 
             and checked_at - _check_state.last_check_monotonic < CHECK_INTERVAL_S
         ):
             return _check_state.last_stale
-        try:
-            now_s = (now or datetime.now(UTC)).timestamp()
-        except Exception as exc:
-            logger.debug("telemetry heartbeat check could not read the clock: {}", exc)
-            return False
+        moment = now or datetime.now(UTC)
         stale = False
-        checks = (
-            ("prometheus", prometheus_heartbeat_age),
-            ("loki", loki_heartbeat_age),
-        )
-        for source, heartbeat_age in checks:
-            try:
-                age_s = heartbeat_age(timeout_s=timeout_s)
-                stale = _report_source(source=source, age_s=age_s, now_s=now_s) or stale
-            except Exception as exc:
-                logger.debug("telemetry heartbeat check failed for {}: {}", source, exc)
+        try:
+            age_s = heartbeat_age(pool, now=moment)
+            stale = _report_source(source="postgres", age_s=age_s, now_s=moment.timestamp())
+        except Exception as exc:
+            logger.debug("telemetry heartbeat check failed: {}", exc)
         _check_state.last_check_monotonic = checked_at
         _check_state.last_stale = stale
         return stale

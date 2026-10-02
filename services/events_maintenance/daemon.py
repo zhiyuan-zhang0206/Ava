@@ -3,17 +3,14 @@
 Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Resident
 loops under one `TaskGroup` (one that raises ends the process):
 
-- Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): recompute
-  the day-grain rollup tables (`services.events_maintenance.rollup`), replay
-  ledger gaps from the retained JSONL mirror
-  (`services.events_maintenance.jsonl_replay`), run the incremental blob VACUUM
-  (`services.events_maintenance.blob_vacuum`), and the hourly checkpoint
-  size/row-count telemetry sample. The PG `events` archive slices
-  (partitions / retention / table retention / index governance) were removed
-  with the task #1281/#1823 cleanup — the table was dropped and its data lives
-  in the Loki archive stream.
+- Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): recover missed
+  observations (`services.events_maintenance.observed_metrics`), replay the JSONL mirror
+  into `telemetry_events` (`services.events_maintenance.telemetry_replay`), recompute the
+  day-grain rollup tables of the last closed days (`services.events_maintenance.rollup`),
+  run the incremental blob VACUUM (`services.events_maintenance.blob_vacuum`), and the hourly
+  checkpoint size/row-count telemetry sample.
 - Resolution loop (`AVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m):
-  refresh immutable-event class-resolution state and gauges from Loki.
+  refresh immutable-event class-resolution state and gauges from `telemetry_events`.
 - Registry-gauge loop (every 60s): sample `max(agents.id)` and emit the
   `agent_registry` event the growth dashboard reads
   (`services.events_maintenance.registry_gauge`).
@@ -87,7 +84,6 @@ from services.events_maintenance.blob_vacuum import (
     run_blob_vacuum,
 )
 from services.events_maintenance.config import EventsMaintenanceConfig
-from services.events_maintenance.jsonl_replay import replay_gap_days
 from services.events_maintenance.observed_metrics import recover_observations
 from services.events_maintenance.resolution import run_resolution_slice
 from services.events_maintenance.rollup import compute_rollup
@@ -102,14 +98,11 @@ def events_maintenance_config() -> EventsMaintenanceConfig:
     return EventsMaintenanceConfig(
         events_maintenance_interval_seconds=settings.daemon.events_maintenance_interval_seconds,
         events_maintenance_pass_deadline_s=settings.daemon.events_maintenance_pass_deadline_s,
-        events_rollup_pass_deadline_s=settings.daemon.events_rollup_pass_deadline_s,
         events_maintenance_resolution_deadline_s=settings.daemon.events_maintenance_resolution_deadline_s,
-        events_rollup_late_write_lookback_days=settings.daemon.events_rollup_late_write_lookback_days,
         events_resolution_burst_threshold=settings.daemon.events_resolution_burst_threshold,
         events_resolution_interval_seconds=settings.daemon.events_resolution_interval_seconds,
         events_auto_dismiss_enabled=settings.daemon.events_auto_dismiss_enabled,
         events_auto_dismiss_days=settings.daemon.events_auto_dismiss_days,
-        telemetry_loki_url=settings.observability.telemetry_loki_url,
         timezone=settings.general.timezone,
         grafana_host=settings.gateway.grafana_host,
         grafana_port=settings.gateway.grafana_port,
@@ -146,17 +139,17 @@ class WedgedPassError(RuntimeError):
 def _run_maintenance(
     pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig, db: Database
 ) -> None:
-    """One hourly pass: the cost-ledger rollup (Loki → `agent_model_tokens_daily`
-    — Loki only retains 84h, so skipping passes permanently loses days), the
-    JSONL gap replay, the hourly checkpoint size/row-count telemetry sample,
-    and the blob VACUUM. One `now` drives the time-based steps.
+    """One hourly pass: the recoveries (observed metrics, the telemetry mirror replay), the
+    cost-ledger rollup of the last closed days (`telemetry_events` → `agent_model_tokens_daily`
+    and `agent_metrics_daily`), the hourly checkpoint size/row-count telemetry sample, and the
+    blob VACUUM. One `now` drives the time-based steps.
     Logs what each step did; a no-op pass logs nothing."""
     now = datetime.now(tz=UTC)
-    # Recovery is independent of the old rollup: an unavailable Loki or mirror
-    # must not prevent the remaining maintenance work from making progress.
+    # Recovery is independent of the rollup: a failing source must not prevent the
+    # remaining maintenance work from making progress.
     try:
         with pool.connection() as conn:
-            recovered = recover_observations(conn, config, now=now)
+            recovered = recover_observations(conn, now=now)
         if recovered:
             _log.info("[events-maintenance] recovered %d metric observations", recovered)
     except Exception:
@@ -173,8 +166,7 @@ def _run_maintenance(
         _log.exception("[events-maintenance] telemetry events replay incomplete")
     progress.beat()
     with pool.connection() as conn:
-        result = compute_rollup(conn, now_utc=now, config=config)
-        replay_result = replay_gap_days(conn, now_utc=now)
+        result = compute_rollup(conn, now_utc=now)
     progress.beat()
     if result.start_day is not None:
         _log.info(
@@ -183,15 +175,6 @@ def _run_maintenance(
             result.end_day,
             result.metrics_rows,
             result.tokens_rows,
-        )
-    if replay_result.days_replayed or replay_result.days_failed:
-        _log.info(
-            "[events-maintenance] JSONL replay — replayed=%s failed=%s, "
-            "%d metric rows, %d token rows",
-            replay_result.days_replayed,
-            replay_result.days_failed,
-            replay_result.metrics_rows,
-            replay_result.tokens_rows,
         )
     # Hourly checkpoint size/row-count sample: the gauge is also emitted after
     # each blob vacuum, but the vacuum only runs inside the 05:00-08:00
@@ -354,9 +337,8 @@ async def _resolution_loop(
 ) -> None:
     """Refresh immutable-event class-resolution gauges on their own cadence.
 
-    The six-hour Loki read and safety-valve write are unrelated to the frozen
-    archive's hourly rollup and must run while archive maintenance is disabled.
-    As with the rollup loop, a transient backend outage waits one full
+    The six-hour class count and safety-valve write are independent of the hourly
+    rollup pass. As with the rollup loop, a transient backend outage waits one full
     configured interval; schema drift exits for watchdog recovery.
     """
 

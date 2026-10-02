@@ -1,7 +1,5 @@
 {
-  "complexity": {
-    "tests/gateway/loki_fake.py::FakeLoki._match": 34
-  },
+  "complexity": {},
   "files": {
     "tests/gateway/test_alerts_api.py": 1014,
     "tests/gateway/test_cluster_endpoints.py": 1200

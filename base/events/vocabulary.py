@@ -28,7 +28,7 @@ EventTier = Literal["business", "anomaly", "observation", "noise"]
 # rows are noise.
 
 # The ops-monitor bucket grid (the Insights Ops panel): 60s buckets on a fixed
-# origin, shared by the LGTM reader (gateway/cluster/ops_series_lgtm.py) and the
+# origin, shared by the LGTM reader (gateway/cluster/ops_series.py) and the
 # frontend's expectation that bucket boundaries never shift with the query
 # time. OPS_BUCKET_S is the finest window step; coarser windows are multiples.
 OPS_BUCKET_S = 60

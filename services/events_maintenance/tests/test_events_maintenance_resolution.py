@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import psycopg
@@ -70,6 +71,26 @@ def _clear_dismissals(db_conn: psycopg.Connection[Any]) -> None:
     with db_conn.cursor() as cur:
         cur.execute("TRUNCATE event_dismissals")
     db_conn.commit()
+    _fresh(db_conn)
+
+
+def _fake_counts(
+    *, unresolved: dict[resolution.EventClass, int], burst: dict[resolution.EventClass, int]
+) -> Any:
+    """A `class_counts` stand-in that answers the six-hour and the ten-minute window."""
+
+    def class_counts(
+        _conn: object, *, start: datetime, end: datetime, cluster: str | None = None
+    ) -> dict[resolution.EventClass, int]:
+        assert cluster is None
+        return unresolved if end - start == timedelta(hours=6) else burst
+
+    return class_counts
+
+
+def _fresh(conn: psycopg.Connection[Any]) -> None:
+    """One recent row, so the record reads as current."""
+    _record(conn, level="info", event_name="heartbeat", minutes_ago=0.1)
 
 
 def _capture_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, object]]]:
@@ -82,26 +103,70 @@ def _capture_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dic
     return emitted
 
 
-def test_resolution_query_uses_json_fields_until_the_legacy_expiry() -> None:
-    """The fixed window aggregates classes without unsafe stream-label filters."""
-
-    assert resolution.grouped_count_query("6h") == (
-        "sum by (category, level, event_name, source, process) "
-        '(count_over_time({service_name="unknown_service"} | json | '
-        'category=~"telemetry|log" | level=~"warning|error|critical" [6h]))'
+def _record(
+    conn: psycopg.Connection[Any],
+    *,
+    minutes_ago: float = 1,
+    level: str = "warning",
+    event_name: str = "x",
+    source: str = "test",
+    process: str = "p",
+    cluster: str = "c",
+    category: str = "telemetry",
+) -> None:
+    conn.execute(
+        "INSERT INTO telemetry_events (event_uid, ts, machine, cluster, process, category, "
+        "event_name, level, source) VALUES (%s, %s, 'm', %s, %s, %s, %s, %s, %s)",
+        (
+            uuid.uuid4().int % (1 << 62),
+            datetime.now(UTC) - timedelta(minutes=minutes_ago),
+            cluster,
+            process,
+            category,
+            event_name,
+            level,
+            source,
+        ),
     )
+    conn.commit()
 
 
-def test_resolution_query_optional_cluster_stage() -> None:
-    """The gateway dashboard scopes raw class counts to its home cluster
-    without changing the daemon's unfiltered query (task #1935)."""
+def _window(minutes: float) -> tuple[datetime, datetime]:
+    now = datetime.now(UTC)
+    return now - timedelta(minutes=minutes), now
 
-    assert resolution.grouped_count_query("6h", cluster='my"cluster') == (
-        "sum by (category, level, event_name, source, process) "
-        '(count_over_time({service_name="unknown_service"} | json | '
-        'category=~"telemetry|log" | level=~"warning|error|critical"'
-        ' | cluster="my\\"cluster" or cluster="" [6h]))'
-    )
+
+def test_class_counts_group_the_warning_error_and_critical_rows_of_the_window(
+    db_conn: psycopg.Connection[Any],
+) -> None:
+    _record(db_conn, level="warning", event_name="a")
+    _record(db_conn, level="warning", event_name="a")
+    _record(db_conn, level="critical", event_name="b", process="q", category="log")
+    _record(db_conn, level="info", event_name="a")  # not a problem level
+    _record(db_conn, level="error", event_name="old", minutes_ago=400)  # outside the window
+
+    start, end = _window(360)
+    counts = resolution.class_counts(db_conn, start=start, end=end)
+
+    assert counts == {
+        _event_class(event_name="a", process="p"): 2,
+        _event_class(level="critical", event_name="b", process="q", category="log"): 1,
+    }
+
+
+def test_class_counts_cluster_filter_keeps_the_home_cluster_and_unlabelled_rows(
+    db_conn: psycopg.Connection[Any],
+) -> None:
+    _record(db_conn, cluster="home")
+    _record(db_conn, cluster="")
+    _record(db_conn, cluster="elsewhere")
+
+    start, end = _window(10)
+
+    home = resolution.class_counts(db_conn, start=start, end=end, cluster="home")
+    everything = resolution.class_counts(db_conn, start=start, end=end)
+    assert sum(home.values()) == 2
+    assert sum(everything.values()) == 3
 
 
 def test_unresolved_math_excludes_active_classes(
@@ -120,12 +185,7 @@ def test_unresolved_math_excludes_active_classes(
         remaining_critical: 4,
     }
 
-    def query_class_counts(
-        window: str, _at: datetime, _config: object
-    ) -> dict[resolution.EventClass, int]:
-        return counts if window == "6h" else {}
-
-    monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
+    monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst={}))
     emitted = _capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
@@ -157,12 +217,7 @@ def test_burst_reopens_only_above_the_configured_threshold(
     _insert_dismissal(db_conn, below)
     counts = {hit: 6, below: 5}
 
-    def query_class_counts(
-        _window: str, _at: datetime, _config: object
-    ) -> dict[resolution.EventClass, int]:
-        return counts
-
-    monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
+    monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
     emitted = _capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
@@ -195,37 +250,56 @@ def test_burst_reopens_only_above_the_configured_threshold(
         assert cur.fetchall() == [("below", "dismissed", None), ("hit", "reopened", 6)]
 
 
-def test_empty_or_failed_loki_read_never_emits_a_stale_zero(
+def test_a_stale_record_or_a_failed_read_never_emits_a_gauge(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    emitted = _capture_events(monkeypatch)
+    pool = cast(ConnectionPool, _Pool(db_conn))
+
+    # The newest recorded event is an hour old: an empty window may only mean a stalled writer.
+    later = datetime.now(UTC) + timedelta(hours=1)
+    assert resolution.run_resolution_slice(pool, events_maintenance_config(), now=later) is None
+    assert emitted == []
+
+    def boom(*_args: object, **_kwargs: object) -> dict[resolution.EventClass, int]:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(resolution, "class_counts", boom)
+    assert resolution.run_resolution_slice(pool, events_maintenance_config()) is None
+    assert emitted == []
+
+
+def test_an_empty_window_over_a_current_record_emits_zero_gauges(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     emitted = _capture_events(monkeypatch)
 
-    def no_class_counts(
-        _window: str, _at: datetime, _config: object
-    ) -> dict[resolution.EventClass, int]:
-        return {}
-
-    monkeypatch.setattr(resolution, "_query_class_counts", no_class_counts)
-
-    assert (
-        resolution.run_resolution_slice(
-            cast(ConnectionPool, _Pool(db_conn)), events_maintenance_config()
-        )
-        is None
+    result = resolution.run_resolution_slice(
+        cast(ConnectionPool, _Pool(db_conn)), events_maintenance_config()
     )
-    assert emitted == []
 
-    def boom(_window: str, _at: datetime, _config: object) -> dict[resolution.EventClass, int]:
-        raise RuntimeError("Loki unavailable")
+    assert result == resolution.ResolutionResult(0, 0, reopened=0, auto_dismissed=0)
+    assert [name for _category, name, _attrs in emitted] == ["resolution_status"]
 
-    monkeypatch.setattr(resolution, "_query_class_counts", boom)
-    assert (
-        resolution.run_resolution_slice(
-            cast(ConnectionPool, _Pool(db_conn)), events_maintenance_config()
-        )
-        is None
-    )
-    assert emitted == []
+
+def test_auto_dismiss_picks_the_classes_present_in_every_six_hour_slice(
+    db_conn: psycopg.Connection[Any],
+) -> None:
+    for slot in range(4):  # one day of six-hour slices
+        _record(db_conn, event_name="steady", minutes_ago=slot * 360 + 30)
+        if slot != 2:
+            _record(db_conn, event_name="gappy", minutes_ago=slot * 360 + 30)
+    now = datetime.now(UTC)
+    current = {
+        _event_class(event_name="steady", process="p"): 1,
+        _event_class(event_name="gappy", process="p"): 1,
+    }
+    config = events_maintenance_config(events_auto_dismiss_enabled=True, events_auto_dismiss_days=1)
+    resolution._last_auto_dismiss_day[0] = None
+
+    stable = resolution._stable_auto_classes(now, db_conn, current, config)
+
+    assert stable == {_event_class(event_name="steady", process="p")}
 
 
 def test_auto_dismiss_is_off_by_default(
@@ -233,12 +307,9 @@ def test_auto_dismiss_is_off_by_default(
 ) -> None:
     stable = _event_class(event_name="stable-warning")
 
-    def stable_class_counts(
-        _window: str, _at: datetime, _config: object
-    ) -> dict[resolution.EventClass, int]:
-        return {stable: 1}
-
-    monkeypatch.setattr(resolution, "_query_class_counts", stable_class_counts)
+    monkeypatch.setattr(
+        resolution, "class_counts", _fake_counts(unresolved={stable: 1}, burst={stable: 1})
+    )
     emitted = _capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
@@ -296,12 +367,7 @@ def test_daemon_emits_dismissed_gauges_alongside_unresolved(
     _insert_dismissal(db_conn, dismissed)
     counts = {dismissed: 4, _event_class(event_name="kept"): 1}
 
-    def query_class_counts(
-        window: str, _at: datetime, _config: object
-    ) -> dict[resolution.EventClass, int]:
-        return counts if window == "6h" else {}
-
-    monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
+    monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst={}))
     emitted = _capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
@@ -350,12 +416,7 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
     _insert_dismissal(db_conn, bridge_class)
     counts = {host_class: 6, bridge_class: 2}
 
-    def query_class_counts(
-        _window: str, _at: datetime, _config: object
-    ) -> dict[resolution.EventClass, int]:
-        return counts
-
-    monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
+    monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
     emitted = _capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
@@ -383,12 +444,7 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
     _insert_dismissal(db_conn, _event_class())  # process="" wildcard
     counts = {_event_class(process="agent_host"): 4, _event_class(process="im_bridge"): 2}
 
-    def query_class_counts(
-        _window: str, _at: datetime, _config: object
-    ) -> dict[resolution.EventClass, int]:
-        return counts
-
-    monkeypatch.setattr(resolution, "_query_class_counts", query_class_counts)
+    monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
     emitted = _capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(

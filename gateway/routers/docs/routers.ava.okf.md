@@ -51,7 +51,7 @@ Every route module is a FastAPI `APIRouter` `include_router`-mounted to `/api/*`
 
 ### Ops & system
 - **status** (`/api/health`, `/api/status`, `/api/stats/dashboard`) — liveness + status panel + dashboard; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([[gateway/cluster/docs/ops-surfaces.ava.okf.md|dashboard contract]])
-- **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over the unified `events` stream
+- **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over `telemetry_events`
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — terminal session monitor (session backend proxy)
 - **tasks** (`/api/tasks` GET + `/api/tasks/{id}` PATCH) — task registry read + partial update (no create; an owner reassignment notifies the new and, when live, previous owner); GET defaults to a full compatibility row or serves a metadata-only SQL projection with `fields=summary`; rows carry `priority` (`P0`..`P3`, validated, illegal 422)

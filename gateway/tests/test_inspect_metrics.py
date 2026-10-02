@@ -277,7 +277,7 @@ def test_statistics_http_does_not_read_logs_or_current_state(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("Statistics must use the persisted SQL read model")
 
-    for name in ("query_events", "query_projected_lines", "attribute_aggregate"):
+    for name in ("query_events",):
         monkeypatch.setattr(loki_events, name, forbidden)
     monkeypatch.setattr(inspect_router, "db_rows_blocking", forbidden)
     with TestClient(app) as client:

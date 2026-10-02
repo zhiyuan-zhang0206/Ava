@@ -1,8 +1,7 @@
-"""Regression tests for fleet-graph upstream failures and Redis fallbacks."""
+"""Regression tests for fleet-graph read failures and Redis fallbacks."""
 
-from datetime import timedelta
+from datetime import datetime
 
-import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -11,12 +10,12 @@ from psycopg import errors as pg_errors
 from base import telemetry
 from base.agents import AgentStatus
 from gateway.app import app
-from gateway.lgtm import prom_metrics, telemetry_staleness
+from gateway.lgtm import telemetry_staleness
 from gateway.schemas.fleet_graph import FleetGraphNode, FleetGraphResponse
 
 
-def _fresh_heartbeat_age(*, timeout_s: float | None = None) -> float:
-    del timeout_s
+def _fresh_heartbeat_age(pool: object, *, now: datetime) -> float:
+    del pool, now
     return 30.0
 
 
@@ -53,17 +52,8 @@ class _RedisFactory:
 
 @pytest.fixture(autouse=True)
 def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Existing resilience cases isolate their named upstream failure."""
-    monkeypatch.setattr(
-        telemetry_staleness,
-        "prometheus_heartbeat_age",
-        _fresh_heartbeat_age,
-    )
-    monkeypatch.setattr(
-        telemetry_staleness,
-        "loki_heartbeat_age",
-        _fresh_heartbeat_age,
-    )
+    """Existing resilience cases isolate their named failure."""
+    monkeypatch.setattr(telemetry_staleness, "heartbeat_age", _fresh_heartbeat_age)
     monkeypatch.setattr(telemetry_staleness, "_source_states", {})
     monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
 
@@ -80,16 +70,6 @@ def _seed_agent(db_conn: psycopg.Connection) -> int:
         )
     db_conn.commit()
     return agent_id
-
-
-def _empty_prom(
-    _metric: str,
-    _by: str,
-    *,
-    window: timedelta | None = None,
-    timeout_s: float | None = None,
-) -> dict[str, float]:
-    return {}
 
 
 def _last_good_graph() -> FleetGraphResponse:
@@ -120,7 +100,6 @@ def test_success_writes_short_cache_and_last_good_graph(
     import gateway.routers.fleet_graph as fg
 
     monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
-    monkeypatch.setattr(prom_metrics, "sum_by", _empty_prom)
     with TestClient(app) as client:
         resp = client.get("/api/fleet/graph")
 
@@ -145,12 +124,11 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
     import gateway.routers.fleet_graph as fg
 
     monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
-    monkeypatch.setattr(prom_metrics, "sum_by", _empty_prom)
 
-    def missing_heartbeat(*, timeout_s: float | None = None) -> None:
-        del timeout_s
+    def missing_heartbeat(pool: object, *, now: datetime) -> None:
+        del pool, now
 
-    monkeypatch.setattr(telemetry_staleness, "prometheus_heartbeat_age", missing_heartbeat)
+    monkeypatch.setattr(telemetry_staleness, "heartbeat_age", missing_heartbeat)
     emitted: list[tuple[str, dict[str, object]]] = []
 
     def capture_emit(
@@ -180,104 +158,26 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
     }
     assert redis.values[key] == redis.values[f"fleet_graph:last_good:{key}"]
     assert emitted[0][0] == "telemetry_read_stale"
-    assert emitted[0][1]["source"] == "prometheus"
+    assert emitted[0][1]["source"] == "postgres"
 
 
 def test_pg_phase_exceeding_route_budget_serves_stale_before_telemetry(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A slow DB phase does not start more upstream reads after its deadline."""
+    """A slow DB phase serves the stale graph instead of finishing the response."""
     _seed_agent(db_conn)
     redis = _FakeRedis()
-    prom_calls = 0
 
     import gateway.routers.fleet_graph as fg
 
     monotonic = iter((0.0, fg._ROUTE_TIMEOUT_S + 0.1))
     monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
     monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
-
-    def prom(*_args: object, **_kwargs: object) -> dict[str, float]:
-        nonlocal prom_calls
-        prom_calls += 1
-        return {}
-
-    monkeypatch.setattr(prom_metrics, "sum_by", prom)
     with TestClient(app) as client:
         response = client.get("/api/fleet/graph")
 
     assert response.status_code == 200
     assert response.json()["stale"] is True
-    assert prom_calls == 0
-
-
-def test_prom_failure_serves_last_good_graph_without_writing_short_cache(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Prometheus failure prefers the complete fallback over a node-only graph."""
-    _seed_agent(db_conn)
-    redis = _FakeRedis()
-    last_good = _last_good_graph()
-    prom_timeouts: list[float | None] = []
-
-    import gateway.routers.fleet_graph as fg
-
-    key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
-    redis.values[f"fleet_graph:last_good:{key}"] = last_good.model_dump_json()
-    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
-
-    def boom(
-        _metric: str,
-        _by: str,
-        *,
-        window: timedelta | None = None,
-        timeout_s: float | None = None,
-    ) -> dict[str, float]:
-        prom_timeouts.append(timeout_s)
-        raise httpx.ConnectError("prometheus unreachable")
-
-    monkeypatch.setattr(prom_metrics, "sum_by", boom)
-    with TestClient(app) as client:
-        resp = client.get("/api/fleet/graph")
-
-    expected = last_good.model_dump(mode="json")
-    expected["stale"] = True
-    assert resp.status_code == 200
-    assert resp.json() == expected
-    assert prom_timeouts == [8.0] * 4
-    assert redis.writes == []
-
-
-def test_prom_failure_without_last_good_keeps_pg_nodes_out_of_short_cache(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Without last-good data, a Prometheus failure still preserves PG nodes."""
-    agent_id = _seed_agent(db_conn)
-    redis = _FakeRedis()
-
-    import gateway.routers.fleet_graph as fg
-
-    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
-
-    def boom(
-        _metric: str,
-        _by: str,
-        *,
-        window: timedelta | None = None,
-        timeout_s: float | None = None,
-    ) -> dict[str, float]:
-        raise httpx.ConnectError("prometheus unreachable")
-
-    monkeypatch.setattr(prom_metrics, "sum_by", boom)
-    with TestClient(app) as client:
-        resp = client.get("/api/fleet/graph")
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert {node["agent_id"] for node in body["nodes"]} == {agent_id}
-    assert body["edges"] == []
-    assert body["stale"] is True
-    assert redis.writes == []
 
 
 def test_pg_cancellation_serves_last_good_graph(

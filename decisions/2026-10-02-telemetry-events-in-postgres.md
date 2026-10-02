@@ -83,3 +83,5 @@ does not compress rows under 2 KB, so the compression factor is the least certai
   the mirrors still hold; older telemetry is gone.
 - A database outage costs the live rows of that period until the daemon's replay (this machine) or
   the backfill (others) lands them; the mirror keeps them for seven days.
+
+Superseded in part by [`2026-10-03-telemetry-readers-on-postgres.md`](2026-10-03-telemetry-readers-on-postgres.md): the readers listed as still on Loki now compute on `telemetry_events`.

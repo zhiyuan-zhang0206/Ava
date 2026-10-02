@@ -2962,28 +2962,19 @@ export interface paths {
          *
          *     Data sources:
          *     - `live_count`: agents_meta table — all non-terminated agents (running/idling)
-         *     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
-         *     - average turn duration: Loki's unified event stream in 12-hour shards
-         *     - warning/error counts: per-class counts via the resolution daemon's
-         *       grouped query (12h shards), split into total / dismissed / net with
-         *       the daemon's class arithmetic over the SELECTED window (task #1935)
+         *     - `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and
+         *       `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)
+         *     - warning/error counts: per-class counts of `telemetry_events` rows, split into
+         *       total / dismissed / net with the resolution daemon's class arithmetic over the
+         *       SELECTED window (task #1935)
          *     - `total_events`: archived event row count — frozen historical constant
          *       (task #1281 parity run; PG events dropped; not a live gauge)
          *
          *     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
          *     hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
-         *     `applied_window_hours`. Zero-data scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds
-         *     None (frontend shows "—"). The ledger-first split avoids the fixed-cost
-         *     full-window token scans; the indexed Loki tail rereads the newest retained
-         *     ledger day to absorb late writes without double counting.
-         *
-         *     A failed recompute (Loki transport error or refused query admission) serves
-         *     the window's last-good response marked `stale` (its `as_of` keeps the
-         *     original read time) while it is within `display.stats_dashboard_stale_max_s`;
-         *     past the cap — or with no last-good payload — the route keeps its retriable
-         *     503, so a real outage surfaces within the cap. Each degradation episode
-         *     emits one `stats_dashboard_stale` event, rate-capped per reason by the
-         *     `stats_dashboard_stale_emit_interval_s` display setting.
+         *     `applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,
+         *     cost_usd 0.0, avg_turn_seconds None (frontend shows "—"). The window is computed on
+         *     every request, in one connection, with an 8-second statement timeout.
          */
         get: operations["get_stats_dashboard_api_stats_dashboard_get"];
         put?: never;
@@ -3226,7 +3217,7 @@ export interface paths {
          * @description Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).
          *
          *     Nodes carry status, label, a windowed recent-work `node_score`, and
-         *     restart-proof `total_tokens` consumed in the retained window (7d). Edges
+         *     `total_tokens` consumed in the retained window (7d). Edges
          *     split into two families: lineage
          *     (spawn/fork/resurrect) is structural and permanent; messages (send_message)
          *     decay with recency. Terminated agents — and edges touching a terminated
@@ -3250,11 +3241,9 @@ export interface paths {
          *
          *     Node score (windowed, drives node size):
          *         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
-         *     over the agent's `llm_usage` counters in the window — read from
-         *     Prometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,
-         *     windowed via `increase(...)`). `total_tokens` is the sum of the same two
-         *     counters over the retained 7d window, also using `increase(...)` so
-         *     exporter process restarts do not reset it.
+         *     over the agent's `llm_usage` rows in the window, summed from
+         *     `telemetry_events`. `total_tokens` is the sum of the same two fields over
+         *     the retained 7d window.
          *
          *     Edge weight:
          *         lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,
@@ -7668,17 +7657,14 @@ export interface components {
          *     `warnings` / `errors`) aggregate over the `applied_window_hours` horizon.
          *     `window_hours` echoes the selected value — `0` means five minutes; all
          *     other values are hours.
-         *     `applied_window_hours` is the actually served window in hours, no greater
-         *     than `window_hours` and clamped to the Loki retention horizon.
+         *     `applied_window_hours` is the served window in hours: the requested one.
          *
          *     - `live_count`: current non-terminated count (from agents_meta, not
          *       events; not windowed)
-         *     - `tokens`: windowed telemetry LLM token usage (fresh-cache TTL:
-         *       `display.stats_dashboard_cache_ttl_s`, default 60s)
+         *     - `tokens`: windowed telemetry LLM token usage
          *     - `cost_usd`: windowed LLM spend in USD, summed from the usage-time
-         *       `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;
-         *       events that pre-date the snapshot field contribute 0 (shares the
-         *       configured fresh-cache TTL with `tokens`, default 60s)
+         *       `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;
+         *       events that pre-date the snapshot field contribute 0
          *     - `avg_turn_seconds`: windowed avg LLM call wall time
          *       (event=turn_end + ok=true)
          *     - `warnings` / `errors`: raw level totals over the window (critical
@@ -7704,11 +7690,7 @@ export interface components {
          *     behind cards that plugins declare under `contributions.ui.stats`, joined
          *     by the console on `(plugin, id)`.
          *
-         *     `stale` is true when this payload is the route's last-good response,
-         *     served because a live recompute failed while the payload was within the
-         *     stale cap (`display.stats_dashboard_stale_max_s`); `as_of` is the UTC
-         *     time the served payload's reads were assembled — a stale fallback keeps
-         *     its original timestamp so a client can show the data's age.
+         *     `as_of` is the UTC time the payload's reads were assembled.
          */
         StatsDashboard: {
             /** Live Count */
@@ -7737,11 +7719,6 @@ export interface components {
             total_events: number;
             /** Plugin Stats */
             plugin_stats: components["schemas"]["PluginStat"][];
-            /**
-             * Stale
-             * @default false
-             */
-            stale: boolean;
             /** As Of */
             as_of?: string | null;
         };

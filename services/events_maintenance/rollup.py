@@ -1,112 +1,49 @@
-"""Incremental Since-Birth rollup — day-grain aggregates sourced from Loki.
+"""Day-grain rollup of the telemetry record into the durable ledger tables.
 
-The unified event stream lives in Loki since the LGTM cutover (the PG
-`events` copy was frozen at the cutover and later dropped; its last-ever code
-read was the llm-cost-rollup-columns migration backfill). Each maintenance pass rolls
-whole UTC days up to yesterday into:
+Each maintenance pass recomputes the most recent closed UTC days (yesterday and the days before
+it, `RECOMPUTE_DAYS` in all) from `telemetry_events` into:
 
-- ``agent_model_tokens_daily`` — per (agent, day, model): calls, token sums,
-  and the cost ledger columns (cost_usd = summed usage-time price snapshots,
-  costed_calls / unpriced_calls). Money is summed at usage-time rates, never
-  re-priced.
-- ``agent_metrics_daily`` — per (agent, day): turn totals/ok/durations and
-  the exec ok/failed split.
+- ``agent_model_tokens_daily`` — per (agent, day, model): calls, token sums, and the cost
+  ledger columns (cost_usd = summed usage-time price snapshots, costed_calls / unpriced_calls).
+  Money is summed at usage-time rates, never re-priced. ``estimated_calls`` is never written.
+- ``agent_metrics_daily`` — per (agent, day): turn totals/ok/durations, the whole-second turn
+  duration histogram and the exec ok/failed split.
 
-Each retained day carries a dirty watermark in ``rollup_day_state``: one cheap
-union-family count probe replaces the fourteen full aggregate queries for a
-clean day. Missing, failed, count-changed, and recent late-write-window days get
-the same idempotent **full-day overwrite recompute** keyed on the PK. A pass
-deadline bounds how many day probes/recomputes one hourly run may start.
+A recompute is one idempotent full-day overwrite keyed on the primary key, so a late write (the
+mirror replay lands rows up to seven days late) is picked up by the next pass. The ledger rows of
+a day that the table only partly holds are protected by a monotone guard: a row is overwritten
+only when the recompute has at least as many calls (turns, execs) as the stored one, so a gap in
+`telemetry_events` can never lower an existing ledger day. Day boundaries are UTC midnight.
 
-An indexed slice that returns zero aggregate rows is unsafe rather than
-authoritatively empty: the pass warns and skips that day, preserving its
-existing ledger rows while continuing with the remaining days.
+The pass is two SQL statements per day in one short transaction; the day's rows are read in
+place, so there is no retention window to clamp to and no per-day watermark.
 
-Loki bounds what is recoverable: retention is 84h
-(deploy/lgtm/config/loki.yaml `retention_period: 84h`), so the
-recompute window clamps to the first FULLY-retained day — a maintenance
-outage longer than retention leaves a gap in the Loki-sourced aggregates
-(logged loudly; the filtered rollup-source JSONL mirror is the automated replay
-source). The clamp also
-protects history: a day at/below the floor is never recomputed, so
-archive-backfilled rows cannot be overwritten with zeros.
+Operator use, for a range of days (for example after a backfill):
 
-Day boundary is UTC midnight; each day aggregates as Loki instant queries
-evaluated at day end over a 24h range vector (Loki's (start, end] vs the
-old SQL's [start, end) differ only at the exact midnight nanosecond).
-
-Test seams: ``_day_source_count`` probes dirtiness and ``_day_aggregates`` does
-the full reroll. Tests monkeypatch both and drive the watermark/clamp/upsert
-logic against a real throwaway Postgres; LogQL builders have string-shape tests.
+    .venv/bin/python -m services.events_maintenance.rollup --from 20260901 --to 20260930
 """
 
 from __future__ import annotations
 
-import json
-import time
-import urllib.parse
-import urllib.request
+import argparse
+import sys
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from datetime import time as datetime_time
 
 import psycopg
-from psycopg import sql
 
-from base.log import logger
-from base.telemetry.loki_index_labels import (
-    EVENT_STREAM_RETENTION,
-    LokiReadEra,
-    escape_logql_label,
-    event_stream_selector,
-    split_index_label_window,
-)
-from base.telemetry.loki_query_budget import FairQueryBudget
-from services.events_maintenance.config import EventsMaintenanceConfig
+from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
+from base.telemetry.event_sql import numeric
 
-_HTTP_TIMEOUT_S = 60.0
-# Serialized by design (capacity 1): the maintenance sweep must not crowd out
-# live reads; 4 waiters + a 30s wait cap the queue-join cost
-# (task #3696 exception inventory).
-_query_budget = FairQueryBudget(capacity=1, max_waiters=4, wait_timeout_s=30.0)
-
-
-@dataclass(frozen=True)
-class TokensRow:
-    """One (agent, model) group of one day's llm_usage aggregation."""
-
-    agent_id: int
-    model: str
-    calls: int
-    costed_calls: int
-    unpriced_calls: int
-    tokens_in: int
-    tokens_out: int
-    tokens_cached: int
-    tokens_reasoning: int
-    cost_usd: float
-
-
-@dataclass(frozen=True)
-class MetricsRow:
-    """One agent's turn/exec aggregates for one day."""
-
-    agent_id: int
-    turn_total: int
-    turn_ok: int
-    turn_dur_sum: float
-    turn_dur_min: float | None
-    turn_dur_max: float | None
-    turn_dur_hist: dict[int, int]
-    exec_ok: int
-    exec_failed: int
+# Late writes arrive up to the mirror's seven-day retention after the event; one more day of
+# margin covers a replay that straddles midnight.
+RECOMPUTE_DAYS = 8
 
 
 @dataclass(frozen=True)
 class RollupResult:
-    """What one `compute_rollup` run attempted. `start_day`/`end_day` are the
-    inclusive UTC-day range (None when no dirty day was attempted); `*_rows`
-    are the successful upsert row counts."""
+    """What one `compute_rollup` run attempted. `start_day`/`end_day` are the inclusive UTC-day
+    range (None when nothing was attempted); `*_rows` are the upsert row counts."""
 
     start_day: date | None
     end_day: date | None
@@ -114,270 +51,28 @@ class RollupResult:
     tokens_rows: int
 
 
-@dataclass(frozen=True)
-class _RollupDayState:
-    status: str
-    source_count: int
+def _num(expression: str, cast: str = "numeric") -> str:
+    return numeric(expression, cast)
 
 
-_DayRollup = tuple[date, list[TokensRow], list[MetricsRow]]
-_StateUpdate = tuple[date, str, int, str | None]
+_COST = LLM_USAGE_KEYS["cost_usd"]
 
-
-# ── LogQL builders ───────────────────────────────────────────────────────────
-
-_DAY_S = 86400
-_ROLLUP_EVENT_NAMES = ["llm_usage", "turn_end", "exec", "exec_.+", "exec\\(.*"]
-
-
-def _event_pipeline(
-    *,
-    era: LokiReadEra,
-    event_names: list[str],
-    telemetry_only: bool,
-) -> str:
-    """One rollup event family using body-truth filters."""
-
-    selector = event_stream_selector(
-        era=era,
-        agent_id=None,
-        event_names=event_names,
-    )
-    parts = [
-        selector,
-        '| json agent_id_extracted="agent_id"',
-        '| agent_id_extracted=~".+"',
-    ]
-    if telemetry_only:
-        parts.append('| category=~"telemetry|log"')
-    joined = "|".join(escape_logql_label(event_name) for event_name in event_names)
-    parts.append('| json event_name_extracted="event_name"')
-    parts.append(f'| event_name_extracted=~"{joined}"')
-    return " ".join(parts)
-
-
-def _tokens_queries(
-    *,
-    era: LokiReadEra = LokiReadEra.LEGACY,
-    duration_s: int = _DAY_S,
-) -> dict[str, str]:
-    """The per-(agent, model) instant queries for one day's tokens/cost row.
-
-    Body-truth agent_id / event_name and payload fields each need their own
-    single-extraction `| json` stage (multiple extractions in one stage are a
-    parse error); category filters structured metadata directly."""
-    llm = _event_pipeline(
-        era=era,
-        event_names=["llm_usage"],
-        telemetry_only=True,
-    )
-    model = ' | json model="attributes.model"'
-    out = {
-        "calls": f"sum by (agent_id, model) (count_over_time(({llm}{model})[{duration_s}s]))",
-        "costed_calls": (
-            f"sum by (agent_id, model) (count_over_time(({llm}{model}"
-            f' | json cost_usd="attributes.cost_usd" | cost_usd!="")[{duration_s}s]))'
-        ),
-    }
-    for name, field in (
-        ("tokens_in", "in_total"),
-        ("tokens_out", "out_total"),
-        ("tokens_cached", "cache_read"),
-        ("tokens_reasoning", "reasoning"),
-        ("cost_usd", "cost_usd"),
-    ):
-        out[name] = (
-            f"sum by (agent_id, model) (sum_over_time(({llm}{model}"
-            f' | json {field}="attributes.{field}" | __error__="" | unwrap {field})'
-            f"[{duration_s}s]))"
-        )
-    return out
-
-
-def _metrics_queries(
-    *,
-    era: LokiReadEra = LokiReadEra.LEGACY,
-    duration_s: int = _DAY_S,
-) -> dict[str, str]:
-    """The per-agent instant queries for one day's turn/exec metrics row."""
-    turn = _event_pipeline(
-        era=era,
-        event_names=["turn_end"],
-        telemetry_only=True,
-    )
-    exec_ok = _event_pipeline(
-        era=era,
-        event_names=["exec"],
-        telemetry_only=False,
-    )
-    exec_failed = _event_pipeline(
-        era=era,
-        event_names=["exec_.+", "exec\\(.*"],
-        telemetry_only=False,
-    )
-    dur = ' | json duration_seconds="attributes.duration_seconds" | __error__="" | unwrap duration_seconds'
-    hist = (
-        ' | json duration_seconds="attributes.duration_seconds"'
-        ' | __error__="" | line_format "{{ floor .duration_seconds }}" | pattern "<bucket>"'
-    )
-    return {
-        "turn_total": f"sum by (agent_id) (count_over_time(({turn})[{duration_s}s]))",
-        "turn_ok": (
-            f"sum by (agent_id) (count_over_time(({turn}"
-            f' | json ok="attributes.ok" | ok="true")[{duration_s}s]))'
-        ),
-        "turn_dur_sum": f"sum by (agent_id) (sum_over_time(({turn}{dur})[{duration_s}s]))",
-        "turn_dur_min": f"min by (agent_id) (min_over_time(({turn}{dur})[{duration_s}s]))",
-        "turn_dur_max": f"max by (agent_id) (max_over_time(({turn}{dur})[{duration_s}s]))",
-        "turn_dur_hist": (
-            f"sum by (agent_id, bucket) (count_over_time(({turn}{hist})[{duration_s}s]))"
-        ),
-        "exec_ok": f"sum by (agent_id) (count_over_time(({exec_ok})[{duration_s}s]))",
-        "exec_failed": f"sum by (agent_id) (count_over_time(({exec_failed})[{duration_s}s]))",
-    }
-
-
-# ── Loki I/O ─────────────────────────────────────────────────────────────────
-
-
-def _query_instant(
-    logql: str, at: datetime, config: EventsMaintenanceConfig
-) -> list[tuple[dict[str, str], float]]:
-    """One Loki instant query; returns [(labels, value)]. Raises on transport
-    or HTTP failure — the daemon pass reports and retries next round (a
-    silently-zero day would be worse than a loud skip). The process-local
-    capacity-one budget also governs resolution.py, which imports this seam."""
-    base = config.telemetry_loki_url.rstrip("/")
-    params = urllib.parse.urlencode({"query": logql, "time": at.timestamp()})
-    req = urllib.request.Request(f"{base}/loki/api/v1/query?{params}")  # noqa: S310 — settings-derived http(s) base
-    with (
-        _query_budget.slot(),
-        urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp,  # noqa: S310
-    ):
-        payload = json.loads(resp.read())
-    out: list[tuple[dict[str, str], float]] = []
-    for vec in payload["data"]["result"]:
-        out.append((dict(vec["metric"]), float(vec["value"][1])))
-    return out
-
-
-def _day_source_count(day: date, config: EventsMaintenanceConfig) -> int | None:
-    """Count all event families feeding one day's rollup; None means probe failure."""
-    day_start = datetime.combine(day, datetime_time.min, tzinfo=UTC)
-    day_end = datetime.combine(day + timedelta(days=1), datetime_time.min, tzinfo=UTC)
-    slices = split_index_label_window(day_start, day_end)
-    source_count = 0
-    try:
-        for slice_ in slices:
-            duration_s = max(1, int((slice_.end - slice_.start).total_seconds()))
-            pipeline = _event_pipeline(
-                era=slice_.era,
-                event_names=_ROLLUP_EVENT_NAMES,
-                telemetry_only=False,
-            )
-            logql = f"sum(count_over_time(({pipeline})[{duration_s}s]))"
-            source_count += int(
-                sum(value for _labels, value in _query_instant(logql, slice_.end, config))
-            )
-    except Exception as exc:
-        logger.warning(
-            f"[events-maintenance] source-count probe failed for {day}: {exc}; "
-            "treating the day as dirty and preserving its watermark"
-        )
-        return None
-    return source_count
-
-
-def _day_aggregates(
-    day: date, config: EventsMaintenanceConfig
-) -> tuple[list[TokensRow], list[MetricsRow]] | None:
-    """Aggregate one UTC day, or return None for a zero-row indexed slice."""
-    day_start = datetime.combine(day, datetime_time.min, tzinfo=UTC)
-    day_end = datetime.combine(day + timedelta(days=1), datetime_time.min, tzinfo=UTC)
-
-    tok: dict[tuple[int, str], dict[str, float]] = {}
-    met: dict[int, dict[str, float]] = {}
-    hist: dict[int, dict[int, int]] = {}
-    slices = split_index_label_window(day_start, day_end)
-    for slice_ in slices:
-        slice_row_count = 0
-        duration_s = max(1, int((slice_.end - slice_.start).total_seconds()))
-        for name, logql in _tokens_queries(
-            era=slice_.era,
-            duration_s=duration_s,
-        ).items():
-            result_rows = _query_instant(logql, slice_.end, config)
-            slice_row_count += len(result_rows)
-            for labels, value in result_rows:
-                key = (int(labels["agent_id"]), labels.get("model", ""))
-                values = tok.setdefault(key, {})
-                values[name] = values.get(name, 0.0) + value
-        for name, logql in _metrics_queries(
-            era=slice_.era,
-            duration_s=duration_s,
-        ).items():
-            result_rows = _query_instant(logql, slice_.end, config)
-            slice_row_count += len(result_rows)
-            for labels, value in result_rows:
-                agent_id = int(labels["agent_id"])
-                if name == "turn_dur_hist":
-                    try:
-                        bucket = int(labels["bucket"])
-                    except (KeyError, ValueError):
-                        continue
-                    met.setdefault(agent_id, {})
-                    agent_hist = hist.setdefault(agent_id, {})
-                    agent_hist[bucket] = agent_hist.get(bucket, 0) + int(value)
-                    continue
-                values = met.setdefault(agent_id, {})
-                if name == "turn_dur_min":
-                    values[name] = min(values.get(name, value), value)
-                elif name == "turn_dur_max":
-                    values[name] = max(values.get(name, value), value)
-                else:
-                    values[name] = values.get(name, 0.0) + value
-        if slice_row_count == 0:
-            return None
-    tokens_rows = [
-        TokensRow(
-            agent_id=agent_id,
-            model=model,
-            calls=int(v.get("calls", 0)),
-            costed_calls=int(v.get("costed_calls", 0)),
-            unpriced_calls=int(v.get("calls", 0)) - int(v.get("costed_calls", 0)),
-            tokens_in=int(v.get("tokens_in", 0)),
-            tokens_out=int(v.get("tokens_out", 0)),
-            tokens_cached=int(v.get("tokens_cached", 0)),
-            tokens_reasoning=int(v.get("tokens_reasoning", 0)),
-            cost_usd=float(v.get("cost_usd", 0.0)),
-        )
-        for (agent_id, model), v in tok.items()
-    ]
-
-    metrics_rows = [
-        MetricsRow(
-            agent_id=agent_id,
-            turn_total=int(v.get("turn_total", 0)),
-            turn_ok=int(v.get("turn_ok", 0)),
-            turn_dur_sum=float(v.get("turn_dur_sum", 0.0)),
-            turn_dur_min=v.get("turn_dur_min"),
-            turn_dur_max=v.get("turn_dur_max"),
-            turn_dur_hist=hist.get(agent_id, {}),
-            exec_ok=int(v.get("exec_ok", 0)),
-            exec_failed=int(v.get("exec_failed", 0)),
-        )
-        for agent_id, v in met.items()
-    ]
-    return tokens_rows, metrics_rows
-
-
-# ── upserts ──────────────────────────────────────────────────────────────────
-
-_TOKENS_UPSERT = """
+_TOKENS_SQL = f"""
     INSERT INTO agent_model_tokens_daily
         (agent_id, day, model, llm_calls, tokens_in, tokens_out, tokens_cached,
          tokens_reasoning, cost_usd, costed_calls, unpriced_calls)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    SELECT t.agent_id, %(day)s, COALESCE({LLM_USAGE_KEYS["model"]}, ''), count(*),
+           COALESCE(sum({_num(LLM_USAGE_KEYS["in_total"])}), 0)::bigint,
+           COALESCE(sum({_num(LLM_USAGE_KEYS["out_total"])}), 0)::bigint,
+           COALESCE(sum({_num(LLM_USAGE_KEYS["cache_read"])}), 0)::bigint,
+           COALESCE(sum({_num(LLM_USAGE_KEYS["reasoning"])}), 0)::bigint,
+           COALESCE(sum({_num(_COST)}), 0)::float8,
+           count(*) FILTER (WHERE COALESCE({_COST}, '') <> ''),
+           count(*) FILTER (WHERE COALESCE({_COST}, '') = '')
+    FROM telemetry_events t
+    JOIN agents a ON a.id = t.agent_id
+    WHERE t.ts >= %(start)s AND t.ts < %(end)s AND t.event_name = 'llm_usage'
+    GROUP BY t.agent_id, 3
     ON CONFLICT (agent_id, day, model) DO UPDATE SET
         llm_calls        = EXCLUDED.llm_calls,
         tokens_in        = EXCLUDED.tokens_in,
@@ -387,267 +82,109 @@ _TOKENS_UPSERT = """
         cost_usd         = EXCLUDED.cost_usd,
         costed_calls     = EXCLUDED.costed_calls,
         unpriced_calls   = EXCLUDED.unpriced_calls
-"""
+    WHERE EXCLUDED.llm_calls >= agent_model_tokens_daily.llm_calls
+"""  # noqa: S608 — keys come from the registered payload constants
 
-_METRICS_UPSERT = """
-    INSERT INTO agent_metrics_daily
-        (agent_id, day, turn_total, turn_ok, turn_dur_sum, turn_dur_min,
-         turn_dur_max, turn_dur_hist, exec_ok, exec_failed)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
-    ON CONFLICT (agent_id, day) DO UPDATE SET
-        turn_total   = EXCLUDED.turn_total,
-        turn_ok      = EXCLUDED.turn_ok,
-        turn_dur_sum = EXCLUDED.turn_dur_sum,
-        turn_dur_min = EXCLUDED.turn_dur_min,
-        turn_dur_max = EXCLUDED.turn_dur_max,
-        turn_dur_hist = EXCLUDED.turn_dur_hist,
-        exec_ok      = EXCLUDED.exec_ok,
-        exec_failed  = EXCLUDED.exec_failed
-"""
-
-_STATE_UPSERT = """
-    INSERT INTO rollup_day_state (day, status, source_count, rolled_at, error)
-    VALUES (%s, %s, %s, now(), %s)
-    ON CONFLICT (day) DO UPDATE SET
-        status       = EXCLUDED.status,
-        source_count = EXCLUDED.source_count,
-        rolled_at    = EXCLUDED.rolled_at,
-        error        = EXCLUDED.error
-"""
-
-
-def _max_rolled_day(cur: psycopg.Cursor, table: str) -> date | None:
-    """The newest `day` already rolled into `table` (None = empty). `table` is
-    a fixed internal literal; composed via sql.Identifier for safety."""
-    cur.execute(sql.SQL("SELECT max(day) FROM {}").format(sql.Identifier(table)))
-    row = cur.fetchone()
-    assert row is not None  # noqa: S101 — aggregate without GROUP BY always returns one row
-    return row[0]
-
-
-def _rollup_day_states(
-    cur: psycopg.Cursor, *, floor_day: date, yesterday: date
-) -> dict[date, _RollupDayState]:
-    cur.execute(
-        "SELECT day, status, source_count FROM rollup_day_state WHERE day BETWEEN %s AND %s",
-        (floor_day, yesterday),
+_METRICS_SQL = f"""
+    WITH f AS (
+        SELECT agent_id, event_name, {_num(TURN_END_KEYS["duration_seconds"], "float8")} AS dur, {TURN_END_KEYS["ok"]} AS ok
+        FROM telemetry_events
+        WHERE ts >= %(start)s AND ts < %(end)s AND agent_id IS NOT NULL
+          AND (event_name IN ('turn_end', 'exec')
+               OR (starts_with(event_name, 'exec_') AND length(event_name) > 5)
+               OR starts_with(event_name, 'exec('))
+    ), turn AS (
+        SELECT agent_id, count(*) AS turn_total, count(*) FILTER (WHERE ok = 'true') AS turn_ok,
+               COALESCE(sum(dur), 0) AS dsum, min(dur) AS dmin, max(dur) AS dmax
+        FROM f WHERE event_name = 'turn_end' GROUP BY agent_id
+    ), hist AS (
+        SELECT agent_id, jsonb_object_agg(b::text, n) AS h
+        FROM (SELECT agent_id, floor(dur)::bigint AS b, count(*) AS n
+              FROM f WHERE event_name = 'turn_end' AND dur IS NOT NULL GROUP BY 1, 2) x
+        GROUP BY agent_id
+    ), ex AS (
+        SELECT agent_id, count(*) FILTER (WHERE event_name = 'exec') AS ok,
+               count(*) FILTER (WHERE event_name <> 'exec') AS failed
+        FROM f WHERE event_name <> 'turn_end' GROUP BY agent_id
     )
-    return {
-        row[0]: _RollupDayState(status=str(row[1]), source_count=int(row[2]))
-        for row in cur.fetchall()
-    }
+    INSERT INTO agent_metrics_daily
+        (agent_id, day, turn_total, turn_ok, turn_dur_sum, turn_dur_min, turn_dur_max,
+         turn_dur_hist, exec_ok, exec_failed)
+    SELECT a.id, %(day)s, COALESCE(turn.turn_total, 0), COALESCE(turn.turn_ok, 0),
+           COALESCE(turn.dsum, 0), turn.dmin, turn.dmax, COALESCE(hist.h, '{{}}'::jsonb),
+           COALESCE(ex.ok, 0), COALESCE(ex.failed, 0)
+    FROM agents a
+    JOIN (SELECT agent_id FROM turn UNION SELECT agent_id FROM ex) k ON k.agent_id = a.id
+    LEFT JOIN turn ON turn.agent_id = a.id
+    LEFT JOIN hist ON hist.agent_id = a.id
+    LEFT JOIN ex ON ex.agent_id = a.id
+    ON CONFLICT (agent_id, day) DO UPDATE SET
+        turn_total    = EXCLUDED.turn_total,
+        turn_ok       = EXCLUDED.turn_ok,
+        turn_dur_sum  = EXCLUDED.turn_dur_sum,
+        turn_dur_min  = EXCLUDED.turn_dur_min,
+        turn_dur_max  = EXCLUDED.turn_dur_max,
+        turn_dur_hist = EXCLUDED.turn_dur_hist,
+        exec_ok       = EXCLUDED.exec_ok,
+        exec_failed   = EXCLUDED.exec_failed
+    WHERE EXCLUDED.turn_total >= agent_metrics_daily.turn_total
+      AND EXCLUDED.exec_ok + EXCLUDED.exec_failed
+          >= agent_metrics_daily.exec_ok + agent_metrics_daily.exec_failed
+"""  # noqa: S608 — keys come from the registered payload constants
 
 
-def _candidate_days(
-    states: dict[date, _RollupDayState],
-    *,
-    floor_day: date,
-    yesterday: date,
-    lookback_days: int,
-) -> list[date]:
-    """Recent probe range plus any older retained failure that still needs retry."""
-    if floor_day > yesterday:
-        return []
-    start_day = max(max(states) - timedelta(days=lookback_days), floor_day) if states else floor_day
-    days: set[date] = set()
-    day = start_day
-    while day <= yesterday:
-        days.add(day)
+def roll_day(conn: psycopg.Connection, day: date) -> tuple[int, int]:
+    """Recompute one closed UTC day; returns `(metrics_rows, tokens_rows)` written."""
+    start = datetime(day.year, day.month, day.day, tzinfo=UTC)
+    params = {"day": day, "start": start, "end": start + timedelta(days=1)}
+    with conn.transaction():
+        tokens = conn.execute(_TOKENS_SQL, params).rowcount  # type: ignore[arg-type]
+        metrics = conn.execute(_METRICS_SQL, params).rowcount  # type: ignore[arg-type]
+    return max(metrics, 0), max(tokens, 0)
+
+
+def roll_days(conn: psycopg.Connection, first: date, last: date) -> RollupResult:
+    """Recompute every closed UTC day in `[first, last]`, oldest first."""
+    metrics_rows = tokens_rows = 0
+    day = first
+    while day <= last:
+        metrics, tokens = roll_day(conn, day)
+        metrics_rows += metrics
+        tokens_rows += tokens
         day += timedelta(days=1)
-    days.update(day for day, state in states.items() if state.status == "failed")
-    return sorted(days)
-
-
-def _prepare_dirty_days(
-    states: dict[date, _RollupDayState],
-    candidates: list[date],
-    *,
-    config: EventsMaintenanceConfig,
-    yesterday: date,
-    lookback_days: int,
-    pass_started: float,
-    pass_deadline_s: float,
-) -> tuple[list[_DayRollup], list[_StateUpdate], list[date]]:
-    """Run bounded Loki probes/recomputes without holding a DB transaction."""
-
-    def deadline_reached() -> bool:
-        return time.monotonic() - pass_started >= pass_deadline_s
-
-    def warn_deadline(remaining: list[date]) -> None:
-        logger.warning(
-            "[events-maintenance] rollup pass deadline reached; remaining "
-            f"candidate/dirty days: {[str(day) for day in remaining]}"
-        )
-
-    late_write_floor = yesterday - timedelta(days=lookback_days) + timedelta(days=1)
-    per_day: list[_DayRollup] = []
-    state_updates: list[_StateUpdate] = []
-    attempted_days: list[date] = []
-    for index, day in enumerate(candidates):
-        if deadline_reached():
-            warn_deadline(candidates[index:])
-            break
-        probe_count = _day_source_count(day, config)
-        state = states.get(day)
-        dirty = (
-            state is None
-            or state.status == "failed"
-            or probe_count is None
-            or state.source_count != probe_count
-            or day >= late_write_floor
-        )
-        if not dirty:
-            continue
-        if probe_count is None:
-            logger.warning(
-                f"[events-maintenance] source-count probe failed for {day}; "
-                "rerolling while preserving the previous watermark"
-            )
-        if deadline_reached():
-            warn_deadline(candidates[index:])
-            break
-        attempted_days.append(day)
-        aggregates = _day_aggregates(day, config)
-        if aggregates is None:
-            error = "indexed slice returned zero rows"
-            logger.warning(
-                f"[events-maintenance] {error} for {day}; refusing to rewrite "
-                "that day and leaving existing rollup rows intact"
-            )
-            state_updates.append(
-                (day, "failed", state.source_count if state is not None else 0, error)
-            )
-            continue
-        tokens_rows, metrics_rows = aggregates
-        per_day.append((day, tokens_rows, metrics_rows))
-        if probe_count is not None:
-            state_updates.append((day, "rolled", probe_count, None))
-    return per_day, state_updates, attempted_days
-
-
-def _write_rollup(
-    conn: psycopg.Connection,
-    per_day: list[_DayRollup],
-    state_updates: list[_StateUpdate],
-) -> tuple[int, int]:
-    """Atomically write prepared ledger rows and their successful/failure states."""
-    tokens_count = metrics_count = 0
-    skipped_tokens_count = skipped_metrics_count = 0
-    skipped_agent_ids: set[int] = set()
-    with conn.transaction(), conn.cursor() as cur:
-        cur.execute("SELECT id FROM agents")
-        known_agent_ids = {int(row[0]) for row in cur.fetchall()}
-        for day, tokens_rows, metrics_rows in per_day:
-            for token_row in tokens_rows:
-                if token_row.agent_id not in known_agent_ids:
-                    skipped_agent_ids.add(token_row.agent_id)
-                    skipped_tokens_count += 1
-                    continue
-                cur.execute(
-                    _TOKENS_UPSERT,
-                    (
-                        token_row.agent_id,
-                        day,
-                        token_row.model,
-                        token_row.calls,
-                        token_row.tokens_in,
-                        token_row.tokens_out,
-                        token_row.tokens_cached,
-                        token_row.tokens_reasoning,
-                        token_row.cost_usd,
-                        token_row.costed_calls,
-                        token_row.unpriced_calls,
-                    ),
-                )
-                tokens_count += cur.rowcount
-            for metrics_row in metrics_rows:
-                if metrics_row.agent_id not in known_agent_ids:
-                    skipped_agent_ids.add(metrics_row.agent_id)
-                    skipped_metrics_count += 1
-                    continue
-                cur.execute(
-                    _METRICS_UPSERT,
-                    (
-                        metrics_row.agent_id,
-                        day,
-                        metrics_row.turn_total,
-                        metrics_row.turn_ok,
-                        metrics_row.turn_dur_sum,
-                        metrics_row.turn_dur_min,
-                        metrics_row.turn_dur_max,
-                        json.dumps(metrics_row.turn_dur_hist),
-                        metrics_row.exec_ok,
-                        metrics_row.exec_failed,
-                    ),
-                )
-                metrics_count += cur.rowcount
-        for state_update in state_updates:
-            cur.execute(_STATE_UPSERT, state_update)
-    if skipped_agent_ids:
-        logger.warning(
-            f"[events-maintenance] skipped rollup rows for unknown agent ids "
-            f"{sorted(skipped_agent_ids)}; tokens rows dropped: {skipped_tokens_count}, "
-            f"metrics rows dropped: {skipped_metrics_count}"
-        )
-    return metrics_count, tokens_count
+    return RollupResult(first, last, metrics_rows, tokens_rows)
 
 
 def compute_rollup(
-    conn: psycopg.Connection,
-    *,
-    now_utc: datetime,
-    config: EventsMaintenanceConfig,
-    lookback_days: int | None = None,
-    pass_deadline_s: float | None = None,
+    conn: psycopg.Connection, *, now_utc: datetime, lookback_days: int = RECOMPUTE_DAYS
 ) -> RollupResult:
-    """Probe retained closed days and fully reroll only dirty watermarks.
+    """Recompute the last `lookback_days` closed UTC days (yesterday and the days before it)."""
+    yesterday = now_utc.astimezone(UTC).date() - timedelta(days=1)
+    return roll_days(conn, yesterday - timedelta(days=lookback_days - 1), yesterday)
 
-    Loki I/O finishes before the write transaction opens. Ledger and watermark
-    upserts then commit atomically, so a state row never advertises a roll that
-    did not land. A retention gap is still unrecoverable without the JSONL
-    mirror and is reported before the retained candidate scan begins.
-    """
-    pass_started = time.monotonic()
-    if lookback_days is None:
-        lookback_days = config.events_rollup_late_write_lookback_days
-    if pass_deadline_s is None:
-        pass_deadline_s = config.events_rollup_pass_deadline_s
-    now = now_utc.astimezone(UTC)
-    yesterday = now.date() - timedelta(days=1)
-    floor_day = (now - EVENT_STREAM_RETENTION).date() + timedelta(days=1)
 
-    with conn.cursor() as cur:
-        max_metrics = _max_rolled_day(cur, "agent_metrics_daily")
-        max_tokens = _max_rolled_day(cur, "agent_model_tokens_daily")
-        states = _rollup_day_states(cur, floor_day=floor_day, yesterday=yesterday)
-    processed = [day for day in (max_metrics, max_tokens) if day is not None]
-    if processed and max(processed) < floor_day - timedelta(days=1):
-        logger.warning(
-            "[events-maintenance] rollup gap exceeds Loki retention: "
-            f"last rolled day {max(processed)}, retention floor {floor_day} — "
-            "the days between are not aggregatable and stay missing "
-            "(manual recovery source: the JSONL telemetry mirror)"
-        )
+def _day_arg(value: str) -> date:
+    return datetime.strptime(value, "%Y%m%d").replace(tzinfo=UTC).date()
 
-    candidates = _candidate_days(
-        states,
-        floor_day=floor_day,
-        yesterday=yesterday,
-        lookback_days=lookback_days,
+
+def main(argv: list[str] | None = None) -> int:
+    """Operator CLI: recompute a range of closed UTC days (monotone guard applies)."""
+    from services.events_maintenance.daemon import events_maintenance_db
+
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
+    parser.add_argument("--from", dest="first", type=_day_arg, required=True, metavar="YYYYMMDD")
+    parser.add_argument("--to", dest="last", type=_day_arg, required=True, metavar="YYYYMMDD")
+    args = parser.parse_args(argv)
+    if args.first > args.last:
+        parser.error("--from is after --to")
+    with events_maintenance_db().connect() as conn:
+        result = roll_days(conn, args.first, args.last)
+    sys.stdout.write(
+        f"rolled {result.start_day}..{result.end_day}: "
+        f"{result.tokens_rows} token rows, {result.metrics_rows} metrics rows\n"
     )
-    if not candidates:
-        return RollupResult(None, None, 0, 0)
+    return 0
 
-    per_day, state_updates, attempted_days = _prepare_dirty_days(
-        states,
-        candidates,
-        config=config,
-        yesterday=yesterday,
-        lookback_days=lookback_days,
-        pass_started=pass_started,
-        pass_deadline_s=pass_deadline_s,
-    )
-    if not attempted_days:
-        return RollupResult(None, None, 0, 0)
-    metrics_count, tokens_count = _write_rollup(conn, per_day, state_updates)
-    return RollupResult(min(attempted_days), max(attempted_days), metrics_count, tokens_count)
+
+if __name__ == "__main__":
+    raise SystemExit(main())

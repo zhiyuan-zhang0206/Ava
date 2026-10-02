@@ -29,7 +29,7 @@ Currently 6: `syntax_fix`, `exec`, `llm_turns`, `agent_activity`, `sdk_usage`, `
 
 ### Two consumers share the same core
 - `scripts/metrics.py` CLI — renders text + dumps JSON.
-- gateway `/api/metrics` (`gateway/events/metrics.py`) — returns `data` to the frontend Metrics page. Inspector statistics read persisted observations with cumulative or time-based windows.
+- gateway `/api/metrics` (`gateway/events/metrics.py`) — returns `data` to the frontend Metrics page. Both consumers fetch the window with `aggregate.fetch_aggregate` (`aggregate_sql`: a few statements over `telemetry_events` in one connection, nothing materialized per row); `/api/metrics/agents` runs only the per-agent counters and `llm_usage` sums (`fetch_agent_rollups`). Inspector statistics read persisted observations with cumulative or time-based windows.
 
 ## Notes
 
@@ -38,7 +38,7 @@ Currently 6: `syntax_fix`, `exec`, `llm_turns`, `agent_activity`, `sdk_usage`, `
 
 ## Key Dependencies
 
-- [[db.ava.okf.md]] — Postgres pool (the `events` archive is dropped; the stream lives in Loki / the JSONL mirror)
+- [[db.ava.okf.md]] — Postgres pool (`telemetry_events` holds the telemetry and log stream; the aggregate reads it)
 - [[log.ava.okf.md]] — the event stream is written by the unified emitter (`base/telemetry/emitter.py`), fed by `base/log/__init__.py`
 
 ## SDK event collection

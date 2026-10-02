@@ -30,7 +30,6 @@ from opentelemetry import trace as otel_trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext
 
 from base import telemetry
-from base.config import settings
 from base.telemetry import emitter, observability
 
 _AGENT = 8901
@@ -212,7 +211,7 @@ def test_jsonl_mirror_holds_every_event() -> None:
     assert any('"event_name":"fork"' in line and '"category":"audit"' in line for line in lines)
 
 
-def test_jsonl_rollup_mirror_holds_only_rollup_source_events(
+def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
@@ -242,39 +241,22 @@ def test_jsonl_rollup_mirror_holds_only_rollup_source_events(
     full_rows = [
         json.loads(line) for line in (tmp_path / f"events-{day}.jsonl").read_text().splitlines()
     ]
-    rollup_rows = [
-        json.loads(line)
-        for line in (tmp_path / f"events-{day}.rollup.jsonl").read_text().splitlines()
-    ]
     assert [row["event_name"] for row in full_rows] == event_names
-    assert [row["event_name"] for row in rollup_rows] == event_names[:-1]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [f"events-{day}.jsonl"]
 
 
-def test_jsonl_mirror_prunes_full_and_rollup_retention_independently(
+def test_jsonl_mirror_prunes_by_the_full_retention_and_sweeps_retired_rollup_leftovers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Each tier expires on its own clock — the filtered copy is the point.
-
-    The full mirror's 7 days is what the rollup tier exists to outlive, so a
-    glob that swept a `.rollup` file into the full tier's cutoff would silently
-    collapse both into the shorter one.
-    """
     monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
     monkeypatch.setattr(emitter, "_JSONL_RETENTION_DAYS", 2)
-    monkeypatch.setattr(settings.daemon, "events_jsonl_rollup_retention_days", 4)
     today = datetime.now(UTC)
     full_old = tmp_path / f"events-{today - timedelta(days=3):%Y%m%d}.jsonl"
     full_kept = tmp_path / f"events-{today - timedelta(days=2):%Y%m%d}.jsonl"
     rollup_old = tmp_path / f"events-{today - timedelta(days=5):%Y%m%d}.rollup.jsonl"
-    rollup_kept = tmp_path / f"events-{today - timedelta(days=4):%Y%m%d}.rollup.jsonl"
+    rollup_kept = tmp_path / f"events-{today - timedelta(days=1):%Y%m%d}.rollup.jsonl"
     malformed = tmp_path / "events-0000000x.jsonl"
-    for path in (
-        full_old,
-        full_kept,
-        rollup_old,
-        rollup_kept,
-        malformed,
-    ):
+    for path in (full_old, full_kept, rollup_old, rollup_kept, malformed):
         path.write_text("{}\n", encoding="utf-8")
 
     telemetry._prune_jsonl_mirror()

@@ -82,24 +82,6 @@ _QUEUE_MAXSIZE = 10_000
 
 # JSONL mirror retention (day-stamped files, like the trace mirror).
 _JSONL_RETENTION_DAYS = 7
-_JSONL_ROLLUP_RETENTION_DAYS = 90
-
-# MUST match the event selectors aggregated by
-# services/events_maintenance/rollup.py:_tokens_queries/_metrics_queries
-# (shared cannot import services without reversing the layer boundary).
-# Loki additionally restricts llm_usage/turn_end to telemetry|log; those
-# families are emitted only in those categories today, so this name-only filter
-# is equivalent. A category change must update both selectors together.
-_JSONL_ROLLUP_SOURCE_EVENTS = frozenset({"llm_usage", "turn_end"})
-
-
-def is_rollup_source(event_name: str) -> bool:
-    """Whether an event feeds the durable token/metrics ledger rollup."""
-    return (
-        event_name in _JSONL_ROLLUP_SOURCE_EVENTS
-        or event_name == "exec"
-        or event_name.startswith(("exec_", "exec("))
-    )
 
 
 def event_id(line: str, ts_ns: int) -> int:
@@ -219,20 +201,14 @@ def _prune_jsonl_mirror() -> None:
     durable fallback for audit events; log-stream lines are also held by the
     loguru file sinks, so the mirror's own retention is what bounds its disk
     footprint."""
-    from base.config import settings
-
-    now = datetime.now(UTC)
-    full_cutoff = (now - timedelta(days=_JSONL_RETENTION_DAYS)).strftime("%Y%m%d")
-    for path in logs_dir().glob("events-????????.jsonl"):
-        day = path.name.removeprefix("events-").removesuffix(".jsonl")
-        if day.isdigit() and day < full_cutoff:
-            with contextlib.suppress(OSError):
-                path.unlink()
-    rollup_retention_days = settings.daemon.events_jsonl_rollup_retention_days
-    rollup_cutoff = (now - timedelta(days=rollup_retention_days)).strftime("%Y%m%d")
-    for path in logs_dir().glob("events-????????.rollup.jsonl"):
-        day = path.name.removeprefix("events-").removesuffix(".rollup.jsonl")
-        if day.isdigit() and day < rollup_cutoff:
+    cutoff = (datetime.now(UTC) - timedelta(days=_JSONL_RETENTION_DAYS)).strftime("%Y%m%d")
+    # `.rollup.jsonl` is the retired filtered tier; leftovers age out with the full mirror.
+    for path in (
+        *logs_dir().glob("events-????????.jsonl"),
+        *logs_dir().glob("events-????????.rollup.jsonl"),
+    ):
+        day = path.name.removeprefix("events-").split(".", 1)[0]
+        if day.isdigit() and day < cutoff:
             with contextlib.suppress(OSError):
                 path.unlink()
 
@@ -242,10 +218,6 @@ def _append_jsonl(events: list[Event]) -> None:
 
     Each row carries the stable surrogate ``id`` derived from its id-free body
     and timestamp, matching the id Loki's read path returns for the same event.
-
-    Two tiers, one pass over the batch: the full mirror and the filtered
-    rollup source — written under the same try, so one failure reports once
-    for the batch rather than twice.
 
     Best-effort — the mirror is a fallback, not a critical path; a write
     failure must never break the batch. But it must not be SILENT either:
@@ -260,24 +232,14 @@ def _append_jsonl(events: list[Event]) -> None:
         with contextlib.suppress(Exception):
             _prune_jsonl_mirror()
     try:
-        lines: list[str] = []
-        rollup_lines: list[str] = []
-        for e in events:
-            line = (
-                json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False)
-                + "\n"
-            )
-            lines.append(line)
-            if is_rollup_source(e.event_name):
-                rollup_lines.append(line)
+        lines = [
+            json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False) + "\n"
+            for e in events
+        ]
         path = logs_dir() / f"events-{day}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write("".join(lines))
-        if rollup_lines:
-            rollup_path = logs_dir() / f"events-{day}.rollup.jsonl"
-            with rollup_path.open("a", encoding="utf-8") as f:
-                f.write("".join(rollup_lines))
     except Exception as exc:  # report, never raise
         global _jsonl_failures  # noqa: PLW0603 — module-level counter
         _jsonl_failures += 1

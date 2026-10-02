@@ -117,6 +117,7 @@ RECALL_FILTER_KEYS = _sql_keys("recall_filter")
 PASSIVE_RECALL_KEYS = _sql_keys("passive_recall")
 GATEWAY_LATENCY_KEYS = _sql_keys("gateway_latency")
 LOG_KEYS = _sql_keys("log")
+PLUGIN_ACTIVATION_KEYS = _sql_keys("plugin_activation")
 
 
 def registered_payload_keys() -> frozenset[str]:

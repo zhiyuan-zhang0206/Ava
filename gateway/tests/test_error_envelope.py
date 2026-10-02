@@ -25,7 +25,7 @@ from gateway.app import (
 )
 from gateway.auth import rejection_log
 from gateway.auth.cors import cors_allowed_origins
-from gateway.lgtm import loki_events, loki_query_budget, prom_metrics
+from gateway.lgtm import loki_events, loki_query_budget
 from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.middleware.error_envelope import request_trace_middleware
 from gateway.middleware.error_handlers import (
@@ -33,7 +33,6 @@ from gateway.middleware.error_handlers import (
     http_exception_handler,
     loki_query_budget_error_handler,
     observability_read_unavailable_handler,
-    prom_query_budget_error_handler,
     request_validation_error_handler,
     unhandled_exception_handler,
 )
@@ -95,10 +94,6 @@ def handler_client() -> Iterator[TestClient]:
         loki_events.ObservabilityReadUnavailable,
         observability_read_unavailable_handler,  # type: ignore[arg-type]
     )
-    app.add_exception_handler(
-        prom_metrics.PromQueryBudgetError,
-        prom_query_budget_error_handler,  # type: ignore[arg-type]
-    )
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, unhandled_exception_handler)
@@ -114,10 +109,6 @@ def handler_client() -> Iterator[TestClient]:
     @app.get("/observability")
     def observability_error() -> None:
         raise loki_events.ObservabilityReadUnavailable("observability is unavailable")
-
-    @app.get("/prom")
-    def prom_error() -> None:
-        raise prom_metrics.PromQueryBudgetError("queue_full")
 
     @app.get("/http/{status}")
     def http_error(status: int) -> None:
@@ -145,7 +136,6 @@ def handler_client() -> Iterator[TestClient]:
         ("/agent", 404, "agent_not_found", False, "agent_not_found", set[str]()),
         ("/loki", 503, "loki_query_budget_unavailable", True, None, set[str]()),
         ("/observability", 503, "observability_read_unavailable", True, None, set[str]()),
-        ("/prom", 503, "prom_query_budget_unavailable", True, None, set[str]()),
         ("/http/404", 404, "http_404", False, None, set[str]()),
         ("/backend", 503, "http_503", True, None, set[str]()),
         ("/validation?count=not-an-int", 422, "validation_error", False, None, {"errors"}),

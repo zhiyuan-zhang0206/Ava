@@ -79,7 +79,7 @@ _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
 
 
-def _deliver_message(
+def deliver_message(
     pool: ConnectionPool,
     agent_id: int,
     message: str,
@@ -237,7 +237,7 @@ def _run_reminders(pool: ConnectionPool, backoff_seconds: float) -> int:
         task_ids = [task_id for task_id, *_ in tasks]
         try:
             # Deliver before counters, so a failed digest leaves every task eligible.
-            _deliver_message(pool, owner, _reminder_digest_message(tasks))
+            deliver_message(pool, owner, _reminder_digest_message(tasks))
         except Exception as exc:
             _log.error(
                 "[task-maintenance] reminder digest for owner %s (tasks %s) failed: %r",
@@ -376,7 +376,7 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
                 # Delegated subtask -> tell the delegator once per overdue
                 # window. >= (not ==): a sweep whose escalation failed or was
                 # missed must still fire later, never losing the window.
-                # `escalated_at`, stamped by _deliver_message in the digest's
+                # `escalated_at`, stamped by deliver_message in the digest's
                 # own transaction, is what makes it at-most-once; any update()
                 # clears it with the reminder counters, re-arming the task's
                 # next window.
@@ -423,7 +423,7 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
     for delegator, tasks in stalled_by_delegator.items():
         task_ids = [task_id for task_id, _, _, _ in tasks]
         try:
-            _deliver_message(
+            deliver_message(
                 pool,
                 delegator,
                 _delegator_digest_message(tasks),
