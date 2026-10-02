@@ -9,16 +9,14 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import NoReturn
-from unittest.mock import Mock
 
 import psutil
 import pytest
 
-import cli.commands.lifecycle.root_driver as _root_driver_commands
 from base.cluster import ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
@@ -29,9 +27,9 @@ from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane import pgbouncer as pb
 from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle import service_stop as stop
-from tests.e2e._proc import kill_group_if_alive
-
-Launcher = Callable[[str, str], subprocess.Popen[str]]
+from tests.cli._commands_helpers import Launcher
+from tests.cli._commands_helpers import home as home
+from tests.cli._commands_helpers import launch as launch
 
 
 def forbidden(*_args: object, **_kwargs: object) -> NoReturn:
@@ -39,60 +37,6 @@ def forbidden(*_args: object, **_kwargs: object) -> NoReturn:
 
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract")
-
-
-@pytest.fixture
-def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.setattr(stop, "get_shell_backend", lambda: SimpleNamespace(list_sessions=list))
-    monkeypatch.setattr(root_driver, "_root_tree_selection", dict)
-    monkeypatch.setattr(root_driver, "_stop_root_service_tree", Mock(return_value=0))
-    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", Mock(return_value=0))
-    monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", Mock(return_value=[]))
-
-    # Stop intentionally consumes the ambient override. Every independent test
-    # CLI still needs its explicit private binding when the checkout currently
-    # points at an isolated native-proof home: the PTY CLI children inherit it.
-    monkeypatch.setenv("HOME", str(tmp_path))
-    return tmp_path
-
-
-@pytest.fixture
-def launch(home: Path) -> Iterator[Callable[[str, str], subprocess.Popen[str]]]:
-    processes: list[subprocess.Popen[str]] = []
-
-    def create(name: str, code: str) -> subprocess.Popen[str]:
-        proc = subprocess.Popen(  # noqa: S603 — test-owned Python and fixed fixture scripts
-            [sys.executable, "-u", "-c", code],
-            cwd=home,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
-        processes.append(proc)
-        assert proc.stdout is not None and proc.stdout.readline().strip() == "ready"
-        SessionRecord(
-            proc.pid,
-            psutil.Process(proc.pid).create_time(),
-            "private-test",
-            str(home),
-            time.time(),
-            pid_starttime_ticks(proc.pid),
-            pgid=os.getpgid(proc.pid),
-        ).write(home / "run/sessions" / f"{name}.json")
-        return proc
-
-    yield create
-    for proc in processes:
-        # Test fixture cleanup alone may kill the exact private process group it
-        # created, after the assertions prove strict stop left it alive.
-        kill_group_if_alive(proc)
-        proc.wait(timeout=5)
-        if proc.stdout:
-            proc.stdout.close()
-        if proc.stderr:
-            proc.stderr.close()
 
 
 _EXIT = "import time; print('ready', flush=True); time.sleep(60)"
