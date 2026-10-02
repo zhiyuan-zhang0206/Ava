@@ -48,7 +48,6 @@
     "tests/base/test_evidence.py::top-level": 1,
     "tests/base/test_exec_request_evidence.py::top-level": 1,
     "tests/base/test_history.py::top-level": 1,
-    "tests/base/test_impersonation_review.py::top-level": 1,
     "tests/base/test_no_secrets_on_argv.py::top-level": 1,
     "tests/base/test_pg_owner_authority.py::top-level": 1,
     "tests/base/test_pg_runtime.py::top-level": 1,
