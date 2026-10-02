@@ -5,6 +5,7 @@
     "gateway/tests/test_notices_endpoint.py::test_escalations_return_open_task_notices_with_task_context": 16,
     "gateway/tests/test_ops_monitor.py::test_ops_monitor_empty_envelope_and_zero_fill": 15,
     "gateway/tests/test_ops_monitor.py::test_ops_monitor_llm_wires_prometheus_and_loki": 16,
+    "gateway/tests/test_pages.py::test_register_page_same_name_auto_closes_then_creates": 16,
     "gateway/tests/test_routes.py::test_dashboard_shards_long_loki_windows_and_merges_aggregates": 20,
     "gateway/tests/test_status_cluster.py::TestClusterPanel.test_machines_list_local_plus_remote": 17,
     "gateway/tests/test_status_cluster.py::TestDetachedRecoveryDial.test_transition_window_simulation": 21

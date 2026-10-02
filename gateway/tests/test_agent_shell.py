@@ -7,7 +7,7 @@ router). Covers the tri-state: unknown agent 404, op failure 404 (no such
 shell / capture failed), op unreachable 503 (machine down), and the success
 shape + `?lines=` forwarding. The runner-side capture itself (name
 reconstruction, capture-pane invocation, error mapping) is covered by
-`tests/gateway/test_cluster_status_fields.py` (capture_shell unit tests).
+`ops/cluster_status/tests/test_cluster_status_fields.py` (capture_shell unit tests).
 """
 
 from __future__ import annotations

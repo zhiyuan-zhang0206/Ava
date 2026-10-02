@@ -5,7 +5,7 @@ middleware asks `should_bypass_pause(path)` and nothing else decides.
 Exemption is a route-declared attribute (`PauseSemantics.CONTROL_PLANE`
 in `base/api_contracts/contracts.py`), never a string special-case in middleware — so
 the exempt surface is enumerable and auditable. `control_plane_surface()`
-exposes it; `tests/gateway/test_route_contracts.py` asserts the exact set,
+exposes it; `gateway/middleware/tests/test_route_contracts_middleware.py` asserts the exact set,
 so a new exemption is a deliberate, reviewed change, not an incident
 patch.
 
