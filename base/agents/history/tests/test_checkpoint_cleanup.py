@@ -34,6 +34,10 @@ from base.agents.history.checkpoint_cleanup import (
 )
 from base.config import settings
 
+# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
+# pyright: reportUnknownMemberType = warning
+# pyright: reportUnknownArgumentType = warning
+
 
 def _saver(pool: AsyncConnectionPool) -> AsyncPostgresSaver:
     # Same cast as prod (agent/loop.py): the saver opens every cursor with its

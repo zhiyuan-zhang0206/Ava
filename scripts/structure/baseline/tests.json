@@ -13,7 +13,6 @@
     "tests/test_helperproc.py::base.sessions.helperproc._read_record": 2
   },
   "tests_location": {
-    "tests/test_checkpoint_cleanup.py::top-level": 1,
     "tests/test_ci_utils.py::top-level": 1,
     "tests/test_event_fixtures.py::top-level": 1,
     "tests/test_goal_watch_filter.py::top-level": 1,
