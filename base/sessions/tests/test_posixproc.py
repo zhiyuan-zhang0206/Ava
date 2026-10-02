@@ -23,13 +23,13 @@ from base.native_process import pid_starttime_ticks
 from base.native_process.os_platform import IS_LINUX, IS_WINDOWS
 from base.sessions import posixproc
 from base.sessions.record import SessionRecord
-from tests.base.poll_until import poll_until
-from tests.base.process_evidence import (
+from base.sessions.tests.process_evidence import (
     detach_evidence,
     detached_to_known_reaper,
     no_new_direct_children,
     no_zombie_children,
 )
+from tests.base.poll_until import poll_until
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
 
