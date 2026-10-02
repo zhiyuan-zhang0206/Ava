@@ -11,7 +11,6 @@ from typing import Any, cast
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
 import base.db
 from base.agents import ForkCheckpointNotFound
@@ -19,14 +18,6 @@ from base.agents.observation.snapshot import select_one
 from base.cluster.machine import machine_name
 from base.config import settings
 from ops.agents import create_agent_row
-
-
-def _test_pool() -> ConnectionPool:
-    """Return a concretely typed pool for helpers that open their own pool."""
-    return cast(
-        ConnectionPool,
-        ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2),
-    )
 
 
 def _agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str, int | None] | None:
