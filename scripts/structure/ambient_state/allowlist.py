@@ -142,7 +142,6 @@ PURE_CHAIN_CALLEES = frozenset({"hashlib.sha256", "hashlib.sha1", "hashlib.md5"}
 PURE_REPO_CALLEES: dict[str, str] = {
     "base.events.contract._sql_keys": "derives a tuple of key names from the static event registry",
     "base.events.contract.family_events": "a tuple over the static event registry",
-    "base.events.contract.lineage_event_names": "a tuple over the static event registry",
     "base.packages.skills.scan._rx": "compiles a regex from a literal pattern",
     "services.gateway_side.backup.passphrase.derive": "a key derivation of a literal: a fixed value",
 }

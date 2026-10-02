@@ -65,7 +65,6 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "message history write-body transfer and retained suffix counts; excludes snapshot seed",
         payload=DeltaMessageSuffix,
         tier="noise",
-        retention_class="telemetry",
     ),
     # pause / rollout lifecycle
     "pause_lifecycle_wait": _telemetry(

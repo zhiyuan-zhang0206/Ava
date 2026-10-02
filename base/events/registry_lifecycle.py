@@ -9,11 +9,8 @@ _EVENTS_LIFECYCLE: dict[str, EventSpec] = {
         "agent_spawned",
         "agent process started",
         payload=AgentSpawned,
-        retention_class="lineage",
     ),
-    "agent_resurrected": _telemetry(
-        "agent_resurrected", "agent resurrected", retention_class="lineage"
-    ),
+    "agent_resurrected": _telemetry("agent_resurrected", "agent resurrected"),
     "billing_resurrect_run": _telemetry(
         "billing_resurrect_run", "billing batch recovery run finished"
     ),

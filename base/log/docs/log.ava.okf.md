@@ -30,7 +30,7 @@ Every log line is also an **event** in the unified event stream (event-system de
 stderr, a rotated JSONL file and the unified event pipeline, and how every sink is registered: [[log_sinks.ava.okf.md|log sinks]].
 
 ### Two key mechanisms
-- The seven-day full, 90-day rollup-source and 365-day lineage JSONL mirrors preserve Loki-stable IDs; [[services/docs/gateway_side/events_maintenance/events_maintenance.ava.okf.md|events maintenance]] replays the rollup tier.
+- The seven-day full and 90-day rollup-source JSONL mirrors preserve Loki-stable IDs; [[services/docs/gateway_side/events_maintenance/events_maintenance.ava.okf.md|events maintenance]] replays the rollup tier.
 - The emitter's bounded queue + daemon drain thread (`base/telemetry._EventPipeline`) replaces loguru's `enqueue=True`, which uses `multiprocessing.SimpleQueue` allocating POSIX named semaphores; when an agent is SIGKILLed (routine operation) they leak permanently, eventually hitting `kern.posix.sem.max`, after which new agent startups fail with errno 28. The thread queue uses no kernel resources. A sink failure is contained on the drain thread (`catch=True`); the JSONL file sinks and the emitter's own day-stamped JSONL mirror (`$AVA_HOME/logs/events-YYYYMMDD.jsonl`) serve as durable fallback. Queue loss is an error: local diagnostics and loss summaries bypass the saturated queue, and an independent metric drives the cluster alert. See [[telemetry/otlp/telemetry-otlp/export-backpressure.ava.okf.md|Queue loss]].
 
 ## Two surfaces, and where they diverge
@@ -56,7 +56,7 @@ events-maintenance daemon kept the current and next month ahead of the write
 frontier so nothing stranded in the DEFAULT catch-all. Retention DROP was
 never enabled: the archive cleanup dropped the table whole (task
 #1281/#1823). Live retention is the JSONL mirror tiers (7d full / 90d
-rollup-source / 365d lineage) plus Loki's own. The day-grain rollups
+rollup-source) plus Loki's own. The day-grain rollups
 (`agent_metrics_daily` / `agent_model_tokens_daily`) keep since-birth
 aggregates alive across the retirement.
 

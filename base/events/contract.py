@@ -12,7 +12,7 @@ Payload schemas and registry declarations live in focused shard modules;
 this facade preserves the stable import surface.
 
 Derived views live here and nowhere else: ``category_for_kind``,
-``telemetry_events``, ``lineage_event_names``, ``family_events``,
+``telemetry_events``, ``family_events``,
 ``payload_keys``, event tiers, plus the folded ``_LLM_ERROR_EVENTS`` family
 and the ops grid constants.
 """
@@ -61,7 +61,6 @@ from base.events.payloads import LlmUsage as LlmUsage
 from base.events.payloads import NodeExit as NodeExit
 from base.events.payloads import NodeExitEntry as NodeExitEntry
 from base.events.payloads import PluginActivation as PluginActivation
-from base.events.payloads import RetentionClass as RetentionClass
 from base.events.payloads import SdkCall as SdkCall
 from base.events.payloads import ServiceStarted as ServiceStarted
 from base.events.payloads import SilentIdle as SilentIdle
@@ -156,15 +155,6 @@ def category_for_kind(event_name: str) -> Category:
 def telemetry_events() -> frozenset[str]:
     """Every telemetry-category event name — replaces ``_TELEMETRY_KINDS``."""
     return frozenset(name for name, spec in EVENTS.items() if spec.category == "telemetry")
-
-
-def lineage_event_names() -> frozenset[str]:
-    """Every event name declared ``retention_class="lineage"``.
-
-    The single source for both permanent copies: the Loki ``retention_stream``
-    selector (validated by ``base.telemetry.loki_index_labels``) and the lineage JSONL
-    mirror (``base.telemetry``). A name added here reaches both."""
-    return frozenset(name for name, spec in EVENTS.items() if spec.retention_class == "lineage")
 
 
 def family_events(family: str) -> tuple[str, ...]:
