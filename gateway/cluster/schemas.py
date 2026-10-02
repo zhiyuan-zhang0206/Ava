@@ -210,17 +210,14 @@ class StatsDashboard(BaseModel):
     `warnings` / `errors`) aggregate over the `applied_window_hours` horizon.
     `window_hours` echoes the selected value — `0` means five minutes; all
     other values are hours.
-    `applied_window_hours` is the actually served window in hours, no greater
-    than `window_hours` and clamped to the Loki retention horizon.
+    `applied_window_hours` is the served window in hours: the requested one.
 
     - `live_count`: current non-terminated count (from agents_meta, not
       events; not windowed)
-    - `tokens`: windowed telemetry LLM token usage (fresh-cache TTL:
-      `display.stats_dashboard_cache_ttl_s`, default 60s)
+    - `tokens`: windowed telemetry LLM token usage
     - `cost_usd`: windowed LLM spend in USD, summed from the usage-time
-      `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;
-      events that pre-date the snapshot field contribute 0 (shares the
-      configured fresh-cache TTL with `tokens`, default 60s)
+      `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;
+      events that pre-date the snapshot field contribute 0
     - `avg_turn_seconds`: windowed avg LLM call wall time
       (event=turn_end + ok=true)
     - `warnings` / `errors`: raw level totals over the window (critical
@@ -246,11 +243,7 @@ class StatsDashboard(BaseModel):
     behind cards that plugins declare under `contributions.ui.stats`, joined
     by the console on `(plugin, id)`.
 
-    `stale` is true when this payload is the route's last-good response,
-    served because a live recompute failed while the payload was within the
-    stale cap (`display.stats_dashboard_stale_max_s`); `as_of` is the UTC
-    time the served payload's reads were assembled — a stale fallback keeps
-    its original timestamp so a client can show the data's age."""
+    `as_of` is the UTC time the payload's reads were assembled."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -268,7 +261,6 @@ class StatsDashboard(BaseModel):
     errors_net: NonNegativeInt
     total_events: NonNegativeInt
     plugin_stats: list[PluginStat]
-    stale: bool = False
     as_of: datetime | None = None
 
 

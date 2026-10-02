@@ -15,8 +15,7 @@ Routers mounted in `gateway/app.py`: `router`, `machine_pause`, `bootstrap`,
   - `roster_probe.py`    — bounded transport policy for runner status probes
                             (also used by the extensions inventory fan-out)
   - `_roster_rows.py`    — roster row shapers + stamping
-  - `_loki_shards.py`    — bounded Loki sharding for the status surface
   - `_health.py`         — the health endpoint body
-  - `_stats_dashboard.py` — dashboard whole-response cache + last-good serving
+  - `_stats_events.py`   — the stats dashboard's window totals over `telemetry_events`
   - `schemas.py`         — the surface's wire models
 """
