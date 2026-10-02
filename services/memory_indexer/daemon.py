@@ -62,6 +62,7 @@ from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.native_process.os_platform import CREATE_NO_WINDOW
@@ -577,6 +578,7 @@ async def _drain_loop(
 
 
 async def _connect_backend_with_retry(
+    database: Database,
     provider: EmbeddingProvider,
     deadline_s: float = 30.0,
     *,
@@ -596,7 +598,7 @@ async def _connect_backend_with_retry(
     and exits, the healthcheck spawns a fresh process that goes through
     this retry).
     """
-    backend = get_backend(dim=provider.dim, fingerprint=provider.fingerprint)
+    backend = get_backend(database, dim=provider.dim, fingerprint=provider.fingerprint)
     start = time.time()
     last_exc: Exception | None = None
     while time.time() - start < deadline_s:
@@ -662,7 +664,8 @@ async def run() -> None:
     # never work (fatal) fails fast with the actionable fix instead of a 30s
     # retry storm; a merely-unreachable one rides into the retry loop with its
     # message attached to the terminal error (CTO ruling 2026-08-30 direction ②).
-    preflight = probe_backend(settings.services.memory_search_backend)
+    database = Database.from_settings()
+    preflight = probe_backend(settings.services.memory_search_backend, database)
     if preflight.fatal:
         _log.critical(
             "[indexer] %s backend preflight FAILED: %s",
@@ -677,7 +680,7 @@ async def run() -> None:
             settings.services.memory_search_backend,
             preflight.message,
         )
-    backend = await _connect_backend_with_retry(provider, probe_message=preflight.message)
+    backend = await _connect_backend_with_retry(database, provider, probe_message=preflight.message)
     _log.info("[indexer] connected to %s backend", backend.name)
     dirty_queue: queue.Queue[Path] = queue.Queue()
     handler = _MarkdownEventHandler(dirty_queue)

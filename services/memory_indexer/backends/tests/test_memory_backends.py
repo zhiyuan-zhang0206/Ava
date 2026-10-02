@@ -14,6 +14,7 @@ from typing import cast
 import numpy as np
 import pytest
 
+from base.db import Database
 from services.memory_indexer.backends import factory
 from services.memory_indexer.backends.base import KIND_DESC, pk_of
 from services.memory_indexer.backends.milvus import MilvusBackend
@@ -46,7 +47,9 @@ def test_factory_default_is_numpy() -> None:
     from services.memory_indexer.backends.numpy import NumPyBackend
 
     assert settings.services.memory_search_backend == "numpy"
-    assert isinstance(factory.get_backend(dim=_DIM, fingerprint=_FP), NumPyBackend)
+    assert isinstance(
+        factory.get_backend(Database.from_settings(), dim=_DIM, fingerprint=_FP), NumPyBackend
+    )
 
 
 def test_factory_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,7 +58,9 @@ def test_factory_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     from services.memory_indexer.backends.numpy import NumPyBackend
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
-    assert isinstance(factory.get_backend(dim=_DIM, fingerprint=_FP), NumPyBackend)
+    assert isinstance(
+        factory.get_backend(Database.from_settings(), dim=_DIM, fingerprint=_FP), NumPyBackend
+    )
 
 
 def test_factory_pgvector_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -64,7 +69,9 @@ def test_factory_pgvector_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     from services.memory_indexer.backends.pgvector import PGVectorBackend
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
-    assert isinstance(factory.get_backend(dim=_DIM, fingerprint=_FP), PGVectorBackend)
+    assert isinstance(
+        factory.get_backend(Database.from_settings(), dim=_DIM, fingerprint=_FP), PGVectorBackend
+    )
 
 
 def test_factory_unknown_backend_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -75,7 +82,7 @@ def test_factory_unknown_backend_fails_fast(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "qdrant")
     with pytest.raises(ValueError, match="unknown memory search backend"):
-        factory.get_backend(dim=_DIM, fingerprint=_FP)
+        factory.get_backend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
 
 
 # ── row vocabulary ───────────────────────────────────────────────────────
@@ -150,14 +157,18 @@ def test_backend_upsert_many_delegates_one_client_call() -> None:
 
 def test_empty_upsert_many_is_noop_before_connect() -> None:
     for name in (MilvusBackend.name, PGVectorBackend.name, NumPyBackend.name):
-        backend = factory.get_backend_named(name, dim=_DIM, fingerprint=_FP)
+        backend = factory.get_backend_named(
+            name, database=Database.from_settings(), dim=_DIM, fingerprint=_FP
+        )
         backend.upsert_many([])
 
 
 def test_readonly_backends_refuse_mutations() -> None:
     """Factory-provided read-only backends reject writes before connect."""
     for name in (MilvusBackend.name, PGVectorBackend.name, NumPyBackend.name):
-        backend = factory.get_backend_named(name, dim=_DIM, fingerprint=_FP, readonly=True)
+        backend = factory.get_backend_named(
+            name, database=Database.from_settings(), dim=_DIM, fingerprint=_FP, readonly=True
+        )
         with pytest.raises(RuntimeError, match="read-only"):
             backend.upsert("/a.md", 1.0, "hash", _vec(0), kind="body", chunk_idx=0)
         with pytest.raises(RuntimeError, match="read-only"):

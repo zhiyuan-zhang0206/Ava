@@ -26,46 +26,57 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from base.config import settings
+from base.db import Database
 from services.memory_indexer.backends.base import MemorySearchBackend
 
 
-def _milvus_backend(dim: int, fingerprint: str, *, readonly: bool = False) -> MemorySearchBackend:
+def _milvus_backend(
+    database: Database, dim: int, fingerprint: str, *, readonly: bool = False
+) -> MemorySearchBackend:
+    """MilvusBackend talks to its own server; `database` is accepted for the uniform factory
+    signature only."""
     from services.memory_indexer.backends.milvus import MilvusBackend
 
+    del database
     return MilvusBackend(dim=dim, fingerprint=fingerprint, readonly=readonly)
 
 
-def _numpy_backend(dim: int, fingerprint: str, *, readonly: bool = False) -> MemorySearchBackend:
+def _numpy_backend(
+    database: Database, dim: int, fingerprint: str, *, readonly: bool = False
+) -> MemorySearchBackend:
     """NumPyBackend is a thin HTTP client — the vector space lives in the
-    memory_search service process, so dim/fingerprint are accepted for the
+    memory_search service process, so database/dim/fingerprint are accepted for the
     uniform factory signature only and deliberately not used."""
     from services.memory_indexer.backends.numpy import NumPyBackend
 
-    del dim, fingerprint
+    del database, dim, fingerprint
     return NumPyBackend(readonly=readonly)
 
 
-def _pgvector_backend(dim: int, fingerprint: str, *, readonly: bool = False) -> MemorySearchBackend:
+def _pgvector_backend(
+    database: Database, dim: int, fingerprint: str, *, readonly: bool = False
+) -> MemorySearchBackend:
     from services.memory_indexer.backends.pgvector import PGVectorBackend
 
-    return PGVectorBackend(dim=dim, fingerprint=fingerprint, readonly=readonly)
+    return PGVectorBackend(database, dim=dim, fingerprint=fingerprint, readonly=readonly)
 
 
-# Uniform constructor shape `(dim: int, fingerprint: str, readonly: bool)`; NumPy's backend
-# is wrapped instead of taking dead parameters.
-_BACKENDS: dict[str, Callable[[int, str, bool], MemorySearchBackend]] = {
-    "milvus": lambda dim, fingerprint, readonly: _milvus_backend(
-        dim, fingerprint, readonly=readonly
+# Uniform constructor shape `(database, dim, fingerprint, readonly)`.
+_BACKENDS: dict[str, Callable[[Database, int, str, bool], MemorySearchBackend]] = {
+    "milvus": lambda database, dim, fingerprint, readonly: _milvus_backend(
+        database, dim, fingerprint, readonly=readonly
     ),
-    "numpy": lambda dim, fingerprint, readonly: _numpy_backend(dim, fingerprint, readonly=readonly),
-    "pgvector": lambda dim, fingerprint, readonly: _pgvector_backend(
-        dim, fingerprint, readonly=readonly
+    "numpy": lambda database, dim, fingerprint, readonly: _numpy_backend(
+        database, dim, fingerprint, readonly=readonly
+    ),
+    "pgvector": lambda database, dim, fingerprint, readonly: _pgvector_backend(
+        database, dim, fingerprint, readonly=readonly
     ),
 }
 
 
 def get_backend_named(
-    name: str, *, dim: int, fingerprint: str, readonly: bool = False
+    name: str, *, database: Database, dim: int, fingerprint: str, readonly: bool = False
 ) -> MemorySearchBackend:
     """Construct a backend by name — the one dispatch path; unknown names
     fail fast (an unrecognized value must not silently fall back to milvus:
@@ -76,13 +87,16 @@ def get_backend_named(
     except KeyError:
         known = ", ".join(sorted(_BACKENDS))
         raise ValueError(f"unknown memory search backend {name!r} (known: {known})") from None
-    return ctor(dim, fingerprint, readonly)
+    return ctor(database, dim, fingerprint, readonly)
 
 
-def get_backend(dim: int, fingerprint: str) -> MemorySearchBackend:
+def get_backend(database: Database, dim: int, fingerprint: str) -> MemorySearchBackend:
     """Construct the configured backend
     (`settings.services.memory_search_backend`, env
     `AVA_MEMORY_SEARCH_BACKEND`) for the given embedding vector space."""
     return get_backend_named(
-        settings.services.memory_search_backend, dim=dim, fingerprint=fingerprint
+        settings.services.memory_search_backend,
+        database=database,
+        dim=dim,
+        fingerprint=fingerprint,
     )

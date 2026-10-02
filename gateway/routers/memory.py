@@ -26,10 +26,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from base.agents import IndexerUnavailable
 from base.config import settings
+from base.db import Database
 from base.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
 from base.paths import gateway_memory_dir
 from gateway.agents.eval_guard import deny_isolated_result_read
@@ -269,7 +270,7 @@ def _extract_meta(path: Path) -> tuple[str, list[str]]:
 
 
 async def _backend_topk(
-    query_vector: Any, k: int, deadline: float, dim: int, fingerprint: str
+    database: Database, query_vector: Any, k: int, deadline: float, dim: int, fingerprint: str
 ) -> list[str]:
     """The storage half of a search: ask the configured backend for top-k
     paths, every step handed an explicit deadline. `dim` + `fingerprint` are
@@ -288,7 +289,7 @@ async def _backend_topk(
     """
     from services.memory_indexer.backends import factory
 
-    return await factory.get_backend(dim=dim, fingerprint=fingerprint).search_topk_async(
+    return await factory.get_backend(database, dim=dim, fingerprint=fingerprint).search_topk_async(
         query_vector, k, timeout=deadline
     )
 
@@ -298,7 +299,7 @@ async def _backend_topk(
     response_model=MemorySearchResponse,
     dependencies=[Depends(deny_isolated_result_read)],
 )
-async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
+async def post_memory_search(request: Request, body: MemorySearchRequest) -> MemorySearchResponse:
     """Semantic search the memory pool; return **relative** paths of the
     top-k most-relevant markdown files.
 
@@ -363,7 +364,12 @@ async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
             try:
                 async with _bounded_semaphore(_search_semaphore()):
                     abs_paths = await _backend_topk(
-                        query_vector, body.k, deadline, provider.dim, provider.fingerprint
+                        request.app.state.db,
+                        query_vector,
+                        body.k,
+                        deadline,
+                        provider.dim,
+                        provider.fingerprint,
                     )
             except IndexerUnavailable:
                 raise
