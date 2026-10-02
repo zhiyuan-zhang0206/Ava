@@ -21,6 +21,9 @@ scripts/structure/baseline/ shards as `path::rule:name -> site count`. The rule 
 - database and bundle wiring: `ambient-db` (a package in `allowlist.DB_HANDLE_PACKAGES` dials
   from the live settings instead of taking a `Database`, see `dbhandle.py`) and `bundle-leak` (a
   `@root_bundle` class named outside its defining module, see `bundle.py`);
+- `ambient-bus`: a package in `allowlist.BUS_PACKAGES` reaches Redis through the live-settings
+  entries of `redis_client` (`get_async_redis`, `sync_redis`, ...) instead of taking an `EventBus`,
+  or calls `EventBus.from_settings()` outside its roots;
 - `ambient-endpoint`: a package in `allowlist.ENDPOINT_PACKAGES` builds the endpoint table
   (`ServiceEndpoints.from_settings()`) outside the roots named for it;
 - free-floating background work: `asyncio-task`, `thread` (keyed by the enclosing
@@ -48,7 +51,14 @@ from pathlib import Path
 
 from scripts.structure import lint_common
 from scripts.structure.ambient_state import allowlist as allow
-from scripts.structure.ambient_state import bundle, dbhandle, endpointrule, scan, sliced
+from scripts.structure.ambient_state import (
+    bundle,
+    busrule,
+    dbhandle,
+    endpointrule,
+    scan,
+    sliced,
+)
 
 SECTION = "ambient_state"
 # The file whose absence at the base revision means this section is being introduced.
@@ -82,6 +92,7 @@ _FIXES: dict[str, str] = {
     scan.CACHE: "a memoized function is state unless it is pure — a pure derivation goes in ALLOWED in scripts/structure/ambient_state/allowlist.py with a reason",
     scan.CALL: "a call that runs at import (a registry fill or side effect) — register from a composition root, not at import",
     dbhandle.AMBIENT_DB: f"an ambient database dial in a package that holds a Database handle — {dbhandle.FIX}",
+    busrule.AMBIENT_BUS: f"an ambient Redis entry in a package that holds an event bus — {busrule.FIX}",
     endpointrule.AMBIENT_ENDPOINT: f"the endpoint table built outside a root — {endpointrule.FIX}",
     bundle.BUNDLE_LEAK: f"a root bundle named outside its composition root — {bundle.FIX}",
     sliced.SETTINGS_READ: f"reads the global configuration in a sliced package — {sliced.FIX}",
@@ -122,6 +133,7 @@ def _hits(tree: ast.Module, rel: str, repo_root: Path) -> list[scan.Hit]:
         *sliced.hits(tree, rel),
         *dbhandle.hits(tree, rel),
         *endpointrule.hits(tree, rel),
+        *busrule.hits(tree, rel),
         *bundle.hits(tree, repo_root),
     ]
 
@@ -200,6 +212,7 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
     for table, registry in (
         ("DB_HANDLE_PACKAGES", allow.DB_HANDLE_PACKAGES),
         ("ENDPOINT_PACKAGES", allow.ENDPOINT_PACKAGES),
+        ("BUS_PACKAGES", allow.BUS_PACKAGES),
     ):
         errors += _missing_roots(repo_root, table, registry)
     for callee in sorted(allow.PURE_REPO_CALLEES):
