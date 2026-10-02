@@ -32,7 +32,7 @@ The baseline section is registered with the structure gate (`locality.SECTIONS`,
 
 `.venv/bin/python scripts/structure/tests_location.py --suggest <file>` names the lowest package that may legally hold the test (any package above it inside the same unit that holds what it uses is also legal), says why none can (a test that uses units that may not import each other: split it by unit or register it as `integration`), or says it references no first-party package (a harness or artifact test: register it as `contract`). It reads the production code through `scripts/structure/placement.py`, which costs 10 ms to 2.7 s per file, so no hook runs it: the hook prints the command.
 
-After `git mv`, `tests/fixtures/path_scopes.py` may need the new directory: its prefix table gives a directory's tests the autouse isolation fixtures, a package directory that is not listed there silently has none (`tests/ci/test_path_scopes.py` fails when a moved test loses them).
+After `git mv`, the new directory may need a `path_scopes.toml` (read by `tests/fixtures/path_scopes.py`): it gives a directory's tests the autouse isolation fixtures, a package directory with none silently has none (`tests/ci/test_path_scopes.py` fails when a moved test loses them).
 
 ## What it costs
 

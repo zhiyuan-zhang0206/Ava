@@ -48,7 +48,7 @@ Source-sync gap (405 input): repo `.agents/skills/` does not auto-enter the `~/.
 
 ### C. Event contracts — `EventSpec` (one declaration per event)
 
-`base/events/contract.py` holds `EVENTS: dict[str, EventSpec]` — name × category × payload TypedDict × retention × destination (`events`|`file`) — the single fact source. Writers add one line; producers emit through it (unknown name → fail-fast); the 15 files / 71 `FROM events` read sites consume SQL fragments generated from the TypedDicts (new literal → lint fails); `base/events/registry.md` becomes a generated artifact. Scope also absorbed: the LLM error family, SSE role lists, and rollup grid constants derive from the registry (add a role = change one place). `sse_drop.kind` is legalized (declared in the payload, zero migration — it is live data).
+`base/events/contract.py` holds `EVENTS: dict[str, EventSpec]` (merged from the domain modules of `base/events/declarations/`) — name × category × payload TypedDict × retention × destination (`events`|`file`) — the single fact source. Writers add one line; producers emit through it (unknown name → fail-fast); the 15 files / 71 `FROM events` read sites consume SQL fragments generated from the TypedDicts (new literal → lint fails); `base/events/registry.md` becomes a generated artifact. Scope also absorbed: the LLM error family, SSE role lists, and rollup grid constants derive from the registry (add a role = change one place). `sse_drop.kind` is legalized (declared in the payload, zero migration — it is live data).
 
 ### D. Retry — `resilience.Policy` (one implementation)
 

@@ -186,7 +186,8 @@ visible in review, not impossible.
 
 Function-body reads of the global `settings` are not module state. Each sliced package
 is locked by a second rule of the same family, `settings-read`
-(`scripts/structure/ambient_state/sliced.py`): a package listed in `SLICED_PACKAGES`
+(`scripts/structure/ambient_state/sliced.py`): a package that declares itself sliced
+(`settings = [...]` in its own `ambient_roots.toml`, collected into `SLICED_PACKAGES`)
 names its composition-root modules, and any other non-test module in it that imports
 `settings`, `turn_settings`, `get_field`, `set_field`, `ensure_eager` or `base.config`
 is a site. Sites are frozen in the same shrink-only baseline, so a package that cannot
@@ -214,8 +215,8 @@ finish in one change freezes what is left; a finished one has none.
    step.
 4. **Config slices by field ownership.** Per slice: define the component's config
    type in its package, build it at the root, take it in the constructor, make tests
-   build the type instead of patching `settings`, and list the package in
-   `SLICED_PACKAGES`. Order: the slices no other package reads (31 in the survey)
+   build the type instead of patching `settings`, and declare the package sliced in
+   its `ambient_roots.toml`. Order: the slices no other package reads (31 in the survey)
    first, then the shared kernel and the secrets. The IM bridge batch is done
    (below); the other slices of that kind follow the same pattern.
 5. **Turn context.** Move the config pins, plugin config and turn identity from
@@ -234,7 +235,7 @@ finish in one change freezes what is left; a finished one has none.
 ## Config slices (done)
 
 Batches so far: the IM bridge daemon, then the events-maintenance and labeler daemons
-(below). Each package is listed in `SLICED_PACKAGES` with its daemon as the root.
+(below). Each package declares itself sliced in its `ambient_roots.toml` with its daemon as the root.
 
 ### IM bridge
 
@@ -287,7 +288,7 @@ Two more gateway-side daemons, one root each, no reader outside the package.
 
 ### Computer use, page server, memory search and hierarchy worker
 
-Four more daemons, one slice each, each package added to `SLICED_PACKAGES`:
+Four more daemons, one slice each, each package declaring itself sliced:
 
 - `ComputerUseConfig` (`services/computer`, root `mcp_daemon.py`): lease, queue timeout and
   session idle, taken by `ComputerMcpDaemon`.

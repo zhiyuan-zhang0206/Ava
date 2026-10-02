@@ -325,7 +325,7 @@ def test_computer_session_events_registered_as_audit() -> None:
     """The task-session envelope events (Phase 2, task #1101) are declared —
     without a spec, telemetry.emit raises ValueError and the daemon's suppress
     used to swallow it silently (task #1136)."""
-    from base.events.contract import ComputerSessionEnd, ComputerSessionStart
+    from base.events.declarations.audit import ComputerSessionEnd, ComputerSessionStart
 
     start = EVENTS["computer_session_start"]
     assert start.category == "audit"

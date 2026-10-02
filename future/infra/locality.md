@@ -87,9 +87,9 @@ lifecycle; those items wait for it to land and are then designed on its code.
    contracts, so it is a separate check, not a hook; today three package tests would fail it
    (`scripts/tests/test_tools_scratch_home.py`, and two under
    `services/gateway_side/backup/tests/` that use both the loose `services/backup.py` and
-   `services.gateway_side`); (b) `tests/fixtures/path_scopes.py` still gives autouse isolation
-   fixtures by directory prefix, so a test moved into a directory the table does not list loses
-   them (the lint's message says so; `tests/ci/test_path_scopes.py` catches a listed directory left
+   `services.gateway_side`); (b) the `path_scopes.toml` files (read by `tests/fixtures/path_scopes.py`) still give autouse
+   isolation fixtures by directory, so a test moved into a directory whose file does not name it
+   loses them (the lint's message says so; `tests/ci/test_path_scopes.py` catches a listed directory left
    without tests, not a test moved out of a listed directory or placed in an unlisted one); (c) whether a frozen or registered
    entry still needs its place (a frozen test that has since lost its package home) needs the
    placement rule, so it belongs in a slow CI check, not a hook.

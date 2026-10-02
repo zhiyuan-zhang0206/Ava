@@ -17,10 +17,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from _pytest.fixtures import FixtureManager
 
 from tests.fixtures import path_scopes
-from tests.fixtures.path_scopes import PATH_SCOPES, Scope, scope_problems
+from tests.fixtures.path_scopes import PATH_SCOPES, Scope, discover_scopes, scope_problems
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -180,3 +181,35 @@ def test_a_directory_left_without_tests_is_reported(tmp_path: Path) -> None:
 def test_the_plugin_registers_only_listed_paths() -> None:
     by_path = path_scopes.modules_by_path(PATH_SCOPES)
     assert sorted(by_path) == sorted(p for scope in PATH_SCOPES.values() for p in scope.paths)
+
+
+def test_scopes_are_read_from_the_files_next_to_the_tests(tmp_path: Path) -> None:
+    """A declaration lives in the directory it governs: `"."` is that directory, a name is a
+    test file in it; modules merge across files and come out alphabetically."""
+    (tmp_path / "pkg" / "tests").mkdir(parents=True)
+    (tmp_path / "pkg" / "tests" / "path_scopes.toml").write_text(
+        '"mod_b" = ["."]\n"mod_a" = ["test_one.py", "test_two.py"]\n', encoding="utf-8"
+    )
+    (tmp_path / "other").mkdir()
+    (tmp_path / "other" / "path_scopes.toml").write_text('"mod_a" = ["."]\n', encoding="utf-8")
+    for ignored in (".venv", "node_modules", ".worktrees/x"):
+        (tmp_path / ignored).mkdir(parents=True)
+        (tmp_path / ignored / "path_scopes.toml").write_text('"mod_z" = ["."]\n', encoding="utf-8")
+
+    assert discover_scopes(tmp_path) == {
+        "mod_a": Scope(("other", "pkg/tests/test_one.py", "pkg/tests/test_two.py")),
+        "mod_b": Scope(("pkg/tests",)),
+    }
+
+
+def test_a_scope_file_that_does_not_list_names_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "path_scopes.toml").write_text('"mod_a" = "."\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="must be a list of names"):
+        discover_scopes(tmp_path)
+
+
+def test_the_plugin_module_holds_no_central_listing() -> None:
+    """The declarations stay next to the tests: nothing in the plugin names a test path."""
+    source = (_REPO_ROOT / "tests" / "fixtures" / "path_scopes.py").read_text(encoding="utf-8")
+    assert "tests/" not in source.split("def modules_by_path")[1]

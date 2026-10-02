@@ -325,7 +325,7 @@ def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> 
 # event_name from the label fallback, `telemetry.emit` raised inside the sink
 # (the row was lost) and loguru logged the internal error on every such read.
 # The call now passes an explicit `event=` — registered as `delta_read_compat`
-# in base/events/registry.py (naming rules §6.2: label is display-only).
+# in base/events/declarations/agent_runtime.py (naming rules §6.2: label is display-only).
 
 
 def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger) -> None:
