@@ -141,8 +141,6 @@ _EXEMPT: dict[str, str] = {
     "agent_metric_collection": "migration-seeded collection cutover singleton — "
     "read-only after installation, never test data",
     "cluster_defaults": "cluster singleton defaults — infra, not test data",
-    "audit_events": "append-only permanent record — its trigger rejects TRUNCATE by "
-    "design; tests key their rows on a unique source instead of assuming an empty table",
     "deployment_state": "R1 singleton (id=1, CHECK) — its live consumer is the "
     "code-version gate (base/db/code_version_gate.py); the row is seeded by the "
     "migration and truncating it would delete the row mid-session. Tests that write "

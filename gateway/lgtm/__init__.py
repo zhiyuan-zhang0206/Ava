@@ -10,7 +10,6 @@ Package door — no imports, no re-exports; callers use the public modules:
   - `prom_metrics.py`        — Prometheus-backed telemetry aggregates
   - `telemetry_staleness.py` — heartbeat guard for stale Loki / Prometheus reads
   - `backend_failure.py`     — the consistent retriable 503 for an unavailable read backend
-  - `edge_stream.py`         — audit edge-event selectors shared by the fleet graph + neighbors walk
 
 `_loki_*` modules are `loki_events`' private implementation.
 """

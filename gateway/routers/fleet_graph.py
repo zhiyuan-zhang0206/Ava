@@ -9,15 +9,14 @@ Data sources (task #1197 LGTM cutover):
   retained-window (7d) totals + selected-window scores — from the OTLP-mapped
   counters `ava_llm_usage_in_total` / `ava_llm_usage_out_total`. The retained
   total uses `increase()` so exporter restarts do not reset the reported value.
-- Edge events (audit category, spawn/send_message/fork/resurrect): cached raw
-  rows from the Loki archive stream (task #1281 — all pre-cutover events)
-  stitched with the live stream. The live stream's frozen pre-index-label
-  interval is cached separately from its indexed tail.
+- Edge events (audit category, spawn/send_message/fork/resurrect): aggregated
+  in Postgres from `audit_events`, the permanent audit record
+  (gateway/events/audit_rows.py), in the same phase as the nodes.
 
-Successful Prometheus/Loki reads also pass through the gateway-latency
-heartbeat guard. Old or missing heartbeat samples retain and cache the fetched
-graph, marked separately as telemetry-degraded; only incomplete or fallback
-data uses the graph's stale flag.
+Successful Prometheus reads also pass through the gateway-latency heartbeat
+guard. Old or missing heartbeat samples retain and cache the fetched graph,
+marked separately as telemetry-degraded; only fallback data uses the graph's
+stale flag.
 
 Each stale-serving fallback emits one `fleet_graph_stale` event per episode
 via `_emit_stale`, watched by the ops rule `ava-ops-fleet-graph-stale` (#3925).
@@ -25,8 +24,6 @@ via `_emit_stale`, watched by the ops rule `ava-ops-fleet-graph-stale` (#3925).
 
 from __future__ import annotations
 
-import json
-import math
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -42,14 +39,8 @@ from base.config import settings
 from base.events.contract import FleetGraphStaleReason
 from base.events.live.redis_client import sync_redis
 from base.log import logger
-from base.telemetry.loki_index_labels import (
-    ARCHIVE_FLOOR_AT,
-    ARCHIVE_FREEZE_AT,
-    INDEX_LABEL_CUTOVER_AT,
-)
-from base.telemetry.observability import cluster_label
-from gateway.lgtm import loki_events, loki_query_budget, prom_metrics, telemetry_staleness
-from gateway.lgtm.edge_stream import EDGE_EVENT_NAMES, LOKI_EDGE_LIMIT
+from gateway.events import audit_rows
+from gateway.lgtm import prom_metrics, telemetry_staleness
 from gateway.schemas.fleet_graph import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
 from gateway.schemas.stats import StatsWindowHours, window_delta
 
@@ -62,23 +53,6 @@ router = APIRouter()
 # a Redis outage degrades to a direct query, never to a 500.
 _CACHE_TTL_SECONDS = 60
 _LAST_GOOD_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
-_FROZEN_CACHE_TTL_SECONDS = 24 * 60 * 60
-_FROZEN_ARCHIVE_CACHE_KEY = "fleet_graph:frozen:archive:v1"
-
-# Single-flight guard for the whole-archive scan (2026-08-29/30 incident):
-# the cache entry is shared, but the fetch runs in this process. Concurrent
-# misses (a 24h TTL expiry, a Redis restart) would otherwise each run their
-# own multi-second scan — a stampede that saturates the Loki querier; when
-# Loki is already slow the scans time out and every following request
-# re-attempts the same doomed scan. One scan runs at a time; a waiter that
-# cannot enter within `_ARCHIVE_FETCH_WAIT_S` serves live-only edges.
-_ARCHIVE_FETCH_LOCK = threading.Lock()
-_ARCHIVE_FETCH_WAIT_S = 3.0
-# A failed fetch writes this short-lived negative entry instead of leaving
-# the cache empty: the next minute of polls serves the last-good graph
-# without re-hammering Loki, and the first poll after the entry expires
-# retries the real fetch (self-heals once Loki recovers).
-_NEGATIVE_CACHE_TTL_SECONDS = 60
 
 _TELEMETRY_READ_TIMEOUT_S = 8.0
 _ROUTE_TIMEOUT_S = 10.0
@@ -145,8 +119,8 @@ def _stale_graph(key: str, nodes: list[FleetGraphNode]) -> FleetGraphResponse:
     """
     last_good = _read_last_good_graph(key)
     if last_good is not None:
-        return last_good.model_copy(update={"stale": True, "truncated": False})
-    return FleetGraphResponse(nodes=nodes, edges=[], stale=True, truncated=False)
+        return last_good.model_copy(update={"stale": True})
+    return FleetGraphResponse(nodes=nodes, edges=[], stale=True)
 
 
 def _finalize_graph_response(
@@ -154,7 +128,6 @@ def _finalize_graph_response(
     key: str,
     nodes: list[FleetGraphNode],
     edges: list[FleetGraphEdge],
-    truncated: bool = False,
 ) -> FleetGraphResponse:
     """Cache a successful graph while reporting heartbeat health separately."""
     try:
@@ -166,225 +139,20 @@ def _finalize_graph_response(
     response = FleetGraphResponse(
         nodes=nodes,
         edges=edges,
-        stale=truncated,
-        truncated=truncated,
         telemetry_stale=telemetry_stale,
         snapshot_at=datetime.now(UTC),
     )
-    # A truncated graph is the best current view for the next poll, but it is
-    # not a complete fallback snapshot. Heartbeat lag is observability health,
-    # not a reason to discard an otherwise successful complete snapshot.
+    # Heartbeat lag is observability health, not a reason to discard an
+    # otherwise successful complete snapshot.
     try:
         with sync_redis(decode_responses=True) as redis:
             serialized = response.model_dump_json()
             redis.set(key, serialized, ex=_CACHE_TTL_SECONDS)
-            if not truncated:
-                redis.set(_last_good_cache_key(key), serialized, ex=_LAST_GOOD_CACHE_TTL_SECONDS)
+            redis.set(_last_good_cache_key(key), serialized, ex=_LAST_GOOD_CACHE_TTL_SECONDS)
     except Exception as exc:
         # Fail-open: a cache write failure must not fail the response.
         logger.debug("fleet_graph cache write failed: {}", exc)
     return response
-
-
-def _read_frozen_json(key: str, *, cache_name: str) -> Any | None:
-    """Read one frozen-source payload, treating Redis or JSON errors as misses."""
-    try:
-        with sync_redis(decode_responses=True) as redis:
-            cached = redis.get(key)
-        return json.loads(cached) if cached is not None else None
-    except Exception as exc:
-        logger.debug(
-            "fleet_graph frozen {} cache read failed — querying source: {}",
-            cache_name,
-            exc,
-        )
-        return None
-
-
-def _write_frozen_json(
-    key: str,
-    payload: object,
-    *,
-    cache_name: str,
-    ttl: int = _FROZEN_CACHE_TTL_SECONDS,
-) -> None:
-    """Write one frozen-source payload without making Redis route-critical.
-
-    `ttl` defaults to the 24h frozen-source lifetime; the negative archive
-    cache (`_NEGATIVE_CACHE_TTL_SECONDS`) passes the short one."""
-    try:
-        with sync_redis(decode_responses=True) as redis:
-            redis.set(key, json.dumps(payload), ex=ttl)
-    except Exception as exc:
-        logger.debug("fleet_graph frozen {} cache write failed: {}", cache_name, exc)
-
-
-def _edge_row(agent: Any, target: Any, event_name: Any, ts: Any) -> dict[str, Any]:
-    """Normalize cached and source edge rows to the Loki query shape."""
-    return {
-        "agent_id": agent,
-        "target_agent_id": target,
-        "event_name": event_name,
-        "ts": ts,
-    }
-
-
-def _query_loki_edge_slice(*, from_: datetime, to: datetime) -> tuple[list[dict[str, Any]], bool]:
-    """Query one edge interval with the endpoint's fixed Loki contract."""
-    return loki_events.query_events(
-        event_names=list(EDGE_EVENT_NAMES),
-        categories=["audit"],
-        cluster=cluster_label(),
-        from_=from_,
-        to=to,
-        limit=LOKI_EDGE_LIMIT,
-        direction="forward",
-        timeout_s=_TELEMETRY_READ_TIMEOUT_S,
-    )
-
-
-def _fetch_loki_edges(*, now: datetime) -> tuple[list[dict[str, Any]], bool]:
-    """Audit rows from the live indexed tail (post label-cutover).
-
-    Message events respect the `hours` window, applied per row by the caller —
-    the lineage tail must not be clipped by the message window. The
-    per-request timeout bounds the expensive tail read before the route
-    degrades."""
-    rows: list[dict[str, Any]] = []
-    has_more = False
-    indexed_start = max(INDEX_LABEL_CUTOVER_AT, ARCHIVE_FREEZE_AT)
-    if indexed_start < now:
-        rows, has_more = _query_loki_edge_slice(from_=indexed_start, to=now)
-    if has_more:
-        logger.warning(
-            "fleet_graph Loki edge stream exceeded the {}-row fetch cap — edges truncated",
-            LOKI_EDGE_LIMIT,
-        )
-    return rows, has_more
-
-
-def _merge_edge_rows(
-    archive_rows: list[dict[str, Any]],
-    loki_rows: list[dict[str, Any]],
-    *,
-    live_ids: set[int] | None,
-    win_start: datetime | None,
-    now: datetime,
-    decay_lambda: float,
-) -> list[FleetGraphEdge]:
-    """Merge the archive and Loki edge rows per (from, to, event_type).
-
-    The archive side spans the pre-freeze history; the live side spans the
-    post-cutover tail — the unlabeled window between them has aged out of
-    Loki retention. Both carry raw rows, so one loop applies the exact same
-    live endpoint, message-window, and per-event weighting semantics."""
-    merged: dict[tuple[int, int, str], list[Any]] = {}
-
-    def _absorb(key: tuple[int, int, str], weight: float, count: int, last_seen: datetime) -> None:
-        slot = merged.get(key)
-        if slot is None:
-            merged[key] = [weight, count, last_seen]
-        else:
-            slot[0] += weight
-            slot[1] += count
-            slot[2] = max(slot[2], last_seen)
-
-    for rows in (archive_rows, loki_rows):
-        for r in rows:
-            target = r.get("target_agent_id")
-            agent = r.get("agent_id")
-            name = r.get("event_name")
-            if target is None or agent is None or name is None:
-                continue
-            if live_ids is not None and (int(target) not in live_ids or int(agent) not in live_ids):
-                continue
-            if name == "send_message":
-                if win_start is not None and r["ts"] < win_start:
-                    continue
-                weight = math.exp(-decay_lambda * (now - r["ts"]).total_seconds() / 86400.0)
-            else:
-                weight = 2.0
-            _absorb((int(target), int(agent), str(name)), weight, 1, r["ts"])
-
-    edges = [
-        FleetGraphEdge(
-            from_agent=target,
-            to_agent=agent,
-            event_type=name,
-            weight=round(slot[0], 4),
-            event_count=slot[1],
-            last_seen_at=slot[2].isoformat(),
-        )
-        for (target, agent, name), slot in merged.items()
-        if name != "send_message" or slot[0] > 0.01
-    ]
-    edges.sort(key=lambda e: e.weight, reverse=True)
-    return edges
-
-
-def _fetch_archive_edges() -> tuple[list[dict[str, Any]], bool]:
-    """Pre-cutover edge rows from the Loki archive stream (task #1281).
-
-    The archive stream holds every pre-cutover audit row; the query is
-    bounded to the archive's own span (within Loki's 90d max_query_length)
-    and the caller caches the result, so the multi-second whole-archive scan
-    runs at most once a day."""
-    rows, has_more = loki_events.query_events(
-        event_names=list(EDGE_EVENT_NAMES),
-        categories=["audit"],
-        from_=ARCHIVE_FLOOR_AT,
-        to=ARCHIVE_FREEZE_AT,
-        limit=LOKI_EDGE_LIMIT,
-        direction="forward",
-        # The whole-archive scan measured ~5.7s on prod; the result is cached
-        # for 24h, so a cold-cache fetch gets a generous budget (the live-tail
-        # reads keep the tighter 8s).
-        archive=True,
-        timeout_s=30.0,
-    )
-    if has_more:
-        logger.warning(
-            "fleet_graph Loki archive edge stream exceeded the {}-row fetch cap — edges truncated",
-            LOKI_EDGE_LIMIT,
-        )
-    return rows, has_more
-
-
-def _read_archive_cache() -> tuple[list[dict[str, Any]], bool] | None:
-    """Cached archive rows as (rows, degraded); None on a miss or corrupt entry.
-
-    `degraded` is True for a negative-cache entry (a failed fetch absorbed
-    for `_NEGATIVE_CACHE_TTL_SECONDS`); a genuine 24h entry — even one whose
-    fetch returned zero rows — is not degraded."""
-    raw = _read_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, cache_name="Loki archive")
-    if raw is None:
-        return None
-    try:
-        rows = [
-            _edge_row(row[1], row[0], row[2], datetime.fromisoformat(row[3])) for row in raw["rows"]
-        ]
-    except Exception as exc:
-        logger.debug("fleet_graph frozen Loki archive cache decode failed: {}", exc)
-        return None
-    return rows, bool(raw.get("degraded", False))
-
-
-def _write_archive_cache(
-    rows: list[dict[str, Any]],
-    *,
-    degraded: bool = False,
-    ttl: int = _FROZEN_CACHE_TTL_SECONDS,
-) -> None:
-    """Persist archive rows; `degraded=True` marks a short negative entry."""
-    payload: dict[str, object] = {
-        "rows": [
-            [row["target_agent_id"], row["agent_id"], row["event_name"], row["ts"].isoformat()]
-            for row in rows
-        ],
-    }
-    if degraded:
-        payload["degraded"] = True
-    _write_frozen_json(_FROZEN_ARCHIVE_CACHE_KEY, payload, cache_name="Loki archive", ttl=ttl)
 
 
 def _stale_emit_interval_s() -> float:
@@ -423,59 +191,51 @@ def _emit_stale(reason: FleetGraphStaleReason) -> None:
     )
 
 
-def _cached_archive_edges() -> tuple[list[dict[str, Any]], bool]:
-    """Archive edge rows via the 24h Redis cache, single-flighted on miss.
-
-    Returns `(rows, degraded)`: `degraded=True` means the archive could not
-    be read this request — a waiter that could not enter the fetch within
-    `_ARCHIVE_FETCH_WAIT_S`, a failed scan, or a negative-cache hit from an
-    earlier failure. The route serves the last-good graph with its honest
-    `stale` flag whenever `degraded` is set.
-
-    Concurrent misses run ONE whole-archive scan instead of one each — a
-    stampede that saturates the Loki querier (2026-08-29/30 incident, see
-    `_ARCHIVE_FETCH_LOCK`). A failed scan writes a 60s negative entry so the
-    next minute of polls serves the last-good graph without re-running the
-    same doomed scan; the first poll after the entry expires retries."""
-    cached = _read_archive_cache()
-    if cached is not None:
-        return cached
-    if not _ARCHIVE_FETCH_LOCK.acquire(timeout=_ARCHIVE_FETCH_WAIT_S):
-        logger.warning("fleet_graph Loki archive fetch already in flight — serving stale graph")
-        _emit_stale("lock_wait")
-        return [], True
-    try:
-        cached = _read_archive_cache()
-        if cached is not None:
-            return cached
-        try:
-            rows, _ = _fetch_archive_edges()
-        except Exception as exc:
-            # Fail open like neighbors: any scan failure serves the last-good
-            # graph and writes the short negative entry, so the next minute of
-            # polls does not re-run the same doomed scan.
-            logger.warning("fleet_graph Loki archive fetch failed — serving stale graph: {}", exc)
-            _write_archive_cache([], degraded=True, ttl=_NEGATIVE_CACHE_TTL_SECONDS)
-            _emit_stale("fetch_failed")
-            return [], True
-        _write_archive_cache(rows)
-        return rows, False
-    finally:
-        _ARCHIVE_FETCH_LOCK.release()
-
-
 class _PgGraphData(NamedTuple):
     """The DB-bound graph phase, kept separate from upstream telemetry work."""
 
     node_rows: list[tuple[Any, ...]]
+    edges: list[FleetGraphEdge]
+
+
+def _edges_from(
+    rows: list[tuple[int, int, str, float, int, datetime]],
+) -> list[FleetGraphEdge]:
+    """Graph edges from the audit aggregates, heaviest first.
+
+    A message edge whose decayed weight has fallen to 0.01 or below is dropped;
+    lineage edges are structural and always shown.
+    """
+    edges = [
+        FleetGraphEdge(
+            from_agent=target,
+            to_agent=agent,
+            event_type=name,
+            weight=round(weight, 4),
+            event_count=count,
+            last_seen_at=last_seen.isoformat(),
+        )
+        for target, agent, name, weight, count, last_seen in rows
+        if name != "send_message" or weight > 0.01
+    ]
+    edges.sort(key=lambda edge: edge.weight, reverse=True)
+    return edges
 
 
 def _fetch_pg_graph(
     pool: Any,
     *,
     not_terminated: LiteralString,
+    include_terminated: bool,
+    win_start: datetime | None,
+    now: datetime,
+    decay_lambda: float,
 ) -> _PgGraphData:
-    """Fetch nodes under the route's PG budget."""
+    """Fetch nodes and edges under the route's PG budget.
+
+    Edges connect two live endpoints unless terminated agents are included; the
+    live set is the node set just read.
+    """
     with pool.connection() as conn, conn.cursor() as cur:
         # Bound the PG phase below the route deadline so a sync route worker
         # can degrade rather than wait for the pool's normal 60-second limit.
@@ -494,7 +254,11 @@ def _fetch_pg_graph(
             "JOIN agents t ON t.id = a.id " + not_terminated + " ORDER BY a.id"
         )
         node_rows = cur.fetchall()
-    return _PgGraphData(node_rows)
+        live_ids = None if include_terminated else {int(row[0]) for row in node_rows}
+        edge_rows = audit_rows.edge_weights(
+            conn, live_ids=live_ids, win_start=win_start, now=now, decay_lambda=decay_lambda
+        )
+    return _PgGraphData(node_rows, _edges_from(edge_rows))
 
 
 def _fetch_prom_tokens(
@@ -572,7 +336,7 @@ def _build_nodes(
 
 
 @router.get("/api/fleet/graph")
-def get_fleet_graph(  # noqa: PLR0915 — one linear fallback chain; each stale-serving return site owns its _emit_stale reason
+def get_fleet_graph(
     request: Request,
     include_terminated: Annotated[  # noqa: FBT002
         bool,
@@ -641,6 +405,10 @@ def get_fleet_graph(  # noqa: PLR0915 — one linear fallback chain; each stale-
         pg_data = _fetch_pg_graph(
             request.app.state.db_pool,
             not_terminated=not_terminated,
+            include_terminated=include_terminated,
+            win_start=win_start,
+            now=now,
+            decay_lambda=decay_lambda,
         )
     except pg_errors.QueryCanceled:
         # A canceled PG query cannot provide a fresh node set, but a complete
@@ -657,24 +425,6 @@ def get_fleet_graph(  # noqa: PLR0915 — one linear fallback chain; each stale-
     if _monotonic() > deadline:
         logger.warning("fleet_graph PG phase exceeded route budget — serving stale graph")
         _emit_stale("pg_budget")
-        return _stale_graph(key, _build_nodes(node_rows))
-
-    # --- Pre-cutover edges from the Loki archive stream (task #1281) ---
-    # The whole-archive scan is slow but served once per day from the 24h
-    # Redis cache; a failure (or a degraded read) serves the last-good graph
-    # with its honest stale flag.
-    try:
-        archive_rows, archive_degraded = _cached_archive_edges()
-    except (httpx.HTTPError, loki_query_budget.LokiQueryBudgetError) as exc:
-        # An escape from the cached archive read stays the fetch_failed side
-        # of the archive family (lock_wait / fetch_failed).
-        logger.warning("fleet_graph archive query failed — serving stale graph: {}", exc)
-        _emit_stale("fetch_failed")
-        return _stale_graph(key, _build_nodes(node_rows))
-    if archive_degraded:
-        # Emitted where detected (lock-wait skip / failed scan); a negative-
-        # cache re-serve of the same episode must not re-emit per poll.
-        logger.warning("fleet_graph Loki archive unavailable — serving stale graph")
         return _stale_graph(key, _build_nodes(node_rows))
 
     # --- Token aggregates from Prometheus (the llm_usage counters) ---
@@ -707,39 +457,8 @@ def get_fleet_graph(  # noqa: PLR0915 — one linear fallback chain; each stale-
         _emit_stale("prom_budget")
         return _stale_graph(key, nodes)
 
-    # --- Loki side: cached legacy history + live indexed tail ---
-    try:
-        loki_rows, truncated = _fetch_loki_edges(now=now)
-    except loki_query_budget.LokiQueryBudgetError as exc:
-        # PoolTimeout subclass: match the refused admission before the transport failure.
-        logger.warning("fleet_graph Loki query budget refused — serving stale graph: {}", exc)
-        _emit_stale("loki_budget")
-        return _stale_graph(key, nodes)
-    except httpx.HTTPError as exc:
-        logger.warning("fleet_graph Loki query failed — serving stale graph: {}", exc)
-        _emit_stale("loki_failed")
-        return _stale_graph(key, nodes)
-
-    if _monotonic() > deadline:
-        logger.warning("fleet_graph Loki phase exceeded route budget — serving stale graph")
-        _emit_stale("loki_budget")
-        return _stale_graph(key, nodes)
-
-    live_ids: set[int] | None = None
-    if not include_terminated:
-        live_ids = {int(r[0]) for r in node_rows}
-    edges = _merge_edge_rows(
-        archive_rows,
-        loki_rows,
-        live_ids=live_ids,
-        win_start=win_start,
-        now=now,
-        decay_lambda=decay_lambda,
-    )
-
     return _finalize_graph_response(
         key=key,
         nodes=nodes,
-        edges=edges,
-        truncated=truncated,
+        edges=pg_data.edges,
     )

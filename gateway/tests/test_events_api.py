@@ -159,20 +159,20 @@ class TestEventsApi:
 
     def test_filter_category_maps_to_categories(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
-            client.get("/api/events", params={"category": "audit"})
-        assert fake_events.calls[0]["categories"] == ["audit"]
+            client.get("/api/events", params={"category": "telemetry"})
+        assert fake_events.calls[0]["categories"] == ["telemetry"]
 
-    def test_no_category_passes_none(self, fake_events: _FakeEvents) -> None:
-        # unlike the per-agent/admin endpoints, /api/events serves ALL
-        # categories (audit included) — no telemetry/log restriction
+    def test_no_category_reads_telemetry_and_log_from_loki(self, fake_events: _FakeEvents) -> None:
+        # /api/events serves ALL categories: audit rows come from Postgres, so the
+        # Loki side asks for telemetry and log only.
         with TestClient(app) as client:
             client.get("/api/events")
-        assert fake_events.calls[0]["categories"] is None
+        assert fake_events.calls[0]["categories"] == ["telemetry", "log"]
 
     def test_filter_event_name(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
-            client.get("/api/events", params={"event_name": "spawn"})
-        assert fake_events.calls[0]["event_names"] == ["spawn"]
+            client.get("/api/events", params={"event_name": "llm_usage"})
+        assert fake_events.calls[0]["event_names"] == ["llm_usage"]
 
     def test_filter_tier_maps_a_comma_separated_list(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
@@ -184,7 +184,7 @@ class TestEventsApi:
         param is ignored by FastAPI, so the request runs unfiltered — pinned
         deliberately as the post-removal wire semantics."""
         with TestClient(app) as client:
-            r = client.get("/api/events", params={"kind": "spawn"})
+            r = client.get("/api/events", params={"kind": "llm_usage"})
         assert r.status_code == 200
         assert fake_events.calls[0]["event_names"] is None
 
@@ -273,7 +273,7 @@ class TestEventsApi:
 
     def test_limit_offset_paging(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
-            client.get("/api/events", params={"limit": 5, "offset": 10})
+            client.get("/api/events", params={"category": "telemetry", "limit": 5, "offset": 10})
         kw = fake_events.calls[0]  # the query call (no count by default)
         assert kw["limit"] == 5
         assert kw["offset"] == 10
