@@ -1,13 +1,13 @@
 ---
 type: doc
-title: Rollback Snapshot Convention
+title: Recovery Snapshot Convention
 description: Shared naming predicate for finite migration recovery tables and their archival retirement guard.
 tags:
 - base
 - migrations
 ---
 
-# Rollback Snapshot Convention
+# Recovery Snapshot Convention
 
 `base/deploy/schema/rollback_snapshot.py` defines `is_rollback_snapshot_table`: a
 `*_backfill_*` table is a finite migration recovery buffer, not durable

@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import os
-import re
-import subprocess
 import time
-from pathlib import Path
 from typing import LiteralString, cast
 
 import psycopg
 import pytest
 from psycopg import sql
 
-from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
 from base.deploy.schema.migrations import (
     MigrationFailed,
@@ -166,173 +162,19 @@ def test_schema_sql_seeds_presets_without_a_skill_index() -> None:
 #
 # `20261001T055030_drop-retired-deploy-and-watcher-storage` drops the objects whose
 # readers and writers are gone, and `20261001T055130_retire-restarting-and-publication-deferred`
-# tightens two `agents_meta` CHECKs. Both must apply cleanly to a database that still
-# holds the objects (with data), land on exactly `db/schema.sql`, and roll back to the
-# pre-migration shape, which their `.down.sql` files rebuild from the baseline in the
-# reverse order a manual rollback uses.
+# tightens two `agents_meta` CHECKs; the retirement refuses a stuck row.
 
-_DIRECTORY = Path(__file__).resolve().parents[2] / "migrations"
 _DROP = "20261001T055030_drop-retired-deploy-and-watcher-storage"
 _RETIRE = "20261001T055130_retire-restarting-and-publication-deferred"
 
-_RETIRED_DEPLOYMENT_COLUMNS = {
-    "phase",
-    "kind",
-    "holder",
-    "acquired_at",
-    "expires_at",
-    "settle_hosts",
-    "settle_note",
-    "settle_started_at",
-    "outcome",
-    "failing_step",
-    "started_at",
-    "ended_at",
-    "origin",
-    "target_sha",
-    "observed_by",
-    "log_path",
-    "pin_advanced",
-    "managed_writer_evidence",
-}
 
-
-def _sql(name: str, *, down: bool = False) -> LiteralString:
-    suffix = ".down.sql" if down else ".sql"
-    return cast(LiteralString, (_DIRECTORY / f"{name}{suffix}").read_text())
-
-
-def _schema_dump(url: str) -> str:
-    result = subprocess.run(  # noqa: S603 — fixed tool path against a private throwaway database
-        [
-            str(pg_tool("pg_dump")),
-            "--schema-only",
-            "--no-owner",
-            "--no-privileges",
-            "--dbname",
-            url,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return "\n".join(
-        line
-        for line in result.stdout.splitlines()
-        if not line.startswith(("\\restrict ", "\\unrestrict "))
-    )
-
-
-def _order_insensitive(dump: str) -> list[str]:
-    """The dump as a sorted list of object blocks with each table's lines sorted.
-
-    A rollback re-adds a dropped column at the end of its table, so the restored
-    table has the same columns in a different order; every reader names its
-    columns. Nothing else about the shape may differ.
-    """
-    blocks: list[str] = []
-    for block in re.split(r"\n(?=--\n-- Name: )", dump):
-        table = re.search(r"CREATE TABLE [^\n]*\(\n(.*?)\n\);", block, re.DOTALL)
-        if table is None:
-            blocks.append(block)
-            continue
-        lines = sorted(line.rstrip(",") for line in table.group(1).splitlines())
-        blocks.append(block[: table.start(1)] + "\n".join(lines) + block[table.end(1) :])
-    return sorted(blocks)
-
-
-def _columns(conn: psycopg.Connection, table: str) -> set[str]:
-    rows = conn.execute(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = 'public' AND table_name = %s",
-        (table,),
-    ).fetchall()
-    return {row[0] for row in rows}
-
-
-def _tables(conn: psycopg.Connection) -> set[str]:
-    rows = conn.execute(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
-    ).fetchall()
-    return {row[0] for row in rows}
-
-
-def _roll_back_both(conn: psycopg.Connection) -> None:
-    conn.execute(_sql(_RETIRE, down=True), prepare=False)
-    conn.execute(_sql(_DROP, down=True), prepare=False)
-
-
-def _seed_retired_state(conn: psycopg.Connection) -> None:
-    """Production-like content in the objects the migrations drop."""
+def _widen_retired_checks(conn: psycopg.Connection) -> None:
+    """The two `agents_meta` CHECKs as they stood before the retirement migration."""
+    conn.execute("ALTER TABLE agents_meta DROP CONSTRAINT agents_meta_status_check")
     conn.execute(
-        "UPDATE deployment_state SET phase = 'stable', outcome = 'clean', "
-        "target_sha = 'c2df669', log_path = '/logs/rollout.log', pin_advanced = TRUE, "
-        "min_code_version = 2694 WHERE id = 1"
+        "ALTER TABLE agents_meta ADD CONSTRAINT agents_meta_status_check "
+        "CHECK (status IN ('running', 'idling', 'restarting', 'terminated'))"
     )
-    conn.execute("UPDATE cluster_pin SET target_sha = 'c2df669', last_known_good_sha = 'c2df669'")
-    conn.execute("UPDATE cluster_last_update SET outcome = 'clean', target_sha = 'c2df669'")
-    conn.execute(
-        "INSERT INTO host_deploy_state (machine, posture, paused_at, stranded_hold_attempts) "
-        "VALUES ('m-idle', 'idle', now(), 0), ('m-paused', 'paused', now(), 0), "
-        "('m-converging', 'converging', now(), 0)"
-    )
-    conn.execute(
-        "INSERT INTO agents (id, label) VALUES (1, 'closed'), (2, 'deferred'), (3, 'kept')"
-    )
-    conn.execute(
-        "INSERT INTO agents_meta (id, status, machine, closed_at, last_admission_outcome, "
-        "last_admission_at) VALUES "
-        "(1, 'terminated', 'm', now(), NULL, NULL), "
-        "(2, 'idling', 'm', NULL, 'publication_deferred', now()), "
-        "(3, 'idling', 'm', NULL, 'admitted', now())"
-    )
-    conn.execute(
-        "INSERT INTO agent_watchers (session_id, agent_id, kind, name, status) "
-        "VALUES (1, 3, 'at', 'w', 'reaped')"
-    )
-
-
-def _assert_retired_objects_gone_and_data_kept(url: str) -> None:
-    with psycopg.connect(url, autocommit=True) as conn:
-        assert _columns(conn, "deployment_state") == {"id", "min_code_version"}
-        assert conn.execute("SELECT id, min_code_version FROM deployment_state").fetchall() == [
-            (1, 2694)
-        ]
-        assert {"agent_watchers", "cluster_pin", "cluster_last_update"}.isdisjoint(_tables(conn))
-        assert conn.execute(
-            "SELECT to_regprocedure('public.lock_runtime_publication_admission()')"
-        ).fetchone() == (None,)
-        assert _columns(conn, "host_deploy_state") == {"machine", "posture", "updated_at"}
-        assert conn.execute(
-            "SELECT machine, posture FROM host_deploy_state ORDER BY machine"
-        ).fetchall() == [("m-converging", "idle"), ("m-idle", "idle"), ("m-paused", "paused")]
-        assert "closed_at" not in _columns(conn, "agents_meta")
-        assert conn.execute(
-            "SELECT id, last_admission_outcome, last_admission_at IS NULL "
-            "FROM agents_meta WHERE id IN (2, 3) ORDER BY id"
-        ).fetchall() == [(2, None, True), (3, "admitted", False)]
-        names = {row[0] for row in conn.execute("SELECT name FROM schema_migrations").fetchall()}
-        assert {_DROP, _RETIRE} <= names
-
-
-def test_up_lands_on_the_baseline_and_drops_only_the_retired_objects() -> None:
-    with _throwaway_database("retire_up") as url:
-        with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
-        baseline = _schema_dump(url)
-        with psycopg.connect(url, autocommit=True) as conn:
-            _roll_back_both(conn)
-            _seed_retired_state(conn)
-            assert _columns(conn, "deployment_state") > _RETIRED_DEPLOYMENT_COLUMNS
-            assert {"agent_watchers", "cluster_pin", "cluster_last_update"} <= _tables(conn)
-        assert _schema_dump(url) != baseline
-
-        with psycopg.connect(url) as conn:
-            applied = apply_pending_migrations(conn)
-        assert [name for name in applied if name in (_DROP, _RETIRE)] == [_DROP, _RETIRE]
-
-        assert _schema_dump(url) == baseline
-        _assert_retired_objects_gone_and_data_kept(url)
 
 
 def test_the_version_gate_and_posture_paths_survive_the_contraction() -> None:
@@ -374,57 +216,11 @@ def test_the_version_gate_and_posture_paths_survive_the_contraction() -> None:
             )
 
 
-def test_down_restores_the_shape_and_up_again_lands_on_the_baseline() -> None:
-    with _throwaway_database("retire_down") as url:
-        with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
-        baseline = _schema_dump(url)
-
-        with psycopg.connect(url, autocommit=True) as conn:
-            _roll_back_both(conn)
-            assert _columns(conn, "deployment_state") > _RETIRED_DEPLOYMENT_COLUMNS
-            assert conn.execute(
-                "SELECT phase, kind, pin_advanced, min_code_version FROM deployment_state"
-            ).fetchall() == [("stable", None, False, 0)]
-            assert conn.execute("SELECT count(*) FROM cluster_pin").fetchone() == (1,)
-            assert conn.execute("SELECT count(*) FROM cluster_last_update").fetchone() == (1,)
-            assert conn.execute(
-                "SELECT to_regprocedure('public.lock_runtime_publication_admission()') IS NOT NULL"
-            ).fetchone() == (True,)
-            conn.execute(
-                "INSERT INTO host_deploy_state (machine, posture) VALUES ('m', 'converging')"
-            )
-            conn.execute("DELETE FROM host_deploy_state")
-            conn.execute("INSERT INTO agents (id, label) VALUES (1, 'a')")
-            conn.execute(
-                "INSERT INTO agents_meta (id, status, machine) VALUES (1, 'restarting', 'm')"
-            )
-            conn.execute("UPDATE agents_meta SET status = 'idling' WHERE id = 1")
-            conn.execute(
-                "UPDATE agents_meta SET last_admission_outcome = 'publication_deferred', "
-                "last_admission_at = now() WHERE id = 1"
-            )
-            conn.execute(
-                "UPDATE agents_meta SET last_admission_outcome = NULL, last_admission_at = NULL"
-            )
-        rolled_back = _schema_dump(url)
-
-        with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(_sql(_DROP), prepare=False)
-            conn.execute(_sql(_RETIRE), prepare=False)
-        assert _schema_dump(url) == baseline
-
-        with psycopg.connect(url, autocommit=True) as conn:
-            _roll_back_both(conn)
-        assert _order_insensitive(_schema_dump(url)) == _order_insensitive(rolled_back)
-        assert _order_insensitive(rolled_back) != _order_insensitive(baseline)
-
-
 def test_restarting_row_refuses_the_retirement_and_leaves_the_schema_alone() -> None:
     with _throwaway_database("retire_guard") as url:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
-            _roll_back_both(conn)
+            _widen_retired_checks(conn)
             conn.execute("INSERT INTO agents (id, label) VALUES (7, 'stuck'), (8, 'ok')")
             conn.execute(
                 "INSERT INTO agents_meta (id, status, machine) VALUES "

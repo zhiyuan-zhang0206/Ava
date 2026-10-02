@@ -1,8 +1,7 @@
 """Checkpoint schema verification belongs to the start migration phase.
 
 Only fresh install may call ``PostgresSaver.setup()``. Existing clusters move
-checkpoint schema through paired Ava migrations, so the existing rollback path
-can reverse them. Every capability verifies the full upstream applied set after
+checkpoint schema through Ava migrations. Every capability verifies the full upstream applied set after
 Ava migrations; a dependency bump without that explicit bridge fails before
 any database work.
 """
@@ -252,9 +251,9 @@ def test_dependency_drift_fails_before_any_database_change(
 ) -> None:
     """An unmirrored upstream v10 cannot strand update recovery on new schema.
 
-    When a real v10 arrives, this red gate may only move after a paired Ava
-    migration exists and real-PG tests cover BOTH existing-v9 update/down and
-    fresh-v10-birth first-start registration/down. The mirrored up must be
+    When a real v10 arrives, this red gate may only move after an Ava
+    migration exists and real-PG tests cover BOTH existing-v9 update and
+    fresh-v10-birth first-start registration. The mirrored up must be
     idempotent against schema + checkpoint_migrations effects already created
     by fresh-install setup while still recording its Ava migration name.
     """
@@ -272,7 +271,7 @@ def test_dependency_drift_fails_before_any_database_change(
 
     monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1"])
 
-    with pytest.raises(CheckpointDependencyDriftError, match="paired Ava timestamp migration"):
+    with pytest.raises(CheckpointDependencyDriftError, match="Ava timestamp migration"):
         cmd_migrations_apply()
 
     assert db_conn.execute("SELECT name FROM schema_migrations").fetchall() == ava_before
@@ -280,7 +279,7 @@ def test_dependency_drift_fails_before_any_database_change(
 
 
 def test_checkpoint_schema_upstream_baseline_is_frozen() -> None:
-    """Future versions extend the paired-migration manifest, never baseline."""
+    """Future versions extend the migration manifest, never baseline."""
     from base.cluster.provision import (
         CHECKPOINT_SCHEMA_AVA_MIGRATIONS,
         CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION,
@@ -304,7 +303,7 @@ def test_checkpoint_migration_manifest_must_be_contiguous(
 def test_checkpoint_migration_manifest_follows_upstream_version_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ava applies filenames forward/down in reverse, so mapping order is semantic."""
+    """Ava applies filenames in order, so mapping order is semantic."""
     from base.cluster import provision
 
     monkeypatch.setattr(
@@ -321,17 +320,16 @@ def test_checkpoint_migration_manifest_follows_upstream_version_order(
 
 
 @pytest.mark.parametrize(
-    ("tracked", "write_up", "write_down"),
-    [(False, True, True), (True, False, False), (True, True, False)],
-    ids=["untracked", "missing-up", "missing-down"],
+    ("tracked", "write_up"),
+    [(False, True), (True, False)],
+    ids=["untracked", "missing-up"],
 )
-def test_checkpoint_migration_manifest_requires_tracked_up_and_down(
+def test_checkpoint_migration_manifest_requires_a_tracked_migration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
     tracked: bool,
     write_up: bool,
-    write_down: bool,
 ) -> None:
     from base.cluster import provision
     from base.deploy.schema import migrations
@@ -339,11 +337,9 @@ def test_checkpoint_migration_manifest_requires_tracked_up_and_down(
     name = "20990101T000000_checkpoint-v10"
     if write_up:
         (tmp_path / f"{name}.sql").write_text("SELECT 1;\n")
-    if write_down:
-        (tmp_path / f"{name}.down.sql").write_text("SELECT 1;\n")
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {10: name})
     monkeypatch.setattr(migrations, "MIGRATIONS_DIR", tmp_path)
     monkeypatch.setattr(migrations, "required_migration_set", lambda: {name} if tracked else set())
 
-    with pytest.raises(provision.CheckpointDependencyDriftError, match="git-tracked paired"):
+    with pytest.raises(provision.CheckpointDependencyDriftError, match="git-tracked Ava migration"):
         provision.assert_checkpoint_dependency_pinned()

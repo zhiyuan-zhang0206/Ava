@@ -422,7 +422,19 @@ jobs:
       - name: Run ruff format check
         run: uv run ruff format --check
       - name: Lint migrations
-        run: uv run python scripts/content_lint/lint_migrations.py
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # On a pull request, a merged migration must be byte-identical in the
+          # base revision THIS event was built against and in the checked-out
+          # merge ref.
+          args=()
+          if [ "$EVENT" = "pull_request" ]; then
+            git fetch --depth=1 origin "$BASE_SHA"
+            args=(--base "$(git rev-parse FETCH_HEAD^{commit})")
+          fi
+          uv run python scripts/content_lint/lint_migrations.py "${args[@]}"
       - name: Lint clock lattice
         run: uv run python scripts/lint/clock_lattice.py
       - name: Apply migrations to fresh DB + trigger smoke

@@ -311,10 +311,10 @@ Adoption, not flag-day:
    /api/inventory` write path retarget to the cluster row (`default_enabled`),
    turning today's cross-machine inventory UI from a per-machine toggle panel
    into a cluster-policy panel with a per-machine *runnability* column.
-4. **Down path**: each slice's `.down.sql` drops its tables/column; content is
-   already materialized on every machine, and the demoted local caches are
-   valid pre-migration authorities again, so rollback loses nothing but the
-   cluster-level view. Lossy steps (deleting local authority files) simply
+4. **Reversal path**: a later forward migration drops a slice's tables/column
+   (there are no down migrations); content is already materialized on every
+   machine, and the demoted local caches are valid pre-migration authorities
+   again, so reversal loses nothing but the cluster-level view. Lossy steps (deleting local authority files) simply
    don't happen — the files stay, they just stop being read as truth.
 
 ## What legitimately stays per-machine
