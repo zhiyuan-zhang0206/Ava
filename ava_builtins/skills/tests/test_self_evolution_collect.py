@@ -190,7 +190,7 @@ def test_transcript_uses_full_checkpoint_loader(
 ) -> None:
     called: dict[str, object] = {}
 
-    def _load(agent_id: int) -> list[HumanMessage]:
+    def _load(_db: object, agent_id: int) -> list[HumanMessage]:
         called["agent_id"] = agent_id
         return [HumanMessage(content="complete history")]
 
