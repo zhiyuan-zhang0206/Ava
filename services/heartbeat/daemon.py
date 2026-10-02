@@ -44,6 +44,7 @@ from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from base.log import init_gateway_process
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
@@ -575,13 +576,13 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
             _log.exception("[heartbeat] poll iteration failed")
 
 
-async def _liveness_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+async def _liveness_loop(pool: ConnectionPool, bus: EventBus, liveness: Liveness) -> None:
     """Run agent-liveness checks, the first at start so the roster read model is
     populated at once; a failed pass is retried on the next interval."""
     while True:
         try:
             if not admission.quiesced():
-                await run_liveness_pass(pool)
+                await run_liveness_pass(pool, bus)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -605,12 +606,13 @@ async def run() -> None:
     _log.info("[heartbeat] healthz listening on :%s", endpoint.health_port)
 
     pool = Database.from_settings().pool()
+    bus = EventBus.from_settings()
     # Liveness pass (Task #1174): a slow independent task alongside the check-in
     # loop, so a stalled probe fan-out (bounded by _PROBE_TIMEOUT_S) can never
     # delay a check-in. One pass per _PASS_INTERVAL_S, first pass after one full
     # interval (the DB merge is cheap; there is nothing to judge before the
     # first probe anyway).
-    liveness_task = asyncio.create_task(_liveness_loop(pool, liveness))
+    liveness_task = asyncio.create_task(_liveness_loop(pool, bus, liveness))
     try:
         await _dispatch_loop(pool, liveness)
     finally:
