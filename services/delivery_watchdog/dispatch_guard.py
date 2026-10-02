@@ -5,6 +5,19 @@ configured cap is reached, the watchdog marks the row poisoned, emits one
 ``delivery_poisoned`` event, and stops re-publishing it. Poisoning is only a
 watchdog guard: the inbound remains pending and claimable by a recovered agent.
 
+Wake re-dispatch and poisoning apply only while the owner's host verdict is
+fresh: a `machine_probe` row no older than the configured staleness window whose
+consecutive-failure count still grades the machine online — the same
+two-consecutive-failure rule as the roster (`MACHINE_OFFLINE_AFTER_FAILURES`) —
+and whose agent host is alive. The host verdict is excused inside the one-failure
+grace window (`consecutive_failures >= 1`), where a failed probe necessarily
+nulls it; everything else — a missing or stale row, a machine graded offline, or
+an absent/dead host verdict outside that window — freezes the row: no
+re-dispatch, no counter advance, no poison — so a host outage cannot burn a
+row's dispatch budget, and redelivery resumes on the next round once the verdict
+is fresh again (task #4872 route D). The daemon's stall alerting still reports
+such rows.
+
 After fixing the underlying failure, an operator can resume watchdog delivery:
 ``UPDATE inbound_messages SET dispatch_count = 0, last_dispatch_at = NULL,
 poisoned_at = NULL WHERE id = <inbound_id>;``
@@ -20,6 +33,7 @@ from psycopg_pool import ConnectionPool
 
 import base.db
 from base import telemetry
+from base.agents.observation.evidence import MACHINE_OFFLINE_AFTER_FAILURES
 from base.db.transaction import write_transaction
 
 _log = logging.getLogger("services.delivery_watchdog.dispatch_guard")
@@ -38,6 +52,7 @@ def select_pending_for_dispatch(
     age_s: float,
     max_dispatch_count: int,
     backoff_steps: list[float],
+    host_staleness_s: float,
 ) -> list[tuple[int, int]]:
     """Return stale pending inbounds eligible for their next wake publish.
 
@@ -46,7 +61,12 @@ def select_pending_for_dispatch(
     repeating the final step when the configured list is shorter than the
     dispatch cap. Poisoned rows, rows at the cap, owners under an active
     automatic-wake suppression window, and owners halted by the recovery
-    circuit breaker (`RECOVERY_BREAKER_CLEAR`) are never selected.
+    circuit breaker (`RECOVERY_BREAKER_CLEAR`) are never selected. Rows whose
+    owner's host verdict is not fresh — `machine_probe` missing, older than
+    ``host_staleness_s``, machine graded offline (two consecutive probe
+    failures), or no live host verdict outside the one-failure grace window —
+    are frozen instead: nothing is published and the row resumes here once the
+    verdict is fresh again (task #4872 route D).
     """
     from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
@@ -56,8 +76,12 @@ def select_pending_for_dispatch(
                 "SELECT m.id, m.agent_id "
                 "FROM inbound_messages m "
                 "JOIN agents_meta am ON am.id = m.agent_id "
+                "LEFT JOIN machine_probe mp ON mp.machine_name = am.machine "
                 "WHERE m.status = 'pending' AND am.status = 'idling' "
                 "  AND (am.wake_suppressed_until IS NULL OR am.wake_suppressed_until < now()) "
+                "  AND mp.consecutive_failures < %s "
+                "  AND (mp.agent_host_online OR mp.consecutive_failures >= 1) "
+                "  AND mp.last_probe_at >= now() - make_interval(secs => %s) "
                 "  AND {} "
                 "  AND m.created_at < now() - make_interval(secs => %s) "
                 "  AND m.dispatch_count < %s AND m.poisoned_at IS NULL "
@@ -66,7 +90,14 @@ def select_pending_for_dispatch(
                 "           GREATEST(m.dispatch_count, 1), array_length(%s::float8[], 1))])) "
                 "ORDER BY m.created_at ASC"
             ).format(sql.SQL(RECOVERY_BREAKER_CLEAR)),
-            (age_s, max_dispatch_count, backoff_steps, backoff_steps),
+            (
+                MACHINE_OFFLINE_AFTER_FAILURES,
+                host_staleness_s,
+                age_s,
+                max_dispatch_count,
+                backoff_steps,
+                backoff_steps,
+            ),
         )
         return [(row[0], row[1]) for row in cur.fetchall()]
 
@@ -76,18 +107,20 @@ def dispatch_wakes(
     dispatch_threshold_s: float,
     max_dispatch_count: int,
     backoff_steps: list[float],
+    host_staleness_s: float,
 ) -> int:
     """Publish eligible wakes, record successes, then poison exhausted rows.
 
     Publish failures are logged and do not advance the durable counter. The
     pending-status guard prevents a successful publish racing a claim from
     mutating a claimed row. Poison remains claimable and can be manually reset
-    with the SQL documented in this module's docstring. Returns the number of
-    successful publishes.
+    with the SQL documented in this module's docstring. Rows whose owner's host
+    verdict is not fresh are skipped (dispatch and poison alike) until the
+    verdict is fresh again. Returns the number of successful publishes.
     """
     dispatched_ids: list[int] = []
     for inbound_id, agent_id in select_pending_for_dispatch(
-        pool, dispatch_threshold_s, max_dispatch_count, backoff_steps
+        pool, dispatch_threshold_s, max_dispatch_count, backoff_steps, host_staleness_s
     ):
         # publish_inbound_wake never raises; it reports delivery through its
         # return value. Only a wake that actually reached Redis advances the
@@ -105,12 +138,14 @@ def dispatch_wakes(
                 (dispatched_ids,),
             )
 
-    _poison_exhausted_dispatches(pool, max_dispatch_count)
+    _poison_exhausted_dispatches(pool, max_dispatch_count, host_staleness_s)
     return len(dispatched_ids)
 
 
-def _poison_exhausted_dispatches(pool: ConnectionPool, max_dispatch_count: int) -> int:
-    candidates = _select_poison_candidates(pool, max_dispatch_count)
+def _poison_exhausted_dispatches(
+    pool: ConnectionPool, max_dispatch_count: int, host_staleness_s: float
+) -> int:
+    candidates = _select_poison_candidates(pool, max_dispatch_count, host_staleness_s)
     if not candidates:
         return 0
 
@@ -130,7 +165,7 @@ def _poison_exhausted_dispatches(pool: ConnectionPool, max_dispatch_count: int) 
 
 
 def _select_poison_candidates(
-    pool: ConnectionPool, max_dispatch_count: int
+    pool: ConnectionPool, max_dispatch_count: int, host_staleness_s: float
 ) -> list[_PoisonCandidate]:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -138,10 +173,15 @@ def _select_poison_candidates(
             "       EXTRACT(EPOCH FROM (now() - m.created_at)) AS age_s "
             "FROM inbound_messages m "
             "LEFT JOIN agents a ON a.id = m.agent_id "
+            "JOIN agents_meta am ON am.id = m.agent_id "
+            "LEFT JOIN machine_probe mp ON mp.machine_name = am.machine "
             "WHERE m.status = 'pending' AND m.dispatch_count >= %s "
             "  AND m.poisoned_at IS NULL "
+            "  AND mp.consecutive_failures < %s "
+            "  AND (mp.agent_host_online OR mp.consecutive_failures >= 1) "
+            "  AND mp.last_probe_at >= now() - make_interval(secs => %s) "
             "ORDER BY m.created_at ASC",
-            (max_dispatch_count,),
+            (max_dispatch_count, MACHINE_OFFLINE_AFTER_FAILURES, host_staleness_s),
         )
         return [
             _PoisonCandidate(row[0], row[1], row[2], row[3], float(row[4]))
