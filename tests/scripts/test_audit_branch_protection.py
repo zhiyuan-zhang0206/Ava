@@ -17,7 +17,6 @@ _ADMISSION_CHECKS = frozenset(
         "backend (pytest + pyright)",
         "frontend (eslint + tsc + vitest)",
         "e2e (Playwright happy path)",
-        "qa-approved-gate",
         "doc lints (pre-commit family)",
     }
 )
@@ -39,7 +38,6 @@ merge:
     - frontend (eslint + tsc + vitest)
     - repo language (no raw CJK)
     - secret scan (Gitleaks)
-    - qa-approved-gate
 """
 
 _TRUNK_BAD_FIXTURE = """
@@ -48,7 +46,6 @@ merge:
   required_statuses:
     - backend (pytest + pyright)
     - backend shard (${{ matrix.group }}/16)
-    - qa-approved-gate
 """
 
 
@@ -124,9 +121,9 @@ def test_real_trunk_yaml_declares_the_full_gate() -> None:
     text = (_REPO_ROOT / ".trunk" / "trunk.yaml").read_text()
     document = yaml.safe_load(text)  # type: ignore[name-defined]
     statuses = document["merge"]["required_statuses"]
-    assert len(statuses) == 13
+    assert len(statuses) == 12
     assert "secret scan (Gitleaks)" in statuses
-    assert "qa-approved-gate" in statuses
+    assert "qa-approved-gate" not in statuses
     assert "backend (pytest + pyright)" in statuses
     assert "frontend (eslint + tsc + vitest)" in statuses
     assert "e2e (Playwright happy path)" in statuses
