@@ -35,7 +35,8 @@ import base.db
 import base.sessions.pty.cli
 from base.cluster.machine import machine_name, reachable_host
 from base.config import settings
-from base.daemon.health import Liveness, start_health_server, stop_health_server
+from base.daemon.health import start_health_server, stop_health_server
+from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
@@ -46,6 +47,7 @@ from base.sessions.page_session import page_session_name
 from base.sessions.record import SessionRecord
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
+from . import dead_pages
 from .degradation import (
     _DegradedServeDir,
     _discard_gone_degraded,
@@ -56,6 +58,9 @@ from .degradation import (
 _log = logging.getLogger("services.page_server.daemon")
 
 _LIVENESS_TIMEOUT_S = 60.0
+# A dead-page round probes every open show page of the host (1.5 s each, eight at once);
+# a loop that completed nothing for this long is wedged.
+_DEAD_PAGES_LIVENESS_TIMEOUT_S = 600.0
 
 
 def _pidfile() -> Path:
@@ -614,7 +619,7 @@ def _reconcile_once(
             _ensure_handle(pool, backend, row, key, managed, backoff, degraded, now, live_names)
 
 
-async def _reconcile_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+async def _reconcile_loop(pool: ConnectionPool, liveness: LoopProgress) -> None:
     """Run page-shell reconciliation at the configured poll interval."""
     host = reachable_host()
     managed: dict[tuple[int, str], _ServerHandle] = {}
@@ -649,11 +654,20 @@ async def run() -> None:
         _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
     _write_pidfile()
-    liveness = Liveness(_LIVENESS_TIMEOUT_S)
+    liveness = LivenessGroup()
+    reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
+    dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
     health = await start_health_server("page_server", liveness=liveness)
     pool = base.db.pool()
     try:
-        await _reconcile_loop(pool, liveness)
+        # One TaskGroup owns the resident loops, each with its own progress tracker so
+        # a stalled loop cannot be masked by a busy sibling: a loop that raises cancels
+        # its sibling and ends the process, and the supervisor restarts it.
+        async with asyncio.TaskGroup() as loops:
+            loops.create_task(_reconcile_loop(pool, reconcile_progress))
+            loops.create_task(
+                dead_pages.dead_pages_loop(pool, reachable_host(), dead_pages_progress)
+            )
     finally:
         await stop_health_server(health)
         pool.close()

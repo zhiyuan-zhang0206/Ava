@@ -299,7 +299,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/agent_host/tests/test_agent_host_abort_reconcile.py",
             "services/agent_host/tests/test_agent_host_boot_defer.py",
             "services/agent_host/tests/test_agent_host_log_rotate.py",
-            "services/agent_host/tests/test_agent_host_pages.py",
             "services/agent_host/tests/test_agent_host_plugins.py",
             "services/agent_host/tests/test_agent_host_pool_release.py",
             "services/agent_host/tests/test_agent_host_recrash_reap.py",
@@ -350,7 +349,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/tests",
             "cli/commands/data_plane/tests/test_native_storage_diagnostics.py",
         ),
-        128,
+        127,
     ),
     "tests.path_scoped.structure_tests": Scope(
         (

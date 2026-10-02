@@ -84,9 +84,9 @@ def _exercise_shutdown(failure: str) -> None:
 
     original_loops = daemon._background_loops
 
-    def loops(pool: object) -> dict[str, Any]:
+    def loops() -> dict[str, Any]:
         if failure == "plugin":
-            return original_loops(pool)  # type: ignore[arg-type] -- pools are test doubles
+            return original_loops()
         failing = {} if failure == "dispatcher_returns" else {"failed": fail()}
         return {**failing, "sibling": background()}
 
@@ -127,7 +127,6 @@ def _exercise_shutdown(failure: str) -> None:
             _background_loops=loops,
             _plugins_fingerprint=MagicMock(side_effect=["before", "after"]),
             _PLUGINS_POLL_INTERVAL_S=0.01,
-            _page_reconcile_forever=background,
             _rotate_stdout_log_forever=background,
             InboundWakeDispatcher=MagicMock(return_value=MagicMock(run=dispatch)),
         ),
@@ -164,7 +163,7 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
     )
     assert result.returncode == 0, result.stdout + result.stderr
     events = json.loads(result.stdout.splitlines()[-1])
-    assert events.count("background_joined") == (2 if failure == "plugin" else 1)
+    assert events.count("background_joined") == 1
     # A process interrupt lets asyncio cancel the heartbeat immediately. Both
     # restart and background-failure paths must still drain turns and release
     # ownership before closing their DB pools.

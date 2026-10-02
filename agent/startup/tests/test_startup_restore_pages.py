@@ -1,7 +1,6 @@
 """`reconcile_open_pages` — probe every open page's server and restore it.
 
-Runs at agent boot, on each heartbeat, and on the periodic page-reconcile
-host scans, as the catch-all for page-server
+Runs at agent boot and on each heartbeat, as the catch-all for page-server
 death after daemon supervision inside persistent page sessions. Per open row:
 server alive -> keep; dead + serve_dir -> re-serve; dead + no serve_dir ->
 close the row so the dead link stops showing as open (PageClosed event).
@@ -11,8 +10,6 @@ the probe itself against a real local HTTP server.
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 import pytest
 
@@ -99,18 +96,6 @@ def _fake_serve(served: list[tuple]) -> object:
         return object()
 
     return _f
-
-
-async def _run_loop_briefly(task: Any, seconds: float) -> None:
-    """Run the reconcile-loop task for `seconds`, then cancel it (the loop
-    never exits on its own) and swallow its CancelledError."""
-    import asyncio
-    import contextlib
-
-    await asyncio.sleep(seconds)
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
 
 
 async def test_reserves_dead_server(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -280,83 +265,6 @@ def test_page_server_alive_refused() -> None:
     assert _page_server_alive("127.0.0.1", 1) is False
 
 
-async def test_page_reconcile_loop_runs_periodically(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Task #2257: the heartbeat-independent periodic scan — a busy agent
-    (no heartbeats) still gets its pages reconciled on a fixed cadence."""
-    import asyncio
-
-    from agent.startup import page_reconcile_loop
-
-    calls: list[tuple[object, int, object | None]] = []
-
-    async def _fake_reconcile(pool, agent_id, *, event_publisher=None):
-        calls.append((pool, agent_id, event_publisher))  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr("agent.startup.reconcile_open_pages", _fake_reconcile)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("agent.startup._last_reconcile_at", {7: 0.0})  # pyright: ignore[reportUnknownArgumentType]
-
-    task = asyncio.create_task(
-        page_reconcile_loop(object(), 7, interval_s=0.01)  # type: ignore[arg-type]
-    )
-    await _run_loop_briefly(task, 0.06)
-
-    assert len(calls) >= 2
-    _pool, agent_id, publisher = calls[0]
-    assert agent_id == 7
-    assert publisher is None
-
-
-async def test_page_reconcile_loop_survives_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A raising pass must not kill the loop (N1, #1284 QA review) — like the
-    lease renewer, any failure is logged and the loop retries next interval
-    instead of silently losing the busy-agent backstop."""
-    import asyncio
-
-    from agent.startup import page_reconcile_loop
-
-    calls = 0
-
-    async def _boom(pool, agent_id, *, event_publisher=None):
-        nonlocal calls
-        calls += 1
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr("agent.startup.reconcile_open_pages", _boom)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("agent.startup._last_reconcile_at", {7: 0.0})  # pyright: ignore[reportUnknownArgumentType]
-
-    task = asyncio.create_task(
-        page_reconcile_loop(object(), 7, interval_s=0.01)  # type: ignore[arg-type]
-    )
-    # Cancels cleanly -> the task survived; had a pass killed it, the await
-    # would re-raise the exception instead.
-    await _run_loop_briefly(task, 0.05)
-    assert calls >= 2
-
-
-async def test_page_reconcile_loop_skips_recent_pass(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pass another path (boot / heartbeat) already ran within the interval
-    suppresses the periodic pass — the combined cadence stays ~one scan per
-    interval, so an idle agent is not probed twice."""
-    import asyncio
-    import time
-
-    from agent.startup import page_reconcile_loop
-
-    monkeypatch.setattr(
-        "agent.startup.reconcile_open_pages",
-        lambda *a, **k: pytest.fail("periodic pass must be skipped"),  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
-    )
-    # A heartbeat pass just ran (monotonic now, plus margin so the sleep
-    # overshoot can never push the diff past the interval) — the loop must
-    # not scan.
-    monkeypatch.setattr("agent.startup._last_reconcile_at", {7: time.monotonic() + 60})  # pyright: ignore[reportUnknownArgumentType]
-
-    task = asyncio.create_task(
-        page_reconcile_loop(object(), 7, interval_s=0.01)  # type: ignore[arg-type]
-    )
-    await _run_loop_briefly(task, 0.05)
-
-
 async def test_open_pages_query_filters_closed_and_expired(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -377,169 +285,3 @@ async def test_open_pages_query_filters_closed_and_expired(
     assert "closed_at IS NULL" in selects[0]
     assert "expired_at IS NULL" in selects[0]
     assert served == []
-
-
-async def test_reconcile_all_open_pages_scans_each_agent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Task #2260: the hosted daemon's periodic scan reconciles every agent
-    that has open pages, one pass per agent."""
-    from agent.startup import reconcile_all_open_pages
-
-    reconciled: list[int] = []
-
-    async def _fake_reconcile(pool, agent_id, *, event_publisher=None):
-        reconciled.append(agent_id)  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr("agent.startup.reconcile_open_pages", _fake_reconcile)  # pyright: ignore[reportUnknownArgumentType]
-    # No recent pass for any agent -> every listed agent is scanned.
-    monkeypatch.setattr("agent.startup._last_reconcile_at", {})
-
-    pool = _FakePool([(3,), (7,), (11,)])
-    await reconcile_all_open_pages(pool, interval_s=0.01)  # type: ignore[arg-type]
-
-    assert reconciled == [3, 7, 11]
-    # The listing query filters to open rows only.
-    selects = [sql for sql, _p in pool.executed if sql.startswith("SELECT")]  # pyright: ignore[reportUnknownMemberType]
-    assert len(selects) == 1
-    assert "DISTINCT agent_id" in selects[0]
-    assert "closed_at IS NULL" in selects[0]
-
-
-async def test_reconcile_all_open_pages_skips_recently_scanned(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An agent another path (its heartbeat scan) already reconciled within
-    the interval is skipped — per-agent throttle keys, so one agent's recent
-    scan never suppresses another's."""
-    import time
-
-    from agent.startup import reconcile_all_open_pages
-
-    reconciled: list[int] = []
-
-    async def _fake_reconcile(pool, agent_id, *, event_publisher=None):
-        reconciled.append(agent_id)  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr("agent.startup.reconcile_open_pages", _fake_reconcile)  # pyright: ignore[reportUnknownArgumentType]
-    # Agent 7 was scanned moments ago; 3 and 11 were not.
-    monkeypatch.setattr("agent.startup._last_reconcile_at", {7: time.monotonic() + 60})
-
-    pool = _FakePool([(3,), (7,), (11,)])
-    await reconcile_all_open_pages(pool, interval_s=0.01)  # type: ignore[arg-type]
-
-    assert reconciled == [3, 11]
-
-
-async def test_reconcile_all_open_pages_swallows_query_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """DB down must not kill the hosted daemon's scan — the listing query
-    failure is logged and the pass ends."""
-    from agent.startup import reconcile_all_open_pages
-
-    class _BoomPool:
-        async def connection(self) -> None:
-            raise RuntimeError("pg down")
-
-    monkeypatch.setattr(
-        "agent.startup.reconcile_open_pages",
-        lambda *a, **kw: pytest.fail("must not scan when the listing query fails"),  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
-    )
-    await reconcile_all_open_pages(_BoomPool(), interval_s=0.01)  # type: ignore[arg-type]  # must not raise
-
-
-class _SequencedPool:
-    """Serves one result set per connection, in order: connection 1 answers
-    the listing query, each later connection is one agent's open-page query."""
-
-    def __init__(self, results: list[list[tuple]]) -> None:
-        self._results: list[list[tuple]] = results
-        self._i = 0
-
-    def connection(self) -> _SequencedConn:
-        return _SequencedConn(self)
-
-
-class _SequencedConn:
-    def __init__(self, pool: _SequencedPool) -> None:
-        self._pool = pool
-
-    def cursor(self) -> _SequencedCur:
-        return _SequencedCur(self._pool)
-
-    async def __aenter__(self) -> _SequencedConn:
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        return None
-
-
-class _SequencedCur:
-    def __init__(self, pool: _SequencedPool) -> None:
-        self._pool = pool
-        self._rows: list[tuple[object, ...]] = []
-
-    async def execute(self, sql: str, params: tuple | None = None) -> None:
-        self._rows = self._pool._results[self._pool._i]  # pyright: ignore[reportUnknownMemberType]
-        self._pool._i += 1  # pyright: ignore[reportUnknownMemberType]
-
-    async def fetchall(self) -> list[tuple]:
-        return self._rows
-
-    async def fetchone(self) -> tuple[object, ...] | None:
-        return None
-
-    async def __aenter__(self) -> _SequencedCur:
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        return None
-
-
-async def test_reconcile_all_open_pages_reserves_with_turn_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """P1 (#1312 adversarial review): the hosted daemon process has no agent
-    identity, and the re-serve arm reads ava.agent_identity.agent_id() — the pass must
-    bind the agent's turn identity so serve() registers for the right agent.
-    Runs the REAL reconcile path (not a fake) to pin the mechanism."""
-    import ava.agent_identity
-    from agent.startup import reconcile_all_open_pages
-
-    identities: list[int | None] = []
-
-    def _fake_serve(*args, **kwargs) -> object:
-        identities.append(ava.agent_identity.agent_id())  # pyright: ignore[reportUnknownArgumentType]
-        return object()
-
-    monkeypatch.setattr("ava.ui.serve", _fake_serve)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("agent.startup._last_reconcile_at", {})
-
-    pool = _SequencedPool(
-        [
-            [(7,)],  # listing: agent 7 has open pages
-            [_row("report", 18001, serve_dir="/data/report")],  # agent 7's rows
-        ]
-    )
-    await reconcile_all_open_pages(pool, interval_s=0.01)  # type: ignore[arg-type]
-
-    # serve() saw the bound identity, not None — without the bind the
-    # registration POST would target /agents/None and fail (the P1).
-    assert identities == [7]
-
-
-async def test_reconcile_stamps_own_agent_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The pass stamps ITS agent's throttle key only — hosted: one agent's
-    scan must never suppress another's (write side of the per-agent dict)."""
-    import agent.startup as startup_mod
-
-    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("agent.startup._last_reconcile_at", {})
-
-    pool = _FakePool([_row("report", 18001, serve_dir="/data/report")])
-    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
-
-    assert 7 in startup_mod._last_reconcile_at
-    assert 8 not in startup_mod._last_reconcile_at
