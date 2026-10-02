@@ -285,6 +285,29 @@ Two more gateway-side daemons, one root each, no reader outside the package.
   `services/backup.py` and `base/host/system/walg_job.py`), `memory_indexer` (read by ops and the CLI) and
   `milvus` (only import-time constants).
 
+### Computer use, page server, memory search and hierarchy worker
+
+Four more daemons, one slice each, each package added to `SLICED_PACKAGES`:
+
+- `ComputerUseConfig` (`services/computer`, root `mcp_daemon.py`): lease, queue timeout and
+  session idle, taken by `ComputerMcpDaemon`.
+- `PageServerConfig` (`services/page_server`, root `daemon.py`): the poll interval and the
+  live-event channel, threaded through the reconcile pass to the PageClosed publication.
+- `MemorySearchConfig` (`services/memory_search`, root `daemon.py`): pidfile, data directory,
+  port and the batch bound `build_app` takes. The embedding provider still comes from the
+  memory-indexer factory, which three consumers share (gateway router, bring-up, this
+  daemon) and which waits for the shared-kernel batch.
+- `HierarchyWorkerConfig` (`services/hierarchy_worker`, root `roots.py`): the 17 `hierarchy_*`
+  daemon fields and the generation model. The package has two processes, the schedule host
+  and the build child, so the root is its own module: `hierarchy_worker_config()` and
+  `prepare()` live there, the scan, runner and job execution take the slice. The big test
+  files keep their `settings` patches and reach the code through
+  `tests/slices.py` wrappers that rebuild the slice from the live settings at each call.
+
+Not sliceable yet, found by re-scanning the code: `delivery_watchdog`, `ttl_reaper` and
+`schedule_manager` are being reworked; `memory_indexer` and `cli/commands/cluster` have
+several entries; the physical-backup package the first survey listed no longer exists.
+
 ## Open questions
 
 - **Log throttling and alert configuration.** Not touched in this wave, and no
