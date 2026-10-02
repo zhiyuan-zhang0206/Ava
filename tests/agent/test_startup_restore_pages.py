@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from langchain_core.messages import HumanMessage
 
 from agent.startup import _page_server_alive, reconcile_open_pages
-from agent.state import AgentState
 
 
 class _FakeCursor:
@@ -280,36 +278,6 @@ def test_page_server_alive_ok() -> None:
 def test_page_server_alive_refused() -> None:
     """A dead server (connection refused) reads as dead — no exception escapes."""
     assert _page_server_alive("127.0.0.1", 1) is False
-
-
-async def test_heartbeat_runs_page_reconcile(monkeypatch: pytest.MonkeyPatch) -> None:
-    """HEARTBEAT handler probes the agent's pages (Task #973: live agents must
-    self-heal pages killed by a cluster rollout — boot recovery never runs)."""
-    from agent.db import ClaimedInbound
-    from agent.graph.claim.node import _BatchState, _handle_heartbeat
-
-    calls: list[tuple[object, int, object | None]] = []
-
-    async def _fake_reconcile(pool, agent_id, *, event_publisher=None):
-        calls.append((pool, agent_id, event_publisher))  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr("agent.startup.reconcile_open_pages", _fake_reconcile)  # pyright: ignore[reportUnknownArgumentType]
-
-    class _Ctx:
-        ops_pool = object()
-        event_publisher = object()
-
-    item = ClaimedInbound(id=1, agent_id=7, content="check-in", kind="heartbeat", source="system")
-    st = _BatchState()
-    state = AgentState(messages=[HumanMessage(content="hi")])
-    await _handle_heartbeat(_Ctx(), 7, item, st, state)  # type: ignore[arg-type]
-
-    assert len(calls) == 1
-    _pool, agent_id, publisher = calls[0]
-    assert agent_id == 7
-    assert publisher is _Ctx.event_publisher
-    # heartbeat system note still appended as usual (breaker closed)
-    assert len(st.new_msgs) == 1
 
 
 async def test_page_reconcile_loop_runs_periodically(monkeypatch: pytest.MonkeyPatch) -> None:

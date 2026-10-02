@@ -43,9 +43,7 @@
     "tests/agent/test_maintenance_receipt_grading.py::ops.agent_pause._wake": 3,
     "tests/agent/test_maintenance_receipt_grading.py::ops.cluster_pause._unpause_local_cluster": 1,
     "tests/agent/test_multiple_tool_calls.py::agent.graph.exec.node._run_agent_code": 7,
-    "tests/agent/test_resource_admission.py::agent.graph.exec._owned_run": 7,
-    "tests/agent/test_startup_restore_pages.py::agent.startup._last_reconcile_at": 7,
-    "tests/agent/test_startup_restore_pages.py::agent.startup._page_server_alive": 9
+    "tests/agent/test_resource_admission.py::agent.graph.exec._owned_run": 2
   },
   "tests_location": {
     "tests/agent/test_claim.py::top-level": 1,
