@@ -30,7 +30,6 @@ from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import RedisError
 
-from base import telemetry
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.dataplane import pooler as pooler_files
@@ -45,6 +44,7 @@ from cli.commands.lifecycle.service_stop import (
     capture_tree,
     deadline_after,
     remaining,
+    report_postgres_stop_escalation,
     wait_for_exit,
 )
 
@@ -116,25 +116,6 @@ def _postgres_fast_budget(deadline: float) -> float:
     return left - reserve if left > reserve else left
 
 
-def _report_escalation(escalation: owned_postgres.Escalation, notes: list[str] | None) -> None:
-    killed = ", ".join(str(pid) for pid in escalation.killed) or "none"
-    note = (
-        f"postgres {escalation.detail}; ended by an immediate shutdown "
-        f"(crash recovery at the next start; unarchived WAL stays in pg_wal), "
-        f"killed leftover processes: {killed}"
-    )
-    print(f"  ! {note}", file=sys.stderr, flush=True)
-    telemetry.emit(
-        "telemetry",
-        "postgres_stop_escalated",
-        level="error",
-        source="stop",
-        attributes={"detail": escalation.detail, "killed": list(escalation.killed)},
-    )
-    if notes is not None:
-        notes.append(note)
-
-
 async def _request_stop(
     name: str,
     identity: OwnedProcess,
@@ -155,7 +136,7 @@ async def _request_stop(
             kill_wait=PROCESS_KILL_WAIT_S,
         )
         if escalation is not None:
-            _report_escalation(escalation, notes)
+            report_postgres_stop_escalation(escalation, notes)
     elif name == "redis":
         # Do not use redis-py's shutdown helper: it accepts any connection
         # error as success. Expected EOF is accepted only if the exact PID
