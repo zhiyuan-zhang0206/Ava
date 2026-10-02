@@ -87,7 +87,7 @@ class Cluster:
         hold = json.dumps(
             {"status": status, "maintenance": phase and {"phase": phase, "failures": failures}}
         )
-        if 'echo "head=' in command:
+        if '"head=$(git rev-parse HEAD)"' in command:
             for key in ("head", "dirty", "hook", "active"):
                 emit(f"{key}={host[key]}")
             emit(f"hold={hold}")
@@ -335,3 +335,43 @@ def test_the_log_carries_no_secret(
     assert "<redacted>" in written
     assert not [secret for secret in ("s3cret-a", "tok-b", "pw-c") if secret in written]
     assert all(path.stat().st_mode & 0o077 == 0 for path in logs)
+
+
+_HOLD_WITH_BACKSLASHES = (
+    '{"status": "paused", "maintenance": {"phase": "stopped", '
+    '"failures": {"argv": "[\\"sh\\", \\"-c\\", \\"\\\\$HOME\\\\n\\"]"}}}'
+)
+
+
+@pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
+def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
+    shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """zsh's and dash's `echo` interpret backslashes: a hold record whose argv holds `\\$HOME`
+    reached `_hold` as an invalid escape. The probe runs in each host's real shell."""
+    if not Path(shell).exists():
+        pytest.skip(f"{shell} is not installed")
+    source = tmp_path / ".ava" / "source"
+    (source / ".venv" / "bin").mkdir(parents=True)
+    _git(source, "init", "-q", "--initial-branch=main")
+    _git(source, "commit", "-q", "--allow-empty", "-m", "base")
+    (source / ".git" / "info" / "exclude").write_text(".venv/\n")
+    fake = source / ".venv" / "bin" / "ava"
+    fake.write_text(f"#!/bin/sh\ncat <<'EOF'\nnoise line\n{_HOLD_WITH_BACKSLASHES}\nEOF\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    result = subprocess.run(  # noqa: S603
+        [shell, "-c", fleet_update._PROBE], capture_output=True, text=True, check=True
+    )
+
+    facts = {
+        key: value for key, _, value in (line.partition("=") for line in result.stdout.splitlines())
+    }
+    assert facts["head"] == _git(source, "rev-parse", "HEAD")
+    assert facts["dirty"] == "0"
+    assert fleet_update._hold(facts["hold"]) == (
+        "paused",
+        "stopped",
+        {"argv": '["sh", "-c", "\\$HOME\\n"]'},
+    )

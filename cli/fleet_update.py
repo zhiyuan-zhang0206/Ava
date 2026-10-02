@@ -39,12 +39,14 @@ _CLEAN = (
     "are not caused by this update (a changed .gitignore can reveal them): check them, then "
     'move them away (do not delete) and rerun down."; exit 1; }'
 )
+# `printf '%s\n'`, not `echo`: zsh's (and dash's) echo interprets backslashes, which corrupts the
+# hold JSON when an argv in the record holds one (`\\$HOME` becomes `\$HOME`: an invalid escape).
 _PROBE = f"""{_HOME}
-echo "head=$(git rev-parse HEAD)"
-echo "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
+printf '%s\\n' "head=$(git rev-parse HEAD)"
+printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
-echo "hold=$({_AVA} maintenance status 2>/dev/null | grep '^{{' | tail -n 1)\""""
+printf '%s\\n' "hold=$({_AVA} maintenance status 2>/dev/null | grep '^{{' | tail -n 1)\""""
 # Early converge passes left these 0555; `uv sync` cannot write through them.
 _VENV_DIRS = (
     "find .venv/bin .venv/lib -maxdepth 3 -type d \\( -path .venv/bin "
