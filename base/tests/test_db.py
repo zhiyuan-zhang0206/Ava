@@ -26,6 +26,14 @@ from base.native_process import code_version
 from base.telemetry import Event, process_name
 
 
+def _direct_url_x(_config: object = None) -> str:
+    return "postgresql://u:p@db:5432/x"
+
+
+def _direct_url_test(_config: object = None) -> str:
+    return "postgresql://direct-test"
+
+
 def test_connect_refuses_placeholder_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """connect() raises PlaceholderDbUrlError when db_url is the placeholder URL,
     rather than letting a bare process reach a real database."""
@@ -143,7 +151,7 @@ def test_connect_unbounded_keeps_the_keepalives(monkeypatch: pytest.MonkeyPatch)
     long DDL on a remote link is the flow a dead peer would otherwise pin."""
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u:p@db.example:5432/x")
     monkeypatch.setattr(settings.data_plane, "db_sslmode", "")
-    monkeypatch.setattr(connections, "direct_db_url", lambda *_: "postgresql://u:p@db:5432/x")
+    monkeypatch.setattr(connections, "direct_db_url", _direct_url_x)
     dials = _spy_dials(monkeypatch)
     db.connect(direct=True, unbounded=True)
     assert dials == [
@@ -358,7 +366,7 @@ def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
             captured.update(_kw)
 
     monkeypatch.setattr(connections, "ConnectionPool", _FakePool)
-    monkeypatch.setattr(connections, "direct_db_url", lambda *_: "postgresql://direct-test")
+    monkeypatch.setattr(connections, "direct_db_url", _direct_url_test)
     # Pooled (the default): the baseline restore is armed on configure + check.
     db.pool()
     assert captured.get("configure") is connections._restore_pooled_session
