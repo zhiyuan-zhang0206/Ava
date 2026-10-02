@@ -146,10 +146,9 @@ limits_config:
   # box (upstream defaults — 1h splits, parallelism 32/128 — are sized for a
   # horizontally scaled querier fleet; here they turned one 30d instant
   # aggregation into ~128 hourly subqueries, 2026-08-18 incident). BOTH split
-  # keys matter: the gateway's aggregations (count_events / count_grouped /
-  # attribute_aggregate in gateway/lgtm/loki_events.py) are INSTANT queries
-  # governed only by the instant key; range queries (query_events,
-  # count_events_series, metric_range) follow the other.
+  # keys matter: Grafana's aggregations are INSTANT queries governed only by the
+  # instant key; range queries (the backfill's query_events, dashboard panels)
+  # follow the other.
   split_queries_by_interval: 24h
   split_instant_metric_queries_by_interval: 24h
   max_query_parallelism: 4
@@ -161,11 +160,10 @@ compactor:
   delete_request_store: filesystem
 
 # Result caches — without them every repeated aggregation re-reads and
-# re-unwraps the same chunks (the gateway's ops panels poll on fixed
+# re-unwraps the same chunks (Grafana's panels poll on fixed
 # intervals). Two caches because the two query shapes cache separately:
-# cache_results covers metric RANGE queries (count_events_series /
-# attribute_max_series / metric_range); the instant-metric pair covers the
-# gateway's aggregations, which run against /loki/api/v1/query with end=now —
+# cache_results covers metric RANGE queries; the instant-metric pair covers
+# aggregations that run against /loki/api/v1/query with end=now —
 # with split alignment the interior 24h-aligned subranges repeat across polls
 # and only the trailing partial interval recomputes. The instant-metric keys
 # are marked experimental upstream (3.x); acceptable for this single-binary
