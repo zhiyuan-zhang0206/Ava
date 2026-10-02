@@ -92,3 +92,7 @@ writes the notices itself in its `terminals` phase.
 Forward: [decisions/2026-10-02-every-resident-database-loop-gates-on-quiesced.md](2026-10-02-every-resident-database-loop-gates-on-quiesced.md)
 extends the third decision point from the three named writers to every resident database
 loop, gated once in the shared round loop and by a lint for the hand-written ones.
+
+Forward: [decisions/2026-10-02-the-stop-reports-pooler-clients-it-does-not-release-pools.md](2026-10-02-the-stop-reports-pooler-clients-it-does-not-release-pools.md)
+retires the fifth decision point (the pre-stop pool release) and replaces it with a report of the
+pooler's remaining clients.

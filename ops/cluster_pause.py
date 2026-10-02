@@ -11,21 +11,11 @@ from __future__ import annotations
 import logging
 from typing import cast
 
-import psycopg
-from psycopg_pool import ConnectionPool
-
 import base.deploy.state.host_deploy_state
-from base.daemon.health import health_port
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
-from base.host.net import http_dial
 
 _log = logging.getLogger(__name__)
 _UNSET = object()
-
-# Bound for the loopback dial that releases the host daemon's idle pool
-# connections; the host answers in milliseconds (it only closes sockets), so
-# this only guards a wedged or unreachable listener.
-_POOL_RELEASE_TIMEOUT_S = 5.0
 
 
 def is_paused(
@@ -105,42 +95,3 @@ def _unpause_local_cluster() -> None:
     admission.require_start_allowed()
     set_posture("idle")
     _log.info("[cluster] unpaused: posture -> idle")
-
-
-def release_local_db_pools(
-    ops_pool: ConnectionPool[psycopg.Connection] | None,
-) -> dict[str, object]:
-    """Release this unit's idle DB-pool connections; never fail the stop.
-
-    Two client pools survive the agent drain: the local host daemon's shared /
-    control pools (dialed over its loopback health port) and the ops daemon's
-    own dispatch pool, which that daemon passes in as `ops_pool` (None before
-    its pool opens). Left open, they hold PgBouncer server connections
-    through the data-plane window the stop is about to close. Both releases are
-    best-effort — a failure leaves the stop correct but leaks idle client
-    connections into the downtime — so it logs loudly and reports in the
-    returned payload instead of raising.
-    """
-    released: dict[str, object] = {}
-
-    try:
-        resp = http_dial.post(
-            f"http://127.0.0.1:{health_port('agent_host')}/release-db-pools",
-            timeout=_POOL_RELEASE_TIMEOUT_S,
-        )
-        resp.raise_for_status()
-        released["host"] = resp.json().get("released", {})
-    except Exception as exc:
-        _log.warning("[cluster] host pool release failed (continuing the stop): %s", exc)
-        released["host_error"] = str(exc)
-
-    try:
-        if ops_pool is not None:
-            from base.db.pool_release import release_idle_sync
-
-            released["ops"] = release_idle_sync(ops_pool)
-    except Exception as exc:
-        _log.warning("[cluster] ops pool release failed (continuing the stop): %s", exc)
-        released["ops_error"] = str(exc)
-
-    return released

@@ -562,13 +562,18 @@ def report_postgres_stop_escalation(
 
 
 def stop_data_plane(
-    timeout: float, *, save: bool = True, notes: list[str] | None = None
+    timeout: float,
+    *,
+    save: bool = True,
+    notes: list[str] | None = None,
+    clients: list[str] | None = None,
 ) -> list[str]:
     """Stop this home's native data plane; never stop a remote-managed plane.
 
     `notes` collects what the stop report must say (a Postgres shutdown that had to be
-    escalated).
+    escalated); `clients` collects the pooler's still-connected clients, reported and
+    never acted on.
     """
     from cli.commands.data_plane.maintenance_stop import stop
 
-    return stop(timeout, save=save, notes=notes)
+    return stop(timeout, save=save, notes=notes, clients=clients)
