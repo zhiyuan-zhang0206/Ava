@@ -9,7 +9,6 @@
   },
   "patch_targets": {
     "tests/cli/test_converge_redis_bridge.py::services.redis_bridge.relay._sleep": 2,
-    "tests/cli/test_grafana_render_cmd.py::cli.commands.observability.grafana_render._provisioning_dashboard": 2,
     "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._MIN_EMIT_INTERVAL_SECONDS": 2,
     "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._heartbeat_loop": 2,
     "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._loop_time": 1,
