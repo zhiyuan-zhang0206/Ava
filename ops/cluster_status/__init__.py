@@ -36,6 +36,7 @@ from base.cluster.machine import (
 from base.config import cluster_tz
 from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
+from base.paths import pid_path
 from base.sessions.page_session import is_page_label
 from ops import cluster_pause
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
@@ -494,13 +495,10 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     through and FastAPI surfaces as default 500 (admin endpoint, not
     consumed by SDK).
     """
-    from base.config import settings
     from base.deploy.git.cluster_drift import prod_source_head_sha
     from base.native_process import loaded_commit as _process_sha
 
-    agent_host_alive = (
-        _check_pidfile(str(settings.services.agent_host_pidfile))[0] if is_agent_runner() else None
-    )
+    agent_host_alive = _check_pidfile(str(pid_path("agent_host")))[0] if is_agent_runner() else None
     supervisor_alive = _supervisor_online()
     sessions, shell_count, session_total = _collect_sessions()
     # The producer is typed (AgentSessionGroup); ClusterStatus.agent_groups stays

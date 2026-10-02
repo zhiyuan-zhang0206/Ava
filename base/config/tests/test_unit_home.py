@@ -29,7 +29,6 @@ def test_pidfile_fields_rooted_under_unit_home(monkeypatch: pytest.MonkeyPatch) 
 
     s = Settings()
     root = Path("/srv/.ava_gateway")
-    assert s.services.agent_host_pidfile == root / "run" / "agent-host.pid"
     assert s.services.gateway_pidfile == root / "run" / "gateway.pid"
     assert s.services.memory_root == root / "memory"
     assert s.services.milvus_data_dir == root / "milvus-data"

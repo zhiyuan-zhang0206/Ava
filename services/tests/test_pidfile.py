@@ -45,7 +45,7 @@ def test_daemon_guard_checks_only_current_pidfile(
 
     monkeypatch.setattr(daemon, "pidfile_holds_daemon", holds_daemon)
     assert daemon._is_running() is False
-    assert calls == [(daemon._PIDFILE, module_name)]
+    assert calls == [(daemon._pidfile(), module_name)]
 
 
 def test_acquire_writes_own_pid(tmp_path: Any) -> None:

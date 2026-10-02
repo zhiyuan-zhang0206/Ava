@@ -54,6 +54,7 @@ import sys
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 import psycopg
@@ -72,6 +73,7 @@ from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
+from base.paths import pid_path
 from services.events_maintenance.blob_vacuum import (
     emit_checkpoint_table_sizes,
     run_blob_vacuum,
@@ -84,7 +86,11 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 
 _log = logging.getLogger("services.events_maintenance.daemon")
 
-_PIDFILE = settings.services.events_maintenance_pidfile
+
+def _pidfile() -> Path:
+    return pid_path("events_maintenance")
+
+
 _LIVENESS_BEAT_STEP_S = 30.0
 
 
@@ -156,13 +162,13 @@ def _run_resolution(pool: ConnectionPool, progress: LoopProgress) -> None:
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.events_maintenance.daemon"):
-        _log.info("[events_maintenance] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.events_maintenance.daemon"):
+        _log.info("[events_maintenance] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -170,7 +176,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.events_maintenance.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.events_maintenance.daemon")
 
 
 def _loop_components(liveness: LivenessGroup) -> list[dict[str, object]]:
@@ -332,13 +338,13 @@ async def run() -> None:
     if _is_running():
         _log.info(
             "[events-maintenance] daemon already running (pidfile=%s), exiting",
-            _PIDFILE,
+            _pidfile(),
         )
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
     _write_pidfile()
-    _log.info("[events-maintenance] pidfile written: %s", _PIDFILE)
+    _log.info("[events-maintenance] pidfile written: %s", _pidfile())
 
     liveness = LivenessGroup()
     dispatch_progress = liveness.register(

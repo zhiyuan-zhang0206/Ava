@@ -15,14 +15,19 @@ from pathlib import Path
 
 import pytest
 
-from base.config import settings
 from ops.agent_pause import probe
 
 
-def _pidfile(tmp_path: Path, pid: int) -> Path:
-    path = tmp_path / "agent-host.pid"
-    path.write_text(f"{pid}\n", encoding="utf-8")
-    return path
+def _pin_pidfiles(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def pid_path(name: str) -> Path:
+        return tmp_path / f"{name}.pid"
+
+    monkeypatch.setattr(probe, "pid_path", pid_path)
+
+
+def _pidfile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pid: int) -> None:
+    _pin_pidfiles(monkeypatch, tmp_path)
+    (tmp_path / "agent_host.pid").write_text(f"{pid}\n", encoding="utf-8")
 
 
 def _stub_backend(monkeypatch: pytest.MonkeyPatch, *, has_session: bool) -> None:
@@ -64,7 +69,7 @@ def test_host_running_true_for_root_supervised_pidfile(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     pid = os.getpid()
-    monkeypatch.setattr(settings.services, "agent_host_pidfile", _pidfile(tmp_path, pid))
+    _pidfile(monkeypatch, tmp_path, pid)
     _stub_backend(monkeypatch, has_session=False)
     _stub_root_client(monkeypatch, response=_root_response(state="running", pid=pid))
     assert probe.host_running() is True
@@ -73,7 +78,7 @@ def test_host_running_true_for_root_supervised_pidfile(
 def test_host_running_rejects_live_pid_when_root_unreachable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(settings.services, "agent_host_pidfile", _pidfile(tmp_path, os.getpid()))
+    _pidfile(monkeypatch, tmp_path, os.getpid())
     _stub_backend(monkeypatch, has_session=False)
     _stub_root_client(monkeypatch, unreachable=True)
     with pytest.raises(RuntimeError, match="without its owned service session"):
@@ -84,7 +89,7 @@ def test_host_running_rejects_live_pid_when_root_does_not_own_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     pid = os.getpid()
-    monkeypatch.setattr(settings.services, "agent_host_pidfile", _pidfile(tmp_path, pid))
+    _pidfile(monkeypatch, tmp_path, pid)
     _stub_backend(monkeypatch, has_session=False)
     _stub_root_client(monkeypatch, response=_root_response(state="running", pid=pid + 1))
     with pytest.raises(RuntimeError, match="without its owned service session"):
@@ -95,7 +100,7 @@ def test_host_running_rejects_live_pid_when_root_unit_is_down(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     pid = os.getpid()
-    monkeypatch.setattr(settings.services, "agent_host_pidfile", _pidfile(tmp_path, pid))
+    _pidfile(monkeypatch, tmp_path, pid)
     _stub_backend(monkeypatch, has_session=False)
     _stub_root_client(monkeypatch, response=_root_response(state="stopped", pid=pid))
     with pytest.raises(RuntimeError, match="without its owned service session"):
@@ -110,7 +115,7 @@ def test_host_running_retries_the_scan_once_past_a_leaked_permission_error(
     identical read succeeds when re-probed, so the scan retries once and the
     real answer still lands (the 2026-09-18 flake)."""
     _stub_backend(monkeypatch, has_session=False)
-    monkeypatch.setattr(settings.services, "agent_host_pidfile", tmp_path / "absent.pid")
+    _pin_pidfiles(monkeypatch, tmp_path)
     monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
     calls: list[int] = []
 
@@ -141,7 +146,7 @@ def test_host_running_stays_loud_when_the_process_scan_is_unreadable(
     probe refuses with a typed error, so the pause path aborts instead of
     declaring the host absent."""
     _stub_backend(monkeypatch, has_session=False)
-    monkeypatch.setattr(settings.services, "agent_host_pidfile", tmp_path / "absent.pid")
+    _pin_pidfiles(monkeypatch, tmp_path)
     monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
     calls: list[int] = []
 
@@ -189,6 +194,7 @@ class _HealthzOpener:
 def _stub_ops_wait(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, calls: list[str]) -> None:
     """A quiescent ops healthz answer: this home, this pidfile, no admitted work."""
     pidfile = tmp_path / "ops.pid"
+    _pin_pidfiles(monkeypatch, tmp_path)
     pidfile.write_text(f"{os.getpid()}\n", encoding="utf-8")
     payload: dict[str, object] = {
         "home": str(tmp_path),
@@ -196,7 +202,6 @@ def _stub_ops_wait(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, calls: li
         "maintenance": {"protocol": 1, "requests": 0, "workers": 0},
     }
     monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(settings.services, "ops_pidfile", pidfile)
     monkeypatch.setattr(
         probe,
         "build_opener",

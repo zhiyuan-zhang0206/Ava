@@ -72,6 +72,7 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 
 import psycopg
 from psycopg import sql
@@ -87,6 +88,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
 from base.log import init_gateway_process
+from base.paths import pid_path
 from services.delivery_watchdog import (
     dispatch_guard,
     resurrect_guard,
@@ -109,7 +111,11 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 
 _log = logging.getLogger("services.delivery_watchdog.daemon")
 
-_PIDFILE = settings.services.delivery_watchdog_pidfile
+
+def _pidfile() -> Path:
+    return pid_path("delivery_watchdog")
+
+
 # Liveness staleness ceiling. The loop sleeps a short inter-poll interval
 # (default 30s), so `_sleep_with_liveness` beats every _LIVENESS_BEAT_STEP_S
 # during that wait; the ceiling only has to exceed that step, not the whole
@@ -359,13 +365,13 @@ def _alert_stalled(
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.delivery_watchdog.daemon"):
-        _log.info("[delivery_watchdog] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.delivery_watchdog.daemon"):
+        _log.info("[delivery_watchdog] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -373,7 +379,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.delivery_watchdog.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.delivery_watchdog.daemon")
 
 
 async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
@@ -664,11 +670,11 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
 async def run() -> None:
     """Start the daemon: pidfile -> healthz server -> connect DB -> main loop."""
     if _is_running():
-        _log.info("[delivery] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[delivery] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
     _write_pidfile()
-    _log.info("[delivery] pidfile written: %s", _PIDFILE)
+    _log.info("[delivery] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     health = await start_health_server("delivery_watchdog", liveness=liveness)

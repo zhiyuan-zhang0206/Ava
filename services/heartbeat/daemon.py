@@ -29,6 +29,7 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -41,13 +42,18 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
 from base.log import init_gateway_process
+from base.paths import pid_path
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.heartbeat.daemon")
 
-_PIDFILE = settings.services.heartbeat_pidfile
+
+def _pidfile() -> Path:
+    return pid_path("heartbeat")
+
+
 # Liveness staleness ceiling. The loop sleeps a long inter-poll interval (default
 # 300s), so `_sleep_with_liveness` beats every _LIVENESS_BEAT_STEP_S during that
 # wait; the ceiling only has to exceed that step, not the whole interval. A
@@ -453,13 +459,13 @@ def _backoff_deadlines(
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.heartbeat.daemon"):
-        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.heartbeat.daemon"):
+        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -467,7 +473,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.heartbeat.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.heartbeat.daemon")
 
 
 async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
@@ -576,12 +582,12 @@ async def _liveness_loop(pool: ConnectionPool, liveness: Liveness) -> None:
 async def run() -> None:
     """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
     if _is_running():
-        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
     _write_pidfile()
-    _log.info("[heartbeat] pidfile written: %s", _PIDFILE)
+    _log.info("[heartbeat] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     health = await start_health_server("heartbeat", liveness=liveness)
