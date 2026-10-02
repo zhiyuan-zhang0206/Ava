@@ -48,7 +48,9 @@ immutable, sequenced, permanent log.
   is a whole lease, because a partial deletion would void the completeness
   predicate.
 - Loki still receives the same events as an observation copy. Only the
-  impersonation record moves; the 2026-08-04 ruling stands for everything else.
+  impersonation record moves here; the general principle that audit facts are
+  recorded in Postgres is `2026-10-02-audit-events-in-postgres.md`, which also
+  narrows this entry's sentence that the 2026-08-04 ruling stands for everything else.
 
 This is the outbox pattern without a relay: the event row commits with the state
 change, and the consumer reads the table directly instead of a broker.
