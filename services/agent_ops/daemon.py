@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 if __name__ == "__main__":
     # Reject unknown argv before imports can load Settings or touch local state.
@@ -55,6 +56,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
 from base.log import init_gateway_process
+from base.paths import pid_path
 
 # The synchronous op arms and the op modules they call live in
 # `services.agent_ops.dispatch_sync` (split at the file-size ceiling, task
@@ -86,7 +88,10 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 
 _log = logging.getLogger("services.agent_ops.daemon")
 
-_PIDFILE = settings.services.ops_pidfile
+
+def _pidfile() -> Path:
+    return pid_path("ops")
+
 
 # ── Idempotency-key dedup (Task #961) ────────────────────────────────────────
 # A request with `idempotency_key` is deduplicated against the shared
@@ -119,13 +124,13 @@ _db_pool: ConnectionPool | None = None
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.agent_ops.daemon"):
-        _log.info("[agent_ops] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.agent_ops.daemon"):
+        _log.info("[agent_ops] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -133,7 +138,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.agent_ops.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.agent_ops.daemon")
 
 
 # Health handler and `_run_arm` share the loop; restart drops state and idempotency makes retry safe.
@@ -448,7 +453,7 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
 
 async def _main() -> None:
     if _is_running():
-        _log.info("ava-ops pidfile %s indicates another instance is alive — exiting", _PIDFILE)
+        _log.info("ava-ops pidfile %s indicates another instance is alive — exiting", _pidfile())
         sys.exit(1)
     _write_pidfile()
 

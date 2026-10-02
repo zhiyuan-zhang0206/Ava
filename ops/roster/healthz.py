@@ -21,8 +21,8 @@ from functools import partial
 from pathlib import Path
 
 from base.cluster.machine import MachineRole
-from base.config import settings
 from base.daemon.health import DEFAULT_PORTS, DaemonProbe, health_port, probe_daemon
+from base.paths import pid_path
 from ops.roster.service_spec import DbAccess, ServiceSpec
 
 # `ava-root` renders this prefix into `cd <repo> && exec <cmd>`; a command that stays
@@ -37,7 +37,7 @@ def health_name_of(session: str) -> str:
     """The health name of a standard daemon: its kebab session with underscores.
 
     This is the key of its port slot, the ``name`` its ``/healthz`` answers with
-    and the stem of its ``AVA_<NAME>_HEALTH_PORT`` / ``<name>_pidfile`` settings.
+    the stem of its ``AVA_<NAME>_HEALTH_PORT`` setting and of its ``run/<name>.pid`` pidfile.
 
     Raises:
         ValueError: ``session`` is not lowercase kebab-case.
@@ -101,14 +101,13 @@ def healthz_daemon(
             f"service {session!r}: health name {name!r} has no port slot "
             f"(known: {sorted(DEFAULT_PORTS)})"
         )
-    pidfile: Path = getattr(settings.services, f"{name}_pidfile")
     return ServiceSpec(
         session=session,
         cmd=f"{_PYTHON_M} {module}",
         capabilities=capabilities,
         requires_db=requires_db,
         curl_url=healthz_url(name),
-        identity_probe=daemon_identity(name, pidfile),
+        identity_probe=daemon_identity(name, pid_path(name)),
         health_name=name,
         gate=gate,
         profile=profile,

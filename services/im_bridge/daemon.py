@@ -18,6 +18,7 @@ import logging
 import signal
 import sys
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 from base.cluster.authority.api import token_digest
@@ -26,6 +27,7 @@ from base.daemon.health import Liveness, health_port, start_health_server, stop_
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
+from base.paths import pid_path
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.im_bridge.daemon")
@@ -37,17 +39,20 @@ _LIVENESS_TIMEOUT_S = 120.0
 # adapters are launched), so a background task carries the heartbeat; the
 # interval sits well under the staleness ceiling.
 _LIVENESS_BEAT_INTERVAL_S = 30.0
-_PIDFILE = settings.services.im_bridge_pidfile
+
+
+def _pidfile() -> Path:
+    return pid_path("im_bridge")
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.im_bridge.daemon"):
-        _log.info("[im_bridge] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.im_bridge.daemon"):
+        _log.info("[im_bridge] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -55,7 +60,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.im_bridge.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.im_bridge.daemon")
 
 
 def _import_adapter(name: str) -> Any:
@@ -160,11 +165,11 @@ async def _handle_send(core: Any) -> Any:
 async def run() -> None:
     """Start the daemon: healthz -> pidfile -> load adapters -> serve."""
     if _is_running():
-        _log.info("[im_bridge] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[im_bridge] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
     _write_pidfile()
-    _log.info("[im_bridge] pidfile written: %s", _PIDFILE)
+    _log.info("[im_bridge] pidfile written: %s", _pidfile())
 
     # The notice bridge reads agent_notices directly (R3 door ④ — decoupled
     # from gateway availability, so a paused cluster cannot stall notice
