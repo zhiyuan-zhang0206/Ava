@@ -21,7 +21,7 @@ from base.agents.observation.evidence import (
 )
 from base.agents.tasks.priority import Priority
 from base.config import settings
-from base.db import connect
+from base.db import Database
 from base.log import logger
 
 # Canonical columns + JOIN. last_active_at is the agent's REAL-activity clock
@@ -245,7 +245,7 @@ def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
     return _row_to_snapshot(row) if row else None
 
 
-def agent_effective_model(agent_id: int, *, fallback: str) -> str:
+def agent_effective_model(db: Database, agent_id: int, *, fallback: str) -> str:
     """The model `agent_id`'s own calls run, withdrawal-resolved.
 
     The same resolution `_row_to_snapshot` applies for the snapshot, without
@@ -256,7 +256,7 @@ def agent_effective_model(agent_id: int, *, fallback: str) -> str:
     bookkeeping miss.
     """
     try:
-        with connect(autocommit=True) as conn:
+        with db.connect(autocommit=True) as conn:
             row = conn.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
             ).fetchone()

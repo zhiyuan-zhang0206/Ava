@@ -77,7 +77,7 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
         )
         return 0
 
-    model = agent_effective_model(agent_id, fallback=config.hierarchy_model)
+    model = agent_effective_model(db, agent_id, fallback=config.hierarchy_model)
     started = time.monotonic()
     try:
         # Each channel reads only its own bookkeeping target: a compact run
