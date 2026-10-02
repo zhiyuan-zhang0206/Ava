@@ -41,7 +41,7 @@ from base.telemetry import Event
 from base.telemetry.audit_events import prepare_event_log
 from gateway.alerts import router as alerts_router
 from tests.base import test_history as history_cases
-from tests.impersonation_support import attested_caller, recorded_tree
+from tests.impersonation_support import attested_caller, recorded_tree, request_legacy_leases
 
 _CERTIFICATION_SECRET = "test-manifest-certification-secret-000001"  # noqa: S105 -- test proof
 
@@ -209,7 +209,9 @@ def test_skew_accepts_both_margins_and_rejects_outside_each(
 
 
 def test_manual_is_pending_manual_while_nonempty_legacy_never_certifies(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manual = leases.request(
         owner.agent_id,
@@ -228,6 +230,7 @@ def test_manual_is_pending_manual_while_nonempty_legacy_never_certifies(
     leases.activate(str(manual["id"]), owner)
     leases.release(str(manual["id"]), attested_caller(manual), "Manual work completed")
 
+    request_legacy_leases(monkeypatch)
     legacy = start(owner)
     event = {
         "id": "legacy-nonempty",

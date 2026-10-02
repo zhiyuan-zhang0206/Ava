@@ -8,6 +8,7 @@ from typing import Any, cast
 import psycopg
 from psycopg.rows import dict_row
 
+from base.agents.impersonation.event_log import LOG_PROTOCOL_VERSION
 from base.config import settings
 from base.telemetry.loki_index_labels import EVENT_STREAM_RETENTION
 
@@ -16,6 +17,7 @@ _MANIFEST_ALERT_NAMES = (
     "ImpersonationEventRetentionLoss",
     "ImpersonationEventDeliveryPending",
     "ImpersonationManifestCaptureFailed",
+    "ImpersonationEventSealStuck",
 )
 
 
@@ -36,6 +38,28 @@ def _has_slow_open_participant(conn: psycopg.Connection, lease_id: str, *, now: 
             now
             - timedelta(seconds=settings.general.impersonation_event_manifest_seal_wait_seconds),
         ),
+    ).fetchone()
+    return row is not None
+
+
+def _seal_stuck_leases(conn: psycopg.Connection, machine: str) -> list[dict[str, Any]]:
+    """Ended log-native leases still waiting on an open participant (a state, no threshold)."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT * FROM agent_impersonations WHERE machine=%s AND automatic "
+            "AND event_delivery_protocol_version=%s AND events_completed_at IS NULL "
+            "AND ended_at IS NOT NULL",
+            (machine, LOG_PROTOCOL_VERSION),
+        )
+        leases = cur.fetchall()
+    return [lease for lease in leases if _has_open_participant(conn, str(lease["id"]))]
+
+
+def _has_open_participant(conn: psycopg.Connection, lease_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM agent_impersonation_event_participants WHERE lease_id=%s "
+        "AND state='open' LIMIT 1",
+        (lease_id,),
     ).fetchone()
     return row is not None
 
@@ -63,6 +87,10 @@ def _manifest_alert_starts_at(
         return opened_at + timedelta(
             seconds=settings.general.impersonation_event_manifest_seal_wait_seconds
         )
+    if alertname == "ImpersonationEventSealStuck":
+        # A log-native lease that ended with a source still open: the state is
+        # the condition, so the onset is the end of the lease and no threshold applies.
+        return cast(datetime, lease["ended_at"])
     if alertname == "ImpersonationEventRetentionLoss":
         return lease["manifest_envelope_floor_at"] + EVENT_STREAM_RETENTION
     if alertname == "ImpersonationEventDeliveryPending":
@@ -111,6 +139,10 @@ def _resolve_cleared_manifest_alerts(
                 condition_holds = _has_slow_open_participant(conn, str(lease["id"]), now=now)
             elif alertname == "ImpersonationEventDeliveryPending":
                 condition_holds = _is_old_pending(lease, now=now)
+            elif alertname == "ImpersonationEventSealStuck":
+                condition_holds = lease["ended_at"] is not None and _has_open_participant(
+                    conn, str(lease["id"])
+                )
             elif alertname == "ImpersonationManifestCaptureFailed":
                 condition_holds = (
                     conn.execute(

@@ -108,7 +108,7 @@ def request(
     relay_token = secrets.token_urlsafe(32) if relay_provider in SESSION_RELAY_PROVIDERS else None
     lease_id = uuid4()
     delivery_config = current_field_values()
-    event_delivery_protocol_version = _manifest_protocol_version(automatic=automatic)
+    event_delivery_protocol_version = event_protocol_for_new_lease(automatic=automatic)
     with write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
         if meta["machine"] != machine_name():
@@ -168,9 +168,11 @@ def request(
     return result
 
 
-def _manifest_protocol_version(*, automatic: bool) -> int | None:
-    """Admit v1 only for new automatic leases while the cluster gate is on."""
-    return 1 if automatic and settings.general.impersonation_event_manifest_enabled else None
+def event_protocol_for_new_lease(*, automatic: bool) -> int | None:
+    """New automatic leases log their events at the source (v2); v1 only while its gate is on."""
+    if not automatic:
+        return None
+    return 1 if settings.general.impersonation_event_manifest_enabled else 2
 
 
 def get(lease_id: str, caller: object) -> dict[str, Any]:
@@ -426,7 +428,7 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
             return public(lease)
         require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
-        if manifest.is_protocol_v1(lease):
+        if manifest.is_event_protocol(lease):
             manifest.close_manifest_admission(conn, lease_id)
 
     with write_transaction() as conn:
@@ -436,9 +438,9 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
             return public(lease)
         require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
-        if manifest.is_protocol_v1(lease):
+        if manifest.is_event_protocol(lease):
             try:
-                manifest.freeze_manifest(conn, lease)
+                manifest.settle_event_log_at_release(conn, lease)
             except RuntimeError as exc:
                 raise ImpersonationError(
                     "Cannot release until every impersonation event participant seals"

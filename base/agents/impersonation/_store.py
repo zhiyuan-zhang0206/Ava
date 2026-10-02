@@ -383,9 +383,9 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
     )
     if fresh == (True,) and overdue is None:
         return lease
-    from base.agents.impersonation_manifest import close_manifest_admission, is_protocol_v1
+    from base.agents.impersonation_manifest import close_manifest_admission, is_event_protocol
 
-    if is_protocol_v1(lease):
+    if is_event_protocol(lease):
         close_manifest_admission(conn, str(lease["id"]))
     detail = (
         f"the executor did not ACK message {overdue[0]} after "

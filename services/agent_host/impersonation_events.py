@@ -25,6 +25,7 @@ def reconcile_one() -> None:
         cur.execute(
             "SELECT * FROM agent_impersonations WHERE machine=%s AND automatic "
             "AND activated_at IS NOT NULL AND ended_at IS NOT NULL "
+            "AND event_delivery_protocol_version IS DISTINCT FROM 2 "
             "AND events_completed_at IS NULL AND events_next_read_at<=clock_timestamp() "
             "ORDER BY events_next_read_at,agent_id,session_id LIMIT 1",
             (machine,),
