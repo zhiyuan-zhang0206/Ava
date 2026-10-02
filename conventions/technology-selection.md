@@ -38,9 +38,9 @@ rebuild the model it assumes saves little. Persisted artifacts must stay readabl
 
 **4. Write it ourselves** only when the problem is small, our requirement truly differs from what
 libraries assume, and the failure modes are understood. Write down, in the same change:
-the condition under which it gets deleted, the stop-loss (size or time past which we switch to a
-mature tool), and that a second user of the same hand-written pattern triggers extraction or a
-move up a rung.
+the condition under which it gets deleted, the qualitative trigger for switching to a mature tool
+(a second user appears, its upkeep costs more than replacing it, the same class of failure recurs),
+and that a second user of the same hand-written pattern triggers extraction or a move up a rung.
 
 ## Lifetime checks (before accepting any rung)
 
