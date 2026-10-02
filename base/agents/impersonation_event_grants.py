@@ -37,8 +37,8 @@ def grant_event_log_runner_access(conn: psycopg.Connection, runner_role: str) ->
         sql.SQL("REVOKE UPDATE ON agent_impersonation_event_participants FROM {}").format(role)
     )
     for signature in (
-        "public.close_impersonation_event_manifest_admission(uuid)",
-        "public.seal_impersonation_event_participant(uuid,text,text,text,bigint,text)",
+        "public.close_impersonation_event_admission(uuid)",
+        "public.seal_impersonation_event_participant(uuid,text,text,text,bigint)",
         "public.lock_impersonation_event_participant(uuid,text)",
     ):
         conn.execute(sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(sql.SQL(signature), role))

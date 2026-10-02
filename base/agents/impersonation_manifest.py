@@ -129,7 +129,7 @@ def open_local_participant(lease_id: str, *, agent_id: int, source_key: str) -> 
             return False
         if lease["agent_id"] != agent_id:
             raise RuntimeError("Local receipt belongs to another agent")
-        if lease["manifest_admission_closed_at"] is not None:
+        if lease["event_admission_closed_at"] is not None:
             raise RuntimeError("Impersonation event admission is closed")
         conn.execute(
             "INSERT INTO agent_impersonation_event_participants(lease_id,source_key,state) "
@@ -317,7 +317,7 @@ def _persist_capture_failure(participant: LocalParticipant) -> None:
             raise RuntimeError("Missing local impersonation event receipt")
         if state == "open":
             conn.execute(
-                "SELECT seal_impersonation_event_participant(%s,%s,'failed','capture_failed',NULL,NULL)",
+                "SELECT seal_impersonation_event_participant(%s,%s,'failed','capture_failed',NULL)",
                 (participant.lease_id, participant.source_key),
             )
             conn.execute(
@@ -368,7 +368,7 @@ def seal_local_participant(participant: LocalParticipant) -> None:
         conn.execute(
             "SELECT seal_impersonation_event_participant(%s,%s,'sealed',NULL,"
             "(SELECT count(*) FROM agent_impersonation_entries "
-            "WHERE lease_id=%s AND source_key=%s),NULL)",
+            "WHERE lease_id=%s AND source_key=%s))",
             (participant.lease_id, participant.source_key) * 2,
         )
         refresh_completed_export(conn, participant.lease_id)
@@ -397,7 +397,7 @@ def record_central_event(conn: psycopg.Connection, event: Event) -> Event:
     if len(leases) != 1:
         raise RuntimeError("Central event admission found more than one active lease")
     lease = leases[0]
-    if lease["manifest_admission_closed_at"] is not None:
+    if lease["event_admission_closed_at"] is not None:
         return event
     tagged = replace(
         event,
@@ -457,7 +457,7 @@ def require_participants_sealed(conn: psycopg.Connection, lease: dict[str, Any])
 def close_event_admission(conn: psycopg.Connection, lease_id: str) -> bool:
     """Close a log-native lease's admission gate through its narrow SQL door."""
     row = conn.execute(
-        "SELECT close_impersonation_event_manifest_admission(%s)",
+        "SELECT close_impersonation_event_admission(%s)",
         (lease_id,),
     ).fetchone()
     return row is not None and row[0] is True
