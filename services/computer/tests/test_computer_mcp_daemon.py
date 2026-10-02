@@ -23,11 +23,12 @@ import services.computer.screen as screen_mod
 from services.computer.errors import ComputerUseError
 from services.computer.mcp_daemon import ComputerMcpDaemon
 from services.computer.protocol import Request, Response
+from services.computer.tests.slices import computer_use_config
 from services.permissions_helper.client import PermissionsHelperError
 
 
-def _daemon() -> ComputerMcpDaemon:
-    return ComputerMcpDaemon(sock="/nonexistent-test.sock")
+def _daemon(**config: Any) -> ComputerMcpDaemon:
+    return ComputerMcpDaemon(computer_use_config(**config), sock="/nonexistent-test.sock")
 
 
 def _req(
@@ -935,12 +936,7 @@ async def test_concurrent_calls_are_safe(
 # ── Phase 2: screen session coordination ────────────────────────────────────
 
 
-def _short_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make the daemon's ScreenSession milliseconds-short (fast tests)."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.daemon, "computer_use_lease_s", 1.0)
-    monkeypatch.setattr(settings.daemon, "computer_use_queue_timeout_s", 0.05)
+SHORT_SESSION = {"computer_use_lease_s": 1.0, "computer_use_queue_timeout_s": 0.05}
 
 
 async def test_screen_busy_blocks_second_agent(
@@ -948,8 +944,7 @@ async def test_screen_busy_blocks_second_agent(
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _short_session(monkeypatch)
-    d = _daemon()
+    d = _daemon(**SHORT_SESSION)
     # agent 7 takes the screen with a click
     assert (await _call(d, "click", {"x": 1, "y": 2}, agent_id=7))["ok"] is True
     # agent 8's action waits past the tiny queue timeout and fails busy
@@ -964,8 +959,7 @@ async def test_holder_continues_while_busy(
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _short_session(monkeypatch)
-    d = _daemon()
+    d = _daemon(**SHORT_SESSION)
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     # the holder's own next action passes through (lease renewed by the call)
     resp = await _call(d, "type_text", {"text": "hi"}, agent_id=7)
@@ -977,8 +971,7 @@ async def test_release_control_hands_over(
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _short_session(monkeypatch)
-    d = _daemon()
+    d = _daemon(**SHORT_SESSION)
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
 
     async def waiter() -> Response:
@@ -997,8 +990,7 @@ async def test_release_control_by_non_holder_fails(
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _short_session(monkeypatch)
-    d = _daemon()
+    d = _daemon(**SHORT_SESSION)
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     resp = await _call(d, "release_control", {}, agent_id=8)
     assert resp["ok"] is False
@@ -1010,8 +1002,7 @@ async def test_operator_force_release_without_identity(
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _short_session(monkeypatch)
-    d = _daemon()
+    d = _daemon(**SHORT_SESSION)
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     # CLI path: no agent_id, force=true — releases whoever holds the screen
     resp = await _call(d, "release_control", {"force": True}, agent_id=None)
@@ -1118,7 +1109,7 @@ async def test_shutdown_cancels_active_clients() -> None:
     daemon process (the #1137 dual-daemon root cause)."""
     d, sock, cleanup = _short_sock_dir()
     try:
-        daemon = daemon_mod.ComputerMcpDaemon(sock=str(sock))
+        daemon = daemon_mod.ComputerMcpDaemon(computer_use_config(), sock=str(sock))
         # A client handler that never returns unless cancelled — the persistent
         # SDK connection equivalent (a real client sits in handle()'s readline).
         started = asyncio.Event()
@@ -1154,11 +1145,7 @@ async def test_high_priority_waiter_jumps_the_queue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A high-priority call queues ahead of an earlier normal one (Phase 3)."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.daemon, "computer_use_lease_s", 1.0)
-    monkeypatch.setattr(settings.daemon, "computer_use_queue_timeout_s", 0.5)
-    d = _daemon()
+    d = _daemon(computer_use_lease_s=1.0, computer_use_queue_timeout_s=0.5)
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     order: list[str] = []
 

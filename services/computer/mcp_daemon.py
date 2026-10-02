@@ -78,6 +78,7 @@ from base.telemetry import audit_events
 # Re-export of the shared OCR module object (test compat: the suite patches
 # mcp_daemon.ocr_mod attributes, and every OCR caller sees the same object).
 from services.computer.ax_ids import AxSession
+from services.computer.config import ComputerUseConfig
 from services.computer.execute import _TOOLS, _execute_tool, _mcp_result, _priority
 from services.computer.execute import ocr_mod as ocr_mod
 from services.computer.protocol import Request, Response
@@ -109,10 +110,19 @@ def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None
     return None
 
 
+def computer_use_config() -> ComputerUseConfig:
+    """The composition root: the one place this package reads `settings`."""
+    return ComputerUseConfig(
+        computer_use_lease_s=settings.daemon.computer_use_lease_s,
+        computer_use_queue_timeout_s=settings.daemon.computer_use_queue_timeout_s,
+        computer_use_session_idle_s=settings.daemon.computer_use_session_idle_s,
+    )
+
+
 class ComputerMcpDaemon:
     """Unix-socket server for the computer-mcp line protocol."""
 
-    def __init__(self, sock: str | None = None) -> None:
+    def __init__(self, config: ComputerUseConfig, sock: str | None = None) -> None:
         self._sock = sock or str(computer_mcp_socket())
         # Last pointer position in PHYSICAL pixels (set by click / explicit
         # scroll); the scroll fallback when the caller gives no x/y.
@@ -133,11 +143,11 @@ class ComputerMcpDaemon:
         self._action_lock = asyncio.Lock()
         # Phase 2 session coordination: who owns the screen + FIFO waiters.
         self._screen = ScreenSession(
-            lease_s=settings.daemon.computer_use_lease_s,
-            queue_timeout_s=settings.daemon.computer_use_queue_timeout_s,
+            lease_s=config.computer_use_lease_s,
+            queue_timeout_s=config.computer_use_queue_timeout_s,
         )
         # Phase 2 audit envelope: task_id -> computer_session_start/end.
-        self._task_sessions = TaskSessionTracker(idle_s=settings.daemon.computer_use_session_idle_s)
+        self._task_sessions = TaskSessionTracker(idle_s=config.computer_use_session_idle_s)
         # Active client handler tasks, so shutdown can close them instead of
         # hanging in server.wait_closed() behind a client that never disconnects
         # (the pre-fix orphan: SIGTERM left the process alive holding the socket).
@@ -371,7 +381,7 @@ def _tracked_client(
 
 
 async def run(sock: str | None = None) -> None:
-    daemon = ComputerMcpDaemon(sock)
+    daemon = ComputerMcpDaemon(computer_use_config(), sock)
     path = Path(daemon._sock)
     if await _socket_in_use(path):
         logger.error(

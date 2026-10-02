@@ -16,6 +16,7 @@ import pytest
 from services.computer.ax_ids import AxIdTable, AxSession
 from services.computer.errors import ComputerUseError
 from services.computer.mcp_daemon import ComputerMcpDaemon
+from services.computer.tests.slices import computer_use_config
 from services.permissions_helper import client as helper
 from services.permissions_helper.client import AxNode, PermissionsHelperError
 
@@ -163,7 +164,7 @@ def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
 @pytest.fixture
 def daemon() -> ComputerMcpDaemon:
-    return ComputerMcpDaemon(sock="/nonexistent-test.sock")
+    return ComputerMcpDaemon(computer_use_config(), sock="/nonexistent-test.sock")
 
 
 async def call(
@@ -398,7 +399,7 @@ async def test_a_failed_set_value_leaves_the_value_out_of_the_audit_too(
 
 
 async def test_ax_act_is_declared_with_its_required_arguments() -> None:
-    daemon = ComputerMcpDaemon(sock="/nonexistent-test.sock")
+    daemon = ComputerMcpDaemon(computer_use_config(), sock="/nonexistent-test.sock")
     resp = await daemon._dispatch({"id": 1, "method": "list_tools"})
     assert resp["ok"] is True
     tools: list[dict[str, Any]] = resp["result"]
