@@ -27,7 +27,7 @@ from base.host.system.boot_unit import BootUnitContext
 from base.native_process.root_control.client import RootClient, RootClientError
 from base.native_process.root_control.ipc import ResponsePayload
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _SLEEPER = [sys.executable, "-u", "-c", "import time; time.sleep(300)"]
 

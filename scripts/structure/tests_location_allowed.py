@@ -366,6 +366,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "runs scripts/worktree.sh clean as a process against throwaway repositories",
     ),
+    "tests/services/test_ava_root_custody_contract.py": (
+        "contract",
+        "compiles the permissions helper's Swift source with tests/services/helper_child_custody.swift and checks the native reaper cannot race owned signal delivery",
+    ),
     "tests/services/test_ava_root_glue_manifests.py": (
         "integration",
         "the ava-root manifest generation from the roster across gateway, ops, browser and ava-root: spans base, gateway, ops, services.ava_root, services.ava_root_glue, services.browser, no one of which may import all the others",

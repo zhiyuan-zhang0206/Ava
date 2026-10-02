@@ -7,7 +7,7 @@ on:
       - 'base/agents/incarnation/tests/test_resources*.py'
       - '.github/workflows/exec-domain-owner.yml'
       - 'agent/graph/exec/_process.py'
-      - 'tests/agent/test_exec_domain_confirmation.py'
+      - 'agent/graph/exec/tests/test_exec_domain_confirmation.py'
       - 'agent/exec*owner*.py'
       - 'agent/graph/exec/_owned_run.py'
       - 'base/agents/incarnation/exec_owner*.py'
@@ -70,8 +70,8 @@ jobs:
         run: |
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
-          uv run pyright base/native_process/exec_domain.py agent/graph/exec/_process.py tests/agent/test_exec_domain_confirmation.py
-          uv run pytest --confcutdir=tests/agent tests/agent/test_exec_domain_confirmation.py agent/tests/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
+          uv run pyright base/native_process/exec_domain.py agent/graph/exec/_process.py agent/graph/exec/tests/test_exec_domain_confirmation.py
+          uv run pytest --confcutdir=tests/agent agent/graph/exec/tests/test_exec_domain_confirmation.py agent/tests/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:

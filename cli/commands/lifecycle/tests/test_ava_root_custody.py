@@ -220,7 +220,7 @@ def test_replacement_guard_names_a_live_process_running_the_artifact(
     # Never exec a copied binary or a fake helper: macOS launch constraints kill it with a
     # GUI dialog. A live interpreter stands in; sys.executable is a venv symlink.
     code = "import time; time.sleep(60)"
-    child = subprocess.Popen([sys.executable, "-c", code])  # noqa: S603 — disposable test child
+    child = subprocess.Popen([sys.executable, "-c", code])
     try:
         with pytest.raises(RuntimeError, match=rf"pid (\d+, )*{child.pid}\b.* still runs"):
             jobs.require_retired_helper(Path(sys.executable))
@@ -250,7 +250,7 @@ def test_helper_stop_intent_survives_new_reader_and_refuses_corruption(tmp_path:
         + 'try "corrupt".write(toFile: StopIntent.path(directory, owner: .root), atomically: true, encoding: .utf8)\n'
         + 'do { _ = try StopIntent.exists(directory, owner: .root); fatalError("corrupt intent admitted") } catch {}\n'
     )
-    result = subprocess.run(  # noqa: S603 — exact repository-owned Swift fragment in a private temporary directory
+    result = subprocess.run(
         ["swift", str(program), str(tmp_path)],
         capture_output=True,
         text=True,
@@ -258,51 +258,6 @@ def test_helper_stop_intent_survives_new_reader_and_refuses_corruption(tmp_path:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-
-
-@pytest.mark.skipif(
-    sys.platform != "darwin" or shutil.which("swift") is None,
-    reason="native Swift child ownership contract",
-)
-def test_helper_native_reaping_cannot_race_owned_signal_delivery(tmp_path: Path) -> None:
-    source = lifecycle._SOURCE.read_text()
-    # Compile the actual spawn/session and root-keeper implementations without
-    # the GUI server. Test barriers widen the old race, without runtime hooks.
-    children = source.split("/// Resolve an allowed path", 1)[0]
-    keeper = source.split("// MARK: - Root keeper", 1)[1].split("// MARK: - Dispatch", 1)[0]
-    implementation = (children + keeper).replace("waitpid(", "observedWaitpid(")
-    implementation = implementation.replace(
-        "kill(child, SIGTERM)", "pausedRootSignal(child, SIGTERM)"
-    ).replace("kill(child.pid, signalValue)", "pausedSessionSignal(child.pid, signalValue)")
-    implementation = implementation.replace(
-        "try StopIntent.store(runDir, owner: .helper)", "try pausedHelperStopIntent(runDir)"
-    )
-    fixture = Path(__file__).with_name("helper_child_custody.swift").read_text()
-    program = tmp_path / "custody.swift"
-    program.write_text(implementation + fixture)
-    result = subprocess.run(  # noqa: S603 — private native fixture, no daemon socket, signing or scheduler
-        ["swift", str(program), str(tmp_path)],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "foreign-child isolation passed" in result.stdout
-    assert "helper shutdown admission passed" in result.stdout
-    # A separate process loses its controller immediately after durable intent;
-    # the next process must observe it before any root or session birth.
-    crash_home = tmp_path / "crash-home"
-    crash_home.mkdir()
-    for mode, expected in (("crash-after-intent", 73), ("restart-after-intent", 0)):
-        crash = subprocess.run(  # noqa: S603 — same private native fixture
-            ["swift", str(program), str(crash_home), mode],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        assert crash.returncode == expected, crash.stdout + crash.stderr
 
 
 def test_mutated_custody_is_never_overwritten_or_cleared(tmp_path: Path) -> None:
@@ -559,7 +514,7 @@ def test_helper_native_shutdown_wait_never_signals_unresponsive_owner(tmp_path: 
         f"pathlib.Path({str(ready)!r}).touch()\n"
         "time.sleep(60)\n"
     )
-    child = subprocess.Popen([sys.executable, "-c", code])  # noqa: S603 — disposable test child
+    child = subprocess.Popen([sys.executable, "-c", code])
     try:
         deadline = time.monotonic() + 10
         while not ready.exists():
@@ -736,7 +691,7 @@ def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> 
         assert 'p.arguments = ["' + str(script) in source
         program, executable = home / "main.swift", home / "helper"
         program.write_text(source)
-        compiled = subprocess.run(  # noqa: S603 — private unsigned native fixture
+        compiled = subprocess.run(
             ["swiftc", str(program), "-o", str(executable)],
             capture_output=True,
             timeout=30,
@@ -758,7 +713,7 @@ def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> 
             AVA_PERMISSIONS_HELPER_SOCKET=str(sock),
             AVA_PERMISSIONS_HELPER_ROOT_SEED=str(run_dir / "seed.json"),
         )
-        process = subprocess.Popen(  # noqa: S603 — private unsigned fixture without OS registration
+        process = subprocess.Popen(
             [str(executable)], env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         try:

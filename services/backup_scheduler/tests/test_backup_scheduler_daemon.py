@@ -59,7 +59,7 @@ def test_module_entrypoint_runs_the_scheduler(tmp_path: Path) -> None:
     )
     result = subprocess.run(
         [sys.executable, "-m", "services.backup_scheduler.daemon"],
-        cwd=Path(__file__).parents[2],
+        cwd=Path(__file__).parents[3],
         env=env,
         capture_output=True,
         text=True,
