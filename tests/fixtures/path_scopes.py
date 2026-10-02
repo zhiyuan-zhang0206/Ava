@@ -279,7 +279,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "ops/lifecycle/tests/test_agent_launch_runner.py",
             "ops/tests/test_cross_machine_dispatch.py",
         ),
-        14,
+        11,
     ),
     "tests.path_scoped.services_tests": Scope(
         (
