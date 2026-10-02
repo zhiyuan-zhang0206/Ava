@@ -1,6 +1,5 @@
 {
   "complexity": {
-    "tests/base/subreaper_probe.py::ancestor": 16,
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
@@ -22,7 +21,6 @@
     "tests/base/test_runner_role.py::base.cluster.provision._checkpoint_schema_versions": 1
   },
   "tests_location": {
-    "tests/base/test_connect_helpers.py::top-level": 1,
-    "tests/base/test_subreaper_contract.py::top-level": 1
+    "tests/base/test_connect_helpers.py::top-level": 1
   }
 }

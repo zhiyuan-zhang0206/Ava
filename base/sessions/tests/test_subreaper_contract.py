@@ -21,7 +21,7 @@ def test_caller_exit_preserves_child_adopted_by_ancestor_subreaper(
             "ancestor",
             str(tmp_path),
         ],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=Path(__file__).resolve().parents[3],
         check=True,
         capture_output=True,
         text=True,
