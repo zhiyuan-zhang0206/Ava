@@ -4,13 +4,14 @@ The core proves one record against the recorded native births and the unit's
 process group — the trio boundaries (a reused PID and a zombie count as gone, a
 stopped process still runs), release-or-retain, the refusal text — and the
 supervisor side drives it: the cold-start gate, a fresh spawn reusing a unit's
-record slot, and every health round.
+record slot, every health round, and the repeat-report dedupe.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -105,6 +106,24 @@ def _wait_for_status(pid: int, wanted: str) -> None:
         if time.monotonic() > deadline:
             raise AssertionError(f"pid {pid} never reached {wanted}")
         time.sleep(0.02)
+
+
+def _wait_sets_own_group(leader: subprocess.Popen[bytes]) -> None:
+    """Wait until the leader's setpgid landed, so a joiner can target its group."""
+    deadline = time.monotonic() + 5
+    while os.getpgid(leader.pid) != leader.pid:
+        if time.monotonic() > deadline:
+            raise AssertionError("leader did not create its process group")
+        time.sleep(0.01)
+
+
+def _reap(*processes: subprocess.Popen[bytes]) -> None:
+    """Kill what still runs, then reap every process so no zombie lingers."""
+    for process in processes:
+        if process.poll() is None:
+            process.kill()
+    for process in processes:
+        process.wait(timeout=10)
 
 
 def root(tmp_path: Path, code: str) -> Supervisor:
@@ -333,6 +352,25 @@ def test_reconcile_retains_a_record_without_a_group_number(tmp_path: Path) -> No
     assert path.exists()
 
 
+def test_reconcile_rejects_a_bool_version_record(tmp_path: Path, events: _EventRecorder) -> None:
+    """JSON `true` would satisfy `in (1, 2)` as `True == 1` and be read as v1;
+    the parser rejects bools like every sibling field instead (C-1)."""
+    birth, group = _dead_leader_birth()
+    path = _write_record(tmp_path, "worker", [birth], group)
+    body = json.loads(path.read_text(encoding="utf-8"))
+    body["version"] = True
+    path.write_text(json.dumps(body), encoding="utf-8")
+
+    outcome = reconcile_record(tmp_path, "worker")
+
+    assert outcome is not None
+    assert outcome.decision == "retained"
+    assert "version True" in outcome.evidence
+    assert path.exists()
+    [event] = events.events("custody_reconcile")
+    assert event["decision"] == "retained"
+
+
 def test_require_clear_reconciles_and_names_the_refusal(tmp_path: Path) -> None:
     """The gate clears what it proves and refuses the rest with steps, force path
     and evidence path (task #4872, C-2); a spawning record is unprovable."""
@@ -429,6 +467,52 @@ async def test_spawn_keeps_an_unproven_record_and_reports_failure(tmp_path: Path
     assert "spawn failed" in str(unit["error"])
     assert record.exists()
     await owner.shutdown()
+
+
+# ── repeat pass dedupe ───────────────────────────────────────────────────────
+
+
+async def test_repeat_pass_reports_a_retained_record_once_until_evidence_changes(
+    tmp_path: Path, events: _EventRecorder
+) -> None:
+    """A repeated pass reports releases always and a retained record on first
+    sight and evidence change only — the stream carries the decision, not a
+    per-round heartbeat (task #4872, C-1)."""
+    owner = root(tmp_path, "import time; time.sleep(60)")
+    leader = _spawn_group_leader("import time; time.sleep(60)")
+    _wait_sets_own_group(leader)
+    member = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], process_group=leader.pid
+    )
+    try:
+        birth = OwnedProcess.capture(psutil.Process(leader.pid))
+        path = _write_record(tmp_path, "worker", [asdict(birth)], leader.pid)
+
+        first = await owner.reconcile_custody()
+        assert [outcome.decision for outcome in first] == ["retained"]
+        assert len(events.events("custody_reconcile")) == 1
+
+        repeat = await owner.reconcile_custody()
+        assert [outcome.decision for outcome in repeat] == ["retained"]
+        assert len(events.events("custody_reconcile")) == 1, "an unchanged retain repeats silently"
+
+        leader.kill()
+        leader.wait(timeout=10)  # the birth is gone; its member keeps the group
+        changed = await owner.reconcile_custody()
+        assert [outcome.decision for outcome in changed] == ["retained"]
+        reported = events.events("custody_reconcile")
+        assert len(reported) == 2, "an evidence change reports again"
+        assert "still holds" in str(reported[-1]["evidence"])
+
+        member.kill()
+        member.wait(timeout=10)
+        released = await owner.reconcile_custody()
+        assert [outcome.decision for outcome in released] == ["released"]
+        assert len(events.events("custody_reconcile")) == 3
+        assert not path.exists()
+        assert await owner.reconcile_custody() == []
+    finally:
+        _reap(leader, member)
 
 
 # ── health wiring ────────────────────────────────────────────────────────────

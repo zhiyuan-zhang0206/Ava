@@ -223,8 +223,9 @@ _EVENTS_OPS: dict[str, EventSpec] = {
     ),
     "custody_reconcile": _telemetry(
         "custody_reconcile",
-        "custody record reconcile pass — every examined record reports released|retained with "
-        "its birth and process-group evidence (task #4872)",
+        "custody record reconcile pass — releases always report; a retained record reports on "
+        "first sight and evidence change — with its birth and process-group evidence "
+        "(task #4872)",
         payload=CustodyReconcile,
         tier="observation",
     ),

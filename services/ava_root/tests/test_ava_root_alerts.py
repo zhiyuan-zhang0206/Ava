@@ -25,6 +25,7 @@ from services.ava_root.alerts import (
     read_record,
     write_record,
 )
+from services.ava_root.custody import ReconcileOutcome
 from services.ava_root.intent_store import RestartFailure, RestartStage
 
 
@@ -418,6 +419,9 @@ class _StubSupervisor:
 
     def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
         return UnitAlertFacts(intent_running=True, restart_failed=None, custody_held=False)
+
+    async def reconcile_custody(self) -> list[ReconcileOutcome]:
+        return []
 
 
 async def test_health_rounds_fire_and_resolve_one_episode(

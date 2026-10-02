@@ -10,7 +10,8 @@ recorded process group must have no member left (zombies included, the closure
 the stop path reads). One unproven fact retains the record and names the
 evidence; nothing here signals. The pass runs on the cold-start custody gate
 (`require_clear`), before a fresh spawn reuses a unit's record slot, and once
-per health round.
+per health round. A repeatable pass reports a retained record on first sight
+and on evidence change only; a release always reports.
 """
 
 from __future__ import annotations
@@ -19,10 +20,10 @@ import json
 import logging
 import math
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import psutil
 
@@ -34,7 +35,12 @@ _log = logging.getLogger(__name__)
 _RECORD_VERSION = 2
 
 _SHOWN_MEMBERS = 8
-"""Members named in one refusal or event before the remainder is counted."""
+"""Members named in one refusal or event before the remainder is counted.
+
+A message-density choice, not a tuning knob (task #3696 exception inventory):
+the `+N more` remainder is always carried, so the cap cannot change any
+decision — what would change it is a different evidence-line layout.
+"""
 
 
 def require_clear(run_dir: Path) -> None:
@@ -119,7 +125,7 @@ class ReconcileOutcome:
     """One record's reconcile result; `decision` is `released` or `retained`."""
 
     unit: str
-    decision: str
+    decision: Literal["released", "retained"]
     checked: int
     found: int
     evidence: str
@@ -133,28 +139,39 @@ def record_paths(run_dir: Path) -> list[Path]:
     return sorted(path for path in directory.iterdir() if path.suffix == ".json")
 
 
-def reconcile_all(run_dir: Path) -> list[ReconcileOutcome]:
-    """Reconcile every custody record under `run_dir`, in name order."""
+def reconcile_all(
+    run_dir: Path, *, reports: MutableMapping[str, str] | None = None
+) -> list[ReconcileOutcome]:
+    """Reconcile every custody record under `run_dir`, in name order.
+
+    `reports` makes repeated passes change-driven: a retained outcome whose
+    fingerprint matches the unit's last report is served without a repeat
+    event (task #4872, C-1). One-shot callers omit it and report every
+    examined record.
+    """
     outcomes: list[ReconcileOutcome] = []
     for path in record_paths(run_dir):
-        outcome = reconcile_record(run_dir, path.stem)
+        outcome = reconcile_record(run_dir, path.stem, reports=reports)
         if outcome is not None:
             outcomes.append(outcome)
     return outcomes
 
 
-def reconcile_record(run_dir: Path, unit: str) -> ReconcileOutcome | None:
+def reconcile_record(
+    run_dir: Path, unit: str, *, reports: MutableMapping[str, str] | None = None
+) -> ReconcileOutcome | None:
     """Reconcile one unit's record; None when it holds no record.
 
     Total by construction: a record it cannot prove releasable is retained
-    with the evidence that kept it, and every examined record reports exactly
-    one `custody_reconcile` event — released or retained (task #4872, C-1).
+    with the evidence that kept it, and every examined record reports a
+    `custody_reconcile` event — released or retained (task #4872, C-1);
+    under `reports`, an unchanged retained outcome reports once, not again.
     """
     path = run_dir / "custody" / f"{unit}.json"
     if not path.exists() and not path.is_symlink():
         return None
     outcome = _reconcile(path, unit)
-    _emit(outcome)
+    _report(outcome, reports)
     return outcome
 
 
@@ -252,10 +269,21 @@ def _record_fields(parsed: object, unit: str) -> tuple[list[OwnedProcess], int |
     if values.get("unit") != unit:
         return "record names a different unit"
     version = values.get("version")
-    if version not in (1, _RECORD_VERSION):
+    if isinstance(version, bool) or version not in (1, _RECORD_VERSION):
         return f"version {version!r}"
     if values.get("stage") != "running":
         return f"no acknowledged generation (stage {values.get('stage')!r})"
+    births = _record_births(values)
+    if isinstance(births, str):
+        return births
+    group = _record_group(values, version)
+    if isinstance(group, str):
+        return group
+    return births, group
+
+
+def _record_births(values: Mapping[str, object]) -> list[OwnedProcess] | str:
+    """The record's verified birth entries, or the reason one is not understood."""
     processes = values.get("processes")
     if not isinstance(processes, list) or not processes:
         return "no recorded births"
@@ -265,14 +293,19 @@ def _record_fields(parsed: object, unit: str) -> tuple[list[OwnedProcess], int |
         if isinstance(entry, str):
             return entry
         births.append(entry)
-    group: int | None = None
-    if version == _RECORD_VERSION:
-        raw_group = values.get("group")
-        if raw_group is not None:
-            if isinstance(raw_group, bool) or not isinstance(raw_group, int) or raw_group <= 0:
-                return f"malformed group {raw_group!r}"
-            group = raw_group
-    return births, group
+    return births
+
+
+def _record_group(values: Mapping[str, object], version: object) -> int | str | None:
+    """The record's group number (version 2 only), or why it is malformed."""
+    if version != _RECORD_VERSION:
+        return None
+    raw_group = values.get("group")
+    if raw_group is None:
+        return None
+    if isinstance(raw_group, bool) or not isinstance(raw_group, int) or raw_group <= 0:
+        return f"malformed group {raw_group!r}"
+    return raw_group
 
 
 def _birth_entry(item: object) -> OwnedProcess | str:
@@ -332,14 +365,41 @@ def _members(group: int) -> str:
     return f"[{shown}, +{len(members) - _SHOWN_MEMBERS} more]"
 
 
-def _outcome(unit: str, decision: str, checked: int, found: int, evidence: str) -> ReconcileOutcome:
+def _outcome(
+    unit: str, decision: Literal["released", "retained"], checked: int, found: int, evidence: str
+) -> ReconcileOutcome:
     return ReconcileOutcome(
         unit=unit, decision=decision, checked=checked, found=found, evidence=evidence
     )
 
 
+def _report(outcome: ReconcileOutcome, reports: MutableMapping[str, str] | None) -> None:
+    """Report one outcome under the caller's policy.
+
+    One-shot passes (`reports` absent) report every examined record; a
+    repeatable pass reports a release always and a retained outcome only when
+    its fingerprint differs from the unit's last report (task #4872, C-1).
+    """
+    if reports is None:
+        _emit(outcome)
+        return
+    if outcome.decision == "released":
+        reports.pop(outcome.unit, None)
+        _emit(outcome)
+        return
+    fingerprint = _fingerprint(outcome)
+    if reports.get(outcome.unit) != fingerprint:
+        reports[outcome.unit] = fingerprint
+        _emit(outcome)
+
+
+def _fingerprint(outcome: ReconcileOutcome) -> str:
+    """The identity of one report: what a repeat must match to stay silent."""
+    return f"{outcome.decision}|{outcome.checked}|{outcome.found}|{outcome.evidence}"
+
+
 def _emit(outcome: ReconcileOutcome) -> None:
-    """One audit event per examined record — released or retained (task #4872, C-1)."""
+    """Fan one reconcile outcome out as a `custody_reconcile` audit event (task #4872, C-1)."""
     try:
         from base.log import logger
 
