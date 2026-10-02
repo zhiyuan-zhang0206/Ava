@@ -83,7 +83,6 @@
     "ava_builtins/plugins/ava_fleet/tests/test_task_maintenance_daemon.py::ava_builtins.plugins.ava_fleet.task_maintenance.daemon._pending_counter_writes": 2,
     "ava_builtins/plugins/lm_google/tests/test_llm_decode_ms.py::agent.graph.llm._stream": 1,
     "ava_builtins/plugins/tests/test_agent_inspect_metrics.py::gateway.inspect._plugin_metrics": 2,
-    "ava_builtins/plugins/tests/test_agent_inspect_metrics.py::gateway.lgtm.loki_events._client": 3,
     "ava_builtins/plugins/tests/test_agent_inspect_widgets.py::gateway.inspect._plugin_widgets": 6
   }
 }
