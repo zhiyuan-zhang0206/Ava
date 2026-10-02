@@ -352,7 +352,7 @@ def _pending_delivery_reason(lease: dict[str, Any]) -> str:
 
 
 def _by_occurrence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Replay appends events in page order (newest first, late arrivals after);
+    """The log returns events in append order (late arrivals after);
     the handoff reader needs call order. ``created_at`` is the event's own time."""
     return sorted(rows, key=lambda row: (row["created_at"], row["seq"]))
 
