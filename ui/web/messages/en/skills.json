@@ -1,0 +1,14 @@
+{
+  "couldntLoad": "Couldn't load skills — check the gateway and reload.",
+  "noSkills": "(no skills installed)",
+  "skill": "Skill",
+  "source": "Source",
+  "enabled": "Enabled",
+  "toggle": "Toggle {name}",
+  "intro": "Skills installed on this gateway host's load dir, by source layer. Describe one you want and an installer agent finds, installs, and verifies it.",
+  "layerCore": "Core",
+  "layerPlugin": "Plugin",
+  "layerMachine": "Machine",
+  "layerUntracked": "Untracked",
+  "noData": "(no data)"
+}

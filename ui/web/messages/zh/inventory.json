@@ -1,0 +1,20 @@
+{
+  "couldntLoad": "无法加载清单——请检查 gateway 后刷新。",
+  "plugins": "插件",
+  "mcpServers": "MCP 服务器",
+  "none": "（无）",
+  "item": "项目",
+  "all": "全部",
+  "enableAll": "全部启用",
+  "disableAll": "全部禁用",
+  "hostUnreachable": "主机不可达",
+  "notInstalled": "未安装在此主机",
+  "changeNotApplied": "变更未生效：{reason}",
+  "saveFailed": "保存失败：{error}",
+  "intro": "按主机启用或禁用{noun}。每台机器一列；点击单元格切换该主机上该项的启用状态。“—”表示未安装在那里；“?”表示主机不可达。",
+  "enabledCount": "{enabled}/{present} 已启用",
+  "cantEnable": "无法在此主机上启用",
+  "clickDisable": "点击禁用",
+  "clickEnable": "点击启用",
+  "noData": "（无数据）"
+}

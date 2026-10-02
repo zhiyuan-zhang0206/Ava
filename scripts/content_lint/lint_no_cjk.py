@@ -30,8 +30,8 @@ text always carries.
 
 ## Exemption — i18n / locale copy only
 
-- `**/messages/*.json` — next-intl message catalogs (frontend locale data,
-  e.g. `ui/web/messages/{en,zh}.json`).
+- `**/messages/**` — next-intl message catalogs (frontend locale data,
+  e.g. `ui/web/messages/{en,zh}/<namespace>.json`).
 - `**/locales/**` and `**/*.po` — gettext-style locale trees, should they
   ever appear.
 - `base/telemetry/alerts_copy.py`, `base/packages/docs/pages_copy.py` — the Python locale
@@ -78,7 +78,7 @@ _CJK_RE = re.compile(
 # Repo-relative path prefixes that are i18n / locale copy and never scanned.
 # A path under these is locale DATA — the exact exemption the ruling grants.
 _LOCALE_PATH_MARKERS = (
-    "/messages/",  # next-intl catalogs: <dir>/messages/<lang>.json
+    "/messages/",  # next-intl catalogs: <dir>/messages/<lang>/<namespace>.json
     "/locales/",  # gettext-style locale trees
 )
 _LOCALE_SUFFIXES = (".po",)

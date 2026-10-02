@@ -1,0 +1,19 @@
+{
+  "couldntLoad": "无法加载预设——重试中…",
+  "noPresets": "尚未定义预设",
+  "label": "名称",
+  "description": "描述",
+  "cancel": "取消",
+  "describePreset": "描述 agent 预设——例如“用于一次性任务的快速 worker”",
+  "edit": "编辑",
+  "delete": "删除",
+  "deleteFailed": "删除失败：{error}",
+  "followSkill": "参照 ava.skills.ava_guide.presets 将其转为配置预设：{text}",
+  "writerCreated": "预设编写 agent #{id} 已创建——在对话中查看进度",
+  "draftFailed": "草稿失败：{error}",
+  "deleteConfirm": "删除预设“{label}”？",
+  "updateFailed": "更新失败：{error}",
+  "intro": "预设是命名的配置模板（模型、预载技能、插件字段）。在创建菜单中选取一个即可据此创建 agent——在那里显式选择的模型仍然优先。",
+  "describe": "描述",
+  "updated": "预设已更新"
+}

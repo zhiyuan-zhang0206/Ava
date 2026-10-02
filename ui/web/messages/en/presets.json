@@ -1,0 +1,19 @@
+{
+  "couldntLoad": "Couldn't load presets — retrying…",
+  "noPresets": "No presets defined",
+  "label": "Label",
+  "description": "Description",
+  "cancel": "Cancel",
+  "describePreset": "Describe an agent preset — e.g. “a fast worker for one-shot tasks”",
+  "edit": "Edit",
+  "delete": "Delete",
+  "deleteFailed": "Delete failed: {error}",
+  "followSkill": "Follow ava.skills.ava_guide.presets to turn this into a config preset: {text}",
+  "writerCreated": "Preset writer #{id} created — check its conversation for progress",
+  "draftFailed": "Draft failed: {error}",
+  "deleteConfirm": "Delete preset \"{label}\"?",
+  "updateFailed": "Update failed: {error}",
+  "intro": "A preset is a named config template (model, preloaded skills, plugin fields). Pick one in the spawn menu to start an agent from it — an explicit model chosen there still wins.",
+  "describe": "Describe",
+  "updated": "Preset updated"
+}
