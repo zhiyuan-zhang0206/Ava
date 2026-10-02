@@ -10,6 +10,37 @@ tags:
 
 # Impersonation manifest certification
 
+## Log-native leases (protocol v2)
+
+New automatic leases are log-native unless the protocol-v1 gate below is on. The
+producer writes each SDK/audit event body into the lease's own
+`agent_impersonation_entries` (`source_key` names the source), so delivery is
+complete from this database alone; the rest of this page describes the v1
+manifest that a log-native lease does not use.
+
+- A central audit event is appended by `stage_central_expected_event` in the
+  producing transaction, under the lease row lock that also closes admission; a
+  rolled-back operation leaves no row and a committed one needs no emit to
+  survive. Its `source_key` is `central`.
+- A controller's SDK event is appended synchronously at the telemetry capture seam,
+  before the emit queue, while its receipt is open. Its `source_key` is the
+  participant's key. This is effect-then-write: a hard crash between the effect
+  and the row leaves the source unsealed, so the lease stays pending.
+- Triggers keep the log closed: a source row is accepted only while its participant
+  receipt is open (or, for `central`, while admission is open).
+- Sealing records the source's row count, which the seal procedure checks against
+  the rows. `finalize_impersonation_event_log` marks the lease complete when it has
+  ended, admission is closed, and every participant is sealed with a matching
+  count. It runs from the seal procedure and from a trigger on `ended_at`, so every
+  end path (release, expiry, abort, termination) completes in its own transaction
+  when no source is still open; no loop or external store takes part. Release still
+  refuses while a participant is open or failed.
+- A failed participant never completes. `ImpersonationEventSealStuck` alerts while
+  an ended lease still has an open participant (a state, not a threshold), and
+  `ImpersonationManifestCaptureFailed` alerts on a failed one.
+- `completion_basis` is `source_log` (v1: `upstream_manifest`). SDK sampling still precedes capture, so a
+  sampled-out call is in no record.
+
 Protocol-v1 admission is off by default and applies only to a new automatic
 lease. A host-local, sensitive
 `AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET` (at least 32

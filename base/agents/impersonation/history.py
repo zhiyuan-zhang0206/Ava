@@ -134,6 +134,7 @@ def append(
     *,
     event_key: str | None = None,
     created_at: datetime | None = None,
+    source_key: str | None = None,
 ) -> int:
     """Append under the lease lock; repeat event identities return the original row."""
     if event_key is not None:
@@ -159,9 +160,9 @@ def append(
         raise ValueError("Impersonation session does not exist")
     seq = int(row[0])
     conn.execute(
-        "INSERT INTO agent_impersonation_entries(lease_id,seq,kind,event_key,created_at,payload) "
-        "VALUES(%s,%s,%s,%s,COALESCE(%s,clock_timestamp()),%s)",
-        (lease_id, seq, kind, event_key, created_at, Jsonb(payload)),
+        "INSERT INTO agent_impersonation_entries(lease_id,seq,kind,event_key,created_at,payload,"
+        "source_key) VALUES(%s,%s,%s,%s,COALESCE(%s,clock_timestamp()),%s,%s)",
+        (lease_id, seq, kind, event_key, created_at, Jsonb(payload), source_key),
     )
     return seq
 
@@ -331,7 +332,7 @@ def _event_delivery_statistics(
     return {
         "state": "complete" if complete else "pending",
         "pending_reason": None if complete else _pending_delivery_reason(lease),
-        "completion_basis": "upstream_manifest" if complete else None,
+        "completion_basis": _completion_basis(lease) if complete else None,
         "sdk_calls": {
             "coverage": coverage,
             "sampling_policy": "unknown",
@@ -339,6 +340,10 @@ def _event_delivery_statistics(
         },
         "api_events": {"coverage": coverage, "consumed_event_count": len(api)},
     }
+
+
+def _completion_basis(lease: dict[str, Any]) -> str:
+    return "source_log" if lease["event_delivery_protocol_version"] == 2 else "upstream_manifest"
 
 
 def _pending_delivery_reason(lease: dict[str, Any]) -> str:

@@ -217,7 +217,7 @@ def abort_lease(
     trigger, so an abort that loses the race is a no-op here.
     """
     from base.agents.impersonation import _wake
-    from base.agents.impersonation_manifest import close_manifest_admission, is_protocol_v1
+    from base.agents.impersonation_manifest import close_manifest_admission, is_event_protocol
 
     detail = detail.strip()
     if not detail:
@@ -230,7 +230,7 @@ def abort_lease(
             raise ImpersonationError("Lease abort requires the native-held lease")
         if lease["status"] not in OPEN:
             return None
-        if is_protocol_v1(lease):
+        if is_event_protocol(lease):
             close_manifest_admission(conn, lease_id)
         inbound_id = None
         if lease["status"] == "active" and not lease["automatic"]:

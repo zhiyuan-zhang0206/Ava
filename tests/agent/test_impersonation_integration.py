@@ -584,7 +584,7 @@ def _assert_resume_note_delivery_contract(content: str) -> None:
     assert "impersonation/0.json" in content
     assert "zero means no events have been consumed yet" in content
     assert "not that no SDK calls occurred" in content
-    assert "manifest of emitted SDK/API events" in content
+    assert "record of emitted SDK/API events" in content
     assert "never proves no SDK calls" in content
 
 
