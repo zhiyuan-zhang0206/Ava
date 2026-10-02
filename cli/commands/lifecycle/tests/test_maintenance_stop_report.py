@@ -28,9 +28,9 @@ from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as stop
 from cli.commands.lifecycle.tests.test_stop_terminals import _unkillable
 from tests.agent.test_maintenance import WHEN
-from tests.cli.test_maintenance_stop import Launcher
-from tests.cli.test_maintenance_stop import home as home
-from tests.cli.test_maintenance_stop import launch as launch
+from tests.cli._commands_helpers import Launcher
+from tests.cli._commands_helpers import home as home
+from tests.cli._commands_helpers import launch as launch
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract")
 

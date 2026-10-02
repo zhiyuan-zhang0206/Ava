@@ -223,6 +223,8 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/ava_root/tests/test_maintenance_late_child.py",
             "cli/commands/lifecycle/tests/test_agent_profile_launch_env.py",
             "cli/commands/lifecycle/tests/test_root_driver.py",
+            "cli/commands/data_plane/tests/test_maintenance_stop.py",
+            "cli/tests/test_pause_stop.py",
         ),
         113,
     ),
