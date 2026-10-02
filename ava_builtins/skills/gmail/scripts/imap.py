@@ -1,5 +1,5 @@
 """
-Gmail ingest half: Keychain auth, IMAP connection/search/fetch, content
+Gmail ingest half: auth (secrets file first, Keychain fallback), IMAP connection/search/fetch, content
 extraction, and the feed lenses (search / read / discover / enum / fetch /
 save / sync). Split out of feed.py (2026-08-07, Task #1011) so the CLI
 entry stays under the 800-line hard ceiling.
@@ -14,6 +14,7 @@ import html
 import imaplib
 import json
 import mimetypes
+import os
 import re
 import subprocess
 from email.message import EmailMessage
@@ -72,12 +73,18 @@ def _keychain(*extra: str) -> str:
             capture_output=True,
             text=True,
             check=False,
+            timeout=15,
         )
     except FileNotFoundError:
         raise GmailError(
             f"could not read Keychain entry (service={KEYCHAIN_SERVICE!r}): "
             f"security command not found (not macOS). Create it with: "
             f"security add-generic-password -a <you@gmail.com> -s {KEYCHAIN_SERVICE} -w"
+        ) from None
+    except subprocess.TimeoutExpired:
+        raise GmailError(
+            f"could not read Keychain entry (service={KEYCHAIN_SERVICE!r}): "
+            f"security command timed out after 15s (keychain locked / prompt pending)"
         ) from None
     if proc.returncode != 0:
         raise GmailError(
@@ -90,7 +97,10 @@ def _keychain(*extra: str) -> str:
 
 @_cache
 def _account() -> str:
-    """The Gmail address to log in as -- the `acct` label of the Keychain entry."""
+    """The Gmail address to log in as -- env override, else the `acct` label of the Keychain entry."""
+    env_acct = os.environ.get("GMAIL_ACCOUNT", "").strip()
+    if env_acct:
+        return env_acct
     m = re.search(r'"acct"<blob>="([^"]+)"', _keychain())
     if not m:
         raise GmailError(f"Keychain entry {KEYCHAIN_SERVICE!r} has no account (acct) attribute")
@@ -101,16 +111,12 @@ def _app_password() -> str:
     # Gmail accepts the 16-char app password with or without its display spaces;
     # strip them so a copy-paste that kept the "abcd efgh ..." grouping still works.
     #
-    # Reads from the macOS Keychain first; when that is unavailable (e.g. a
-    # headless agent without GUI access), falls back to a plain-text file at
-    # ~/.ava/secrets/gmail-app-password. This is deliberately machine-level, not
-    # cluster-scoped via resolve_ava_home(): the Keychain entry it mirrors is
-    # itself per-OS-user, and secrets living in per-machine ~/.ava/secrets/*.env
-    # is the documented convention (conventions/dev-setup.md).
-    try:
-        return _keychain("-w").strip().replace(" ", "")
-    except GmailError:
-        logger.debug("Gmail app password not found in macOS Keychain, falling back to secrets file")
+    # Reads the plain-text file ~/.ava/secrets/gmail-app-password FIRST (user
+    # ruling 2026-08-26: automation must not depend on the macOS Keychain --
+    # lock/prompt hangs stall headless pipelines), then falls back to the
+    # `ava-gmail-imap` Keychain entry. File path is deliberately machine-level,
+    # not cluster-scoped via resolve_ava_home(): the Keychain entry it mirrors
+    # is itself per-OS-user (conventions/dev-setup.md).
     secrets_file = Path("~/.ava/secrets/gmail-app-password").expanduser()
     if secrets_file.exists():
         try:
@@ -119,9 +125,13 @@ def _app_password() -> str:
                 return pwd
         except OSError as e:
             logger.warning("Failed to read Gmail secrets file at {}: {}", secrets_file, e)
+    try:
+        return _keychain("-w").strip().replace(" ", "")
+    except GmailError as e:
+        logger.debug("Gmail app password not found in secrets file and Keychain unreadable: {}", e)
     raise GmailError(
-        f"could not read Keychain entry (service={KEYCHAIN_SERVICE!r}) "
-        f"and no secrets file at {secrets_file}. Create it with: "
+        f"no Gmail app password: file {secrets_file} unreadable/missing and "
+        f"Keychain entry (service={KEYCHAIN_SERVICE!r}) unreadable. Create the file (chmod 600) or: "
         f"security add-generic-password -a <you@gmail.com> -s {KEYCHAIN_SERVICE} -w"
     )
 
