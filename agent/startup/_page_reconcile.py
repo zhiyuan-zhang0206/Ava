@@ -8,33 +8,22 @@ from typing import Any
 
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents import page_recovery
 from base.db.transaction import async_write_transaction
 from base.log import logger
 
-# The re-serve notice prefix — also the dedupe key for the min-interval check.
-_PAGE_RECOVERY_NOTICE_PREFIX = "Page recovery:"
-# Repeated heartbeats (every 5 min) while a dead row survives must not nag
-# the agent; the interval is checked against the agent's own inbound history.
-_PAGE_RECOVERY_MIN_INTERVAL_S = 6 * 3600
-
-
-def _page_recovery_notice(agent_id: int, names: list[str]) -> str:
-    """The re-serve notice content; the prefix doubles as the dedupe key."""
-    return (
-        f"{_PAGE_RECOVERY_NOTICE_PREFIX} page(s) "
-        f"{', '.join(repr(n) for n in names)} of agent {agent_id} are no longer "
-        "being served (their page server died). Re-serve them with "
-        "ava.ui.show() to republish."
-    )
+# The notice wording, dedupe window and statements are shared with the page-server
+# service's synchronous pass (`base/agents/page_recovery.py`).
+_PAGE_RECOVERY_NOTICE_PREFIX = page_recovery.NOTICE_PREFIX
+_PAGE_RECOVERY_MIN_INTERVAL_S = page_recovery.MIN_INTERVAL_S
+_page_recovery_notice = page_recovery.recovery_notice
 
 
 async def _recent_page_recovery_notice(cur: Any, agent_id: int) -> bool:
     """Whether this agent was already told within the min interval."""
     cutoff = datetime.now(UTC) - timedelta(seconds=_PAGE_RECOVERY_MIN_INTERVAL_S)
     await cur.execute(
-        "SELECT 1 FROM inbound_messages "
-        "WHERE agent_id = %s AND source = 'system' "
-        "AND content LIKE %s AND created_at > %s LIMIT 1",
+        page_recovery.RECENT_NOTICE_SQL,
         (agent_id, _PAGE_RECOVERY_NOTICE_PREFIX + "%", cutoff),
     )
     return await cur.fetchone() is not None
@@ -70,16 +59,10 @@ async def _close_dead_show_pages(
         async with async_write_transaction(pool) as conn, conn.cursor() as cur:
             for name in names:
                 # CAS open->closed (the same UPDATE close_page uses).
-                await cur.execute(
-                    "UPDATE agent_pages SET closed_at = now() "
-                    "WHERE agent_id = %s AND name = %s AND closed_at IS NULL "
-                    "AND expired_at IS NULL",
-                    (agent_id, name),
-                )
+                await cur.execute(page_recovery.CLOSE_PAGE_SQL, (agent_id, name))
             if not await _recent_page_recovery_notice(cur, agent_id):
                 await cur.execute(
-                    "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-                    "VALUES (%s, %s, 'chat', 'system')",
+                    page_recovery.NOTICE_INSERT_SQL,
                     (agent_id, _page_recovery_notice(agent_id, names)),
                 )
                 notified = True
