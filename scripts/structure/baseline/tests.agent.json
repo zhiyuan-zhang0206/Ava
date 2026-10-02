@@ -21,8 +21,6 @@
     "tests/agent/test_claim.py::agent.graph.claim.node._claim_node_impl": 1,
     "tests/agent/test_compact.py::base.telemetry.tracing._state": 1,
     "tests/agent/test_exec_domain_confirmation.py::base.native_process.exec_domain._process_group_has_live_member": 2,
-    "tests/agent/test_impersonation_integration.py::agent.impersonation._PROCESS_STARTED_MONOTONIC": 1,
-    "tests/agent/test_impersonation_integration.py::agent.impersonation._provider_anchor_states": 2,
     "tests/agent/test_inbound_ownership.py::agent.db._CLAIM_DB_LOCK_TIMEOUT": 1,
     "tests/agent/test_maintenance.py::ops.agent_pause._wake": 1,
     "tests/agent/test_maintenance.py::ops.cluster_pause._unpause_local_cluster": 1,
