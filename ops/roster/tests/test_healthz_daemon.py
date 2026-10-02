@@ -19,8 +19,8 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineRole
-from base.config import settings
 from base.daemon.health import DEFAULT_PORTS, DaemonProbe, health_port
+from base.paths import pid_path
 from ops import roster
 from ops.roster.healthz import (
     daemon_identity,
@@ -69,7 +69,7 @@ def test_the_factory_derives_command_url_probe_and_health_name() -> None:
     probe = cast("partial[DaemonProbe]", spec.identity_probe)
     assert probe.func.__name__ == "probe_daemon"
     assert probe.args == ("delivery_watchdog", spec.curl_url)
-    assert probe.keywords == {"pidfile": settings.services.delivery_watchdog_pidfile}
+    assert probe.keywords == {"pidfile": pid_path("delivery_watchdog")}
 
 
 def test_the_factory_passes_the_optional_declarations_through() -> None:

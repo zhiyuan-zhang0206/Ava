@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "services/labeler/daemon.py::ambient-container:_BACKOFF": 1,
-    "services/labeler/daemon.py::import-time-read:_PIDFILE": 1
+    "services/labeler/daemon.py::ambient-container:_BACKOFF": 1
   }
 }

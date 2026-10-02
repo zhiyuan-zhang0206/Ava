@@ -1,7 +1,6 @@
 {
   "ambient_state": {
     "services/events_maintenance/daemon.py::asyncio-task:_maintenance_with_liveness": 1,
-    "services/events_maintenance/daemon.py::import-time-read:_PIDFILE": 1,
     "services/events_maintenance/resolution.py::ambient-container:_last_auto_dismiss_day": 1,
     "services/events_maintenance/rollup.py::ambient-instance:_query_budget": 1
   },

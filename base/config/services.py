@@ -21,47 +21,6 @@ from base.config.service_runtime import _ServiceRuntimeSettings
 
 
 class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
-    agent_host_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "agent-host.pid",
-        alias="AVA_AGENT_HOST_PIDFILE",
-        description="Hosted agent-runner daemon pidfile path.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    page_server_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "page-server.pid",
-        alias="AVA_PAGE_SERVER_PIDFILE",
-        description="Page server supervisor daemon pidfile path.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    labeler_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "labeler.pid",
-        alias="AVA_LABELER_PIDFILE",
-        description="Labeler daemon pidfile path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     labeler_max_chars: int = Field(
         default=64,
         gt=0,
@@ -81,70 +40,6 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
         },
     )
 
-    heartbeat_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "heartbeat.pid",
-        alias="AVA_HEARTBEAT_PIDFILE",
-        description="Heartbeat daemon pidfile path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    delivery_watchdog_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "delivery_watchdog.pid",
-        alias="AVA_DELIVERY_WATCHDOG_PIDFILE",
-        description="Delivery watchdog daemon pidfile path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    task_maintenance_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "task_maintenance.pid",
-        alias="AVA_TASK_MAINTENANCE_PIDFILE",
-        description="Task-maintenance daemon pidfile path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    events_maintenance_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "events_maintenance.pid",
-        alias="AVA_EVENTS_MAINTENANCE_PIDFILE",
-        description="Events-maintenance daemon pidfile path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    pg_backup_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "pg_backup.pid",
-        alias="AVA_PG_BACKUP_PIDFILE",
-        description="Postgres backup scheduler daemon pidfile path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
     backup_hour: int = Field(
         default=3,
         ge=0,
@@ -271,19 +166,6 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
         default="http://localhost:8000/api/health",
         alias="AVA_GATEWAY_HEALTH_URL",
         description="Gateway healthcheck probe URL. Pure agent-runners derive it from AVA_GATEWAY_URL when no host override is set; gateway-capable units default to the local gateway.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    labeler_health_url: str = Field(
-        default="",
-        alias="AVA_LABELER_HEALTH_URL",
-        description="Labeler healthcheck URL. Empty = derive via base.daemon.health.health_port('labeler').",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -482,85 +364,6 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
-        },
-    )
-
-    heartbeat_health_url: str = Field(
-        default="",
-        alias="AVA_HEARTBEAT_HEALTH_URL",
-        description="Heartbeat healthcheck URL. Empty = derive via base.daemon.health.health_port('heartbeat').",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    im_bridge_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "im_bridge.pid",
-        alias="AVA_IM_BRIDGE_PIDFILE",
-        description="IM Bridge daemon pidfile path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    task_maintenance_health_url: str = Field(
-        default="",
-        alias="AVA_TASK_MAINTENANCE_HEALTH_URL",
-        description="Task-maintenance healthcheck URL. Empty = derive via base.daemon.health.health_port('task_maintenance').",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    events_maintenance_health_url: str = Field(
-        default="",
-        alias="AVA_EVENTS_MAINTENANCE_HEALTH_URL",
-        description="Events-maintenance healthcheck URL. Empty = derive via base.daemon.health.health_port('events_maintenance').",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    pg_backup_health_url: str = Field(
-        default="",
-        alias="AVA_PG_BACKUP_HEALTH_URL",
-        description="Postgres backup scheduler healthcheck URL. Empty = derive via base.daemon.health.health_port('pg_backup').",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    ops_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "ops.pid",
-        alias="AVA_OPS_PIDFILE",
-        description="ava-ops daemon pidfile path.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
         },
     )
 
