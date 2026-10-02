@@ -257,7 +257,11 @@ def _patch_run(
     monkeypatch.setattr(daemon, "_remove_pidfile", lambda: events.append("pidfile"))
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
-    monkeypatch.setattr(daemon.base.db, "pool", _Pool)
+
+    def fake_pool(_self: object) -> _Pool:
+        return _Pool()
+
+    monkeypatch.setattr(daemon.Database, "pool", fake_pool)
     monkeypatch.setattr(daemon, "_reconcile_loop", loops["reconcile"])
     monkeypatch.setattr(daemon.dead_pages, "dead_pages_loop", loops["dead"])
     return seen
