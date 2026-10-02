@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 25 | event stream |
-| telemetry (category=telemetry) | `events` | 223 | event stream |
+| telemetry (category=telemetry) | `events` | 224 | event stream |
 | log (category=log) | `events` | 12 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 30 role | live projection |
@@ -92,7 +92,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 223)
+## 3. Telemetry events (category=telemetry, 224)
 
 Telemetry-side event name resolution (`base/log/__init__.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -132,6 +132,7 @@ consumers: see the comments at each emit point.
 | `exec_timeout` | execute_code timed out | anomaly | — | — | events |
 | `exec_node_timeout` | node-level timeout | anomaly | — | — | events |
 | `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | anomaly | pid, grace | — | events |
+| `exec_memory_guard_killed` | the host memory guard killed the largest exec process domain at critical system memory pressure | anomaly | agent_id, pid, footprint_bytes, running, pressure | — | events |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events |
 | `host_recovery_wake_started` | hosted recovery wake started a turn and occupied an in-flight pacing slot | noise | — | — | events |

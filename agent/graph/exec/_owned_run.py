@@ -40,6 +40,7 @@ from base.agents.incarnation.resources import (
     register_exec,
 )
 from base.db.transaction import write_transaction
+from base.native_process.exec_kill_notice import read_notice
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from base.native_process.turn_identity import current_hosted_resources
 from base.paths import exec_run_dir
@@ -291,6 +292,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
             timed_out=receipt.reason == "timeout",
             envelope_error=error,
             stream_cap=stream.cap(),
+            memory_guard_notice=read_notice(result),
         ), payload
     except asyncio.CancelledError as original:
         # EOF asks the independent owner to close. Process mode has no hosted
