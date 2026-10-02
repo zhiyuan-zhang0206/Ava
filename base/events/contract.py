@@ -47,6 +47,7 @@ from base.events.payloads import EventTier as EventTier
 from base.events.payloads import ExecChildBoot as ExecChildBoot
 from base.events.payloads import ExecEnvelope as ExecEnvelope
 from base.events.payloads import ExecFailed as ExecFailed
+from base.events.payloads import ExecMemoryGuardKilled as ExecMemoryGuardKilled
 from base.events.payloads import ExecPayload as ExecPayload
 from base.events.payloads import ExecSubprocessKilled as ExecSubprocessKilled
 from base.events.payloads import FrontendInteraction as FrontendInteraction
