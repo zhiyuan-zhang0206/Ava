@@ -21,11 +21,6 @@ import pytest
 from base.events.live import redis_listener
 from cli.commands.agents import impersonation_relay as relay
 
-
-def _public_relay_session(*_args: object, **_kwargs: object) -> dict[str, int]:
-    return {"session_id": 0}
-
-
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")
 THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 
@@ -148,6 +143,44 @@ class Listener:
 
     async def close(self) -> None:
         self.closed = True
+
+
+def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
+    """Serve the fake inbox through the public relay calls `cmd_relay` reads it with."""
+
+    def lease(*_args: object) -> dict[str, Any]:
+        return {
+            "session_id": 0,
+            "id": str(LEASE_ID),
+            "agent_id": 42,
+            "status": inbox.status,
+            "expires_at": inbox.expires_at,
+            "ack_window_seconds": inbox.ack_window_seconds,
+            "max_delivery_attempts": inbox.max_delivery_attempts,
+            "relay_batch_window_seconds": inbox.batch_window,
+            "start_message": inbox.start_message,
+        }
+
+    def rows(*_args: object) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": i,
+                "kind": inbox.messages[i].kind,
+                "source": inbox.messages[i].source,
+                "content": inbox.messages[i].content,
+                "delivery_attempts": inbox.messages[i].delivery_attempts,
+                "delivery_due": inbox.messages[i].delivery_due,
+            }
+            for i in sorted(inbox.messages)[: inbox.page_size]
+        ]
+
+    monkeypatch.setattr("base.agents.impersonation.relay_get", lease)
+    monkeypatch.setattr("base.agents.impersonation.relay_inbox", rows)
+
+    def beat(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr("base.agents.impersonation.relay_heartbeat", beat)
 
 
 class FakeClock:
@@ -739,15 +772,11 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
     listener = Listener(inbox)
     delivered: list[tuple[UUID, str | None]] = []
     monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
-    monkeypatch.setattr("base.agents.impersonation.relay_get", _public_relay_session)
-
-    def read(*_args: object) -> relay.InboxSnapshot:
-        return relay.InboxSnapshot(frozenset(), {}, inbox.expires_at, inbox.status)
+    inbox.start_message = ""
+    _serve_inbox(monkeypatch, inbox)
 
     def make_listener(*_args: object) -> Listener:
         return listener
-
-    monkeypatch.setattr(relay, "_read_inbox", read)
 
     def reserve(_lease: str, _token: str, ids: list[int]) -> frozenset[int]:
         for i in ids:
@@ -756,16 +785,6 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(relay, "reserve_delivery", reserve)
     monkeypatch.setattr(redis_listener, "RedisInboundListener", make_listener)
-
-    def heartbeat_ok(_lease_id: UUID, _token: str) -> bool:
-        return True
-
-    async def heartbeat_loop(_lease_id: UUID, _token: str, **kwargs: float) -> None:
-        _ = kwargs
-        await asyncio.sleep(0)
-
-    monkeypatch.setattr(relay, "_write_heartbeat", heartbeat_ok)
-    monkeypatch.setattr(relay, "_heartbeat_loop", heartbeat_loop)
 
     def deliver(thread_id: str, _message: str, *, endpoint: str) -> None:
         delivered.append((UUID(thread_id), endpoint))
@@ -805,24 +824,10 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
     listener = Listener(inbox)
     delivered: list[str] = []
     monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
-    monkeypatch.setattr("base.agents.impersonation.relay_get", _public_relay_session)
-
-    def read(*_args: object) -> relay.InboxSnapshot:
-        page = frozenset(sorted(inbox.messages)[: inbox.page_size])
-        return relay.InboxSnapshot(
-            page,
-            {i: inbox.messages[i] for i in page},
-            inbox.expires_at,
-            inbox.status,
-            routine_ids=frozenset(i for i in page if i in inbox.routine),
-            batch_window=inbox.batch_window,
-            start_message=inbox.start_message,
-        )
+    _serve_inbox(monkeypatch, inbox)
 
     def make_listener(*_args: object) -> Listener:
         return listener
-
-    monkeypatch.setattr(relay, "_read_inbox", read)
 
     def reserve(_lease: str, _token: str, ids: list[int]) -> frozenset[int]:
         for i in ids:
@@ -831,16 +836,6 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
 
     monkeypatch.setattr(relay, "reserve_delivery", reserve)
     monkeypatch.setattr(redis_listener, "RedisInboundListener", make_listener)
-
-    def heartbeat_ok(_lease_id: UUID, _token: str) -> bool:
-        return True
-
-    async def heartbeat_loop(_lease_id: UUID, _token: str, **kwargs: float) -> None:
-        _ = kwargs
-        await asyncio.sleep(0)
-
-    monkeypatch.setattr(relay, "_write_heartbeat", heartbeat_ok)
-    monkeypatch.setattr(relay, "_heartbeat_loop", heartbeat_loop)
 
     def deliver(_thread_id: str, message: str, *, endpoint: str) -> str | None:
         delivered.append(message)
