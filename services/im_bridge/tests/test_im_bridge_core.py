@@ -16,10 +16,10 @@ from typing import Any
 import httpx
 import pytest
 
-from base.config import settings
 from services.im_bridge import copy, push_watchdog
 from services.im_bridge import state as state_mod
 from services.im_bridge.core import IMBridgeCore
+from services.im_bridge.tests.slices import gateway_client, im_bridge_config
 from services.im_bridge.types import ChatState, IMAdapter, InboundMessage, Reply
 
 
@@ -151,10 +151,8 @@ class FakeGateway:
         yield None  # pragma: no cover - unreachable
 
 
-def _core(gateway: FakeGateway) -> IMBridgeCore:
-    core = IMBridgeCore()
-    core.gateway = gateway  # type: ignore[assignment]
-    return core
+def _core(gateway: FakeGateway, **config: Any) -> IMBridgeCore:
+    return IMBridgeCore(im_bridge_config(**config), gateway)  # type: ignore[arg-type]
 
 
 def _text(reply: object) -> str:
@@ -301,18 +299,15 @@ def test_cmd_switch_replay_caps_at_five() -> None:
     assert core._last_pushed.get(("telegram", "12345", 405)) == "8.1"
 
 
-def test_cmd_switch_window_and_replay_follow_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The raw fetch window and the replay count are cluster config, resolved
-    per call (task #3696)."""
-    monkeypatch.setattr(settings.services, "im_bridge_timeline_window", 7)
-    monkeypatch.setattr(settings.services, "im_bridge_replay_messages", 2)
+def test_cmd_switch_window_and_replay_follow_config() -> None:
+    """The raw fetch window and the replay count are cluster config (task #3696)."""
     gateway = FakeGateway(
         agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")],
         timeline=[
             {"kind": "agent_chat", "item_id": f"{i}.1", "payload": f"m{i}"} for i in range(1, 9)
         ],
     )
-    core = _core(gateway)
+    core = _core(gateway, im_bridge_timeline_window=7, im_bridge_replay_messages=2)
     state = ChatState("telegram", "12345")
     out = asyncio.run(core._cmd_switch(state, "405"))
     text = _text(out)
@@ -515,14 +510,9 @@ def test_render_item_tags_speaker() -> None:
     assert _render_item({"kind": "agent_chat", "payload": "answer"}, 405) == "[Ava #405] answer"
 
 
-def test_send_message_retries_through_gateway_rollout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_send_message_retries_through_gateway_rollout() -> None:
     """A 5xx from the gateway (mid-rollout) is retried with backoff until it
     lands — an IM message must not be dropped because the gateway blinked."""
-    from services.im_bridge.gateway_client import GatewayClient
-
-    monkeypatch.setattr(settings.services, "im_send_retry_delays", [0.01, 0.01, 0.01])
     calls: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -532,8 +522,7 @@ def test_send_message_retries_through_gateway_rollout(
         return httpx.Response(201, json={"status": "delivered"})
 
     async def scenario() -> None:
-        client = GatewayClient()
-        client._base = "http://localhost:8000"
+        client = gateway_client(im_bridge_config(im_send_retry_delays=(0.01, 0.01, 0.01)))
         client._client = httpx.AsyncClient(
             base_url="http://localhost:8000", transport=httpx.MockTransport(handler)
         )
@@ -544,10 +533,7 @@ def test_send_message_retries_through_gateway_rollout(
     assert calls[0].url.path == "/api/agents/405/messages"
 
 
-def test_send_message_gives_up_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    from services.im_bridge.gateway_client import GatewayClient
-
-    monkeypatch.setattr(settings.services, "im_send_retry_delays", [0.01, 0.01])
+def test_send_message_gives_up_after_retries() -> None:
     calls: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -555,8 +541,7 @@ def test_send_message_gives_up_after_retries(monkeypatch: pytest.MonkeyPatch) ->
         return httpx.Response(503, json={"detail": "restarting"})
 
     async def scenario() -> None:
-        client = GatewayClient()
-        client._base = "http://localhost:8000"
+        client = gateway_client(im_bridge_config(im_send_retry_delays=(0.01, 0.01)))
         client._client = httpx.AsyncClient(
             base_url="http://localhost:8000", transport=httpx.MockTransport(handler)
         )
@@ -1100,8 +1085,8 @@ def test_weixin_push_failures_alert_other_channel(monkeypatch: pytest.MonkeyPatc
     asyncio.run(scenario())
     assert wx.send_attempts == 2  # exactly one retry
     assert len(sleeps) == 1
-    base = settings.services.im_push_retry_backoff_seconds
-    jitter = settings.services.im_push_retry_jitter_seconds
+    base = core.config.im_push_retry_backoff_seconds
+    jitter = core.config.im_push_retry_jitter_seconds
     assert base <= sleeps[0] <= base + jitter
 
 
@@ -1182,8 +1167,8 @@ def test_push_retry_sleeps_backoff_before_retrying(monkeypatch: pytest.MonkeyPat
     events: list[str] = []
 
     async def _sleep(seconds: float) -> None:
-        base = settings.services.im_push_retry_backoff_seconds
-        jitter = settings.services.im_push_retry_jitter_seconds
+        base = core.config.im_push_retry_backoff_seconds
+        jitter = core.config.im_push_retry_jitter_seconds
         assert base <= seconds <= base + jitter
         events.append("sleep")
 
@@ -1207,14 +1192,14 @@ def test_push_retry_sleeps_backoff_before_retrying(monkeypatch: pytest.MonkeyPat
 def test_push_retry_backoff_is_config_backed(monkeypatch: pytest.MonkeyPatch) -> None:
     """The backoff is a config field, not a bare literal (user ruling: behaviour
     constants are configurable, each carrying its reason): base + U(0, jitter),
-    read at retry time; jitter 0 makes the wait deterministic."""
-    assert settings.services.im_push_retry_backoff_seconds == 1.0
-    assert settings.services.im_push_retry_jitter_seconds == 2.0
-    monkeypatch.setattr(settings.services, "im_push_retry_backoff_seconds", 1.5)
-    monkeypatch.setattr(settings.services, "im_push_retry_jitter_seconds", 0.0)
-    assert push_watchdog.retry_backoff_seconds() == 1.5
-    monkeypatch.setattr(settings.services, "im_push_retry_jitter_seconds", 2.0)
-    delays = [push_watchdog.retry_backoff_seconds() for _ in range(50)]
+    taken from the slice; jitter 0 makes the wait deterministic."""
+    defaults = im_bridge_config()
+    assert defaults.im_push_retry_backoff_seconds == 1.0
+    assert defaults.im_push_retry_jitter_seconds == 2.0
+    fixed = im_bridge_config(im_push_retry_backoff_seconds=1.5, im_push_retry_jitter_seconds=0.0)
+    assert push_watchdog.retry_backoff_seconds(fixed) == 1.5
+    jittery = im_bridge_config(im_push_retry_backoff_seconds=1.5, im_push_retry_jitter_seconds=2.0)
+    delays = [push_watchdog.retry_backoff_seconds(jittery) for _ in range(50)]
     assert all(1.5 <= delay <= 3.5 for delay in delays)
     assert len(set(delays)) > 1  # the jitter actually varies
 
@@ -1226,17 +1211,15 @@ def test_restore_subscriptions_skips_disabled_channels(
     subscription — stale switch_state bindings are skipped so the bridge
     stops pushing snapshots to a channel with no adapter (Task #855)."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.setattr(settings.services, "im_disabled_adapters", [])
     gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
-    core = _core(gateway)  # nothing disabled: both subscribe
+    core = _core(gateway, im_disabled_adapters=())  # nothing disabled: both subscribe
     for channel, chat_id in (("weixin", "wx123"), ("telegram", "12345")):
         state = ChatState(channel, chat_id)
         asyncio.run(core._cmd_switch(state, "405"))
         assert (channel, chat_id) in core._subscriptions
 
     # daemon restart with weixin disabled: its subscription is not restored
-    monkeypatch.setattr(settings.services, "im_disabled_adapters", ["weixin"])
-    core2 = _core(FakeGateway(agents=[]))
+    core2 = _core(FakeGateway(agents=[]), im_disabled_adapters=("weixin",))
     assert core2._disabled_channels == {"weixin"}
     asyncio.run(core2.restore_subscriptions())
     assert ("weixin", "wx123") not in core2._subscriptions

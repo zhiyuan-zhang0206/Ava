@@ -4,9 +4,9 @@ Goal: a function's dependencies are in its signature or its constructor, never
 reached through a module global. The direction, the rule that separates what is
 injected from what may stay global, and the alternatives rejected are in the
 [decision record](../../decisions/2026-10-02-dependency-injection-direction.md);
-this page is the target form and what is left. Nothing below is built yet. The
-lint rule that holds the line is a separate change and is described here only by
-its semantics.
+this page is the target form and what is left. Built so far: the ambient-state lint
+and the first configuration slices ([Config slices](#config-slices-first-batch-done));
+the rest is target form.
 
 It is the work the other infra pages point at: the
 [test patch audit](test-patch-audit.md) counts the tests' global-environment
@@ -41,10 +41,14 @@ fields it reads and takes it in its constructor or factory. A field read by two
 components appears in both types, or, when that proves common, in a type owned by
 the lower of the two; the field-ownership survey decides.
 
-`Settings` becomes a catalog. It collects every package's config type so that the
-config panel, `ava config set`, the `.env` writer and the per-field metadata
-(scope, restart requirement, per-agent lifecycle) keep working. It is read by
-tools that enumerate fields, not by code that needs a value.
+`Settings` stays the flat field registry and nothing more: the single source of the
+env, overlay and API surface, with field names and aliases unchanged and the per-field
+metadata (scope, restart requirement, per-agent lifecycle). `base` holds no slice
+directory. A slice is a frozen dataclass its owning package defines; each process
+entry lists the slices it needs and builds them from the flat values in its
+composition root, without pydantic, so boot-lite can use them. The package that owns a
+slice names the fields under their flat names, so a root builds it by reading
+`settings.<domain>.<field>` field by field.
 
 ### 2. Config types live in their package
 
@@ -180,10 +184,13 @@ deletes its entry, and the baseline is never regenerated upward. The limit is th
 the lint and its baseline are files an author can edit; the edit is deliberate and
 visible in review, not impossible.
 
-Function-body reads of the global `settings` are not module state and the first
-lint does not see them. Each slice below is locked by a second rule of the same
-family (proposed): a module outside the composition roots may not import the
-process-global `settings`, with a per-module shrink-only baseline.
+Function-body reads of the global `settings` are not module state. Each sliced package
+is locked by a second rule of the same family, `settings-read`
+(`scripts/structure/ambient_state/sliced.py`): a package listed in `SLICED_PACKAGES`
+names its composition-root modules, and any other non-test module in it that imports
+`settings`, `turn_settings`, `get_field`, `set_field`, `ensure_eager` or `base.config`
+is a site. Sites are frozen in the same shrink-only baseline, so a package that cannot
+finish in one change freezes what is left; a finished one has none.
 
 ## Migration order
 
@@ -200,9 +207,10 @@ process-global `settings`, with a per-module shrink-only baseline.
    step.
 4. **Config slices by field ownership.** Per slice: define the component's config
    type in its package, build it at the root, take it in the constructor, make tests
-   build the type instead of patching `settings`, and remove the slice's baseline
-   entries and the second rule's entries. The slice list is not written yet: it
-   waits for the field-ownership survey, and this page carries none.
+   build the type instead of patching `settings`, and list the package in
+   `SLICED_PACKAGES`. Order: the slices no other package reads (31 in the survey)
+   first, then the shared kernel and the secrets. The IM bridge batch is done
+   (below); the other slices of that kind follow the same pattern.
 5. **Turn context.** Move the config pins, plugin config and turn identity from
    ContextVars into `AvaContext` once the agent-level slices exist; delete the
    views and the lint that polices them.
@@ -215,6 +223,33 @@ process-global `settings`, with a per-module shrink-only baseline.
 7. **Clear the baseline.** `Settings` is then the catalog. The allowlist of
    environment readers shrinks to the roots, and the boot-lite layer is removed if
    the hypothesis below holds. Completed items are deleted from this page.
+
+## Config slices, first batch (done)
+
+The IM bridge daemon: three slices, 21 fields read across eight modules, all in one
+process (the gateway-side `services.im_bridge.daemon`), none read by another package.
+
+- `ImBridgeConfig` (retry delays, push backoff, SSE timeout, timeline and replay windows,
+  notice limits, disabled adapters), `TelegramCredentialsConfig` and
+  `FeishuCredentialsConfig` (credentials and poll timing, plus the replay window the
+  Feishu cursor needs) live in `services/im_bridge/config.py`. Field names are the flat
+  registry names. Secrets sit in their own slices, so the Telegram token is not in the
+  bridge core's type.
+- `services/im_bridge/daemon.py` is the composition root and the only module there that
+  reads `settings`. Its `im_bridge_config()`, `telegram_config()`, `feishu_config()` and
+  `gateway_client()` build the objects; `run()` hands `IMBridgeCore(config, gateway)` its
+  slice and its gateway client, and `_load_adapters` hands each adapter the slice it
+  names (Weixin takes none). The gateway URL and the cluster secret reach `GatewayClient`
+  as arguments from the root; the secret is not part of any slice.
+- The adapter fallbacks that swallowed a missing `settings.feishu` domain are gone: a
+  slice is always complete.
+- Tests build slices with `services/im_bridge/tests/slices.py` (the daemon's builders plus
+  `dataclasses.replace`) instead of patching `settings`; `test_im_bridge_daemon.py` pins
+  that each slice field equals the live flat field of the same name and that `run()` and
+  `_load_adapters` hand the slices down.
+- Not in this batch: `telegram-send-file` still reads the bot token from the environment
+  (it needs its own change), and the gateway profile still lists the `telegram` and
+  `feishu` domains, because the root reads them.
 
 ## Open questions
 
@@ -260,8 +295,7 @@ process-global `settings`, with a per-module shrink-only baseline.
   reads `settings` directly cannot be found from here. What a plugin may read of the
   framework configuration, besides its own plugin-scope config, is undecided. No
   shim is carried: such plugins are updated when their runtime rolls out.
-- **Where the catalog sits in the import layering,** since it must reach every
-  package's config type, and whether the boot-lite layer is still needed. Boot-lite
+- **Whether the boot-lite layer is still needed.** Boot-lite
   exists because constructing the whole `Settings` cost a measurable amount of
   memory in every exec child ([why](../../decisions/2026-09-16-config-boot-lite.md));
   a process that builds only the types it uses may not need it. That is an

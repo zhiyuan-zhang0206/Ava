@@ -15,6 +15,9 @@ scripts/structure/baseline/ shards as `path::rule:name -> site count`. The rule 
 - state: `ambient-instance`, `ambient-container`, `contextvar`, `global-rebind`,
   `foreign-rebind`, `class-level-container`, `hidden-singleton`, `hidden-cache`;
 - import-time effects: `import-time-call`, `import-time-read`, `host-fact`;
+- configuration reads: `settings-read` — a module of a slice-governed package
+  (`allowlist.SLICED_PACKAGES`, see `sliced.py`) other than its composition root imports the
+  process-global `settings`;
 - free-floating background work: `asyncio-task`, `thread` (keyed by the enclosing
   function). Background work must be durable or re-derivable from durable state and
   run as its own service loop; use a per-iteration `async with asyncio.TaskGroup()`
@@ -40,7 +43,7 @@ from pathlib import Path
 
 from scripts.structure import lint_common
 from scripts.structure.ambient_state import allowlist as allow
-from scripts.structure.ambient_state import scan
+from scripts.structure.ambient_state import scan, sliced
 
 SECTION = "ambient_state"
 # The file whose absence at the base revision means this section is being introduced.
@@ -73,6 +76,7 @@ _FIXES: dict[str, str] = {
     scan.SINGLETON: f"a zero-argument cache is a hidden singleton — {_STATE_FIX}; a memoized pure derivation goes in ALLOWED with a reason",
     scan.CACHE: "a memoized function is state unless it is pure — a pure derivation goes in ALLOWED in scripts/structure/ambient_state/allowlist.py with a reason",
     scan.CALL: "a call that runs at import (a registry fill or side effect) — register from a composition root, not at import",
+    sliced.SETTINGS_READ: f"reads the global configuration in a sliced package — {sliced.FIX}",
     scan.READ: "reads settings, the environment, the clock or the filesystem at import — read it where it is used, or inject it",
     scan.HOST: "a platform constant computed at import — inject a `Platform` instead of recomputing the fact per module",
     scan.TASK: f"a free-floating task — {_BACKGROUND_FIX}",
@@ -103,7 +107,7 @@ def site_key(rel: str, hit: scan.Hit) -> str:
 
 
 def _hits(tree: ast.Module, rel: str, repo_root: Path) -> list[scan.Hit]:
-    return scan.scan(tree, rel, repo_root) if in_scope(rel) else []
+    return [*scan.scan(tree, rel, repo_root), *sliced.hits(tree, rel)] if in_scope(rel) else []
 
 
 def measure(tree: ast.Module, rel: str, repo_root: Path) -> Sites:
@@ -162,6 +166,12 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
         for path in sorted(listed_paths)
         if not (repo_root / path).is_file()
     ]
+    for package, roots in sorted(allow.SLICED_PACKAGES.items()):
+        for path in (f"{package}/config.py", *sorted(roots)):
+            if not (repo_root / path).is_file():
+                errors.append(
+                    f"{_LIST_FILE}:1: stale SLICED_PACKAGES entry {package} — {path} does not exist; fix or remove it"
+                )
     for callee in sorted(allow.PURE_REPO_CALLEES):
         owner, _, name = callee.rpartition(".")
         path = repo_root.joinpath(*owner.split(".")).with_suffix(".py")

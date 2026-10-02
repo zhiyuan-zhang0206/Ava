@@ -12,9 +12,9 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.config import settings
 from services.im_bridge.core import IMBridgeCore
 from services.im_bridge.notice_bridge import NoticeBridge, _state_dir
+from services.im_bridge.tests.slices import gateway_client, im_bridge_config
 
 
 class FakeGateway:
@@ -97,14 +97,13 @@ def _notice(
 
 
 def _bridge(
-    tmp_path: Any, gateway: FakeGateway, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Any, gateway: FakeGateway, monkeypatch: pytest.MonkeyPatch, **config: Any
 ) -> tuple[NoticeBridge, FakeAdapter]:
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    core = IMBridgeCore()
-    core.gateway = gateway  # type: ignore[assignment]
+    core = IMBridgeCore(im_bridge_config(**config), gateway)  # type: ignore[arg-type]
     adapter = FakeAdapter()
     core.adapters["telegram"] = adapter  # type: ignore[assignment]
-    bridge = NoticeBridge(core)
+    bridge = NoticeBridge(core, core.config)
     return bridge, adapter
 
 
@@ -167,8 +166,7 @@ def test_reply_window_follows_config(tmp_path: Any, monkeypatch: pytest.MonkeyPa
     """The reply-mode window is cluster config, resolved when the mode arms
     (task #3696)."""
     gateway = FakeGateway()
-    bridge, _ = _bridge(tmp_path, gateway, monkeypatch)
-    monkeypatch.setattr(settings.services, "im_bridge_notice_reply_window_seconds", 600)
+    bridge, _ = _bridge(tmp_path, gateway, monkeypatch, im_bridge_notice_reply_window_seconds=600)
 
     before = time.time()
     hint = asyncio.run(bridge.handle_callback("12345", "notice:reply:7:42"))
@@ -345,7 +343,7 @@ def test_cmd_notice_filter_updates_and_persists(
     assert '"agent": 5' in out
     assert (_state_dir() / "notice_filters.json").exists()
     # restart: filter survives
-    bridge2 = NoticeBridge(_bridge(tmp_path, gateway, monkeypatch)[0].core)
+    bridge2 = NoticeBridge(_bridge(tmp_path, gateway, monkeypatch)[0].core, im_bridge_config())
     assert bridge2._filters["min_priority"] == "P1"
     assert bridge2._filters["agent"] == 5
 
@@ -355,17 +353,19 @@ def test_cmd_notice_filter_updates_and_persists(
 # availability); these tests exercise the real DB path with a real pool.
 
 
-def _direct_bridge(db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _direct_bridge(
+    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **config: Any
+):
     from psycopg_pool import ConnectionPool
 
     from base.config import settings
 
     pool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    core = IMBridgeCore(db_pool=pool)
+    core = IMBridgeCore(im_bridge_config(**config), gateway_client(), db_pool=pool)
     adapter = FakeAdapter()
     core.adapters["telegram"] = adapter  # type: ignore[assignment]
-    bridge = NoticeBridge(core, db_pool=pool)
+    bridge = NoticeBridge(core, core.config, db_pool=pool)
     return bridge, adapter, pool
 
 
@@ -443,8 +443,9 @@ def test_list_queue_limit_follows_config(
     agent_id = spawn_agent()
     for i in range(3):
         _seed_notice(db_conn, agent_id, f"queue item {i}")
-    monkeypatch.setattr(settings.services, "im_bridge_notice_open_limit", 2)
-    bridge, adapter, pool = _direct_bridge(db_conn, tmp_path, monkeypatch)
+    bridge, adapter, pool = _direct_bridge(
+        db_conn, tmp_path, monkeypatch, im_bridge_notice_open_limit=2
+    )
     try:
         hint = asyncio.run(bridge.list_queue())
         assert hint is not None and "2 notices open" in hint
@@ -464,8 +465,9 @@ def test_notices_after_caps_at_display_default(
     agent_id = spawn_agent()
     for i in range(3):
         _seed_notice(db_conn, agent_id, f"live item {i}")
-    monkeypatch.setattr(settings.display, "notices_open_default_limit", 2)
-    bridge, _adapter, pool = _direct_bridge(db_conn, tmp_path, monkeypatch)
+    bridge, _adapter, pool = _direct_bridge(
+        db_conn, tmp_path, monkeypatch, notices_open_default_limit=2
+    )
     try:
         rows = bridge._notices_after(0)
         assert len(rows) == 2

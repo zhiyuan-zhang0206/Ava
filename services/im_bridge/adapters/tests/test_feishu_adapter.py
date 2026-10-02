@@ -24,6 +24,7 @@ from services.im_bridge.adapters.feishu import (
     _backoff_delay,
     _segment,
 )
+from services.im_bridge.tests.slices import feishu_config
 from services.im_bridge.types import InboundMessage
 from tests.base.poll_until import poll_until_async
 
@@ -124,8 +125,8 @@ class BlockingThread(threading.Thread):
 class PatchingAdapter(FeishuAdapter):
     """Adapter with the lark ws client construction replaced by a fake."""
 
-    def __init__(self, core: FakeCore, ws_client: FakeWsClient) -> None:
-        super().__init__(core)
+    def __init__(self, core: FakeCore, config: Any, ws_client: FakeWsClient) -> None:
+        super().__init__(core, config)
         self._ws_client_impl = ws_client
 
     def _build_ws_client(self) -> Any:
@@ -144,7 +145,7 @@ class _LogRecorder:
 
 @pytest.fixture
 def adapter() -> FeishuAdapter:
-    return FeishuAdapter(FakeCore())
+    return FeishuAdapter(FakeCore(), feishu_config())
 
 
 # -- inbound ---------------------------------------------------------------
@@ -215,54 +216,14 @@ async def test_ws_callback_drops_when_no_main_loop(adapter: FeishuAdapter) -> No
 # -- credentials / lifecycle ------------------------------------------------
 
 
-def test_credentials_read_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.feishu, "feishu_app_id", "cli_env")
-    monkeypatch.setattr(settings.feishu, "feishu_app_secret", "sec_ava")
-    try:
-        adapter = FeishuAdapter(FakeCore())
-        assert adapter._credential("feishu_app_id") == "cli_env"
-        assert adapter._credential("feishu_app_secret") == "sec_ava"
-    finally:
-        monkeypatch.undo()
+async def test_start_skips_without_credentials() -> None:
+    adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_app_id="", feishu_app_secret=""))
+    await adapter.start()
+    assert adapter._ws_thread is None
+    assert adapter._ws_client is None
 
 
-def test_credentials_missing_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.feishu, "feishu_app_id", "")
-    monkeypatch.setattr(settings.feishu, "feishu_app_secret", "")
-    try:
-        adapter = FeishuAdapter(FakeCore())
-        assert adapter._credential("feishu_app_id") == ""
-        assert adapter._credential("feishu_app_secret") == ""
-    finally:
-        monkeypatch.undo()
-
-
-async def test_start_skips_without_credentials(
-    adapter: FeishuAdapter, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.feishu, "feishu_app_id", "")
-    monkeypatch.setattr(settings.feishu, "feishu_app_secret", "")
-    try:
-        await adapter.start()
-        assert adapter._ws_thread is None
-        assert adapter._ws_client is None
-    finally:
-        monkeypatch.undo()
-
-
-async def test_start_connects_with_credentials(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.feishu, "feishu_app_id", "cli_x")
-    monkeypatch.setattr(settings.feishu, "feishu_app_secret", "secret_x")
+async def test_start_connects_with_credentials() -> None:
     # The ws thread's first act is a COLD import of lark_oapi.ws.client (a
     # protobuf + websocket import chain, seconds on a loaded CI runner) before
     # the fake's start() can run, so the timed wait below would race that
@@ -273,8 +234,10 @@ async def test_start_connects_with_credentials(
     import lark_oapi.ws.client  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     ws_client = FakeWsClient()
-    adapter = PatchingAdapter(FakeCore(), ws_client)
+    credentials = feishu_config(feishu_app_id="cli_x", feishu_app_secret="secret_x")  # noqa: S106
+    adapter = PatchingAdapter(FakeCore(), credentials, ws_client)
     await adapter.start()
+    assert (adapter._app_id, adapter._app_secret) == ("cli_x", "secret_x")
     assert adapter._ws_thread is not None
     assert ws_client.started.wait(timeout=15)
     assert adapter._ws_client is ws_client
@@ -380,7 +343,7 @@ async def test_build_ws_client_installs_the_env_proxy_kwargs_builder(
 
     from services.im_bridge.adapters import feishu_ws_proxy
 
-    adapter = FeishuAdapter(FakeCore())
+    adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_rest_timeout_seconds=7.5))
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105 — a literal, never a real credential
     monkeypatch.setattr(ws_client_module, "_ws_connect_kwargs", lambda: {"proxy": None})
@@ -557,9 +520,6 @@ def test_rest_client_applies_configured_timeout(
     contract — the adapter must pass AVA_FEISHU_REST_TIMEOUT_SECONDS through
     so a hung Feishu line cannot park an IM outbound at an unknown default.
     """
-    from base.config import settings
-
-    monkeypatch.setattr(settings.feishu, "feishu_rest_timeout_seconds", 7.5)
     seen: list[float] = []
 
     class _Builder:
@@ -579,7 +539,7 @@ def test_rest_client_applies_configured_timeout(
     import lark_oapi
 
     monkeypatch.setattr(lark_oapi.Client, "builder", staticmethod(_Builder))
-    adapter = FeishuAdapter(FakeCore())
+    adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_rest_timeout_seconds=7.5))
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
     client = adapter._build_rest_client()
@@ -701,7 +661,7 @@ def make_list_response(items: list[SimpleNamespace]) -> SimpleNamespace:
 
 
 def poll_adapter(rest: FakeRestClient) -> FeishuAdapter:
-    adapter = FeishuAdapter(FakeCore())
+    adapter = FeishuAdapter(FakeCore(), feishu_config())
     adapter._rest_client = rest
     return adapter
 
@@ -880,12 +840,9 @@ async def test_send_does_not_override_existing_owner_open_id(adapter: FeishuAdap
     assert adapter._last_open_id == "ou_first"
 
 
-def test_start_poller_honors_zero_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_poller_honors_zero_interval() -> None:
     """AVA_FEISHU_POLL_INTERVAL_SECONDS=0 disables the poller (WS-only)."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.feishu, "feishu_poll_interval_seconds", 0)
-    adapter = FeishuAdapter(FakeCore())
+    adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_poll_interval_seconds=0))
     adapter._start_poller()
     assert adapter._poll_task is None
 
@@ -1061,7 +1018,7 @@ async def test_poll_poison_message_skipped_after_retries(adapter: FeishuAdapter)
 
     core = AlwaysFailingCore()
     rest = FakeRestClient()
-    adapter = FeishuAdapter(core)
+    adapter = FeishuAdapter(core, feishu_config())
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     window = make_list_response(
@@ -1172,7 +1129,7 @@ async def test_poll_inbound_failure_retried_next_round(adapter: FeishuAdapter) -
 
     core = FlakyCore()
     rest = FakeRestClient()
-    adapter = FeishuAdapter(core)
+    adapter = FeishuAdapter(core, feishu_config())
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     failing_window = make_list_response(
@@ -1205,7 +1162,7 @@ async def test_poll_never_marks_seen_before_delivery(adapter: FeishuAdapter) -> 
 
     core = FailingCore()
     rest = FakeRestClient()
-    adapter = FeishuAdapter(core)
+    adapter = FeishuAdapter(core, feishu_config())
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     rest.list_responses = [

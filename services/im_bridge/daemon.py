@@ -17,6 +17,7 @@ import json
 import logging
 import signal
 import sys
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,12 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
 from base.paths import pid_path
+from services.im_bridge.config import (
+    FeishuCredentialsConfig,
+    ImBridgeConfig,
+    TelegramCredentialsConfig,
+)
+from services.im_bridge.gateway_client import GatewayClient
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.im_bridge.daemon")
@@ -63,26 +70,86 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), "services.im_bridge.daemon")
 
 
+# -- composition root --------------------------------------------------------
+# This module is the only one of the package that reads `settings`
+# (scripts/structure/ambient_state: SLICED_PACKAGES). It builds the configuration
+# slices from the flat field values and hands each to the component that uses it.
+
+
+def im_bridge_config() -> ImBridgeConfig:
+    return ImBridgeConfig(
+        im_disabled_adapters=tuple(settings.services.im_disabled_adapters),
+        im_send_retry_delays=tuple(settings.services.im_send_retry_delays),
+        im_push_retry_backoff_seconds=settings.services.im_push_retry_backoff_seconds,
+        im_push_retry_jitter_seconds=settings.services.im_push_retry_jitter_seconds,
+        im_sse_read_timeout_seconds=settings.services.im_sse_read_timeout_seconds,
+        im_bridge_timeline_window=settings.services.im_bridge_timeline_window,
+        im_bridge_replay_messages=settings.services.im_bridge_replay_messages,
+        im_bridge_notice_reply_window_seconds=settings.services.im_bridge_notice_reply_window_seconds,
+        im_bridge_notice_open_limit=settings.services.im_bridge_notice_open_limit,
+        notices_open_default_limit=settings.display.notices_open_default_limit,
+    )
+
+
+def telegram_config() -> TelegramCredentialsConfig:
+    return TelegramCredentialsConfig(
+        telegram_bot_token=settings.telegram.telegram_bot_token,
+        telegram_owner_id=settings.telegram.telegram_owner_id,
+        telegram_poll_timeout_seconds=settings.telegram.telegram_poll_timeout_seconds,
+        telegram_reconnect_base_delay_seconds=settings.telegram.telegram_reconnect_base_delay_seconds,
+        telegram_reconnect_max_delay_seconds=settings.telegram.telegram_reconnect_max_delay_seconds,
+    )
+
+
+def feishu_config() -> FeishuCredentialsConfig:
+    return FeishuCredentialsConfig(
+        feishu_app_id=settings.feishu.feishu_app_id,
+        feishu_app_secret=settings.feishu.feishu_app_secret,
+        feishu_rest_timeout_seconds=settings.feishu.feishu_rest_timeout_seconds,
+        feishu_poll_interval_seconds=settings.feishu.feishu_poll_interval_seconds,
+        feishu_poll_chat_id=settings.feishu.feishu_poll_chat_id,
+        delivery_watchdog_stale_claimed_threshold_seconds=(
+            settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
+        ),
+    )
+
+
+def gateway_client(config: ImBridgeConfig) -> GatewayClient:
+    return GatewayClient(
+        config,
+        gateway_url=settings.gateway.gateway_url,
+        cluster_secret=settings.data_plane.cluster_secret,
+    )
+
+
+# The adapters the daemon runs, in load order, each with the builder of the slice
+# its constructor takes (None: the adapter reads no configuration slice).
+_ADAPTERS: tuple[tuple[str, Callable[[], Any] | None], ...] = (
+    ("telegram", telegram_config),
+    ("weixin", None),
+    ("feishu", feishu_config),
+)
+
+
 def _import_adapter(name: str) -> Any:
     """Import one adapter module by channel name (seam for tests)."""
 
     return __import__(f"services.im_bridge.adapters.{name}", fromlist=["*"])
 
 
-def _load_adapters(core: Any) -> list[Any]:
+def _load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:
     """Import each channel adapter; a missing module or failed import logs and
     skips — one broken channel must not take down the bridge."""
 
     loaded: list[Any] = []
-    disabled = set(settings.services.im_disabled_adapters)
-    for name in ("telegram", "weixin", "feishu"):
+    for name, build_config in _ADAPTERS:
         if name in disabled:
             _log.info("im_bridge: adapter %s disabled by config (AVA_IM_DISABLED_ADAPTERS)", name)
             continue
         try:
             mod = _import_adapter(name)
             adapter_cls = mod.ADAPTER_CLASS
-            adapter = adapter_cls(core)
+            adapter = adapter_cls(core, *(() if build_config is None else (build_config(),)))
             core.register(adapter)
             loaded.append(adapter)
             _log.info("im_bridge: adapter %s loaded", name)
@@ -178,7 +245,8 @@ async def run() -> None:
     from services.im_bridge.core import IMBridgeCore
 
     db_pool = _db.pool()
-    core = IMBridgeCore(db_pool=db_pool)
+    config = im_bridge_config()
+    core = IMBridgeCore(config, gateway_client(config), db_pool=db_pool)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     try:
         health = await start_health_server(
@@ -197,7 +265,7 @@ async def run() -> None:
         raise
     _log.info("[im_bridge] healthz listening on :%s", health_port("im_bridge"))
 
-    adapters = _load_adapters(core)
+    adapters = _load_adapters(core, frozenset(config.im_disabled_adapters))
     if not adapters:
         _log.warning("im_bridge: no adapters loaded — nothing to serve")
 
