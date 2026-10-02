@@ -103,7 +103,6 @@ PATH_SCOPES: dict[str, Scope] = {
     "tests.path_scoped.ava_tests": Scope(
         (
             "tests/ava",
-            "agent/graph/claim/tests",
             "agent/tests/test_lazy_child_telemetry.py",
             "agent/tests/test_register_namespace.py",
             "ava/agents/tests/test_agents_scan.py",
@@ -149,7 +148,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "gateway/schedules/tests/test_schedule_manager_pty.py",
             "services/agent_host/tests/test_hosted_dispatcher_cancellation.py",
         ),
-        60,
+        57,
     ),
     "tests.path_scoped.cli_tests": Scope(
         (
@@ -241,7 +240,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "ava_builtins/plugins/tests/test_agent_inspect_widgets.py",
             "base/agents/tests/test_log_sink.py",
             "base/packages/plugins/tests/test_enable_config.py",
-            "base/paths/tests",
             "base/telemetry/metrics/tests/test_metrics_aggregate_equivalence.py",
             "gateway/agents/tests/test_completion_notice_flusher.py",
             "gateway/agents/tests/test_context_breakdown.py",
@@ -269,7 +267,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "ops/tests/test_inventory_ops.py",
             "ops/tests/test_operations.py",
         ),
-        116,
+        114,
     ),
     "tests.path_scoped.integration_tests": Scope(
         (
