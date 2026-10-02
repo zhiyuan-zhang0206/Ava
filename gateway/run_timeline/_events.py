@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from base.db import connect
+from base.db import Database
 from base.events.contract import EVENTS
 from gateway.events import audit_rows, telemetry_rows
 
@@ -21,12 +21,17 @@ def _is_audit(event_name: str) -> bool:
 
 
 def _query_pages(
-    reader: _Reader, agent_id: int, from_: datetime, to: datetime, event_names: list[str]
+    database: Database,
+    reader: _Reader,
+    agent_id: int,
+    from_: datetime,
+    to: datetime,
+    event_names: list[str],
 ) -> list[dict[str, object]]:
     """The rows of an inclusive window, oldest first, one transport page at a time."""
     events: list[dict[str, object]] = []
     offset = 0
-    with connect(autocommit=True) as conn:
+    with database.connect(autocommit=True) as conn:
         while True:
             page, has_more = reader(
                 conn,
@@ -45,7 +50,12 @@ def _query_pages(
 
 
 def query_all_events(
-    agent_id: int, from_: datetime, to: datetime, *, event_names: tuple[str, ...]
+    database: Database,
+    agent_id: int,
+    from_: datetime,
+    to: datetime,
+    *,
+    event_names: tuple[str, ...],
 ) -> list[dict[str, object]]:
     """Audit facts come from `audit_events`, the rest from `telemetry_events`; the rows
     are returned together, in no particular order."""
@@ -53,7 +63,9 @@ def query_all_events(
     other_names = [name for name in event_names if name not in audit_names]
     events: list[dict[str, object]] = []
     if audit_names:
-        events += _query_pages(audit_rows.query_events, agent_id, from_, to, audit_names)
+        events += _query_pages(database, audit_rows.query_events, agent_id, from_, to, audit_names)
     if other_names:
-        events += _query_pages(telemetry_rows.query_events, agent_id, from_, to, other_names)
+        events += _query_pages(
+            database, telemetry_rows.query_events, agent_id, from_, to, other_names
+        )
     return events

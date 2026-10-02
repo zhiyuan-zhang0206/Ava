@@ -18,9 +18,10 @@ from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from base.config import settings
+from base.db import Database
 from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.run_timeline import _events
@@ -503,17 +504,18 @@ def aggregate_turn_timeline(
 
 
 def _query_all_events(
+    database: Database,
     agent_id: int,
     from_: datetime,
     to: datetime,
     *,
     event_names: tuple[str, ...] = _TURN_EVENTS,
 ) -> list[dict[str, object]]:
-    return _events.query_all_events(agent_id, from_, to, event_names=event_names)
+    return _events.query_all_events(database, agent_id, from_, to, event_names=event_names)
 
 
 def _default_window(
-    agent_id: int, now: datetime, *, session: Literal["compact", "current"]
+    database: Database, agent_id: int, now: datetime, *, session: Literal["compact", "current"]
 ) -> tuple[datetime, datetime]:
     """Choose the latest compact-ended or current observable session.
 
@@ -522,12 +524,8 @@ def _default_window(
     lookback gets a bounded last-24-hours view instead of an unbounded scan.
     """
     lookback_start = now - _LIFECYCLE_LOOKBACK
-    lifecycle_events = _query_all_events(
-        agent_id,
-        lookback_start,
-        now,
-        event_names=tuple(_SESSION_START_EVENTS | _COMPACT_EVENTS),
-    )
+    names = tuple(_SESSION_START_EVENTS | _COMPACT_EVENTS)
+    lifecycle_events = _query_all_events(database, agent_id, lookback_start, now, event_names=names)
     ordered = sorted(lifecycle_events, key=_event_ts)
     starts = [_event_ts(event) for event in ordered if _event_name(event) in _SESSION_START_EVENTS]
     if session == "current":
@@ -561,6 +559,7 @@ def _parse_bucket_seconds(bucket: str | None) -> int:
 
 
 def _effective_window(
+    database: Database,
     agent_id: int,
     from_: datetime | None,
     to: datetime | None,
@@ -572,7 +571,7 @@ def _effective_window(
         if value is not None and value.tzinfo is None:
             raise HTTPException(status_code=422, detail=f"{name} must include a timezone offset")
     if from_ is None and to is None:
-        return _default_window(agent_id, now, session=session)
+        return _default_window(database, agent_id, now, session=session)
     end = to or now
     start = from_ or end - _FALLBACK_WINDOW
     if start >= end:
@@ -585,6 +584,7 @@ def _effective_window(
     dependencies=[Depends(deny_isolated_result_read)],
 )
 def get_run_timeline(
+    request: Request,
     agent_id: int,
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: Annotated[datetime | None, Query()] = None,
@@ -595,7 +595,8 @@ def get_run_timeline(
 ) -> RunTimelineResponse:
     """Return an event-driven session waterfall with turn or bucket rows."""
     now = datetime.now(UTC)
-    window_start, window_end = _effective_window(agent_id, from_, to, now, session=session)
+    db: Database = request.app.state.db
+    window_start, window_end = _effective_window(db, agent_id, from_, to, now, session=session)
     # Two independent read branches: the request thread owns events/narrative,
     # one worker owns checkpoint strip reads. Join before returning or raising;
     # request context follows the worker, and no executor survives the request.
@@ -603,14 +604,16 @@ def get_run_timeline(
         strip_read = executor.submit(
             copy_context().run,
             strip_for_window_or_none,
+            db,
             agent_id,
             window_start,
             window_end,
             messages_max,
         )
-        events = _query_all_events(agent_id, window_start, window_end)
+        events = _query_all_events(db, agent_id, window_start, window_end)
         post_window_events = (
             _query_all_events(
+                db,
                 agent_id,
                 window_end,
                 now,
