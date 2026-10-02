@@ -153,17 +153,17 @@ dev = [
     "pytest-split",
 ]
 
-# Import-direction contract: lock the layering the sink refactors established
-# so no new reverse edge can creep back in. A lower layer importing a higher
-# one fails CI; higher importing lower is allowed (agent imports ava; everyone
-# imports base).
+# Import-direction contracts: no new reverse edge can creep back in. What they
+# mean, what they do not see and the ignore_imports policy:
+# conventions/import-layering.md. A lower layer importing a higher one fails
+# CI; higher importing lower is allowed (agent imports ava; everyone imports
+# base).
 #
-# `services` is deliberately NOT a layer: the package straddles levels —
-# `services.memory_indexer` is imported by gateway (so it sits below gateway),
-# while `services.labeler` / `services.runner` / `services.restarter` etc. are
-# daemons that import gateway (so they sit above it). The clean spine stays in
-# its own layers contract; `services.agent_host` has a separate submodule
-# contract because it is the one daemon intentionally above the agent kernel.
+# `services` is deliberately NOT a layer: gateway imports some of its packages
+# (`services.memory_indexer`, `services.heartbeat`), so it does not sit above
+# gateway, and `services.agent_host` is the one daemon intentionally above the
+# agent kernel. The clean spine stays in its own layers contract;
+# `services.agent_host` has a separate submodule contract for that reason.
 # `plugins` is left ungoverned (the built-in ava_compact is intentionally
 # coupled to the agent kernel, so agent <-> plugins is cyclic by design).
 [tool.importlinter]

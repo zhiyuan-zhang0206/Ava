@@ -480,10 +480,10 @@ repos:
       # a field with a missing/invalid scope, so the former standalone
       # lint-config-scope hook retired.)
 
-      # Import-direction contract (config in pyproject [tool.importlinter]):
-      # locks base < ava < agent < gateway < {services,cli} so no new
-      # reverse edge into a lower layer can creep back in. Analyzes the whole
-      # import graph, so pass_filenames: false + trigger on any .py change.
+      # Import-direction contracts (config in pyproject [tool.importlinter];
+      # the rules and their blind spots: conventions/import-layering.md).
+      # Analyzes the whole import graph, so pass_filenames: false + trigger on
+      # any .py change.
       - id: lint-imports
         name: lint import direction (layered architecture)
         # import-linter has no pyproject.toml cache-dir key (cache_dir is a CLI/API
