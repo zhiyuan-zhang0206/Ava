@@ -327,11 +327,20 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   allowlist.py`), and bans `Database.from_settings()` outside the roots named there. Listed so far:
   labeler, page server, hierarchy worker, events maintenance, IM bridge. A package joins when its
   last ambient dial is gone, in the same change; the shim is deleted with the last package.
+- **Done, the endpoint table** (`base/daemon/endpoints.py`): `ServiceEndpoints.from_settings()`
+  builds one row per health daemon (`ServiceEndpoint`: name, healthz port, pidfile under
+  `$AVA_HOME/run`) from the fixed port table, the unit's `AVA_<NAME>_HEALTH_PORT` override and
+  `AVA_HOME`. A daemon root takes its own row (`.of("labeler")`) and hands the port to
+  `start_health_server`; a supervisor, probe or command takes the table. `health_port(name)` and
+  `pid_path(name)` remain as the shim. The `ambient-endpoint` rule bans both in the packages listed
+  in `ENDPOINT_PACKAGES` and bans `ServiceEndpoints.from_settings()` outside the roots named there.
+  Listed so far: labeler, events maintenance, IM bridge, page server.
 - **Root-local bundles**: a root may gather what it wires into a frozen dataclass marked
   `base.wiring.root_bundle`. The `bundle-leak` rule fails any annotation of such a class outside
   its defining module, so the bundle stays a local variable of the root and never becomes a
   parameter type (a function handed the whole bundle can reach any member).
-- **Not yet**: the event bus handle, the endpoint table, the clock, and the cluster-secret
+- **Not yet**: the event bus handle, the endpoint consumers outside daemon roots (agent pause,
+  cluster pause, lifecycle, gateway cluster status, telemetry health alerts), the clock, and the cluster-secret
   contraction (machine API tokens in place of the human secret outside the gateway, the operator
   CLI and the root); the agent-side per-turn slices carried in `AvaContext`.
 
