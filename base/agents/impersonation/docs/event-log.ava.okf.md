@@ -18,13 +18,20 @@ keep no event log, and report `pending_reason` `manual` or `legacy`.
 
 ## Writers
 
-Both halves append the event body itself (`event_log.append_source_event`), so
-nothing is read back from the telemetry store.
+Both halves append through `event_log.append_source_event`, so nothing is read
+back from the telemetry store. A controller's SDK event is not an audit event and
+the entry holds its body. A central audit event's entry holds a reference to its
+`audit_events` row (`event_uid`, the stream id `id`, `line_sha256`) in place of a
+second copy of the body; `history.entries` resolves the reference, so the
+hand-off export and every reader see the full event, and an unresolvable
+reference raises. The append records the `audit_events` row first (idempotent),
+so the reference never dangles. A duplicate delivery of the same event key is
+compared on resolved content, whichever side holds the body.
 
 - **Central audit events** are appended by `record_central_event` in the producing
   transaction, under the lease row lock that also closes admission. A rolled-back
   operation leaves no row and a committed one needs no emit to survive. Their
-  `source_key` is `central`. The same transaction then records the tagged event in `audit_events` (`record_audit`), the global record every audit fact has. The audit-root census test classifies every producer.
+  `source_key` is `central`. The same transaction records the tagged event in `audit_events` (`record_audit`), the global record every audit fact has, and the entry points at that row. The audit-root census test classifies every producer.
 - **A controller's SDK events** are appended synchronously by `capture_local_event`
   at the telemetry seam, before the emit queue, while the controller's receipt is
   open. The `source_key` is the receipt's key. This is effect-then-write: a hard
