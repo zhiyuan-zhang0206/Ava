@@ -21,8 +21,8 @@ The placement rule (one owner, reused by every test-locality lint):
    or the non-test code in P's subtree imports it (or something below it) directly, function-level
    imports included. Candidates are the packages on the ancestor chains of the referenced
    modules, never above their nearest common ancestor directory (the bound). Only direct
-   imports count (a dependency of a dependency does not), and `tests.*` references are not
-   modules of the unit, so a shared fixture neither raises nor lowers the home. If no single
+   imports count (a dependency of a dependency does not), and `tests.*`/`<pkg>.tests.*` references
+   are test support, not modules of the unit: a shared helper never raises or lowers the home. If no single
    package is the deepest (a dependency cycle between two packages), the home stays at the
    bound. Layer legality stays with step 3: only the home unit's own packages are
    candidates, so a production import running against the contracts moves no home. A file
@@ -462,7 +462,7 @@ class _Collector(ast.NodeVisitor):
     def _add(
         self, line: int, kind: str, module: str, via: str = "", names: tuple[str, ...] = ()
     ) -> None:
-        unit = unit_of(module)
+        unit = unit_of(module) if "tests" not in module.split(".") else None
         if unit:
             self.refs.append(Ref(line, kind, module, unit, via, names))
 
