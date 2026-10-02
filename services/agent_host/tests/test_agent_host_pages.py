@@ -129,25 +129,20 @@ async def test_page_reconcile_forever_skips_passes_while_quiesced(
             await task
 
 
-async def test_spawn_background_tasks_includes_page_reconciler() -> None:
-    """The daemon's background-task wiring must include the page reconciler —
+def test_background_loops_include_page_reconciler() -> None:
+    """The daemon's background-loop wiring must include the page reconciler —
     a regression dropping it would silently reopen the busy-hosted-agent
     dead-page gap (#1312 QA P2: 'delete create_task' mutation was green)."""
     import services.agent_host.daemon as daemon_mod
 
-    tasks = daemon_mod._spawn_background_tasks(object())  # type: ignore[arg-type]
+    loops = daemon_mod._background_loops(object())  # type: ignore[arg-type]
     try:
-        assert set(tasks) == {
+        assert set(loops) == {
             "plugins_watch",
             "page_reconciler",
             "stdout_log_rotate",
             "exec_memory_guard",
         }
-        assert isinstance(tasks["page_reconciler"], asyncio.Task)
-        assert isinstance(tasks["stdout_log_rotate"], asyncio.Task)
     finally:
-        for task in tasks.values():
-            task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            for task in tasks.values():
-                await task
+        for loop in loops.values():
+            loop.close()
