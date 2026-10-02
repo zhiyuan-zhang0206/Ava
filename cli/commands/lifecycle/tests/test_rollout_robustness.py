@@ -52,7 +52,7 @@ def test_declined_restart_reports_its_own_exit_code(monkeypatch: pytest.MonkeyPa
     exactly this code to decide whether to run `ava start`."""
 
     stopped: list[bool] = []
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 1)
+    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 1)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
     monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
 
@@ -65,7 +65,7 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
 ) -> None:
     """Once the stop has happened the host may be DOWN, so its code must NOT be the
     one the updater treats as "still serving"."""
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 0)
+    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_readiness_preflight_commands,
         "preflight_start_readiness",

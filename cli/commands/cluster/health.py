@@ -191,12 +191,12 @@ def _crash_loop_detection(max_restarts: int, window_minutes: int) -> bool:
 
     Counts the audit `resurrect` rows of `audit_events` per agent. The CLI never imports
     gateway code (layering) — this is a straight SQL read."""
-    from base import db
+    from base.db import Database
 
     end = datetime.now(UTC)
     start = end - timedelta(minutes=window_minutes)
     try:
-        with db.connect(autocommit=True) as conn:
+        with Database.from_settings().connect(autocommit=True) as conn:
             rows = conn.execute(
                 "SELECT agent_id, count(*) FROM audit_events "
                 "WHERE event_name = 'resurrect' AND ts > %s AND ts <= %s GROUP BY agent_id",
