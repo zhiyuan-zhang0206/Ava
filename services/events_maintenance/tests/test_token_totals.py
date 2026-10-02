@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 
@@ -147,7 +147,7 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
     assert _total(db, agent) == (100, 10)
 
     @contextmanager
-    def connect() -> Iterator[psycopg.Connection]:
+    def connect() -> Generator[psycopg.Connection]:
         yield db
 
     monkeypatch.setattr("base.db.connect", connect)
