@@ -12,7 +12,6 @@ CI_RUN_GAUGE_DISPOSITIONS: dict[tuple[str, str], str] = {
             "runs",
             "instant_skip_runs",
             "watchdog_runs",
-            "qa_gate_runs",
             "proof_runs",
             "cancelled_runs",
             "superseded_runs",

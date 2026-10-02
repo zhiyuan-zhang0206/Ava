@@ -114,7 +114,6 @@ def test_classification_rules_cover_noise_white_retry_and_trunk_mapping() -> Non
     assert module.is_failed(failed_retry)
     assert module.workflow_class("Runner shutdown rerun") == "watchdog"
     assert module.workflow_class("CI failed-job rerun") == "watchdog"
-    assert module.workflow_class("QA Review Signal") == "qa_gate"
     assert module.workflow_class("Example proof") == "proof"
     assert module.workflow_class("Release desktop") == "release"
     assert module.trunk_merge_pr_number("trunk-merge/pr-42/a4e9") == 42

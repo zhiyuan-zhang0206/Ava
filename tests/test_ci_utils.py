@@ -239,23 +239,9 @@ def test_merge_conflict_short_circuits(gh: Any, has_workflows: Any) -> None:
     assert ci_utils.check_ci("1").verdict is CIStatus.MERGE_CONFLICT
 
 
-def test_merge_conflict_keeps_qa_approved_gate_out_of_completed(
-    gh: Any, has_workflows: Any
-) -> None:
-    gate = _check("qa-approved-gate", "FAILURE", workflow="QA approved gate")
-    evidence = _check("evaluate-qa-evidence", "FAILURE", workflow="QA approved gate")
-    gh([_check("backend", "SUCCESS"), gate, evidence], mergeable="CONFLICTING")
-    has_workflows(True)
-    r = ci_utils.check_ci("1")
-    assert r.verdict is CIStatus.MERGE_CONFLICT
-    assert r.completed == ["backend"]
-    assert r.gate_checks == [gate, evidence]
-
-
 @pytest.mark.parametrize(
     ("context", "state", "verdict", "bucket", "expected"),
     [
-        ("qa-approved-gate", "SUCCESS", CIStatus.ALL_PASSED, "gate_checks", "gate"),
         ("coverage/deploy", "SUCCESS", CIStatus.ALL_PASSED, "passed", "coverage/deploy"),
         ("coverage/deploy", "FAILURE", CIStatus.FAILED, "failed", "failure"),
         ("coverage/deploy", "PENDING", CIStatus.PENDING, "pending", "coverage/deploy"),
@@ -270,8 +256,8 @@ def test_status_context_bucketing(
     bucket: str,
     expected: str,
 ) -> None:
-    """Commit statuses have context+state, not check-run keys; the QA receipt
-    must not become a phantom '?' pending check (2026-09-04: five PRs froze)."""
+    """Commit statuses have context+state, not check-run keys; one must not
+    become a phantom '?' pending check (2026-09-04: five PRs froze)."""
     status_ctx = {
         "__typename": "StatusContext",
         "context": context,
@@ -282,10 +268,8 @@ def test_status_context_bucketing(
     has_workflows(True)
     result = ci_utils.check_ci("1")
     assert result.verdict is verdict
-    if bucket == "gate_checks":
-        assert result.gate_checks == [status_ctx]
-        assert "?" not in result.pending
-    elif bucket == "failed":
+    assert "?" not in result.pending
+    if bucket == "failed":
         assert {"name": context, "conclusion": state} in result.failed
     elif bucket == "pending":
         assert result.pending == [context]
@@ -296,55 +280,27 @@ def test_status_context_bucketing(
 def test_stale_cancelled_run_loses_to_newer_success_of_same_name(
     gh: Any, has_workflows: Any
 ) -> None:
-    """cancel-in-progress on the QA evaluator leaves a CANCELLED run and a
-    SUCCESS run of the same name on one SHA; GitHub treats them as one
-    logical check whose state is the newest run's. The survivor is QA evidence,
-    not a verdict check (2026-09-04 #1636)."""
+    """cancel-in-progress leaves a CANCELLED run and a SUCCESS run of the same
+    name on one SHA; GitHub treats them as one logical check whose state is
+    the newest run's (2026-09-04 #1636)."""
     stale = _check(
-        "evaluate-qa-evidence",
+        "backend serial (flaky)",
         "CANCELLED",
-        workflow="QA Approved Gate",
+        workflow="CI",
         completed_at="2026-09-03T17:25:42Z",
     )
     fresh = _check(
-        "evaluate-qa-evidence",
+        "backend serial (flaky)",
         "SUCCESS",
-        workflow="QA Approved Gate",
+        workflow="CI",
         completed_at="2026-09-03T18:04:17Z",
     )
-    gh(
-        [
-            _check("backend (pytest + pyright)", "SUCCESS"),
-            stale,
-            fresh,
-        ]
-    )
-    has_workflows(True)
-    r = ci_utils.check_ci("1")
-    assert r.verdict is CIStatus.ALL_PASSED
-    assert r.gate_checks == [fresh]
-    assert "evaluate-qa-evidence" not in r.completed
-
-
-def test_cancelled_qa_evidence_run_stays_out_of_ci_verdict(gh: Any, has_workflows: Any) -> None:
-    """The queue's own gate evaluates QA evidence; the CI verdict must not block on it."""
-    cancelled = _check(
-        "evaluate-qa-evidence",
-        "CANCELLED",
-        workflow="QA Approved Gate",
-        completed_at="2026-09-03T17:25:42Z",
-    )
-    gh(
-        [
-            _check("backend (pytest + pyright)", "SUCCESS"),
-            cancelled,
-        ]
-    )
+    gh([_check("backend (pytest + pyright)", "SUCCESS"), stale, fresh])
     has_workflows(True)
     r = ci_utils.check_ci("1")
     assert r.verdict is CIStatus.ALL_PASSED
     assert r.failed == []
-    assert r.gate_checks == [cancelled]
+    assert r.completed.count("backend serial (flaky)") == 1
 
 
 def test_empty_rollup(gh: Any, has_workflows: Any) -> None:
@@ -658,27 +614,6 @@ def test_runs_probe_returns_none_on_bad_response(
     assert ci_utils._runs_not_yet_reporting("abc123", None) is None
 
 
-_QA_APPROVED_GATE_FAILURE = _check("qa-approved-gate", "FAILURE", workflow="QA approved gate")
-
-
-@pytest.mark.parametrize(
-    "gate",
-    [
-        _QA_APPROVED_GATE_FAILURE,
-        _check("evaluate-qa-evidence", "FAILURE", workflow="QA approved gate"),
-    ],
-)
-def test_qa_failure_is_excluded_from_ci_verdict(gh: Any, has_workflows: Any, gate: dict) -> None:
-    """Both retired QA checks stay outside the CI verdict on older heads."""
-    gh([_check("backend (pytest + pyright)", "SUCCESS"), gate])
-    has_workflows(True)
-    r = ci_utils.check_ci("57")
-    assert r.verdict is CIStatus.ALL_PASSED
-    assert all(f["name"] != gate["name"] for f in r.failed)
-    assert gate["name"] not in r.workflow_checks
-    assert r.gate_checks == [gate]
-
-
 def _completed(stdout: str = "", returncode: int = 0) -> Any:
     return ci_utils.subprocess.CompletedProcess([], returncode, stdout, "boom")
 
@@ -984,7 +919,7 @@ def test_json_probe_carries_terminal_flag(gh: Any, has_workflows: Any, capsys) -
     payload = json.loads(capsys.readouterr().out)
     assert payload["verdict"] == "all_passed"
     assert payload["terminal"] is True
-    assert payload["gate_checks"] == []
+    assert "gate_checks" not in payload
 
 
 def test_json_probe_reports_draft_and_core_skipped(gh: Any, has_workflows: Any, capsys) -> None:

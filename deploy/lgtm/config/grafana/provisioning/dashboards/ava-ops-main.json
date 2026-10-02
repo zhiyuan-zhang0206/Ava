@@ -6077,92 +6077,6 @@
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "description": "QA traffic per merged PR by complete cluster-tz day \u2014 mean ava-qa receipt count and the share of merges whose head moved after the receipt (re-review), from the daily PR-flow export job (ava_pr_flow_daily_qa_rounds_mean_ratio / ava_pr_flow_daily_qa_rereview_share_ratio gauges).",
-   "fieldConfig": {
-    "defaults": {
-     "thresholds": {
-      "mode": "absolute",
-      "steps": []
-     },
-     "unit": "short"
-    }
-   },
-   "gridPos": {
-    "h": 7,
-    "w": 12,
-    "x": 0,
-    "y": 312
-   },
-   "id": 2403,
-   "options": {
-    "cellHeight": "sm",
-    "footer": {
-     "countRows": false,
-     "enablePagination": true,
-     "show": false
-    },
-    "showHeader": true,
-    "showTypeIcons": false,
-    "sortBy": []
-   },
-   "title": "QA rounds \u2014 mean / re-review share (by day)",
-   "type": "table",
-   "targets": [
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "max by (day) (last_over_time(ava_pr_flow_daily_qa_rounds_mean_ratio[26h]))",
-     "format": "table",
-     "instant": true,
-     "range": false,
-     "refId": "A",
-     "legendFormat": "mean rounds"
-    },
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "max by (day) (last_over_time(ava_pr_flow_daily_qa_rereview_share_ratio[26h]))",
-     "format": "table",
-     "instant": true,
-     "range": false,
-     "refId": "B",
-     "legendFormat": "re-review share"
-    }
-   ],
-   "transformations": [
-    {
-     "id": "joinByField",
-     "options": {
-      "byField": "day",
-      "mode": "outer"
-     }
-    },
-    {
-     "id": "organize",
-     "options": {
-      "excludeByName": {
-       "Time 1": true,
-       "Time 2": true
-      },
-      "renameByName": {
-       "Value #A": "mean rounds",
-       "Value #B": "re-review share"
-      }
-     }
-    }
-   ]
-  },
-  {
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
    "description": "Tests newly quarantined by Trunk\u2019s flaky detector per complete cluster-tz day (ava_pr_flow_daily_flake_new_quarantines_ratio gauge, daily PR-flow export job). A day whose flaky source was unreachable is omitted rather than shown as zero.",
    "fieldConfig": {
     "defaults": {
@@ -6176,7 +6090,7 @@
    "gridPos": {
     "h": 7,
     "w": 12,
-    "x": 12,
+    "x": 0,
     "y": 312
    },
    "id": 2404,
@@ -6257,7 +6171,7 @@
   },
   {
    "datasource": {"type": "prometheus", "uid": "prometheus"},
-   "description": "Attributed CI trigger count per completed PR by complete cluster-time day. The executed median filters instant-skip, watchdog, QA-gate, and proof workflows.",
+   "description": "Attributed CI trigger count per completed PR by complete cluster-time day. The executed median filters instant-skip, watchdog, and proof workflows.",
    "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
    "gridPos": {"h": 7, "w": 12, "x": 12, "y": 320},
    "id": 2502,
@@ -6276,7 +6190,7 @@
   },
   {
    "datasource": {"type": "prometheus", "uid": "prometheus"},
-   "description": "CI-red, rerun-to-green, failed retry, and v1 first-pass PR share by complete cluster-time day. First pass excludes watchdog, QA-gate, proof, instant-skip, and zombie runs.",
+   "description": "CI-red, rerun-to-green, failed retry, and v1 first-pass PR share by complete cluster-time day. First pass excludes watchdog, proof, instant-skip, and zombie runs.",
    "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
    "gridPos": {"h": 7, "w": 12, "x": 0, "y": 327},
    "id": 2503,
