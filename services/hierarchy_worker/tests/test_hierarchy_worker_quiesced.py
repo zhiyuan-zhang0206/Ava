@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pytest
 
+from base.db.tests.fakes import fake_database
 from base.deploy.maintenance import admission
 from services.hierarchy_worker import runner
 from services.hierarchy_worker.tests.slices import hierarchy_config
@@ -17,9 +18,7 @@ def test_a_quiesced_unit_ticks_without_a_connection(monkeypatch: pytest.MonkeyPa
     def record_dial(**kw: object) -> None:
         dialed.append(kw)
 
-    monkeypatch.setattr(runner, "connect", record_dial)
-
-    runner.run_tick(hierarchy_config(hierarchy_worker_enabled=True))
+    runner.run_tick(hierarchy_config(hierarchy_worker_enabled=True), fake_database(record_dial))
 
     assert dialed == []
 
@@ -33,10 +32,8 @@ def test_an_unquiesced_unit_ticks_through_a_connection(monkeypatch: pytest.Monke
         dialed.append(kw)
         raise RuntimeError("stop here")
 
-    monkeypatch.setattr(runner, "connect", dial)
-
     runner.run_tick(
-        hierarchy_config(hierarchy_worker_enabled=True)
+        hierarchy_config(hierarchy_worker_enabled=True), fake_database(dial)
     )  # the transient failure ends the tick
 
     assert dialed
