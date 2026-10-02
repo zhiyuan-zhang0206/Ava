@@ -327,7 +327,7 @@ def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
     )
     result = subprocess.run(  # noqa: S603 — our own venv python + a literal script
         [sys.executable, "-c", code],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=Path(__file__).resolve().parents[4],
         capture_output=True,
         text=True,
         check=False,
