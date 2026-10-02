@@ -1,11 +1,11 @@
 ---
 type: doc
-title: Quiesced window — loops hold off, pools release
-description: Between drain and resume, local background loops stop touching the database and every idle client-pool connection is released before the data plane closes.
+title: Quiesced window — loops hold off, remaining clients are reported
+description: Between drain and resume, local background loops stop touching the database; the stop reports the pooler's remaining clients before it stops the pooler.
 status: current
 ---
 
-# Quiesced window — loops hold off, pools release
+# Quiesced window — loops hold off, remaining clients are reported
 
 `admission.quiesced()` (phases `drained` through `ready`) is the stop window
 read by every resident background loop that touches the database. The shared
@@ -26,17 +26,14 @@ leg, but from the start leg on a booting host must drain its pending workset
 even while the unit is still held — pub/sub has no replay, so recovery may
 not wait for the hold to release.
 
-`ops.cluster_pause.release_local_db_pools` releases every idle client-pool
-connection: the host daemon's shared and control pools (via `POST
-/release-db-pools` on its loopback health port) and the ops daemon's own
-dispatch pool, which the calling daemon passes in (ops never reaches into the
-daemon's module state). `base.db.pool_release` performs the release against the pool's
-private face because psycopg-pool has no public "close idle, keep usable"
-operation (`drain()` re-opens replacements, `close()` is terminal). Its only
-caller was the legacy `cluster_stop` op, which the scripted fleet update
-replaced; it has no production caller now (recorded debt). Both host pools and
-the ops pool run `min_size=0`, so the first borrow after resume reconnects
-lazily.
+The stop does not release pools: its `services` phase stops every service process,
+so each pool closes with its process before the `data-plane` phase starts, and the
+pooler's SIGINT stop disconnects whatever client is left. Just before that signal
+the stop lists the pooler's remaining clients (`SHOW CLIENTS`: address, database,
+user, state) on stderr, in the log and in the stop journal's `pooler_clients`
+entry, and reports an unreadable console as such. It only reports; a runner
+on another machine that is still up when the gateway stops appears there, and
+the order that avoids it (runners first) is the operator's.
 
 ## Dependencies
 
