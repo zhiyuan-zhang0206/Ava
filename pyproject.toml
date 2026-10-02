@@ -808,6 +808,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/clock/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/cluster/authority/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
