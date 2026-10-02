@@ -444,7 +444,7 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
 
         return run_loop
 
-    async def fake_start(_name: str, **_kw: object) -> object:
+    async def fake_start(_name: str, _port: int, **_kw: object) -> object:
         return object()
 
     async def fake_stop(_server: object) -> None:
