@@ -1,7 +1,6 @@
 {
   "complexity": {
     "tests/cli/test_converge_lgtm.py::test_native_grafana_renders_from_the_repo_and_host_setting": 25,
-    "tests/cli/test_packages_refresh.py::test_refresh_applies_only_the_changed_package": 17,
     "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17
   },
   "patch_targets": {
@@ -23,7 +22,6 @@
     "tests/cli/test_converge_redis_bridge.py::top-level": 1,
     "tests/cli/test_main_dispatch.py::top-level": 1,
     "tests/cli/test_otel_bootstrap_relay.py::top-level": 1,
-    "tests/cli/test_packages_refresh.py::top-level": 1,
     "tests/cli/test_pgbouncer_config.py::top-level": 1,
     "tests/cli/test_pgbouncer_wire.py::top-level": 1,
     "tests/cli/test_plugin_scaffold.py::top-level": 1,
