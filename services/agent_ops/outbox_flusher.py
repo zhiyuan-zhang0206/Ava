@@ -8,8 +8,7 @@ budget is spent. It outlives every sender process by construction, which is
 the whole point.
 
 One pass per configured tick, each pass one `asyncio.to_thread`; a quiesced
-unit (an `ava stop` draining) skips passes and keeps its records, mirroring
-the shell-closure notice flusher. A config read that fails mid-life keeps the
+unit (an `ava stop` draining) skips passes and keeps its records. A config read that fails mid-life keeps the
 previous wait instead of killing the loop; a failed *initial* read refuses to
 start the loop at all — loudly — rather than guessing a cadence.
 """
