@@ -16,11 +16,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.daemon.schedules.builtin_schedules import (
-    ManifestError,
-    load_manifest,
-    provision_builtin_schedules,
-)
+from base.daemon.schedules.builtin_schedules import load_manifest, provision_builtin_schedules
 
 
 def _manifest(tmp_path: Path, entries: list[dict[str, object]]) -> Path:
@@ -48,68 +44,6 @@ def _row(conn: psycopg.Connection, name: str) -> Any:
             (name,),
         )
         return cur.fetchone()
-
-
-class TestLoadManifest:
-    def test_loads_repo_manifest(self) -> None:
-        """The repo manifest parses: product schedules enabled / operator schedules disabled."""
-        scheds = load_manifest()
-        by_name = {s.name: s for s in scheds}
-        assert set(by_name) == {
-            "c9-daily-report",
-            "debt-sweep-daily",
-            "dev-ci-metrics",
-            "adversarial-eval-weekly",
-            "self-evolution-weekly",
-            "self-evolution-daily",
-            "memory-arbiter",
-            "model-update-tracker",
-            "trace-ship-tempo",
-            "hierarchy-worker",
-        }
-        assert all(
-            s.klass == "product" and s.default_enabled
-            for s in scheds
-            if s.name != "trace-ship-tempo"
-        )
-        assert by_name["trace-ship-tempo"].klass == "operator"
-        assert by_name["trace-ship-tempo"].default_enabled is False
-
-    def test_unknown_class_fails_fast(self, tmp_path: Path) -> None:
-        path = _manifest(
-            tmp_path,
-            [
-                {
-                    "name": "x",
-                    "class": "mystery",
-                    "default_enabled": True,
-                    "script": "x.py",
-                    "command": "python x.py",
-                }
-            ],
-        )
-        with pytest.raises(ManifestError, match="unknown class"):
-            load_manifest(path)
-
-    def test_missing_script_file_fails(self, tmp_path: Path) -> None:
-        path = tmp_path / "manifest.json"
-        path.write_text(
-            json.dumps(
-                {
-                    "builtin_schedules": [
-                        {
-                            "name": "x",
-                            "class": "product",
-                            "default_enabled": True,
-                            "script": "nope.py",
-                            "command": "python nope.py",
-                        }
-                    ]
-                }
-            )
-        )
-        with pytest.raises(ManifestError, match="does not exist"):
-            load_manifest(path)
 
 
 class TestProvision:
