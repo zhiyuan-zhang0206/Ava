@@ -1,7 +1,12 @@
 """Delivery watchdog daemon — gateway-owned wake dispatcher + recovery scanner.
 
-Six jobs on one fast tick (user-confirmed design, 2026-08-02 — see
-`delivery-dispatcher-design-2026-08-02.md`):
+Six jobs on four resident loops under one `TaskGroup` (`_run_loops`): jobs 1, 2
+and 4 share the fast scan loop (user-confirmed design, 2026-08-02 — see
+`delivery-dispatcher-design-2026-08-02.md`); jobs 3, 5 and 6 each run as their own
+sequential loop, so an agent is never in two attempts at once and a slow RPC
+holds up only its own loop. Their per-agent cooldowns and failure counts live in
+`delivery_watchdog_attempts`, so a restart resumes them. A loop that raises ends
+the process and the supervisor restarts it.
 
 1. **Wake dispatch** — every `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS` (default
    0.5s), re-publish the Redis wake for every `pending` inbound whose owner is
@@ -24,7 +29,7 @@ Six jobs on one fast tick (user-confirmed design, 2026-08-02 — see
 `running` owners are never dispatched or alerted: a chat queued behind a long
 in-flight turn is normal — the claim's turn-end SELECT picks it up.
 
-3. **Terminated-owner resurrect retry** — every tick, for each DISTINCT
+3. **Terminated-owner resurrect retry** (`resurrect_retry`) — every round, for each DISTINCT
    terminated agent that still holds a `pending` chat created after its latest
    termination (the delivery-path auto-resurrect failed) and younger than the
    stale-claimed threshold, re-run `resurrect_if_terminated`. Older pending
@@ -33,7 +38,7 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up.
    This extends the delivery check from live owners to ALL agents (Task #689
    G4, user ruling 2026-08-03): a chat to a dead agent must wake it, and a
    missed auto-resurrect must be retried, not just alerted. Per-agent cooldown
-   (60s) + per-tick cap + concurrency semaphore keep a pile of dead letters
+   (60s, persisted) + per-round cap + concurrency semaphore keep a pile of dead letters
    from spawning an LLM wake storm; repeated failures suppress automatic wakes
    for a bounded exponentially increasing window, and normal delivery resumes after expiry.
 4. **Stale-inbound dead-letter sweep** — every 30s, flip `claimed` chat
@@ -47,16 +52,16 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up.
    stale pending `terminate` / `system_note` / `restart_completed` rows of
    terminated owners (no consumer), and the reconcile-side cutoff
    (`agent/db/__init__.py::reconcile_claimed_inbounds`) still closes the resurrect race at boot.
-5. **Hosted-turn liveness recovery** — on the same watchdog tick, select hosted
+5. **Hosted-turn liveness recovery** (`turn_liveness`) — every round, select hosted
    running rows whose DB activity is older than the 2400s wedged-agent budget,
    then confirm them against the agent-host's 15s Redis progress heartbeat
    (60s TTL). Missing host heartbeats or stale per-turn marks trigger a
-   terminate-then-resurrect recovery with a 10-minute per-agent cooldown; the
+   terminate-then-resurrect recovery with a persisted 10-minute per-agent cooldown; the
    recovery wake commits in the same transaction as the force terminate.
 
-6. **Stalled crash-marked harvest request** — escalate a chat still `pending`
+6. **Stalled crash-marked harvest request** (`stall_recovery`) — escalate a chat still `pending`
    past the stall threshold whose owner is a crash-marked idling corpse over
-   the internal `recover-crash-marked-v2` path (one request per owner, 60s
+   the internal `recover-crash-marked-v2` path (one request per owner, persisted 60s
    cooldown, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618).
 
 Runs on the gateway, one per cluster. Kept alive by the root supervisor's health
@@ -75,15 +80,13 @@ import time
 from pathlib import Path
 
 import psycopg
-from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 import base.db
 from base import telemetry
-from base.agents import AgentStatus
 from base.config import settings
-from base.config.service_read import current_field_values
-from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
@@ -91,7 +94,8 @@ from base.log import init_gateway_process
 from base.paths import pid_path
 from services.delivery_watchdog import (
     dispatch_guard,
-    resurrect_guard,
+    resurrect_retry,
+    rounds,
     stall_recovery,
     turn_liveness,
 )
@@ -111,30 +115,16 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 
 _log = logging.getLogger("services.delivery_watchdog.daemon")
 
-
 def _pidfile() -> Path:
     return pid_path("delivery_watchdog")
 
 
-# Liveness staleness ceiling. The loop sleeps a short inter-poll interval
-# (default 30s), so `_sleep_with_liveness` beats every _LIVENESS_BEAT_STEP_S
-# during that wait; the ceiling only has to exceed that step, not the whole
-# interval.
-_LIVENESS_TIMEOUT_S = 60.0
-_LIVENESS_BEAT_STEP_S = 15.0
-
-# Terminated-owner resurrect retry (G4): a pending chat whose owner is
-# terminated means the delivery-path auto-resurrect failed (or the delivery
-# predates it). Retry it here, bounded against storms and against unbounded
-# age: past the stale-claimed threshold the chat is a dead letter and its
-# owner is never resurrected for it again (issue #2049):
-#   * per-agent cooldown — a failed resurrect (unreachable home machine) is
-#     re-attempted at most once a minute, not every tick;
-#   * concurrency semaphore — at most 2 resurrects in flight at once;
-#   * per-tick cap (settings.delivery_watchdog_max_resurrect_per_tick) — a
-#     pile of dead letters drains over ticks, never as a burst.
-_RESURRECT_RETRY_MIN_INTERVAL_S = 60.0
-_RESURRECT_MAX_CONCURRENCY = 2
+# Liveness staleness ceiling of the scan loop. It sleeps a short inter-poll
+# interval and `rounds.sleep_with_progress` beats during that wait; the ceiling
+# only has to exceed one beat step, not the whole interval.
+_SCAN_LIVENESS_TIMEOUT_S = 60.0
+# Connections the four loops' concurrent statements can hold at once.
+_POOL_MAX_SIZE = 4
 
 
 def select_stale_pending(
@@ -170,70 +160,7 @@ select_pending_for_dispatch = dispatch_guard.select_pending_for_dispatch
 dispatch_wakes = dispatch_guard.dispatch_wakes
 
 
-def select_terminated_owners_with_pending(
-    pool: ConnectionPool,
-    threshold_s: float,
-) -> list[tuple[int, int]]:
-    """One `(agent_id, trigger_inbound_id)` per terminated owner with a
-    post-termination pending chat, ordered by agent id.
-
-    The selected chat is carried to the home runner as the final resurrection
-    CAS. A chat already pending when the agent was terminated cannot reverse
-    that explicit lifecycle decision — EXCEPT when the system itself reaped a
-    crash-marked corpse (`SYSTEM_REAPED_CRASH_ROW`): that death was not an
-    operator's will, so leftover work still resumes its owner. A later
-    termination makes this trigger stale before it can launch, and a tripped
-    recovery breaker (`RECOVERY_BREAKER_CLEAR`) or an active wake suppression
-    keeps automatic recovery halted entirely. Chat only: lifecycle kinds
-    (terminate / restart) must not resurrect a dead agent against the caller's
-    intent. A pile of 250 dead letters for one agent still means one attempt,
-    not 250.
-
-    System notices never resurrect: a system-family chat (`system` /
-    `system:<subtype>`) is a framework notification, not a person or peer
-    message — it waits for the owner's next resurrect, or the stale threshold
-    closes it. Machine *wakeups* still wake; exempt are the recovery-class
-    chats (`hosted_turn_recovery` marker): the watchdog's wedged-turn wake and
-    the corpse reaper's crash-recovery wake (task #4039) revive their owner.
-
-    `threshold_s` bounds how long a pending chat keeps its terminated owner a
-    resurrect candidate: past it the row is a dead letter (issue #2049) that
-    `dead_letter_stale_pending_chats` closes — and with it the trigger, so no
-    unbounded retry can resurrect-suicide the agent forever.
-    """
-    from base.agents.incarnation.lifecycle_acceptance import (
-        FAILED_RESTART_FOR_CURRENT_TARGET,
-        SYSTEM_NOTICE_SOURCE,
-        SYSTEM_REAPED_CRASH_ROW,
-    )
-    from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
-
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            sql.SQL(
-                "SELECT m.agent_id, MIN(m.id) "
-                "FROM inbound_messages m "
-                "JOIN agents_meta ON agents_meta.id = m.agent_id "
-                "WHERE m.status = 'pending' AND m.kind = 'chat' "
-                "  AND agents_meta.status = 'terminated' AND NOT {} "
-                " AND (m.created_at > agents_meta.status_changed_at OR {}) "
-                "  AND m.created_at > now() - make_interval(secs => %s) "
-                "  AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0) "
-                "  AND (agents_meta.wake_suppressed_until IS NULL "
-                "       OR agents_meta.wake_suppressed_until < now()) "
-                "  AND {} "
-                "  AND NOT {} "
-                "GROUP BY m.agent_id "
-                "ORDER BY m.agent_id"
-            ).format(
-                sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET),
-                sql.SQL(SYSTEM_REAPED_CRASH_ROW),
-                sql.SQL(RECOVERY_BREAKER_CLEAR),
-                sql.SQL(SYSTEM_NOTICE_SOURCE),
-            ),
-            (threshold_s,),
-        )
-        return [(r[0], r[1]) for r in cur.fetchall()]
+select_terminated_owners_with_pending = resurrect_retry.select_terminated_owners_with_pending
 
 
 def select_pending_ids(pool: ConnectionPool) -> set[int]:
@@ -382,115 +309,6 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), "services.delivery_watchdog.daemon")
 
 
-async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
-    """Sleep `total_s`, beating liveness every `_LIVENESS_BEAT_STEP_S` so the
-    /healthz probe stays fresh instead of reading as a wedged loop."""
-    remaining = total_s
-    while remaining > 0:
-        liveness.beat()
-        step = min(_LIVENESS_BEAT_STEP_S, remaining)
-        await asyncio.sleep(step)
-        remaining -= step
-
-
-# ── Terminated-owner resurrect retry (G4) ────────────────────────────────────
-_last_resurrect_attempt: dict[int, float] = {}
-_resurrect_tasks: dict[int, asyncio.Task[None]] = {}
-_resurrect_failures: dict[int, int] = {}
-_resurrect_suppressions: dict[int, int] = {}
-_resurrect_semaphore = asyncio.Semaphore(_RESURRECT_MAX_CONCURRENCY)
-
-
-async def _resurrect_one(pool: ConnectionPool, agent_id: int, trigger_inbound_id: int) -> None:
-    """Run `resurrect_if_terminated` for one agent, bounded by the concurrency
-    semaphore; classify the returned status and escalate consecutive failures
-    into a durable wake-suppression window."""
-    from ops.lifecycle import resurrect_if_terminated
-
-    async with _resurrect_semaphore:
-        try:
-            status = await resurrect_if_terminated(
-                agent_id,
-                trigger_inbound_id=trigger_inbound_id,
-                trigger_inbound_kind="chat",
-            )
-            if status is AgentStatus.TERMINATED:
-                resurrect_guard.record_resurrect_failure(
-                    pool,
-                    agent_id,
-                    _resurrect_failures,
-                    _resurrect_suppressions,
-                )
-            else:
-                _resurrect_failures.pop(agent_id, None)
-                _resurrect_suppressions.pop(agent_id, None)
-                _log.info(
-                    "[delivery] resurrect retry for terminated agent %s -> status %s",
-                    agent_id,
-                    status,
-                )
-        except Exception:
-            _log.info(
-                "[delivery] resurrect retry failed for agent %s",
-                agent_id,
-                exc_info=True,
-            )
-            resurrect_guard.record_resurrect_failure(
-                pool,
-                agent_id,
-                _resurrect_failures,
-                _resurrect_suppressions,
-            )
-        finally:
-            _last_resurrect_attempt[agent_id] = time.monotonic()
-
-
-def _maybe_spawn_resurrects(
-    pool: ConnectionPool,
-    max_per_tick: int,
-    threshold_s: float,
-) -> None:
-    """Enqueue a resurrect retry per distinct terminated owner with a pending
-    chat, honoring the per-agent cooldown and the per-tick cap. Fire-and-forget
-    (the tick is not blocked on a resurrect's RPC timeouts); tasks are tracked
-    so they are never garbage-collected mid-flight.
-
-    The cap bounds how many new spawns THIS tick attempts (audit round 2,
-    P2/P3): it used to compare the cross-tick in-flight task set against the
-    per-tick quota, so two slow in-flight resurrects starved every later tick,
-    and the backlog warning re-ran the owners query once per overflow."""
-    now = time.monotonic()
-    owners = select_terminated_owners_with_pending(pool, threshold_s)
-    spawned = 0
-    deferred = 0
-    for agent_id, trigger_inbound_id in owners:
-        if agent_id in _resurrect_tasks:
-            continue
-        if now - _last_resurrect_attempt.get(agent_id, 0.0) < _RESURRECT_RETRY_MIN_INTERVAL_S:
-            continue
-        if spawned >= max_per_tick:
-            deferred += 1
-            continue
-        task = asyncio.create_task(_resurrect_one(pool, agent_id, trigger_inbound_id))
-        _resurrect_tasks[agent_id] = task
-
-        def _discard_completed_task(
-            completed: asyncio.Task[None], *, completed_agent_id: int = agent_id
-        ) -> None:
-            if _resurrect_tasks.get(completed_agent_id) is completed:
-                del _resurrect_tasks[completed_agent_id]
-
-        task.add_done_callback(_discard_completed_task)
-        spawned += 1
-    if deferred:
-        _log.warning(
-            "[delivery] resurrect retry backlog: %s more terminated owner(s) deferred",
-            deferred,
-        )
-    if spawned:
-        _log.info("[delivery] spawned %s resurrect retry task(s)", spawned)
-
-
 # Alert-dedup GC cadence (Task #945): the TTL sweep runs once per
 # `_DEDUP_GC_EVERY_TICKS` ticks (120 ticks x 0.5s default interval = 1/min);
 # the per-tick prune is the primary GC, this is the safety net.
@@ -503,11 +321,6 @@ _DEDUP_GC_EVERY_TICKS = 120
 # resurrect takes seconds to boot, so the sweep is virtually always ahead of
 # it; the reconcile-side cutoff (agent/db/__init__.py) closes the residual race.
 _CLAIMED_SWEEP_INTERVAL_S = 30.0
-
-
-def _hosted_turn_threshold_seconds() -> float:
-    """Read the runner-owned threshold from the gateway's current `.env` view."""
-    return float(current_field_values()["wedged_agent_inbound_age_seconds"])
 
 
 def _maybe_sweep_stale_inbounds(
@@ -554,13 +367,12 @@ def _maybe_sweep_stale_inbounds(
     return now_mono
 
 
-async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
-    """Main loop: every interval, (1) re-publish lost wakes for stale pending
+async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
+    """Scan loop: every interval, (1) re-publish lost wakes for stale pending
     rows of idling owners, (2) WARNING each chat inbound stalled past the alert
-    threshold, once per row while it stays pending, (3) retry resurrect for
-    terminated owners with pending chats, (4) request a harvest decision for
-    stalled chats of crash-marked idling corpses, (5) scan hosted-turn liveness
-    and recover wedged hosted turns, (6) sweep stale inbounds into dead letters.
+    threshold, once per row while it stays pending, (3) sweep stale inbounds
+    into dead letters. The three RPC-driven recovery jobs run as their own
+    loops beside this one (`run`).
 
     The once-per-row alert set lives in `delivery_watchdog_alerted` — the
     table is the single truth (Task #945); each tick reloads it, so memory
@@ -575,15 +387,10 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     stale_claimed_idling_threshold = (
         settings.daemon.delivery_watchdog_stale_claimed_idling_threshold_seconds
     )
-    # This alias belongs to the agent-runner config projection and is removed
-    # from the gateway process environment. Read the gateway-owned `.env`
-    # snapshot so an operator override is preserved at this authority boundary.
-    hosted_turn_threshold = _hosted_turn_threshold_seconds()
     _log.info(
         "[delivery] watchdog started, pid=%s, interval=%.1fs, dispatch_threshold=%.1fs, "
         "alert_threshold=%.0fs, stale_claimed_threshold=%.0fs, "
         "stale_claimed_idling_threshold=%.0fs, "
-        "hosted_turn_threshold=%.0fs, hosted_turn_cooldown=%.0fs, "
         "alert set table-backed (reload per tick)",
         os.getpid(),
         interval,
@@ -591,14 +398,12 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
         alert_threshold,
         stale_claimed_threshold,
         stale_claimed_idling_threshold,
-        hosted_turn_threshold,
-        turn_liveness.HOSTED_TURN_RECOVERY_COOLDOWN_S,
     )
     ticks = 0
     last_claimed_sweep = 0.0
     while True:
         try:
-            await _sleep_with_liveness(liveness, interval)
+            await rounds.sleep_with_progress(progress, interval)
             # Reload the alerted set from the table — it is the single truth;
             # `alerted` below is a per-tick working copy. An unreadable table
             # skips the whole tick (defer rather than re-alert): the loop
@@ -636,13 +441,6 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
                     gc_alerted(pool, _DEDUP_TTL_S)
             except Exception:
                 _log.exception("[delivery] alert-dedup persist/prune failed")
-            _maybe_spawn_resurrects(
-                pool,
-                settings.daemon.delivery_watchdog_max_resurrect_per_tick,
-                stale_claimed_threshold,
-            )
-            stall_recovery.maybe_request_stall_recovery(pool, alert_threshold)
-            await turn_liveness.scan_hosted_turn_liveness(pool, hosted_turn_threshold)
             last_claimed_sweep = _maybe_sweep_stale_inbounds(
                 pool,
                 stale_claimed_threshold,
@@ -667,8 +465,44 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
             _log.exception("[delivery] poll iteration failed")
 
 
+async def _run_loops(pool: ConnectionPool, liveness: LivenessGroup) -> None:
+    """Own the four resident loops: the scan loop and the three recovery loops
+    (resurrect retry, stalled crash-marked harvest, hosted-turn recovery).
+
+    One `TaskGroup` holds them, so a loop that raises cancels its siblings and
+    the exception leaves `run`: the process exits and the supervisor restarts
+    it. Each loop reports its own progress, so a wedged loop reads as a
+    failing `/healthz` even while its siblings stay busy."""
+    interval = settings.daemon.delivery_watchdog_interval_seconds
+    scan = liveness.register("scan", _SCAN_LIVENESS_TIMEOUT_S)
+    resurrect = liveness.register("resurrect", rounds.LOOP_LIVENESS_TIMEOUT_S)
+    harvest = liveness.register("harvest", rounds.LOOP_LIVENESS_TIMEOUT_S)
+    hosted_turn = liveness.register("hosted_turn", rounds.LOOP_LIVENESS_TIMEOUT_S)
+    async with asyncio.TaskGroup() as loops:
+        loops.create_task(_scan_loop(pool, scan))
+        loops.create_task(
+            resurrect_retry.resurrect_loop(
+                pool,
+                resurrect,
+                interval,
+                settings.daemon.delivery_watchdog_max_resurrect_per_tick,
+                settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds,
+            )
+        )
+        loops.create_task(
+            stall_recovery.stall_recovery_loop(
+                pool, harvest, interval, settings.daemon.delivery_watchdog_threshold_seconds
+            )
+        )
+        loops.create_task(
+            turn_liveness.hosted_turn_recovery_loop(
+                pool, hosted_turn, interval, turn_liveness.hosted_turn_threshold_seconds()
+            )
+        )
+
+
 async def run() -> None:
-    """Start the daemon: pidfile -> healthz server -> connect DB -> main loop."""
+    """Start the daemon: pidfile -> healthz server -> connect DB -> loops."""
     if _is_running():
         _log.info("[delivery] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
@@ -676,13 +510,15 @@ async def run() -> None:
     _write_pidfile()
     _log.info("[delivery] pidfile written: %s", _pidfile())
 
-    liveness = Liveness(_LIVENESS_TIMEOUT_S)
+    liveness = LivenessGroup()
     health = await start_health_server("delivery_watchdog", liveness=liveness)
     _log.info("[delivery] healthz listening on :%s", health_port("delivery_watchdog"))
 
-    pool = base.db.pool()
+    # Four loops share the pool; each borrows a connection only for the length
+    # of one short statement batch.
+    pool = base.db.pool(max_size=_POOL_MAX_SIZE)
     try:
-        await _scan_loop(pool, liveness)
+        await _run_loops(pool, liveness)
     finally:
         pool.close()
         await stop_health_server(health)

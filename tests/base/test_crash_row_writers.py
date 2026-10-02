@@ -97,7 +97,7 @@ def test_relaxed_guard_consumers_embed_the_shared_predicates() -> None:
     """The two relaxed CAS sites and the automatic-recovery gates must use the
     shared constants; a re-inlined literal would drift from the predicate."""
     expectations = {
-        "services/delivery_watchdog/daemon.py": [
+        "services/delivery_watchdog/resurrect_retry.py": [
             "SYSTEM_REAPED_CRASH_ROW",
             "RECOVERY_BREAKER_CLEAR",
         ],

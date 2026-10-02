@@ -5,9 +5,13 @@ stall shape no other automatic path owns: the corpse never claims (its
 process is gone), the corpse reaper waits out its grace window, and the
 terminated-owner retry never sees the row (it is not terminated yet). The
 watchdog escalating to the owner's home runner — one request per owner, a 60s
-cooldown, `_HARVEST_MAX_CONCURRENCY` in flight — gives every such delivery a
-bounded-time recovery decision (harvest now, or a refusal naming its reason),
-which is the invariant behind the `delivery_recovery_decision` event.
+persisted cooldown, `_HARVEST_MAX_CONCURRENCY` in flight within a round —
+gives every such delivery a bounded-time recovery decision (harvest now, or a
+refusal naming its reason), which is the invariant behind the
+`delivery_recovery_decision` event.
+
+Runs as one resident sequential loop, so an owner never has two requests in
+flight; gated by `delivery_stalled_recovery_enabled`, read each round.
 
 Split out of `daemon.py` when its tick grew past the file ceiling (same split
 as `dispatch_guard` / `resurrect_guard` / `turn_liveness`).
@@ -16,25 +20,22 @@ as `dispatch_guard` / `resurrect_guard` / `turn_liveness`).
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
-import time
 
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.config import settings
+from base.daemon.loop_health import LoopProgress
+from services.delivery_watchdog import attempts, rounds
 
 _log = logging.getLogger("services.delivery_watchdog.stall_recovery")
 
-# Same per-owner retry cadence as the G4 resurrect retry in `daemon.py`; kept
-# local because `daemon` imports this module (sharing the constant would be an
-# import cycle).
+# Same per-owner retry cadence as the G4 resurrect retry.
 _HARVEST_RETRY_MIN_INTERVAL_S = 60.0
 _HARVEST_MAX_CONCURRENCY = 2
-_harvest_tasks: dict[int, asyncio.Task[None]] = {}
-_last_harvest_attempt: dict[int, float] = {}
-_harvest_semaphore = asyncio.Semaphore(_HARVEST_MAX_CONCURRENCY)
 
 
 def select_stalled_crash_marked(
@@ -70,16 +71,17 @@ def select_stalled_crash_marked(
         return [(r[0], r[1], r[2], float(r[3])) for r in cur.fetchall()]
 
 
-async def _request_harvest(agent_id: int, inbound_id: int) -> None:
-    """Ask the owner's home runner for one harvest decision; emit it (the
-    recovery-decision-rate metric). Never raises."""
+async def _request_harvest(pool: ConnectionPool, agent_id: int, inbound_id: int) -> None:
+    """Ask the owner's home runner for one harvest decision under the RPC
+    deadline; emit it (the recovery-decision-rate metric)."""
     from ops.lifecycle import recover_crash_marked_if_stalled
 
-    async with _harvest_semaphore:
+    try:
         try:
-            decision, reason = await recover_crash_marked_if_stalled(
-                agent_id, stalled_inbound_id=inbound_id
-            )
+            async with asyncio.timeout(rounds.RPC_DEADLINE_S):
+                decision, reason = await recover_crash_marked_if_stalled(
+                    agent_id, stalled_inbound_id=inbound_id
+                )
         except Exception:
             _log.info(
                 "[delivery] stalled crash-marked recovery request failed for agent %s",
@@ -87,8 +89,8 @@ async def _request_harvest(agent_id: int, inbound_id: int) -> None:
                 exc_info=True,
             )
             decision, reason = "error", "harvest request failed"
-        finally:
-            _last_harvest_attempt[agent_id] = time.monotonic()
+    finally:
+        await asyncio.to_thread(attempts.finish_attempt, pool, attempts.HARVEST, agent_id)
     detail = f" ({reason})" if reason else ""
     _log.info(
         "[delivery] stalled crash-marked recovery for agent %s (inbound %s): %s%s",
@@ -111,27 +113,39 @@ async def _request_harvest(agent_id: int, inbound_id: int) -> None:
         )
 
 
-def maybe_request_stall_recovery(pool: ConnectionPool, threshold_s: float) -> None:
+async def stall_recovery_round(
+    pool: ConnectionPool, progress: LoopProgress, threshold_s: float
+) -> None:
     """For every stalled chat of a crash-marked idling corpse, request one
-    harvest decision from its home runner. Per-owner single flight + 60s
-    cooldown (the same retry cadence as the G4 resurrect retry); disabled by
-    `delivery_stalled_recovery_enabled`. Fire-and-forget, like the resurrect
-    retry — the tick never blocks on an RPC timeout."""
+    harvest decision from its home runner, then return. Per-owner cooldown (the
+    same cadence as the G4 resurrect retry, persisted); disabled by
+    `delivery_stalled_recovery_enabled`."""
     if not settings.daemon.delivery_stalled_recovery_enabled:
         return
-    now = time.monotonic()
-    for inbound_id, agent_id, _label, _age_s in select_stalled_crash_marked(pool, threshold_s):
-        if agent_id in _harvest_tasks:
-            continue
-        if now - _last_harvest_attempt.get(agent_id, 0.0) < _HARVEST_RETRY_MIN_INTERVAL_S:
-            continue
-        task = asyncio.create_task(_request_harvest(agent_id, inbound_id))
-        _harvest_tasks[agent_id] = task
+    rows = await asyncio.to_thread(select_stalled_crash_marked, pool, threshold_s)
+    oldest_inbound: dict[int, int] = {}
+    for inbound_id, agent_id, _label, _age_s in rows:
+        oldest_inbound.setdefault(agent_id, inbound_id)
+    claimed, _deferred = await asyncio.to_thread(
+        attempts.claim_attempts,
+        pool,
+        attempts.HARVEST,
+        list(oldest_inbound),
+        _HARVEST_RETRY_MIN_INTERVAL_S,
+    )
+    await rounds.fan_out(
+        [functools.partial(_request_harvest, pool, a, oldest_inbound[a]) for a in claimed],
+        concurrency=_HARVEST_MAX_CONCURRENCY,
+        progress=progress,
+    )
 
-        def _discard_completed_task(
-            completed: asyncio.Task[None], *, completed_agent_id: int = agent_id
-        ) -> None:
-            if _harvest_tasks.get(completed_agent_id) is completed:
-                del _harvest_tasks[completed_agent_id]
 
-        task.add_done_callback(_discard_completed_task)
+async def stall_recovery_loop(
+    pool: ConnectionPool, progress: LoopProgress, interval_s: float, threshold_s: float
+) -> None:
+    """The stalled crash-marked harvest as a resident sequential loop."""
+
+    async def one_round() -> None:
+        await stall_recovery_round(pool, progress, threshold_s)
+
+    await rounds.run_rounds("stalled crash-marked recovery", progress, interval_s, one_round)

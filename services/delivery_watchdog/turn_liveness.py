@@ -1,12 +1,18 @@
-"""Out-of-process liveness detection and recovery for hosted agent turns."""
+"""Out-of-process liveness detection and recovery for hosted agent turns.
+
+Runs as one resident sequential loop: each round selects the hosted agents
+whose DB clock is stale, confirms them against the host's Redis beat, and
+recovers the confirmed wedges (at most one recovery per agent per persisted
+ten-minute cooldown, a few at a time).
+"""
 
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import math
-import time
 from typing import NamedTuple, Protocol, TypeGuard, cast
 from uuid import UUID
 
@@ -17,10 +23,14 @@ import base.events.live.redis_client
 from base import telemetry
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from base.agents.observation.db_wait import database_wait_matches
+from base.config.service_read import current_field_values
+from base.daemon.loop_health import LoopProgress
+from services.delivery_watchdog import attempts, rounds
 
 _log = logging.getLogger("services.delivery_watchdog.turn_liveness")
 
 HOSTED_TURN_RECOVERY_COOLDOWN_S = 600.0
+_HOSTED_TURN_RECOVERY_MAX_CONCURRENCY = 4
 HOSTED_TURN_RECOVERY_WAKE_TEXT = (
     "Your previous hosted turn stopped making progress and was restarted "
     "by the delivery watchdog. Continue from the latest checkpoint."
@@ -110,7 +120,9 @@ async def _detect_hosted_turn_wedges(
 ) -> list[_HostedTurnWedge]:
     """Confirm stale DB candidates against the host's independent Redis beat."""
     wedges: list[_HostedTurnWedge] = []
-    for candidate in select_hosted_turn_liveness_candidates(pool, threshold_s):
+    for candidate in await asyncio.to_thread(
+        select_hosted_turn_liveness_candidates, pool, threshold_s
+    ):
         try:
             raw = await redis_client.get(f"host_turn_progress:{candidate.machine}")
             if raw is None:
@@ -238,37 +250,61 @@ async def _recover_hosted_turn(pool: ConnectionPool, wedge: _HostedTurnWedge) ->
         _log.exception("[delivery] hosted turn recovery failed for agent %s", wedge.agent_id)
 
 
-_last_hosted_turn_recovery_attempt: dict[int, float] = {}
-_hosted_turn_recovery_tasks: dict[int, asyncio.Task[None]] = {}
+def hosted_turn_threshold_seconds() -> float:
+    """Read the runner-owned threshold from the gateway's current `.env` view.
+
+    The alias belongs to the agent-runner config projection and is removed from
+    the gateway process environment, so the gateway-owned `.env` snapshot is the
+    authority an operator override is preserved at."""
+    return float(current_field_values()["wedged_agent_inbound_age_seconds"])
 
 
-def _maybe_spawn_hosted_turn_recoveries(
-    pool: ConnectionPool,
-    wedges: list[_HostedTurnWedge],
+async def _recover_within_deadline(pool: ConnectionPool, wedge: _HostedTurnWedge) -> None:
+    """One recovery under the RPC deadline. A timeout between the terminate's
+    commit and the resurrect leaves the committed recovery wake for the
+    terminated-owner retry, exactly as any other failure there does."""
+    try:
+        try:
+            async with asyncio.timeout(rounds.RPC_DEADLINE_S):
+                await _recover_hosted_turn(pool, wedge)
+        except TimeoutError:
+            _log.error(
+                "[delivery] hosted turn recovery for agent %s exceeded %.0fs",
+                wedge.agent_id,
+                rounds.RPC_DEADLINE_S,
+            )
+    finally:
+        await asyncio.to_thread(attempts.finish_attempt, pool, attempts.HOSTED_TURN, wedge.agent_id)
+
+
+async def hosted_turn_recovery_round(
+    pool: ConnectionPool, progress: LoopProgress, threshold_s: float
 ) -> None:
-    """Start at most one recovery per agent in each ten-minute cooldown."""
-    now = time.monotonic()
-    for wedge in wedges:
-        if wedge.agent_id in _hosted_turn_recovery_tasks:
-            continue
-        last_attempt = _last_hosted_turn_recovery_attempt.get(wedge.agent_id)
-        if last_attempt is not None and now - last_attempt < HOSTED_TURN_RECOVERY_COOLDOWN_S:
-            continue
-        _last_hosted_turn_recovery_attempt[wedge.agent_id] = now
-        task = asyncio.create_task(_recover_hosted_turn(pool, wedge))
-        _hosted_turn_recovery_tasks[wedge.agent_id] = task
-
-        def _discard(
-            completed: asyncio.Task[None], *, completed_agent_id: int = wedge.agent_id
-        ) -> None:
-            if _hosted_turn_recovery_tasks.get(completed_agent_id) is completed:
-                del _hosted_turn_recovery_tasks[completed_agent_id]
-
-        task.add_done_callback(_discard)
-
-
-async def scan_hosted_turn_liveness(pool: ConnectionPool, threshold_s: float) -> None:
-    """Run one Redis-confirmed scan on the delivery watchdog's existing tick."""
+    """One Redis-confirmed scan; recover the wedges whose per-agent cooldown
+    has elapsed, then return."""
     redis_client = cast(_RedisReader, base.events.live.redis_client.get_async_redis())
     wedges = await _detect_hosted_turn_wedges(pool, threshold_s, redis_client)
-    _maybe_spawn_hosted_turn_recoveries(pool, wedges)
+    claimed, _deferred = await asyncio.to_thread(
+        attempts.claim_attempts,
+        pool,
+        attempts.HOSTED_TURN,
+        [wedge.agent_id for wedge in wedges],
+        HOSTED_TURN_RECOVERY_COOLDOWN_S,
+    )
+    by_agent = {wedge.agent_id: wedge for wedge in wedges}
+    await rounds.fan_out(
+        [functools.partial(_recover_within_deadline, pool, by_agent[a]) for a in claimed],
+        concurrency=_HOSTED_TURN_RECOVERY_MAX_CONCURRENCY,
+        progress=progress,
+    )
+
+
+async def hosted_turn_recovery_loop(
+    pool: ConnectionPool, progress: LoopProgress, interval_s: float, threshold_s: float
+) -> None:
+    """The hosted-turn liveness recovery as a resident sequential loop."""
+
+    async def one_round() -> None:
+        await hosted_turn_recovery_round(pool, progress, threshold_s)
+
+    await rounds.run_rounds("hosted-turn recovery", progress, interval_s, one_round)
