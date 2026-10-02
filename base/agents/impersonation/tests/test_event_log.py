@@ -153,6 +153,55 @@ def test_central_event_commits_with_its_transaction_and_survives_a_lost_emit(
     assert completion[0]["payload"]["api_event_count"] == 1
 
 
+def test_central_entry_references_its_audit_row_and_entries_resolve_the_body(
+    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+) -> None:
+    event = _central_event(db_conn, owner.agent_id)
+    with db_conn.transaction():
+        tagged = record_central_event(db_conn, event)
+    db_conn.commit()
+
+    stored = db_conn.execute(
+        "SELECT payload FROM agent_impersonation_entries WHERE lease_id=%s AND source_key=%s",
+        (lease["id"], event_log.CENTRAL_SOURCE),
+    ).fetchone()
+    assert stored is not None
+    # The entry holds the reference only, no second copy of the body.
+    assert set(stored[0]) == {"event_uid", "id", "line_sha256"}
+    row = db_conn.execute(
+        "SELECT event_uid,event_name,attributes FROM audit_events WHERE event_uid=%s",
+        (stored[0]["event_uid"],),
+    ).fetchone()
+    assert row is not None
+    assert row[1] == "send_message"
+    assert row[2]["impersonation_session"] == tagged.attributes["impersonation_session"]
+
+    [api] = [
+        entry["payload"]
+        for entry in history.entries(str(lease["id"]), db_conn)
+        if entry["kind"] == "api_event"
+    ]
+    assert (api["event_name"], api["source"], api["category"]) == (
+        "send_message",
+        event.source,
+        "audit",
+    )
+    assert api["attributes"] == tagged.attributes
+    assert api["line_sha256"] == stored[0]["line_sha256"]
+
+
+def test_resolving_a_reference_without_its_audit_row_fails_loudly(
+    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+) -> None:
+    with db_conn.transaction():
+        record_central_event(db_conn, _central_event(db_conn, owner.agent_id))
+    db_conn.execute("SET LOCAL session_replication_role = replica")
+    db_conn.execute("DELETE FROM audit_events")
+    with pytest.raises(RuntimeError, match="audit_events has no row"):
+        history.entries(str(lease["id"]), db_conn)
+    db_conn.rollback()
+
+
 def test_central_append_stops_once_admission_closes(
     db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
 ) -> None:

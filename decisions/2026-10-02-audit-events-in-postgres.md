@@ -73,8 +73,8 @@ the exception to the 2026-08-04 ruling for that record. This entry states the
 principle for all audit facts. The two do not overlap: `audit_events` is global,
 read by time, and holds only audit-category events; `agent_impersonation_entries`
 is per-lease, read by sequence, and also holds the controller-side SDK calls,
-which are not audit events. The central half of the impersonation log may later
-reference an `audit_events` row instead of storing a second copy of the body.
+which are not audit events. The central half of the impersonation log
+references its `audit_events` row instead of storing a second copy of the body.
 
 ## Alternatives rejected
 
