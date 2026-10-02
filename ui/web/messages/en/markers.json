@@ -1,0 +1,10 @@
+{
+  "terminated": "Terminated",
+  "restarted": "Restarted",
+  "resurrected": "Resurrected",
+  "forked": "Forked",
+  "memory": "Memory",
+  "note": "Note",
+  "unrecognized": "Unrecognized system_marker (frontend not adapted)",
+  "errorPrefix": "[error] {content}"
+}

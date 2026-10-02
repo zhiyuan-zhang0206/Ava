@@ -1,0 +1,17 @@
+{
+  "blocking": "Blocking",
+  "dismiss": "Dismiss",
+  "sendAnswer": "Send answer",
+  "replyTo": "Reply to notice: {title}",
+  "failed": "{verb} failed: {msg}",
+  "alreadyAnswered": "This notice was already answered.",
+  "send": "Send",
+  "alreadyDismissed": "This notice was already dismissed.",
+  "alreadyRead": "This notice was already read.",
+  "markRead": "Mark read",
+  "sendNote": "Send note",
+  "marking": "Marking…",
+  "answerPlaceholder": "Your answer… (Enter to send)",
+  "notePlaceholder": "Optional note… (Enter to mark read)",
+  "expires": "Expires {time}"
+}

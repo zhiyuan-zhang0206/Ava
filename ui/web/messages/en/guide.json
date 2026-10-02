@@ -1,0 +1,7 @@
+{
+  "describeTask": "Describe an operations task — e.g. install the linear MCP server",
+  "created": "Ava Guide #{id} created — check its conversation for progress",
+  "failed": "Guide failed: {error}",
+  "intro": "Ask Ava to operate the cluster — run or update it, switch tracks, manage MCP servers, install skills or plugins, tune anything not on this page.",
+  "ask": "Ask Ava"
+}

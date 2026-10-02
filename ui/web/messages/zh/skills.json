@@ -1,0 +1,14 @@
+{
+  "couldntLoad": "无法加载技能——请检查 gateway 后刷新。",
+  "noSkills": "（未安装技能）",
+  "skill": "技能",
+  "source": "来源",
+  "enabled": "已启用",
+  "toggle": "切换 {name}",
+  "intro": "安装在此 gateway 主机加载目录中的技能，按来源层分类。描述你想要的技能，安装 agent 会查找、安装并验证它。",
+  "layerCore": "核心",
+  "layerPlugin": "插件",
+  "layerMachine": "机器",
+  "layerUntracked": "未跟踪",
+  "noData": "（无数据）"
+}

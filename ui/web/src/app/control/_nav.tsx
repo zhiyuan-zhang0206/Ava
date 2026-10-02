@@ -149,7 +149,7 @@ export function ControlNav({
   // A section/sub renders its translated label when a labelKey is present,
   // else its raw English label (data-driven labels like preset names have no
   // key). The type cast is safe: labelKey values are hand-kept in sync with
-  // the control.sections catalog (en.json is the canonical English source).
+  // the control.sections catalog (messages/en is the canonical English source).
   const labelOf = (labelKey: string | undefined, label: string) =>
     labelKey ? t(labelKey as Parameters<typeof t>[0]) : label;
   const sections = useControlSections(baseSections);

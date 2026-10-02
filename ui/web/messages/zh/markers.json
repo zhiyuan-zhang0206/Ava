@@ -1,0 +1,10 @@
+{
+  "terminated": "已终止",
+  "restarted": "已重启",
+  "resurrected": "已复活",
+  "forked": "已分叉",
+  "memory": "记忆",
+  "note": "笔记",
+  "unrecognized": "无法识别的 system_marker（前端未适配）",
+  "errorPrefix": "[错误] {content}"
+}

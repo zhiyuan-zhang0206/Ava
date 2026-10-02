@@ -23,11 +23,11 @@ import { useEffect } from "react";
 
 import { useUserSettings } from "@/lib/use-user-settings";
 
-import en from "../../messages/en.json";
-import zh from "../../messages/zh.json";
+import en from "../../messages/en";
+import zh from "../../messages/zh";
 
 // The supported locales and their catalogs. Adding a locale = add a
-// messages/<locale>.json + one entry here (and the AppConfig Locale union in
+// messages/<locale>/ (one JSON file per namespace plus its index.ts) + one entry here (and the AppConfig Locale union in
 // i18n/app-config.d.ts).
 export const LOCALES = {
   en,

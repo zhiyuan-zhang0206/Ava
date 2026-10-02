@@ -1,0 +1,16 @@
+{
+  "models": "模型",
+  "hiddenModels": "已隐藏 {count} 个 — 前往控制 > 显示管理",
+  "effortDefault": "推理强度：默认",
+  "presets": "预设",
+  "noPreset": "无预设",
+  "spawnOn": "在以下机器创建",
+  "spawn": "创建",
+  "model": "模型",
+  "reasoningEffort": "推理强度",
+  "preset": "预设",
+  "spawnAgent": "创建 agent",
+  "hostUnavailable": "Agent host 不可用",
+  "hostUnknown": "Agent host 状态未知",
+  "noReadyRunner": "没有 host 可用的 agent runner"
+}
