@@ -46,42 +46,15 @@ def test_prometheus_heartbeat_age_reads_newest_sample(monkeypatch: pytest.Monkey
     assert telemetry_staleness.prometheus_heartbeat_age() is None
 
 
-def test_loki_heartbeat_age_reads_newest_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, Any] = {}
-
-    def fake_query_events(**kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-        seen.update(kwargs)
-        return [
-            {"ts": datetime.fromtimestamp(1_699_999_970.0, UTC)},
-        ], False
-
-    monkeypatch.setattr(telemetry_staleness.loki_events, "query_events", fake_query_events)
-    monkeypatch.setattr(telemetry_staleness.time, "time", lambda: 1_700_000_000.0)
-
-    assert telemetry_staleness.loki_heartbeat_age(timeout_s=2.5) == 30.0
-    assert seen["event_names"] == ["gateway_latency"]
-    assert seen["categories"] == ["telemetry"]
-    assert seen["limit"] == 1
-    assert seen["direction"] == "backward"
-    assert seen["timeout_s"] == 2.5
-    assert seen["from_"] == datetime.fromtimestamp(1_699_999_100.0, UTC)
-    assert seen["to"] == datetime.fromtimestamp(1_700_000_000.0, UTC)
-
-
 def test_check_reports_stale_rate_limits_and_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
-    ages: dict[str, float | None] = {"prometheus": 30.0, "loki": 30.0}
+    ages: dict[str, float | None] = {"prometheus": 30.0}
     emitted: list[tuple[str, dict[str, Any]]] = []
 
     def prometheus_age(*, timeout_s: float | None = None) -> float | None:
         del timeout_s
         return ages["prometheus"]
 
-    def loki_age(*, timeout_s: float | None = None) -> float | None:
-        del timeout_s
-        return ages["loki"]
-
     monkeypatch.setattr(telemetry_staleness, "prometheus_heartbeat_age", prometheus_age)
-    monkeypatch.setattr(telemetry_staleness, "loki_heartbeat_age", loki_age)
 
     def capture_emit(
         _category: str, event_name: str, *, attributes: dict[str, Any], **_kwargs: Any
@@ -132,7 +105,7 @@ def test_check_reports_stale_rate_limits_and_recovers(monkeypatch: pytest.Monkey
 
 
 def test_check_throttles_heartbeat_queries(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = {"prometheus": 0, "loki": 0}
+    calls = {"prometheus": 0}
     monotonic_times = iter((100.0, 100.1, 160.1))
 
     def heartbeat_age(source: str) -> float:
@@ -143,21 +116,16 @@ def test_check_throttles_heartbeat_queries(monkeypatch: pytest.MonkeyPatch) -> N
         del timeout_s
         return heartbeat_age("prometheus")
 
-    def loki_age(*, timeout_s: float | None = None) -> float:
-        del timeout_s
-        return heartbeat_age("loki")
-
     monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 60)
     monkeypatch.setattr(telemetry_staleness.time, "monotonic", lambda: next(monotonic_times))
     monkeypatch.setattr(telemetry_staleness, "prometheus_heartbeat_age", prometheus_age)
-    monkeypatch.setattr(telemetry_staleness, "loki_heartbeat_age", loki_age)
 
     assert telemetry_staleness.check_and_report() is False
     assert telemetry_staleness.check_and_report() is False
-    assert calls == {"prometheus": 1, "loki": 1}
+    assert calls == {"prometheus": 1}
 
     assert telemetry_staleness.check_and_report() is False
-    assert calls == {"prometheus": 2, "loki": 2}
+    assert calls == {"prometheus": 2}
 
 
 def test_check_fail_open_when_heartbeat_queries_raise(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,7 +135,6 @@ def test_check_fail_open_when_heartbeat_queries_raise(monkeypatch: pytest.Monkey
         raise RuntimeError(f"backend failed at timeout {timeout_s}")
 
     monkeypatch.setattr(telemetry_staleness, "prometheus_heartbeat_age", boom)
-    monkeypatch.setattr(telemetry_staleness, "loki_heartbeat_age", boom)
 
     def capture_emit(_category: str, event_name: str, **_kwargs: Any) -> None:
         emitted.append(event_name)

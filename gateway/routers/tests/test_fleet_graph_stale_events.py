@@ -64,7 +64,6 @@ def _fresh_heartbeat_age(*, timeout_s: float | None = None) -> float:
 def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     """The success-path heartbeat guard must not dial real services here."""
     monkeypatch.setattr(telemetry_staleness, "prometheus_heartbeat_age", _fresh_heartbeat_age)
-    monkeypatch.setattr(telemetry_staleness, "loki_heartbeat_age", _fresh_heartbeat_age)
     monkeypatch.setattr(telemetry_staleness, "_source_states", {})
     monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
 
