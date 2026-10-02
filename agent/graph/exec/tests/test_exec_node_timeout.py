@@ -17,8 +17,8 @@ from langgraph.runtime import Runtime
 
 from agent.graph.exec.node import _exec_node_impl
 from agent.state import AgentState
+from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
-from tests.agent._fakes import make_fake_ops_pool
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
