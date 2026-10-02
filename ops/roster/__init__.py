@@ -135,6 +135,9 @@ def build_services() -> tuple[ServiceSpec, ...]:
             curl_url=f"http://127.0.0.1:{entry_port()}/__ava/healthz",
             identity_probe=probe_gate,
             healthcheck_module="services.healthchecks.gate",
+            # The gate's /__ava/healthz names its home (`probe_gate` checks it), so a
+            # foreign gate on the entry port is recognisable before the launch.
+            home_healthz=True,
         ),
         ServiceSpec(
             session="gateway",

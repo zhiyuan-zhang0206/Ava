@@ -53,6 +53,7 @@ def _healthz_spec(service: str, port: int) -> ServiceSpec:
         capabilities=_AGENT_RUNNER,
         requires_db=True,
         curl_url=f"http://localhost:{port}/healthz",
+        health_name=service.replace("-", "_"),
     )
 
 

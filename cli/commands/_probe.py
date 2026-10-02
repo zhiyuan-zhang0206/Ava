@@ -97,17 +97,17 @@ class OccupiedPort(NamedTuple):
 
 
 def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
-    """Whether `spec` binds one of this unit's `AVA_*_HEALTH_PORT` ports.
+    """Whether `spec`'s port answers an Ava `/healthz` whose body names its home.
 
-    Read off the spec's own probe target instead of a second list of daemon
-    names: every such service is declared with `curl_url=_hz(<daemon>)`
-    (`ops.spec`), built from the same `health_port(<daemon>)` call the daemon
-    passes to `start_health_server` — so the URL probed and the port bound cannot
-    disagree. The gateway (`/api/health`), the browser (CDP `/json/version`),
-    milvus (gRPC) and the frontend fall out by the same rule: none of them
-    serves a `/healthz` whose body names its home.
+    Read off what the spec declares, not off its URL: a standard daemon carries a
+    `health_name` (its URL is built from the same `health_port(<daemon>)` call the
+    daemon passes to `start_health_server`, so the URL probed and the port bound
+    cannot disagree), and the gate declares `home_healthz` for its entry port. The
+    gateway (`/api/health`), the browser (CDP `/json/version`), milvus (gRPC) and
+    the frontend declare neither: none of them serves a `/healthz` whose body
+    names its home.
     """
-    return spec.curl_url is not None and spec.curl_url.endswith("/healthz")
+    return spec.health_name is not None or spec.home_healthz
 
 
 def _occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort, ...]:
