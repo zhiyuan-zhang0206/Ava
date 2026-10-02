@@ -275,14 +275,8 @@ uses inline `# emoji-ok: <reason>`.
 
 ## Import layering
 
-`base < ava < agent < gateway < cli` — a lower layer importing a
-higher one fails; higher→lower is fine. `services` must not import the `agent`
-kernel or `cli` (a primitive a daemon and `cli` both need lives in `base`) but is
-otherwise unlayered (it straddles). `plugins` is ungoverned
-(agent ↔ plugins is cyclic by design).
-
-Enforced by import-linter (config in `pyproject.toml [tool.importlinter]`,
-hook `lint-imports`).
+Which package may import which, and how it is enforced:
+[`import-layering.md`](import-layering.md).
 
 ## contextvars are allowlisted, not free
 
