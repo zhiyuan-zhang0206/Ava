@@ -4,7 +4,9 @@
     "test_maintenance_late_child.py",
 ]
 "tests.path_scoped.services_tests" = [
+    "test_ava_root_daemon.py",
     "test_ava_root_health.py",
+    "test_ava_root_ipc.py",
     "test_ava_root_probes.py",
     "test_ava_root_reconcile.py",
     "test_ava_root_selfcheck.py",

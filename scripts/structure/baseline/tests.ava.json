@@ -1,8 +1,0 @@
-{
-  "patch_targets": {
-    "tests/ava/test_external_integration.py::ava.gateway_client.transport._client": 2
-  },
-  "tests_location": {
-    "tests/ava/test_external_integration.py::top-level": 1
-  }
-}

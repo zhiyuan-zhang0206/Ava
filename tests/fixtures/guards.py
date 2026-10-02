@@ -41,7 +41,7 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     pause/stop) would refuse — red on an agent box, green
     in CI. A pty-session or login-shell run (the fleet's test convention) never
     sees this. The predicate's own membership behaviour is exercised in spawned
-    child processes (`tests/base/test_proc.py`), whose sessions are built for
+    child processes (`base/host/tests/test_proc.py`), whose sessions are built for
     the case; a lifecycle test that wants the refusal patches this back.
     """
     monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: None)
@@ -308,7 +308,7 @@ def _test_homes_get_their_own_ports(
 # refresh_runner_env_or_die` ran from `cli.main.main()` before dispatch on
 # `ava start`, and on an enrolled runner it fetched /api/bootstrap, rewrote the
 # real ~/.ava/.env, and re-exec'd — replacing the pytest process mid-run.
-# `tests/cli/test_main_dispatch.py` stubbed it, and the exec guard here is the
+# `cli/tests/test_main_dispatch.py` stubbed it, and the exec guard here is the
 # backstop that turns a forgotten stub into a plain test failure instead of a
 # vanished run. (The refresh is gone; `ava start`'s Settings build fetches in-
 # process, which is what `_guard_bootstrap_fetch` below blocks.)
@@ -341,7 +341,7 @@ def _guard_process_exec(monkeypatch: pytest.MonkeyPatch) -> None:
             raise AssertionError(
                 f"os.{name}() would replace the pytest process image — the run would end "
                 f"here with no summary and no failure report. Stub the code path that "
-                f"execs (see tests/cli/test_main_dispatch.py), or patch os.{name} in the "
+                f"execs (see cli/tests/test_main_dispatch.py), or patch os.{name} in the "
                 f"test body if the exec is the subject under test."
             )
 

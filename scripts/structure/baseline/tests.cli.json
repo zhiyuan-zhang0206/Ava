@@ -5,9 +5,6 @@
   },
   "patch_targets": {
     "tests/cli/test_converge_redis_bridge.py::services.redis_bridge.relay._sleep": 2,
-    "tests/cli/test_main_dispatch.py::base.native_process.code_version._db_gate_exempt": 1,
-    "tests/cli/test_main_dispatch.py::cli.parsers.host._h_start": 1,
-    "tests/cli/test_main_dispatch.py::cli.parsers.host._h_status": 2,
     "tests/cli/test_pgbouncer_wire.py::base.db.code_version_gate._last_read_at": 1,
     "tests/cli/test_pgbouncer_wire.py::base.native_process.code_version._db_gate_exempt": 1,
     "tests/cli/test_pgbouncer_wire.py::base.native_process.code_version._version": 1,
@@ -19,12 +16,6 @@
   },
   "tests_location": {
     "tests/cli/test_converge_lgtm.py::top-level": 1,
-    "tests/cli/test_converge_redis_bridge.py::top-level": 1,
-    "tests/cli/test_main_dispatch.py::top-level": 1,
-    "tests/cli/test_otel_bootstrap_relay.py::top-level": 1,
-    "tests/cli/test_pgbouncer_config.py::top-level": 1,
-    "tests/cli/test_pgbouncer_wire.py::top-level": 1,
-    "tests/cli/test_plugin_scaffold.py::top-level": 1,
-    "tests/cli/test_schedules_cmd.py::top-level": 1
+    "tests/cli/test_plugin_scaffold.py::top-level": 1
   }
 }

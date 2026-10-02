@@ -135,7 +135,7 @@ def _sample_messages() -> list[AnyMessage]:
 
 
 def _compact_tail(update: Any) -> list[AnyMessage]:
-    """Same transport assertion as tests/agent/test_compact.py: the window is
+    """Same transport assertion as agent/tests/test_compact.py: the window is
     cleared (REMOVE_ALL sentinel alone) and what follows the head is parked in
     `context_reset.tail`. Returns the tail."""
     msgs = update["messages"]

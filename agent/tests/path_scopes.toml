@@ -2,8 +2,11 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.agent_tests" = [
     "test_checkpoint_interval.py",
+    "test_claim.py",
+    "test_compact.py",
     "test_exec_child.py",
     "test_exec_subprocess.py",
+    "test_fork_notes.py",
     "test_history_dump.py",
     "test_impersonation_integration.py",
     "test_lazy_child_imports.py",

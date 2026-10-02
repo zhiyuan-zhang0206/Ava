@@ -70,8 +70,9 @@ def sse_closed(mode: SseMode) -> None:
     )
 
 
-def _initialize_sse_metrics() -> None:
-    """Publish zero connection depth so an idle gateway still has series."""
+def initialize_sse_metrics() -> None:
+    """Reset the active-connection gauge to zero for every mode and publish it, so an idle
+    gateway still has series."""
     _sse_active_connections.clear()
     _sse_active_connections.update(dict.fromkeys(_SSE_MODES, 0))
     for mode in _SSE_MODES:
@@ -169,7 +170,7 @@ class GatewayRuntimeMonitor:
 
 def start_runtime_monitor() -> GatewayRuntimeMonitor:
     """Start one monitor bound to the running uvicorn event loop."""
-    _initialize_sse_metrics()
+    initialize_sse_metrics()
     monitor = GatewayRuntimeMonitor(loop=asyncio.get_running_loop(), process=psutil.Process())
     monitor.start()
     return monitor
