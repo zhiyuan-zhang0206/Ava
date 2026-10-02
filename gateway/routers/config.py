@@ -541,8 +541,8 @@ async def put_config(
         candidate_writes = dict(plan.cluster_writes)
         candidate_removals = set(plan.cluster_removals)
         # A local host field shares the gateway's `.env`. Include only host edits
-        # from a cluster-touched domain: this catches a cross-scope PITR transition
-        # before its host write, without changing the existing host capability-result
+        # from a cluster-touched domain: this catches a transition spanning the cluster
+        # and host scopes of one domain before its host write, without changing the existing host capability-result
         # contract for unrelated fields.
         cluster_domains = {
             field_domain(name) for name in set(candidate_writes) | candidate_removals

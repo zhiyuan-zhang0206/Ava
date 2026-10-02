@@ -39,8 +39,8 @@ def component(
     daemon's HTTP readiness (503): True (default) keeps the historic behavior
     — any non-OK component degrades the daemon. False reports a domain
     condition without gating readiness, so a watchdog that respawns on 503
-    never restarts a daemon onto a condition a restart cannot fix (PITR
-    unacked-age health, QA #4696 block 2); the component stays visible in the
+    never restarts a daemon onto a condition a restart cannot fix (a backlog
+    only an external dependency clears); the component stays visible in the
     payload either way.
     """
     if status not in _COMPONENT_STATUSES:
