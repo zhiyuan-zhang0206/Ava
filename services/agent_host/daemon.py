@@ -286,7 +286,7 @@ async def _close_host_runtime(
 class _PageEventPublisher:
     """Best-effort page events on the shared Redis channel — the daemon's
     stand-in for a per-agent SSE publisher (turns build their own; none
-    exists outside a turn). Mirrors the gateway ttl_reaper's pattern so the
+    exists outside a turn). Mirrors the ttl_reaper service's pattern so the
     frontend drops closed rows the daemon's scan closes; pages still heal
     without it, the events only keep the open-pages popover accurate.
     """

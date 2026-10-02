@@ -1,4 +1,4 @@
-"""Lease expiration without deleting permanent history on the existing gateway TTL reaper."""
+"""Lease expiration without deleting permanent history on the existing TTL reaper."""
 
 import shlex
 from typing import Literal
@@ -138,7 +138,7 @@ def remind_expiring_impersonations(
 ) -> int:
     """Insert one pending renewal reminder per approaching expiry deadline.
 
-    Runs in the gateway TTL reaper cycle (default 60s), ahead of expiry
+    Runs in the TTL reaper cycle (default 60s), ahead of expiry
     reconciliation, so a lease gets its reminder within the 300s window with
     several scan chances. The reminder is an ordinary durable inbox row of
     kind='reminder' tagged with the lease id in its payload; the bound relay

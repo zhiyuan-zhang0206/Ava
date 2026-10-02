@@ -399,6 +399,50 @@ async def test_reconcile_delivers_stale_unfinished_event(
     assert inbound == (None, "reconcile")
 
 
+async def test_reconcile_cuts_a_wedged_delivery_and_goes_on_with_the_batch(
+    db_conn: psycopg.Connection,
+    failure_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One delivery that outlives the RPC deadline fails alone: it counts as an
+    attempt, the rest of the batch is delivered, and `on_event` fires per event."""
+    wedged_author = _seed_agent(db_conn, status=AgentStatus.IDLING)
+    healthy_author = _seed_agent(db_conn, status=AgentStatus.IDLING)
+    wedged_id, _ = _seed_unfinished_failure(
+        db_conn, wedged_author, dedup_key="wedged", age=timedelta(minutes=11)
+    )
+    healthy_id, _ = _seed_unfinished_failure(
+        db_conn, healthy_author, dedup_key="healthy", age=timedelta(minutes=10)
+    )
+
+    async def _delivery(
+        _pool: object, agent_id: int, *args: object, **kwargs: object
+    ) -> ChatDelivery:
+        if agent_id == wedged_author:
+            await asyncio.Event().wait()
+        return ChatDelivery(AgentStatus.IDLING, 1)
+
+    monkeypatch.setattr(work_failed_router, "deliver_chat_inbound", _delivery)
+    monkeypatch.setattr(work_failed_router, "worst_case_dispatch_seconds", lambda: 0.05)
+    seen: list[None] = []
+
+    completed = await work_failed_router.reconcile_stale_work_failures(
+        failure_pool, on_event=lambda: seen.append(None)
+    )
+
+    assert completed == 1
+    assert len(seen) == 2
+    states = {
+        row[0]: row[1:]
+        for row in db_conn.execute(
+            "SELECT id, delivered_at IS NOT NULL, delivery_attempts FROM work_failed_events "
+            "WHERE id = ANY(%s)",
+            ([wedged_id, healthy_id],),
+        ).fetchall()
+    }
+    assert states == {wedged_id: (False, 1), healthy_id: (True, 1)}
+
+
 async def test_reconcile_sends_attempts_over_limit_directly_to_task_alert(
     db_conn: psycopg.Connection,
     failure_pool: ConnectionPool,

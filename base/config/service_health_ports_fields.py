@@ -63,6 +63,7 @@ class ServiceHealthPortFields:
     task_maintenance_health_port: int | None = health_port_field("task_maintenance")
     events_maintenance_health_port: int | None = health_port_field("events_maintenance")
     pg_backup_health_port: int | None = health_port_field("pg_backup")
+    ttl_reaper_health_port: int | None = health_port_field("ttl_reaper")
     memory_indexer_health_port: int | None = health_port_field("memory_indexer")
     # The ops daemon is the agent-runner's inbound port the gateway dials to run
     # cluster ops; the runner registers the resulting URL itself.

@@ -1,4 +1,4 @@
-"""Lifecycle-pointer maintenance scans for the gateway TTL reaper.
+"""Lifecycle-pointer maintenance scans for the TTL reaper service.
 
 Two slow, hourly scans over ``agents_meta.lifecycle_command_id`` — the one
 durable pointer that says which accepted lifecycle command (restart /
@@ -13,15 +13,13 @@ terminate) an agent still owes:
   recovery that normally observes its fences, so they would sit stuck
   forever.
 
-Split out of ``gateway/ttl_reaper/__init__.py`` (which sits at the 800-line hard
-ceiling) so both pointer scans live in one focused module beside the reaper
-loop that schedules them.
+Both run on hourly cadences claimed in ``maintenance_state``
+(``services/ttl_reaper/cadence.py``); this module holds the scans themselves.
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from uuid import UUID
 
 from psycopg_pool import ConnectionPool
@@ -30,47 +28,6 @@ from base import telemetry
 from base.db.transaction import write_transaction
 
 _log = logging.getLogger(__name__)
-
-# Torn lifecycle-pointer scan cadence: the commit-time guard (task #3678)
-# rejects new pointer->done writes; this scan is the slow safety net for the
-# sides the guard cannot see (a bypass write, a rollback past the migration).
-_TORN_POINTER_SCAN_INTERVAL_S = 3600.0
-_torn_pointer_last_scan: float | None = None
-
-# Absent-machine fence-settle cadence: the rows stay stuck until settled and
-# nothing else ever settles them, so hourly is prompt enough — and the scan is
-# hourly, not per-poll, for the same reason as the torn-pointer one (a
-# pointer join every pass would scan agents_meta for nothing).
-_FENCE_SETTLE_INTERVAL_S = 3600.0
-_fence_settle_last_scan: float | None = None
-
-
-def _torn_pointer_scan_due() -> bool:
-    """True once per torn-pointer scan interval (hourly).
-
-    Same throttle shape as the fire-log prune: the scan is hourly, not a
-    per-poll job (a live-pointer join every 30 s would scan agents_meta for
-    nothing).
-    """
-    global _torn_pointer_last_scan  # noqa: PLW0603 — process-local scan cadence
-    now = time.monotonic()
-    if (
-        _torn_pointer_last_scan is None
-        or now - _torn_pointer_last_scan >= _TORN_POINTER_SCAN_INTERVAL_S
-    ):
-        _torn_pointer_last_scan = now
-        return True
-    return False
-
-
-def _fence_settle_due() -> bool:
-    """True once per absent-machine fence-settle scan interval (hourly)."""
-    global _fence_settle_last_scan  # noqa: PLW0603 — process-local scan cadence
-    now = time.monotonic()
-    if _fence_settle_last_scan is None or now - _fence_settle_last_scan >= _FENCE_SETTLE_INTERVAL_S:
-        _fence_settle_last_scan = now
-        return True
-    return False
 
 
 def _scan_torn_lifecycle_pointers_blocking(pool: ConnectionPool) -> int:

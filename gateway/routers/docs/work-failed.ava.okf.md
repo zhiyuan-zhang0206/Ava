@@ -39,8 +39,8 @@ The final target is written back as `delivered_to`, `delivery_kind`, and
 `delivered_at`. Liveness is always the shared status-plus-lease predicate;
 delivery return values do not invent a second liveness truth.
 
-The gateway TTL reaper also reconciles unfinished events once at startup and
-on every periodic pass. Only rows older than
+The TTL reaper service (`services/ttl_reaper/remote.py`) also reconciles
+unfinished events on every pass, one deadline per event. Only rows older than
 `AVA_WORK_FAILED_RETRY_GRACE_SECONDS` (default five minutes) are eligible, so
 the recovery pass does not collide with a normal request still finishing its
 route. Each claimed retry increments `delivery_attempts`; attempts one through

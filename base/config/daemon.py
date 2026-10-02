@@ -315,7 +315,7 @@ class DaemonSettings(
     ttl_reaper_poll_interval_seconds: float = Field(
         default=60.0,
         alias="AVA_TTL_REAPER_POLL_INTERVAL_SECONDS",
-        description="Gateway TTL reaper poll interval in seconds for expired pages and explicitly time-limited persistent shell sessions.",
+        description="TTL reaper service poll interval in seconds for expired pages, browser sessions, notices, impersonation leases and explicitly time-limited persistent shell sessions.",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",
@@ -328,7 +328,7 @@ class DaemonSettings(
     schedule_fire_log_retention_days: int = Field(
         default=30,
         alias="AVA_SCHEDULE_FIRE_LOG_RETENTION_DAYS",
-        description="Days of schedule_fire_log claims kept by the gateway reaper's retention prune. schedule_fire_log is the at-most-once claim ledger for schedule catch-up; the prune deletes rows whose slot is older than this window but always keeps the newest claim per schedule so the catch-up baseline never regresses (a regressed baseline would refire a sparse-cron schedule's already-claimed slot).",
+        description="Days of schedule_fire_log claims kept by the TTL reaper's retention prune. schedule_fire_log is the at-most-once claim ledger for schedule catch-up; the prune deletes rows whose slot is older than this window but always keeps the newest claim per schedule so the catch-up baseline never regresses (a regressed baseline would refire a sparse-cron schedule's already-claimed slot).",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",
@@ -341,7 +341,7 @@ class DaemonSettings(
     schedule_fire_log_cleanup_interval_seconds: float = Field(
         default=86400.0,
         alias="AVA_SCHEDULE_FIRE_LOG_CLEANUP_INTERVAL_SECONDS",
-        description="How often the gateway reaper runs the schedule_fire_log retention prune. One bounded DELETE per pass; the default keeps a single daily pass.",
+        description="How often the TTL reaper runs the schedule_fire_log retention prune (the clock is kept in maintenance_state, so a restart does not reset it). One bounded DELETE per pass; the default keeps a single daily pass.",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",
