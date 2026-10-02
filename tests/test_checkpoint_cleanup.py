@@ -216,7 +216,7 @@ async def test_trim_preserves_compaction_ancestors_for_fork(
     aops_pool: AsyncConnectionPool, db_conn: psycopg.Connection
 ) -> None:
     """Fork's real recursive chain copy must still reach retained segments."""
-    from ops.agents.spawn import _copy_checkpoint_chain
+    from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 
     ids = await _put_turns(aops_pool, "1", 8)
     async with aops_pool.connection() as conn:
@@ -227,7 +227,7 @@ async def test_trim_preserves_compaction_ancestors_for_fork(
         )
     await trim_checkpoints(aops_pool, "1", keep=3, batch=2)
     with db_conn.cursor() as cursor:
-        _copy_checkpoint_chain(cursor, 1, ids[-1], 2)
+        copy_checkpoint_chain(cursor, 1, ids[-1], 2)
     db_conn.commit()
     assert await _surviving_ids(aops_pool, "2") == {ids[1], *ids[-3:]}
     for thread in ("1", "2"):
