@@ -58,6 +58,7 @@ def result(nodes: list[AxNode], **overrides: Any) -> AxTreeResult:
         "pid": 1,
         "windows": 1,
         "framework": "",
+        "ax_enable": "n/a",
         "nodes": nodes,
         "visited": len(nodes),
         "truncated": False,
@@ -174,6 +175,30 @@ def test_quality_sparse_vs_electron_not_exposed() -> None:
     assert ax.assess_quality(result(nodes), scoped=False)["reason"] == "sparse"
     flagged = ax.assess_quality(result(nodes, framework="electron"), scoped=False)
     assert flagged["reason"] == "electron_not_exposed"
+
+
+@pytest.mark.parametrize(
+    ("ax_enable", "reason"),
+    [
+        ("off", "electron_ax_disabled"),
+        ("failed", "electron_enable_failed"),
+        ("set", "electron_not_exposed"),
+        ("already", "electron_not_exposed"),
+    ],
+)
+def test_chromium_apps_get_a_reason_that_says_what_the_enable_step_did(
+    ax_enable: str, reason: str
+) -> None:
+    nodes = [window(1), node(2, 1, "AXGroup", depth=1)]
+    q = ax.assess_quality(result(nodes, framework="chromium", ax_enable=ax_enable), scoped=False)
+    assert q["ok"] is False and q["reason"] == reason
+    assert reason in q["suggest"] and "include_ocr_gap" in q["suggest"]
+
+
+def test_an_unreadable_or_timed_out_empty_walk_is_unresponsive_not_no_window() -> None:
+    assert ax.assess_quality(result([], unreadable=1), scoped=False)["reason"] == "unresponsive"
+    assert ax.assess_quality(result([], timed_out=True), scoped=False)["reason"] == "unresponsive"
+    assert ax.assess_quality(result([]), scoped=False)["reason"] == "no_window"
 
 
 def test_quality_canvas() -> None:
