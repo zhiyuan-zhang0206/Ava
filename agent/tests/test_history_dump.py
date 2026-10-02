@@ -46,6 +46,7 @@ from agent.hooks.compact import auto_compact_for_llm, compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.config import settings
 from base.config.agent_compaction import AgentCompactionSettings
 from base.lm.context_budget import ContextBudget
@@ -168,7 +169,11 @@ _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
 def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
-    return Runtime(context=AvaContext(ops_pool=None, llm=llm, event_publisher=MagicMock()))
+    return Runtime(
+        context=AvaContext(
+            ops_pool=None, llm=llm, event_publisher=MagicMock(), agent=AgentSlices.resolve()
+        )
+    )
 
 
 def _fake_config() -> RunnableConfig:
@@ -194,6 +199,7 @@ def _make_runtime(
         ops_pool=ops_pool,
         llm=llm if llm is not None else _fake_llm("synthetic summary"),
         event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx)
 

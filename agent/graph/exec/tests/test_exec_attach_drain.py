@@ -22,6 +22,7 @@ from agent.graph.exec.node import _exec_node_impl
 from agent.state import AgentState, AttachState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import AvaMsgType
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
@@ -58,6 +59,7 @@ def _make_runtime(model_name: str | None = None) -> Runtime[AvaContext]:
         ops_pool=make_fake_ops_pool(),
         llm=llm,
         event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx)
 

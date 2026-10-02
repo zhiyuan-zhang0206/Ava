@@ -29,6 +29,7 @@ from agent.graph.exec._result import _ExecDone
 from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.config import settings
 from base.db import insert_inbound_message
@@ -60,7 +61,12 @@ class _Turn:
     def __init__(self, pool: AsyncConnectionPool, agent_id: int) -> None:
         self.agent_id = agent_id
         self.runtime = Runtime(
-            context=AvaContext(ops_pool=pool, llm=MagicMock(), event_publisher=MagicMock())
+            context=AvaContext(
+                ops_pool=pool,
+                llm=MagicMock(),
+                event_publisher=MagicMock(),
+                agent=AgentSlices.resolve(),
+            )
         )
         self.claimed: list[AnyMessage] = []
         self.executed: list[AnyMessage] = []

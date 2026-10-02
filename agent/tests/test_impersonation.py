@@ -14,7 +14,6 @@ from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
@@ -23,7 +22,7 @@ from agent import impersonation
 from agent.graph.exec._result import lifecycle_exception_from_name
 from agent.graph.exec.protocol import read_request, write_request
 from agent.state import BaseAgentState
-from base.agents.context import AvaContext
+from agent.tests._fakes import placeholder_runtime
 from base.agents.lifecycle import AgentImpersonation
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
@@ -89,7 +88,7 @@ async def test_hold_ends_before_claim_or_compaction(
     guarded = impersonation.protect_native_hooks(hook)
     result = await guarded(
         BaseAgentState(),
-        Runtime(context=AvaContext(ops_pool=MagicMock())),
+        placeholder_runtime(),
         {"configurable": {"thread_id": "42"}},
     )
     assert result.goto == END

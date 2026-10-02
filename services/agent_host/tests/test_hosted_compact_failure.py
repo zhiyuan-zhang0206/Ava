@@ -22,6 +22,7 @@ from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.tests.test_inbound_ownership import _agent
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
 from base.db import Database, insert_inbound_message
@@ -107,7 +108,9 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     redis = open_async_redis(settings.data_plane.redis_url)
     channel = f"{settings.data_plane.events_channel}:compact-proof:{agent}"
     publisher = AgentEventPublisher(redis, channel, agent_id=agent)
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock())
+    ctx = AvaContext(
+        ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock(), agent=AgentSlices.resolve()
+    )
     host = AgentHost(
         pool=aops_pool,
         checkpointer=saver,

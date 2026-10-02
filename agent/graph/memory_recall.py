@@ -12,7 +12,7 @@ from title/body. The agent
 sees relevant durable notes surface on their own, without having to call
 `ava.memory.search`.
 
-A removable layer: gated by `turn_settings.agent.passive_memory_recall_enabled` (default
+A removable layer: gated by the agent's `passive_memory_recall_enabled` slice field (default
 on), and a no-op whenever the search does not come back with results -- index
 down, gateway erroring, feature off -- so the call site degrades to nothing
 rather than failing the turn. It runs before the LLM on every inbound turn, so a
@@ -35,8 +35,8 @@ from agent.graph._memory_filter import Candidate, filter_candidates
 from agent.messages import NoteTag, system_note_message
 from ava import gateway_client
 from base.agents import GatewayUnavailable, IndexerUnavailable
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from base.config.turn_view import turn_settings
 from base.lm.content import content_blocks
 from base.log import logger
 from base.paths import memory_dir
@@ -115,7 +115,10 @@ def _build_query(messages: Collection[AnyMessage]) -> str:
 
 
 async def passive_memory_recall(
-    messages: Collection[AnyMessage], *, injected_paths: Collection[str] = frozenset()
+    messages: Collection[AnyMessage],
+    *,
+    agent: AgentSlices,
+    injected_paths: Collection[str] = frozenset(),
 ) -> PassiveRecall | None:
     """Search the memory pool on the recent conversation and render the fresh
     top matches as a note to inject, or `None` when there is nothing to add.
@@ -129,12 +132,12 @@ async def passive_memory_recall(
     Never raises on a failed search: the caller is a before_llm hook, so an
     exception here ends the agent process rather than the recall.
     """
-    if turn_settings.agent.eval_isolation or not turn_settings.agent.passive_memory_recall_enabled:
+    if agent.sandbox.eval_isolation or not agent.memory.passive_memory_recall_enabled:
         return None
     query = _build_query(messages)
     if not query:
         return None
-    retrieve_k = turn_settings.agent.memory_recall_retrieve_k
+    retrieve_k = agent.memory.memory_recall_retrieve_k
     import httpx  # deferred: stays off the child boot path
 
     search_started = time.monotonic()
@@ -201,7 +204,7 @@ async def passive_memory_recall(
 
     search_ms = (time.monotonic() - search_started) * 1000
     filter_started = time.monotonic()
-    picked = await filter_candidates(query, candidates)
+    picked = await filter_candidates(query, candidates, agent.memory)
     # Leg timings keep the recall pass diagnosable from its events alone: the
     # search leg is the one a congested gateway stretches (a fleet wake queues
     # searches behind the search endpoint's semaphore), the filter leg is a

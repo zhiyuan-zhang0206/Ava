@@ -47,6 +47,7 @@ from agent.llm import execute_code
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.lm.context_budget import ContextBudget
 from tests.fixtures.units import spawn_agent
 
@@ -125,10 +126,11 @@ def _fake_llm_seq(*summaries: str) -> Any:
 
 def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
     # These unit tests have no DB. ops_pool=None is the container-mode value:
-    # the post-compact checkpoint trim treats it as a no-op (real-pool trimming
-    # is covered by base/agents/history/tests/test_checkpoint_cleanup.py and the claim_node compact
-    # tests below, which use aops_pool).
-    ctx = AvaContext(ops_pool=None, llm=llm, event_publisher=MagicMock())
+    # the post-compact checkpoint trim treats it as a no-op (real-pool trimming is covered by
+    # base/agents/history/tests/test_checkpoint_cleanup.py and the aops_pool compact tests below).
+    ctx = AvaContext(
+        ops_pool=None, llm=llm, event_publisher=MagicMock(), agent=AgentSlices.resolve()
+    )
     return Runtime(context=ctx)
 
 
@@ -144,7 +146,9 @@ async def test_generate_summary_returns_summary():
     """generate_summary returns summary text (from LLM), no longer returns tail."""
     msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
 
-    summary = await generate_summary(msgs, _fake_llm(summary_text="a synthetic summary"))
+    summary = await generate_summary(
+        msgs, _fake_llm(summary_text="a synthetic summary"), "deepseek-flash"
+    )
 
     assert summary == "a synthetic summary"
 
@@ -206,7 +210,8 @@ async def test_generate_summary_emits_agent_billing_span(
     llm.model_name = "deepseek-v4-pro"
 
     assert (
-        await generate_summary([HumanMessage(content="conversation")], llm) == "a complete summary"
+        await generate_summary([HumanMessage(content="conversation")], llm, "deepseek-flash")
+        == "a complete summary"
     )
 
     assert len(tracer.spans) == 1
@@ -236,7 +241,7 @@ async def test_generate_summary_includes_whole_conversation():
     ]
 
     llm = _fake_llm()
-    await generate_summary(convo, llm)
+    await generate_summary(convo, llm, "deepseek-flash")
 
     [call] = _compaction_ainvoke(llm).call_args_list
     [llm_input] = call.args
@@ -251,7 +256,7 @@ async def test_generate_summary_reuses_conversation_prefix_for_cache():
     content: list[AnyMessage] = [HumanMessage(content=f"m-{i}") for i in range(5)]
 
     llm = _fake_llm()
-    await generate_summary([sys_msg, *content], llm)
+    await generate_summary([sys_msg, *content], llm, "deepseek-flash")
 
     llm.bind_tools.assert_called_once_with([execute_code])
     [call] = _compaction_ainvoke(llm).call_args_list
@@ -267,7 +272,7 @@ async def test_generate_summary_raises_on_empty_llm_text():
     msgs: list[AnyMessage] = [HumanMessage(content=f"m{i}") for i in range(3)]
 
     with pytest.raises(RuntimeError, match="no text"):
-        await generate_summary(msgs, _fake_llm(summary_text=""))
+        await generate_summary(msgs, _fake_llm(summary_text=""), "deepseek-flash")
 
 
 async def test_generate_summary_extracts_text_from_block_content():
@@ -281,7 +286,7 @@ async def test_generate_summary_extracts_text_from_block_content():
         ]
     )
 
-    summary = await generate_summary(msgs, _fake_llm(response=block_response))
+    summary = await generate_summary(msgs, _fake_llm(response=block_response), "deepseek-flash")
     assert summary == "the real summary"
 
 
@@ -294,13 +299,13 @@ async def test_generate_summary_raises_on_tool_use_only_block_content():
     )
 
     with pytest.raises(RuntimeError, match="no text"):
-        await generate_summary(msgs, _fake_llm(response=tool_only))
+        await generate_summary(msgs, _fake_llm(response=tool_only), "deepseek-flash")
 
 
 async def test_generate_summary_raises_on_empty_conversation():
     """Only SystemMessage (no conversation) → ValueError — nothing to summarize."""
     with pytest.raises(ValueError, match="empty"):
-        await generate_summary([SystemMessage(content="<sys>")], _fake_llm())
+        await generate_summary([SystemMessage(content="<sys>")], _fake_llm(), "deepseek-flash")
 
 
 # --- auto_compact_for_llm hook tests ---
@@ -472,7 +477,7 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
     llm = _fake_llm("too short")  # 9 chars < floor, on every call
     state = _over_threshold_state()
     publisher = MagicMock()
-    ctx = AvaContext(ops_pool=None, llm=llm, event_publisher=publisher)
+    ctx = AvaContext(ops_pool=None, llm=llm, event_publisher=publisher, agent=AgentSlices.resolve())
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
         await auto_compact_for_llm(state, Runtime(context=ctx), _fake_config())
@@ -507,7 +512,8 @@ async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pyte
     the summary message carries the durable anchor ava_compact_id."""
     _patch_compact_config(monkeypatch, auto_compact_tokens=1)
     publisher = MagicMock()
-    ctx = AvaContext(ops_pool=None, llm=_fake_llm(_LONG_SUMMARY), event_publisher=publisher)
+    llm = _fake_llm(_LONG_SUMMARY)
+    ctx = AvaContext(ops_pool=None, llm=llm, event_publisher=publisher, agent=AgentSlices.resolve())
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(state, Runtime(context=ctx), _fake_config())
@@ -852,7 +858,9 @@ async def test_compact_summary_emits_compact_done(
     # Explicit publisher MagicMock (not via runtime.context, which is Optional)
     # so the emit assertion types cleanly — mirrors the auto-path emit test.
     publisher = MagicMock()
-    ctx = AvaContext(ops_pool=aops_pool, llm=AsyncMock(), event_publisher=publisher)
+    ctx = AvaContext(
+        ops_pool=aops_pool, llm=AsyncMock(), event_publisher=publisher, agent=AgentSlices.resolve()
+    )
     runtime = Runtime(context=ctx)
 
     await claim_node(state, runtime, _config(tid))
@@ -1075,7 +1083,12 @@ def _make_runtime(ops_pool=None, llm=None):
         ops_pool = AsyncMock()
     if llm is None:
         llm = AsyncMock()
-    ctx = AvaContext(ops_pool=ops_pool, llm=llm, event_publisher=MagicMock())  # pyright: ignore[reportUnknownArgumentType]
+    ctx = AvaContext(
+        ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
+        llm=llm,  # pyright: ignore[reportUnknownArgumentType]
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+    )
     from langgraph.runtime import Runtime
 
     return Runtime(context=ctx)

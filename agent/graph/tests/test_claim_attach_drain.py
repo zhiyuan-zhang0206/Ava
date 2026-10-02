@@ -18,6 +18,7 @@ from agent.graph.claim.node import _claim_node_impl
 from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import AvaMsgType
 
 
@@ -32,6 +33,7 @@ def _context(model_name: str) -> AvaContext:
         ops_pool=MagicMock(),
         llm=cast("BaseChatModel", SimpleNamespace(model_name=model_name)),
         event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
     )
 
 

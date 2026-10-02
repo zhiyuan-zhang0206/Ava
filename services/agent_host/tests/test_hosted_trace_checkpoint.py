@@ -18,6 +18,7 @@ from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import BaseAgentState
 from agent.tests.test_inbound_ownership import _agent
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from base.config import settings
 from base.db import Database
@@ -71,7 +72,11 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
             bus=EventBus.from_settings(),
             db=Database.from_settings(),
         )
-        assert not (await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))).exited
+        assert not (
+            await host._invoke_until_done(
+                agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            )
+        ).exited
 
     assert len(traces) == 1
     # This is the actual gateway trace-content reader, using fresh connections.

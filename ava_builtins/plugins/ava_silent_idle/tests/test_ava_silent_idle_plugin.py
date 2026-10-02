@@ -27,6 +27,7 @@ from langgraph.runtime import Runtime
 from agent.messages import NoteTag
 from agent.state import build_agent_state, clear_plugin_registrations
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 
 
 @pytest.fixture
@@ -58,7 +59,12 @@ def _state(messages: list[AnyMessage]):
 
 
 def _runtime() -> Runtime[AvaContext]:
-    ctx = AvaContext(ops_pool=MagicMock(), llm=MagicMock(), event_publisher=MagicMock())
+    ctx = AvaContext(
+        ops_pool=MagicMock(),
+        llm=MagicMock(),
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+    )
     return Runtime(context=ctx)
 
 

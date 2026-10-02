@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.llm_errors import FatalProviderError
 from agent.state import AgentState, CircuitState
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.db import Database
 from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
@@ -17,7 +18,9 @@ from tests.fixtures.units import spawn_agent
 
 def _breaker_ctx() -> AvaContext:
     """An AvaContext whose event-log write is skipped (no ops_pool)."""
-    return AvaContext(ops_pool=None, llm=MagicMock(), event_publisher=MagicMock())
+    return AvaContext(
+        ops_pool=None, llm=MagicMock(), event_publisher=MagicMock(), agent=AgentSlices.resolve()
+    )
 
 
 @pytest.mark.parametrize("overflow", [False, True])

@@ -23,6 +23,7 @@ from agent.impersonation import protect_native_hooks
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.cluster.machine import machine_name
 from base.db import Database, create_agent, insert_inbound_message
@@ -190,7 +191,12 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     await graph.aupdate_state(
         config, {"messages": [HumanMessage(content="Do the action")], "halted": False}
     )
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), llm=MagicMock())
+    ctx = AvaContext(
+        ops_pool=aops_pool,
+        event_publisher=MagicMock(),
+        llm=MagicMock(),
+        agent=AgentSlices.resolve(),
+    )
     host = AgentHost(
         pool=aops_pool,
         checkpointer=saver,
