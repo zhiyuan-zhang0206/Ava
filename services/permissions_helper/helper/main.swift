@@ -677,6 +677,211 @@ func axWindowInfo(_ req: [String: Any]) throws -> [String: Any] {
     return ["app": appName, "x": pos.x, "y": pos.y, "w": size.width, "h": size.height]
 }
 
+// MARK: - AX tree
+
+/// Read-only accessibility-tree walk of one application window (`ax_tree`).
+/// The helper serves one request at a time, so a walk is bounded three ways: a
+/// node cap, a depth cap and a total time budget, plus a per-element messaging
+/// timeout so one hung target app cannot hold the socket for the system default
+/// (about six seconds). Whatever was read when a bound trips is returned with
+/// `truncated` / `timed_out` set; filtering, collapsing and rendering belong to
+/// the Python side. Element ids ("e<N>") index a table of live element
+/// references that lives until the next unscoped walk, which only a later
+/// `scope` drill-down needs.
+private let axTreeAttributes: [String] = [
+    kAXRoleAttribute, kAXSubroleAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
+    kAXValueAttribute, kAXIdentifierAttribute, kAXPositionAttribute, kAXSizeAttribute,
+    kAXEnabledAttribute, kAXFocusedAttribute, kAXSelectedAttribute,
+    kAXChildrenAttribute, kAXVisibleChildrenAttribute,
+]
+private let axVisibleChildrenRoles: Set<String> = [
+    "AXList", "AXTable", "AXOutline", "AXBrowser", "AXScrollArea",
+]
+private let axMaxStringLength = 200
+private let axTreeFrameworkMarkers: [(marker: String, name: String)] = [
+    ("Electron Framework.framework", "electron"),
+    ("Chromium Embedded Framework.framework", "cef"),
+]
+
+private var axElementTable: [Int: AXUIElement] = [:]
+private var axNextElementID = 1
+
+private func axBatch(_ element: AXUIElement, _ attributes: [String]) -> [AnyObject?]? {
+    var out: CFArray?
+    let status = AXUIElementCopyMultipleAttributeValues(
+        element, attributes as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &out)
+    guard status == .success, let values = out as? [AnyObject], values.count == attributes.count
+    else { return nil }
+    return values.map { value in
+        // A missing attribute comes back as an AXValue of type axError.
+        if CFGetTypeID(value) == AXValueGetTypeID(),
+           AXValueGetType(value as! AXValue) == .axError { return nil }
+        return value
+    }
+}
+
+private func axString(_ value: AnyObject?) -> String? {
+    var text: String?
+    if let s = value as? String { text = s }
+    else if let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() { text = n.stringValue }
+    guard let t = text, !t.isEmpty else { return nil }
+    return t.count > axMaxStringLength ? String(t.prefix(axMaxStringLength)) : t
+}
+
+private func axFlag(_ value: AnyObject?) -> Bool? {
+    guard let n = value as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return nil }
+    return n.boolValue
+}
+
+private func axElements(_ value: AnyObject?) -> [AXUIElement] {
+    guard let array = value as? [AnyObject] else { return [] }
+    return array.compactMap { item in
+        CFGetTypeID(item) == AXUIElementGetTypeID() ? (item as! AXUIElement) : nil
+    }
+}
+
+private func axFrame(_ position: AnyObject?, _ size: AnyObject?) -> (CGPoint, CGSize)? {
+    var pos = CGPoint.zero
+    var dim = CGSize.zero
+    guard let pv = position, let sv = size,
+          CFGetTypeID(pv) == AXValueGetTypeID(), CFGetTypeID(sv) == AXValueGetTypeID(),
+          AXValueGetValue(pv as! AXValue, .cgPoint, &pos),
+          AXValueGetValue(sv as! AXValue, .cgSize, &dim),
+          [pos.x, pos.y, dim.width, dim.height].allSatisfy({ $0.isFinite })  // else JSON serialization throws and hangs the client
+    else { return nil }
+    return (pos, dim)
+}
+
+private func axActionNames(_ element: AXUIElement) -> [String] {
+    var names: CFArray?
+    guard AXUIElementCopyActionNames(element, &names) == .success, let list = names as? [String]
+    else { return [] }
+    return list
+}
+
+private func axFrameworkHint(_ app: NSRunningApplication) -> String {
+    guard let bundle = app.bundleURL else { return "" }
+    for entry in axTreeFrameworkMarkers {
+        let path = bundle.appendingPathComponent("Contents/Frameworks/" + entry.marker).path
+        if FileManager.default.fileExists(atPath: path) { return entry.name }
+    }
+    return ""
+}
+
+private func axPickWindow(_ axApp: AXUIElement) -> (window: AXUIElement?, count: Int) {
+    var count = 0
+    var listRef: CFTypeRef?
+    if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &listRef) == .success {
+        count = (listRef as? [AnyObject])?.count ?? 0
+    }
+    for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+        var ref: CFTypeRef?
+        if AXUIElementCopyAttributeValue(axApp, attribute as CFString, &ref) == .success,
+           let window = ref, CFGetTypeID(window) == AXUIElementGetTypeID() {
+            return ((window as! AXUIElement), count)
+        }
+    }
+    if let first = axElements(listRef as AnyObject?).first { return (first, count) }
+    return (nil, count)
+}
+
+/// Walk one window (or, with `scope`, the subtree under an id from the last
+/// walk) breadth-first and return the raw node list.
+func axTree(_ req: [String: Any]) throws -> [String: Any] {
+    guard let appName = req["app"] as? String else { throw OpError.bad("ax_tree needs string app") }
+    guard let app = NSWorkspace.shared.runningApplications.first(where: {
+        $0.localizedName == appName || $0.bundleIdentifier == appName
+    }) else { throw OpError.bad("app not running: \(appName)") }
+    let maxNodes = max(1, min(Int(numericDouble(req["max_nodes"]) ?? 600), 2000))
+    let maxDepth = max(1, min(Int(numericDouble(req["max_depth"]) ?? 14), 40))
+    let budget = max(0.05, min((numericDouble(req["budget_ms"]) ?? 1500) / 1000, 10))
+    let messagingTimeout = Float(max(0.05, min((numericDouble(req["timeout_ms"]) ?? 400) / 1000, 5)))
+
+    let axApp = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetMessagingTimeout(axApp, messagingTimeout)
+    let picked = axPickWindow(axApp)
+    var meta: [String: Any] = [
+        "app": appName, "pid": Int(app.processIdentifier), "windows": picked.count,
+        "framework": axFrameworkHint(app),
+    ]
+
+    let root: AXUIElement
+    if let scope = req["scope"] as? String {
+        guard scope.hasPrefix("e"), let id = Int(scope.dropFirst()), let scoped = axElementTable[id]
+        else { throw OpError.bad("unknown scope \(scope): ids are valid until the next ax_tree without scope") }
+        var scopedPid: pid_t = 0
+        guard AXUIElementGetPid(scoped, &scopedPid) == .success, scopedPid == app.processIdentifier
+        else { throw OpError.bad("scope \(scope) does not belong to \(appName)") }
+        AXUIElementSetMessagingTimeout(scoped, messagingTimeout)
+        root = scoped
+    } else {
+        axElementTable.removeAll()
+        guard let window = picked.window else {
+            meta.merge(["nodes": [Any](), "visited": 0, "truncated": false, "timed_out": false,
+                        "unreadable": 0, "elapsed_ms": 0]) { $1 }
+            return meta
+        }
+        AXUIElementSetMessagingTimeout(window, messagingTimeout)
+        root = window
+    }
+
+    let started = Date()
+    var nodes: [[String: Any]] = []
+    var queue: [(element: AXUIElement, parent: Int?, depth: Int)] = [(root, nil, 0)]
+    var head = 0
+    var truncated = false
+    var timedOut = false
+    var unreadable = 0
+    while head < queue.count {
+        let (element, parent, depth) = queue[head]
+        head += 1
+        if nodes.count >= maxNodes { truncated = true; break }
+        if Date().timeIntervalSince(started) > budget { timedOut = true; break }
+        guard let values = axBatch(element, axTreeAttributes) else { unreadable += 1; continue }
+        let role = axString(values[0])
+        let id = axNextElementID
+        axNextElementID += 1
+        axElementTable[id] = element
+
+        var node: [String: Any] = ["id": id, "depth": depth]
+        if let parent = parent { node["parent"] = parent }
+        if let role = role { node["role"] = role }
+        if let v = axString(values[1]) { node["subrole"] = v }
+        if let v = axString(values[2]) { node["title"] = v }
+        if let v = axString(values[3]) { node["desc"] = v }
+        // Secure fields are never echoed, whatever the target app exposes.
+        if node["subrole"] as? String != "AXSecureTextField", let v = axString(values[4]) { node["value"] = v }
+        if let v = axString(values[5]) { node["ident"] = v }
+        if let (pos, dim) = axFrame(values[6], values[7]) {
+            node["x"] = Double(pos.x); node["y"] = Double(pos.y)
+            node["w"] = Double(dim.width); node["h"] = Double(dim.height)
+        }
+        if let v = axFlag(values[8]) { node["enabled"] = v }
+        if let v = axFlag(values[9]) { node["focused"] = v }
+        if let v = axFlag(values[10]) { node["selected"] = v }
+        let actions = axActionNames(element)
+        if !actions.isEmpty { node["actions"] = actions }
+
+        var children = axElements(values[11])
+        if let role = role, axVisibleChildrenRoles.contains(role) {
+            let visible = axElements(values[12])
+            if !visible.isEmpty { children = visible }
+        }
+        node["n"] = children.count
+        nodes.append(node)
+        if depth + 1 >= maxDepth {
+            if !children.isEmpty { truncated = true }
+            continue
+        }
+        for child in children { queue.append((child, id, depth + 1)) }
+    }
+    meta.merge([
+        "nodes": nodes, "visited": nodes.count, "truncated": truncated, "timed_out": timedOut,
+        "unreadable": unreadable, "elapsed_ms": Int(Date().timeIntervalSince(started) * 1000),
+    ]) { $1 }
+    return meta
+}
+
 // MARK: - Root keeper
 
 /// Environment variable naming the JSON seed file the keeper loads when the
@@ -1246,7 +1451,7 @@ private let rootKeeper = RootKeeper()
 func dispatch(_ req: [String: Any]) -> [String: Any] {
     let id = req["id"]
     let method = req["method"] as? String ?? ""
-    let axGatedMethods: Set<String> = ["click", "type", "key", "scroll", "ax_window_info"]
+    let axGatedMethods: Set<String> = ["click", "type", "key", "scroll", "ax_window_info", "ax_tree"]
     if axGatedMethods.contains(method) && !axTrustedOrPrompt() {
         return ["id": id as Any, "ok": false, "error": axGrantError]
     }
@@ -1255,7 +1460,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "root_seed_report_v1": true,
+                      "root_seed_report_v1": true, "ax_tree_v1": true,
                       "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)
@@ -1266,6 +1471,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         case "key": result = try key(req)
         case "scroll": result = try scroll(req)
         case "ax_window_info": result = try axWindowInfo(req)
+        case "ax_tree": result = try axTree(req)
         case "window_info": result = try windowInfo(req)
         case "session_info": result = sessionInfo()
         case "screen_size": result = try screenSize(req)
