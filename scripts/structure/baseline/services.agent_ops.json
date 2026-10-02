@@ -1,7 +1,5 @@
 {
   "ambient_state": {
-    "services/agent_ops/close_notices.py::asyncio-task:start": 1,
-    "services/agent_ops/close_notices.py::global-rebind:_delivery_task": 2,
     "services/agent_ops/daemon.py::ambient-container:_active_ops": 1,
     "services/agent_ops/daemon.py::global-rebind:_db_pool": 1,
     "services/agent_ops/daemon.py::global-rebind:_dispatch_sem": 1,

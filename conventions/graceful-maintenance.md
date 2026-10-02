@@ -27,8 +27,10 @@ are SIGKILLed, loudly and without failing the stop
 ([decision](../decisions/2026-10-02-pg-stop-escalates-to-immediate.md)); for terminals, `stop` hangs up each shell's
 whole session (its descendants and double-forked orphans included), and
 SIGKILLs what is still alive after a grace of at most 10 seconds; a busy
-session still leaves its owner the closure notice
-([decision](../decisions/2026-09-28-stop-escalates-to-sigkill.md)). `--force`
+session still leaves its owner the closure notice, written to the database
+in the `terminals` phase, before the data plane stops
+([decision](../decisions/2026-09-28-stop-escalates-to-sigkill.md),
+[notice write](../decisions/2026-10-02-close-notices-written-at-terminals.md)). `--force`
 explicitly selects force behavior when normal exit cannot complete. Force stops
 the selected service processes without fabricating a restart receipt. Later
 start uses agent-host crash recovery from persisted checkpoints.

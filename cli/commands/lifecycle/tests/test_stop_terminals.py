@@ -24,11 +24,10 @@ diagnostic.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import signal
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -72,6 +71,25 @@ _LOOP_SHELL = "bash -c 'while true; do sleep 1; done'"
 
 # The idle test's own prompt, set by its home's `.bash_profile`.
 _IDLE_PROMPT = "ava-idle-shell>"
+
+
+_WRITE_NOTICES = pty_close_notices.write_notices
+
+
+@pytest.fixture(autouse=True)
+def written(monkeypatch: pytest.MonkeyPatch) -> list[pty_close_notices.ClosureNotice]:
+    """Stand-in for the stop's database write: every notice it would write, in order."""
+    notices: list[pty_close_notices.ClosureNotice] = []
+
+    def record(
+        batch: Sequence[pty_close_notices.ClosureNotice], *, direct: bool
+    ) -> list[tuple[pty_close_notices.ClosureNotice, Exception]]:
+        del direct
+        notices.extend(batch)
+        return []
+
+    monkeypatch.setattr(pty_close_notices, "write_notices", record)
+    return notices
 
 
 def _double_forked_job(pidfile: Path, *, ignore: tuple[str, ...]) -> str:
@@ -357,7 +375,10 @@ def test_stop_terminates_restart_loop_shell(
 
 @pytest.mark.flaky
 def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
-    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
+    written: list[pty_close_notices.ClosureNotice],
 ) -> None:
     """A job that ignores TERM and HUP is SIGKILLed once the bounded grace ends:
     the stop completes well inside its deadline, and the owner still gets the
@@ -376,12 +397,15 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     assert time.monotonic() - started < 8, "the grace bounds the wait, not the stop deadline"
     assert _wait_exit(jobs[0].pid, timeout=5), "the job outlived the stop"
     assert not terminal.has_session(name)
-    assert len(_notice_files(home)) == 1, "a killed busy session still leaves its notice"
+    assert len(written) == 1, "a killed busy session still leaves its notice"
 
 
 @pytest.mark.flaky
 def test_stop_kills_a_double_forked_orphan_of_the_session(
-    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
+    written: list[pty_close_notices.ClosureNotice],
 ) -> None:
     """A process that double-forked out of the shell's tree stays in its POSIX
     session: the stop captures it before the hangup, and it dies with the rest
@@ -398,7 +422,7 @@ def test_stop_kills_a_double_forked_orphan_of_the_session(
 
     assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
     assert _wait_exit(orphan.pid, timeout=5), "the orphan outlived a stop that succeeded"
-    assert len(_notice_files(home)) == 1, "the orphan was running work: the session was busy"
+    assert len(written) == 1, "the orphan was running work: the session was busy"
 
 
 @pytest.mark.flaky
@@ -423,7 +447,11 @@ def test_stop_terminates_a_double_forked_job_outside_the_shell_tree(
 @pytest.mark.flaky
 @pytest.mark.parametrize("disposition", ["SIG_IGN", "SIG_DFL"])
 def test_stop_kills_a_helper_its_job_forks_on_term_and_orphans(
-    disposition: str, home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+    disposition: str,
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
+    written: list[pty_close_notices.ClosureNotice],
 ) -> None:
     """The job's TERM handler forks a helper and exits at once: no captured
     process is left alive to lead the stop to the helper (with SIG_DFL it never
@@ -454,7 +482,7 @@ def test_stop_kills_a_helper_its_job_forks_on_term_and_orphans(
     with contextlib.suppress(psutil.NoSuchProcess):
         pty_reaper.track(psutil.Process(helper))
     assert _wait_exit(helper, timeout=5), "the helper outlived a stop that succeeded"
-    assert len(_notice_files(home)) == 1
+    assert len(written) == 1
 
 
 @pytest.mark.flaky
@@ -468,6 +496,7 @@ def test_stop_kills_the_last_hop_of_a_fork_chain_started_on_term(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
+    written: list[pty_close_notices.ClosureNotice],
 ) -> None:
     """A TERM handler starts a chain of processes that each fork the next and
     exit within a few ms — too short for a full process-table pass to read one
@@ -504,7 +533,7 @@ def test_stop_kills_the_last_hop_of_a_fork_chain_started_on_term(
     assert not left, f"part of the chain outlived a stop that succeeded: {left}"
     if pidfile.exists():
         assert _wait_exit(int(pidfile.read_text(encoding="utf-8")), timeout=5)
-    assert len(_notice_files(home)) == 1
+    assert len(written) == 1
 
 
 @pytest.mark.flaky
@@ -513,6 +542,7 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     pty_reaper: PtyReaper,
+    written: list[pty_close_notices.ClosureNotice],
 ) -> None:
     """One session closes; in another the shell itself outlives the stop and
     keeps its job through the SIGKILL. The stop is incomplete, yet the closed
@@ -548,15 +578,15 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
         assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
     assert admission.held(), "the hold must survive an incomplete stop"
     assert stuck in capsys.readouterr().err
-    assert _notice_names(home) == [closed], "the closed session's notice was lost"
-    assert "survivors" not in _notices(home)[0], "nothing of the closed session survived"
+    assert [notice.name for notice in written] == [closed], "the closed session's notice was lost"
+    assert "survivors" not in written[0].as_dict(), "nothing of the closed session survived"
 
     def still_drained(_timeout: float, **_kw: object) -> None:
         """The retry re-enters the held stop; the drain stand-in only opens a fresh hold."""
 
     monkeypatch.setattr(command, "pause_agents", still_drained)
     assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
-    assert _notice_names(home) == sorted([closed, stuck])
+    assert [notice.name for notice in written] == sorted([closed, stuck])
 
 
 def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
@@ -595,7 +625,7 @@ def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
         return [] if time.monotonic() >= cleared_at else [name]
 
     monkeypatch.setattr(strict, "live_terminals", tearing_down)
-    strict.close_terminals(time.monotonic() + 10, "stop-test", datetime.now(UTC))
+    strict.close_terminals(time.monotonic() + 10, "stop-test", datetime.now(UTC), direct_db=False)
     assert time.monotonic() >= cleared_at
 
 
@@ -608,53 +638,11 @@ def _running(script: Path) -> list[int]:
     ]
 
 
-def _notice_files(home: Path) -> list[Path]:
-    journal = pty_close_notices.journal_dir()
-    return list(journal.iterdir()) if journal.is_dir() else []
-
-
-def _notices(home: Path) -> list[dict[str, Any]]:
-    return sorted(
-        (json.loads(path.read_text()) for path in _notice_files(home)),
-        key=lambda notice: str(notice["name"]),
-    )
-
-
-def _notice_names(home: Path) -> list[str]:
-    return [notice["name"] for notice in _notices(home)]
-
-
-def test_stop_records_notice_for_verified_closed_busy_session(
+def test_stop_records_nothing_for_idle_shell(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
     pty_reaper: PtyReaper,
-) -> None:
-    """A busy session verified closed leaves one durable notice; delivery to
-    its owner happens at the next ops-daemon startup (issue #2044)."""
-    dependencies(monkeypatch)
-    terminal = PtySessionBackend()
-    _stop_env(monkeypatch, home, terminal)
-    name = "ava-agent-987-shell-2044-busy"
-    shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB, pty_reaper)
-    assert _started_jobs(shell, pty_reaper), "the job never started"
-
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
-    files = _notice_files(home)
-    assert len(files) == 1
-    import json as _json
-
-    notice = _json.loads(files[0].read_text())
-    assert notice["agent_id"] == 987
-    assert notice["session_id"] == 2044
-    assert notice["name"] == name
-    assert notice["machine"]
-    assert notice["operation"]
-    assert "operator stop" in notice["reason"]
-
-
-def test_stop_records_nothing_for_idle_shell(
-    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+    written: list[pty_close_notices.ClosureNotice],
 ) -> None:
     """An idle shell (no jobs) closed by stop is silent — the TTL reaper's
     quiet-empty policy, never a blanket close notification (issue #2044 #3).
@@ -665,7 +653,7 @@ def test_stop_records_nothing_for_idle_shell(
     test owns that prompt: the login shell reads this home's `.bash_profile`
     after the system's files, so the prompt is `_IDLE_PROMPT` whatever the
     host's or the developer's shell configuration prints. The machine name
-    lets a wrongly recorded notice land in the journal.
+    lets a wrongly built notice show in the stop's writes.
     """
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
@@ -683,7 +671,7 @@ def test_stop_records_nothing_for_idle_shell(
     assert members == [shell.pid], "precondition: the shell at its prompt runs no job"
 
     assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
-    assert _notice_files(home) == []
+    assert written == []
 
 
 def test_stop_keeps_hold_when_a_process_outlives_the_kill(
@@ -691,6 +679,7 @@ def test_stop_keeps_hold_when_a_process_outlives_the_kill(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     pty_reaper: PtyReaper,
+    written: list[pty_close_notices.ClosureNotice],
 ) -> None:
     """The kill ends the shell, but a job outlives its SIGKILL (another user's,
     which this stop may not signal). The stop is incomplete — the hold stays
@@ -716,16 +705,15 @@ def test_stop_keeps_hold_when_a_process_outlives_the_kill(
     assert "terminals" in err, "the failure must name the phase"
     assert name in err, "the failure must name the owning session"
     assert "nothing was force-killed" not in err, "the survivors outlived a SIGKILL"
-    notices = _notices(home)
-    assert [notice["name"] for notice in notices] == [name]
-    assert notices[0]["survivors"] == [{"pid": jobs[0].pid, "name": jobs[0].name()}]
+    assert [notice.name for notice in written] == [name]
+    assert written[0].survivors == ((jobs[0].pid, jobs[0].name()),)
 
     def still_drained(_timeout: float, **_kw: object) -> None:
         """The retry re-enters the held stop; the drain stand-in only opens a fresh hold."""
 
     monkeypatch.setattr(command, "pause_agents", still_drained)
     assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
-    assert len(_notice_files(home)) == 1, "the retry recorded the closed session again"
+    assert len(written) == 1, "the retry recorded the closed session again"
 
 
 @pytest.mark.flaky
