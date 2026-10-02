@@ -64,6 +64,9 @@ class InboundMessage:
     chat_id: str  # platform-scoped conversation id
     text: str
     message_id: str | None = None
+    # Platform-stable key for the gateway's keyed-delivery dedup: the same
+    # platform message re-read after a restart cannot become a second inbound.
+    idempotency_key: str | None = None
 
 
 @dataclass
