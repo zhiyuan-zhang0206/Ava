@@ -168,7 +168,7 @@ def test_sse_metrics_initialize_idle_modes_at_zero(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(runtime_metrics.telemetry, "emit", capture_emit)
 
-    runtime_metrics._initialize_sse_metrics()
+    runtime_metrics.initialize_sse_metrics()
 
     assert emitted == [
         {"mode": "filtered", "active_connections": 0},

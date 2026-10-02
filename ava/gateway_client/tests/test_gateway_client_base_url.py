@@ -85,3 +85,43 @@ def test_gateway_client_in_an_agent_without_a_token_fails_instead_of_using_the_s
     monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
     with pytest.raises(RuntimeError, match="AVA_API_TOKEN"):
         gc._client_singleton()  # pyright: ignore[reportUnknownMemberType]
+
+
+def _answering(label: str, seen: list[str]) -> Any:
+    import httpx
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{label} {request.url}")
+        return httpx.Response(200, json={})
+
+    return httpx.Client(base_url=f"http://{label}.test", transport=httpx.MockTransport(answer))
+
+
+def test_use_client_routes_sdk_calls_through_the_injected_client_and_restores_the_previous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ava.gateway_client.transport as gc
+
+    seen: list[str] = []
+    outer = _answering("outer", seen)
+    monkeypatch.setattr(gc, "_client", outer)
+
+    with gc.use_client(_answering("injected", seen)) as injected:
+        assert gc._client_singleton() is injected  # pyright: ignore[reportUnknownMemberType]
+        gc.get("/api/x")  # pyright: ignore[reportUnknownMemberType]
+    gc.get("/api/y")  # pyright: ignore[reportUnknownMemberType]
+
+    assert seen == ["injected http://injected.test/api/x", "outer http://outer.test/api/y"]
+
+
+def test_use_client_leaves_the_lazy_default_unbuilt_when_none_was_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ava.gateway_client.transport as gc
+
+    monkeypatch.setattr(gc, "_client", None)
+
+    with pytest.raises(RuntimeError, match="boom"), gc.use_client(_answering("injected", [])):
+        raise RuntimeError("boom")
+
+    assert gc._client is None  # pyright: ignore[reportUnknownMemberType]
