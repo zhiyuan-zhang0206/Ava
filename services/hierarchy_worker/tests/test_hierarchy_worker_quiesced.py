@@ -14,7 +14,11 @@ def test_a_quiesced_unit_ticks_without_a_connection(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
     monkeypatch.setattr(admission, "quiesced", lambda: True)
     dialed: list[object] = []
-    monkeypatch.setattr(runner, "connect", lambda **kw: dialed.append(kw))
+
+    def record_dial(**kw: object) -> None:
+        dialed.append(kw)
+
+    monkeypatch.setattr(runner, "connect", record_dial)
 
     runner.run_tick()
 

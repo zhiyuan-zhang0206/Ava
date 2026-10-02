@@ -4,8 +4,8 @@ borrows no connection from a pool the stop is about to close."""
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from typing import cast
+from collections.abc import Callable, Coroutine
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,7 +16,7 @@ from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
 from services.delivery_watchdog import daemon, resurrect_retry, stall_recovery, turn_liveness
 
-_Loop = Callable[[ConnectionPool, LoopProgress], Awaitable[None]]
+_Loop = Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]]
 
 _LOOPS: dict[str, _Loop] = {
     "scan": daemon._scan_loop,

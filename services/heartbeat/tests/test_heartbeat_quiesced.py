@@ -4,8 +4,8 @@ unit is quiesced, so neither borrows a connection from a pool the stop is about 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from typing import cast
+from collections.abc import Callable, Coroutine
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,7 +18,7 @@ from services.heartbeat import daemon
 
 async def _run_briefly(
     monkeypatch: pytest.MonkeyPatch,
-    loop: Callable[[ConnectionPool, Liveness], Awaitable[None]],
+    loop: Callable[[ConnectionPool, Liveness], Coroutine[Any, Any, None]],
     pool: object,
     *,
     quiesced: bool,

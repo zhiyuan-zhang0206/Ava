@@ -23,7 +23,11 @@ async def test_a_quiesced_unit_runs_no_reconcile_pass(
     monkeypatch.setattr(daemon, "reachable_host", lambda: "127.0.0.1")
     monkeypatch.setattr(daemon, "machine_name", lambda: "test-machine")
     passes: list[object] = []
-    monkeypatch.setattr(daemon, "_reconcile_once", lambda *args: passes.append(args))
+
+    def record_pass(*args: object) -> None:
+        passes.append(args)
+
+    monkeypatch.setattr(daemon, "_reconcile_once", record_pass)
     real_sleep = asyncio.sleep
 
     async def short_sleep(_seconds: float) -> None:

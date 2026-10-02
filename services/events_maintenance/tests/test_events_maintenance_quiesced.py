@@ -4,7 +4,7 @@ neither borrows a connection from a pool the stop is about to close."""
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 import pytest
@@ -15,7 +15,7 @@ from services.events_maintenance import daemon
 from services.events_maintenance.config import EventsMaintenanceConfig
 from services.events_maintenance.tests.slices import events_maintenance_config
 
-_Loop = Callable[[Any, LoopProgress, EventsMaintenanceConfig], Awaitable[None]]
+_Loop = Callable[[Any, LoopProgress, EventsMaintenanceConfig], Coroutine[Any, Any, None]]
 
 _LOOPS: dict[str, tuple[_Loop, str]] = {
     "rollup": (daemon._dispatch_loop, "_run_maintenance"),
@@ -31,7 +31,11 @@ async def test_a_quiesced_unit_runs_no_pass(
     loop, pass_name = _LOOPS[name]
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
     passes: list[object] = []
-    monkeypatch.setattr(daemon, pass_name, lambda *args: passes.append(args))
+
+    def record_pass(*args: object) -> None:
+        passes.append(args)
+
+    monkeypatch.setattr(daemon, pass_name, record_pass)
 
     async def short_sleep(_progress: LoopProgress, _total_s: float) -> None:
         await asyncio.sleep(0.01)
