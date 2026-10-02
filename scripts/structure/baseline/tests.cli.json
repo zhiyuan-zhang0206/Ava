@@ -27,10 +27,7 @@
     "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._alert_verify": 2,
     "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._check_script": 1,
     "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._open_verify_starts_at": 4,
-    "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._read_schedule_rows": 2,
-    "tests/cli/test_storage_ownership.py::base.cluster.postgres._read": 1,
-    "tests/cli/test_storage_ownership.py::base.cluster.postgres._require_closed": 2,
-    "tests/cli/test_storage_ownership.py::base.cluster.postgres._spawn": 2
+    "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._read_schedule_rows": 2
   },
   "tests_location": {
     "tests/cli/test_commands_cluster_status.py::top-level": 1,
@@ -47,7 +44,6 @@
     "tests/cli/test_pgbouncer_config.py::top-level": 1,
     "tests/cli/test_pgbouncer_wire.py::top-level": 1,
     "tests/cli/test_plugin_scaffold.py::top-level": 1,
-    "tests/cli/test_schedules_cmd.py::top-level": 1,
-    "tests/cli/test_storage_ownership.py::top-level": 1
+    "tests/cli/test_schedules_cmd.py::top-level": 1
   }
 }
