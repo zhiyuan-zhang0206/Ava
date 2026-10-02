@@ -315,7 +315,7 @@ app = FastAPI(
 # only the tested decision function `gateway.middleware.pause_policy.should_bypass_pause`,
 # which reads the CONTROL_PLANE doorplates from `base/api_contracts/contracts.py`. The
 # exempt surface (control plane + agent self-reports) is enumerable and
-# audited by tests/gateway/test_route_contracts.py — a new exemption is a
+# audited by gateway/middleware/tests/test_route_contracts_middleware.py — a new exemption is a
 # deliberate declaration, not an incident patch.
 
 

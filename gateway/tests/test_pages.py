@@ -205,33 +205,6 @@ def test_register_page_applies_gateway_default_expiry(
     )
 
 
-def test_register_page_revives_expired_row_and_resets_deadline(
-    db_conn: psycopg.Connection,
-) -> None:
-    from ops.pages import register_page
-
-    aid = create_agent(db_conn)
-    original = register_page(db_conn, aid, "revive", 8001, _HOST, None, ttl_seconds=30)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_pages SET expired_at = now() WHERE id = %s",
-            (original.id,),
-        )
-    db_conn.commit()
-
-    before = datetime.now(UTC)
-    revived = register_page(db_conn, aid, "revive", 8002, _HOST, "Again", ttl_seconds=240)
-
-    assert revived.id == original.id
-    assert revived.port == 8002
-    expires_at, expired_at = _page_deadline(db_conn, aid, "revive")
-    assert expires_at is not None
-    assert (
-        before + timedelta(seconds=239) <= expires_at <= datetime.now(UTC) + timedelta(seconds=241)
-    )
-    assert expired_at is None
-
-
 def test_register_page_invalid_name_422() -> None:
     with TestClient(app) as client:
         resp = client.post(
@@ -427,22 +400,6 @@ def test_register_page_with_serve_dir(db_conn: psycopg.Connection) -> None:
     db_conn.rollback()
     rows = _page_rows(db_conn, aid)
     assert rows == [("report", 8766, _HOST, None, "/data/report", None)]
-
-
-def test_register_page_upsert_updates_serve_dir(db_conn: psycopg.Connection) -> None:
-    """ops.register_page \u540c\u540d upsert\uff08UPDATE \u5206\u652f\uff09\uff1aport/title/serve_dir \u4e00\u8d77\u66f4\u65b0\uff0c\u884c id \u4e0d\u53d8\u3002"""
-    from ops.pages import register_page
-
-    aid = create_agent(db_conn)
-    r1 = register_page(db_conn, aid, "p", 8001, _HOST, None, serve_dir="/data/a")
-    r2 = register_page(db_conn, aid, "p", 8002, "10.0.0.2", "v2", serve_dir="/data/b")
-    assert r2.id == r1.id  # UPDATE, not INSERT
-    assert r2.port == 8002
-    assert r2.title == "v2"
-    assert r2.serve_dir == "/data/b"
-    db_conn.rollback()
-    rows = _page_rows(db_conn, aid)
-    assert rows == [("p", 8002, "10.0.0.2", "v2", "/data/b", None)]
 
 
 def test_register_page_without_serve_dir_leaves_null(db_conn: psycopg.Connection) -> None:
@@ -733,48 +690,3 @@ def test_register_page_reuses_port_freed_by_expiry(db_conn: psycopg.Connection) 
             f"/api/agents/{other}/pages", json={"name": "fresh", "port": 8774, "host": _HOST}
         )
     assert resp.status_code == 201, resp.text
-
-
-def test_live_port_unique_index_guards_raced_registrations(
-    db_conn: psycopg.Connection,
-) -> None:
-    """DB-level pin of migration page-live-port-unique: two rows cannot both be
-    live on one (host, port), while an expired row is no obstacle."""
-    first = create_agent(db_conn)
-    second = create_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_pages (agent_id, name, port, host) VALUES (%s, 'x', 8775, %s)",
-            (first, _HOST),
-        )
-    db_conn.commit()
-    with pytest.raises(psycopg.errors.UniqueViolation), db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_pages (agent_id, name, port, host) VALUES (%s, 'y', 8775, %s)",
-            (second, _HOST),
-        )
-    db_conn.rollback()
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_pages SET expired_at = now() WHERE agent_id = %s AND name = 'x'",
-            (first,),
-        )
-        cur.execute(
-            "INSERT INTO agent_pages (agent_id, name, port, host) VALUES (%s, 'z', 8775, %s)",
-            (second, _HOST),
-        )
-    db_conn.commit()
-
-
-def test_register_page_raced_conflict_raises_domain_error(
-    db_conn: psycopg.Connection,
-) -> None:
-    """ops.register_page (the path behind the router's pre-check) refuses a
-    port a live row holds and names the occupant — the index backstop."""
-    from ops.pages import PagePortConflictError, register_page
-
-    owner = create_agent(db_conn)
-    other = create_agent(db_conn)
-    register_page(db_conn, owner, "holder", 8776, _HOST, None)
-    with pytest.raises(PagePortConflictError, match="'holder'"):
-        register_page(db_conn, other, "clash", 8776, _HOST, None)

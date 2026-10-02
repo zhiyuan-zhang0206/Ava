@@ -2,8 +2,7 @@
   "complexity": {
     "tests/gateway/loki_fake.py::FakeLoki._match": 34,
     "tests/gateway/test_agents_endpoints.py::test_get_models_reasoning_effort_options_match_factory_tables": 35,
-    "tests/gateway/test_agents_endpoints.py::test_get_models_returns_grouped_supported_models": 17,
-    "tests/gateway/test_pages.py::test_register_page_same_name_auto_closes_then_creates": 16
+    "tests/gateway/test_agents_endpoints.py::test_get_models_returns_grouped_supported_models": 17
   },
   "files": {
     "tests/gateway/test_agents_endpoints.py": 1401,
@@ -16,7 +15,6 @@
     "tests/gateway/test_agents_endpoints.py::gateway.routers.memory._backend_topk": 1,
     "tests/gateway/test_alerts_api.py::gateway.alerts.router._notify_im": 10,
     "tests/gateway/test_cluster_endpoints.py::ops.cluster_status._supervisor_online": 1,
-    "tests/gateway/test_cluster_status_fields.py::ops.cluster_status._collect_sessions": 1,
     "tests/gateway/test_runtime_metrics.py::gateway.middleware.runtime_metrics._sse_active_connections": 2
   },
   "tests_location": {
@@ -25,14 +23,9 @@
     "tests/gateway/test_alerts_api.py::top-level": 1,
     "tests/gateway/test_caller_protocol_path.py::top-level": 1,
     "tests/gateway/test_cluster_endpoints.py::top-level": 1,
-    "tests/gateway/test_cluster_status_fields.py::top-level": 1,
     "tests/gateway/test_delivery_publish.py::top-level": 1,
     "tests/gateway/test_labels.py::top-level": 1,
     "tests/gateway/test_okf_graph.py::top-level": 1,
-    "tests/gateway/test_operations_config.py::top-level": 1,
-    "tests/gateway/test_pages.py::top-level": 1,
-    "tests/gateway/test_request_principal.py::top-level": 1,
-    "tests/gateway/test_route_contracts.py::top-level": 1,
     "tests/gateway/test_runtime_metrics.py::top-level": 1
   }
 }
