@@ -32,6 +32,10 @@ from tests.services.daemon_shutdown_test_support import (
 )
 
 
+def _note_pidfile_removed(events: list[str], _path: object) -> None:
+    events.append("pidfile_removed")
+
+
 def _describe(exc: BaseException) -> str:
     if isinstance(exc, BaseExceptionGroup):
         members = cast("BaseExceptionGroup[BaseException]", exc).exceptions
@@ -69,6 +73,9 @@ def _exercise_shutdown(failure: str) -> None:
         raise ValueError("background failed")
 
     async def dispatch() -> None:
+        if failure == "dispatcher_returns":
+            await asyncio.sleep(0.01)  # let the sibling loop start before the return
+            return
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -80,7 +87,8 @@ def _exercise_shutdown(failure: str) -> None:
     def loops(pool: object) -> dict[str, Any]:
         if failure == "plugin":
             return original_loops(pool)  # type: ignore[arg-type] -- pools are test doubles
-        return {"failed": fail(), "sibling": background()}
+        failing = {} if failure == "dispatcher_returns" else {"failed": fail()}
+        return {**failing, "sibling": background()}
 
     host = MagicMock(aclose=partial(record, "owner_released"))
     scheduler = MagicMock(aclose=partial(record, "turns_drained"))
@@ -91,9 +99,6 @@ def _exercise_shutdown(failure: str) -> None:
 
     async def close_health(*_args: object) -> None:
         await record("health_closed")
-
-    def remove_pidfile(*_args: object) -> None:
-        events.append("pidfile_removed")
 
     with (
         patch.multiple(
@@ -107,7 +112,7 @@ def _exercise_shutdown(failure: str) -> None:
             daemon,
             _is_running=MagicMock(return_value=False),
             acquire_pidfile=MagicMock(return_value=True),
-            remove_pidfile=remove_pidfile,
+            remove_pidfile=MagicMock(side_effect=partial(_note_pidfile_removed, events)),
             build_shared_pool=MagicMock(return_value=workload),
             build_control_pool=MagicMock(return_value=control),
             _open_host_pools=AsyncMock(),
@@ -141,6 +146,7 @@ def _exercise_shutdown(failure: str) -> None:
         ("plugin", "KeyboardInterrupt"),
         ("signal", "KeyboardInterrupt"),
         ("exception", "ExceptionGroup[ValueError]"),
+        ("dispatcher_returns", "ExceptionGroup[RuntimeError]"),
     ],
 )
 def test_failed_background_still_drains_and_releases(failure: str, exception: str) -> None:
