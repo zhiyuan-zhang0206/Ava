@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import uvicorn
 
+from base.db import Database
 from services.memory_indexer.backends import probe
 from services.memory_indexer.backends.numpy import NumPyBackend
 from services.memory_search.app import build_app
@@ -178,4 +179,4 @@ def test_probe_numpy_healthy(memory_search_uri: str, monkeypatch: pytest.MonkeyP
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
-    assert probe.probe_backend("numpy").message is None
+    assert probe.probe_backend("numpy", Database.from_settings()).message is None
