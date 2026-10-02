@@ -111,23 +111,26 @@ def resolve_target() -> _StationTarget | None:
 def _station_answers(url: str) -> bool:
     """One bearer-authenticated OTLP round-trip; any 2xx = the ingress serves.
 
-    The bearer is the cluster's telemetry token, derived from this gateway's
-    human secret (the station accepts the same token from its capability)."""
-    secret = settings.data_plane.cluster_secret
-    if not secret:
-        # A remote observatory without a cluster secret cannot authenticate a
-        # probe (and the collector relay already fails closed at converge).
-        # Fail open: warn, never block.
+    The bearer is the cluster's telemetry token (the station accepts the same token from its
+    capability), read from the private file the gateway home's start publishes: this process
+    never holds the human secret it is derived from."""
+    from base.cluster.authority.api import read_telemetry_token
+    from base.paths import ava_home
+
+    token = read_telemetry_token(ava_home())
+    if token is None:
+        # A remote observatory with no published telemetry token (an open cluster, or a
+        # start that has not run yet) cannot authenticate a probe (and the collector relay
+        # already fails closed at converge). Fail open: warn, never block.
         logger.bind(_no_emitter=True, component="station-healthcheck").warning(
-            "station probe: no AVA_CLUSTER_SECRET set — cannot authenticate the probe of {}; "
+            "station probe: no published telemetry token — cannot authenticate the probe of {}; "
             "skipping this round (fail-open)",
             url,
         )
         return True
-    from base.cluster.authority.api import telemetry_token
 
     headers = {
-        "Authorization": f"Bearer {telemetry_token(secret)}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
     req = urllib.request.Request(  # noqa: S310 — advertised private-network endpoint, deliberate

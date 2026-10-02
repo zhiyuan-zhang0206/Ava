@@ -361,13 +361,18 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   rule fails `Clock.from_settings()` outside the roots named in `CLOCK_PACKAGES` (the schedules
   command and the cluster-status probe); libraries build their own clock at the call. The
   endpoint, bus and clock rules share one shape (`scripts/structure/ambient_state/rootrule.py`).
+- **Done, the cluster secret** (behavior change, `decisions/2026-10-03-cluster-secret-contraction.md`):
+  outside the gateway, the CLI and the root, no component holds the human secret. im_bridge
+  presents its machine API token and accepts the write generation's tokens on `/send`
+  (`base.cluster.machine.daemon_acceptance`, shared with the ops server); the callers of `/send`
+  send `gateway_auth_headers()`; the heartbeat's station probe reads the telemetry token from a
+  private file the gateway home's start writes. A remote-managed data plane keeps the human secret
+  (it issues no token), in `daemon_acceptance` and `gateway_bearer` only.
 - **Root-local bundles**: a root may gather what it wires into a frozen dataclass marked
   `base.wiring.root_bundle`. The `bundle-leak` rule fails any annotation of such a class outside
   its defining module, so the bundle stays a local variable of the root and never becomes a
   parameter type (a function handed the whole bundle can reach any member).
-- **Not yet**: the cluster-secret
-  contraction (machine API tokens in place of the human secret outside the gateway, the operator
-  CLI and the root); the agent-side per-turn slices carried in `AvaContext`.
+- **Not yet**: the agent-side per-turn slices carried in `AvaContext`.
 
 ## Open questions
 

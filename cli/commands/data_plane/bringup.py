@@ -40,6 +40,7 @@ def ensure_gateway_data_plane() -> int:
         redis_identity,
         redis_password_from_env,
     )
+    from base.cluster.authority.api import publish_telemetry_token
     from base.paths import ava_home
     from cli.commands.data_plane.cluster_instance import ensure_cluster_storage
 
@@ -51,6 +52,10 @@ def ensure_gateway_data_plane() -> int:
             file=sys.stderr,
         )
         return 1
+
+    # The root holding the human secret derives the telemetry token and keeps it where the
+    # gateway-side services that probe the observability station can read it.
+    publish_telemetry_token(ava_home().resolve(), settings.data_plane.cluster_secret)
 
     if settings.data_plane.is_remote:
         # Remote-managed data plane (Task #1752): the URLs name another host,
