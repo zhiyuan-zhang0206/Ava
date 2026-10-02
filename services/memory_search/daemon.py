@@ -19,6 +19,7 @@ import asyncio
 import logging
 import signal
 import sys
+from pathlib import Path
 
 import uvicorn
 
@@ -31,15 +32,15 @@ from services.memory_search.app import build_app
 from services.memory_search.store import MemoryStore
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
-_PIDFILE = settings.services.memory_search_pidfile
-_DATA_FILE = settings.services.memory_search_data_dir / "vectors.npz"
-_PORT = settings.services.memory_search_port
-
 _log = logging.getLogger("services.memory_search.daemon")
 
 
+def _pidfile() -> Path:
+    return settings.services.memory_search_pidfile
+
+
 def _is_running() -> bool:
-    return pidfile_holds_daemon(_PIDFILE, "services.memory_search.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.memory_search.daemon")
 
 
 async def run() -> None:
@@ -50,13 +51,17 @@ async def run() -> None:
     produced the vectors, and an unknown provider value fails fast instead
     of serving a half-mismatched search surface."""
     provider = get_provider()
-    store = MemoryStore(_DATA_FILE, dim=provider.dim, fingerprint=provider.fingerprint)
+    store = MemoryStore(
+        settings.services.memory_search_data_dir / "vectors.npz",
+        dim=provider.dim,
+        fingerprint=provider.fingerprint,
+    )
     await asyncio.to_thread(store.load)
     server = uvicorn.Server(
         uvicorn.Config(
-            build_app(store),
+            build_app(store, settings.services.memory_search_max_batch_rows),
             host="127.0.0.1",
-            port=_PORT,
+            port=settings.services.memory_search_port,
             log_level="warning",
             access_log=False,
             log_config=None,
@@ -69,7 +74,7 @@ def main() -> None:
     """Entry point: pidfile -> log init -> serve -> cleanup."""
     if _is_running():
         sys.exit(1)
-    if not acquire_pidfile(_PIDFILE, "services.memory_search.daemon"):
+    if not acquire_pidfile(_pidfile(), "services.memory_search.daemon"):
         sys.exit(1)
     init_gateway_process(name="memory_search")
     install_graceful_shutdown("memory_search")
@@ -101,7 +106,7 @@ def main() -> None:
         _log.exception("[memory-search] daemon crashed — uncaught exception escaped run()")
         code = 1
     finally:
-        remove_pidfile(_PIDFILE)
+        remove_pidfile(_pidfile())
     _hard_exit(code)
 
 
