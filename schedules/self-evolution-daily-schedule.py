@@ -16,8 +16,7 @@ from datetime import UTC, datetime, timedelta
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import catch_up, fire_slot_once
-from base.config import settings
+from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
 ensure_agent_status_members(
@@ -26,29 +25,33 @@ ensure_agent_status_members(
     schedule_name="self-evolution-daily",
 )
 
+
 # daily_scan.py ships with the ava-self-evolution skill. The load-dir copy is
 # converge-managed but bootstrap-only (R5): converge lands it once, and the
 # product rollout's update legs refresh it to the landed revision (issue
 # #1289 — before that wiring, the copy stayed at its first-landing version
 # and a script added later never arrived; `ava skill update` is the manual
 # equivalent).
-DAILY = os.path.join(
-    os.environ.get("AVA_HOME", os.path.expanduser("~/.ava")),
-    "skills",
-    "ava-self-evolution",
-    "reference",
-    "daily_scan.py",
-)
+def _daily_scan_path() -> str:
+    return os.path.join(
+        os.environ.get("AVA_HOME", os.path.expanduser("~/.ava")),
+        "skills",
+        "ava-self-evolution",
+        "reference",
+        "daily_scan.py",
+    )
+
+
 CRON = "0 0 * * *"  # 00:00 cluster time — the off-peak trough of a cluster workday
-# Cluster wall clock (`AVA_TIMEZONE`, cluster-pinned), never the host's OS
-# timezone: the whole fleet fires at one instant regardless of where each
-# machine sits. Read at process start — `ava schedules restart <id>` to adopt a
-# changed AVA_TIMEZONE.
-TZ = settings.general.timezone
+
+
 # Daily report recipient (an agent id) — defaults to the CEO #228 per the
 # 2026-08-09 ruling (daily reports replaced the weekly ones); an env override
 # wins, and an explicit empty env value skips the report.
-REPORT_AGENT = os.environ.get("AVA_SELF_EVOLUTION_DAILY_REPORT_AGENT", "228")
+def _report_agent() -> str:
+    return os.environ.get("AVA_SELF_EVOLUTION_DAILY_REPORT_AGENT", "228")
+
+
 # Measured full-day scan T >= 108 min: 112.9 min total on 2026-09-25 while
 # two collect streams ran (task #4743 log, #4750 tracker). 10800 s = 180 min,
 # about 1.6x the measured contended T. This remains the final bound between
@@ -78,12 +81,13 @@ def ensure_agent(label: str, prompt: str) -> int:
 
 
 def run_scan() -> None:
-    if not os.path.isfile(DAILY):
+    daily = _daily_scan_path()
+    if not os.path.isfile(daily):
         # A missing script must not masquerade as an ALERT: python exits 2
         # when it cannot open the file, which the rc==2 branch would read
         # as "bad runs found". Fail loudly and wake the agent instead.
         msg = (
-            f"daily_scan.py missing at {DAILY} — run `ava skill update ava-self-evolution` "
+            f"daily_scan.py missing at {daily} — run `ava skill update ava-self-evolution` "
             f"(or `ava skill update` for all repo-native skills) to refresh the load-dir copy"
         )
         print(f"[{datetime.now(UTC).isoformat()}] {msg}")
@@ -91,7 +95,7 @@ def run_scan() -> None:
         return
     try:
         r = subprocess.run(
-            [sys.executable, DAILY, "--days", "1"],
+            [sys.executable, daily, "--days", "1"],
             timeout=_SCAN_TIMEOUT_SECONDS,
             capture_output=True,
             text=True,
@@ -119,14 +123,15 @@ def run_scan() -> None:
             f"Daily scan timed out after {_SCAN_TIMEOUT_SECONDS}s — check whether daily_scan.py is stuck.",
         )
         return
-    if REPORT_AGENT:
+    report_agent = _report_agent()
+    if report_agent:
         try:
             ava.agents.send_message(
-                int(REPORT_AGENT),
+                int(report_agent),
                 f"[self-evolution daily {datetime.now(UTC).strftime('%m-%d')}]\n{tail}",
             )
         except Exception as e:
-            print(f"daily report to {REPORT_AGENT} failed: {e}")
+            print(f"daily report to {report_agent} failed: {e}")
 
 
 def _fire_scan(_trigger: None) -> None:
@@ -134,14 +139,14 @@ def _fire_scan(_trigger: None) -> None:
 
 
 def main() -> None:
-    catch_up([(CRON, None)], timezone=TZ, fire=_fire_scan)
+    catch_up([(CRON, None)], timezone=cluster_timezone(), fire=_fire_scan)
     while True:
         # after=now-2min gives trigger tolerance: sleep precision delay can land `now`
         # a fraction of a second past the hour; croniter get_next (strictly > base)
         # would then jump to the next day (deterministic miss, observed 2026-08-06).
         # tolerance window = [-120s, +60s].
         now = datetime.now(UTC)
-        nxt = next_fire(CRON, after=now - timedelta(minutes=2), timezone=TZ)
+        nxt = next_fire(CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone())
         wait = (nxt - now).total_seconds()
         if wait > 60:
             time.sleep(min(wait, 3600))
