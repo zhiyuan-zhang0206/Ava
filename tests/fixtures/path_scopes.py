@@ -17,11 +17,10 @@ under the path.
 Moving a test: edit `paths` in its `PATH_SCOPES` entry (directories or single test
 files, relative to the repo root, forward slashes); list the new path next to the old
 one while both exist. A path may be as narrow as one file, so tests that came from
-different directories can sit together. `test_files` does not change on a move: it
-counts the test files the paths hold, and `tests/ci/test_path_scopes.py` fails when
-fewer are found, which is what a test moved out without its new path listed looks
-like. Nothing else changes: the fixture modules do not know where their tests live.
-A path that does not exist stops the run.
+different directories can sit together. Nothing else changes: the fixture modules do
+not know where their tests live. A path that does not exist, or a directory that no
+longer holds a test file, stops the run (`tests/ci/test_path_scopes.py`). No count of
+test files is recorded: two moves that each adjusted one would collide on every merge.
 
 Depends on `FixtureManager.parsefactories(holder=, node=)`, the semi-internal
 interface pytest's own conftest handling uses. `tests/ci/test_path_scopes.py` locks
@@ -40,7 +39,6 @@ import pytest
 
 class Scope(NamedTuple):
     paths: tuple[str, ...]  # directories or test files whose tests the module governs
-    test_files: int  # how many test files those paths hold; unchanged by a move
 
 
 # Fixture module -> its scope. One module per former conftest, so the autouse names
@@ -99,7 +97,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/agent_host/tests/test_recovery_interrupt.py",
             "agent/tests/test_impersonation_integration.py",
         ),
-        117,
     ),
     "tests.path_scoped.ava_tests": Scope(
         (
@@ -149,7 +146,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/schedule_manager/tests/test_manager_pty.py",
             "services/agent_host/tests/test_hosted_dispatcher_cancellation.py",
         ),
-        57,
     ),
     "tests.path_scoped.cli_tests": Scope(
         (
@@ -223,7 +219,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "cli/commands/data_plane/tests/test_maintenance_stop.py",
             "cli/tests/test_pause_stop.py",
         ),
-        96,
     ),
     "tests.path_scoped.db_authority_tests": Scope(
         (
@@ -232,7 +227,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "base/tests/test_delivery.py",
             "cli/commands/tests/test_single_box.py",
         ),
-        9,
     ),
     "tests.path_scoped.gateway_tests": Scope(
         (
@@ -271,7 +265,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/schedule_manager/tests/test_requests.py",
             "services/ttl_reaper/tests",
         ),
-        119,
     ),
     "tests.path_scoped.integration_tests": Scope(
         (
@@ -283,7 +276,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "ops/lifecycle/tests/test_agent_launch_runner.py",
             "ops/tests/test_cross_machine_dispatch.py",
         ),
-        11,
     ),
     "tests.path_scoped.services_tests": Scope(
         (
@@ -349,7 +341,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/tests",
             "cli/commands/data_plane/tests/test_native_storage_diagnostics.py",
         ),
-        127,
     ),
     "tests.path_scoped.structure_tests": Scope(
         (
@@ -366,7 +357,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "scripts/structure/tests",
             "scripts/tests/test_patch_targets.py",
         ),
-        19,
     ),
 }
 
@@ -380,26 +370,20 @@ def modules_by_path(scopes: dict[str, Scope]) -> dict[str, list[str]]:
 
 
 def scope_problems(scopes: dict[str, Scope], root: Path) -> list[str]:
-    """What is wrong with the table: a missing path, or fewer test files than recorded."""
+    """What is wrong with the table: a missing path, or a path that holds no test file."""
     problems: list[str] = []
     for module, scope in scopes.items():
         missing = [path for path in scope.paths if not (root / path).exists()]
         if missing:
             problems.append(f"{module}: paths do not exist: {missing}")
             continue
-        found = {
-            file.resolve()
+        empty = [
+            path
             for path in scope.paths
-            for file in (
-                [root / path] if (root / path).is_file() else (root / path).rglob("test_*.py")
-            )
-        }
-        if len(found) < scope.test_files:
-            problems.append(
-                f"{module}: its paths hold {len(found)} test files, {scope.test_files} are "
-                "recorded; a test that moved without its new path listed here has lost "
-                "these fixtures"
-            )
+            if (root / path).is_dir() and not any((root / path).rglob("test_*.py"))
+        ]
+        if empty:
+            problems.append(f"{module}: directories hold no test file, drop their entries: {empty}")
     return problems
 
 
