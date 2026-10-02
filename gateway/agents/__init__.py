@@ -20,6 +20,5 @@ mounted in `gateway/app.py`: `router`, `lifecycle`, `state`, `timeline`,
   - `eval_guard.py`        — result-read boundary for evaluation-isolated callers
                               (also used by the events, memory, run-timeline and tasks reads)
   - `context_breakdown.py` — context-window breakdown view logic over checkpoint messages
-  - `completion_notice_flusher.py` — hourly completion-notice digest delivery (lifespan task)
   - `schemas.py`           — the surface's wire models
 """
