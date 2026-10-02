@@ -1,12 +1,10 @@
 {
   "complexity": {
     "tests/base/subreaper_probe.py::ancestor": 16,
-    "tests/base/test_delivery.py::test_real_relay_uses_snapshotted_config_across_restart": 17,
-    "tests/base/test_delivery.py::test_two_attempts_each_get_a_full_window_then_native_observes_expiry": 16,
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 27
+    "tests/base": 25
   },
   "files": {
     "tests/base/test_editable_install.py": 883,
@@ -26,10 +24,7 @@
   },
   "tests_location": {
     "tests/base/test_connect_helpers.py::top-level": 1,
-    "tests/base/test_delivery.py::top-level": 1,
     "tests/base/test_editable_install.py::top-level": 1,
-    "tests/base/test_exec_request_evidence.py::top-level": 1,
-    "tests/base/test_pg_owner_authority.py::top-level": 1,
     "tests/base/test_subreaper_contract.py::top-level": 1,
     "tests/base/test_tags.py::top-level": 1
   }

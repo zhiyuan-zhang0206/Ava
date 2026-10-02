@@ -7,7 +7,6 @@
     "agent/tests/test_impersonation_integration.py::test_consent_exec_inbox_release_and_resume": 20
   },
   "files": {
-    "agent/tests/test_claim.py": 2592,
     "agent/tests/test_compact.py": 1142,
     "agent/tests/test_impersonation.py": 842,
     "agent/tests/test_state_slot.py": 936

@@ -17,6 +17,7 @@
     "cli/tests/test_pause_stop.py::cli.commands.lifecycle.stop._announce_stopping": 2,
     "cli/tests/test_pause_stop.py::cli.commands.lifecycle.stop._force_stop": 1,
     "cli/tests/test_pause_stop.py::ops.agent_pause._wake": 1,
-    "cli/tests/test_pause_stop.py::ops.cluster_pause._unpause_local_cluster": 2
+    "cli/tests/test_pause_stop.py::ops.cluster_pause._unpause_local_cluster": 2,
+    "cli/tests/test_plugin_scaffold.py::cli.commands.extensions._plugin_scaffold": 2
   }
 }

@@ -147,7 +147,7 @@ def owned_pg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
     finally:
         # Re-pin the temp home: teardown must never resolve the operator's home.
         monkeypatch.setenv("AVA_HOME", str(home))
-        subprocess.run(  # noqa: S603 — private test-owned postgres
+        subprocess.run(
             [ci._pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
@@ -230,7 +230,7 @@ def _provision_by_owner_login(pg_port: int, identity: str, dim: int) -> None:
             )
         )
     login = f"postgresql://{identity}:{_OWNER_PASSWORD}@127.0.0.1:{pg_port}/{identity}"
-    schema = (Path(__file__).resolve().parents[2] / "db" / "schema.sql").read_text()
+    schema = (Path(__file__).resolve().parents[4] / "db" / "schema.sql").read_text()
     with psycopg.connect(login, autocommit=True) as conn:
         conn.execute(schema)  # type: ignore[arg-type]
     ensure_pgvector_extension(identity, base_admin_url=admin)
@@ -332,7 +332,7 @@ def test_owner_without_login_keeps_every_admin_path(
     # pg_dump acts as the owner with no password in argv or the environment.
     dump = tmp_path / "owner.dump"
     environment = {key: value for key, value in os.environ.items() if not key.startswith("PG")}
-    subprocess.run(  # noqa: S603 — fixed tool path, private test database
+    subprocess.run(
         [
             str(pg_tool("pg_dump")),
             "--format=custom",
@@ -352,7 +352,7 @@ def test_owner_without_login_keeps_every_admin_path(
                 sql.Identifier(restored), sql.Identifier(identity)
             )
         )
-    subprocess.run(  # noqa: S603 — fixed tool path, private test database
+    subprocess.run(
         [
             str(pg_tool("pg_restore")),
             "--clean",
