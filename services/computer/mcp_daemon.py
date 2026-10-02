@@ -77,6 +77,7 @@ from base.telemetry import audit_events
 
 # Re-export of the shared OCR module object (test compat: the suite patches
 # mcp_daemon.ocr_mod attributes, and every OCR caller sees the same object).
+from services.computer.ax_ids import AxSession
 from services.computer.execute import _TOOLS, _execute_tool, _mcp_result, _priority
 from services.computer.execute import ocr_mod as ocr_mod
 from services.computer.protocol import Request, Response
@@ -88,6 +89,24 @@ from services.permissions_helper.client import PermissionsHelperError
 # A snapshot PNG can be multi-MB on one line; lift the stream buffer cap well
 # above StreamReader's 64KiB default (same limit as the browser daemon).
 _LINE_LIMIT = 64 * 1024 * 1024
+
+
+def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None) -> str | None:
+    """The compact "where / what" string of a computer_action audit row."""
+    if tool == "click" and "x" in args:
+        return f"{args['x']},{args['y']}"
+    if tool == "click_text" and result is not None:
+        # click_text resolves its own target via OCR: audit the center it
+        # clicked (physical pixels), not an argument coordinate.
+        return f"{result.get('x')},{result.get('y')}"
+    if tool == "ax_act" and result is not None:
+        # The element's center and the action — never the value written.
+        return f"{result.get('x')},{result.get('y')},{result.get('action')}"
+    if tool == "scroll":
+        return f"{args.get('x')},{args.get('y')},{args.get('dy')}"
+    if tool == "key":
+        return str(args.get("key") or args.get("keycode") or "")
+    return None
 
 
 class ComputerMcpDaemon:
@@ -106,6 +125,8 @@ class ComputerMcpDaemon:
         # find_text with snapshot_fresh=false searches the screen the caller
         # last saw instead of capturing again.
         self._ocr_cache: dict[str, Any] = {"items": []}
+        # Stable accessibility element ids (ax_tree / ax_act), one app at a time.
+        self._ax_session = AxSession()
         # One lock around execute: a single desktop op at a time machine-wide,
         # and a snapshot's multi-step capture never interleaves with another
         # agent's click (same serial choice as browser-mcp).
@@ -191,6 +212,7 @@ class ComputerMcpDaemon:
                     pointer=self._pointer,
                     scale=self._scale,
                     ocr_cache=self._ocr_cache,
+                    ax_session=self._ax_session,
                 )
                 if tool == "snapshot":
                     # click/scroll convert with the scale the caller saw.
@@ -268,17 +290,7 @@ class ComputerMcpDaemon:
         result: dict[str, Any] | None = None,
     ) -> None:
         """One computer_action audit event per call — facts for later review."""
-        coords: str | None = None
-        if tool == "click" and "x" in args:
-            coords = f"{args['x']},{args['y']}"
-        elif tool == "click_text" and result is not None:
-            # click_text resolves its own target via OCR: audit the center it
-            # clicked (physical pixels), not an argument coordinate.
-            coords = f"{result.get('x')},{result.get('y')}"
-        elif tool == "scroll":
-            coords = f"{args.get('x')},{args.get('y')},{args.get('dy')}"
-        elif tool == "key":
-            coords = str(args.get("key") or args.get("keycode") or "")
+        coords = _audit_coords(tool, args, result)
         if agent_id is None:
             # No identity, no audit row: events.agent_id references agents(id).
             return
