@@ -139,13 +139,13 @@ def _capture_events(
     audits: list[dict[str, Any]] = []
     telemetry: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
-    def _record_audit(**kw: Any) -> None:
-        audits.append(kw)
+    def _record_audit(event: Any) -> None:
+        audits.append({"event_type": event.event_name, "payload": event.attributes})
 
     def _record_telemetry(*a: Any, **kw: Any) -> None:
         telemetry.append((a, kw))
 
-    monkeypatch.setattr("base.telemetry.audit_events.insert_event_log", _record_audit)
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone", _record_audit)
     monkeypatch.setattr("base.telemetry.emit", _record_telemetry)
     return audits, telemetry
 
