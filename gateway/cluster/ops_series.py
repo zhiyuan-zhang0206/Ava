@@ -33,6 +33,7 @@ from base.events.contract import (
     SSE_DROP_KEYS,
     family_events,
 )
+from base.telemetry.event_sql import numeric
 
 # Window -> (seconds, bucket seconds). Bucket count per window is fixed:
 # 1h=60, 6h=72, 24h=48, 7d=168 points — enough shape, small payloads.
@@ -45,7 +46,6 @@ WINDOWS: dict[str, tuple[int, int]] = {
 
 _GRID_ORIGIN = OPS_GRID_ORIGIN
 _LLM_ERROR_EVENTS = list(family_events(LLM_ERROR_FAMILY))
-_NUMBER = r"^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$"
 
 
 def _bucket_starts(anchor: datetime, window_s: int, bucket_s: int) -> list[datetime]:
@@ -68,10 +68,6 @@ def _execute(
 ) -> psycopg.Cursor[Any]:
     """Run a query assembled from integers and the registered payload-key constants."""
     return conn.execute(cast(LiteralString, query), params)
-
-
-def _number(expression: str) -> str:
-    return f"CASE WHEN {expression} ~ '{_NUMBER}' THEN ({expression})::float8 END"
 
 
 def _bucket(start_s: int, bucket_s: int) -> str:
@@ -133,7 +129,7 @@ def _sse_series(conn: psycopg.Connection[Any], window: _Window) -> dict[str, Any
 
 
 def _llm_series(conn: psycopg.Connection[Any], window: _Window) -> dict[str, Any]:
-    latency = _number(LLM_USAGE_KEYS["latency_ms"])
+    latency = numeric(LLM_USAGE_KEYS["latency_ms"])
     usage = "event_name = 'llm_usage'"
     rows = _execute(
         conn,
@@ -148,9 +144,9 @@ def _llm_series(conn: psycopg.Connection[Any], window: _Window) -> dict[str, Any
                grouping(bkt)
         FROM (
           SELECT {window.bucket_sql} AS bkt, event_name,
-                 CASE WHEN {usage} THEN {_number(LLM_USAGE_KEYS["in_total"])} END AS tin,
-                 CASE WHEN {usage} THEN {_number(LLM_USAGE_KEYS["out_total"])} END AS tout,
-                 CASE WHEN {usage} THEN {_number(LLM_USAGE_KEYS["reasoning"])} END AS treason,
+                 CASE WHEN {usage} THEN {numeric(LLM_USAGE_KEYS["in_total"])} END AS tin,
+                 CASE WHEN {usage} THEN {numeric(LLM_USAGE_KEYS["out_total"])} END AS tout,
+                 CASE WHEN {usage} THEN {numeric(LLM_USAGE_KEYS["reasoning"])} END AS treason,
                  CASE WHEN {usage} THEN {latency} END AS lat
           FROM telemetry_events
           WHERE (event_name = 'llm_usage' OR event_name = ANY(%s)) AND ts >= %s AND ts < %s

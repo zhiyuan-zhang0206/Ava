@@ -14,9 +14,8 @@ from typing import Any, NamedTuple
 import psycopg
 
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
+from base.telemetry.event_sql import numeric
 from services.events_maintenance.resolution import EventClass, class_counts
-
-_NUMBER = r"^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$"
 
 
 class WindowTotals(NamedTuple):
@@ -28,10 +27,6 @@ class WindowTotals(NamedTuple):
     cost_usd: float
     turn_seconds: float
     turn_count: int
-
-
-def _number(expression: str) -> str:
-    return f"CASE WHEN {expression} ~ '{_NUMBER}' THEN ({expression})::float8 END"
 
 
 def window_totals(
@@ -47,11 +42,11 @@ def window_totals(
     turn = f"event_name = 'turn_end' AND {TURN_END_KEYS['ok']} = 'true'"
     query = f"""
         SELECT
-          COALESCE(sum({_number(LLM_USAGE_KEYS["in_total"])}) FILTER (WHERE {usage}), 0),
-          COALESCE(sum({_number(LLM_USAGE_KEYS["out_total"])}) FILTER (WHERE {usage}), 0),
-          COALESCE(sum({_number(LLM_USAGE_KEYS["cache_read"])}) FILTER (WHERE {usage}), 0),
-          COALESCE(sum({_number(LLM_USAGE_KEYS["cost_usd"])}) FILTER (WHERE {usage}), 0),
-          COALESCE(sum({_number(TURN_END_KEYS["duration_seconds"])}) FILTER (WHERE {turn}), 0),
+          COALESCE(sum({numeric(LLM_USAGE_KEYS["in_total"])}) FILTER (WHERE {usage}), 0),
+          COALESCE(sum({numeric(LLM_USAGE_KEYS["out_total"])}) FILTER (WHERE {usage}), 0),
+          COALESCE(sum({numeric(LLM_USAGE_KEYS["cache_read"])}) FILTER (WHERE {usage}), 0),
+          COALESCE(sum({numeric(LLM_USAGE_KEYS["cost_usd"])}) FILTER (WHERE {usage}), 0),
+          COALESCE(sum({numeric(TURN_END_KEYS["duration_seconds"])}) FILTER (WHERE {turn}), 0),
           count(*) FILTER (WHERE {turn})
         FROM telemetry_events
         WHERE event_name IN ('llm_usage', 'turn_end')

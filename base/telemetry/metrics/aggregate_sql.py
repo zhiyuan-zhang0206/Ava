@@ -35,6 +35,7 @@ from base.events.contract import (
     SYNTAX_FIX_KEYS,
     TURN_END_KEYS,
 )
+from base.telemetry.event_sql import numeric
 
 EXEC_FAILURE_EVENTS = [
     "exec_failed",
@@ -52,12 +53,10 @@ LIFECYCLE_EVENTS = {
     "agent_resurrected": "resurrected",
 }
 IDLE_HALT_BODY = "no tool_call (idle)"
-_NUMBER = r"^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$"
 
 
 def _n(expression: str, cast_to: str = "numeric") -> str:
-    """The numeric value of a payload field; text that is not a number reads as missing."""
-    return f"CASE WHEN {expression} ~ '{_NUMBER}' THEN ({expression})::{cast_to} END"
+    return numeric(expression, cast_to)
 
 
 class _Scope:

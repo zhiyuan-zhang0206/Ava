@@ -3217,7 +3217,7 @@ export interface paths {
          * @description Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).
          *
          *     Nodes carry status, label, a windowed recent-work `node_score`, and
-         *     restart-proof `total_tokens` consumed in the retained window (7d). Edges
+         *     `total_tokens` consumed in the retained window (7d). Edges
          *     split into two families: lineage
          *     (spawn/fork/resurrect) is structural and permanent; messages (send_message)
          *     decay with recency. Terminated agents — and edges touching a terminated
@@ -3241,11 +3241,9 @@ export interface paths {
          *
          *     Node score (windowed, drives node size):
          *         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
-         *     over the agent's `llm_usage` counters in the window — read from
-         *     Prometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,
-         *     windowed via `increase(...)`). `total_tokens` is the sum of the same two
-         *     counters over the retained 7d window, also using `increase(...)` so
-         *     exporter process restarts do not reset it.
+         *     over the agent's `llm_usage` rows in the window, summed from
+         *     `telemetry_events`. `total_tokens` is the sum of the same two fields over
+         *     the retained 7d window.
          *
          *     Edge weight:
          *         lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,

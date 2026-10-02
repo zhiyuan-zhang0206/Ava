@@ -12,16 +12,16 @@ rate cap collapses repeats.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Any
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
 from base import telemetry
 from gateway.app import app
-from gateway.lgtm import prom_metrics, telemetry_staleness
+from gateway.lgtm import telemetry_staleness
 
 _STALE_EVENT = "fleet_graph_stale"
 
@@ -55,15 +55,15 @@ class _RedisFactory:
         return self._redis
 
 
-def _fresh_heartbeat_age(*, timeout_s: float | None = None) -> float:
-    del timeout_s
+def _fresh_heartbeat_age(pool: object, *, now: datetime) -> float:
+    del pool, now
     return 30.0
 
 
 @pytest.fixture(autouse=True)
 def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     """The success-path heartbeat guard must not dial real services here."""
-    monkeypatch.setattr(telemetry_staleness, "prometheus_heartbeat_age", _fresh_heartbeat_age)
+    monkeypatch.setattr(telemetry_staleness, "heartbeat_age", _fresh_heartbeat_age)
     monkeypatch.setattr(telemetry_staleness, "_source_states", {})
     monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
 
@@ -110,11 +110,7 @@ def _empty_pg_phase(*_args: object, **_kwargs: object) -> Any:
     """Stand-in for `_fetch_pg_graph`: empty node rows, no Postgres."""
     import gateway.routers.fleet_graph as fg
 
-    return fg._PgGraphData([], [])
-
-
-def _empty_prom_tokens(*_args: object, **_kwargs: object) -> dict[str, float]:
-    return {}
+    return fg._PgGraphData([], [], {})
 
 
 def _stub_pg(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,10 +118,6 @@ def _stub_pg(monkeypatch: pytest.MonkeyPatch) -> None:
     import gateway.routers.fleet_graph as fg
 
     monkeypatch.setattr(fg, "_fetch_pg_graph", _empty_pg_phase)
-
-
-def _stub_prom_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(prom_metrics, "sum_by", _empty_prom_tokens)
 
 
 def _get_stale() -> tuple[int, bool]:
@@ -168,68 +160,6 @@ def test_pg_phase_budget_emits(
     assert emitted == [{"route": "fleet_graph", "reason": "pg_budget"}]
 
 
-def test_prom_admission_budget_emits(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """A refused Prometheus query admission -> prom_budget."""
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-    monotonic = iter((0.0, 0.0))
-    monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
-
-    def refused(*_a: object, **_k: object) -> dict[str, float]:
-        raise prom_metrics.PromQueryBudgetError("queue_full")
-
-    monkeypatch.setattr(prom_metrics, "sum_by", refused)
-
-    status, stale = _get_stale()
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "prom_budget"}]
-
-
-def test_prom_query_failure_emits(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """A Prometheus transport failure -> prom_failed."""
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-    monotonic = iter((0.0, 0.0))
-    monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
-
-    def fail(*_a: object, **_k: object) -> dict[str, float]:
-        raise httpx.ConnectError("prometheus unreachable")
-
-    monkeypatch.setattr(prom_metrics, "sum_by", fail)
-
-    status, stale = _get_stale()
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "prom_failed"}]
-
-
-def test_prom_phase_budget_emits(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """Prometheus phase crossing the route deadline -> prom_budget."""
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-    _stub_prom_ok(monkeypatch)
-    monotonic = iter((0.0, 0.0, fg._ROUTE_TIMEOUT_S + 0.1))
-    monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
-
-    status, stale = _get_stale()
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "prom_budget"}]
-
-
 def test_healthy_response_emits_nothing(
     monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
 ) -> None:
@@ -237,7 +167,6 @@ def test_healthy_response_emits_nothing(
 
     _install_redis(monkeypatch)
     _stub_pg(monkeypatch)
-    _stub_prom_ok(monkeypatch)
 
     with TestClient(app) as client:
         resp = client.get("/api/fleet/graph")
@@ -257,15 +186,15 @@ def test_stale_emit_rate_cap_collapses_repeats(
     """
     import gateway.routers.fleet_graph as fg
 
-    fg._emit_stale("prom_failed")
+    fg._emit_stale("pg_budget")
     fg._emit_stale("pg_timeout")  # a different reason is not suppressed
-    fg._emit_stale("prom_failed")  # same reason inside the default window
-    assert [event["reason"] for event in emitted] == ["prom_failed", "pg_timeout"]
+    fg._emit_stale("pg_budget")  # same reason inside the default window
+    assert [event["reason"] for event in emitted] == ["pg_budget", "pg_timeout"]
 
     monkeypatch.setattr(fg, "_stale_emit_interval_s", lambda: 0.0)
-    fg._emit_stale("prom_failed")
+    fg._emit_stale("pg_budget")
     assert [event["reason"] for event in emitted] == [
-        "prom_failed",
+        "pg_budget",
         "pg_timeout",
-        "prom_failed",
+        "pg_budget",
     ]

@@ -33,12 +33,11 @@ from datetime import UTC, date, datetime, timedelta
 import psycopg
 
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
+from base.telemetry.event_sql import numeric
 
 # Late writes arrive up to the mirror's seven-day retention after the event; one more day of
 # margin covers a replay that straddles midnight.
 RECOMPUTE_DAYS = 8
-
-_NUMBER = r"^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$"
 
 
 @dataclass(frozen=True)
@@ -53,8 +52,7 @@ class RollupResult:
 
 
 def _num(expression: str, cast: str = "numeric") -> str:
-    """The numeric value of a payload field; text that is not a number reads as missing."""
-    return f"CASE WHEN {expression} ~ '{_NUMBER}' THEN ({expression})::{cast} END"
+    return numeric(expression, cast)
 
 
 _COST = LLM_USAGE_KEYS["cost_usd"]
