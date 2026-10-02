@@ -155,8 +155,6 @@ def workflow_class(name: object) -> str:
     lowered = label.lower()
     if label in _WATCHDOG_WORKFLOW_NAMES:
         return "watchdog"
-    if label.startswith("QA "):
-        return "qa_gate"
     if "proof" in lowered or "evidence" in lowered or lowered.endswith(("contracts", "contract")):
         return "proof"
     if label.startswith("Release"):
@@ -449,7 +447,6 @@ def _flags(run: dict[str, Any], superseded: set[int], abandoned_shas: set[str]) 
         "self_healed": int(run.get("run_attempt") or 0) >= 2 and run.get("conclusion") == "success",
         "abandoned": isinstance(run.get("head_sha"), str) and run["head_sha"] in abandoned_shas,
         "watchdog": label == "watchdog",
-        "qa_gate": label == "qa_gate",
         "proof": label == "proof",
     }
 
@@ -488,7 +485,6 @@ def daily_aggregates(
             "runs": len(group),
             "instant_skip_runs": sum(value["instant_skip"] for value in flags.values()),
             "watchdog_runs": sum(value["watchdog"] for value in flags.values()),
-            "qa_gate_runs": sum(value["qa_gate"] for value in flags.values()),
             "proof_runs": sum(value["proof"] for value in flags.values()),
             "cancelled_runs": sum(run.get("conclusion") == "cancelled" for run in group),
             "superseded_runs": sum(value["superseded"] for value in flags.values()),
@@ -512,11 +508,7 @@ def daily_aggregates(
                 sum(int(run.get("run_attempt") or 0) >= 2 for run in group) / len(group), 3
             )
             entry["noise_run_share"] = round(
-                sum(
-                    value["watchdog"] or value["qa_gate"] or value["proof"]
-                    for value in flags.values()
-                )
-                / len(group),
+                sum(value["watchdog"] or value["proof"] for value in flags.values()) / len(group),
                 3,
             )
         completed_numbers = {
@@ -551,7 +543,6 @@ def daily_aggregates(
                     if not pr_flags[int(run["id"])]["zombie"]
                     and not pr_flags[int(run["id"])]["instant_skip"]
                     and not pr_flags[int(run["id"])]["watchdog"]
-                    and not pr_flags[int(run["id"])]["qa_gate"]
                     and not pr_flags[int(run["id"])]["proof"]
                 ]
                 executed_counts.append(float(len(executed)))

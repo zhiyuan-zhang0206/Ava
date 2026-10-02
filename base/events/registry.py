@@ -651,7 +651,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     ),
     "pr_flow_daily": _telemetry(
         "pr_flow_daily",
-        "daily PR-flow aggregates — ready->merged percentiles, QA rounds, "
+        "daily PR-flow aggregates — ready->merged percentiles and "
         "flake discoveries (absolute gauges, one sample per complete day)",
         payload=PrFlowDaily,
     ),

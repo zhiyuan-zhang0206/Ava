@@ -85,7 +85,7 @@ catalog.register_core_metric(
         title="Per-PR CI runs — median / p90 (by day)",
         description=(
             "Attributed CI trigger count per completed PR by complete cluster-time day. "
-            "The executed median filters instant-skip, watchdog, QA-gate, and proof workflows."
+            "The executed median filters instant-skip, watchdog, and proof workflows."
         ),
         event_name="ci_runs_daily",
         category="telemetry",
@@ -110,7 +110,7 @@ catalog.register_core_metric(
         title="CI failures & self-healing (by day)",
         description=(
             "CI-red, rerun-to-green, failed retry, and v1 first-pass PR share by complete "
-            "cluster-time day. First pass excludes watchdog, QA-gate, proof, instant-skip, and zombie runs."
+            "cluster-time day. First pass excludes watchdog, proof, instant-skip, and zombie runs."
         ),
         event_name="ci_runs_daily",
         category="telemetry",

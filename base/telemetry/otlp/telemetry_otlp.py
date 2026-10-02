@@ -193,8 +193,6 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("pr_flow_daily", "merged_count"): "gauge",
     ("pr_flow_daily", "ready_to_merge_median_seconds"): "gauge",
     ("pr_flow_daily", "ready_to_merge_p90_seconds"): "gauge",
-    ("pr_flow_daily", "qa_rounds_mean"): "gauge",
-    ("pr_flow_daily", "qa_rereview_share"): "gauge",
     ("pr_flow_daily", "flake_new_quarantines"): "gauge",
     ("pr_flow_run", "queue_depth"): "gauge",
     # CI-run state is re-emitted absolute state, so every numeric field is a gauge (task #4014).

@@ -75,8 +75,6 @@ def test_pr_flow_payloads_and_metric_dispositions() -> None:
         "merged_count",
         "ready_to_merge_median_seconds",
         "ready_to_merge_p90_seconds",
-        "qa_rounds_mean",
-        "qa_rereview_share",
         "flake_new_quarantines",
     )
     assert payload_keys("pr_flow_run") == ("queue_depth",)
@@ -84,8 +82,6 @@ def test_pr_flow_payloads_and_metric_dispositions() -> None:
         "merged_count",
         "ready_to_merge_median_seconds",
         "ready_to_merge_p90_seconds",
-        "qa_rounds_mean",
-        "qa_rereview_share",
         "flake_new_quarantines",
     ):
         assert _METRIC_DISPOSITION[("pr_flow_daily", field)] == "gauge", field
