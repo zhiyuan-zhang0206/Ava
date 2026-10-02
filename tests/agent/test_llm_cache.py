@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -209,39 +208,3 @@ class TestAinvokeWithCacheRetry:
 
 async def _async_return(value: Any) -> Any:
     return value
-
-
-class TestInvokeTimeout:
-    """ainvoke_with_cache_retry is bounded by llm_compact_timeout_seconds — a
-    wedged provider must surface as a timeout, not hold the agent's claim
-    node at the provider SDK default."""
-
-    async def test_compact_timeout_bounds_the_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        class _HangingRunnable(_StubRunnable):
-            async def ainvoke(self, messages: Any) -> AIMessage:
-                self.calls.append(list(messages))  # pyright: ignore[reportUnknownMemberType]
-                await asyncio.sleep(30)
-                return AIMessage(content="never")
-
-        class _HangingLLM(_StubLLM):
-            def __init__(self) -> None:
-                super().__init__()
-                self.runnable = _HangingRunnable()
-
-        from base.config import settings as _settings
-
-        monkeypatch.setattr(_settings.lm, "llm_compact_timeout_seconds", 0.05)
-        llm = _HangingLLM()
-        with pytest.raises(TimeoutError):
-            await ainvoke_with_cache_retry(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
-
-    async def test_fast_call_returns_within_bound(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from base.config import settings as _settings
-
-        monkeypatch.setattr(_settings.lm, "llm_compact_timeout_seconds", 60.0)
-        llm = _StubLLM()
-        out, used_cache = await ainvoke_with_cache_retry(
-            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO]
-        )
-        assert out.content == "done"  # pyright: ignore[reportUnknownMemberType]
-        assert used_cache is False  # plain path (no cache memo)

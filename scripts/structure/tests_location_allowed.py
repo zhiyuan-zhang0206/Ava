@@ -134,6 +134,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "freezes the wire schemas against ui/web/openapi.json and ui/web/src/lib/types.ts",
     ),
+    "tests/integration/test_hosted_lifecycle_integration.py": (
+        "integration",
+        "agent and ops are peers: a hosted force settles against a prior restart across both, and neither imports the other",
+    ),
     "tests/ops/test_resurrection_admission.py": (
         "integration",
         "agent and ops are peers: admission and resurrect race on the same rows",
