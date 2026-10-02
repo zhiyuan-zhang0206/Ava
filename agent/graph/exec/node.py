@@ -374,9 +374,7 @@ def _attach_model(ctx: AvaContext) -> str:
     LLM's model name, else the configured turn model. ``ctx.llm`` can be None
     (tests / container edge), hence the getattr fallback.
     """
-    from base.config.turn_view import turn_settings
-
-    return getattr(ctx.llm, "model_name", None) or turn_settings.lm.llm_model
+    return getattr(ctx.llm, "model_name", None) or ctx.require_agent().brain.llm_model
 
 
 async def _exec_single_call(

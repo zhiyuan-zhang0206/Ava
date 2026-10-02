@@ -41,6 +41,7 @@ from pathlib import Path
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.messages import NoteTag, system_note_message
+from base.agents.context.slices import HistoryDump
 from base.agents.messages.kwargs import read_ava_kwargs
 from base.config.turn_view import turn_settings
 from base.log import logger
@@ -83,7 +84,7 @@ def _earliest_message_ts(messages: list[AnyMessage]) -> datetime | None:
     return earliest
 
 
-def dump_history(messages: list[AnyMessage], agent_id: int) -> Path | None:
+def dump_history(messages: list[AnyMessage], agent_id: int, config: HistoryDump) -> Path | None:
     """Write the full pre-compact conversation to a JSONL file; return its path.
 
     Returns ``None`` when the dump is disabled (``history_dump_enabled`` off —
@@ -102,7 +103,7 @@ def dump_history(messages: list[AnyMessage], agent_id: int) -> Path | None:
     fields, same shape as GET /api/agents/{id}/messages); the replay recipe is
     in the module docstring.
     """
-    if not turn_settings.agent.history_dump_enabled:
+    if not config.history_dump_enabled:
         return None
     try:
         d = history_dump_dir(agent_id)
@@ -112,7 +113,7 @@ def dump_history(messages: list[AnyMessage], agent_id: int) -> Path | None:
         with path.open("w", encoding="utf-8") as f:
             for msg in messages:
                 f.write(json.dumps(msg.model_dump(mode="json")) + "\n")
-        _rotate(d, max(1, turn_settings.agent.history_dump_keep))
+        _rotate(d, max(1, config.history_dump_keep))
         logger.info(
             "[{label}] {body}",
             label="history-dump",
