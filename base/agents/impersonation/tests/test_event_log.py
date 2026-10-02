@@ -182,10 +182,10 @@ def test_local_events_are_recorded_sealed_and_complete_at_release(
     assert _rows(db_conn, lease["id"], "local-happy") == 2
     seal_local_participant(participant)
     assert db_conn.execute(
-        "SELECT state,item_count,manifest_digest FROM agent_impersonation_event_participants "
+        "SELECT state,item_count FROM agent_impersonation_event_participants "
         "WHERE lease_id=%s AND source_key='local-happy'",
         (lease["id"],),
-    ).fetchone() == ("sealed", 2, None)
+    ).fetchone() == ("sealed", 2)
 
     leases.release(participant.lease_id, attested_caller(lease), "Local work")
     ended = history.resolve(owner.agent_id, 0)
@@ -236,7 +236,7 @@ def test_seal_count_must_match_the_recorded_rows(
     _capture(participant, [_sdk_event(owner.agent_id, "one")])
     with pytest.raises(psycopg.errors.RaiseException, match="count does not match"):
         db_conn.execute(
-            "SELECT seal_impersonation_event_participant(%s,'miscount','sealed',NULL,5,NULL)",
+            "SELECT seal_impersonation_event_participant(%s,'miscount','sealed',NULL,5)",
             (lease["id"],),
         )
     db_conn.rollback()

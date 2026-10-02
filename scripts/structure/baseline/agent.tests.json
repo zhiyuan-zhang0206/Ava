@@ -9,7 +9,6 @@
   "patch_targets": {
     "agent/tests/test_exec_subprocess.py::agent.graph.exec._process": 1,
     "agent/tests/test_external.py::ava.external._deliver_telemetry_before_detach": 1,
-    "agent/tests/test_external.py::ava.external.attach._seal_manifest_participant": 2,
     "agent/tests/test_external.py::ava.mcps._get_remote_client": 2,
     "agent/tests/test_external.py::ava.mcps._run_async": 1,
     "agent/tests/test_external.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 2
