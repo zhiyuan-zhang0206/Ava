@@ -39,16 +39,6 @@ def create_ms(item: Any) -> int | None:
         return None
 
 
-def replay_window_s() -> float:
-    """How old an unhandled message may be and still be replayed: the agent
-    side dead-letters chat inbounds older than this rather than re-deliver
-    them, so the bridge never feeds an agent what it would refuse as ancient."""
-
-    from base.config import settings
-
-    return settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
-
-
 def anchor(items: list[Any]) -> tuple[str | None, int]:
     """Where a never-polled chat is anchored: its newest message (nothing is
     processed). Anchors on the newest item that carries an id: an id-less
@@ -64,13 +54,16 @@ def anchor(items: list[Any]) -> tuple[str | None, int]:
 
 
 def reaches_cursor(
-    pages_newest_first: list[Any], cursor_id: str | None, cursor_ms: int | None
+    pages_newest_first: list[Any],
+    cursor_id: str | None,
+    cursor_ms: int | None,
+    replay_window_s: float,
 ) -> bool:
     """Whether the pages listed so far already hold everything the replay can
     want: the cursor id itself, a message older than the cursor's time, or one
     older than the replay window."""
 
-    cutoff = now_ms() - int(replay_window_s() * 1000)
+    cutoff = now_ms() - int(replay_window_s * 1000)
     bound = max(cutoff, cursor_ms) if cursor_ms is not None else cutoff
     for item in pages_newest_first:
         created = create_ms(item)
@@ -82,7 +75,12 @@ def reaches_cursor(
 
 
 def pending_after(
-    items: list[Any], cursor_id: str | None, cursor_ms: int | None, *, replay: bool
+    items: list[Any],
+    cursor_id: str | None,
+    cursor_ms: int | None,
+    *,
+    replay: bool,
+    replay_window_s: float,
 ) -> tuple[list[Any], list[Any]]:
     """The messages to process after the cursor, as (to process, too old).
 
@@ -101,7 +99,7 @@ def pending_after(
         gap = items
     if not replay:
         return gap, []
-    cutoff = now_ms() - int(replay_window_s() * 1000)
+    cutoff = now_ms() - int(replay_window_s * 1000)
     fresh: list[Any] = []
     stale: list[Any] = []
     for item in gap:
@@ -115,6 +113,7 @@ async def list_chat(
     chat_id: str,
     *,
     deep: bool,
+    replay_window_s: float,
     cursor_id: str | None = None,
     cursor_ms: int | None = None,
 ) -> list[Any] | None:
@@ -155,7 +154,7 @@ async def list_chat(
             deep
             and getattr(data, "has_more", False)
             and token
-            and not reaches_cursor(items, cursor_id, cursor_ms)
+            and not reaches_cursor(items, cursor_id, cursor_ms, replay_window_s)
         ):
             break
     items.reverse()

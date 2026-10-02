@@ -6,9 +6,8 @@ bridged; group chats and media messages are ignored. Replies go through the
 REST ``im/v1/messages`` create API keyed by the sender's ``open_id`` (the
 contract's feishu session id).
 
-Credentials are read from ``settings.feishu`` when that config domain exists,
-else from env vars (``AVA_FEISHU_APP_ID`` / ``FEISHU_APP_ID`` and
-``AVA_FEISHU_APP_SECRET`` / ``FEISHU_APP_SECRET``). Missing credentials make
+Credentials arrive in the ``FeishuCredentialsConfig`` slice the daemon builds
+(``AVA_FEISHU_APP_ID`` / ``AVA_FEISHU_APP_SECRET``). Missing credentials make
 ``start()`` log and no-op — the daemon keeps running without the feishu link.
 
 Platform side (operator action, not code): in the Feishu open platform enable
@@ -28,6 +27,7 @@ from typing import Any
 from base.log import logger
 from services.im_bridge.adapters import feishu_poll_cursor as cursors
 from services.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
+from services.im_bridge.config import FeishuCredentialsConfig
 from services.im_bridge.types import IMAdapter, InboundMessage
 
 # Feishu caps a text message around 30KB of characters; segment conservatively.
@@ -62,8 +62,10 @@ class FeishuAdapter(IMAdapter):
 
     channel = "feishu"
 
-    def __init__(self, core: Any) -> None:
+    def __init__(self, core: Any, config: FeishuCredentialsConfig) -> None:
         super().__init__(core)
+        self._config = config
+        self._replay_window_s = config.delivery_watchdog_stale_claimed_threshold_seconds
         self._app_id = ""
         self._app_secret = ""
         self._main_loop: asyncio.AbstractEventLoop | None = None
@@ -96,39 +98,13 @@ class FeishuAdapter(IMAdapter):
         self._poison_retries: dict[str, int] = {}  # "chat:msg" -> inbound failures
         self._seen_messages: deque[str] = deque(maxlen=500)
 
-    # -- credentials ---------------------------------------------------------
-
-    @staticmethod
-    def _credential(field: str, *env_names: str) -> str:
-        """Read a credential from ``settings.feishu`` — the repo's only
-        sanctioned env surface (lint os.environ forbids direct reads).
-        ``env_names`` is accepted for call-site clarity but unused."""
-        del env_names
-        try:
-            from base.config import settings
-
-            domain = getattr(settings, "feishu", None)
-            if domain is not None:
-                value: Any = getattr(domain, field, "")
-                if value:
-                    return (
-                        value.get_secret_value()
-                        if hasattr(value, "get_secret_value")
-                        else str(value)
-                    )
-        except Exception:
-            # base.config must never break the adapter (settings-lite verbs,
-            # bare checkouts, a gateway fetch failure).
-            logger.debug("FeishuAdapter: settings.feishu probe failed")
-        return ""
-
     # -- lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
         """Connect the long-connection client; no-op (with a log) when the
         credentials are missing so the daemon stays up either way."""
-        self._app_id = self._credential("feishu_app_id")
-        self._app_secret = self._credential("feishu_app_secret")
+        self._app_id = self._config.feishu_app_id
+        self._app_secret = self._config.feishu_app_secret
         if not self._app_id or not self._app_secret:
             logger.warning(
                 "FeishuAdapter: FEISHU_APP_ID / FEISHU_APP_SECRET not configured; "
@@ -217,14 +193,7 @@ class FeishuAdapter(IMAdapter):
         # Explicit timeout (G6, task #698): the lark SDK's own default is 30s
         # but that is an SDK-version property, not a contract — pin it so a hung
         # Feishu REST line cannot park an IM outbound longer than configured.
-        # Same fail-open guard as _credential: settings must never break the
-        # adapter in a settings-lite context.
-        try:
-            from base.config import settings
-
-            timeout = settings.feishu.feishu_rest_timeout_seconds
-        except Exception:
-            timeout = 30.0
+        timeout = self._config.feishu_rest_timeout_seconds
         return builder.app_id(self._app_id).app_secret(self._app_secret).timeout(timeout).build()
 
     # -- inbound -------------------------------------------------------------
@@ -362,14 +331,8 @@ class FeishuAdapter(IMAdapter):
         """Start the ListMessage poll loop (main loop task)."""
         if self._poll_task is not None and not self._poll_task.done():
             return
-        try:
-            from base.config import settings
-
-            interval = settings.feishu.feishu_poll_interval_seconds
-            bootstrap = (settings.feishu.feishu_poll_chat_id or "").strip()
-        except Exception:
-            interval = 1.0
-            bootstrap = ""
+        interval = self._config.feishu_poll_interval_seconds
+        bootstrap = self._config.feishu_poll_chat_id.strip()
         if interval <= 0:
             logger.info("FeishuAdapter: polling disabled (AVA_FEISHU_POLL_INTERVAL_SECONDS=0)")
             return
@@ -451,6 +414,7 @@ class FeishuAdapter(IMAdapter):
             self._rest_client,
             chat_id,
             deep=replay,
+            replay_window_s=self._replay_window_s,
             cursor_id=self._poll_cursor.get(chat_id),
             cursor_ms=self._poll_cursor_ms.get(chat_id),
         )
@@ -473,6 +437,7 @@ class FeishuAdapter(IMAdapter):
             self._poll_cursor.get(chat_id),
             self._poll_cursor_ms.get(chat_id),
             replay=replay,
+            replay_window_s=self._replay_window_s,
         )
         if stale:
             logger.warning(

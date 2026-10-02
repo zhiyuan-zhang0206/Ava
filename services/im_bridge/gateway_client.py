@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 import httpx
 
-from base.config import settings
+from services.im_bridge.config import ImBridgeConfig
 from services.im_bridge.types import AgentDetail, AgentDirectoryPage
 
 _log = logging.getLogger("services.im_bridge.gateway_client")
@@ -20,8 +20,10 @@ _log = logging.getLogger("services.im_bridge.gateway_client")
 class GatewayClient:
     """REST + SSE client for the Ava gateway (the Post Gateway)."""
 
-    def __init__(self) -> None:
-        self._base = settings.gateway.gateway_url.rstrip("/")
+    def __init__(self, config: ImBridgeConfig, *, gateway_url: str, cluster_secret: str) -> None:
+        self._config = config
+        self._base = gateway_url.rstrip("/")
+        self._cluster_secret = cluster_secret
         self._cookie: str | None = None
         self._client: httpx.AsyncClient | None = None
 
@@ -37,7 +39,7 @@ class GatewayClient:
         client = await self._http()
         resp = await client.post(
             "/api/auth/login",
-            json={"password": settings.data_plane.cluster_secret},
+            json={"password": self._cluster_secret},
         )
         if resp.status_code != 200:
             raise RuntimeError(f"gateway login failed: HTTP {resp.status_code}")
@@ -83,7 +85,7 @@ class GatewayClient:
         their persisted key (Task #1032), so a replay after a lost gateway
         response stays a no-op server-side."""
         key = idempotency_key or uuid.uuid4().hex
-        for attempt, delay in enumerate(settings.services.im_send_retry_delays, start=1):
+        for attempt, delay in enumerate(self._config.im_send_retry_delays, start=1):
             try:
                 client = await self._http()
                 resp = await client.post(
@@ -116,7 +118,7 @@ class GatewayClient:
                 )
                 await asyncio.sleep(delay)
         raise RuntimeError(
-            f"send to agent {agent_id} failed after {len(settings.services.im_send_retry_delays)} attempts"
+            f"send to agent {agent_id} failed after {len(self._config.im_send_retry_delays)} attempts"
         )
 
     async def list_presets(self) -> list[dict[str, Any]]:
@@ -170,7 +172,7 @@ class GatewayClient:
         from."""
         client = await self._http()
         if limit is None:
-            limit = settings.services.im_bridge_timeline_window
+            limit = self._config.im_bridge_timeline_window
         resp = await client.get(
             f"/api/agents/{agent_id}/timeline",
             headers=self._headers(),
@@ -189,7 +191,7 @@ class GatewayClient:
             "GET",
             f"/api/agents/{agent_id}/events/stream",
             headers=self._headers(),
-            timeout=httpx.Timeout(settings.services.im_sse_read_timeout_seconds, connect=10.0),
+            timeout=httpx.Timeout(self._config.im_sse_read_timeout_seconds, connect=10.0),
         ) as resp:
             if resp.status_code != 200:
                 raise RuntimeError(f"sse {agent_id} failed: HTTP {resp.status_code}")

@@ -19,6 +19,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from services.im_bridge.core import IMBridgeCore
+from services.im_bridge.tests.slices import im_bridge_config
 from services.im_bridge.types import ChatState, IMAdapter, InboundMessage
 
 _KEY = ("telegram", "12345")
@@ -94,8 +95,7 @@ class _Adapter(IMAdapter):
 def _core(
     gateway: _Gateway, pool: ConnectionPool[Any] | None = None
 ) -> tuple[IMBridgeCore, _Adapter]:
-    core = IMBridgeCore(db_pool=pool)
-    core.gateway = gateway  # type: ignore[assignment]
+    core = IMBridgeCore(im_bridge_config(), gateway, db_pool=pool)  # type: ignore[arg-type]
     adapter = _Adapter()
     core.register(adapter)
     return core, adapter

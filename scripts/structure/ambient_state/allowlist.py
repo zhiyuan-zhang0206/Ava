@@ -174,6 +174,17 @@ ALLOWED: dict[str, str] = {
     "ava/__init__.py::ambient-instance:extend": "a namespace of functions built once and never rebound or filled afterwards",
 }
 
+# ── 4. slice-governed packages ─────────────────────────────────────────────
+
+# Packages whose configuration arrives as constructor-injected slices: package dir ->
+# its composition-root modules, the only modules there that may read `settings`
+# (scripts/structure/ambient_state/sliced.py). A package joins when it is sliced;
+# leaving needs a decision record. A listed package or root that no longer exists
+# fails as stale.
+SLICED_PACKAGES: dict[str, frozenset[str]] = {
+    "services/im_bridge": frozenset({"services/im_bridge/daemon.py"}),
+}
+
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 
 DEFERRED_WARNING_REDESIGN = "deferred: warning/alert redesign"
