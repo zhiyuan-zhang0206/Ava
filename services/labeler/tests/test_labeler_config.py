@@ -39,7 +39,7 @@ def test_run_hands_the_slice_to_the_dispatch_loop(monkeypatch: pytest.MonkeyPatc
         def close(self) -> None:
             pass
 
-    async def fake_dispatch(_pool: object, _liveness: object, config: object) -> None:
+    async def fake_dispatch(_pool: object, _db: object, _liveness: object, config: object) -> None:
         received.append(config)
 
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
@@ -48,14 +48,14 @@ def test_run_hands_the_slice_to_the_dispatch_loop(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
 
-    def fake_pool() -> _Pool:
+    def fake_pool(_self: object) -> _Pool:
         return _Pool()
 
     def fake_health_port(_name: str) -> int:
         return 1
 
     monkeypatch.setattr(daemon, "health_port", fake_health_port)
-    monkeypatch.setattr(daemon.base.db, "pool", fake_pool)
+    monkeypatch.setattr(daemon.Database, "pool", fake_pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", fake_dispatch)
 
     asyncio.run(daemon.run())
