@@ -138,7 +138,12 @@ def _seed_llm_bucket(db: psycopg.Connection) -> int:
     i = 40
     inside = _bucket_starts(_now_ts(), 86400, 1800)[i] + timedelta(seconds=60)
     for latency, tokens_in in ((100.0, 600), (300.0, 300), (900.0, 100), (2000.0, 0)):
-        payload = {"latency_ms": latency, "in_total": tokens_in, "out_total": 50, "reasoning": 0}
+        payload: dict[str, object] = {
+            "latency_ms": latency,
+            "in_total": tokens_in,
+            "out_total": 50,
+            "reasoning": 0,
+        }
         _add(db, event="llm_usage", payload=payload, ts=inside)
     # a row with no numeric latency counts as a call but not toward the latency figures
     _add(db, event="llm_usage", payload={"in_total": 1}, ts=inside)
