@@ -7,7 +7,7 @@ import pytest
 
 from base.agents.messages.chat_delivery import insert_chat_inbound_once, reconcile_chat_inbound
 from base.db import create_agent, insert_inbound_message
-from base.telemetry.audit_events import insert_event_log, insert_event_log_many
+from base.telemetry.audit_events import prepare_event_log
 
 _SOURCE = "external_agent:codex:run-42"
 _CALLER = {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
@@ -86,19 +86,13 @@ def test_conflicting_caller_rejected_before_insert(db_conn: psycopg.Connection) 
         assert cur.fetchone() == (0,)
 
 
-def test_single_and_batch_audit_carry_structured_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    from unittest.mock import Mock
-
-    emit_prepared = Mock()
-    monkeypatch.setattr("base.telemetry.audit_events.telemetry.emit_prepared", emit_prepared)
-    insert_event_log(event_type="restart", agent_id=42, source=_SOURCE, payload={"inbound_id": 9})
-    insert_event_log_many(
-        event_type="restart", agent_id=42, source=_SOURCE, payloads=[{"inbound_id": 10}]
+def test_audit_events_carry_structured_identity() -> None:
+    event = prepare_event_log(
+        event_type="restart", agent_id=42, source=_SOURCE, payload={"inbound_id": 9}
     )
-    assert emit_prepared.call_count == 2
-    for call in emit_prepared.call_args_list:
-        assert call.args[0].attributes["caller_identity"] == _CALLER
-        assert "auth_principal" not in call.args[0].attributes
+
+    assert event.attributes["caller_identity"] == _CALLER
+    assert "auth_principal" not in event.attributes
 
 
 def test_internal_chat_and_lifecycle_writes_cannot_bypass_rollout_fence(

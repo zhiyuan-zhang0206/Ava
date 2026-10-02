@@ -280,13 +280,13 @@ def test_building_the_prompt_records_no_skill_attribution(
 
     writes: list[dict[str, Any]] = []
 
-    def _record(**kwargs: Any) -> None:
-        writes.append(kwargs)
+    def _record(events: list[Any]) -> None:
+        writes.append({"events": events})
 
     # Stub the ONE write path — every skill_invoked row goes through the
     # audit-event writer — so any regression that routes prompt assembly (or an
     # index render) into a skill_invoked write fails this test.
-    monkeypatch.setattr(audit_events, "insert_event_log_many", _record)
+    monkeypatch.setattr(audit_events, "record_audit_standalone_many", _record)
     monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
 
     prompt = build_system_prompt()
