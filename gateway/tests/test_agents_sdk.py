@@ -16,7 +16,8 @@ httpx client redirected to in-process FastAPI app via autouse fixture.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import uuid
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -26,8 +27,6 @@ from fastapi.testclient import TestClient
 import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, AgentStatus, ForkSourceEmpty, TerminateResult
-from gateway.lgtm import loki_events
-from tests.gateway.loki_fake import FakeLoki
 
 
 def _spawn_agent() -> int:
@@ -676,9 +675,9 @@ class TestSendSystemNote:
 
 class TestGetNeighbors:
     """SDK get_neighbors maps the gateway rows to Neighbor dataclasses (status to
-    the AgentStatus enum). The graph behaviors (Loki live tail + archive stitch)
-    are covered in gateway/tests/test_agent_neighbors.py; here we verify the
-    wrapper + wire path only, seeding ties through the FakeLoki live tail."""
+    the AgentStatus enum). The graph behaviors are covered in
+    gateway/tests/test_agent_neighbors.py; here we verify the wrapper + wire path
+    only, seeding ties as `audit_events` rows."""
 
     @staticmethod
     def _seed(db: psycopg.Connection, *, status: str = "running") -> int:
@@ -695,40 +694,22 @@ class TestGetNeighbors:
         return aid
 
     @staticmethod
-    def _tie(
-        fake: FakeLoki,
-        agent_id: int,
-        target: int,
-        *,
-        days_ago: float | None = None,
-        ts: datetime | None = None,
-        archive: bool = False,
-    ) -> None:
-        if ts is None:
-            assert days_ago is not None
-            ts = datetime.now(UTC) - timedelta(hours=days_ago * 24.0)
-        fake.add(
-            event="send_message",
-            agent_id=agent_id,
-            target_agent_id=target,
-            category="audit",
-            ts=ts,
-            archive=archive,
+    def _tie(db: psycopg.Connection, agent_id: int, target: int, *, days_ago: float) -> None:
+        db.execute(
+            "INSERT INTO audit_events (event_uid, ts, machine, process, event_name, level, "
+            "source, agent_id, target_agent_id) "
+            "VALUES (%s, now() - (%s * interval '1 day'), 'test', 'test', 'send_message', "
+            "'info', 'test', %s, %s)",
+            (uuid.uuid4().int % (1 << 62), days_ago, agent_id, target),
         )
+        db.commit()
 
-    def test_returns_ranked_neighbor_dataclasses(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        fake = FakeLoki()
-        monkeypatch.setattr(loki_events, "query_events", fake.query_events)
+    def test_returns_ranked_neighbor_dataclasses(self, db_conn: psycopg.Connection) -> None:
         a = self._seed(db_conn)
         fresh = self._seed(db_conn)
         stale = self._seed(db_conn, status="terminated")
-        self._tie(fake, fresh, a, days_ago=0.0)
-        # The stale tie sits inside the archive span (before ARCHIVE_FREEZE_AT)
-        # and must be seeded as an archive-stream row: the live-stream query is
-        # clamped at the freeze point, so a live row there would fall in the gap.
-        self._tie(fake, stale, a, ts=datetime(2026, 8, 10, tzinfo=UTC), archive=True)
+        self._tie(db_conn, fresh, a, days_ago=0.0)
+        self._tie(db_conn, stale, a, days_ago=60.0)
 
         rows = ava.agents.get_neighbors(a)
 
@@ -770,7 +751,7 @@ class TestGetAncestors:
     dataclasses. The chain walk itself is covered in
     gateway/tests/test_agent_neighbors.py; here we verify the wrapper + wire
     path only. Ancestry is the immutable `agents_meta.born_spawner` chain, so
-    it is seeded on the row; the FakeLoki spawn event only feeds the tie
+    it is seeded on the row; the recorded spawn event only feeds the tie
     graph."""
 
     @staticmethod
@@ -791,24 +772,20 @@ class TestGetAncestors:
         return aid
 
     @staticmethod
-    def _spawn(fake: FakeLoki, child: int, parent: int) -> None:
+    def _spawn(db: psycopg.Connection, child: int, parent: int) -> None:
         # Event direction: agent_id = the new agent, target_agent_id = spawner.
-        fake.add(
-            event="spawn",
-            agent_id=child,
-            target_agent_id=parent,
-            category="audit",
-            ts_offset_hours=0.0,
+        db.execute(
+            "INSERT INTO audit_events (event_uid, ts, machine, process, event_name, level, "
+            "source, agent_id, target_agent_id) "
+            "VALUES (%s, now(), 'test', 'test', 'spawn', 'info', 'test', %s, %s)",
+            (uuid.uuid4().int % (1 << 62), child, parent),
         )
+        db.commit()
 
-    def test_returns_spawn_chain_as_neighbor_dataclasses(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        fake = FakeLoki()
-        monkeypatch.setattr(loki_events, "query_events", fake.query_events)
+    def test_returns_spawn_chain_as_neighbor_dataclasses(self, db_conn: psycopg.Connection) -> None:
         a = self._seed(db_conn, status="terminated")
         b = self._seed(db_conn, born_spawner=f"agent:{a}")
-        self._spawn(fake, b, a)
+        self._spawn(db_conn, b, a)
 
         rows = ava.agents.get_ancestors(b)
 
@@ -818,11 +795,7 @@ class TestGetAncestors:
         assert rows[0].status is AgentStatus.TERMINATED  # terminated parent included
         assert f"#{a}" in str(rows[0]) and "depth=1" in str(rows[0])
 
-    def test_no_spawner_returns_empty(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        fake = FakeLoki()
-        monkeypatch.setattr(loki_events, "query_events", fake.query_events)
+    def test_no_spawner_returns_empty(self, db_conn: psycopg.Connection) -> None:
         a = self._seed(db_conn)
 
         assert ava.agents.get_ancestors(a) == []

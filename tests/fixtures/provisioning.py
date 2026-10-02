@@ -233,6 +233,9 @@ _PER_TEST_TRUNCATE_TABLES = (
     # Plugin stat values (task #2911): no FKs, but a leaked row would render in
     # the next test's dashboard response.
     "plugin_stats",
+    # The append-only audit record: a leaked row would show in the next test's
+    # whole-table reads (the fleet graph, the neighbors walk).
+    "audit_events",
     # im-bridge durable cursors: no FK path; a leaked row would make the next
     # test's bridge resume (or replay) from a stale position.
     "im_bridge_cursors",
@@ -296,6 +299,10 @@ def _clean_state(
                     # of the next test's reused id (the CI-only lifecycle-state collision
                     # flake class). Monotonic ids make a straggler write land on a dead id
                     # instead. Tests that need a stable self-identity take `self_agent`.
+                    # audit_events refuses TRUNCATE through its append-only trigger by
+                    # design; the harness resets it with triggers off for this
+                    # transaction only (a test database owner, never production).
+                    cur.execute("SET LOCAL session_replication_role = replica")
                     cur.execute("TRUNCATE " + ", ".join(_PER_TEST_TRUNCATE_TABLES) + " CASCADE")
                 conn.commit()
                 break

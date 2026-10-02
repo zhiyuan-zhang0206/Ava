@@ -178,7 +178,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # shutdown ended by an immediate one, with the leftover processes killed)
     # raises it to 223. The exec memory guard's kill (exec_memory_guard_killed)
     # raises it to 224. The audit write failure (audit_write_failed — an audit event
-    # that could not be recorded in audit_events) raises it to 225.
+    # that could not be recorded in audit_events) raises it to 225. Retiring
+    # archive_fetch_degraded (the frozen-archive reader it reported on is gone) lowers it
+    # back to 224.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
     assert "agent_reopened" not in _TELEMETRY_KINDS
     for retired in (
@@ -190,7 +192,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
         assert retired not in _TELEMETRY_KINDS
     # The suffix diagnostic adds one; retiring tool-call concatenation removes one.
     assert "multiple_tool_calls_merged" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 225
+    assert len(_TELEMETRY_KINDS) == 224
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",

@@ -57,7 +57,7 @@ def test_small_event_window_is_one_read(monkeypatch: pytest.MonkeyPatch) -> None
         return [{"id": 1}], False
 
     monkeypatch.setattr(reads.loki_events, "query_events", query)
-    assert reads.query_all_events(405, start, start, event_names=("compact",)) == [{"id": 1}]
+    assert reads.query_all_events(405, start, start, event_names=("turn_end",)) == [{"id": 1}]
     assert len(calls) == 1
 
 

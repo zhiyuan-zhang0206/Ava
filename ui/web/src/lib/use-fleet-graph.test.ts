@@ -59,7 +59,6 @@ const API_GRAPH: WireFleetGraph = {
     },
   ],
   stale: false,
-  truncated: false,
   telemetry_stale: false,
   snapshot_at: null,
 };
@@ -95,7 +94,6 @@ describe("useFleetGraph", () => {
       nodes: [],
       edges: [],
       stale: false,
-      truncated: false,
       telemetry_stale: false,
       snapshot_at: null,
     });
@@ -173,7 +171,6 @@ describe("useFleetGraph", () => {
       ],
       edges: [],
       stale: false,
-      truncated: false,
       telemetry_stale: false,
       snapshot_at: null,
     } as unknown as WireFleetGraph;
@@ -203,7 +200,6 @@ describe("useFleetGraph", () => {
       nodes: [],
       edges: [],
       stale: false,
-      truncated: false,
       telemetry_stale: false,
       snapshot_at: null,
     });
@@ -214,7 +210,6 @@ describe("useFleetGraph", () => {
       nodes: [],
       edges: [],
       stale: true,
-      truncated: false,
       telemetry_stale: false,
       snapshot_at: null,
     });

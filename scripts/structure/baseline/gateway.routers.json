@@ -9,15 +9,12 @@
   },
   "complexity": {
     "gateway/routers/config.py::put_config": 24,
-    "gateway/routers/fleet_graph.py::_merge_edge_rows": 15,
-    "gateway/routers/fleet_graph.py::get_fleet_graph": 17,
-    "gateway/routers/tests/test_fleet_graph_resilience.py::test_archive_fetch_failure_serves_stale_graph_and_negative_caches": 16,
     "gateway/routers/tests/test_tasks_router.py::TestGetTaskFields.test_full_is_backward_compatible_and_summary_is_metadata_only": 15,
     "gateway/routers/tests/test_upload_endpoint.py::TestUploadFile.test_upload_single_file_saves_and_inserts_one_inbound": 15
   },
   "files": {
     "gateway/routers/tests/test_config_api.py": 1004,
-    "gateway/routers/tests/test_fleet_graph.py": 1049,
+    "gateway/routers/tests/test_fleet_graph.py": 841,
     "gateway/routers/tests/test_memory_search.py": 1424,
     "gateway/routers/tests/test_tasks_router.py": 811
   },
