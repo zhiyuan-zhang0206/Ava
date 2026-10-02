@@ -409,6 +409,43 @@ def _plane_delivers_no_tokens() -> bool:
     return config_source_is_local() and settings.data_plane.is_remote
 
 
+def daemon_acceptance() -> frozenset[str] | None:
+    """SHA-256 digests of the bearers a gateway-side daemon's authenticated endpoint accepts,
+    or None for the open posture. The acceptor's half of `gateway_bearer()`: the daemons that
+    take calls from the gateway (the ops server, im_bridge's `/send`) accept machine API tokens,
+    never the human cluster secret.
+
+    The gateway dials with its gateway-class token and a runner-class process of the unit with its
+    runner token, so a daemon accepts exactly its write generation's two tokens. A remote unit
+    takes the gateway token digest its installed capability carries plus its own runner token's
+    (none when its cluster's API is open): it never holds the gateway token or the human secret.
+    The gateway home takes the active generation's two tokens while the cluster secret is set
+    (none while no generation is active: fail closed).
+
+    The one place the human secret is still accepted is a remote-managed data plane
+    (`settings.data_plane.is_remote`): it keeps no write generations and issues no token, so
+    its gateway-local services present, and its daemons accept, the human secret. That branch
+    is the exception to "outside the gateway, the CLI and the root, no component holds the
+    cluster secret" (decisions/2026-10-03-cluster-secret-contraction.md); the live
+    deployment's data plane is local, and this branch only runs when `is_remote`.
+    """
+    from base.cluster.authority.api import acceptance, token_digest
+    from base.cluster.authority.unit import load_unit_capability
+    from base.paths import ava_home
+
+    home = ava_home().resolve()
+    capability = load_unit_capability(home)
+    if capability is not None:
+        api = capability.api
+        return None if api is None else frozenset({api.gateway, token_digest(api.token)})
+    secret = settings.data_plane.cluster_secret
+    if not secret:
+        return None
+    if settings.data_plane.is_remote:
+        return frozenset({token_digest(secret)})
+    return frozenset(acceptance(home).values())
+
+
 def gateway_auth_headers() -> dict[str, str]:
     """Auth headers a client presents to the cluster's authenticated surfaces.
 

@@ -68,6 +68,7 @@ def notify_owner(text: str) -> None:
     The R3 migration shape is ``Policy(max_attempts=1, idempotent=False,
     on_final_failure=log)``."""
     from base.cluster import home_label
+    from base.cluster.machine import gateway_auth_headers
     from base.config import settings
     from base.daemon.endpoints import ServiceEndpoints
     from base.paths import ava_home
@@ -84,7 +85,7 @@ def notify_owner(text: str) -> None:
         resp = httpx.post(
             f"{base}/send",
             json={"text": stamped},
-            headers={"Authorization": f"Bearer {settings.data_plane.cluster_secret}"},
+            headers=gateway_auth_headers(),
             timeout=10.0,
         )
         resp.raise_for_status()
