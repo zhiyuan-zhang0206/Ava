@@ -99,7 +99,7 @@ _log = logging.getLogger("base.daemon.health")
 #
 # `base/cluster/tests/test_cluster_env.py` guards that they stay in sync.
 
-# The health daemons' ports from the fixed table (base.host.env.port_table, 8103-8120).
+# The health daemons' ports from the fixed table (base.host.env.port_table, 8103-8116).
 # The curl_url of ServiceSpec in cli/commands.py references the same ports. A
 # unit whose `.env` names no health port binds these.
 DEFAULT_PORTS: dict[str, int] = {svc: FIXED_PORTS[svc] for svc in health_port_env_aliases()}
