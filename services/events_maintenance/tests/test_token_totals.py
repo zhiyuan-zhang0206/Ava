@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime, timedelta
 import psycopg
 import pytest
 
-from services.events_maintenance import rollup, token_totals
+from services.events_maintenance import daemon, rollup, token_totals
 
 _TODAY = date(2026, 6, 30)
 
@@ -146,11 +146,14 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
     token_totals.fold_totals(db, today=today)
     assert _total(db, agent) == (100, 10)
 
-    @contextmanager
-    def connect() -> Generator[psycopg.Connection]:
-        yield db
+    class _Database:
+        """The service's database handle, dialing the test connection."""
 
-    monkeypatch.setattr("base.db.connect", connect)
+        @contextmanager
+        def connect(self) -> Generator[psycopg.Connection]:
+            yield db
+
+    monkeypatch.setattr(daemon, "events_maintenance_db", _Database)
     _raw_usage(db, agent, old, 150)  # the backfilled history of a folded day
 
     recent = (today - timedelta(days=1)).strftime("%Y%m%d")
