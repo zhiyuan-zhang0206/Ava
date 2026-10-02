@@ -1,7 +1,6 @@
 {
   "ambient_state": {
-    "services/heartbeat/daemon.py::asyncio-task:run": 1,
-    "services/heartbeat/daemon.py::import-time-read:_PIDFILE": 1
+    "services/heartbeat/daemon.py::asyncio-task:run": 1
   },
   "complexity": {
     "services/heartbeat/daemon.py::_reconcile_checkin_outcomes": 19,

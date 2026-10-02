@@ -9,7 +9,11 @@ the `.env` contract stay exactly as they were.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import Field
+
+from base.host.env.port_table import FIXED_PORTS
 
 # ── daemon /healthz ports — host scope ───────────────────────────────────
 #
@@ -20,140 +24,56 @@ from pydantic import Field
 # gateway reads that URL back off the machines row. So the gateway does not serve
 # these to runners over /api/bootstrap, and a runner's .env never caches a
 # gateway-served value. `ava start` refuses to launch onto a port another home's
-# daemon already answers on. The sibling `*_health_url` / `*_pidfile` fields were
-# already `host`.
+# daemon already answers on. A daemon's healthz URL and pidfile are derived from
+# its name (`base.daemon.health.healthz_url`, `base.paths.pid_path`), not configured.
+
+
+def health_port_field(name: str, *, capability: str | None = None, writable: bool = False) -> Any:
+    """The `<name>_health_port` field of a standard `/healthz` daemon.
+
+    `name` is the daemon's health name (a key of the fixed port table); the
+    alias is `AVA_<NAME>_HEALTH_PORT` and the described default is the table's.
+    """
+    extra: dict[str, Any] = {} if capability is None else {"capability": capability}
+    extra |= {
+        "restart_required": "",
+        "writable": writable,
+        "sensitive": False,
+        "scope": "host",
+        "remote_writable": False,
+    }
+    return Field(
+        default=None,
+        alias=f"AVA_{name.upper()}_HEALTH_PORT",
+        description=(
+            f"{name.replace('_', ' ').capitalize()} daemon /healthz port override (per unit). "
+            f"Unset = default {FIXED_PORTS[name]}."
+        ),
+        json_schema_extra=extra,
+    )
 
 
 class ServiceHealthPortFields:
-    """The per-unit daemon /healthz port overrides, in their former order."""
+    """The per-unit daemon /healthz port overrides."""
 
-    labeler_health_port: int | None = Field(
-        default=None,
-        alias="AVA_LABELER_HEALTH_PORT",
-        description="Labeler daemon /healthz port override (per unit). Unset = default 8103.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
+    labeler_health_port: int | None = health_port_field("labeler")
+    im_bridge_health_port: int | None = health_port_field("im_bridge")
+    heartbeat_health_port: int | None = health_port_field("heartbeat")
+    delivery_watchdog_health_port: int | None = health_port_field("delivery_watchdog")
+    task_maintenance_health_port: int | None = health_port_field("task_maintenance")
+    events_maintenance_health_port: int | None = health_port_field("events_maintenance")
+    pg_backup_health_port: int | None = health_port_field("pg_backup")
+    memory_indexer_health_port: int | None = health_port_field("memory_indexer")
+    # The ops daemon is the agent-runner's inbound port the gateway dials to run
+    # cluster ops; the runner registers the resulting URL itself.
+    ops_health_port: int | None = health_port_field("ops", capability="agent-runner")
+    # `writable`: the one official repair surface for a hosted-runner port that
+    # collides on a mirrored localhost namespace (`.env` hand-edits were the only
+    # fix during the 2026-09-02 win/wsl 8114 incident). Host scope stays
+    # host-writable; remote_writable=False keeps a remote `--machine` set out.
+    agent_host_health_port: int | None = health_port_field(
+        "agent_host", capability="agent-runner", writable=True
     )
-
-    im_bridge_health_port: int | None = Field(
-        default=None,
-        alias="AVA_IM_BRIDGE_HEALTH_PORT",
-        description="IM Bridge daemon /healthz port override (per unit). Unset = default 8111.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    heartbeat_health_port: int | None = Field(
-        default=None,
-        alias="AVA_HEARTBEAT_HEALTH_PORT",
-        description="Heartbeat daemon /healthz port override (per unit). Unset = default 8107.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    delivery_watchdog_health_port: int | None = Field(
-        default=None,
-        alias="AVA_DELIVERY_WATCHDOG_HEALTH_PORT",
-        description="Delivery watchdog /healthz port override (per unit). Unset = default 8110.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    delivery_watchdog_health_url: str = Field(
-        default="",
-        alias="AVA_DELIVERY_WATCHDOG_HEALTH_URL",
-        description="Delivery watchdog healthcheck URL. Empty = derive via base.daemon.health.health_port('delivery_watchdog').",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    task_maintenance_health_port: int | None = Field(
-        default=None,
-        alias="AVA_TASK_MAINTENANCE_HEALTH_PORT",
-        description="Task-maintenance daemon /healthz port override (per unit). Unset = default 8108.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    events_maintenance_health_port: int | None = Field(
-        default=None,
-        alias="AVA_EVENTS_MAINTENANCE_HEALTH_PORT",
-        description="Events-maintenance daemon /healthz port override (per unit). Unset = default 8109.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    pg_backup_health_port: int | None = Field(
-        default=None,
-        alias="AVA_PG_BACKUP_HEALTH_PORT",
-        description="Postgres backup scheduler /healthz port override (per unit). Unset = default 8116.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    memory_indexer_health_port: int | None = Field(
-        default=None,
-        alias="AVA_MEMORY_INDEXER_HEALTH_PORT",
-        description="Memory indexer daemon /healthz port override (per unit). Unset = default 8105.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    ops_health_port: int | None = Field(
-        default=None,
-        alias="AVA_OPS_HEALTH_PORT",
-        description="ava-ops daemon /healthz + /ops port override (per unit) — the agent-runner's inbound port the gateway dials to run cluster ops; the runner registers the resulting URL itself. Unset = default 8113.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
+    page_server_health_port: int | None = health_port_field(
+        "page_server", capability="agent-runner"
     )

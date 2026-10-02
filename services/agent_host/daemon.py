@@ -48,6 +48,7 @@ import os
 import signal
 import sys
 from collections.abc import Collection
+from pathlib import Path
 from typing import cast
 
 import psycopg
@@ -77,6 +78,7 @@ from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
 from base.log import init_gateway_process, logger
+from base.paths import pid_path
 from base.sessions.helper_chain_guard import parent_chain_intact
 from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
@@ -89,7 +91,11 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.agent_host.daemon")
 
 _MODULE = "services.agent_host.daemon"
-_PIDFILE = settings.services.agent_host_pidfile
+
+
+def _pidfile() -> Path:
+    return pid_path("agent_host")
+
 
 # A fixed timer proves liveness even when no agent has work. The same beat
 # renews hosted agent leases, so its step IS the lattice's renewal interval.
@@ -442,7 +448,7 @@ async def _close_host_pools(
 def _is_running() -> bool:
     """Whether a host is already running. Pid-reuse-safe: a live pid whose argv
     does not name this module is a recycled pid, not an instance."""
-    return pidfile_holds_daemon(_PIDFILE, _MODULE)
+    return pidfile_holds_daemon(_pidfile(), _MODULE)
 
 
 async def run() -> None:
@@ -450,10 +456,10 @@ async def run() -> None:
     for why the order is what it is."""
     assert_clock_lattice()
     if _is_running():
-        _log.info("[agent-host] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[agent-host] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
-    if not acquire_pidfile(_PIDFILE, _MODULE):
-        _log.info("[agent-host] could not acquire pidfile %s, exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), _MODULE):
+        _log.info("[agent-host] could not acquire pidfile %s, exiting", _pidfile())
         sys.exit(1)
 
     # langgraph types its checkpointer parameter with an unparameterized generic,
@@ -540,7 +546,7 @@ async def run() -> None:
         if health is not None:
             await stop_health_server(health)
         await _close_host_pools(workload_pool, control_pool)
-        remove_pidfile(_PIDFILE)
+        remove_pidfile(_pidfile())
         _log.info("[agent-host] daemon stopped")
 
 

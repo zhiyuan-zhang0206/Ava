@@ -44,6 +44,7 @@ import os
 import sys
 import time
 from collections import defaultdict
+from pathlib import Path
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -61,11 +62,16 @@ from base.daemon.shutdown import install_graceful_shutdown
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.log import init_gateway_process
+from base.paths import pid_path
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
 
-_PIDFILE = settings.services.task_maintenance_pidfile
+
+def _pidfile() -> Path:
+    return pid_path("task_maintenance")
+
+
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
 
@@ -452,13 +458,13 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "ava_builtins.plugins.ava_fleet.task_maintenance.daemon"):
-        _log.info("[task_maintenance] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "ava_builtins.plugins.ava_fleet.task_maintenance.daemon"):
+        _log.info("[task_maintenance] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -466,7 +472,9 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
+    return pidfile_holds_daemon(
+        _pidfile(), "ava_builtins.plugins.ava_fleet.task_maintenance.daemon"
+    )
 
 
 async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
@@ -516,13 +524,13 @@ async def run() -> None:
     if _is_running():
         _log.info(
             "[task-maintenance] daemon already running (pidfile=%s), exiting",
-            _PIDFILE,
+            _pidfile(),
         )
         sys.exit(1)
 
     # Pidfile before the healthz bind — see services/restarter/daemon.py:run().
     _write_pidfile()
-    _log.info("[task-maintenance] pidfile written: %s", _PIDFILE)
+    _log.info("[task-maintenance] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     health = await start_health_server("task_maintenance", liveness=liveness)

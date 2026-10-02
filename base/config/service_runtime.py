@@ -197,32 +197,6 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
-    memory_indexer_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "memory_indexer.pid",
-        alias="AVA_MEMORY_INDEXER_PIDFILE",
-        description="Memory indexer daemon pidfile path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    memory_indexer_health_url: str = Field(
-        default="",
-        alias="AVA_MEMORY_INDEXER_HEALTH_URL",
-        description="Memory indexer healthcheck URL. Empty = derive via base.daemon.health.health_port('memory_indexer').",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     memory_indexer_reconcile_retry_backoff_seconds: float = Field(
         default=60.0,
         gt=0,
@@ -259,53 +233,6 @@ class _ServiceRuntimeSettings(EnvSettings):
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    page_server_health_url: str = Field(
-        default="",
-        alias="AVA_PAGE_SERVER_HEALTH_URL",
-        description="Page server supervisor healthcheck URL. Empty = derive via base.daemon.health.health_port('page-server').",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    agent_host_health_port: int | None = Field(
-        default=None,
-        alias="AVA_AGENT_HOST_HEALTH_PORT",
-        description="Hosted agent-runner healthz port. Unset = default 8114.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            # The one official repair surface for a hosted-runner port that
-            # collides on a mirrored localhost namespace: `.env` hand-edits were
-            # the only fix during the 2026-09-02 win/wsl 8114 incident (the
-            # field was reserved read-only before the service existed). Host
-            # scope stays host-writable; remote_writable=False keeps a remote
-            # `--machine` set out, like every other host-scope key.
-            "writable": True,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    page_server_health_port: int | None = Field(
-        default=None,
-        alias="AVA_PAGE_SERVER_HEALTH_PORT",
-        description="Page server supervisor healthz port. Unset = default 8112.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
             "sensitive": False,
             "scope": "host",
             "remote_writable": False,
