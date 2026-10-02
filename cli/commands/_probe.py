@@ -100,7 +100,7 @@ def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
     """Whether `spec`'s port answers an Ava `/healthz` whose body names its home.
 
     Read off what the spec declares, not off its URL: a standard daemon carries a
-    `health_name` (its URL is built from the same `health_port(<daemon>)` call the
+    `health_name` (its URL is built from the same `ServiceEndpoints` row the
     daemon passes to `start_health_server`, so the URL probed and the port bound
     cannot disagree), and the gate declares `home_healthz` for its entry port. The
     gateway (`/api/health`), the browser (CDP `/json/version`), milvus (gRPC) and

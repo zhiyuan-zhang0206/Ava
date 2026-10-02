@@ -27,26 +27,16 @@ def _sites(source: str, rel: str = f"{_PACKAGE}/core.py") -> dict[str, int]:
 
 
 @pytest.mark.parametrize(
-    ("imports", "call", "expected"),
+    "imports",
     [
-        ("from base.daemon.health import health_port", 'health_port("x")', "health_port"),
-        ("from base.paths import pid_path as _pid", '_pid("x")', "pid_path"),
-        ("import base.paths", 'base.paths.pid_path("x")', "pid_path"),
-        ("import base.daemon.health as h", 'h.health_port("x")', "health_port"),
-        ("from base import paths", 'paths.pid_path("x")', "pid_path"),
-        ("from base.daemon import health", 'health.health_port("x")', "health_port"),
-        (
-            "from base.daemon.endpoints import ServiceEndpoints",
-            "ServiceEndpoints.from_settings()",
-            "ServiceEndpoints.from_settings",
-        ),
+        "from base.daemon.endpoints import ServiceEndpoints",
+        "from base.daemon.endpoints import ServiceEndpoints as Table",
     ],
 )
-def test_ambient_lookups_in_a_governed_package_are_sites(
-    imports: str, call: str, expected: str
-) -> None:
-    source = f"{imports}\n\n\ndef f():\n    return {call}\n"
-    assert _sites(source) == {f"ambient-endpoint:{expected}": 1}
+def test_building_the_table_outside_a_root_is_a_site(imports: str) -> None:
+    alias = "Table" if imports.endswith("Table") else "ServiceEndpoints"
+    source = f"{imports}\n\n\ndef f():\n    return {alias}.from_settings()\n"
+    assert _sites(source) == {"ambient-endpoint:ServiceEndpoints.from_settings": 1}
 
 
 def test_a_row_taken_from_the_root_is_not_a_site() -> None:
@@ -57,21 +47,29 @@ def test_a_row_taken_from_the_root_is_not_a_site() -> None:
     assert _sites(source) == {}
 
 
-def test_the_root_may_build_the_table_but_not_look_up_ambiently() -> None:
+def test_the_root_may_build_the_table() -> None:
     source = """
         from base.daemon.endpoints import ServiceEndpoints
-        from base.paths import pid_path
 
         def f():
-            ServiceEndpoints.from_settings()
-            return pid_path("x")
+            return ServiceEndpoints.from_settings().of("x")
     """
-    assert _sites(source, _ROOT) == {"ambient-endpoint:pid_path": 1}
+    assert _sites(source, _ROOT) == {}
+
+
+def test_an_unrelated_from_settings_is_not_a_site() -> None:
+    source = """
+        from base.db import Database
+
+        def f():
+            return Database.from_settings()
+    """
+    assert _sites(source) == {}
 
 
 @pytest.mark.parametrize("rel", ["services/other/core.py", f"{_PACKAGE}/tests/test_core.py"])
 def test_other_modules_and_tests_are_outside_the_rule(rel: str) -> None:
-    source = 'from base.paths import pid_path\n\n\ndef f():\n    return pid_path("x")\n'
+    source = "from base.daemon.endpoints import ServiceEndpoints\n\n\ndef f():\n    return ServiceEndpoints.from_settings()\n"
     assert _sites(source, rel) == {}
 
 

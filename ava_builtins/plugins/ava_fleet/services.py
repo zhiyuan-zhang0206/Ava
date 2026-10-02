@@ -14,7 +14,7 @@ This module is deliberately light: it imports only the ops service contract and
 roster probe helper plus `base` — never `plugin.py` or the fleet
 domain code — so the ops/CLI/watchdog process that discovers it does not pull the
 agent kernel in. `services()` is a function (not a module constant) so probe
-ports derived from settings / monkeypatched `health_port()` are read at use-time,
+ports derived from settings / monkeypatched endpoints are read at use-time,
 matching `build_services()`'s use-time contract.
 """
 

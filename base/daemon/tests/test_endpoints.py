@@ -1,4 +1,4 @@
-"""`ServiceEndpoints`: the table is the settings-and-home facts of `health_port` / `pid_path`,
+"""`ServiceEndpoints`: the table is the settings-and-home facts of every daemon's port and pidfile,
 read once at construction."""
 
 from __future__ import annotations
@@ -7,19 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from base.config import settings
+from base.config import get_field, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
-from base.daemon.health import health_port
 from base.host.env.registry import health_port_env_aliases
-from base.paths import pid_path
+from base.paths import run_dir
 
 
-def test_every_health_daemon_has_an_endpoint_matching_the_ambient_helpers() -> None:
+def test_every_health_daemon_has_an_endpoint_from_its_setting_and_the_run_dir() -> None:
     table = ServiceEndpoints.from_settings()
     assert {e.name for e in table} == set(health_port_env_aliases())
     for endpoint in table:
-        assert endpoint.health_port == health_port(endpoint.name)
-        assert endpoint.pidfile == pid_path(endpoint.name)
+        assert endpoint.health_port == int(get_field(f"{endpoint.name}_health_port"))
+        assert endpoint.pidfile == run_dir() / f"{endpoint.name}.pid"
 
 
 def test_a_port_override_reaches_the_row_and_only_that_row(monkeypatch: pytest.MonkeyPatch) -> None:
