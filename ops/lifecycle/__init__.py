@@ -143,7 +143,7 @@ async def cancel_agent_op(agent_id: int, db_pool: ConnectionPool) -> CancelReque
     iid = await asyncio.to_thread(_cancel_blocking, agent_id, db_pool)
     if iid is None:
         return CancelRequested(status="already_terminated")
-    await publish_inbound_arrived(agent_id, iid, "cancel", "user", "")
+    await publish_inbound_arrived(EventBus.from_settings(), agent_id, iid, "cancel", "user", "")
     return CancelRequested(status="enqueued")
 
 
@@ -177,7 +177,7 @@ async def terminate_agent_op(
         )
         await _cancel_hosted_turn_best_effort(agent_id, command_id)
         for page_name in killed_page_names:
-            await publish_page_closed(agent_id, page_name)
+            await publish_page_closed(EventBus.from_settings(), agent_id, page_name)
         _log.info(
             "[gateway] agent %s force requested by %s (pid=%s)",
             agent_id,
@@ -208,7 +208,9 @@ async def terminate_agent_op(
             status="already_terminated",
             shell_sessions=await _kill_shell_sessions_now(agent_id, kill=True),
         )
-    await publish_inbound_arrived(agent_id, iid, "terminate", body.source, "")
+    await publish_inbound_arrived(
+        EventBus.from_settings(), agent_id, iid, "terminate", body.source, ""
+    )
     return TerminateAgentResponse(
         status="enqueued",
         shell_sessions=ShellSessionsKill(when="at_exit") if body.kill_all_shell_sessions else None,
@@ -517,7 +519,9 @@ async def restart_agent_op(
     iid = await asyncio.to_thread(_restart_blocking, agent_id, body, db_pool)
     if iid is None:
         return RestartAgentResponse(status="already_terminated")
-    await publish_inbound_arrived(agent_id, iid, "restart", body.source, "")
+    await publish_inbound_arrived(
+        EventBus.from_settings(), agent_id, iid, "restart", body.source, ""
+    )
     return RestartAgentResponse(status="enqueued")
 
 

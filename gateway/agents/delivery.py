@@ -134,7 +134,9 @@ async def deliver_chat_inbound(
         await asyncio.to_thread(publish_inbound_wake, agent_id, str(inbound_id))
     if pending:
         _spawn_background(
-            _ops.publish_inbound_arrived(agent_id, inbound_id, "chat", source, content)
+            _ops.publish_inbound_arrived(
+                EventBus.from_settings(), agent_id, inbound_id, "chat", source, content
+            )
         )
         # Auto-resurrect: a chat delivered to a terminated agent should wake it so
         # the sender's message gets a response — the user's reply (or any peer /
@@ -184,7 +186,9 @@ async def reconcile_chat_delivery(
         return ChatDelivery(status, receipt.inbound_id)
     await asyncio.to_thread(publish_inbound_wake, agent_id, str(receipt.inbound_id))
     _spawn_background(
-        _ops.publish_inbound_arrived(agent_id, receipt.inbound_id, "chat", source, content)
+        _ops.publish_inbound_arrived(
+            EventBus.from_settings(), agent_id, receipt.inbound_id, "chat", source, content
+        )
     )
     status = await _ops.resurrect_if_terminated(
         agent_id,

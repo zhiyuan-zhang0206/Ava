@@ -429,12 +429,18 @@ async def create_and_launch_agent(
         prompt_source=body.prompt_source,
     )
     if prompt_inbound_id is not None and body.prompt_source is not None and body.prompt is not None:
+        from base.events.live.bus import EventBus
         from ops.lifecycle.events import publish_inbound_arrived
 
         prompt_content = spawn_prompt_with_label(body.prompt, body.label)
         try:
             await publish_inbound_arrived(
-                new_id, prompt_inbound_id, "chat", body.prompt_source, prompt_content
+                EventBus.from_settings(),
+                new_id,
+                prompt_inbound_id,
+                "chat",
+                body.prompt_source,
+                prompt_content,
             )
         except Exception as exc:
             logger.warning("created agent {} inbound hint failed: {}", new_id, type(exc).__name__)

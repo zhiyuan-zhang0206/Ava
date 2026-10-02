@@ -144,7 +144,9 @@ async def test_legacy_launch_agent_op_delivers_plain_spawn_prompt(
     monkeypatch.setattr(launch, "_insert_prompt_blocking", _fake_insert)
     published: list[object] = []
 
-    async def _fake_publish(aid: int, iid: int, kind: str, source: str, prompt: str) -> None:
+    async def _fake_publish(
+        _bus: object, aid: int, iid: int, kind: str, source: str, prompt: str
+    ) -> None:
         published.append((aid, iid, kind, source, prompt))
 
     monkeypatch.setattr(lifecycle, "publish_inbound_arrived", _fake_publish)

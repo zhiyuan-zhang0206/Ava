@@ -406,14 +406,15 @@ async def post_agent_system_note(
         request_inbound_provenance(request),
     )
     # Announce for the live UI (frontend badge / turn active), like chat.
+    note_kind = InboundKind.SYSTEM_NOTE.value
     await _ops.publish_inbound_arrived(
-        agent_id, inbound_id, InboundKind.SYSTEM_NOTE.value, body.source, body.content
+        request.app.state.bus, agent_id, inbound_id, note_kind, body.source, body.content
     )
     if body.resurrect:
         status = await _ops.resurrect_if_terminated(
             agent_id,
             trigger_inbound_id=inbound_id,
-            trigger_inbound_kind=InboundKind.SYSTEM_NOTE.value,
+            trigger_inbound_kind=note_kind,
         )
     else:
         status = await asyncio.to_thread(get_agent_status, agent_id)

@@ -1293,7 +1293,7 @@ def test_supersede_publishes_global_notice_id(
 
     published: list[int] = []
 
-    async def _capture(_agent_id: int, notice_id: int) -> None:
+    async def _capture(_bus: object, _agent_id: int, notice_id: int) -> None:
         published.append(notice_id)
 
     monkeypatch.setattr(ops_lifecycle, "publish_notice_resolved", _capture)
