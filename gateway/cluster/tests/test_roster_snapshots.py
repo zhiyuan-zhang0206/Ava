@@ -5,6 +5,7 @@ fresh snapshot) dials."""
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -15,6 +16,7 @@ from psycopg.types.json import Jsonb
 
 import gateway.cluster.status as status_mod
 from base.api_contracts.status import MachineStatus
+from base.config import settings
 from gateway.app import app
 from gateway.cluster import snapshots
 from gateway.cluster.snapshots import Snapshot
@@ -190,6 +192,28 @@ def test_the_gateway_remembers_no_failure_between_reads(monkeypatch: pytest.Monk
 
     assert [m.online for m in first + second] == [False, False]
     assert calls == ["wsl", "wsl"]
+
+
+def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dials run in parallel under one per-dial deadline, so five hosts that
+    never answer cost about one budget, not five."""
+    budget_s = 0.3
+    monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", budget_s)
+
+    async def dispatch(**_kw: object) -> dict[str, object]:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
+
+    started = time.monotonic()
+    machines = _gather([_row(f"h{i}") for i in range(5)], None)
+    elapsed = time.monotonic() - started
+
+    assert [m.online for m in machines] == [False] * 5
+    assert elapsed < budget_s * 3
 
 
 # --- the endpoints ------------------------------------------------------------
