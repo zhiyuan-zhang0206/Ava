@@ -285,12 +285,6 @@ class NeighborsResponse(BaseModel):
     neighbors: list[NeighborRow]
     # The spawn/fork chain above the queried agent, nearest ancestor first.
     ancestors: list[NeighborRow]
-    # True when the tie graph's event-stream read degraded this request — a
-    # frozen-archive lock-wait skip / failed scan, or the no-observability
-    # refusal of the live tail: the tie set is incomplete (live-only, or empty
-    # with just the birth chain) and must not be read as the complete graph.
-    # Defaults False so older clients ignore it.
-    degraded: bool = False
 
 
 class BornChainRow(BaseModel):

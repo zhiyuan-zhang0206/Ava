@@ -5,14 +5,12 @@ events, so every stale-serving fallback on GET /api/fleet/graph must emit
 exactly one event per degradation episode — a path that serves stale silently
 is a hole in the alert. One case per reason in the closed vocabulary
 (base.events.contract.FleetGraphStaleReason), plus the by-design
-non-emissions: a healthy response emits nothing, re-serving the same episode
-from the archive's negative cache does not re-emit, and the per-reason
-emission rate cap collapses repeats.
+non-emissions: a healthy response emits nothing, and the per-reason emission
+rate cap collapses repeats.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from typing import Any
 
@@ -23,13 +21,13 @@ from psycopg import errors as pg_errors
 
 from base import telemetry
 from gateway.app import app
-from gateway.lgtm import loki_query_budget, prom_metrics, telemetry_staleness
+from gateway.lgtm import prom_metrics, telemetry_staleness
 
 _STALE_EVENT = "fleet_graph_stale"
 
 
 class _FakeRedis:
-    """Minimal Redis fake for the route's poll/last-good/frozen caches."""
+    """Minimal Redis fake for the route's poll and last-good caches."""
 
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
@@ -113,19 +111,11 @@ def _empty_pg_phase(*_args: object, **_kwargs: object) -> Any:
     """Stand-in for `_fetch_pg_graph`: empty node rows, no Postgres."""
     import gateway.routers.fleet_graph as fg
 
-    return fg._PgGraphData([])
+    return fg._PgGraphData([], [])
 
 
 def _empty_prom_tokens(*_args: object, **_kwargs: object) -> dict[str, float]:
     return {}
-
-
-def _empty_loki_tail(**_kwargs: object) -> tuple[list[Any], bool]:
-    return [], False
-
-
-def _empty_archive_rows() -> tuple[list[Any], bool]:
-    return [], False
 
 
 def _stub_pg(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,12 +123,6 @@ def _stub_pg(monkeypatch: pytest.MonkeyPatch) -> None:
     import gateway.routers.fleet_graph as fg
 
     monkeypatch.setattr(fg, "_fetch_pg_graph", _empty_pg_phase)
-
-
-def _stub_archive_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    import gateway.routers.fleet_graph as fg
-
-    monkeypatch.setattr(fg, "_cached_archive_edges", _empty_archive_rows)
 
 
 def _stub_prom_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,97 +169,6 @@ def test_pg_phase_budget_emits(
     assert emitted == [{"route": "fleet_graph", "reason": "pg_budget"}]
 
 
-def test_archive_fetch_failure_emits_and_negative_caches(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """A failed frozen-archive scan -> fetch_failed + the 60s negative entry."""
-    import gateway.routers.fleet_graph as fg
-
-    redis = _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-
-    def fail(*_a: object, **_k: object) -> object:
-        raise httpx.ConnectError("loki archive unreachable")
-
-    monkeypatch.setattr(fg, "_fetch_archive_edges", fail)
-
-    status, stale = _get_stale()
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "fetch_failed"}]
-    negative = json.loads(redis.values[fg._FROZEN_ARCHIVE_CACHE_KEY])
-    assert negative["degraded"] is True
-
-
-def test_archive_negative_cache_reserve_does_not_reemit(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """Re-serving the same episode from the negative cache is not a new event.
-
-    With the archive scan still failing, the second poll within the 60s
-    negative window must serve stale WITHOUT calling the fetch again — one
-    event per degradation episode, never per poll.
-    """
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-
-    def fail(*_a: object, **_k: object) -> object:
-        raise httpx.ConnectError("loki archive unreachable")
-
-    monkeypatch.setattr(fg, "_fetch_archive_edges", fail)
-
-    with TestClient(app) as client:
-        first = client.get("/api/fleet/graph")
-        second = client.get("/api/fleet/graph")
-
-    assert first.json()["stale"] is True
-    assert second.json()["stale"] is True
-    assert emitted == [{"route": "fleet_graph", "reason": "fetch_failed"}]
-
-
-def test_archive_lock_wait_emits(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """A waiter that cannot enter the single-flight archive scan -> lock_wait."""
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-    monkeypatch.setattr(fg, "_ARCHIVE_FETCH_WAIT_S", 0.05)
-
-    assert fg._ARCHIVE_FETCH_LOCK.acquire(timeout=1)
-    try:
-        status, stale = _get_stale()
-    finally:
-        fg._ARCHIVE_FETCH_LOCK.release()
-
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "lock_wait"}]
-
-
-def test_archive_read_escape_emits_fetch_failed(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """An exception escaping the cached archive read -> fetch_failed."""
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-
-    def boom() -> object:
-        raise httpx.ConnectError("archive read exploded")
-
-    monkeypatch.setattr(fg, "_cached_archive_edges", boom)
-
-    status, stale = _get_stale()
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "fetch_failed"}]
-
-
 def test_prom_admission_budget_emits(
     monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
 ) -> None:
@@ -284,7 +177,6 @@ def test_prom_admission_budget_emits(
 
     _install_redis(monkeypatch)
     _stub_pg(monkeypatch)
-    _stub_archive_ok(monkeypatch)
     monotonic = iter((0.0, 0.0))
     monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
 
@@ -307,7 +199,6 @@ def test_prom_query_failure_emits(
 
     _install_redis(monkeypatch)
     _stub_pg(monkeypatch)
-    _stub_archive_ok(monkeypatch)
     monotonic = iter((0.0, 0.0))
     monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
 
@@ -330,7 +221,6 @@ def test_prom_phase_budget_emits(
 
     _install_redis(monkeypatch)
     _stub_pg(monkeypatch)
-    _stub_archive_ok(monkeypatch)
     _stub_prom_ok(monkeypatch)
     monotonic = iter((0.0, 0.0, fg._ROUTE_TIMEOUT_S + 0.1))
     monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
@@ -341,81 +231,14 @@ def test_prom_phase_budget_emits(
     assert emitted == [{"route": "fleet_graph", "reason": "prom_budget"}]
 
 
-def test_loki_admission_budget_emits(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """A refused Loki query admission -> loki_budget."""
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-    _stub_archive_ok(monkeypatch)
-    _stub_prom_ok(monkeypatch)
-
-    def refused(**_kwargs: object) -> tuple[list[Any], bool]:
-        raise loki_query_budget.LokiQueryBudgetError("queue_full")
-
-    monkeypatch.setattr(fg, "_fetch_loki_edges", refused)
-
-    status, stale = _get_stale()
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "loki_budget"}]
-
-
-def test_loki_query_failure_emits(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """A Loki transport failure -> loki_failed."""
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-    _stub_archive_ok(monkeypatch)
-    _stub_prom_ok(monkeypatch)
-
-    def fail(**_kwargs: object) -> tuple[list[Any], bool]:
-        raise httpx.ConnectError("loki unreachable")
-
-    monkeypatch.setattr(fg, "_fetch_loki_edges", fail)
-
-    status, stale = _get_stale()
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "loki_failed"}]
-
-
-def test_loki_phase_budget_emits(
-    monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
-) -> None:
-    """Loki phase crossing the route deadline -> loki_budget."""
-    import gateway.routers.fleet_graph as fg
-
-    _install_redis(monkeypatch)
-    _stub_pg(monkeypatch)
-    _stub_archive_ok(monkeypatch)
-    _stub_prom_ok(monkeypatch)
-    monotonic = iter((0.0, 0.0, 0.0, fg._ROUTE_TIMEOUT_S + 0.1))
-    monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
-    monkeypatch.setattr(fg, "_fetch_loki_edges", _empty_loki_tail)
-
-    status, stale = _get_stale()
-    assert status == 200
-    assert stale is True
-    assert emitted == [{"route": "fleet_graph", "reason": "loki_budget"}]
-
-
 def test_healthy_response_emits_nothing(
     monkeypatch: pytest.MonkeyPatch, emitted: list[dict[str, Any]]
 ) -> None:
     """The event marks degraded fallbacks only — never a fresh poll."""
-    import gateway.routers.fleet_graph as fg
 
     _install_redis(monkeypatch)
     _stub_pg(monkeypatch)
-    _stub_archive_ok(monkeypatch)
     _stub_prom_ok(monkeypatch)
-    monkeypatch.setattr(fg, "_fetch_loki_edges", _empty_loki_tail)
 
     with TestClient(app) as client:
         resp = client.get("/api/fleet/graph")
@@ -435,15 +258,15 @@ def test_stale_emit_rate_cap_collapses_repeats(
     """
     import gateway.routers.fleet_graph as fg
 
-    fg._emit_stale("loki_failed")
+    fg._emit_stale("prom_failed")
     fg._emit_stale("pg_timeout")  # a different reason is not suppressed
-    fg._emit_stale("loki_failed")  # same reason inside the default window
-    assert [event["reason"] for event in emitted] == ["loki_failed", "pg_timeout"]
+    fg._emit_stale("prom_failed")  # same reason inside the default window
+    assert [event["reason"] for event in emitted] == ["prom_failed", "pg_timeout"]
 
     monkeypatch.setattr(fg, "_stale_emit_interval_s", lambda: 0.0)
-    fg._emit_stale("loki_failed")
+    fg._emit_stale("prom_failed")
     assert [event["reason"] for event in emitted] == [
-        "loki_failed",
+        "prom_failed",
         "pg_timeout",
-        "loki_failed",
+        "prom_failed",
     ]
