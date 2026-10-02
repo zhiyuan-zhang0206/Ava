@@ -15,21 +15,32 @@ sentinel (env-class red).
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from base.host.env import dotenv_boot
 from base.host.env.tests.test_dotenv_boot import (
-    _IDENTITY_LINES,
     _point_env_at_without_db_url,
     _restore_authority_env,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
 from tests.fixtures.units import use_env_files
 
-_NO_DATA_PLANE_IDENTITY_LINES = tuple(
-    ln for ln in _IDENTITY_LINES if ln.startswith(("AVA_CLUSTER_SECRET=", "AVA_GATEWAY_URL="))
+_NO_DATA_PLANE_IDENTITY_LINES = (
+    f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
+    f"AVA_GATEWAY_URL={os.environ['AVA_GATEWAY_URL']}",
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_environ() -> Iterator[None]:
+    """`_enforce_cluster_env_authority` and the CLI entry mutate os.environ directly,
+    not through monkeypatch: put the whole environment back after each test."""
+    snapshot = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(snapshot)
 
 
 def _point_env_at_without_data_plane_urls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
