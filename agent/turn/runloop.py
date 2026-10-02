@@ -26,7 +26,7 @@ from base.agents.context import AvaContext
 from base.config.turn_view import turn_settings
 from base.events.live.projection import Error
 from base.log import logger
-from base.telemetry.audit_events import insert_event_log_async
+from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
 
 # LangGraph recursion_limit defaults to 25 — far too low for this graph even
 # per-turn: one invocation is one TURN, and a turn is a whole work bout (the
@@ -178,8 +178,11 @@ async def _record_permanent_reject_outcome(
             streak=streak,
             reason=reason,
         )
-        try:
-            await insert_event_log_async(
+        # The halt itself is already in force; a failed audit write is reported
+        # (`audit_write_failed`) instead of aborting the rest of the handling.
+        await record_audit_reported_async(
+            ctx.ops_pool,
+            prepare_event_log(
                 event_type="circuit_breaker",
                 agent_id=agent_id,
                 source="system",
@@ -190,12 +193,8 @@ async def _record_permanent_reject_outcome(
                     "error_class": exc.error_class,
                     "streak": streak,
                 },
-            )
-        except Exception:
-            logger.warning(
-                "failed to record the recovery-halt circuit_breaker event",
-                agent_id=agent_id,
-            )
+            ),
+        )
     try:
         from agent.db import enqueue_fatal_provider_report_to_nearest_alive_ancestor
 
@@ -346,11 +345,13 @@ async def _handle_fatal_llm_error(
             reason=reason,
             status=exc.status,
         )
-        # Record the breaker-open event as an audit event (best-effort: a failure
-        # only loses the audit record, never the breaker state itself).
+        # Record the breaker-open event as an audit event. The breaker state is
+        # already set; a failed audit write is reported (`audit_write_failed`),
+        # never allowed to undo or skip the rest of the handling.
         if emit_reports and ctx.ops_pool is not None:
-            try:
-                await insert_event_log_async(
+            await record_audit_reported_async(
+                ctx.ops_pool,
+                prepare_event_log(
                     event_type="circuit_breaker",
                     agent_id=agent_id,
                     source="system",
@@ -360,13 +361,8 @@ async def _handle_fatal_llm_error(
                         "status": exc.status,
                         "error_class": exc.error_class,
                     },
-                )
-            except Exception as exc_log:
-                logger.warning(
-                    "failed to record circuit_breaker event: {exc!r}",
-                    agent_id=agent_id,
-                    exc=exc_log,
-                )
+                ),
+            )
         if emit_reports and ctx.ops_pool is not None and is_blocked_provider_failure:
             from agent.db import enqueue_fatal_provider_report_to_nearest_alive_ancestor
 

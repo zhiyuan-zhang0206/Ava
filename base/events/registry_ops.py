@@ -13,6 +13,7 @@ from base.events.registry import _telemetry_audit as _telemetry_audit
 from base.events.system import (
     AgentRegistry,
     ArchiveFetchDegraded,
+    AuditWriteFailed,
     Auth401Rejected,
     BackupOperationCustody,
     CheckpointTableSizes,
@@ -444,6 +445,13 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "checkpoint_table_sizes",
         "checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run)",
         payload=CheckpointTableSizes,
+    ),
+    "audit_write_failed": _telemetry(
+        "audit_write_failed",
+        "an audit event could not be recorded in audit_events (the record is missing; "
+        "the Loki projection of the same event still went out)",
+        payload=AuditWriteFailed,
+        tier="anomaly",
     ),
     # gate entry-point diagnostics
     "gate_auth_probe_failed": _telemetry(

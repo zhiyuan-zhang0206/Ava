@@ -8,16 +8,19 @@ JSONL mirror receive the same event through the unified emitter
 (`base.telemetry`) as a projection that sheds under overload, truncates long
 lines and expires after 84 hours; losing the projection loses no record.
 
-Two primitives record an event, and a lint (`scripts/content_lint/lint_audit_record.py`)
-requires every audit emit site to use one:
+The primitives that record an event, one of which every audit emit site must use
+(`scripts/content_lint/lint_audit_record.py` enforces it):
 
-- :func:`record_audit` — INSERT inside the caller's own transaction, so the
-  row commits or rolls back with the business write. The caller emits the
-  returned event after its commit.
-- :func:`record_audit_standalone` — for a producer that owns no transaction
-  (the effect already happened, or another process owns it): one short write
-  transaction, then the emit. A failed write raises; it is never degraded to a
-  projection-only emit.
+- :func:`record_audit` / :func:`record_audit_async` — INSERT inside the caller's
+  own transaction, so the row commits or rolls back with the business write.
+  The caller emits the returned event after its commit.
+- :func:`record_audit_standalone` / :func:`record_audit_standalone_async` — for
+  a producer that owns no transaction (the effect already happened, or another
+  process owns it): one short write transaction, then the emit. A failed write
+  raises; it is never degraded to a projection-only emit.
+- :func:`record_audit_reported` / :func:`record_audit_reported_async` — the same
+  for the few producers that must not fail their caller (an agent-facing tool
+  call that already succeeded): a failed write is reported loudly instead.
 
 `insert_event_log*` below is the enqueue-only API that predates the table. It
 records nothing in Postgres; the call sites still on it are frozen in the lint's
@@ -43,6 +46,7 @@ import json
 from typing import Any, Literal
 
 import psycopg
+from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict
 
 from base import telemetry
@@ -213,6 +217,34 @@ def audit_event_uid(event: telemetry.Event) -> int:
     return uid - (1 << 64) if uid >= 1 << 63 else uid
 
 
+def _audit_row(event: telemetry.Event) -> tuple[Any, ...]:
+    """The INSERT parameters of one audit event; ValueError unless it is registered audit."""
+    spec = EVENTS.get(event.event_name)
+    if (
+        event.category != "audit"
+        or spec is None
+        or "audit" not in {spec.category, *spec.extra_categories}
+    ):
+        raise ValueError(
+            f"record_audit() needs a registered category=audit event, got "
+            f"category={event.category!r} event_name={event.event_name!r}"
+        )
+    return (
+        audit_event_uid(event),
+        event.ts,
+        event.trace_id,
+        event.span_id,
+        event.agent_id,
+        event.machine,
+        event.process,
+        event.event_name,
+        event.level,
+        event.source,
+        event.target_agent_id,
+        json.dumps(event.attributes, default=str, ensure_ascii=False),
+    )
+
+
 def record_audit(conn: psycopg.Connection, event: telemetry.Event) -> telemetry.Event:
     """INSERT one audit event into `audit_events` inside the caller's transaction.
 
@@ -228,37 +260,15 @@ def record_audit(conn: psycopg.Connection, event: telemetry.Event) -> telemetry.
     does not declare as audit) raises ValueError; a database failure
     propagates to the caller's transaction.
     """
-    spec = EVENTS.get(event.event_name)
-    if (
-        event.category != "audit"
-        or spec is None
-        or "audit"
-        not in {
-            spec.category,
-            *spec.extra_categories,
-        }
-    ):
-        raise ValueError(
-            f"record_audit() needs a registered category=audit event, got "
-            f"category={event.category!r} event_name={event.event_name!r}"
-        )
-    conn.execute(
-        _INSERT_AUDIT_EVENT,
-        (
-            audit_event_uid(event),
-            event.ts,
-            event.trace_id,
-            event.span_id,
-            event.agent_id,
-            event.machine,
-            event.process,
-            event.event_name,
-            event.level,
-            event.source,
-            event.target_agent_id,
-            json.dumps(event.attributes, default=str, ensure_ascii=False),
-        ),
-    )
+    conn.execute(_INSERT_AUDIT_EVENT, _audit_row(event))
+    return event
+
+
+async def record_audit_async(
+    conn: psycopg.AsyncConnection[Any], event: telemetry.Event
+) -> telemetry.Event:
+    """:func:`record_audit` for an async connection inside the caller's transaction."""
+    await conn.execute(_INSERT_AUDIT_EVENT, _audit_row(event))
     return event
 
 
@@ -277,3 +287,61 @@ def record_audit_standalone(event: telemetry.Event) -> None:
     with write_transaction() as conn:
         record_audit(conn, event)
     telemetry.emit_prepared(event)
+
+
+async def record_audit_standalone_async(pool: AsyncConnectionPool, event: telemetry.Event) -> None:
+    """:func:`record_audit_standalone` over an async pool."""
+    from base.db.transaction import async_write_transaction
+
+    async with async_write_transaction(pool) as conn:
+        await record_audit_async(conn, event)
+    telemetry.emit_prepared(event)
+
+
+def _report_unrecorded(event: telemetry.Event, exc: Exception) -> None:
+    """Make a failed audit write loud without failing the caller.
+
+    An error log with the traceback plus an `audit_write_failed` anomaly event.
+    The projection still goes out: Loki then carries the fact for 84 hours
+    even though the record does not.
+    """
+    from base.log import logger
+
+    logger.opt(exception=exc).error(
+        "audit event {event_name} could not be recorded in audit_events",
+        event_name=event.event_name,
+    )
+    telemetry.emit(
+        "telemetry",
+        "audit_write_failed",
+        level="error",
+        agent_id=event.agent_id,
+        attributes={
+            "event_name": event.event_name,
+            "error_class": type(exc).__name__,
+            "error": str(exc)[:500],
+        },
+    )
+    telemetry.emit_prepared(event)
+
+
+def record_audit_reported(event: telemetry.Event) -> None:
+    """:func:`record_audit_standalone` for a producer that must not fail its caller.
+
+    Used where the operation already succeeded and raising would be wrong:
+    an agent-facing tool call (the agent would retry and repeat the side
+    effect) or a state transition whose remaining steps must still run. A
+    failed write does not raise; it is reported by :func:`_report_unrecorded`.
+    """
+    try:
+        record_audit_standalone(event)
+    except Exception as exc:
+        _report_unrecorded(event, exc)
+
+
+async def record_audit_reported_async(pool: AsyncConnectionPool, event: telemetry.Event) -> None:
+    """:func:`record_audit_reported` over an async pool."""
+    try:
+        await record_audit_standalone_async(pool, event)
+    except Exception as exc:
+        _report_unrecorded(event, exc)
