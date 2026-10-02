@@ -21,6 +21,7 @@ from base.cluster.authority import (
     mint_generation,
     require_ledger,
 )
+from base.cluster.authority import groups as groups_module
 from base.cluster.authority import ledger as ledger_module
 from base.cluster.authority import roles as roles_module
 from base.cluster.authority.fence import close_revoked, revoke
@@ -138,12 +139,31 @@ def test_gateway_group_holds_the_full_dml_surface(authority_postgres: AuthorityC
         "sequence": {"USAGE", "SELECT", "UPDATE"},
         "routine": {"EXECUTE"},
     }
-    missing = [row[:3] for row in rows if row[2] in required[row[0]] and not row[3]]
+    append_only = set(groups_module._GATEWAY_APPEND_ONLY_TABLES)
+    missing = [
+        row[:3]
+        for row in rows
+        if row[2] in required[row[0]]
+        and not row[3]
+        and not (row[0] == "table" and row[1] in append_only and row[2] in {"UPDATE", "DELETE"})
+    ]
     assert missing == []
     forbidden = {"TRUNCATE", "REFERENCES", "TRIGGER"}
     assert [row[:3] for row in rows if row[2] in forbidden and row[3]] == []
     maintained = {row[1] for row in rows if row[2] == "MAINTAIN" and row[3]}
     assert maintained == {"checkpoints", "checkpoint_blobs", "checkpoint_writes"}
+
+
+@pytest.mark.parametrize(
+    ("login", "group"), [("ava_g0_gateway", "ava_gateway"), ("ava_g0_runner", "ava_runner")]
+)
+def test_both_groups_append_audit_events_but_cannot_rewrite_them(
+    authority_postgres: AuthorityCluster, login: str, group: str
+) -> None:
+    with authority_postgres.admin() as conn:
+        rows = conn.execute(_PRIVILEGE_MATRIX, {"login": login, "group": group}).fetchall()
+    held = {row[2] for row in rows if row[:2] == ("table", "audit_events") and row[3]}
+    assert held == {"SELECT", "INSERT"}
 
 
 @pytest.mark.parametrize("cls", ["gateway", "runner"])

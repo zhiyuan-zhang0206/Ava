@@ -72,6 +72,35 @@ END $$;
 SQL
 echo "  ok"
 
+echo "-> audit_events is append-only: INSERT lands, UPDATE / DELETE / TRUNCATE are rejected"
+psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO audit_events (event_uid, ts, machine, process, event_name, level, source)
+    VALUES (1, now(), 'smoke-machine', 'smoke', 'spawn', 'info', 'user');
+DO $$
+DECLARE
+    statement TEXT;
+BEGIN
+    FOREACH statement IN ARRAY ARRAY[
+        'UPDATE audit_events SET level = ''error''',
+        'DELETE FROM audit_events',
+        'TRUNCATE audit_events'
+    ] LOOP
+        BEGIN
+            EXECUTE statement;
+            RAISE EXCEPTION 'audit_events accepted: %', statement;
+        EXCEPTION WHEN raise_exception THEN
+            IF SQLERRM NOT LIKE 'audit_events is append-only%' THEN
+                RAISE;
+            END IF;
+        END;
+    END LOOP;
+    IF (SELECT count(*) FROM audit_events) <> 1 THEN
+        RAISE EXCEPTION 'audit_events lost its row';
+    END IF;
+END $$;
+SQL
+echo "  ok"
+
 echo "-> trigger smoke: exercise agents_meta termination triggers"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO agents (label) VALUES ('smoke-agent');
