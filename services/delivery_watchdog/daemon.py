@@ -90,7 +90,6 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import base.db
 from base import telemetry
 from base.config import settings
 from base.daemon import round_loop
@@ -99,6 +98,7 @@ from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
@@ -537,7 +537,7 @@ async def run() -> None:
 
     # Four loops share the pool; each borrows a connection only for the length
     # of one short statement batch.
-    pool = base.db.pool(max_size=_POOL_MAX_SIZE)
+    pool = Database.from_settings().pool(max_size=_POOL_MAX_SIZE)
     try:
         await _run_loops(pool, liveness)
     finally:
