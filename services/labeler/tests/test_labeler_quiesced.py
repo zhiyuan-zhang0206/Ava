@@ -11,6 +11,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.daemon.health import Liveness
+from base.db import Database
 from base.deploy.maintenance import admission
 from services.labeler import daemon
 
@@ -25,6 +26,7 @@ async def test_a_quiesced_unit_borrows_no_connection(
     task = asyncio.create_task(
         daemon._dispatch_loop(
             cast("ConnectionPool", pool),
+            Database.from_settings(),
             Liveness(daemon._LIVENESS_TIMEOUT_S),
             daemon.labeler_config(),
         )

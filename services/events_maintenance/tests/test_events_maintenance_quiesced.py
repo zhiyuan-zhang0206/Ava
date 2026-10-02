@@ -13,12 +13,18 @@ from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
 from services.events_maintenance import daemon
 from services.events_maintenance.config import EventsMaintenanceConfig
+from services.events_maintenance.daemon import events_maintenance_db
 from services.events_maintenance.tests.slices import events_maintenance_config
 
 _Loop = Callable[[Any, LoopProgress, EventsMaintenanceConfig], Coroutine[Any, Any, None]]
 
+
+def _rollup(pool: Any, progress: LoopProgress, config: EventsMaintenanceConfig) -> Any:
+    return daemon._dispatch_loop(pool, progress, config, events_maintenance_db())
+
+
 _LOOPS: dict[str, tuple[_Loop, str]] = {
-    "rollup": (daemon._dispatch_loop, "_run_maintenance"),
+    "rollup": (_rollup, "_run_maintenance"),
     "resolution": (daemon._resolution_loop, "_run_resolution"),
 }
 

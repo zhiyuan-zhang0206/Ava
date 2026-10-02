@@ -452,7 +452,11 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     monkeypatch.setattr(daemon, "_remove_pidfile", lambda: closed.append("pidfile"))
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
-    monkeypatch.setattr(daemon.base.db, "pool", _RunPool)
+
+    def pool(_self: object) -> _RunPool:
+        return _RunPool()
+
+    monkeypatch.setattr(daemon.Database, "pool", pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", loop("dispatch"))
     monkeypatch.setattr(daemon, "_resolution_loop", loop("resolution"))
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", loop("registry_gauge"))
