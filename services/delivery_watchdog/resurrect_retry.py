@@ -110,7 +110,7 @@ async def resurrect_one(pool: ConnectionPool, agent_id: int, trigger_inbound_id:
 
     try:
         try:
-            async with asyncio.timeout(rounds.RPC_DEADLINE_S):
+            async with asyncio.timeout(rounds.rpc_deadline_s()):
                 status = await resurrect_if_terminated(
                     agent_id,
                     trigger_inbound_id=trigger_inbound_id,

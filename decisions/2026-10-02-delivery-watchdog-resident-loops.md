@@ -17,7 +17,7 @@ strictly sequential (one round at a time, so an agent is never in two attempts a
 and no single-flight registry exists), owned together with the scan loop by one
 `TaskGroup` in the service's main function. A loop that raises cancels its siblings and
 ends the process; the supervisor restarts it. Within a round the per-agent RPCs run
-under a round-scoped `TaskGroup`, bounded by a semaphore and a per-RPC deadline.
+under a round-scoped `TaskGroup`, bounded by a semaphore and a per-job deadline derived from the cluster RPC client's timeout and retry budget (twice its worst case, since a job makes at most two dispatches).
 
 Cooldowns and the resurrect failure and suppression counters live in
 `delivery_watchdog_attempts`, one row per (loop kind, agent). An attempt is claimed with

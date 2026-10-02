@@ -30,7 +30,7 @@ def pool():
 
 @pytest.fixture
 def progress() -> LoopProgress:
-    return LoopProgress("resurrect", rounds.LOOP_LIVENESS_TIMEOUT_S)
+    return LoopProgress("resurrect", rounds.loop_liveness_timeout_s())
 
 
 def _terminated_owner_with_chat(db: psycopg.Connection) -> tuple[int, int]:
@@ -249,7 +249,7 @@ async def test_hung_rpc_is_cut_at_the_deadline_and_counts_as_a_failure(
         return AgentStatus.TERMINATED
 
     monkeypatch.setattr(ol, "resurrect_if_terminated", hang)
-    monkeypatch.setattr(rounds, "RPC_DEADLINE_S", 0.05)
+    monkeypatch.setattr(rounds, "rpc_deadline_s", lambda: 0.05)
 
     await resurrect_retry.resurrect_round(pool, progress, 5, _THRESHOLD_S)
 

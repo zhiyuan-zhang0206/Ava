@@ -18,16 +18,27 @@ from base.daemon.loop_health import LoopProgress
 
 _log = logging.getLogger("services.delivery_watchdog.rounds")
 
-# Overall deadline for one per-agent RPC. The cluster RPC retries a transport
-# failure up to four attempts of its own per-attempt timeout (30s default, 4s
-# capped backoff between), so this sits above that worst case and below the
-# loops' liveness window.
-RPC_DEADLINE_S = 180.0
-# A loop that has completed no round step for this long reads as wedged on
-# /healthz. A step is a round boundary or one finished per-agent job, so the
-# bound only has to exceed one job's deadline.
-LOOP_LIVENESS_TIMEOUT_S = 300.0
+# Liveness slack above one job's deadline: a loop that has completed no round
+# step for deadline + this reads as wedged on /healthz.
+_LIVENESS_SLACK_S = 60.0
 _BEAT_STEP_S = 15.0
+
+
+def rpc_deadline_s() -> float:
+    """Overall deadline for one per-agent job. A job makes at most two cluster
+    dispatches (hosted-turn recovery: terminate, then resurrect), each bounded by
+    the RPC client's own timeout and retry budget, so the deadline is twice the
+    client's worst case: it only cuts a job the client's budgets did not."""
+    from ops.cluster_rpc import worst_case_dispatch_seconds
+
+    return 2 * worst_case_dispatch_seconds()
+
+
+def loop_liveness_timeout_s() -> float:
+    """How long a recovery loop may go without completing a round step before
+    `/healthz` reads it as wedged: a step is a round boundary or one finished
+    per-agent job, so one job's deadline plus slack."""
+    return rpc_deadline_s() + _LIVENESS_SLACK_S
 
 
 async def sleep_with_progress(progress: LoopProgress, total_s: float) -> None:
@@ -74,7 +85,7 @@ async def fan_out(
     return when all are done.
 
     A job handles its own expected failures and bounds its RPC with
-    `RPC_DEADLINE_S`; an exception it lets escape cancels the round and ends
+    `rpc_deadline_s()`; an exception it lets escape cancels the round and ends
     the loop.
     """
     gate = asyncio.Semaphore(concurrency)
