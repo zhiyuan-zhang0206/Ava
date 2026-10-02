@@ -97,10 +97,9 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/agent_host/tests/test_pooled_checkpoint.py",
             "services/agent_host/tests/test_reconcile_after_abort.py",
             "services/agent_host/tests/test_recovery_interrupt.py",
-            "agent/tests/test_impersonation.py",
             "agent/tests/test_impersonation_integration.py",
         ),
-        118,
+        117,
     ),
     "tests.path_scoped.ava_tests": Scope(
         (
