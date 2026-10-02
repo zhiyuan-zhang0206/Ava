@@ -309,6 +309,32 @@ Not sliceable yet, found by re-scanning the code: `delivery_watchdog`, `ttl_reap
 `schedule_manager` are being reworked; `memory_indexer` and `cli/commands/cluster` have
 several entries; the physical-backup package the first survey listed no longer exists.
 
+## Shared kernel: handles, not configuration (in progress)
+
+The kernel (database, event bus, service endpoints, clock, cluster secret) is read by too many
+components to slice by owner. The rule for it: **a component receives a handle, not the config**.
+Components that need Postgres want a connection, not the URL (which carries the login), so
+`DbConfig` is read only by the constructor of the handle. The same shape follows for the event bus
+and the clock; the endpoint table is indexed by service name, a daemon taking only its own row.
+
+- **Done, the database** (`base/db`): `DbConfig` (`config.py`) is built from the live settings in
+  one place; `Database` (`handle.py`) binds one config to `connect`, `pool`, `async_pool`,
+  `direct_url` and `write_transaction`, and a root builds it with `Database.from_settings()`. The
+  module-level `base.db.connect()` / `pool()` / `async_pool()` / `direct_db_url()` and a
+  `write_transaction()` without a pool remain as a shim that builds the same dial at each call.
+- **Held by a rule, package by package**: the `ambient-db` rule of the ambient-state gate bans the
+  shim in the packages listed in `DB_HANDLE_PACKAGES` (`scripts/structure/ambient_state/
+  allowlist.py`), and bans `Database.from_settings()` outside the roots named there. Listed so far:
+  labeler, page server, hierarchy worker, events maintenance, IM bridge. A package joins when its
+  last ambient dial is gone, in the same change; the shim is deleted with the last package.
+- **Root-local bundles**: a root may gather what it wires into a frozen dataclass marked
+  `base.wiring.root_bundle`. The `bundle-leak` rule fails any annotation of such a class outside
+  its defining module, so the bundle stays a local variable of the root and never becomes a
+  parameter type (a function handed the whole bundle can reach any member).
+- **Not yet**: the event bus handle, the endpoint table, the clock, and the cluster-secret
+  contraction (machine API tokens in place of the human secret outside the gateway, the operator
+  CLI and the root); the agent-side per-turn slices carried in `AvaContext`.
+
 ## Open questions
 
 - **Log throttling and alert configuration.** Not touched in this wave, and no
