@@ -134,4 +134,4 @@ thing; the unified model states their relationship.**
 - This document is a point-in-time snapshot; if superseded, open a new entry
   per the `decisions/README.md` rules and add a forward link here.
 
-<!-- Superseded by: (none yet) -->
+<!-- Narrowed by: decisions/2026-10-02-audit-events-in-postgres.md (audit-category events are recorded in Postgres; Loki is a projection) -->
