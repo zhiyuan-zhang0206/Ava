@@ -345,6 +345,14 @@ class TestGlobalQueryBudget:
             validate_loki_deploy_config(config)
         assert loki_query_budget.LOKI_QUERY_CONCURRENCY == LOKI_QUERY_CONCURRENCY
 
+    def test_loki_configs_keep_only_the_archive_retention_override(self) -> None:
+        """Audit permanence lives in Postgres, so no event-name retention rule remains."""
+        repo = Path(__file__).parents[3]
+        for path in ("deploy/lgtm/config/loki.yaml", "deploy/lgtm/native/config/loki.yaml"):
+            limits = yaml.safe_load((repo / path).read_text())["limits_config"]
+            assert [r["selector"] for r in limits["retention_stream"]] == ['{stream="archive"}']
+            assert limits["retention_period"] == "84h"
+
     def test_rejects_loki_deploy_config_drift(self) -> None:
         with pytest.raises(ValueError, match="retention_period"):
             validate_loki_deploy_config(
