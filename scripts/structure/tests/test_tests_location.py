@@ -1,10 +1,8 @@
 """The tests-location lint (`scripts/structure/tests_location.py`): a top-level test must be
-registered, the registry cannot rot, the checks stay path-only, and the frozen section is
-shrink-only and carried by renames."""
+registered (nothing else is accepted), the registry cannot rot, and the checks stay path-only."""
 
 from __future__ import annotations
 
-import json
 import pathlib
 import subprocess
 import sys
@@ -12,9 +10,7 @@ import textwrap
 
 import pytest
 
-from scripts.lint import code_structure as lcs
 from scripts.structure import (
-    baseline_shards,
     locality,
     placement,
     tests_location_allowed,
@@ -23,8 +19,7 @@ from scripts.structure import (
 from scripts.structure import tests_location as tl
 
 _ROOT = pathlib.Path(__file__).resolve().parents[3]
-_SHARD = f"{baseline_shards.SHARD_DIR}/tests.base.json"
-_KEY = "tests/base/test_x.py::top-level"
+_REGISTERED = {"tests/base/test_x.py": ("contract", "a registered test the fixtures start from")}
 _PYPROJECT = """\
 [tool.importlinter]
 root_packages = ["agent", "ops", "base"]
@@ -36,7 +31,6 @@ layers = ["agent | ops", "base"]
 """
 _SOURCES = {
     "pyproject.toml": _PYPROJECT,
-    "scripts/structure/baseline/README.md": "Structure baseline shards.\n",
     "base/__init__.py": "",
     "base/net/__init__.py": "",
     "base/net/retry.py": "def backoff():\n    return 1\n",
@@ -76,31 +70,21 @@ def _git(root: pathlib.Path, *args: str) -> str:
     ).stdout
 
 
-def _freeze(root: pathlib.Path, keys: list[str]) -> None:
-    """Replace the `tests_location` baseline with `keys` (one shard per key's directory)."""
-    for stale in (root / baseline_shards.SHARD_DIR).glob("*.json"):
-        stale.unlink()
-    counts = dict.fromkeys(keys, 1)
-    for name, shard in baseline_shards.split({tl.SECTION: counts}).items():
-        _write(root, f"{baseline_shards.SHARD_DIR}/{name}.json", baseline_shards.render(shard))
-
-
 def _run(
     root: pathlib.Path,
     capsys: pytest.CaptureFixture[str],
     argv: list[str] | None = None,
     allowed: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[int, str, str]:
-    status = tl.main(argv or [], repo_root=root, allowed=allowed or {})
+    status = tl.main(argv or [], repo_root=root, allowed={**_REGISTERED, **(allowed or {})})
     out = capsys.readouterr()
     return status, out.out, out.err
 
 
 def _make_repo(root: pathlib.Path) -> pathlib.Path:
-    """A tracked repository at `root` with one frozen top-level test and nothing else registered."""
+    """A tracked repository at `root` with one registered top-level test and nothing else."""
     for rel, text in _SOURCES.items():
         _write(root, rel, text)
-    _freeze(root, [_KEY])
     _git(root, "init", "--quiet")
     _git(root, "add", "-A")
     return root
@@ -199,56 +183,15 @@ def test_an_entry_that_needs_none_is_refused(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _track(repo, "tests/e2e/test_flow.py")
-    _track(repo, "tests/ci/test_both.py")
     _track(repo, "base/net/tests/test_inside.py")
-    _freeze(repo, [_KEY, "tests/ci/test_both.py::top-level", "tests/e2e/test_flow.py::top-level"])
     allowed = {
-        "tests/ci/test_both.py": ("contract", "reads ci.yml"),
         "tests/e2e/test_flow.py": ("contract", "no need: e2e"),
         "base/net/tests/test_inside.py": ("integration", "not a top-level test"),
     }
     status, out, _ = _run(repo, capsys, allowed=allowed)
     assert status == 1
-    assert "`tests/ci/test_both.py` is also frozen in the tests_location baseline" in out
     assert "`tests/e2e/test_flow.py` needs no entry: it stays at the top level by design" in out
     assert "`base/net/tests/test_inside.py` is not a top-level test file" in out
-
-
-# ------------------------------------------------------------------ the frozen baseline
-
-
-def test_a_frozen_test_that_moved_into_its_package_leaves_a_stale_key(
-    repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    (repo / "base/net/tests").mkdir(parents=True)
-    _git(repo, "mv", "tests/base/test_x.py", "base/net/tests/test_x.py")
-    status, out, _ = _run(repo, capsys)
-    assert status == 1
-    assert f"{_SHARD}: stale entry `tests/base/test_x.py`: the file no longer exists" in out
-    _freeze(repo, [])
-    assert _run(repo, capsys) == (0, "", "")
-
-
-@pytest.mark.parametrize(
-    "key",
-    ["tests/base/test_x.py::other", "tests/base/helper.py::top-level", "base/test_x.py::top-level"],
-)
-def test_a_malformed_baseline_key_is_an_error(
-    repo: pathlib.Path, capsys: pytest.CaptureFixture[str], key: str
-) -> None:
-    _write(repo, _SHARD, json.dumps({tl.SECTION: {key: 1}}))
-    status, _, err = _run(repo, capsys)
-    assert status == 1
-    assert f"invalid {tl.SECTION} baseline" in err
-
-
-def test_a_baseline_value_other_than_one_is_an_error(
-    repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _write(repo, _SHARD, json.dumps({tl.SECTION: {_KEY: 2}}))
-    status, _, err = _run(repo, capsys)
-    assert status == 1
-    assert "with the value 1" in err
 
 
 # ------------------------------------------------------------------ explicit paths and --only
@@ -262,7 +205,7 @@ def test_explicit_paths_judge_exactly_those_tests(
     status, out, _ = _run(repo, capsys, ["tests/base/test_a.py"])
     assert status == 1
     assert _flagged(out) == ["tests/base/test_a.py"]
-    assert _run(repo, capsys, ["tests/base/test_x.py"]) == (0, "", "")  # frozen: fine
+    assert _run(repo, capsys, ["tests/base/test_x.py"]) == (0, "", "")  # registered: fine
     assert _run(repo, capsys, [str(repo / "tests/base/test_a.py")])[0] == 1  # absolute path
 
 
@@ -281,7 +224,7 @@ def test_only_judges_the_changed_top_level_tests_and_nothing_else(
     )
     assert status == 1
     assert _flagged(out) == ["tests/base/test_a.py"]  # test_b did not change
-    assert _run(repo, capsys, ["--only", "tests/base/test_x.py"]) == (0, "", "")  # frozen
+    assert _run(repo, capsys, ["--only", "tests/base/test_x.py"]) == (0, "", "")  # registered
     assert _run(repo, capsys, ["--only", str(repo / "tests/base/test_a.py")])[0] == 1
 
 
@@ -295,7 +238,6 @@ def test_only_with_nothing_changed_has_nothing_to_judge(
 @pytest.mark.parametrize(
     "rule_input",
     [
-        _SHARD,
         "scripts/structure/tests_location.py",
         "scripts/structure/tests_location_allowed.py",
         "scripts/structure/tests_location_suggest.py",
@@ -305,8 +247,7 @@ def test_a_changed_rule_input_widens_only_to_every_test(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str], rule_input: str
 ) -> None:
     _track(repo, "tests/base/test_a.py")
-    if rule_input != _SHARD:  # the shard is the repository's own, already tracked
-        _track(repo, rule_input, "# a rule input\n")
+    _track(repo, rule_input, "# a rule input\n")
     status, out, _ = _run(repo, capsys, ["--only", rule_input])
     assert status == 1
     assert _flagged(out) == ["tests/base/test_a.py"]
@@ -460,62 +401,14 @@ def test_suggest_a_by_design_test_is_told_it_stays(repo: pathlib.Path) -> None:
     assert "stays at the top level by design" in message
 
 
-# ------------------------------------------------------------------ the section in the structure gate
+# ------------------------------------------------------------------ no baseline to add debt to
 
 
-def _guard(root: pathlib.Path, rev: str, renames: dict[str, str] | None = None) -> list[str]:
-    """`code_structure._baseline_guard`'s verdict on this section against `rev` in `root`."""
-
-    def merged(shards: dict[str, str] | None) -> dict[str, int]:
-        assert shards is not None
-        return lcs._parse_baseline(shards)[tl.SECTION]
-
-    previous = merged(locality.introduced(baseline_shards.read_at(root, rev), root, rev))
-    current = merged(baseline_shards.read_worktree(root))
-    remapped = lcs._remap_renamed_keys(tl.SECTION, previous, renames or {})
-    return lcs._section_guard(tl.SECTION, current, remapped, renames=renames)
-
-
-def test_the_section_is_registered_with_the_structure_gate() -> None:
-    assert tl.SECTION in locality.SECTIONS
-    assert locality.EXTERNAL_SECTIONS[tl.SECTION] == "scripts/structure/tests_location.py"
-
-
-def test_the_section_is_introduced_with_its_lint_and_shrink_only_afterwards(
-    repo: pathlib.Path,
-) -> None:
-    _git(repo, "commit", "--quiet", "-m", "Before the lint")
-    _track(repo, "scripts/structure/tests_location.py", "# the lint\n")
-    _track(repo, "tests/base/test_y.py")
-    _freeze(repo, [_KEY, "tests/base/test_y.py::top-level"])
-    assert _guard(repo, "HEAD") == []  # introducing change: compared with itself
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "--quiet", "-m", "Introduce the lint")
-    _track(repo, "tests/base/test_z.py")
-    _freeze(repo, [_KEY, "tests/base/test_y.py::top-level", "tests/base/test_z.py::top-level"])
-    (error,) = _guard(repo, "HEAD")
-    assert "added tests_location entry tests/base/test_z.py::top-level" in error
-
-
-def test_a_renamed_test_carries_its_frozen_key(
-    repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _track(repo, "scripts/structure/tests_location.py", "# the lint\n")
-    _git(repo, "commit", "--quiet", "-m", "The lint and one frozen test")
-    _git(repo, "mv", "tests/base/test_x.py", "tests/base/test_renamed.py")
-    out = _git(repo, "diff", "-M", "--name-status", "--diff-filter=R", "HEAD")
-    renames = {old: new for _status, old, new in (line.split("\t") for line in out.splitlines())}
-    assert renames == {"tests/base/test_x.py": "tests/base/test_renamed.py"}
-
-    # Not migrated: the old key is stale, the new path is unregistered, the guard names the move.
-    status, text, _ = _run(repo, capsys)
-    assert status == 1
-    assert "stale entry `tests/base/test_x.py`" in text
-    assert "tests/base/test_renamed.py:1:" in text
-    (error,) = _guard(repo, "HEAD", renames)
-    assert "was not migrated after its file moved to tests/base/test_renamed.py" in error
-
-    # Migrated: both the lint and the guard are satisfied, and no key was added or raised.
-    _freeze(repo, ["tests/base/test_renamed.py::top-level"])
-    assert _run(repo, capsys) == (0, "", "")
-    assert _guard(repo, "HEAD", renames) == []
+def test_no_frozen_section_exists_any_more() -> None:
+    """A top-level test is registered or refused: the structure gate keeps no `tests_location`
+    section, and no shipped baseline shard carries one."""
+    assert "tests_location" not in locality.SECTIONS
+    assert "tests_location" not in locality.EXTERNAL_SECTIONS
+    assert not hasattr(tl, "read_baseline")
+    for shard in (_ROOT / "scripts/structure/baseline").glob("*.json"):
+        assert "tests_location" not in shard.read_text(encoding="utf-8"), shard.name

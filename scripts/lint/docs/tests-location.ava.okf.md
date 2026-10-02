@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Tests-location lint
-description: A test in the top-level tests/ must be registered (by design, allowed with a reason, or frozen as debt to move) - decided from its path alone; the registry, the tests_location baseline section, the --suggest command and what the check costs.
+description: A test in the top-level tests/ must be registered (by design, or allowed with a reason as contract or integration) - decided from its path alone, a new one is refused; the registry, the --suggest command and what the check costs.
 tags:
 - scripts
 - lint
@@ -16,17 +16,14 @@ It lives in `scripts/structure/` rather than `scripts/lint/` because the lint di
 
 ## The rule
 
-A *top-level test* is a `test_*.py` file under `tests/`. It may stay only if one of these holds, each a path lookup:
+A *top-level test* is a `test_*.py` file under `tests/`. It may stay only if one of the two registries below names it, each a path lookup:
 
 | registry | where | meaning |
 |---|---|---|
 | `BY_DESIGN` | `scripts/structure/tests_location_allowed.py` | a directory or file with no package to move to: `tests/e2e/`, `tests/ui/`, `tests/fixtures/`, `tests/factories/` and three real-process proofs under `tests/integration/`. Repeats `placement.TOP_LEVEL_*`; a test locks the two together |
 | `ALLOWED` | same file | one test with a category and a one-line reason. `contract`: the test's subject is a repository artifact (workflows, `pyproject.toml`, `db/schema.sql`, migrations, `ui/`, `schedules/`, `deploy/`, skill scripts) or the test harness itself, which no package owns; a scan over the whole tree counts. `integration`: it spans units that may not import each other (agent and ops, cli and gateway), so no package may hold it |
-| `tests_location` baseline section | `scripts/structure/baseline/tests.*.json` | `tests/x/test_y.py::top-level -> 1`: the tests still to move |
 
-Anything else is a violation. An entry whose file is gone, an `ALLOWED` entry under `BY_DESIGN` or also frozen, a category other than the two, an empty reason or a malformed baseline key fails too, so the registry cannot rot into a permit wall. The verdict never looks at what the test imports: an unrelated production commit cannot move it.
-
-The baseline section is registered with the structure gate (`locality.SECTIONS`, `locality.EXTERNAL_SECTIONS`), so `scripts/lint/code_structure.py` guards it like the other frozen sections: introduced with the change that adds the lint, shrink-only against the base revision afterwards, a renamed file carries its key (`git -M`). Moving a frozen test into its package leaves a stale key that fails until it is deleted.
+Anything else is a violation: a new top-level test is refused, there is no baseline of debt to add it to. An entry whose file is gone, an `ALLOWED` entry under `BY_DESIGN`, a category other than the two or an empty reason fails too, so the registry cannot rot into a permit wall. The verdict never looks at what the test imports: an unrelated production commit cannot move it.
 
 ## Fixing a violation
 
@@ -36,7 +33,7 @@ After `git mv`, the new directory may need a `path_scopes.toml` (read by `tests/
 
 ## What it costs
 
-Paths only: the checked files, `ALLOWED` and the baseline shards. No module index, no import graph, no `place()`; a test locks that the checks never import `scripts.structure.placement`. The commit hook runs `--only` over the changed files ([[scripts/lint/docs/changed-files-mode.ava.okf.md|changed-files mode]]): the changed top-level tests are judged, and a change to the lint, its registry or a baseline shard (anything under `scripts/structure/`) checks every test. Every judgment is on the repo-relative path, never on where the checkout sits. Pre-push and CI's `backend-structure` (`pre-commit run --all-files`) check every tracked top-level test (`git ls-files tests`), which is also where a deleted test's stale entry is found when no commit hook saw it. Whether a frozen test still has a package home is not checked here: it needs the placement rule.
+Paths only: the checked files and the registry. No module index, no import graph, no `place()`; a test locks that the checks never import `scripts.structure.placement`. The commit hook runs `--only` over the changed files ([[scripts/lint/docs/changed-files-mode.ava.okf.md|changed-files mode]]): the changed top-level tests are judged, and a change to the lint or its registry (anything under `scripts/structure/`) checks every test. Every judgment is on the repo-relative path, never on where the checkout sits. Pre-push and CI's `backend-structure` (`pre-commit run --all-files`) check every tracked top-level test (`git ls-files tests`), which is also where a deleted test's stale entry is found when no commit hook saw it. Whether a registered test still has a package home is not checked here: it needs the placement rule.
 
 ## What it does not check yet
 
