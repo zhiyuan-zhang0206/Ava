@@ -17,10 +17,9 @@ registrations on teardown.
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import psycopg
 import pytest
@@ -43,33 +42,6 @@ def skills_unit(unit_home: Path, set_machine_identity: Callable[..., None]) -> N
     """A per-test unit home, so `<home>/skills` is this test's own skill load dir,
     that still names its machine: the fork tail renders a capability index."""
     set_machine_identity("agent-runner", "test-machine")
-
-
-@pytest.fixture(autouse=True)
-def memory_plugin() -> Any:
-    """Load ava_memory through the real plugin-registration path (mirrors
-    ava_builtins/plugins/ava_memory/tests/test_ava_memory_notes.py) so the memory-note registrations
-    exist regardless of what earlier modules cleared."""
-    from agent.state import clear_plugin_registrations
-    from base.packages.plugins.config_registration import bind_from_disk
-    from base.packages.plugins.context import PluginContext
-
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
-
-    with PluginContext("ava_memory"):
-        # the memory-note registrations live in the agent_runtime face (the full load imports it after plugin.py — task #3633).
-        from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
-
-    bind_from_disk()
-    yield _plugin
-
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
 
 
 def test_strip_tag_set_is_exactly_the_source_identity_notes() -> None:
