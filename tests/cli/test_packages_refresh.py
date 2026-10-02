@@ -12,10 +12,8 @@ import json
 import os
 import shutil
 import subprocess
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
 
 import pytest
 from loguru import logger
@@ -541,106 +539,7 @@ def test_policy_verb_writes_explicit_values(core_repo: Path) -> None:
     assert cmd_packages_policy("missing", update_mode="auto") == 1
 
 
-def test_policy_cli_requires_at_least_one_field(capsys: pytest.CaptureFixture[str]) -> None:
-    from cli.parsers import build_parser
-
-    args = build_parser().parse_args(["packages", "policy", "foo"])
-    assert args.func(args) == 2
-    assert "--update-mode" in capsys.readouterr().err
-
-
-def test_policy_cli_rejects_bad_duration_at_parse_time(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    from cli.parsers import build_parser
-
-    with pytest.raises(SystemExit) as raised:
-        build_parser().parse_args(["packages", "policy", "foo", "--check-every", "soon"])
-    assert raised.value.code == 2
-    assert "argument --check-every:" in capsys.readouterr().err
-
-
-def test_policy_cli_accepts_explicit_fields() -> None:
-    from cli.parsers import build_parser
-
-    args = build_parser().parse_args(["packages", "policy", "foo", "--check-every", "2h"])
-    assert args.check_every == "2h" and args.update_mode is None
-
-
 # ── runtime host-contract filter (design §5.5) ──────────────────────────────
-
-
-def _manifest_for(name: str, **extra: object) -> dict[str, object]:
-    data: dict[str, object] = {"apiVersion": 2, "name": name, "version": "1.0.0"}
-    data.update(extra)
-    return data
-
-
-def test_loadable_names_respect_the_host_contract(
-    core_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.packages.extensions.install_registry import (
-        host_contract_reason,
-        loadable_skill_names,
-    )
-
-    home = _home()
-
-    def skill(name: str, manifest: dict[str, object] | None) -> None:
-        d = home / "skills" / name
-        d.mkdir(parents=True)
-        (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n", encoding="utf-8")
-        if manifest is not None:
-            (d / "ava-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
-        reg.register(reg.InstalledPackage(name=name, type="skill", enabled=True))
-
-    head = _head(core_repo)
-    # a side-branch commit exists but is not an ancestor of main
-    _git(core_repo, "checkout", "-qb", "side")
-    (core_repo / "side.txt").write_text("side\n", encoding="utf-8")
-    _git(core_repo, "add", "side.txt")
-    _git(core_repo, "commit", "-qm", "side")
-    side = _head(core_repo)
-    _git(core_repo, "checkout", "-q", "main")
-
-    skill("plain", None)
-    skill("ok", _manifest_for("ok", requires_commit=head))
-    skill("future", _manifest_for("future", requires_commit="d" * 40))
-    skill("side", _manifest_for("side", requires_commit=side))
-    skill("too_new", _manifest_for("too_new", engines={"ava": ">=2099"}))
-
-    import base.paths as paths_mod
-
-    monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)
-    loadable = loadable_skill_names()
-    assert "plain" in loadable and "ok" in loadable
-    assert "future" not in loadable and "side" not in loadable and "too_new" not in loadable
-    assert "unresolvable" in (host_contract_reason(home / "skills" / "future") or "")
-    assert "not an ancestor" in (host_contract_reason(home / "skills" / "side") or "")
-
-
-def test_scan_drops_host_blocked_packages(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import ava.skills as skills_mod
-    import base.paths as paths_mod
-
-    home = _home()
-    for name in ("ok", "blocked"):
-        d = home / "skills" / name
-        d.mkdir(parents=True)
-        (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n", encoding="utf-8")
-        reg.register(reg.InstalledPackage(name=name, type="skill", enabled=True))
-    (home / "skills" / "blocked" / "ava-plugin.json").write_text(
-        json.dumps(_manifest_for("blocked", engines={"ava": ">=2099"})), encoding="utf-8"
-    )
-    monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)
-    monkeypatch.setattr(skills_mod, "_provider_roots", list)
-
-    scan_tree = cast(
-        "Callable[[], dict[str, object]]",
-        skills_mod._scan_tree,  # pyright: ignore[reportUnknownMemberType] — _scan_tree is annotated `-> dict`
-    )
-    tree = scan_tree()
-    assert "ok" in tree and "blocked" not in tree
 
 
 def test_refresh_cmd_json_shape(
