@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, NotRequired, TypedDict
 
-from base.events.payloads import Category, EventTier, RetentionClass
+from base.events.payloads import Category, EventTier
 
 
 class ProcessExit(TypedDict):
@@ -661,10 +661,6 @@ class EventSpec:
     ``"file"`` (log-file only, e.g. ``node_enter`` after PR #1758's sink
     filter). ``family`` groups events the ops panels / rollups treat as one
     family (e.g. LLM_ERROR). ``doc`` is the one-line registry.md description.
-
-    ``retention_class``: how long this name's rows must survive (see the
-    ``RetentionClass`` note above). ``None`` = undeclared, which means the
-    global Loki retention applies; only ``"lineage"`` is declared today.
     """
 
     name: str
@@ -675,4 +671,3 @@ class EventSpec:
     destination: Literal["events", "file"] = "events"
     family: str | None = None
     doc: str = ""
-    retention_class: RetentionClass | None = None

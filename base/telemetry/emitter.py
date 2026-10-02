@@ -8,13 +8,14 @@ local JSONL mirrors, best-effort compact metrics, and OTLP logs/metrics. Live
 event reads use Loki/Prometheus; the retired Postgres archive is never revived
 (audit events: the `audit_events` table is their record, this pipeline a projection).
 
-Backpressure sheds non-audit records under overload. Trace ids are captured at
-enqueue, and machine and cluster dimensions are always populated.
+Backpressure sheds records under overload, audit events included: their record
+is `audit_events`, written before the event is emitted, so shedding the
+projection loses nothing. Trace ids are captured at enqueue, and machine and
+cluster dimensions are always populated.
 
 Emit is best-effort and never raises: a broken sink must not crash the caller
 (JSONL mirror + loguru file sinks are the durable backfill for everything
-that reaches the drain thread; audit events additionally block briefly at
-enqueue so they are not shed while the queue is overloaded).
+that reaches the drain thread).
 Startup init (`init_telemetry`) is the one place that fails loud — a process
 whose event pipeline cannot come up should not start silently blind.
 
@@ -39,7 +40,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
 from typing import Any, Literal
 
-from base.events.contract import EVENTS, lineage_event_names
+from base.events.contract import EVENTS
 from base.events.contract import category_for_kind as registry_category
 from base.paths import logs_dir
 from base.telemetry.emitter_sync import synchronize
@@ -71,35 +72,15 @@ Level = Literal["debug", "info", "warning", "error", "critical"]
 _BATCH_SIZE = 100
 _FLUSH_INTERVAL_S = 0.5
 # Queue bound: what stops a producer that outruns the drain thread from growing
-# process memory without limit. Past this point non-audit records are shed (see
+# process memory without limit. Past this point records are shed (see
 # `_EventPipeline.enqueue`) and `dropped` says how much. A shed record is gone
 # from EVERY sink — the JSONL mirror only ever holds what reached the drain
-# thread — so audit-category events get a durable lane instead (below).
+# thread.
 _QUEUE_MAXSIZE = 10_000
-
-# How long an audit event's producer blocks on a full queue before the event is
-# shed (bounded backpressure). Audit events are the compliance evidence — the
-# one class that must not vanish under load, which is exactly when the queue
-# fills — so they wait for the drain thread to free a slot instead of dropping
-# immediately. 5s is far above the drain thread's flush cadence (100/batch,
-# 0.5s interval), so a healthy pipeline frees the slot in well under a second
-# and the cap only binds when the drain thread itself is gone.
-_AUDIT_BLOCK_S = 5.0
 
 # JSONL mirror retention (day-stamped files, like the trace mirror).
 _JSONL_RETENTION_DAYS = 7
 _JSONL_ROLLUP_RETENTION_DAYS = 90
-# Lineage mirror retention (design 2026-09-02 §3C). The lineage class is
-# permanent in Loki (a 100-year per-stream override, see
-# `base/loki_index_labels.LINEAGE_RETENTION_PERIOD`); this mirror exists
-# because that is ONE copy in ONE failure domain, and 2026-08-20 is what a
-# single copy is worth — a global-retention bucket deleted the pre-cutover
-# archive and nothing else held those rows. Its failure domain is this box's
-# disk, independent of Loki's config and data volume. At ~412 rows/day
-# cluster-wide (<1MB/day) a year of it costs ~100MB, so the retention is long
-# rather than tuned; unlike the rollup tier nothing replays it on a schedule,
-# so it stays a constant instead of a settings knob until an operator needs it.
-_JSONL_LINEAGE_RETENTION_DAYS = 365
 
 # MUST match the event selectors aggregated by
 # services/events_maintenance/rollup.py:_tokens_queries/_metrics_queries
@@ -117,19 +98,6 @@ def is_rollup_source(event_name: str) -> bool:
         or event_name == "exec"
         or event_name.startswith(("exec_", "exec("))
     )
-
-
-# Derived from the registry's `retention_class="lineage"` declarations — the
-# same source the deployed Loki per-stream selector is validated against
-# (`base/loki_index_labels.validate_loki_deploy_config`), so the two
-# permanent copies cannot come to disagree about what lineage is. Snapshotted
-# at import: the drain thread tests it once per event.
-_JSONL_LINEAGE_SOURCE_EVENTS = lineage_event_names()
-
-
-def _is_lineage_source(event_name: str) -> bool:
-    """Whether an event belongs to the permanently retained lineage class."""
-    return event_name in _JSONL_LINEAGE_SOURCE_EVENTS
 
 
 def event_id(line: str, ts_ns: int) -> int:
@@ -265,12 +233,6 @@ def _prune_jsonl_mirror() -> None:
         if day.isdigit() and day < rollup_cutoff:
             with contextlib.suppress(OSError):
                 path.unlink()
-    lineage_cutoff = (now - timedelta(days=_JSONL_LINEAGE_RETENTION_DAYS)).strftime("%Y%m%d")
-    for path in logs_dir().glob("events-????????.lineage.jsonl"):
-        day = path.name.removeprefix("events-").removesuffix(".lineage.jsonl")
-        if day.isdigit() and day < lineage_cutoff:
-            with contextlib.suppress(OSError):
-                path.unlink()
 
 
 def _append_jsonl(events: list[Event]) -> None:
@@ -279,9 +241,9 @@ def _append_jsonl(events: list[Event]) -> None:
     Each row carries the stable surrogate ``id`` derived from its id-free body
     and timestamp, matching the id Loki's read path returns for the same event.
 
-    Three tiers, one pass over the batch: the full mirror, the filtered
-    rollup source, and the filtered lineage copy — all written under the same
-    try, so one failure reports once for the batch rather than three times.
+    Two tiers, one pass over the batch: the full mirror and the filtered
+    rollup source — written under the same try, so one failure reports once
+    for the batch rather than twice.
 
     Best-effort — the mirror is a fallback, not a critical path; a write
     failure must never break the batch. But it must not be SILENT either:
@@ -298,7 +260,6 @@ def _append_jsonl(events: list[Event]) -> None:
     try:
         lines: list[str] = []
         rollup_lines: list[str] = []
-        lineage_lines: list[str] = []
         for e in events:
             line = (
                 json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False)
@@ -307,8 +268,6 @@ def _append_jsonl(events: list[Event]) -> None:
             lines.append(line)
             if is_rollup_source(e.event_name):
                 rollup_lines.append(line)
-            if _is_lineage_source(e.event_name):
-                lineage_lines.append(line)
         path = logs_dir() / f"events-{day}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
@@ -317,10 +276,6 @@ def _append_jsonl(events: list[Event]) -> None:
             rollup_path = logs_dir() / f"events-{day}.rollup.jsonl"
             with rollup_path.open("a", encoding="utf-8") as f:
                 f.write("".join(rollup_lines))
-        if lineage_lines:
-            lineage_path = logs_dir() / f"events-{day}.lineage.jsonl"
-            with lineage_path.open("a", encoding="utf-8") as f:
-                f.write("".join(lineage_lines))
     except Exception as exc:  # report, never raise
         global _jsonl_failures  # noqa: PLW0603 — module-level counter
         _jsonl_failures += 1
@@ -400,8 +355,7 @@ class _EventPipeline:
     Same shape as the former loguru Postgres sink (which this replaces): the
     queue bound is the backpressure, the drain thread batches, and shed records
     are counted and reported as one `event_log_drop` event per flush so the ops
-    monitor panel keeps its backlog metric. Audit events enqueue through a
-    bounded-blocking lane (see `enqueue`) so overload sheds telemetry/log first."""
+    monitor panel keeps its backlog metric."""
 
     def __init__(
         self,
@@ -429,22 +383,7 @@ class _EventPipeline:
         self._thread.start()
 
     def enqueue(self, event: Event) -> None:
-        """Producer path — non-blocking for regular events, bounded-blocking
-        for audit events.
-
-        Regular events shed (counted) when the queue is full. Audit events
-        instead block up to `_AUDIT_BLOCK_S` for a slot — bounded backpressure
-        — so an overloaded queue sheds telemetry/log before it ever sheds audit
-        evidence; only a sustained overflow past the cap drops an audit event
-        (counted, and reported by the next flush). The drain thread frees slots
-        on its 0.5s cadence, so a healthy pipeline never actually spends the
-        cap."""
-        if event.category == "audit":
-            try:
-                self._queue.put(event, timeout=_AUDIT_BLOCK_S)
-            except queue.Full:
-                self._record_drop(event)
-            return
+        """Producer path — never blocks: the event is shed (counted) when the queue is full."""
         try:
             self._queue.put_nowait(event)
         except queue.Full:

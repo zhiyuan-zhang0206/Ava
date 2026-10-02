@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -144,7 +144,8 @@ def append(
         ).fetchone()
         if existing is not None:
             same_content = (
-                _event_content(existing[1]) == _event_content(payload)
+                _event_content(_resolve_payload(conn, existing[1]))
+                == _event_content(_resolve_payload(conn, payload))
                 if kind in _CONSUMED_EVENT_KINDS
                 else existing[1] == payload
             )
@@ -241,13 +242,71 @@ def say(
 
 
 def entries(lease_id: str, conn: psycopg.Connection) -> list[dict[str, Any]]:
+    """The lease's log in order, central event references resolved to their bodies."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT seq,kind,created_at,payload FROM agent_impersonation_entries "
             "WHERE lease_id=%s ORDER BY seq",
             (lease_id,),
         )
-        return cur.fetchall()
+        rows = cur.fetchall()
+    _resolve_event_references(rows, conn)
+    return rows
+
+
+def _audit_bodies(conn: psycopg.Connection, uids: list[int]) -> dict[int, dict[str, Any]]:
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT event_uid,ts,trace_id,span_id,agent_id,machine,process,event_name,level,"
+            "source,target_agent_id,attributes FROM audit_events WHERE event_uid = ANY(%s)",
+            (uids,),
+        )
+        return {body["event_uid"]: body for body in cur.fetchall()}
+
+
+def _resolved_payload(reference: dict[str, Any], body: dict[str, Any] | None) -> dict[str, Any]:
+    """The event payload a central reference names; a missing row is a broken invariant.
+
+    The record is written in the same transaction as the reference, so it is
+    never legitimately absent.
+    """
+    if body is None:
+        raise RuntimeError(f"audit_events has no row for event_uid {reference['event_uid']}")
+    return {
+        "ts": body["ts"].astimezone(UTC).isoformat(),
+        "trace_id": body["trace_id"],
+        "span_id": body["span_id"],
+        "agent_id": body["agent_id"],
+        "machine": body["machine"],
+        "process": body["process"],
+        "category": "audit",
+        "event_name": body["event_name"],
+        "level": body["level"],
+        "source": body["source"],
+        "target_agent_id": body["target_agent_id"],
+        "attributes": body["attributes"],
+        "id": reference["id"],
+        "line_sha256": reference["line_sha256"],
+        "event_uid": reference["event_uid"],
+    }
+
+
+def _resolve_event_references(rows: list[dict[str, Any]], conn: psycopg.Connection) -> None:
+    """Replace each central reference payload with the `audit_events` body it names."""
+    refs = [row for row in rows if "event_uid" in row["payload"]]
+    if not refs:
+        return
+    bodies = _audit_bodies(conn, [row["payload"]["event_uid"] for row in refs])
+    for row in refs:
+        row["payload"] = _resolved_payload(row["payload"], bodies.get(row["payload"]["event_uid"]))
+
+
+def _resolve_payload(conn: psycopg.Connection, payload: dict[str, Any]) -> dict[str, Any]:
+    if "event_uid" not in payload:
+        return payload
+    return _resolved_payload(
+        payload, _audit_bodies(conn, [payload["event_uid"]]).get(payload["event_uid"])
+    )
 
 
 def _json_default(value: object) -> str:

@@ -264,11 +264,7 @@ def test_transfer_event_and_reconstruction_span_include_overfetch(
 
 def test_message_suffix_event_contract() -> None:
     spec = EVENTS["delta_message_suffix"]
-    assert (spec.category, spec.tier, spec.retention_class) == (
-        "telemetry",
-        "noise",
-        "telemetry",
-    )
+    assert (spec.category, spec.tier) == ("telemetry", "noise")
     assert set(payload_keys("delta_message_suffix")) == {
         "thread_id",
         "checkpoint_ns",

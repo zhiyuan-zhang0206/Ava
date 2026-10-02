@@ -141,7 +141,8 @@ def test_backfill_wires_dedup_into_collect(
 ) -> None:
     """backfill() must hand the deduped row set to collect(): the consumer it
     installs (collect._fetch_events_window) drops duplicate ids, keeps the
-    window, and feeds both categories before collect() ever sees a row."""
+    window, and serves telemetry from the mirror while audit still goes through
+    the original fetch (Postgres via the gateway) before collect() sees a row."""
     now = datetime.now(UTC)
     window_from = now - timedelta(days=1)
     ts_in = (window_from + timedelta(minutes=5)).isoformat()
@@ -155,7 +156,7 @@ def test_backfill_wires_dedup_into_collect(
         _row(1, ts_in),  # true duplicate
         _row(2, ts_in),
         _row(3, ts_out),
-        {**_row(4, ts_in), "category": "audit"},
+        {**_row(4, ts_in), "category": "audit"},  # the mirror no longer stands in for audit
     ]
     _write_mirror_day(logs, days[0], events)
     for day in days[1:]:  # every window day must exist — missing days are not silent
@@ -164,6 +165,14 @@ def test_backfill_wires_dedup_into_collect(
     monkeypatch.setattr(backfill_mod, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(backfill_mod, "_mirror_dir", lambda: logs)
     captured: dict[str, list[dict[str, Any]]] = {}
+    audit_rows = [{"id": 99, "category": "audit"}]
+
+    def fake_original_fetch(
+        _category: str, _frm: datetime | None, _to: datetime | None, _agent_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        return audit_rows
+
+    monkeypatch.setattr(backfill_mod.collect, "_fetch_events_window", fake_original_fetch)
 
     def fake_collect_with_counts(
         days: int, week: str, **kw: Any
@@ -183,7 +192,7 @@ def test_backfill_wires_dedup_into_collect(
     path, missing, counts = backfill_mod.backfill(1, "test-week")
 
     assert [r["id"] for r in captured["telemetry"]] == [1, 2]
-    assert [r["id"] for r in captured["audit"]] == [4]
+    assert captured["audit"] == audit_rows
     assert counts == {"seen": 0, "excluded_test": 0, "skipped_meta": 0}
     assert missing == []
     assert path == tmp_path / "self_evolution" / "daily" / "test-week.jsonl"

@@ -4,6 +4,11 @@ The lease's own ``agent_impersonation_entries`` is the record. A source row is
 appended in the caller's transaction (central producers) or at the capture seam
 (a controller's receipt), and the database decides completeness from those rows
 alone, so no external store is compared and no certifier takes part.
+
+A central row holds a reference to the event's `audit_events` row (its
+`event_uid` and line digest) instead of a second copy of the body; readers
+resolve it through `history.entries`. A controller's SDK row, which is not an
+audit event, still holds the body itself.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from psycopg.types.json import Jsonb
 from base.agents.impersonation._store import lock_lease
 from base.agents.impersonation.history import append, export_handoff
 from base.telemetry import Event, event_id, event_line, event_line_digest
+from base.telemetry.audit_events import audit_event_uid, record_audit
 from base.telemetry.serialization import event_payload
 
 LOG_PROTOCOL_VERSION = 2
@@ -57,13 +63,27 @@ def locked_receipt_state(conn: psycopg.Connection, lease_id: str, source_key: st
 def append_source_event(
     conn: psycopg.Connection, lease: dict[str, Any], event: Event, *, source_key: str
 ) -> None:
-    """Record one event body in the lease's own log, in the caller's transaction."""
+    """Record one event in the lease's own log, in the caller's transaction.
+
+    A central audit event is recorded in `audit_events` first (idempotent) and
+    the entry carries only the reference to that row; any other event carries
+    its body.
+    """
     if lease["next_entry"] >= MAX_LOG_ENTRIES:
         raise RuntimeError("Impersonation event log reached its entry cap")
     line = event_line(event)
     key, digest, kind, timestamp = event_item(event)
     timestamp_ns = int(event.ts.timestamp() * 1_000_000_000)
-    payload = {**event_payload(event), "id": event_id(line, timestamp_ns), "line_sha256": digest}
+    surrogate = event_id(line, timestamp_ns)
+    if source_key == CENTRAL_SOURCE:
+        record_audit(conn, event)
+        payload: dict[str, Any] = {
+            "event_uid": audit_event_uid(event),
+            "id": surrogate,
+            "line_sha256": digest,
+        }
+    else:
+        payload = {**event_payload(event), "id": surrogate, "line_sha256": digest}
     append(
         conn,
         str(lease["id"]),

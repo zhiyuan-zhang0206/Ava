@@ -16,7 +16,6 @@ import importlib.util
 import json
 import os
 import random
-import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -29,10 +28,8 @@ import pytest
 import yaml
 
 from base.config import settings
-from base.events.contract import lineage_event_names
 from base.telemetry.loki_index_labels import (
     EVENT_STREAM_RETENTION,
-    LINEAGE_RETENTION_PERIOD,
     LOKI_MAX_QUERY_SERIES,
     LOKI_QUERY_CONCURRENCY,
     WAL_DISK_FULL_THRESHOLD,
@@ -44,12 +41,6 @@ from base.telemetry.loki_index_labels import (
 )
 from gateway.lgtm import _loki_logql, loki_events, loki_events_cache, loki_query_budget
 from services.events_maintenance.resolution import EventClass
-
-
-def _selector_event_names(selector: str) -> set[str]:
-    """The event_name alternation inside a `retention_stream` selector."""
-    match = re.fullmatch(r'\{event_name=~"([a-z0-9_|]+)"\}', selector)
-    return set(match.group(1).split("|")) if match else set()
 
 
 def test_retention_hours_drives_the_gateway_window_clamp() -> None:
@@ -354,34 +345,12 @@ class TestGlobalQueryBudget:
             validate_loki_deploy_config(config)
         assert loki_query_budget.LOKI_QUERY_CONCURRENCY == LOKI_QUERY_CONCURRENCY
 
-    def test_both_loki_configs_retain_the_lineage_class_permanently(self) -> None:
-        """Lineage rows outlive the global 84h bucket in BOTH deploy variants.
-
-        The container config is the operator's manual rollback asset, so a rule
-        that lands only in the native template would silently drop lineage back
-        to 84 hours the moment the rollback path is used — the 2026-08-20 loss
-        shape, one deploy variant later.
-        """
+    def test_loki_configs_keep_only_the_archive_retention_override(self) -> None:
+        """Audit permanence lives in Postgres, so no event-name retention rule remains."""
         repo = Path(__file__).parents[3]
-        # `set(...)` at the source: `_selector_event_names` yields `set[str]`, and
-        # comparing that against a bare frozenset is a static no-overlap error.
-        expected = set(lineage_event_names())
-        assert expected == {
-            "spawn",
-            "fork",
-            "resurrect",
-            "agent_spawned",
-            "agent_resurrected",
-        }
         for path in ("deploy/lgtm/config/loki.yaml", "deploy/lgtm/native/config/loki.yaml"):
             limits = yaml.safe_load((repo / path).read_text())["limits_config"]
-            rules = limits["retention_stream"]
-            lineage = [r for r in rules if _selector_event_names(r["selector"]) == expected]
-            assert len(lineage) == 1, f"{path} carries no single lineage retention_stream rule"
-            assert lineage[0]["period"] == LINEAGE_RETENTION_PERIOD
-            # The archive rule and the global bucket are untouched by this class.
-            archive = [r for r in rules if r["selector"] == '{stream="archive"}']
-            assert [r["period"] for r in archive] == ["8760h"]
+            assert [r["selector"] for r in limits["retention_stream"]] == ['{stream="archive"}']
             assert limits["retention_period"] == "84h"
 
     def test_rejects_loki_deploy_config_drift(self) -> None:
@@ -427,57 +396,6 @@ class TestGlobalQueryBudget:
                     "ingester": {"wal": {"disk_full_threshold": 0.95}},
                 }
             )
-
-    def test_rejects_lineage_retention_drift(self) -> None:
-        """A config that lost the lineage rule, its period, or a name is drift.
-
-        Every other pin here guards a limit; this one guards data that cannot be
-        recreated. Retention lives in the deploy template while the class lives
-        in the event registry, so nothing but this check couples them — which is
-        precisely the gap the 2026-08-20 archive loss fell through.
-        """
-
-        def config(retention_stream: list[dict[str, object]]) -> dict[str, object]:
-            return {
-                "limits_config": {
-                    "retention_period": "84h",
-                    "max_query_series": LOKI_MAX_QUERY_SERIES,
-                    "retention_stream": retention_stream,
-                },
-                "querier": {"max_concurrent": LOKI_QUERY_CONCURRENCY},
-                "ingester": {"wal": {"disk_full_threshold": WAL_DISK_FULL_THRESHOLD}},
-            }
-
-        names = sorted(lineage_event_names())
-        lineage_rule: dict[str, object] = {
-            "selector": f'{{event_name=~"{"|".join(names)}"}}',
-            "priority": 1,
-            "period": LINEAGE_RETENTION_PERIOD,
-        }
-        archive_rule: dict[str, object] = {
-            "selector": '{stream="archive"}',
-            "priority": 1,
-            "period": "8760h",
-        }
-        validate_loki_deploy_config(config([archive_rule, lineage_rule]))
-
-        # The rule is missing entirely — the shape the archive loss shipped in.
-        with pytest.raises(ValueError, match="lineage rule"):
-            validate_loki_deploy_config(config([archive_rule]))
-        # A lineage name was registered but never added to the deployed selector.
-        with pytest.raises(ValueError, match="retention_class='lineage'"):
-            validate_loki_deploy_config(
-                config([{**lineage_rule, "selector": f'{{event_name=~"{"|".join(names[1:])}"}}'}])
-            )
-        # The period drifted back to a finite window.
-        with pytest.raises(ValueError, match="lineage retention_stream period"):
-            validate_loki_deploy_config(config([{**lineage_rule, "period": "8760h"}]))
-        # Selector order is not drift: Loki's label regex is anchored, not ordered.
-        reversed_rule: dict[str, object] = {
-            **lineage_rule,
-            "selector": f'{{event_name=~"{"|".join(names[::-1])}"}}',
-        }
-        validate_loki_deploy_config(config([reversed_rule]))
 
     @pytest.mark.parametrize("variant", ("config", "native/config"))
     def test_loki_demotes_instance_id_and_indexes_event_dimensions(self, variant: str) -> None:
