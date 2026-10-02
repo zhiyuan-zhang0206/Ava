@@ -12,6 +12,7 @@ import pytest
 from base.host.env import audit
 from base.host.env import runtime_config as runtime_config
 from base.host.env.audit import check_env_integrity, last_env_write_record, record_env_write
+from base.telemetry import Event
 
 
 @pytest.fixture
@@ -337,20 +338,16 @@ def test_env_write_event_carries_actor_without_values(
     audit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The value-free event stream also gains the initiating actor."""
-    captured: list[dict[str, object]] = []
-
-    def _capture(**kwargs: object) -> None:
-        captured.append(kwargs)
-
-    monkeypatch.setattr("base.telemetry.audit_events.insert_event_log", _capture)
+    captured: list[Event] = []
+    monkeypatch.setattr("base.telemetry.emit_prepared", captured.append)
     runtime_config.write_fields(
         {"llm_model": "m3"}, set(), audit_site="test", actor="user_session:administrator"
     )
 
-    assert captured and captured[0]["event_type"] == "env_write"
-    payload = cast("dict[str, object]", captured[0]["payload"])
+    assert captured and captured[0].event_name == "env_write"
+    payload = captured[0].attributes
     assert payload["actor"] == "user_session:administrator"
-    assert "m3" not in json.dumps(captured)
+    assert "m3" not in json.dumps(payload)
 
 
 def test_record_env_write_withholds_every_value_when_metadata_fails(
