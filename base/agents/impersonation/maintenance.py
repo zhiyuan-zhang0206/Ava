@@ -45,6 +45,24 @@ def reap_impersonations(pool: ConnectionPool, *, limit: int = _PASS_BATCH) -> in
     return len(expired_agents)
 
 
+def alert_stuck_event_logs(pool: ConnectionPool) -> int:
+    """Alert on ended leases still waiting for an open event source; resolve cleared ones.
+
+    A state alert, not a threshold: the lease cannot complete until its source
+    seals, and nothing else will say so.
+    """
+    from base.agents.impersonation_event_alerts import reconcile_seal_stuck_alerts
+    from base.log import logger
+
+    try:
+        with write_transaction(pool) as conn:
+            return reconcile_seal_stuck_alerts(conn)
+    except Exception:
+        # A failing alert pass must not stop the reclamation that runs after it.
+        logger.exception("impersonation event-log alert pass failed")
+        return 0
+
+
 def force_expire_impersonation(
     pool: ConnectionPool, agent_id: int, session_id: int, actor: str
 ) -> Literal["expired", "not_open"]:
@@ -61,8 +79,9 @@ def force_expire_impersonation(
         insert_handoff,
         lock_agent,
     )
+    from base.agents.impersonation.event_log import is_log_native
     from base.agents.impersonation.history import set_actor
-    from base.agents.impersonation_manifest import close_manifest_admission, is_event_protocol
+    from base.agents.impersonation_manifest import close_event_admission
     from base.log import logger
 
     with write_transaction(pool) as conn:
@@ -77,8 +96,8 @@ def force_expire_impersonation(
         if lease is None or lease["session_id"] != session_id:
             return "not_open"
         set_actor(conn, actor)
-        if is_event_protocol(lease):
-            close_manifest_admission(conn, str(lease["id"]))
+        if is_log_native(lease):
+            close_event_admission(conn, str(lease["id"]))
         inbound_id = None
         if lease["status"] == "active" and not lease["automatic"]:
             inbound_id = insert_handoff(

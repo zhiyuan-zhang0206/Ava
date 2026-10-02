@@ -100,7 +100,7 @@ def attached_runtime(
     monkeypatch.setattr(external.control, "merge_plugin_delta", stage)
     monkeypatch.setattr(external, "process_metadata", lambda: {"pid": 777})
 
-    # This suite models the pre-manifest lease boundary with a symbolic lease
+    # This suite models the pre-event-log lease boundary with a symbolic lease
     # id. The receipt seam is integration-tested against real UUID leases;
     # keeping it outside this state-machine fixture avoids an accidental DB
     # dial that the fixture cannot represent.
@@ -131,15 +131,15 @@ def test_attach_borrows_identity_even_with_explicit_external_profile(
     assert ava.state is None
 
 
-def test_legacy_attachment_never_opens_a_manifest_receipt(
+def test_legacy_attachment_never_opens_an_event_receipt(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A NULL-version legacy attachment has no manifest database side effect."""
+    """A NULL-version legacy attachment has no event-log database side effect."""
 
     def unexpected_open(_lease_id: str, *, agent_id: int, source_key: str) -> bool:
         del agent_id, source_key
-        pytest.fail("legacy attachment opened a manifest receipt")
+        pytest.fail("legacy attachment opened an event receipt")
 
     monkeypatch.setattr(
         "base.agents.impersonation_manifest.open_local_participant",

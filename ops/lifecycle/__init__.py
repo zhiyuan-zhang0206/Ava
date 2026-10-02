@@ -604,11 +604,9 @@ def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
             source="system",
             payload={"from": "idling", "to": "terminated", "reason": "corpse_reaper"},
         )
-        from base.agents.impersonation_manifest import stage_central_expected_event
+        from base.agents.impersonation_manifest import record_central_event
 
-        prepared_event = stage_central_expected_event(
-            conn, prepared_event, origin_kind="ops_lifecycle_reaper", origin_id=agent_id
-        )
+        prepared_event = record_central_event(conn, prepared_event)
     telemetry.emit_prepared(prepared_event)
     _log.info(
         "recover-crash-marked-v2: harvested crash-marked corpse for agent %s "

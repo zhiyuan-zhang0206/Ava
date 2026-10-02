@@ -141,10 +141,8 @@ async def test_spawn_background_tasks_includes_page_reconciler() -> None:
             "plugins_watch",
             "page_reconciler",
             "stdout_log_rotate",
-            "impersonation_events",
             "exec_memory_guard",
         }
-        assert isinstance(tasks["impersonation_events"], asyncio.Task)
         assert isinstance(tasks["page_reconciler"], asyncio.Task)
         assert isinstance(tasks["stdout_log_rotate"], asyncio.Task)
     finally:

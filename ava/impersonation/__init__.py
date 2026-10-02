@@ -6,10 +6,7 @@
 # never agent-facing:
 #   launch   the bootstrap message a launched coding process receives
 #            (`ava.shell.coding_tools`, the use-other-agents skill)
-#   replay   agent-host maintenance that replays recorded SDK/API events into
-#            session history (`services.agent_host.impersonation_events`)
-# Neither is imported here: `import ava` loads this module eagerly, and `replay`
-# pulls in psycopg and httpx.
+# It is not imported here: `import ava` loads this module eagerly.
 
 from typing import NoReturn
 

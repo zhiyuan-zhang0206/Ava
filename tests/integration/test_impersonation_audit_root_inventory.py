@@ -1,8 +1,8 @@
 """Static census for every production audit-construction root.
 
-The manifest protocol can only certify a source census when a newly-added
-audit producer is forced to declare whether it is controller-local, central,
-or deliberately outside the borrowed-identity boundary.
+The event log is complete only when every audit producer is classified: a
+newly-added one must declare whether it is controller-local, central, or
+deliberately outside the borrowed-identity boundary.
 """
 
 from __future__ import annotations
@@ -196,7 +196,7 @@ def _assert_classified(roots: set[str], inventory: dict[str, str]) -> None:
         raise AssertionError("audit inventory has an unknown classification")
 
 
-def test_every_production_audit_root_has_one_manifest_classification() -> None:
+def test_every_production_audit_root_has_one_event_log_classification() -> None:
     root = Path(__file__).parents[2]
     roots = _audit_roots(root)
     _assert_classified(roots, _INVENTORY)
@@ -207,9 +207,7 @@ def test_every_production_audit_root_has_one_manifest_classification() -> None:
             continue
         path = root / location.split("::", 1)[0]
         source = path.read_text(encoding="utf-8")
-        assert "stage_central_expected_event" in source or "emit_staged_central_event" in source, (
-            location
-        )
+        assert "record_central_event" in source or "emit_recorded_central_event" in source, location
 
 
 def test_scope_keys_survive_line_drift_and_require_count_and_name_updates(tmp_path: Path) -> None:

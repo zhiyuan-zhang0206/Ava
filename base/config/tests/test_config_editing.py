@@ -284,26 +284,6 @@ def test_coerce_scalar_forms() -> None:
 # ── real-field provisioning surface pins ──
 
 
-def test_manifest_certification_secret_stays_locally_provisionable() -> None:
-    """The operator provisioning surface for manifest enablement (task #4719).
-
-    The host-scoped certification secret requires a distinct value on every
-    participating agent-runner, and the official config path is the only
-    sanctioned way to set it (direct `.env` writes are barred by the 2026-09-01
-    ruling). It must stay editable on its own host and never remotely: the value
-    must not traverse the gateway.
-    """
-    meta = next(
-        item
-        for item in get_config_metadata()
-        if item.name == "impersonation_event_manifest_certification_secret"
-    )
-    assert meta.scope == "host"
-    assert meta.sensitive is True
-    assert field_editable(meta, local=True) is True
-    assert field_editable(meta, local=False) is False
-
-
 # Keys that decide who authenticates to this cluster, or whether it
 # authenticates at all. An authenticated caller (any machine token included)
 # must never choose them through a config write: the human bearer rotates only
@@ -333,9 +313,6 @@ _OUTBOUND_CREDENTIALS = {
     "AVA_FEISHU_APP_SECRET",
     "AVA_TELEGRAM_BOT_TOKEN",
     "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
-    # Host-local proof, usable only together with a database login the fence
-    # revokes (base/agents/impersonation/docs/manifest-certification.ava.okf.md).
-    "AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET",
 }
 
 

@@ -132,19 +132,17 @@ def fake_helper(monkeypatch: pytest.MonkeyPatch) -> FakeHelper:
 def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     log: list[dict[str, Any]] = []
 
-    def _stage(event: Any, *, origin_kind: str, origin_id: int) -> None:
+    def _record(event: Any) -> None:
         log.append(
             {
                 "event_type": event.event_name,
                 "agent_id": event.agent_id,
                 "source": event.source,
                 "payload": event.attributes,
-                "origin_kind": origin_kind,
-                "origin_id": origin_id,
             }
         )
 
-    monkeypatch.setattr("base.agents.impersonation_manifest.emit_staged_central_event", _stage)
+    monkeypatch.setattr("base.agents.impersonation_manifest.emit_recorded_central_event", _record)
     return log
 
 
@@ -883,7 +881,6 @@ async def test_audit_emitted_on_success(
     start, ev = audit_log
     assert start["event_type"] == "computer_session_start"
     assert start["payload"]["task_id"] == 42
-    assert start["origin_id"] == 42
     assert ev["event_type"] == "computer_action"
     assert ev["agent_id"] == 7
     assert ev["source"] == "agent:7"
@@ -892,7 +889,6 @@ async def test_audit_emitted_on_success(
     assert ev["payload"]["coords"] == "100,200"
     assert ev["payload"]["task_id"] == 42
     assert ev["payload"]["app"] == "Finder"
-    assert (ev["origin_kind"], ev["origin_id"]) == ("computer_action", 1)
 
 
 async def test_audit_emitted_on_error(fake_helper: FakeHelper, audit_log: list) -> None:
@@ -1034,8 +1030,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
     monkeypatch.setattr(daemon_mod.logger, "warning", lambda msg: warnings.append(str(msg)))  # pyright: ignore[reportUnknownArgumentType]
     log: list[dict[str, Any]] = []
 
-    def _stage(event: Any, *, origin_kind: str, origin_id: int) -> None:
-        del origin_kind, origin_id
+    def _stage(event: Any) -> None:
         if event.event_name.startswith("computer_session_"):
             # the envelope path is broken (unregistered name etc.)
             raise ValueError(f"unknown event name {event.event_name!r}")
@@ -1048,7 +1043,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
             }
         )  # pyright: ignore[reportUnknownMemberType]
 
-    monkeypatch.setattr("base.agents.impersonation_manifest.emit_staged_central_event", _stage)
+    monkeypatch.setattr("base.agents.impersonation_manifest.emit_recorded_central_event", _stage)
     d = _daemon()
     resp = await _call(d, "click", {"x": 1, "y": 2, "task_id": 42})
     assert resp["ok"] is True  # the action itself executed

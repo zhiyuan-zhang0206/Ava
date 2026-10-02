@@ -3,7 +3,7 @@
 The package door is the client — typed gateway operations the SDK namespaces
 call. `transport` is the HTTP layer under it: the process-wide httpx client,
 retry/backoff, and wire-error translation. Other `ava` modules that read a raw
-gateway route (`ava.impersonation.replay`) use `transport` directly.
+gateway route use `transport` directly.
 
 The agent process's `ava.agents.*` no longer directly connects to the DB —
 three gateway ops (spawn / send_message / get_last_message)
