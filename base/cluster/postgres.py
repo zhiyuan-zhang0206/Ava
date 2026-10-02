@@ -15,6 +15,7 @@ import sys
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
 from typing import Any, Literal, cast
@@ -25,10 +26,11 @@ from pydantic import Field, model_validator
 from base.deploy.release.verified_file import regular_bytes
 from base.host.atomic_io import write_text_atomic
 from base.host.private_storage import ensure_private_dir
+from base.log import logger
 from base.native_process import native_boot_id
 from base.native_process.evidence import EvidenceModel, ExpectedProcess
 from base.native_process.os_platform import file_lock
-from base.native_process.ownership import OwnedProcess, capture_tree
+from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 
 # Retain unreaped direct children through admission, including ambiguous failure.
 _CHILDREN: list[subprocess.Popen[bytes]] = []
@@ -346,8 +348,81 @@ def start(
         return _complete_start(data, captured, ready, timeout)
 
 
-def stop(data: Path, *, expected: OwnedProcess | None = None, timeout: float = 60) -> None:
-    """Fast clean shutdown, followed by exact native tree and endpoint closure."""
+@dataclass(frozen=True)
+class Escalation:
+    """A fast shutdown that did not finish and was ended by an immediate one."""
+
+    detail: str
+    killed: tuple[int, ...]  # pids SIGKILLed after the immediate shutdown (verified descendants)
+
+
+def _wait_all_gone(members: set[OwnedProcess], wait: float) -> bool:
+    deadline = time.monotonic() + wait
+    while any(member.live() for member in members):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def _escalate(
+    owner: OwnedProcess,
+    tree: set[OwnedProcess],
+    fast_wait: float,
+    immediate_wait: float,
+    kill_wait: float,
+) -> Escalation:
+    """End a fast shutdown that is stuck: SIGQUIT, then SIGKILL what outlives it.
+
+    Postgres stays stuck in a fast shutdown while its archiver waits on an archive command
+    that never returns. SIGQUIT is Postgres' immediate shutdown (no checkpoint; the next
+    start replays WAL, and segments not yet archived stay in `pg_wal` for the archiver).
+    The archiver dies with it but its archive command, a child of the archiver, is
+    orphaned, so the tree captured before the signal is the only proof of whose it is:
+    every survivor still matching its recorded birth is SIGKILLed, children before the
+    postmaster, and nothing is ever signalled by name or pid alone.
+    """
+    detail = (
+        f"fast shutdown did not complete within {fast_wait:.0f}s "
+        "(a blocked archive command is the usual cause)"
+    )
+    logger.error(f"[postgres] {detail}; escalating to immediate shutdown")
+    for member in tuple(tree):  # a command the archiver started after the first capture
+        retain_processes(tree, capture_tree(member))
+    owner.send_signal(signal.SIGQUIT)
+    _wait_all_gone({owner}, immediate_wait)
+    survivors = sorted(
+        (member for member in tree if member.live()), key=lambda member: member == owner
+    )
+    for member in survivors:
+        member.send_signal(signal.SIGKILL)
+    if not _wait_all_gone(tree, kill_wait):
+        alive = sorted(member.pid for member in tree if member.live())
+        logger.error(f"[postgres] processes outlived SIGKILL: {alive}")
+        raise RuntimeError(
+            f"PostgreSQL immediate shutdown left processes {alive} alive; custody retained"
+        )
+    killed = tuple(member.pid for member in survivors)
+    logger.error(f"[postgres] immediate shutdown done; killed leftover processes {list(killed)}")
+    return Escalation(detail, killed)
+
+
+def stop(
+    data: Path,
+    *,
+    expected: OwnedProcess | None = None,
+    timeout: float = 60,
+    immediate_wait: float | None = None,
+    kill_wait: float | None = None,
+) -> Escalation | None:
+    """Fast clean shutdown, followed by exact native tree and endpoint closure.
+
+    A fast shutdown that has not finished after `timeout` fails with custody retained,
+    unless `immediate_wait` and `kill_wait` are given: then it is ended by an immediate
+    shutdown (waiting at most `immediate_wait` for the postmaster) and a SIGKILL of the
+    recorded descendants that outlive it (waiting at most `kill_wait`), and the returned
+    `Escalation` says so. Returns None for a shutdown that finished by itself.
+    """
     data = _data_path(data)
     path = receipt_path(data)
     ensure_private_dir(path.parent)
@@ -359,7 +434,7 @@ def stop(data: Path, *, expected: OwnedProcess | None = None, timeout: float = 6
         if owner is None:
             if receipt is not None:
                 require_listener(None, receipt.port, required=False)
-            return
+            return None
         if expected is not None and not owner.same_birth(expected):
             raise RuntimeError("PostgreSQL replacement cannot inherit retained stop authority")
         if receipt is None:
@@ -368,9 +443,15 @@ def stop(data: Path, *, expected: OwnedProcess | None = None, timeout: float = 6
         tree = capture_tree(owner)
         owner.send_signal(signal.SIGINT)  # PostgreSQL fast, checkpointed shutdown.
         deadline = time.monotonic() + timeout
+        escalation: Escalation | None = None
         while any(member.live() for member in tree):
             if time.monotonic() >= deadline:
-                raise RuntimeError("PostgreSQL native shutdown did not complete; custody retained")
+                if immediate_wait is None or kill_wait is None:
+                    raise RuntimeError(
+                        "PostgreSQL native shutdown did not complete; custody retained"
+                    )
+                escalation = _escalate(owner, tree, timeout, immediate_wait, kill_wait)
+                break
             time.sleep(0.05)
         _require_closed(data, receipt)
         require_listener(None, receipt.port, required=False)
@@ -378,3 +459,4 @@ def stop(data: Path, *, expected: OwnedProcess | None = None, timeout: float = 6
             if child.pid == owner.pid:
                 child.wait(timeout=1)
                 _CHILDREN.remove(child)
+        return escalation

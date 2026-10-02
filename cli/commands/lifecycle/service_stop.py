@@ -56,6 +56,12 @@ _TERMINAL_STOP_GRACE_S = 10.0
 # bounded leg.
 _TERMINAL_KILL_WAIT_S = 3.0
 
+# The data-plane stop's escalation legs (`cli/commands/data_plane/maintenance_stop.py`)
+# use the same two bounds under their own names: how long Postgres' immediate shutdown
+# is given to finish, and how long the SIGKILL of what outlives it is waited for.
+PROCESS_CLEANUP_WAIT_S = _TERMINAL_STOP_GRACE_S
+PROCESS_KILL_WAIT_S = _TERMINAL_KILL_WAIT_S
+
 
 def deadline_after(timeout: float) -> float:
     if not math.isfinite(timeout) or timeout <= 0:
@@ -515,8 +521,14 @@ def stop_services(
     return selected_names
 
 
-def stop_data_plane(timeout: float, *, save: bool = True) -> list[str]:
-    """Stop this home's native data plane; never stop a remote-managed plane."""
+def stop_data_plane(
+    timeout: float, *, save: bool = True, notes: list[str] | None = None
+) -> list[str]:
+    """Stop this home's native data plane; never stop a remote-managed plane.
+
+    `notes` collects what the stop report must say (a Postgres shutdown that had to be
+    escalated).
+    """
     from cli.commands.data_plane.maintenance_stop import stop
 
-    return stop(timeout, save=save)
+    return stop(timeout, save=save, notes=notes)

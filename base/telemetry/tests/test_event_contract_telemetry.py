@@ -174,7 +174,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # current total to 221. The custody reconcile audit (task #4872 C route:
     # custody_reconcile — releases always report; a retained record on first
     # sight and on evidence change, with its evidence) raises the current total
-    # to 222.
+    # to 222. The Postgres stop escalation (postgres_stop_escalated — a fast
+    # shutdown ended by an immediate one, with the leftover processes killed)
+    # raises it to 223.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
     assert "agent_reopened" not in _TELEMETRY_KINDS
     for retired in (
@@ -186,7 +188,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
         assert retired not in _TELEMETRY_KINDS
     # The suffix diagnostic adds one; retiring tool-call concatenation removes one.
     assert "multiple_tool_calls_merged" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 222
+    assert len(_TELEMETRY_KINDS) == 223
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",

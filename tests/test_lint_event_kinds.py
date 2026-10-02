@@ -75,6 +75,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "editable_direct_url_repaired",  # base/deploy/release/editable_install.py:repair_editable_direct_url
         "exec_editable_install_poisoned",  # base/deploy/release/editable_install.py:guard_editable_install
         "lgtm_dashboard_render_failed",  # cli/commands/observability/_lgtm_provisioning.py:_render_ava_ops_dashboard telemetry.emit("telemetry", ...)
+        "postgres_stop_escalated",  # cli/commands/data_plane/maintenance_stop.py:_report_escalation telemetry.emit("telemetry", ...)
         "event_log_drop",  # base/telemetry/loss.py:loss_event constructs Event directly
         "sdk_call",  # ava/sdk_surface/metering.py recorder (via base/sdk_telemetry)
         # base/packages/plugins/activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a

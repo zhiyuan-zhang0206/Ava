@@ -1,6 +1,8 @@
 """Verified native data-plane stop for an already drained maintenance hold.
 
-No force escalation, snapshots, or remote management. The stop semantics match
+No force escalation of the pooler or Redis, no snapshots, no remote management. A Postgres
+fast shutdown that outlives its share of the budget is ended by an immediate shutdown
+(decisions/2026-10-02-pg-stop-escalates-to-immediate.md). The stop semantics match
 what the preceding drain has already proven: the pooler gets SIGINT (safe
 shutdown — it disconnects clients and waits only for in-flight server
 transactions) and PostgreSQL native fast shutdown (disconnect idle sessions, roll
@@ -28,6 +30,7 @@ from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import RedisError
 
+from base import telemetry
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.dataplane import pooler as pooler_files
@@ -36,6 +39,8 @@ from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.lifecycle.service_stop import (
+    PROCESS_CLEANUP_WAIT_S,
+    PROCESS_KILL_WAIT_S,
     OwnedProcess,
     capture_tree,
     deadline_after,
@@ -97,12 +102,60 @@ async def _redis_command(client: Redis, deadline: float, *args: str) -> object:
     )
 
 
+def _postgres_fast_budget(deadline: float) -> float:
+    """How long Postgres' fast shutdown may take: what is left of the stop's deadline minus
+    the legs that follow it, so a stuck fast shutdown cannot spend the whole shared budget.
+
+    The reserve is the immediate shutdown's wait, the SIGKILL wait, and the same cleanup
+    wait for Redis' save. A stop whose remaining time is not larger than the reserve
+    gives the fast shutdown all of it; the escalation legs then overrun the deadline by
+    their own bounded waits, like the terminal closure's SIGKILL leg.
+    """
+    left = remaining(deadline)
+    reserve = PROCESS_CLEANUP_WAIT_S + PROCESS_KILL_WAIT_S + PROCESS_CLEANUP_WAIT_S
+    return left - reserve if left > reserve else left
+
+
+def _report_escalation(escalation: owned_postgres.Escalation, notes: list[str] | None) -> None:
+    killed = ", ".join(str(pid) for pid in escalation.killed) or "none"
+    note = (
+        f"postgres {escalation.detail}; ended by an immediate shutdown "
+        f"(crash recovery at the next start; unarchived WAL stays in pg_wal), "
+        f"killed leftover processes: {killed}"
+    )
+    print(f"  ! {note}", file=sys.stderr, flush=True)
+    telemetry.emit(
+        "telemetry",
+        "postgres_stop_escalated",
+        level="error",
+        source="stop",
+        attributes={"detail": escalation.detail, "killed": list(escalation.killed)},
+    )
+    if notes is not None:
+        notes.append(note)
+
+
 async def _request_stop(
-    name: str, identity: OwnedProcess, client: Redis, deadline: float, *, save: bool
+    name: str,
+    identity: OwnedProcess,
+    client: Redis,
+    deadline: float,
+    *,
+    save: bool,
+    notes: list[str] | None = None,
 ) -> None:
     if name == "postgres":
-        # SIGINT requests PostgreSQL's fast, checkpointed shutdown.
-        owned_postgres.stop(instance._pg_data_dir(), expected=identity, timeout=remaining(deadline))
+        # SIGINT requests PostgreSQL's fast, checkpointed shutdown; a fast shutdown stuck
+        # past its budget (an archive command that never returns) is ended by SIGQUIT.
+        escalation = owned_postgres.stop(
+            instance._pg_data_dir(),
+            expected=identity,
+            timeout=_postgres_fast_budget(deadline),
+            immediate_wait=PROCESS_CLEANUP_WAIT_S,
+            kill_wait=PROCESS_KILL_WAIT_S,
+        )
+        if escalation is not None:
+            _report_escalation(escalation, notes)
     elif name == "redis":
         # Do not use redis-py's shutdown helper: it accepts any connection
         # error as success. Expected EOF is accepted only if the exact PID
@@ -117,7 +170,7 @@ async def _request_stop(
             raise TimeoutError("PgBouncer stop incomplete; custody retained")
 
 
-async def _stop(deadline: float, *, save: bool = True) -> list[str]:
+async def _stop(deadline: float, *, save: bool = True, notes: list[str] | None = None) -> list[str]:
     pg = capture_postgres()
     pgb = _capture_pooler()
     port = ownership.configured_redis_port()
@@ -155,7 +208,7 @@ async def _stop(deadline: float, *, save: bool = True) -> list[str]:
             remaining(deadline)
             if not identity.live():
                 raise RuntimeError(f"{name} identity changed before stop")
-            await _request_stop(name, identity, client, deadline, save=save)
+            await _request_stop(name, identity, client, deadline, save=save, notes=notes)
             wait_for_exit(trees[name], deadline)
             stopped.append(name)
         remaining(deadline)
@@ -177,10 +230,10 @@ async def _stop(deadline: float, *, save: bool = True) -> list[str]:
         await asyncio.wait_for(client.aclose(), max(0.001, deadline - time.monotonic()))
 
 
-def stop(timeout: float, *, save: bool = True) -> list[str]:
+def stop(timeout: float, *, save: bool = True, notes: list[str] | None = None) -> list[str]:
     deadline = deadline_after(timeout)
     if sys.platform == "win32":
         raise RuntimeError("native maintenance data-plane stop requires POSIX")
     if settings.data_plane.is_remote:
         raise RuntimeError("maintenance cannot verify a remote-managed data-plane stop")
-    return asyncio.run(_stop(deadline, save=save))
+    return asyncio.run(_stop(deadline, save=save, notes=notes))

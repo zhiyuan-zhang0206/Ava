@@ -82,3 +82,5 @@ deploy lease also froze admission cluster-wide.
   release does not fail the stop.
 - Recovery correctness depends on the scan resuming at the start leg; a
   future hold added to the scan must carry this record's constraint.
+
+Forward link: the "never force Postgres" part of item 1 is replaced for Postgres by [a fast shutdown that does not finish is ended by an immediate one](2026-10-02-pg-stop-escalates-to-immediate.md).

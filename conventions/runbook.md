@@ -1531,9 +1531,11 @@ clear it. The probe reads the queue over the admin socket because the applicatio
 may not list `archive_status/`.
 
 **Before a planned stop**, look at `ava backup walg status`: Postgres' shutdown waits for
-the archiver to finish its queue, so a backlog (or a hung `wal-g`) delays `ava stop` and
-may end in "native shutdown did not complete; custody retained" while Postgres finishes
-on its own; run `ava stop` again.
+the archiver to finish its queue, so a backlog (or a hung `wal-g`) delays `ava stop`. A
+fast shutdown still unfinished near the end of the stop's budget is ended by an immediate
+shutdown and the leftover `wal-g` processes are killed; the stop reports it (an error
+log, the `postgres_stop_escalated` event, an `escalations` entry in the stop journal) and
+completes. The next start replays WAL and the archiver ships what was left in `pg_wal`.
 
 ### Agent recovery after a provider billing stoppage
 

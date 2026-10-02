@@ -443,8 +443,15 @@ def test_pg_native_signal_failure_is_not_reported_as_stopped(
     owner = OwnedProcess(123, 100.0, 456)
     seen: list[OwnedProcess | None] = []
 
-    def fail(_data: Path, *, expected: OwnedProcess | None, timeout: float) -> None:
-        assert timeout > 0
+    def fail(
+        _data: Path,
+        *,
+        expected: OwnedProcess | None,
+        timeout: float,
+        immediate_wait: float,
+        kill_wait: float,
+    ) -> None:
+        assert timeout > 0 and immediate_wait > 0 and kill_wait > 0
         seen.append(expected)
         raise RuntimeError("native custody lost")
 
