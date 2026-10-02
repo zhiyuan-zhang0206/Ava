@@ -13,7 +13,7 @@ import pytest
 from scripts.lint import code_structure as lcs
 from scripts.lint import patch_targets as lint
 from scripts.structure import baseline_shards, locality, patch_targets
-from tests.scripts.structure.patch_repo import make_repo, write
+from scripts.structure.tests.patch_repo import make_repo, write
 
 _LINT = "scripts/lint/patch_targets.py"
 # A test whose subject spans two `base` packages (home `base`) and reaches into one's private.

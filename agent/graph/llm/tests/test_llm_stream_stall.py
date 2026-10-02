@@ -34,11 +34,11 @@ from agent.graph.llm_errors import (
     _reset_stall_pair_streak,
 )
 from agent.state import AgentState
+from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.config import settings
 from base.lm.registry import MODELS, ModelSpec
 from base.native_process.turn_identity import bind_turn_identity
-from tests.agent._fakes import make_fake_ops_pool
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 

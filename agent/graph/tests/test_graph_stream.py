@@ -25,9 +25,9 @@ from langgraph.types import Command
 
 from agent.graph import exec_node, llm_node
 from agent.state import AgentState
+from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
-from tests.agent._fakes import make_fake_ops_pool
 
 
 def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
