@@ -212,16 +212,12 @@ def _instrument_maintenance_slices(
         "rollup": _CallRecorder(
             SimpleNamespace(start_day=None, end_day=None, metrics_rows=0, tokens_rows=0)
         ),
-        "replay": _CallRecorder(
-            SimpleNamespace(days_replayed=[], days_failed=[], metrics_rows=0, tokens_rows=0)
-        ),
         "vacuum": _CallRecorder(SimpleNamespace(ran=False, summary=lambda: "")),
         "emit_sizes": _CallRecorder(None),
     }
     monkeypatch.setattr(daemon, "recover_observations", rec["observed_metrics"])
     monkeypatch.setattr(daemon, "recover_telemetry_events", rec["telemetry_events"])
     monkeypatch.setattr(daemon, "compute_rollup", rec["rollup"])
-    monkeypatch.setattr(daemon, "replay_gap_days", rec["replay"])
     monkeypatch.setattr(daemon, "run_blob_vacuum", rec["vacuum"])
     monkeypatch.setattr(daemon, "emit_checkpoint_table_sizes", rec["emit_sizes"])
     return rec
@@ -229,7 +225,7 @@ def _instrument_maintenance_slices(
 
 def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hourly pass always runs the metric and telemetry-event recoveries, the cost-ledger
-    rollup, the JSONL replay, the size telemetry sample, and blob vacuum. Checkpoint pruning belongs only
+    rollup, the size telemetry sample, and blob vacuum. Checkpoint pruning belongs only
     to the fast loop; the hourly pass must not run a second retention rule."""
     rec = _instrument_maintenance_slices(monkeypatch)
     progress = LoopProgress("dispatch", timeout_s=60.0)
@@ -254,12 +250,11 @@ def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPa
         "observed_metrics",
         "telemetry_events",
         "rollup",
-        "replay",
         "vacuum",
         "emit_sizes",
     ):
         assert rec[name].calls == 1, name
-    assert beats == 5  # one per slice group: both recoveries, rollup+replay, sizes, vacuum
+    assert beats == 5  # one per slice group: both recoveries, rollup, sizes, vacuum
     assert progress.snapshot()["last_success_at"] is not None
 
 

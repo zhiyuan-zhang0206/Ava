@@ -1,13 +1,7 @@
 {
   "ambient_state": {
     "services/events_maintenance/daemon.py::asyncio-task:_maintenance_with_liveness": 1,
-    "services/events_maintenance/resolution.py::ambient-container:_last_auto_dismiss_day": 1,
-    "services/events_maintenance/rollup.py::ambient-instance:_query_budget": 1
-  },
-  "complexity": {
-    "services/events_maintenance/jsonl_replay.py::aggregate_rollup_file": 15,
-    "services/events_maintenance/observed_metrics.py::replay_jsonl": 18,
-    "services/events_maintenance/rollup.py::_day_aggregates": 15
+    "services/events_maintenance/resolution.py::ambient-container:_last_auto_dismiss_day": 1
   },
   "patch_targets": {
     "services/events_maintenance/tests/test_events_maintenance_daemon.py::base.daemon.health.LivenessGroup.register._last_success_at": 1

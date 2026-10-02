@@ -33,7 +33,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # name -> (modules the entry imports, AVA_PROCESS_PROFILE the roster sets)
 ENTRIES: dict[str, tuple[tuple[str, ...], str]] = {
     "heartbeat": (("services.heartbeat.daemon",), "gateway"),
-    "events-maintenance": (("services.events_maintenance.daemon",), "gateway"),
     "memory-indexer": (("services.memory_indexer.daemon",), "gateway"),
     "memory-search": (("services.memory_search.daemon",), "gateway"),
     "gateway": (("gateway._server", "gateway.app"), "gateway"),

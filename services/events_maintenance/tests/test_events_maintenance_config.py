@@ -14,11 +14,9 @@ from services.events_maintenance import daemon
 def test_the_slice_carries_the_live_value_of_every_field(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.daemon, "events_resolution_burst_threshold", 17)
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    monkeypatch.setattr(settings.observability, "telemetry_loki_url", "http://loki.example:3100")
     config = daemon.events_maintenance_config()
     for field in dataclasses.fields(config):
         flat: Any = get_field(field.name)
         assert getattr(config, field.name) == flat, field.name
     assert config.events_resolution_burst_threshold == 17
     assert config.timezone == "Asia/Shanghai"
-    assert config.telemetry_loki_url == "http://loki.example:3100"
