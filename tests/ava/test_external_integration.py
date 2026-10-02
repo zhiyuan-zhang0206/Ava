@@ -6,7 +6,6 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -121,14 +120,13 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     assert leases.get(lease["id"], attested_caller(lease))["delta_version"] == 1
 
 
+@pytest.mark.usefixtures("sdk_via_gateway")
 def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenance(
-    gateway_unit: TestClient,
     native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner, _ = native_checkpoint
-    monkeypatch.setattr("ava.gateway_client.transport._client", gateway_unit)
     monkeypatch.setenv(
         "AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex","instance":"test"}'
     )
@@ -177,15 +175,14 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     assert handoff[3]["caller_identity"] == caller.model_dump()
 
 
+@pytest.mark.usefixtures("sdk_via_gateway")
 def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
-    gateway_unit: TestClient,
     native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Attachment-owned ``ava.agents.send_message`` is a central audit row in the lease log."""
     owner, _ = native_checkpoint
-    monkeypatch.setattr("ava.gateway_client.transport._client", gateway_unit)
     peer_id = create_agent(db_conn)
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,lease_expires_at) "

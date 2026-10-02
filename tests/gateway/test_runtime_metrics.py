@@ -185,7 +185,6 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
     mode: Literal["filtered", "throttled"],
 ) -> None:
     emitted: list[dict[str, Any]] = []
-    monkeypatch.setattr(runtime_metrics, "_sse_active_connections", {})
 
     def open_redis(_url: str) -> _RedisClient:
         return _RedisClient()
@@ -201,6 +200,8 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
         emitted.append(attributes)
 
     monkeypatch.setattr(runtime_metrics.telemetry, "emit", capture_emit)
+    runtime_metrics.initialize_sse_metrics()
+    emitted.clear()
 
     async def run_stream() -> None:
         request = cast(Request, _Request())
