@@ -65,7 +65,7 @@ class MetricsSource(Protocol):
     """The self-check slice `status()` embeds (W1.2b's `TreeSelfCheck`)."""
 
     def metrics_snapshot(self) -> dict[str, object]:
-        """The B7 metrics block (chain gauges + injectable slots)."""
+        """The B7 metrics block (the chain gauges)."""
         ...
 
 
