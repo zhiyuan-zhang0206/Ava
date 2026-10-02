@@ -4,10 +4,9 @@
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 25
+    "tests/base": 21
   },
   "files": {
-    "tests/base/test_editable_install.py": 883,
     "tests/base/test_runner_role.py": 1035
   },
   "patch_targets": {
@@ -24,8 +23,6 @@
   },
   "tests_location": {
     "tests/base/test_connect_helpers.py::top-level": 1,
-    "tests/base/test_editable_install.py::top-level": 1,
-    "tests/base/test_subreaper_contract.py::top-level": 1,
-    "tests/base/test_tags.py::top-level": 1
+    "tests/base/test_subreaper_contract.py::top-level": 1
   }
 }
