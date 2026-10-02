@@ -56,7 +56,6 @@ def test_apply_pending_squash_then_apply_pending(
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_squash_t (id int);")
-    (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE syn_squash_t;")
     _init_repo(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
@@ -84,7 +83,6 @@ def test_squash_does_not_touch_baseline_or_pending(
     nothing to squash)."""
     _ = db_conn
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_keep_t (id int);")
-    (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE syn_keep_t;")
     _init_repo(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
@@ -261,17 +259,14 @@ def test_current_reset_refuses_missing_history_without_mutation(
         assert applied_migration_names(conn) == before
 
 
-def test_current_reset_converges_complete_history_and_refuses_cross_floor_rollback(
+def test_current_reset_converges_complete_history(
     db_conn: psycopg.Connection,
 ) -> None:
     from base.deploy.schema.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
     from base.deploy.schema.migrations import (
-        RollbackBelowFloor,
         applied_migration_names,
-        apply_down,
         check_schema_version,
         required_migration_set,
-        rollback_to,
     )
     from tests.ava.migration_support import _schema_sql_stamped_migration_names, _set_table_to
 
@@ -288,12 +283,6 @@ def test_current_reset_converges_complete_history_and_refuses_cross_floor_rollba
         expected = required_migration_set()
         assert applied_migration_names(conn) == expected
         assert apply_pending_migrations(conn) == []
-        with pytest.raises(RollbackBelowFloor):
-            rollback_to(conn, predecessor)
-        assert applied_migration_names(conn) == expected
-        with pytest.raises(RollbackBelowFloor):
-            apply_down(conn, _RESET_ANCHOR)
-        assert applied_migration_names(conn) == expected
 
 
 @pytest.mark.parametrize("apply", [False, True])
@@ -320,7 +309,6 @@ def test_reset_anchor_and_history_deletion_roll_back_together(
     from tests.ava.migration_support import _set_table_to
 
     (tmp_path / f"{_RESET_ANCHOR}.sql").write_text("SELECT 1;")
-    (tmp_path / f"{_RESET_ANCHOR}.down.sql").write_text("SELECT 1;")
     _init_repo(tmp_path)
     monkeypatch.setattr(migrations, "MIGRATIONS_DIR", tmp_path)
     predecessor = {_BASELINE_NAME, *_PRE_RESET_SET}
@@ -352,7 +340,6 @@ def test_failed_reset_anchor_preserves_history_for_retry(
 
     anchor = tmp_path / f"{_RESET_ANCHOR}.sql"
     anchor.write_text("SELECT 1 / 0;")
-    (tmp_path / f"{_RESET_ANCHOR}.down.sql").write_text("SELECT 1;")
     _init_repo(tmp_path)
     monkeypatch.setattr(migrations, "MIGRATIONS_DIR", tmp_path)
     predecessor = {_BASELINE_NAME, *_PRE_RESET_SET}

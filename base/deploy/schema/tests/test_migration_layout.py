@@ -47,11 +47,10 @@ class TestLayoutValidation:
         with pytest.raises(MigrationLayoutError, match="does not match"):
             _list_migration_files()
 
-    def test_readme_and_down_and_dotfiles_skipped(
+    def test_readme_and_dotfiles_skipped(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         (tmp_path / f"{_SYN}.sql").write_text("-- noop")
-        (tmp_path / f"{_SYN}.down.sql").write_text("-- noop")
         (tmp_path / "README.md").write_text("docs")
         (tmp_path / ".DS_Store").write_text("junk")
         _init_repo(tmp_path)
@@ -64,7 +63,11 @@ class TestValidateMigrationLayout:
         validate_migration_layout([f"{_SYN}.sql", f"{_SYN2}.sql"])
 
     def test_empty_is_valid(self) -> None:
-        validate_migration_layout([".DS_Store", "README.md", f"{_SYN}.down.sql"])
+        validate_migration_layout([".DS_Store", "README.md"])
+
+    def test_down_file_is_not_a_migration_name(self) -> None:
+        with pytest.raises(MigrationLayoutError, match="does not match"):
+            validate_migration_layout([f"{_SYN}.down.sql"])
 
     def test_duplicate_raises(self) -> None:
         with pytest.raises(MigrationLayoutError, match="duplicate migration name"):

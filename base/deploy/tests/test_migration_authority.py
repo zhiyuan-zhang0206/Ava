@@ -117,7 +117,6 @@ def _as_git_worktree(tmp_path: Path) -> None:
 def _pending_migration(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Point MIGRATIONS_DIR at one synthetic post-baseline migration (tracked)."""
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_authority_t (id int);")
-    (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE syn_authority_t;")
     _as_git_worktree(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
 
@@ -223,12 +222,11 @@ def test_untracked_migration_files_names_only_untracked_sql(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The converge warning surfaces exactly what the loader skips: untracked
-    `.sql` up-files — nothing else (tracked files, down files, dotfiles)."""
+    `.sql` up-files — nothing else (tracked files, dotfiles)."""
     (tmp_path / "20260808T010000_tracked.sql").write_text("-- up")
     _as_git_worktree(tmp_path)
     # Written AFTER the commit, so git does not track them:
     (tmp_path / "20260808T020000_untracked.sql").write_text("-- up")
-    (tmp_path / "20260808T030000_untracked.down.sql").write_text("-- down")
     (tmp_path / ".hidden.sql").write_text("-- hidden")
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
 
@@ -273,7 +271,6 @@ def test_unreadable_migration_files_empty_when_every_tracked_file_reads(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / "20260808T010000_ok.sql").write_text("-- up")
-    (tmp_path / "20260808T010000_ok.down.sql").write_text("-- down")
     _as_git_worktree(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
 

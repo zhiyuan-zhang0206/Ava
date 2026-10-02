@@ -37,7 +37,7 @@ def cmd_migrations_apply() -> list[str]:
     from base.db import pg_admin
 
     # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
-    # must first be mirrored in a paired Ava up/down migration. Failing before
+    # must first be mirrored in an Ava migration. Failing before
     # Ava SQL runs keeps update recovery on the old code + old schema.
     cluster.assert_checkpoint_dependency_pinned()
 

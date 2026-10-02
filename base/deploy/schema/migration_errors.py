@@ -30,12 +30,6 @@ class MigrationLayoutError(MigrationError):
     does not match the timestamp format / a duplicate name."""
 
 
-class RollbackBelowFloor(MigrationError):  # noqa: N818 — state-description naming
-    """Rollback target is below the baseline; the baseline has no down by
-    design (it is a squashed snapshot). Folded strict deltas cannot be
-    replayed safely by an older release."""
-
-
 class MigrationHistoryGap(MigrationError):  # noqa: N818
     """The apply path found a DB that applied only PART of a frozen pre-reset
     migration generation, or has not reached the current reset at all.

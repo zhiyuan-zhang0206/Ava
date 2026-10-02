@@ -4,21 +4,27 @@ CI runs it (`.venv/bin/python scripts/content_lint/lint_migrations.py`); fail ->
 fine to run locally once after adding a new migration.
 
 Checks:
-1. **Filename format** — every up-migration matches
-   `YYYYMMDDTHHMMSS_<kebab-name>.sql` and every down matches the `.down.sql`
-   variant (the regexes are reused from `base.deploy.schema.migrations`, so lint and the
-   runtime loader can never disagree on the format). The timestamp part must
-   parse as a real UTC datetime (catches fat-fingered `20261301T...`).
+1. **Filename format** — every migration matches
+   `YYYYMMDDTHHMMSS_<kebab-name>.sql` (the regex is reused from
+   `base.deploy.schema.migrations`, so lint and the runtime loader can never
+   disagree on the format). The timestamp part must parse as a real UTC datetime
+   (catches fat-fingered `20261301T...`). There are no down migrations: a
+   `.down.sql` file is rejected, and a mistake is fixed forward.
 2. **Unique names** — no two files share a name (the applied-set primary key
    would reject a duplicate at apply; catch it here).
 3. **Unique timestamp prefixes** — no two migrations share the same
    `YYYYMMDDTHHMMSS` prefix. Names stay second-precision by ruling (2026-08-07),
    so a shared prefix means two distinct migrations are timestamp-ambiguous;
-   rollback diffs and operator chatter key off these names, and a pair that
-   differs only in the kebab tail is one typo away from colliding.
-4. **up/down pairing** — every `*.sql` has a matching `*.down.sql` and vice
-   versa. The baseline is the rollback floor, so every post-baseline migration
-   must be reversible.
+   operator chatter keys off these names, and a pair that differs only in the
+   kebab tail is one typo away from colliding.
+4. **merged migrations are immutable** — against the base revision (the
+   merge-base with `origin/main`, or `--base` in CI) no existing
+   migration file may be modified, deleted or renamed; only additions pass.
+   A DB that already applied a migration will never re-run it, so editing the
+   file forks what a fresh DB builds from what the applied ones hold, and
+   deleting it makes the applied set disagree with the code's required set
+   (the develop/prod fork after migration #27 was deleted). Skipped, with a
+   note, when no base revision can be found.
 5. **schema.sql baseline seed** — `db/schema.sql` must stamp the baseline
    sentinel row and must NOT still carry the pre-cutover `generate_series(...)`
    seed. It must also stamp every migration name whose non-idempotent change is
@@ -27,16 +33,12 @@ Checks:
    subset of this rule, where a fresh-DB replay would definitely fail; the
    replay-safe shapes (idempotent DDL, guarded DO blocks, in-place rebuilds)
    stay exempt by design.
-6. **down IF EXISTS symmetry** — every top-level DROP in a `.down.sql` must
-   carry `IF EXISTS`, so a repeated or standalone rollback cannot blow up on a
-   schema that already lacks the object (drops inside guarded DO blocks are
-   exempt).
-7. **rollback-snapshot retirement** — every table following the shared
+6. **rollback-snapshot retirement** — every table following the shared
    `*_backfill_*` rollback-snapshot convention that is created by an up
    migration must have a later up migration that drops it. The archive CLI
    accepts the same convention; the table is a finite recovery buffer, never
    durable application state.
-8. **folded strict migrations must be seeded** — an unseeded up migration must
+7. **folded strict migrations must be seeded** — an unseeded up migration must
    not carry a strict (non-idempotent) DDL statement whose object already
    exists in `db/schema.sql`: a fresh DB replays every unseeded migration over
    the baseline (the migration smoke builds exactly that DB), and the statement
@@ -49,7 +51,7 @@ Checks:
    already-exists — whether the baseline is missing the change at all is the
    smoke convergence gate's question). Heuristic by design — a tripwire for the
    convention, not a SQL parser.
-9. **no role switching** — neither `db/schema.sql` nor any migration may
+8. **no role switching** — neither `db/schema.sql` nor any migration may
    `SET ROLE`, `RESET ROLE` or change the session authorization. Both run as
    the OS-user administrator acting as the schema owner (`base.db.pg_admin`);
    switching away would create admin-owned objects or run with superuser
@@ -63,6 +65,7 @@ the 2026-07-19 re-baseline (the 0060 / 0062 / 0080 numbering collisions).
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -75,7 +78,6 @@ if __name__ == "__main__":
 
 from base.deploy.schema.migrations import (
     _BASELINE_NAME,
-    _DOWN_FILENAME_RE,
     _FILENAME_RE,
 )
 from base.deploy.schema.rollback_snapshot import is_rollback_snapshot_table
@@ -96,7 +98,7 @@ _DROP_TABLE_IF_EXISTS_RE = re.compile(
 _DOLLAR_QUOTE_TAG_RE = re.compile(r"(?:[A-Za-z_][A-Za-z0-9_]*)?$")
 _DO_PREFIX_RE = re.compile(r"\s*DO(?:\s+LANGUAGE\s+[A-Za-z_][A-Za-z0-9_]*)?\s*$", re.IGNORECASE)
 
-# Check 8: strict per-object DDL patterns, matched table-qualified against
+# Check 7: strict per-object DDL patterns, matched table-qualified against
 # db/schema.sql. "Strict" = no IF NOT EXISTS / OR REPLACE: replaying it over a
 # schema that already holds the object fails.
 _DdlCandidate = tuple[str, str | None, str, bool, int]  # (kind, table, name, idempotent, position)
@@ -295,15 +297,14 @@ def _timestamp_valid(stem: str) -> bool:
     return True
 
 
-def _collect_migrations() -> tuple[set[str], set[str], list[str]]:
-    """Scan migrations/; return (up stems, down stems, error list)."""
+def _collect_migrations() -> tuple[set[str], list[str]]:
+    """Scan migrations/; return (migration stems, error list)."""
     errors: list[str] = []
     ups: set[str] = set()
-    downs: set[str] = set()
     prefixes: set[str] = set()
     if not MIGRATIONS_DIR.is_dir():
         errors.append(f"migrations/ directory does not exist: {MIGRATIONS_DIR}")
-        return ups, downs, errors
+        return ups, errors
 
     for entry in sorted(MIGRATIONS_DIR.iterdir()):
         if entry.is_dir():
@@ -312,13 +313,10 @@ def _collect_migrations() -> tuple[set[str], set[str], list[str]]:
         if entry.name.startswith(".") or entry.name == "README.md":
             continue
         if entry.name.endswith(".down.sql"):
-            dm = _DOWN_FILENAME_RE.match(entry.name)
-            if not dm:
-                errors.append(
-                    f"non-conforming down name: {entry.name} ({_FORMAT_HINT[:-4]}.down.sql)"
-                )
-            else:
-                downs.add(dm.group(1))
+            errors.append(
+                f"{entry.name}: down migrations are not used — fix a mistake forward "
+                "with a new migration"
+            )
             continue
         if not entry.name.endswith(".sql"):
             errors.append(f"non-.sql file: {entry.name}")
@@ -346,19 +344,7 @@ def _collect_migrations() -> tuple[set[str], set[str], list[str]]:
             )
         ups.add(stem)
 
-    return ups, downs, errors
-
-
-def _check_pairing(ups: set[str], downs: set[str]) -> list[str]:
-    """Every up needs a matching down and vice versa."""
-    errors: list[str] = []
-    for stem in sorted(ups - downs):
-        errors.append(
-            f"{stem}.sql has no matching {stem}.down.sql (post-baseline migrations must be reversible)"
-        )
-    for stem in sorted(downs - ups):
-        errors.append(f"{stem}.down.sql has no matching up migration {stem}.sql")
-    return errors
+    return ups, errors
 
 
 def _check_schema_seed() -> list[str]:
@@ -386,55 +372,17 @@ def _check_schema_seed() -> list[str]:
     return errors
 
 
-def _check_down_if_exists() -> list[str]:
-    """Every top-level DROP in a .down.sql must carry IF EXISTS.
-
-    A down must be re-runnable: a rollback that fails partway is retried, and a
-    standalone down of one migration is a supported recovery shape — both blow
-    up on a schema that already lacks the dropped object. Drops inside DO
-    blocks are deliberately NOT checked: those are guarded by the block's own
-    EXISTS/relkind checks (e.g. the monthly-partitioning down). Heuristic by
-    design — a lint tripwire for the common trap, not a SQL parser. (audit P2,
-    Fable backend-shared: four downs shipped bare DROPs, and 20260805T083741's
-    down referenced the pre-rename `kind` column, blowing up standalone.)"""
-    errors: list[str] = []
-    for entry in sorted(MIGRATIONS_DIR.iterdir()):
-        if not entry.name.endswith(".down.sql"):
-            continue
-        for lineno, line in enumerate(entry.read_text(encoding="utf-8").splitlines(), 1):
-            stripped = line.strip()
-            if not stripped or stripped.startswith("--"):
-                continue
-            if line[:1].isspace():
-                continue  # inside a DO block or plpgsql body
-            m = re.match(
-                r"^DROP\s+((?:MATERIALIZED\s+)?VIEW|TABLE|COLUMN|INDEX|SEQUENCE|TYPE|SCHEMA|FUNCTION|TRIGGER)\b",
-                stripped,
-                re.IGNORECASE,
-            )
-            if m and "IF EXISTS" not in stripped.upper():
-                errors.append(
-                    f"{entry.name}:{lineno}: top-level DROP {m.group(1)} without "
-                    "IF EXISTS — a repeated / standalone rollback fails; add "
-                    "IF EXISTS or move the drop into a guarded DO block"
-                )
-    return errors
-
-
 def _check_backfill_snapshot_drop_plans() -> list[str]:
     """Require every temporary `*_backfill_*` table to have a later drop migration.
 
-    The check intentionally reads only up migrations: a down migration removes a
-    snapshot when rolling a correction back, but is not the forward retirement
-    plan that reclaims it once recovery data is no longer needed. This is a
-    naming convention, not a SQL parser; migration table names are unquoted
+    This is a naming convention, not a SQL parser; migration table names are unquoted
     lowercase identifiers by repository convention.
     """
     creations: list[tuple[str, str]] = []
     drops: dict[str, list[str]] = {}
 
     for entry in sorted(MIGRATIONS_DIR.iterdir()):
-        if not entry.name.endswith(".sql") or entry.name.endswith(".down.sql"):
+        if not entry.name.endswith(".sql"):
             continue
         text, _ = _mask_nonstatic_sql(entry.read_text(encoding="utf-8"))
         for match in _CREATE_TABLE_RE.finditer(text):
@@ -700,7 +648,7 @@ def _check_folded_strict_without_seed() -> list[str]:
 
     unseeded: list[tuple[str, Path]] = []
     for entry in sorted(MIGRATIONS_DIR.iterdir()):
-        if not entry.name.endswith(".sql") or entry.name.endswith(".down.sql"):
+        if not entry.name.endswith(".sql"):
             continue
         match = _FILENAME_RE.match(entry.name)
         if match and match.group(1) not in seeded:
@@ -760,11 +708,74 @@ def _check_folded_strict_without_seed() -> list[str]:
     return errors
 
 
-def main() -> int:
-    ups, downs, errors = _collect_migrations()
-    errors.extend(_check_pairing(ups, downs))
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 — local git query, no shell
+        ["git", "-C", str(REPO_ROOT), *args], capture_output=True, text=True, check=False
+    )
+
+
+def _immutability_base(ref: str | None) -> str | None:
+    """The revision merged migrations are compared against, or None when unknown.
+
+    `ref` (CI passes the pull request's base revision with `--base`) must resolve;
+    without it, the merge-base with `origin/main`. A checkout that has neither (a
+    push to main, a fresh clone) has nothing to compare against.
+    """
+    if ref is not None:
+        for args in (
+            ("merge-base", "--", "HEAD", ref),
+            ("rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"),
+        ):
+            result = _git(*args)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        raise ValueError(f"--base {ref!r} cannot resolve to a commit")
+    if _git("rev-parse", "--verify", "origin/main^{commit}").returncode == 0:
+        result = _git("merge-base", "HEAD", "origin/main")
+        if result.returncode == 0:
+            return result.stdout.strip()
+    return None
+
+
+def _check_merged_migrations_immutable(base: str | None) -> list[str]:
+    """No migration file present at `base` may be modified, deleted or renamed.
+
+    Renames are reported as a deletion of the old name (`--no-renames`). The
+    working tree is compared, so an uncommitted edit fails at commit time too.
+    Only up migrations are in scope: `.down.sql` files are rejected by the
+    filename check instead.
+    """
+    if base is None:
+        print(
+            "note: no base revision (origin/main merge-base) — skipping the "
+            "merged-migrations-immutable check",
+            file=sys.stderr,
+        )
+        return []
+    result = _git(
+        "diff", "--name-status", "--no-renames", "--diff-filter=MD", base, "--", "migrations"
+    )
+    if result.returncode != 0:
+        return [f"cannot diff migrations/ against {base}: {result.stderr.strip()}"]
+    errors: list[str] = []
+    for line in result.stdout.splitlines():
+        status, _, path = line.partition("\t")
+        name = path.rpartition("/")[2]
+        if _FILENAME_RE.match(name) is None:
+            continue
+        verb = "modified" if status == "M" else "deleted or renamed"
+        errors.append(
+            f"{name}: a migration already on main was {verb} — merged migrations are "
+            "immutable (a DB that applied it never re-runs it, and a missing file breaks "
+            "the applied set); fix forward with a new migration"
+        )
+    return errors
+
+
+def main(base_ref: str | None = None) -> int:
+    ups, errors = _collect_migrations()
+    errors.extend(_check_merged_migrations_immutable(_immutability_base(base_ref)))
     errors.extend(_check_schema_seed())
-    errors.extend(_check_down_if_exists())
     errors.extend(_check_backfill_snapshot_drop_plans())
     errors.extend(_check_folded_strict_without_seed())
     errors.extend(_check_no_role_switch())
@@ -780,4 +791,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    argv = sys.argv[1:]
+    if argv and (len(argv) != 2 or argv[0] != "--base"):
+        sys.exit("usage: lint_migrations.py [--base REVISION]")
+    sys.exit(main(argv[1] if argv else None))

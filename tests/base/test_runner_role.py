@@ -219,7 +219,7 @@ def test_fresh_install_dependency_drift_precedes_checkpoint_setup(
             conn.execute(_schema_sql())  # type: ignore[arg-type]
 
         monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1"])
-        with pytest.raises(CheckpointDependencyDriftError, match="paired Ava timestamp migration"):
+        with pytest.raises(CheckpointDependencyDriftError, match="Ava timestamp migration"):
             ensure_checkpoint_schema(identity, base_admin_url=admin)
 
         with psycopg.connect(db_url, autocommit=True) as conn:
@@ -426,7 +426,7 @@ def test_existing_behind_schema_never_falls_back_to_setup(
         conn.execute("DELETE FROM checkpoint_migrations WHERE v = 9")
 
     def setup_must_not_run(_self: PostgresSaver) -> None:
-        raise AssertionError("existing schemas must use paired Ava migrations")
+        raise AssertionError("existing schemas must use Ava migrations")
 
     monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
     with pytest.raises(CheckpointSchemaMismatchError):

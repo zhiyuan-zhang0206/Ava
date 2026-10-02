@@ -2,12 +2,11 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, LiteralString, cast
+from typing import Any
 from uuid import uuid4
 
 import psycopg
 import pytest
-from psycopg import sql
 
 from base.agents import impersonation as leases
 from base.agents.impersonation import delivery as delivery
@@ -219,22 +218,6 @@ def test_exhausted_message_outside_page_still_ends_lease(
     assert f"message {other}" in ended["rejection_reason"]
 
 
-def test_migration_roundtrip_initializes_old_unacked_rows(
-    db_conn: psycopg.Connection, active: ActiveSession
-) -> None:
-    lease, _, mid = active
-    root = Path(__file__).parents[2] / "migrations"
-    stem = "20260922T053200_impersonation-delivery-budget"
-    with db_conn.transaction(force_rollback=True):
-        db_conn.execute(sql.SQL(cast(LiteralString, (root / f"{stem}.down.sql").read_text())))
-        db_conn.execute(sql.SQL(cast(LiteralString, (root / f"{stem}.sql").read_text())))
-        assert db_conn.execute(
-            "SELECT delivery_attempts,last_delivery_at,acknowledged_at "
-            "FROM agent_impersonation_messages WHERE lease_id=%s AND inbound_id=%s",
-            (lease["id"], mid),
-        ).fetchone() == (0, None, None)
-
-
 @pytest.mark.parametrize("active", [(180, 2), (7, 1), (60, 3)], indirect=True)
 @pytest.mark.parametrize("crash_after_first_submission", [False, True])
 async def test_real_relay_uses_snapshotted_config_across_restart(
@@ -331,87 +314,3 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (mid,)
     ).fetchone() == ("pending",)
-
-
-def test_rollback_refuses_to_reset_an_active_budget(
-    db_conn: psycopg.Connection, active: ActiveSession
-) -> None:
-    lease, _, mid = active
-    reserve(lease, mid)
-    rollback = (
-        Path(__file__).parents[2]
-        / "migrations/20260922T053200_impersonation-delivery-budget.down.sql"
-    )
-    with (
-        db_conn.transaction(force_rollback=True),
-        pytest.raises(psycopg.errors.RaiseException, match="End active impersonations"),
-    ):
-        db_conn.execute(sql.SQL(cast(LiteralString, rollback.read_text())))
-
-
-@pytest.mark.parametrize("status", ["active", "released"])
-def test_config_migration_preserves_existing_policy_and_attempts(
-    db_conn: psycopg.Connection,
-    active: ActiveSession,
-    status: str,
-) -> None:
-    lease, _, mid = active
-    reserve(lease, mid)
-    root = Path(__file__).parents[2] / "migrations"
-    stem = "20260922T075826_impersonation-delivery-config"
-    with db_conn.transaction(force_rollback=True):
-        db_conn.execute(
-            "UPDATE agent_impersonations SET ack_window_seconds=300,status=%s WHERE id=%s",
-            (status, lease["id"]),
-        )
-        before = db_conn.execute(
-            "SELECT delivery_attempts,last_delivery_at FROM agent_impersonation_messages "
-            "WHERE lease_id=%s AND inbound_id=%s",
-            (lease["id"], mid),
-        ).fetchone()
-        for suffix in (".down.sql", ".sql"):
-            db_conn.execute(sql.SQL(cast(LiteralString, (root / (stem + suffix)).read_text())))
-        assert db_conn.execute(
-            "SELECT ack_window_seconds,max_delivery_attempts FROM agent_impersonations WHERE id=%s",
-            (lease["id"],),
-        ).fetchone() == (300, 2)
-        assert (
-            db_conn.execute(
-                "SELECT delivery_attempts,last_delivery_at FROM agent_impersonation_messages "
-                "WHERE lease_id=%s AND inbound_id=%s",
-                (lease["id"], mid),
-            ).fetchone()
-            == before
-        )
-        assert db_conn.execute(
-            "SELECT column_default FROM information_schema.columns "
-            "WHERE table_name='agent_impersonations' AND column_name='ack_window_seconds'"
-        ).fetchone() == ("180",)
-
-
-@pytest.mark.parametrize("historical_attempts", [False, True])
-def test_config_rollback_refuses_policy_or_history_loss(
-    db_conn: psycopg.Connection,
-    active: ActiveSession,
-    historical_attempts: bool,
-) -> None:
-    lease, _, mid = active
-    rollback = (
-        Path(__file__).parents[2]
-        / "migrations/20260922T075826_impersonation-delivery-config.down.sql"
-    )
-    with db_conn.transaction(force_rollback=True):
-        if historical_attempts:
-            db_conn.execute(
-                "UPDATE agent_impersonations SET status='released' WHERE id=%s", (lease["id"],)
-            )
-            db_conn.execute(
-                "UPDATE agent_impersonation_messages SET delivery_attempts=3,last_delivery_at=clock_timestamp() "
-                "WHERE lease_id=%s AND inbound_id=%s",
-                (lease["id"], mid),
-            )
-        with (
-            pytest.raises(psycopg.errors.RaiseException, match="Cannot downgrade"),
-            db_conn.transaction(),
-        ):
-            db_conn.execute(sql.SQL(cast(LiteralString, rollback.read_text())))

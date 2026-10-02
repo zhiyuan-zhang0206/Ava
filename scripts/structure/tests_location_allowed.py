@@ -58,10 +58,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "scans every production module for writers of the crash-row predicate fields",
     ),
-    "tests/base/test_retired_schema_markers.py": (
-        "contract",
-        "reads migrations/ for the retired-marker drop and its rollback",
-    ),
     "tests/base/test_runner_role.py": (
         "contract",
         "asserts the ava_runner capability matrix declared in db/schema.sql",

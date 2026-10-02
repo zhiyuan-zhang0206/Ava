@@ -532,14 +532,13 @@ def test_a_runner_login_reads_the_minimum_and_cannot_write_it(
 # ── the migration ────────────────────────────────────────────────────────────
 
 
-def test_the_migration_pair_round_trips_and_lands_where_the_baseline_does() -> None:
-    """The down migration removes the column, the up migration restores it (twice
-    over: it is idempotent) with the shape and comment `db/schema.sql` gives a
-    fresh database. Run inside one transaction, so the suite database is untouched."""
+def test_the_migration_restores_the_column_where_the_baseline_has_it() -> None:
+    """With the column dropped, the migration restores it (twice over: it is
+    idempotent) with the shape and comment `db/schema.sql` gives a fresh database.
+    Run inside one transaction, so the suite database is untouched."""
     from base.paths import repo_root
 
     (up_file,) = (repo_root() / "migrations").glob("*_min-code-version.sql")
-    down_file = up_file.with_suffix(".down.sql")
     column = (
         "SELECT data_type, is_nullable, column_default, "
         "col_description('deployment_state'::regclass, ordinal_position::int) "
@@ -551,7 +550,7 @@ def test_the_migration_pair_round_trips_and_lands_where_the_baseline_does() -> N
             baseline = conn.execute(column).fetchone()
             assert baseline is not None and baseline[:3] == ("bigint", "NO", "0")
 
-            conn.execute(cast(LiteralString, down_file.read_text()))
+            conn.execute("ALTER TABLE deployment_state DROP COLUMN min_code_version")
             assert conn.execute(column).fetchone() is None
 
             up = cast(LiteralString, up_file.read_text())
