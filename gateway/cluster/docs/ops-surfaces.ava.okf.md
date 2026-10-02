@@ -83,8 +83,7 @@ budget envelope / a retriable `Retry-After: 1` after `loki_events` records
 the failing query shape).
 
 Every dashboard Loki read is explicitly scoped to the current home-derived
-cluster label. The fleet graph's Loki event tail applies the same dimension,
-and an unmarked gateway without an explicit Loki URL receives the shared clean
+cluster label, and an unmarked gateway without an explicit Loki URL receives the shared clean
 503 instead of reading another home's loopback stack.
 
 `GET /api/agents/{id}/inspect/statistics` owns window-dependent cost, stats,

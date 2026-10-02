@@ -145,22 +145,20 @@ function richGraph(): FleetGraph {
     nodes,
     edges,
     stale: false,
-    truncated: false,
     telemetry_stale: false,
     snapshot_at: null,
   };
 }
 
 function ok(
-  graph: Omit<FleetGraph, "stale" | "truncated" | "telemetry_stale" | "snapshot_at"> & {
+  graph: Omit<FleetGraph, "stale" | "telemetry_stale" | "snapshot_at"> & {
     stale?: boolean;
-    truncated?: boolean;
     telemetry_stale?: boolean;
     snapshot_at?: string | null;
   },
 ): FleetGraphResult {
   return {
-    graph: { stale: false, truncated: false, telemetry_stale: false, snapshot_at: null, ...graph },
+    graph: { stale: false, telemetry_stale: false, snapshot_at: null, ...graph },
     loading: false,
     error: false,
   };
@@ -554,21 +552,6 @@ describe("GraphView", () => {
     expect(screen.queryByText(/telemetry/i)).toBeNull();
   });
 
-  it("renders no truncation copy (task #3893)", () => {
-    useFleetGraph.mockReturnValue(
-      ok({
-        nodes: [node(1), node(2)],
-        edges: [edge(1, 2, "spawn")],
-        truncated: true,
-      }),
-    );
-
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
-
-    expect(screen.queryByRole("status")).toBeNull();
-    expect(screen.queryByText(/truncat/i)).toBeNull();
-  });
-
   it("merges multiple lineage kinds per pair into one edge (no duplicate React keys)", async () => {
     // The backend returns separate edges per event kind (spawn / fork /
     // resurrect) for the same pair; GraphView collapses them to the shared
@@ -653,7 +636,6 @@ describe("GraphView", () => {
         nodes: [],
         edges: [],
         stale: false,
-        truncated: false,
         telemetry_stale: false,
         snapshot_at: null,
       },
@@ -673,7 +655,6 @@ describe("GraphView", () => {
         nodes: [],
         edges: [],
         stale: false,
-        truncated: false,
         telemetry_stale: false,
         snapshot_at: null,
       },
@@ -692,7 +673,6 @@ describe("GraphView", () => {
         nodes: [],
         edges: [],
         stale: false,
-        truncated: false,
         telemetry_stale: false,
         snapshot_at: null,
       },

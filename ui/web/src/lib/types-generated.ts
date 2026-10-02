@@ -5168,8 +5168,8 @@ export interface components {
          * FleetGraphResponse
          * @description GET /api/fleet/graph response.
          *
-         *     `stale` identifies data-level degradation: a fallback snapshot, truncated
-         *     edge stream, or failed source response. `telemetry_stale` separately says
+         *     `stale` identifies data-level degradation: a fallback snapshot or a failed
+         *     source response. `telemetry_stale` separately says
          *     the heartbeat guard was old or missing while this otherwise fresh graph was
          *     read. `snapshot_at` records when a successful graph snapshot was produced;
          *     a fallback retains that timestamp so clients can show its age.
@@ -5184,11 +5184,6 @@ export interface components {
              * @default false
              */
             stale: boolean;
-            /**
-             * Truncated
-             * @default false
-             */
-            truncated: boolean;
             /**
              * Telemetry Stale
              * @default false
@@ -6167,11 +6162,6 @@ export interface components {
             neighbors: components["schemas"]["NeighborRow"][];
             /** Ancestors */
             ancestors: components["schemas"]["NeighborRow"][];
-            /**
-             * Degraded
-             * @default false
-             */
-            degraded: boolean;
         };
         /**
          * NoticeCreateIn

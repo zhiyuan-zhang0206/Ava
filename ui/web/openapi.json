@@ -9853,11 +9853,6 @@
             "title": "Stale",
             "default": false
           },
-          "truncated": {
-            "type": "boolean",
-            "title": "Truncated",
-            "default": false
-          },
           "telemetry_stale": {
             "type": "boolean",
             "title": "Telemetry Stale",
@@ -9882,7 +9877,7 @@
           "edges"
         ],
         "title": "FleetGraphResponse",
-        "description": "GET /api/fleet/graph response.\n\n`stale` identifies data-level degradation: a fallback snapshot, truncated\nedge stream, or failed source response. `telemetry_stale` separately says\nthe heartbeat guard was old or missing while this otherwise fresh graph was\nread. `snapshot_at` records when a successful graph snapshot was produced;\na fallback retains that timestamp so clients can show its age."
+        "description": "GET /api/fleet/graph response.\n\n`stale` identifies data-level degradation: a fallback snapshot or a failed\nsource response. `telemetry_stale` separately says\nthe heartbeat guard was old or missing while this otherwise fresh graph was\nread. `snapshot_at` records when a successful graph snapshot was produced;\na fallback retains that timestamp so clients can show its age."
       },
       "ForceExpireImpersonationRequest": {
         "properties": {
@@ -11889,11 +11884,6 @@
             },
             "type": "array",
             "title": "Ancestors"
-          },
-          "degraded": {
-            "type": "boolean",
-            "title": "Degraded",
-            "default": false
           }
         },
         "type": "object",
