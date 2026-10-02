@@ -25,6 +25,12 @@ on a separate redesign.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from scripts.structure.ambient_state.roots import package_roots
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
 # ── 1. write-only facades ──────────────────────────────────────────────────
 
 # A handle to a logger / meter / tracer: written through, never read to decide.
@@ -178,18 +184,10 @@ ALLOWED: dict[str, str] = {
 
 # Packages whose configuration arrives as constructor-injected slices: package dir ->
 # its composition-root modules, the only modules there that may read `settings`
-# (scripts/structure/ambient_state/sliced.py). A package joins when it is sliced;
-# leaving needs a decision record. A listed package or root that no longer exists
-# fails as stale.
-SLICED_PACKAGES: dict[str, frozenset[str]] = {
-    "services/computer": frozenset({"services/computer/mcp_daemon.py"}),
-    "services/events_maintenance": frozenset({"services/events_maintenance/daemon.py"}),
-    "services/hierarchy_worker": frozenset({"services/hierarchy_worker/roots.py"}),
-    "services/im_bridge": frozenset({"services/im_bridge/daemon.py"}),
-    "services/labeler": frozenset({"services/labeler/daemon.py"}),
-    "services/memory_search": frozenset({"services/memory_search/daemon.py"}),
-    "services/page_server": frozenset({"services/page_server/daemon.py"}),
-}
+# (scripts/structure/ambient_state/sliced.py). A package declares itself in its own
+# `ambient_roots.toml` (`settings = [...]`, see roots.py) when it is sliced; leaving needs
+# a decision record. A declared root that no longer exists fails as stale.
+SLICED_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "settings")
 
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 
