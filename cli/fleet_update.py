@@ -26,6 +26,7 @@ from typing import Any
 _REPO = Path(__file__).resolve().parents[1]
 _HOME = 'H="$HOME/.ava"; S="$H/source"; cd "$S" || exit 1'
 _AVA = 'AVA_HOME="$H" "$S/.venv/bin/ava"'
+_PYTHON = f'{_HOME}; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
 _STATUS = f"{_HOME}; {_AVA} maintenance status"
 _FREE = ("inactive", "resumed")  # maintenance statuses with no hold
 _POLL_S = 5  # roster re-read interval
@@ -250,10 +251,17 @@ launchctl bootout "gui/$(id -u)/{label}" || echo "bootout of {label} failed"
 rm -rf "$D"; exit "$rc\""""
 
 
-def _machine_names(s: Session, program: str, aliases: list[str]) -> dict[str, str]:
-    """Each listed host's own machine name (what the roster calls it), asked of the host."""
-    ask = f'{program} -c "from base.cluster.machine import machine_name; print(machine_name())"'
-    names = {alias: s.run(alias, ask, effect=False).split()[-1] for alias in aliases}
+def _machine_names(s: Session, aliases: list[str]) -> dict[str, str]:
+    """Each listed host's own machine name (what the roster calls it), asked of the host.
+
+    Asked with `-c`, so it takes `_PYTHON`, not the `python -` program that reads stdin."""
+    ask = f'{_PYTHON} -c "from base.cluster.machine import machine_name; print(machine_name())"'
+    names: dict[str, str] = {}
+    for alias in aliases:
+        reported = s.run(alias, ask, effect=False).split()
+        if not reported:
+            raise FailedError(f"{alias}: the host printed no machine name")
+        names[alias] = reported[-1]
     if len(set(names.values())) != len(names):
         raise FailedError(f"two listed hosts report one machine name: {names}")
     return names
@@ -266,7 +274,7 @@ def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[di
     that is off) is reported and left alone. A listed host is matched to its row by the
     machine name it reports, not by its SSH alias; no row for it is an error.
     `online` follows the heartbeat: a machine just started is re-read until --roster-timeout."""
-    names = _machine_names(s, program, [args.gateway, *args.runner])
+    names = _machine_names(s, [args.gateway, *args.runner])
     wanted = set(names.values())
     deadline = time.monotonic() + args.roster_timeout
     while True:
@@ -312,7 +320,7 @@ def up(s: Session, args: argparse.Namespace) -> None:
         s.run(alias, gui_oneshot(alias, args.start_timeout) if macos else f"{_HOME}; {_AVA} start")
         if not s.dry_run and (hold := _hold(s.run(alias, _STATUS, effect=False)))[0] not in _FREE:
             raise FailedError(f"{alias}: start left maintenance {hold}")
-    program = f'{_HOME}; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -'
+    program = f"{_PYTHON} -"
     if s.dry_run:
         s.run(args.gateway, f"{program} smoke MACHINE {args.smoke_timeout}  # each agent-runner")
         _refresh(s, args)
