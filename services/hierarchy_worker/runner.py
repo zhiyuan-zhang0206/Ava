@@ -36,8 +36,7 @@ import psycopg
 from psycopg import Connection
 
 from base import telemetry
-from base.db import connect
-from base.db.transaction import write_transaction
+from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import logger
 from services.hierarchy_worker.config import HierarchyWorkerConfig
@@ -206,7 +205,7 @@ def claim_next(conn: Connection) -> ClaimedJob | None:
             return ClaimedJob(id=job_id, agent_id=agent_id, include_tail=include_tail)
 
 
-def run_child(job: ClaimedJob, config: HierarchyWorkerConfig) -> None:
+def run_child(job: ClaimedJob, config: HierarchyWorkerConfig, db: Database) -> None:
     """Run one claimed job under its hard deadline; recover what it cannot write."""
     deadline_s = config.hierarchy_job_deadline_seconds
     child = subprocess.Popen(  # noqa: S603 — fixed argv: our own interpreter, a static module path, and an int id
@@ -227,20 +226,20 @@ def run_child(job: ClaimedJob, config: HierarchyWorkerConfig) -> None:
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait()
-        _recover(job.id, f"deadline exceeded ({deadline_s:.0f}s)")
+        _recover(job.id, f"deadline exceeded ({deadline_s:.0f}s)", db)
         return
     if code != 0:
-        _recover(job.id, f"child exited {code} without recording a result")
+        _recover(job.id, f"child exited {code} without recording a result", db)
     else:
         # The child records its own outcome; this only catches a child that
         # died between the build and the row write (the no-op case is the
         # normal path).
-        _recover(job.id, "child exited 0 without recording a result")
+        _recover(job.id, "child exited 0 without recording a result", db)
 
 
-def _recover(job_id: int, error: str) -> None:
+def _recover(job_id: int, error: str, db: Database) -> None:
     """Park a job row the child could not finish (no-op once it is not running)."""
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         conn.execute(
             "UPDATE hierarchy_jobs SET status = 'failed', finished_at = now(), error = %s"
             " WHERE id = %s AND status = 'running'",
@@ -248,7 +247,7 @@ def _recover(job_id: int, error: str) -> None:
         )
 
 
-def run_tick(config: HierarchyWorkerConfig) -> None:
+def run_tick(config: HierarchyWorkerConfig, db: Database) -> None:
     """One schedule tick: claim and run due jobs back-to-back — drain, not scan.
 
     The event trigger enqueues each compact boundary's job, so a tick
@@ -269,7 +268,7 @@ def run_tick(config: HierarchyWorkerConfig) -> None:
         if admission.quiesced():
             return  # the stop window: no database work until `ava start` releases the hold
         try:
-            with connect(autocommit=True) as conn:
+            with db.connect(autocommit=True) as conn:
                 if _regen_budget_check(conn, config):
                     return
                 now = datetime.now(UTC)
@@ -312,4 +311,4 @@ def run_tick(config: HierarchyWorkerConfig) -> None:
             agent=job.agent_id,
             tail=job.include_tail,
         )
-        run_child(job, config)
+        run_child(job, config, db)

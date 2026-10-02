@@ -38,8 +38,7 @@ from base.agents.history.hierarchy.generate import build_generation_llm
 from base.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
 from base.agents.history.hierarchy.store import load_known_texts, write_tree
 from base.agents.observation.snapshot import agent_effective_model
-from base.db import connect
-from base.db.transaction import write_transaction
+from base.db import Database
 from base.lm.factory import close_chat_model
 from base.log import logger
 from services.hierarchy_worker.config import HierarchyWorkerConfig
@@ -50,9 +49,9 @@ from services.hierarchy_worker.scan import KIND_COMPACT, KIND_TAIL
 _ERROR_TAIL_CHARS = 4000
 
 
-def execute_job(job_id: int, config: HierarchyWorkerConfig) -> int:
+def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int:
     """Run one `running` job to completion; returns the child's exit code."""
-    with connect(autocommit=True) as conn:
+    with db.connect(autocommit=True) as conn:
         row = conn.execute(
             "SELECT agent_id, trigger_boundary, include_tail, status, kind"
             " FROM hierarchy_jobs WHERE id = %s",
@@ -138,6 +137,7 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig) -> int:
         if not include_tail:
             _regen_signals(agent_id, job_id, tree, config)
         _record_done(
+            db,
             job_id,
             agent_id,
             tree,
@@ -167,7 +167,7 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig) -> int:
         return 0
     except Exception:
         tail = traceback.format_exc()[-_ERROR_TAIL_CHARS:]
-        _record_failed(job_id, tail)
+        _record_failed(job_id, tail, db)
         logger.error("hierarchy job {} failed:\n{}", job_id, tail)
         return 1
 
@@ -181,6 +181,7 @@ def _advance_target(agent_id: int, trigger_boundary: str) -> str:
 
 
 def _record_done(
+    db: Database,
     job_id: int,
     agent_id: int,
     tree: MaterializedTree,
@@ -201,7 +202,7 @@ def _record_done(
     `scan._has_clean_baseline` guard on it), so the continuation backs off
     instead of hot-looping.
     """
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         conn.execute(
             "UPDATE hierarchy_jobs SET status = 'done', finished_at = now(), error = %s,"
             " model = %s, engine_version = %s, prompt_version = %s,"
@@ -246,9 +247,9 @@ def _record_done(
                 )
 
 
-def _record_failed(job_id: int, error: str) -> None:
+def _record_failed(job_id: int, error: str, db: Database) -> None:
     """Park the row; no-op once it is already done/failed (recovery races)."""
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         conn.execute(
             "UPDATE hierarchy_jobs SET status = 'failed', finished_at = now(), error = %s"
             " WHERE id = %s AND status = 'running'",

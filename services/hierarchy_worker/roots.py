@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 
 from base.config import settings
+from base.db import Database
 from base.log import init_gateway_process, logger
 from services.hierarchy_worker.config import HierarchyWorkerConfig
 
@@ -35,6 +36,18 @@ def hierarchy_worker_config() -> HierarchyWorkerConfig:
         hierarchy_regen_daily_budget_nodes=settings.daemon.hierarchy_regen_daily_budget_nodes,
         hierarchy_regen_min_reuse_ratio=settings.daemon.hierarchy_regen_min_reuse_ratio,
     )
+
+
+def hierarchy_worker_db() -> Database:
+    """The handle on the cluster database, built where the worker's process starts."""
+    return Database.from_settings()
+
+
+def tick() -> None:
+    """One schedule tick: the runner's drain with this process's configuration and database."""
+    from services.hierarchy_worker.runner import run_tick
+
+    run_tick(hierarchy_worker_config(), hierarchy_worker_db())
 
 
 def prepare() -> None:

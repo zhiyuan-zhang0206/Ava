@@ -6,13 +6,15 @@ the code under test through the slice.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 
+from base.db import Database
 from services.hierarchy_worker import execute as execute_module
-from services.hierarchy_worker import roots
+from services.hierarchy_worker import roots, runner
 from services.hierarchy_worker import scan as scan_module
 from services.hierarchy_worker.config import HierarchyWorkerConfig
 from services.hierarchy_worker.scan import ScanOutcome
@@ -28,5 +30,26 @@ def scan(conn: psycopg.Connection) -> ScanOutcome:
 
 
 def execute_job(job_id: int) -> int:
-    """`execute.execute_job` with the live settings' slice."""
-    return execute_module.execute_job(job_id, hierarchy_config())
+    """`execute.execute_job` with the live settings' slice and the test database."""
+    return execute_module.execute_job(job_id, hierarchy_config(), hierarchy_db())
+
+
+def hierarchy_db() -> Database:
+    """The handle on the test database (the settings the suite's conftest points at the throwaway cluster)."""
+    return Database.from_settings()
+
+
+class _FakeDb:
+    """A `Database` stand-in whose `connect` is the given callable (ticks that never reach Postgres)."""
+
+    def __init__(self, connect: Callable[..., Any]) -> None:
+        self.connect = connect
+
+
+def fake_db(connect: Callable[..., Any]) -> Database:
+    return cast(Database, _FakeDb(connect))
+
+
+def run_child(job: runner.ClaimedJob) -> None:
+    """`runner.run_child` with the live settings' slice and the test database."""
+    runner.run_child(job, hierarchy_config(), hierarchy_db())
