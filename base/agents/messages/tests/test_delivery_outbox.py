@@ -246,6 +246,24 @@ def test_flush_delivers_and_retires(
     assert key == "key-1"
 
 
+def test_flush_announces_each_record_to_a_progress_hook(
+    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    """A caller that tracks a long pass (the ops server's liveness) hears about every
+    record, delivered or deferred, before it is handled."""
+    agent_id = _agent(db_conn)
+    _record(agent_id=agent_id, key="key-a", content="a", now=_NOW)
+    _record(agent_id=agent_id, key="key-b", content="b", now=_NOW)
+    announced: list[int] = []
+
+    report = outbox.flush(
+        pool, now=_NOW + timedelta(seconds=31), on_record=lambda: announced.append(1)
+    )
+
+    assert report.delivered == 2
+    assert len(announced) == 2
+
+
 def test_flush_replays_hourly_completion_through_the_policy_boundary(
     journal: Path,
     db_conn: psycopg.Connection,
