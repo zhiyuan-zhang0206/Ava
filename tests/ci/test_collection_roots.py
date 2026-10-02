@@ -275,8 +275,7 @@ def test_no_pytest_option_or_conftest_excludes_tracked_tests_from_collection() -
             for name in ("collect_ignore", "pytest_ignore_collect")
         )
     )
-    # tests/services/conftest.py drops the ava-root files on win32 only; POSIX collects them.
-    assert excluders == ["tests/services/conftest.py"], (
+    assert excluders == [], (
         "a conftest excludes tests from collection: state why in this test's known list"
     )
 
