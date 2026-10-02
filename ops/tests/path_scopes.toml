@@ -1,0 +1,13 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"tests.path_scoped.gateway_tests" = [
+    "test_cluster_rpc.py",
+    "test_inventory_ops.py",
+    "test_operations.py",
+]
+"tests.path_scoped.integration_tests" = [
+    "test_cross_machine_dispatch.py",
+]
+"tests.path_scoped.services_tests" = [
+    "test_healthcheck_page_server.py",
+]

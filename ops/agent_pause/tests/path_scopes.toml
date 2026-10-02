@@ -1,0 +1,8 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"tests.path_scoped.services_tests" = [
+    "test_daemon_shutdown_bound.py",
+    "test_delivery_watchdog_shutdown.py",
+    "test_im_bridge_shutdown.py",
+    "test_labeler_shutdown.py",
+]
