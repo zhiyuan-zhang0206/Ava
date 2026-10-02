@@ -274,60 +274,6 @@ async def _close_host_runtime(
         cleanup.push_async_callback(scheduler.aclose)
 
 
-class _PageEventPublisher:
-    """Best-effort page events on the shared Redis channel — the daemon's
-    stand-in for a per-agent SSE publisher (turns build their own; none
-    exists outside a turn). Mirrors the ttl_reaper service's pattern so the
-    frontend drops closed rows the daemon's scan closes; pages still heal
-    without it, the events only keep the open-pages popover accurate.
-    """
-
-    def __init__(self) -> None:
-        self._tasks: set[asyncio.Task[object]] = set()
-
-    def emit(self, payload: str) -> None:
-        from base.config import settings
-        from base.events.live.redis_client import publish_best_effort
-
-        # Fire-and-forget: publish_best_effort never raises; the task set
-        # keeps a strong ref so the publish cannot be GC'd mid-flight.
-        task = asyncio.create_task(
-            publish_best_effort(
-                settings.data_plane.events_channel, payload, context="agent_host_page"
-            )
-        )
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-
-
-async def _page_reconcile_forever(pool: AsyncConnectionPool) -> None:
-    """Periodically probe + restore every hosted agent's open pages.
-
-    Heartbeat check-ins only reach idle agents. The host therefore restores
-    pages for busy agents too: once at startup and then every heartbeat
-    interval, skipping pages already reconciled within that interval. A failed
-    pass logs and retries on the next interval without blocking other turns.
-    """
-    from agent.startup import reconcile_all_open_pages
-    from base.config import settings
-
-    interval_s = float(settings.daemon.heartbeat_interval_seconds)
-    publisher = _PageEventPublisher()
-    while True:
-        # A quiesced unit (stop window) skips its pass, silently, until
-        # resume: page probing would borrow the pools the stop released.
-        if not admission.quiesced():
-            try:
-                await reconcile_all_open_pages(
-                    pool, interval_s=interval_s, event_publisher=publisher
-                )
-            except Exception:
-                _log.exception(
-                    "[agent-host] periodic page reconcile pass failed — retrying next interval"
-                )
-        await asyncio.sleep(interval_s)
-
-
 async def _exec_memory_guard_forever() -> None:
     """Relieve critical memory pressure by killing the largest exec domain.
 
@@ -344,19 +290,17 @@ async def _exec_memory_guard_forever() -> None:
     await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever()
 
 
-def _background_loops(pool: AsyncConnectionPool) -> dict[str, Coroutine[object, object, None]]:
-    """The daemon's background loops for plugins, pages, logs and exec memory.
+def _background_loops() -> dict[str, Coroutine[object, object, None]]:
+    """The daemon's background loops for plugins, logs and exec memory.
 
     Split out of `run()` so the wiring is testable without booting the
-    dispatcher: the reconciler's existence is what closes the
-    busy-hosted-agent dead-page gap (task #2260), the rotator's is what keeps a
-    traceback storm from filling the disk through the uncapped raw transcript
-    (task #2356), and a regression that dropped either must turn a test red
-    rather than silently reopen the gap. `run` starts them in one `TaskGroup`.
+    dispatcher: the rotator's existence is what keeps a traceback storm from
+    filling the disk through the uncapped raw transcript (task #2356), and a
+    regression that dropped it must turn a test red rather than silently reopen
+    the gap. `run` starts them in one `TaskGroup`.
     """
     return {
         "plugins_watch": _watch_plugins_for_restart(),
-        "page_reconciler": _page_reconcile_forever(pool),
         "stdout_log_rotate": _rotate_stdout_log_forever(),
         "exec_memory_guard": _exec_memory_guard_forever(),
     }
@@ -526,16 +470,13 @@ async def run() -> None:
             workload=workload_pool.max_size,
             control=control_pool.max_size,
         )
-        # Task #2260: heartbeat-independent page-liveness scan for hosted
-        # agents — busy agents get no heartbeats, and the hosted daemon runs
-        # no per-agent page_reconcile_loop (loop.py:main() is process-only).
         # One TaskGroup owns the loops beside the dispatcher: a loop that
         # raises cancels the dispatcher and its siblings, and the exception
         # leaves `run` so the process exits for `ava-root` to restart it. The
         # group exits, every loop joined, before the runtime drains turns.
         try:
             async with asyncio.TaskGroup() as background:
-                for name, loop in _background_loops(workload_pool).items():
+                for name, loop in _background_loops().items():
                     background.create_task(loop, name=name)
                 await InboundWakeDispatcher(
                     settings.data_plane.redis_url,
@@ -625,7 +566,7 @@ def _release_pools_route(
     Called by the ops stop path once this unit's agents are drained: closes
     every idle connection in both pools and answers `{"released": {"workload":
     n, "control": m}}`. Nothing reconnects during the quiesced window (the
-    beat and page loops are gated; the turn scan only through the stop leg)
+    beat loop is gated; the turn scan only through the stop leg)
     and the first borrow after resume opens a fresh connection lazily.
     Loopback-only and unauthenticated, like `/cancel-turn`.
     """
