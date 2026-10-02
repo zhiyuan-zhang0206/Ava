@@ -38,6 +38,8 @@ Governed: the framework packages plus `schedules/`. Out of scope: tests, `__main
 
 Packages outside `DB_HANDLE_PACKAGES` are not policed per site, but `scripts/structure/ambient_state/handle_ratchet.py` counts their shim dials, self-built `Database.from_settings()` calls and self-built `EventBus.from_settings()` calls (outside `BUS_PACKAGES`) per package and freezes the counts in `scripts/structure/ambient_state/handle_ratchet_baseline.json`. A count above its frozen value fails (new code takes a handle); one below it fails until `--write` lowers the baseline; against the base revision a frozen count only falls. Threading a handle into a package lowers its count; a package at zero can join `DB_HANDLE_PACKAGES`.
 
+The same file counts, per package, the reads of the context-bound `turn_settings` proxy (`turn-settings-read`): a turn's per-agent settings come from the `AgentSlices` on `AvaContext` (`base/agents/context/slices.py`), and the sites that still read the proxy — the exec child and SDK, registered prompt-section and note callables, the checkpoint saver — only fall.
+
 ## Known gaps
 
 A per-file AST pass does not see a non-empty container mutated only from another module, a `Thread` subclass instantiated elsewhere, `run_coroutine_threadsafe` or executor submits, or whether a `<expr>.create_task` receiver is really a `TaskGroup` (any receiver not named like a loop passes). A value class is resolved from its defining file, so changing a class there can move a verdict in a file that did not change; the full gate run sees it.
