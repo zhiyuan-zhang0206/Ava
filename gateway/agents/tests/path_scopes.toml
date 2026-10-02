@@ -4,7 +4,6 @@
     "test_completion_notice_flusher.py",
     "test_context_breakdown.py",
     "test_inbound_provenance.py",
-    "test_max_id_gauge.py",
     "test_resurrect_forward.py",
     "test_spawn_forward.py",
     "test_timeline.py",
