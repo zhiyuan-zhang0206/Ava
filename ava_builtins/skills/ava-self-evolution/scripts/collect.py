@@ -35,6 +35,8 @@ from typing import Any
 import httpx
 import psycopg
 
+from base.db import Database
+
 # `record` is a sibling in this skill's own scripts/ dir, not an importable
 # package (PYTHONSAFEPATH=1 keeps a script's own directory off sys.path) —
 # restore it for the sibling import. Structure Rule 6 recognizes this exact
@@ -51,7 +53,6 @@ from record import _transcript as _transcript
 
 from base.cluster.machine import gateway_auth_headers
 from base.config import settings
-from base.db import connect
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from base.paths import ava_home
 from base.telemetry.observability import (
@@ -467,7 +468,7 @@ def collect_with_counts(
     logs = _group_by_agent(audit)
     ids = sorted(events)
     window = f"{days} days"
-    with connect() as conn, conn.cursor() as cur:
+    with Database.from_settings().connect() as conn, conn.cursor() as cur:
         inbounds = _inbounds_by_agent(cur, ids, window)
         meta = _meta_by_agent(cur, ids)
         test_ids = set() if include_test else _test_label_ids(cur, ids)
@@ -554,7 +555,7 @@ def collect_one(
     log_events = [
         (r["event_name"], r.get("attributes") or {}) for r in audit if r.get("agent_id") == agent_id
     ]
-    with connect() as conn, conn.cursor() as cur:
+    with Database.from_settings().connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT source, content, created_at > %s AS is_in_collection_window "
             "FROM inbound_messages WHERE agent_id = %s AND kind = 'chat' "

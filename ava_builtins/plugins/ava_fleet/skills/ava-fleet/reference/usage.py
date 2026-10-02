@@ -47,7 +47,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from base.db import connect
+from base.db import Database
 from base.telemetry.loki_index_labels import ledger_gap_plan, retention_floor
 from gateway.lgtm import loki_events
 
@@ -164,7 +164,7 @@ def _ledger_rows(
     """
     rows: list[_LokiRow] = []
     tails: dict[int, datetime] = {}
-    with connect() as conn, conn.cursor() as cur:
+    with Database.from_settings().connect() as conn, conn.cursor() as cur:
         cur.execute(_NEWEST_LEDGER_DAYS_SQL, (agent_ids,))
         newest_days = {int(agent_id): day for agent_id, day in cur.fetchall()}
         for aid in agent_ids:

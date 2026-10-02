@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from base.db.tests.fakes import patch_database
+
 _PATH = (
     Path(__file__).resolve().parents[4]
     / "ava_builtins"
@@ -158,7 +160,7 @@ def test_whole_life_gap_day_excludes_stale_fleet_ledger_once(
         newest_day=date(2026, 8, 10),
         stale_rows=[("m", 1, 1, 0, 100, 100, 0, 0, 1.0)],
     )
-    monkeypatch.setattr(usage, "connect", lambda: _LedgerConnection(cursor))
+    patch_database(monkeypatch, connect=lambda: _LedgerConnection(cursor))
     monkeypatch.setattr(usage, "retention_floor", lambda: floor)
     tails: list[datetime] = []
 
@@ -185,7 +187,7 @@ def test_whole_life_final_fleet_ledger_keeps_history_and_clamps_tail(
         newest_day=date(2026, 8, 8),
         stale_rows=[("m", 1, 1, 0, 100, 100, 0, 0, 1.0)],
     )
-    monkeypatch.setattr(usage, "connect", lambda: _LedgerConnection(cursor))
+    patch_database(monkeypatch, connect=lambda: _LedgerConnection(cursor))
     monkeypatch.setattr(usage, "retention_floor", lambda: floor)
     tails: list[datetime] = []
 
