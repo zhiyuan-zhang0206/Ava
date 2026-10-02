@@ -209,7 +209,7 @@ Five axes, one fact per place: `*.ava.okf.md` in each package's `docs/` = what t
 4. **Unclear requirements — ask first** ([workflow align](ava_builtins/skills/ava-workflow/align/SKILL.md)).
 5. **Behavior changes are locked by a test** — no tests for the sake of tests.
 6. **Re-read the diff before committing**; drop what is not necessary.
-7. **No new dependencies or upgrades unless necessary.**
+7. **Price our own code's liabilities together with new dependencies.**
 
 Rules 1–2 and 5–7 are referenced, not restated, by
 [serious-engineering implementation](ava_builtins/skills/ava-serious-engineering/practices/implementation/SKILL.md)
