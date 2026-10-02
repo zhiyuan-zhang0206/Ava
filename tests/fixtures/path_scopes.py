@@ -55,7 +55,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "agent/graph/tests",
             "agent/hooks/tests",
             "agent/llm/tests",
-            "agent/messages/tests",
             "agent/ownership/tests",
             "agent/startup/tests",
             "agent/tests/test_checkpoint_interval.py",
@@ -99,12 +98,11 @@ PATH_SCOPES: dict[str, Scope] = {
             "services/agent_host/tests/test_reconcile_after_abort.py",
             "services/agent_host/tests/test_recovery_interrupt.py",
         ),
-        123,
+        118,
     ),
     "tests.path_scoped.ava_tests": Scope(
         (
             "tests/ava",
-            "agent/graph/claim/tests",
             "agent/tests/test_lazy_child_telemetry.py",
             "agent/tests/test_register_namespace.py",
             "ava/agents/tests/test_agents_scan.py",
@@ -150,7 +148,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "gateway/schedules/tests/test_schedule_manager_pty.py",
             "services/agent_host/tests/test_hosted_dispatcher_cancellation.py",
         ),
-        60,
+        57,
     ),
     "tests.path_scoped.cli_tests": Scope(
         (
@@ -158,7 +156,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "base/packages/tests",
             "cli/commands/agents/tests",
             "cli/commands/cluster/tests",
-            "cli/commands/converge/tests",
             "cli/commands/data_plane/tests/test_cluster_instance_bind.py",
             "cli/commands/data_plane/tests/test_pg_socket_dir.py",
             "base/cluster/dataplane/tests/test_pgbouncer.py",
@@ -199,7 +196,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "cli/commands/tests/test_repo_heartbeat_gate.py",
             "cli/commands/tests/test_service_probe_ports.py",
             "cli/commands/tests/test_session_naming.py",
-            "cli/parsers/tests",
             "cli/tests/test_boot_retry.py",
             "cli/tests/test_cli_groups.py",
             "cli/tests/test_cluster_health_window.py",
@@ -226,7 +222,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "cli/commands/data_plane/tests/test_maintenance_stop.py",
             "cli/tests/test_pause_stop.py",
         ),
-        113,
+        96,
     ),
     "tests.path_scoped.db_authority_tests": Scope(
         (
@@ -244,7 +240,6 @@ PATH_SCOPES: dict[str, Scope] = {
             "ava_builtins/plugins/tests/test_agent_inspect_widgets.py",
             "base/agents/tests/test_log_sink.py",
             "base/packages/plugins/tests/test_enable_config.py",
-            "base/paths/tests",
             "base/telemetry/metrics/tests/test_metrics_aggregate_equivalence.py",
             "gateway/agents/tests/test_completion_notice_flusher.py",
             "gateway/agents/tests/test_context_breakdown.py",
@@ -272,7 +267,7 @@ PATH_SCOPES: dict[str, Scope] = {
             "ops/tests/test_inventory_ops.py",
             "ops/tests/test_operations.py",
         ),
-        116,
+        114,
     ),
     "tests.path_scoped.integration_tests": Scope(
         (
