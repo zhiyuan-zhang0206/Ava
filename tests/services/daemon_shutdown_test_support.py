@@ -9,9 +9,9 @@ lands within a small bound and that the drain reached ``run()``'s cleanup, and
 carries its own kill deadline so the old unbounded shape fails as an assertion
 instead of hanging the suite.
 
-The shape was proven by the pitr base-candidate regression (task #4218, PR
-#3045); this module hosts it for the sweep-B daemons and carries that
-regression too (task #4239). The child stubs ``main()``'s boot gates that would
+The shape was first proven on a daemon with a multi-minute ``to_thread`` scan
+(task #4218, PR #3045); this module hosts it for the sweep-B daemons (task
+#4239). The child stubs ``main()``'s boot gates that would
 need a live cluster (the schema version check); everything from signal wiring
 down is production code. A caller whose test must observe a precondition before
 the stop window opens hands ``spawn_child`` a ``pre_ready`` callable: the child

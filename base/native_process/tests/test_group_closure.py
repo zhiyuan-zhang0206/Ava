@@ -1,4 +1,4 @@
-"""The shared group-closure core on its default signal (PITR unowned launch)."""
+"""The shared group-closure core on its default signal (an unowned launch)."""
 
 from __future__ import annotations
 

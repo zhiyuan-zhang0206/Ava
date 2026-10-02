@@ -280,7 +280,7 @@ def _signal_group(pgid: int | None, sig: int) -> None:
     A group signal reaches children spawned after any psutil snapshot — the
     hard-kill window the old children-list walk missed (task #2249). A dead
     leader frees its pid for reuse; a reused pid that setsid()s into a new
-    group could then be hit here (µs window, same shape as pty_sessions/PITR
+    group could then be hit here (µs window, same shape as pty_sessions
     group kills — accepted)."""
     if pgid is None or pgid <= 0:
         return

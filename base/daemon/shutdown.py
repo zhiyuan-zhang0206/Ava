@@ -16,20 +16,19 @@ The daemons with an explicit drain cancel and await remaining loop tasks so
 not close ``asyncio.Runner``: its default-executor shutdown can wait up to
 CPython's 300-second ``THREAD_JOIN_TIMEOUT``, already the stop flow's entire
 budget, and interpreter teardown can join surviving workers without a bound.
-Even ``shutdown(wait=False)`` does not prevent that atexit join. The uploader's
-own pool and the ops pool have the same risk. A hard exit skips only teardown
+Even ``shutdown(wait=False)`` does not prevent that atexit join. The ops pool
+has the same risk. A hard exit skips only teardown
 after daemon-owned cleanup; it also skips the telemetry emitter's atexit drain
 (accepted for this path in task #4320). Explicitly flush logs first because
 their atexit cleanup is skipped too.
 
 The in-flight work varies: agent-host recorders, delivery recovery, Feishu
 calls, heartbeat grading, page reconciliation, memory search loading, indexer
-embedding, event maintenance, watchdog checks, and PITR retention all use
-threads. Labeler can use the default executor for DNS even though it declares
-no long executor job; backup's child-process dump has no long executor job.
-The uploader can block on a GCS upload. Their ``run()`` cleanup handles owned
-resources before exit; unfinished reconciliation is re-derived on restart,
-indexer failures stay dirty on disk, and PITR deletions are journalled.
+embedding, event maintenance, and watchdog checks all use threads. Labeler can
+use the default executor for DNS even though it declares no long executor job;
+backup's child-process dump has no long executor job. Their ``run()`` cleanup
+handles owned resources before exit; unfinished reconciliation is re-derived on
+restart and indexer failures stay dirty on disk.
 """
 
 from __future__ import annotations
